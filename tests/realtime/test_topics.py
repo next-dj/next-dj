@@ -3,7 +3,6 @@ import json
 import math
 import re
 import threading
-from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from unittest.mock import create_autospec
 
@@ -14,13 +13,21 @@ from django.contrib.auth import (
     HASH_SESSION_KEY,
     SESSION_KEY,
     get_user_model,
-    login,
 )
 from django.contrib.auth.middleware import get_user
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.exceptions import ImproperlyConfigured
-from django.test import AsyncRequestFactory, RequestFactory, override_settings
+from django.http import JsonResponse
+from django.http.response import HttpResponseBase
+from django.test import (
+    AsyncClient,
+    AsyncRequestFactory,
+    Client,
+    RequestFactory,
+    override_settings,
+)
+from django.urls import path
 from django.utils.functional import SimpleLazyObject, empty
 
 from next.partial import Patches
@@ -29,8 +36,8 @@ from next.realtime import (
     MemoryBroker,
     TopicStream,
     apublish,
+    negotiation,
     publish,
-    topics as realtime_topics,
     transports,
 )
 from next.realtime.backends import BrokerBackend
@@ -38,9 +45,14 @@ from next.realtime.errors import BrokerConnectionError, InvalidTicketError
 from next.realtime.messages import Position
 from next.realtime.signals import stream_subscribed
 from next.realtime.tickets import verify_ticket
-from next.testing import SseEvent, SseReader, memory_broker as install_memory_broker
+from next.testing import SseEvent, SseReader
 from next.testing.realtime import override_websocket_mount
-from tests.support.realtime import LiveStreams, ServerClock, anext_item
+from tests.support.realtime import (
+    LiveStreams,
+    ServerClock,
+    anext_item,
+    signed_in_session,
+)
 
 
 def _suppress_message(message):
@@ -65,16 +77,14 @@ def ws_available():
         yield
 
 
-def _body(response: TopicStream) -> dict[str, object]:
-    assert isinstance(response, TopicStream)
+def _negotiate(request, *topics: str, **options: object) -> HttpResponseBase:
+    return TopicStream(request, *topics, **options).render()
+
+
+def _body(response: JsonResponse) -> dict[str, object]:
+    assert isinstance(response, JsonResponse)
     assert response["Content-Type"] == "application/json"
-    return json.loads(b"".join(response.streaming_content))
-
-
-@pytest.fixture()
-def memory_broker() -> Iterator[MemoryBroker]:
-    with install_memory_broker() as backend:
-        yield backend
+    return json.loads(response.content)
 
 
 def test_sync_topic_stream_published_message_follows_retry_and_hello(
@@ -147,7 +157,7 @@ def test_topic_stream_negotiates_a_private_session_bound_websocket_ticket(
     request.session = SessionStore()
 
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(request, "poll:42", authorize=_allow_topic)
+        response = _negotiate(request, "poll:42", authorize=_allow_topic)
 
     assert response.status_code == 200
     assert response["Cache-Control"] == "private, no-store"
@@ -168,7 +178,7 @@ def test_websocket_negotiation_falls_back_without_stable_topic_authorizer(
     request.session = SessionStore()
 
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(request, "poll:42")
+        response = _negotiate(request, "poll:42")
 
     assert response.status_code == 406
     assert _body(response) == {"transport": "sse", "reason": "authorization"}
@@ -180,17 +190,17 @@ def test_websocket_negotiation_without_get_or_ws_transport_is_refused(
 ) -> None:
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["sse"]}}):
         request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
-        response = TopicStream(request, "room", authorize=_allow_topic)
+        response = _negotiate(request, "room", authorize=_allow_topic)
         assert response.status_code == 406
         assert _body(response) == {"error": "transport_unavailable"}
 
     transports.withdraw_websocket()
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
-    assert TopicStream(request, "room", authorize=_allow_topic).status_code == 406
+    assert _negotiate(request, "room", authorize=_allow_topic).status_code == 406
 
     transports.announce_websocket()
     request = RequestFactory().post("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
-    response = TopicStream(request, "room", authorize=_allow_topic)
+    response = _negotiate(request, "room", authorize=_allow_topic)
     assert response.status_code == 405
     assert response["Allow"] == "GET"
 
@@ -206,7 +216,7 @@ def test_websocket_negotiation_rejects_unstable_callbacks_and_topics(
         return None
 
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(
+        response = _negotiate(
             request, "room", transform=local_transform, authorize=_allow_topic
         )
         assert response.status_code == 406
@@ -215,16 +225,16 @@ def test_websocket_negotiation_rejects_unstable_callbacks_and_topics(
         def local_authorizer(_user, _topic):
             return True
 
-        response = TopicStream(request, "room", authorize=local_authorizer)
+        response = _negotiate(request, "room", authorize=local_authorizer)
         assert response.status_code == 406
         assert _body(response)["reason"] == "authorization"
 
-        response = TopicStream(
+        response = _negotiate(
             request, *[f"room:{index}" for index in range(65)], authorize=_allow_topic
         )
         assert response.status_code == 400
 
-        response = TopicStream(request, "bad topic", authorize=_allow_topic)
+        response = _negotiate(request, "bad topic", authorize=_allow_topic)
         assert response.status_code == 400
         assert _body(response) == {"error": "invalid_topics"}
 
@@ -234,16 +244,16 @@ def test_websocket_negotiation_maps_ticket_failure_to_service_unavailable(
     monkeypatch: pytest.MonkeyPatch, ws_available: None
 ) -> None:
     monkeypatch.setattr(
-        realtime_topics,
+        negotiation,
         "issue_ticket",
         create_autospec(
-            realtime_topics.issue_ticket, side_effect=InvalidTicketError("session")
+            negotiation.issue_ticket, side_effect=InvalidTicketError("session")
         ),
     )
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(request, "room", authorize=_allow_topic)
+        response = _negotiate(request, "room", authorize=_allow_topic)
     assert response.status_code == 503
     assert _body(response) == {"error": "session_unavailable"}
 
@@ -255,7 +265,7 @@ def test_websocket_negotiation_accepts_stable_transform_and_explicit_references(
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(
+        response = _negotiate(
             request,
             "room",
             transform="tests.realtime.test_topics._event_transform",
@@ -274,7 +284,7 @@ def test_websocket_negotiation_discovers_stable_callbacks_and_rejects_bad_paths(
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(
+        response = _negotiate(
             request, "room", transform=_event_transform, authorize=_allow_topic
         )
         assert response.status_code == 200
@@ -296,7 +306,7 @@ def test_websocket_negotiation_discovers_stable_callbacks_and_rejects_bad_paths(
             return message
 
         renamed.__qualname__ = "renamed_away"
-        response = TopicStream(
+        response = _negotiate(
             request, "room", transform=renamed, authorize=_allow_topic
         )
         assert response.status_code == 406
@@ -461,10 +471,28 @@ def test_topic_stream_subscription_precedes_the_position_snapshot(
     assert streams.live() == 0
 
 
+class _TaggedStream(TopicStream):
+    def __init__(self, request, *topics, tag: str, **options) -> None:
+        super().__init__(request, *topics, **options)
+        self.tag = tag
+
+
 @pytest.mark.django_db()
-def test_websocket_negotiation_subclass_reply_is_a_subclass_instance(
-    ws_available: None,
+def test_subclass_keyword_reaches_its_init_and_passes_the_negotiation(
+    memory_broker: MemoryBroker, ws_available: None
 ) -> None:
+    stream = _TaggedStream(RequestFactory().get("/"), "poll:1", tag="seen")
+    assert stream.tag == "seen"
+    request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
+    request.session = SessionStore()
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        stream = _TaggedStream(request, "room", tag="seen", authorize=_allow_topic)
+        assert stream.tag == "seen"
+        assert stream.render().status_code == 200
+
+
+@pytest.mark.django_db()
+def test_websocket_negotiation_of_a_subclass_runs_its_init(ws_available: None) -> None:
     class AuditedStream(TopicStream):
         def __init__(self, request, *topics, **options) -> None:
             super().__init__(request, *topics, **options)
@@ -473,47 +501,116 @@ def test_websocket_negotiation_subclass_reply_is_a_subclass_instance(
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = AuditedStream(request, "room", authorize=_allow_topic)
-    assert isinstance(response, AuditedStream)
-    assert response.audited is True
+        stream = AuditedStream(request, "room", authorize=_allow_topic)
+        response = stream.render()
+    assert stream.audited is True
     assert response.status_code == 200
     assert _body(response)["transport"] == "ws"
 
 
-@pytest.mark.django_db(transaction=True)
-def test_async_negotiation_reply_streams_one_json_chunk(ws_available: None) -> None:
-    request = AsyncRequestFactory().get("/updates/", headers={"X-Next-Transport": "ws"})
+@pytest.mark.django_db()
+def test_negotiation_renders_once_and_a_plain_stream_renders_itself(
+    memory_broker: MemoryBroker, ws_available: None
+) -> None:
+    sse = TopicStream(RequestFactory().get("/"), "poll:1")
+    assert sse.render() is sse
+    request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        stream = TopicStream(request, "room", authorize=_allow_topic)
+        reply = stream.render()
+    assert stream.render() is reply
+
+
+@pytest.mark.django_db()
+def test_negotiation_reply_keeps_the_headers_a_page_stamped_on_the_stream(
+    ws_available: None,
+) -> None:
+    request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
+    request.session = SessionStore()
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        stream = TopicStream(request, "room", authorize=_allow_topic)
+        stream["X-Robots-Tag"] = "noindex"
+        stream["Cache-Control"] = "public"
+        reply = stream.render()
+    assert reply["X-Robots-Tag"] == "noindex"
+    assert reply["Cache-Control"] == "private, no-store"
+    assert reply["Content-Type"] == "application/json"
+    assert list(stream.streaming_content) == [b"retry: 3000\n\n"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_unrendered_async_negotiation_streams_no_frame(ws_available: None) -> None:
+    request = AsyncRequestFactory().get("/updates/", headers={"X-Next-Transport": "ws"})
+    stream = TopicStream(request, "room", authorize=_allow_topic)
 
     async def body() -> list[bytes]:
-        return [chunk async for chunk in response.streaming_content]
+        return [chunk async for chunk in stream.streaming_content]
 
+    assert asyncio.run(body()) == [b"retry: 3000\n\n"]
+
+
+def _negotiating_view(request):
+    return TopicStream(request, "room", authorize=_allow_topic)
+
+
+urlpatterns = [path("stream/", _negotiating_view)]
+
+
+@pytest.mark.django_db()
+@override_settings(ROOT_URLCONF=__name__)
+def test_django_serves_the_rendered_ticket_reply(ws_available: None) -> None:
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(request, "room", authorize=_allow_topic)
-    assert response["Content-Type"] == "application/json"
-    chunks = asyncio.run(body())
-    assert len(chunks) == 1
-    assert json.loads(chunks[0])["transport"] == "ws"
+        response = Client().get("/stream/", HTTP_X_NEXT_TRANSPORT="ws")
+    assert isinstance(response, JsonResponse)
+    assert response.status_code == 200
+    assert response.json()["transport"] == "ws"
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(ROOT_URLCONF=__name__)
+def test_django_serves_the_rendered_ticket_reply_under_asgi(ws_available: None) -> None:
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        response = asyncio.run(
+            AsyncClient().get("/stream/", headers={"X-Next-Transport": "ws"})
+        )
+    assert response.status_code == 200
+    assert response.json()["transport"] == "ws"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_async_negotiation_reply_is_a_plain_json_response(ws_available: None) -> None:
+    request = AsyncRequestFactory().get("/updates/", headers={"X-Next-Transport": "ws"})
+    request.session = SessionStore()
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
+        response = _negotiate(request, "room", authorize=_allow_topic)
+    assert not response.streaming
+    assert _body(response)["transport"] == "ws"
 
 
 @pytest.mark.django_db()
 def test_websocket_negotiation_falls_back_for_an_oversized_reference(
     ws_available: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(realtime_topics, "MAX_REFERENCE_LENGTH", 8)
+    monkeypatch.setattr(negotiation, "MAX_REFERENCE_LENGTH", 8)
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(request, "room", authorize=_allow_topic)
+        response = _negotiate(request, "room", authorize=_allow_topic)
     assert response.status_code == 406
     assert _body(response) == {"transport": "sse", "reason": "authorization"}
 
 
-def test_topic_stream_without_heartbeat_uses_the_realtime_setting(
+def test_topic_stream_without_heartbeat_uses_the_sse_option(
     memory_broker: MemoryBroker,
 ) -> None:
     request = RequestFactory().get("/polls/1/stream/")
-    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HEARTBEAT": 7}}):
+    backend = {
+        "BACKEND": "next.partial.JsonPartialProtocolBackend",
+        "OPTIONS": {"SSE": {"HEARTBEAT_SECONDS": 7}},
+    }
+    config = {"PARTIAL_BACKENDS": [backend], "REALTIME": {"HEARTBEAT": 3}}
+    with override_settings(NEXT_FRAMEWORK=config):
         stream = TopicStream(request, "poll:1")
     assert stream._subscription_timeout == 7.0
     assert stream._heartbeat_seconds == 7.0
@@ -853,7 +950,7 @@ def test_websocket_negotiation_replaces_a_stale_anonymous_cookie(
     request.META["HTTP_X_NEXT_TRANSPORT"] = "ws"
     stale = request.session.session_key
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(request, "room", authorize=_allow_topic)
+        response = _negotiate(request, "room", authorize=_allow_topic)
     grant = _body(response)
     assert response.status_code == 200
     assert request.session.session_key != stale
@@ -882,7 +979,7 @@ def test_websocket_ticket_carries_the_stream_presence(
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(
+        response = _negotiate(
             request, "room", authorize=_allow_topic, presence=presence
         )
     assert response.status_code == 200
@@ -897,7 +994,7 @@ def test_websocket_negotiation_falls_back_for_an_unstable_identify(
     request = RequestFactory().get("/updates/", HTTP_X_NEXT_TRANSPORT="ws")
     request.session = SessionStore()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TRANSPORTS": ["ws"]}}):
-        response = TopicStream(
+        response = _negotiate(
             request, "room", authorize=_allow_topic, presence=lambda _u, _t: None
         )
     assert response.status_code == 406
@@ -910,16 +1007,12 @@ _NEW_SECRET = "new-secret-" + "n" * 50
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("mode", ["sync", "async"])
-def test_a_fallback_secret_stream_never_loads_the_lazy_user_nor_cycles_the_key(
+def test_fallback_secret_stream_never_loads_the_lazy_user_nor_cycles_the_key(
     memory_broker: MemoryBroker, mode: str
 ) -> None:
-    user = get_user_model().objects.create_user(username="rotated", password="x")
     with override_settings(SECRET_KEY=_OLD_SECRET, SECRET_KEY_FALLBACKS=[]):
-        login_request = RequestFactory().get("/")
-        login_request.session = SessionStore()
-        login(login_request, user, backend="django.contrib.auth.backends.ModelBackend")
-        login_request.session.save()
-    key = login_request.session.session_key
+        user, session = signed_in_session("rotated")
+    key = session.session_key
     seen: list[object] = []
 
     def authorizer(current: object, _topic: str) -> bool:
@@ -955,7 +1048,7 @@ def test_a_fallback_secret_stream_never_loads_the_lazy_user_nor_cycles_the_key(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_lazy_user_of_a_session_gone_at_open_streams_as_anonymous(
+def test_lazy_user_of_a_session_gone_at_open_streams_as_anonymous(
     memory_broker: MemoryBroker,
 ) -> None:
     request = _stale_anonymous_request(RequestFactory())
@@ -973,21 +1066,13 @@ def test_a_lazy_user_of_a_session_gone_at_open_streams_as_anonymous(
     assert original._wrapped is empty
 
 
-def _logged_in_session_key() -> tuple[object, str]:
-    user = get_user_model().objects.create_user(username="subscriber", password="x")
-    login_request = RequestFactory().get("/")
-    login_request.session = SessionStore()
-    login(login_request, user, backend="django.contrib.auth.backends.ModelBackend")
-    login_request.session.save()
-    return user, login_request.session.session_key
-
-
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("mode", ["sync", "async"])
-def test_a_subscribed_receiver_reads_the_stored_session_user_off_the_request(
+def test_subscribed_receiver_reads_the_stored_session_user_off_the_request(
     memory_broker: MemoryBroker, mode: str
 ) -> None:
-    user, key = _logged_in_session_key()
+    user, session = signed_in_session("subscriber")
+    key = session.session_key
     loads: list[int] = []
     factory = RequestFactory() if mode == "sync" else AsyncRequestFactory()
     request = factory.get("/polls/1/stream/")
@@ -1026,10 +1111,9 @@ def test_a_subscribed_receiver_reads_the_stored_session_user_off_the_request(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_user_the_page_guard_loaded_is_kept_as_is(
-    memory_broker: MemoryBroker,
-) -> None:
-    user, key = _logged_in_session_key()
+def test_user_the_page_guard_loaded_is_kept_as_is(memory_broker: MemoryBroker) -> None:
+    user, session = signed_in_session("subscriber")
+    key = session.session_key
     request = RequestFactory().get("/polls/1/stream/")
     request.session = SessionStore(session_key=key)
     request.user = original = SimpleLazyObject(lambda: user)

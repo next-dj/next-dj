@@ -5,7 +5,6 @@ from datetime import timedelta
 
 import pytest
 from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
-from django.contrib.auth import get_user_model, login
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
 from django.core.handlers.asgi import ASGIHandler
@@ -22,7 +21,11 @@ from next.testing.realtime import (
     issue_socket_ticket,
     override_websocket_mount,
 )
-from tests.support.realtime import ROOM_AUTHORIZER_REF
+from tests.support.realtime import (
+    ROOM_AUTHORIZER_REF,
+    signed_in_session,
+    websocket_scope,
+)
 
 
 _ORIGIN = (b"origin", b"http://testserver")
@@ -42,29 +45,6 @@ def ticket(transactional_db: None) -> SocketTicket:
     return issue_socket_ticket(
         ("room:42",), authorizer_ref=ROOM_AUTHORIZER_REF, session=session
     )
-
-
-def _scope(
-    headers: list[tuple[bytes, bytes]],
-    *,
-    server: tuple[str, int | None] | None = ("testserver", 80),
-    scheme: str = "ws",
-) -> Scope:
-    return {
-        "type": "websocket",
-        "asgi": {"version": "3.0", "spec_version": "2.3"},
-        "http_version": "1.1",
-        "scheme": scheme,
-        "path": "/_next/ws/",
-        "raw_path": b"/_next/ws/",
-        "query_string": b"",
-        "root_path": "",
-        "headers": headers,
-        "client": None,
-        "server": server,
-        "subprotocols": [],
-        "extensions": {},
-    }
 
 
 async def _http_ok(
@@ -114,7 +94,7 @@ def test_default_origin_matches_the_validated_host(
     origin: str | None, *, allowed: bool
 ) -> None:
     app = WebSocketApp()
-    assert app.allow_origin(origin, _scope([_HOST])) is allowed
+    assert app.allow_origin(origin, websocket_scope([_HOST])) is allowed
 
 
 @pytest.mark.parametrize(
@@ -123,7 +103,7 @@ def test_default_origin_matches_the_validated_host(
 def test_default_origin_on_a_secure_socket_requires_https(
     origin: str, *, allowed: bool
 ) -> None:
-    scope = _scope([_HOST], scheme="wss")
+    scope = websocket_scope([_HOST], scheme="wss")
     assert WebSocketApp().allow_origin(origin, scope) is allowed
 
 
@@ -139,13 +119,13 @@ def test_default_origin_on_a_secure_socket_requires_https(
 def test_default_origin_takes_the_scheme_from_the_proxy_header(
     proto: bytes, origin: str, *, allowed: bool
 ) -> None:
-    scope = _scope([_HOST, (b"x-forwarded-proto", proto)])
+    scope = websocket_scope([_HOST, (b"x-forwarded-proto", proto)])
     assert WebSocketApp().allow_origin(origin, scope) is allowed
 
 
 def test_default_origin_refuses_a_host_outside_allowed_hosts() -> None:
     app = WebSocketApp()
-    scope = _scope([(b"host", b"evil.example")])
+    scope = websocket_scope([(b"host", b"evil.example")])
     assert app.allow_origin("http://evil.example", scope) is False
 
 
@@ -162,21 +142,26 @@ def test_default_origin_refuses_a_host_outside_allowed_hosts() -> None:
 def test_default_origin_honours_a_leading_dot_allowed_host(
     host: bytes, origin: str, *, allowed: bool
 ) -> None:
-    scope = _scope([(b"host", host)], scheme="wss")
+    scope = websocket_scope([(b"host", host)], scheme="wss")
     assert WebSocketApp().allow_origin(origin, scope) is allowed
 
 
 def test_default_origin_falls_back_to_the_server_address() -> None:
     app = WebSocketApp()
-    assert app.allow_origin("http://testserver", _scope([])) is True
+    assert app.allow_origin("http://testserver", websocket_scope([])) is True
     with override_settings(ALLOWED_HOSTS=["unknown"]):
-        assert app.allow_origin("http://unknown:0", _scope([], server=None)) is True
+        assert (
+            app.allow_origin("http://unknown:0", websocket_scope([], server=None))
+            is True
+        )
 
 
 @override_settings(USE_X_FORWARDED_HOST=True, ALLOWED_HOSTS=["public.example"])
 def test_default_origin_follows_a_forwarded_host() -> None:
     app = WebSocketApp()
-    scope = _scope([(b"host", b"internal"), (b"x-forwarded-host", b"public.example")])
+    scope = websocket_scope(
+        [(b"host", b"internal"), (b"x-forwarded-host", b"public.example")]
+    )
     assert app.allow_origin("http://public.example", scope) is True
 
 
@@ -198,12 +183,12 @@ def test_default_origin_accepts_csrf_trusted_origins(
     origin: str, *, allowed: bool
 ) -> None:
     app = WebSocketApp()
-    assert app.allow_origin(origin, _scope([_HOST])) is allowed
+    assert app.allow_origin(origin, websocket_scope([_HOST])) is allowed
 
 
 def test_default_origin_rereads_csrf_trusted_origins_after_a_change() -> None:
     app = WebSocketApp()
-    scope = _scope([_HOST])
+    scope = websocket_scope([_HOST])
     with override_settings(CSRF_TRUSTED_ORIGINS=["https://one.example"]):
         assert app.allow_origin("https://one.example", scope) is True
     with override_settings(CSRF_TRUSTED_ORIGINS=["https://two.example"]):
@@ -212,7 +197,7 @@ def test_default_origin_rereads_csrf_trusted_origins_after_a_change() -> None:
 
 def test_explicit_origins_replace_the_default() -> None:
     app = WebSocketApp(origins=["https://app.example", "https://*.example.org"])
-    scope = _scope([_HOST])
+    scope = websocket_scope([_HOST])
     assert app.allow_origin("https://app.example", scope) is True
     assert app.allow_origin("https://a.example.org", scope) is True
     assert app.allow_origin("http://testserver", scope) is False
@@ -241,7 +226,7 @@ def test_origins_reject_a_non_string_value() -> None:
 
 
 def test_request_meta_mirrors_django_header_naming() -> None:
-    scope = _scope(
+    scope = websocket_scope(
         [
             (b"cookie", b"a=1; "),
             (b"cookie", b"b=2"),
@@ -264,7 +249,7 @@ def test_authenticate_loads_the_session_named_by_the_cookie(
     ticket: SocketTicket,
 ) -> None:
     app = WebSocketApp()
-    scope = _scope([(b"cookie", b"other=1"), ticket.cookie])
+    scope = websocket_scope([(b"cookie", b"other=1"), ticket.cookie])
     handshake = asyncio.run(app.authenticate(scope))
     assert handshake is not None
     assert handshake.credential == ticket.credential
@@ -274,19 +259,15 @@ def test_authenticate_loads_the_session_named_by_the_cookie(
 
 @pytest.mark.django_db(transaction=True)
 def test_authenticate_loads_the_logged_in_user_read_only() -> None:
-    user = get_user_model().objects.create_user("ada", password="pw")
-    request = RequestFactory().get("/")
-    request.session = SessionStore()
-    login(request, user)
-    request.session.save()
-    key = request.session.session_key
+    user, session = signed_in_session("ada")
+    key = session.session_key
     stored = dict(SessionStore(key).load())
     with override_settings(
         SECRET_KEY="rotated", SECRET_KEY_FALLBACKS=["test-secret-key"]
     ):
         handshake = asyncio.run(
             WebSocketApp().authenticate(
-                _scope([(b"cookie", f"sessionid={key}".encode())])
+                websocket_scope([(b"cookie", f"sessionid={key}".encode())])
             )
         )
     assert handshake is not None
@@ -300,18 +281,20 @@ def test_authenticate_without_a_session_cookie_returns_none(
     cookie: bytes | None,
 ) -> None:
     headers = [] if cookie is None else [(b"cookie", cookie)]
-    assert asyncio.run(WebSocketApp().authenticate(_scope(headers))) is None
+    assert asyncio.run(WebSocketApp().authenticate(websocket_scope(headers))) is None
 
 
 @pytest.mark.django_db(transaction=True)
 def test_authenticate_refuses_a_missing_or_expired_session() -> None:
     app = WebSocketApp()
-    missing = _scope([(b"cookie", b"sessionid=abcdefghijklmnopqrstuvwxyz012345")])
+    missing = websocket_scope(
+        [(b"cookie", b"sessionid=abcdefghijklmnopqrstuvwxyz012345")]
+    )
     assert asyncio.run(app.authenticate(missing)) is None
     expired = SessionStore()
     expired.set_expiry(-10)
     expired.create()
-    scope = _scope([(b"cookie", f"sessionid={expired.session_key}".encode())])
+    scope = websocket_scope([(b"cookie", f"sessionid={expired.session_key}".encode())])
     assert asyncio.run(app.authenticate(scope)) is None
 
 
@@ -323,13 +306,15 @@ def test_authenticate_refuses_a_session_its_store_has_expired() -> None:
     SessionStore.get_model_class().objects.filter(session_key=key).update(
         expire_date=session.get_expiry_date() - timedelta(days=60)
     )
-    scope = _scope([(b"cookie", f"sessionid={key}".encode())])
+    scope = websocket_scope([(b"cookie", f"sessionid={key}".encode())])
     assert asyncio.run(WebSocketApp().authenticate(scope)) is None
 
 
 def test_topic_socket_builds_the_default_connection() -> None:
     handshake = Handshake("key", object(), None)
-    socket = WebSocketApp().topic_socket(asgi._Port(_noop_send), handshake, _scope([]))
+    socket = WebSocketApp().topic_socket(
+        asgi._Port(_noop_send), handshake, websocket_scope([])
+    )
     assert isinstance(socket, TopicSocket)
     assert socket.handshake is handshake
 
@@ -469,7 +454,7 @@ def test_app_lets_a_cancelled_authentication_propagate() -> None:
         return next(events)
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(Cancelled()(_scope([_HOST, _ORIGIN]), receive, _noop_send))
+        asyncio.run(Cancelled()(websocket_scope([_HOST, _ORIGIN]), receive, _noop_send))
 
 
 def test_app_without_a_session_tolerates_a_peer_that_left() -> None:
@@ -484,7 +469,7 @@ def test_app_without_a_session_tolerates_a_peer_that_left() -> None:
         if message["type"] == "websocket.send":
             raise OSError
 
-    scope = _scope([_HOST, _ORIGIN])
+    scope = websocket_scope([_HOST, _ORIGIN])
     asyncio.run(WebSocketApp()(scope, receive, send))
     assert sent == ["websocket.accept", "websocket.send", "websocket.close"]
 
@@ -496,7 +481,7 @@ def test_app_leaves_quietly_when_the_client_never_connects() -> None:
     async def send(message: object) -> None:
         raise AssertionError(message)
 
-    asyncio.run(WebSocketApp()(_scope([_HOST, _ORIGIN]), receive, send))
+    asyncio.run(WebSocketApp()(websocket_scope([_HOST, _ORIGIN]), receive, send))
 
 
 def test_app_rejects_a_non_websocket_scope() -> None:
@@ -579,7 +564,7 @@ def test_application_routes_the_configured_websocket_path(route: str) -> None:
 
 @pytest.mark.django_db()
 @override_settings(FORCE_SCRIPT_NAME="/app")
-def test_a_ticket_under_a_script_prefix_names_the_path_the_router_serves() -> None:
+def test_ticket_under_a_script_prefix_names_the_path_the_router_serves() -> None:
     calls: list[str] = []
 
     class Recording(WebSocketApp):
@@ -609,7 +594,7 @@ def test_application_refuse_ignores_a_client_that_left_first() -> None:
     async def send(message: object) -> None:
         raise AssertionError(message)
 
-    scope = _scope([])
+    scope = websocket_scope([])
     scope["path"] = "/elsewhere/"
     asyncio.run(application(_http_ok)(scope, _noop_receive, send))
 

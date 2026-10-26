@@ -1,54 +1,40 @@
-"""Request-scoped SSE subscriptions to realtime topics and their WebSocket handoff."""
+"""Request-scoped SSE subscriptions to realtime topics."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 import time
 from contextlib import aclosing
+from dataclasses import dataclass
 from functools import partial
-from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, TypeGuard, cast, override
+from typing import TYPE_CHECKING, Any, Self, cast, override
 
 from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
-from django.http import StreamingHttpResponse
-from django.utils.cache import patch_vary_headers
 from django.utils.functional import SimpleLazyObject, empty
-from django.utils.module_loading import import_string
 
-from next.partial.sse import PatchStreamWriter
+from next.partial.sse import PatchStreamWriter, sse_heartbeat_seconds
 from next.partial.stream import StreamEnd, StreamHello, StreamSkip, stream_hello
+from next.utils import positive_number
 
-from .access import (
-    Access,
-    AccessCheck,
-    TopicAuthorizer,
-    heartbeat_seconds as realtime_heartbeat_seconds,
-    run_detached,
-)
+from .access import Access, AccessCheck, TopicAuthorizer
 from .attendance import Identifier, aattend, aattending, attend, attending
 from .binding import request_subject, session_user, ticket_binding
 from .delivery import transformed
-from .errors import BrokerConnectionError, InvalidTicketError, InvalidTopicError
+from .errors import BrokerConnectionError
+from .lifecycle import StreamLifecycle
 from .manager import broker_manager
-from .messages import validate_topic
+from .messages import validate_topics
+from .negotiation import negotiate, wants_websocket
+from .pool import run_detached
 from .replay import acatch_up, catch_up, format_event_id, parse_event_id
-from .roster import (
-    Presence,
-    counted,
-    presence_broker,
-    require_presence,
-    snapshot_message,
-)
-from .signals import StreamLifecycle, UnsubscribeReason
-from .tickets import MAX_REFERENCE_LENGTH, import_callable, issue_ticket
-from .transports import active_transports
+from .roster import counted, presence_broker, require_presence, subscriber_snapshot
+from .signals import UnsubscribeReason
+from .tickets import import_callable
 
 
-_MAX_TOPICS = 64
 _TOPIC_DENIED = StreamEnd("auth")
 
 
@@ -63,7 +49,8 @@ if TYPE_CHECKING:
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
-    from django.http import HttpRequest
+    from django.http import HttpRequest, JsonResponse
+    from django.http.response import HttpResponseBase
 
     from next.partial.envelope import Envelope
     from next.partial.stream import StreamPosition
@@ -71,15 +58,53 @@ if TYPE_CHECKING:
     from .attendance import Attendance, Identify
     from .backends import BrokerBackend
     from .messages import Message, Position
+    from .roster import Presence
     from .tickets import TopicTransform
 
     TopicItem = Message | Envelope | StreamHello | StreamSkip | StreamEnd | None
 
 
-class TopicStream(PatchStreamWriter):
-    """Stream broker topics as SSE, or answer a WebSocket negotiation with a ticket.
+@dataclass(frozen=True, slots=True)
+class _Callbacks:
+    """The transform, authorizer and presence of a stream, each with its dotted path."""
 
-    A negotiation reply is still a `TopicStream`, a one-chunk `application/json` body.
+    transform: TopicTransform | None
+    transform_ref: str | None
+    authorize: TopicAuthorizer | None
+    authorize_ref: str | None
+    presence: bool | Identify
+    presence_ref: str | None
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        transform: TopicTransform | str | None,
+        authorize: TopicAuthorizer | str | None,
+        presence: bool | Identify | str,
+    ) -> Self:
+        """Import the callbacks given as dotted paths, keeping each path."""
+        _require_presence_option(presence)
+        return cls(
+            transform=_imported(transform, "transform")
+            if isinstance(transform, str)
+            else transform,
+            transform_ref=transform if isinstance(transform, str) else None,
+            authorize=_imported(authorize, "authorize")
+            if isinstance(authorize, str)
+            else authorize,
+            authorize_ref=authorize if isinstance(authorize, str) else None,
+            presence=_imported(presence, "presence")
+            if isinstance(presence, str)
+            else presence,
+            presence_ref=presence if isinstance(presence, str) else None,
+        )
+
+
+class TopicStream(PatchStreamWriter):
+    """Stream broker topics as SSE once the page guards and dependencies have run.
+
+    A WebSocket negotiation renders into the JSON ticket reply, as Django serves it.
     """
 
     def __init__(
@@ -96,46 +121,31 @@ class TopicStream(PatchStreamWriter):
 
         A dotted path stands for its callable and reaches a WebSocket ticket verbatim.
         """
-        self._transform_ref = transform if isinstance(transform, str) else None
-        self._transform: TopicTransform | None = (
-            _imported(transform, "transform")
-            if isinstance(transform, str)
-            else transform
+        callbacks = _Callbacks.of(
+            transform=transform, authorize=authorize, presence=presence
         )
-        self._authorize_ref = authorize if isinstance(authorize, str) else None
-        self._authorize: TopicAuthorizer | None = (
-            _imported(authorize, "authorize")
-            if isinstance(authorize, str)
-            else authorize
-        )
-        _require_presence_option(presence)
-        self._presence_ref = presence if isinstance(presence, str) else None
-        self._presence: bool | Identify = (
-            _imported(presence, "presence") if isinstance(presence, str) else presence
-        )
+        self._callbacks = callbacks
+        self._reply: JsonResponse | None = None
+        self._negotiating = wants_websocket(request)
+        if self._negotiating:
+            self.topics = topics
+            super().__init__(request, _no_items(request))
+            self._stream_headers = frozenset(self.headers)
+            return
+        self._transform = callbacks.transform
+        self._authorize = callbacks.authorize
+        self._presence = callbacks.presence
         self._identifier = (
             None if isinstance(self._presence, bool) else Identifier.of(self._presence)
         )
         self._server_clock = server_clock if server_clock is not None else time.time
-        if _wants_websocket(request):
-            self.topics = topics
-            self._negotiate(request)
-            return
-        selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
-        if not selected:
-            msg = "TopicStream requires at least one topic."
-            raise ValueError(msg)
+        selected = validate_topics(topics, at_least_one=True)
         interval = (
             heartbeat_seconds
             if heartbeat_seconds is not None
-            else realtime_heartbeat_seconds()
+            else sse_heartbeat_seconds()
         )
-        if (
-            not isinstance(interval, int | float)
-            or isinstance(interval, bool)
-            or not math.isfinite(interval)
-            or interval <= 0
-        ):
+        if not positive_number(interval, math.inf):
             msg = "TopicStream heartbeat_seconds must be a positive finite number."
             raise ValueError(msg)
         self.topics = selected
@@ -165,28 +175,27 @@ class TopicStream(PatchStreamWriter):
         )
         self._cursors = self.replay_cursors(request)
 
-    def _negotiate(self, request: HttpRequest) -> None:
-        """Become the JSON ticket reply, or the reply that sends the client to SSE."""
-        refs = _ticket_references(
-            (self._transform, self._transform_ref),
-            (self._authorize, self._authorize_ref),
-            (self._presence, self._presence_ref),
-        )
-        status, body, headers = _negotiate_websocket(request, self.topics, refs)
-        payload = json.dumps(body, separators=(",", ":")).encode()
-        content: Iterator[bytes] | AsyncIterator[bytes] = (
-            _single_chunk(payload)
-            if isinstance(request, ASGIRequest)
-            else iter((payload,))
-        )
-        StreamingHttpResponse.__init__(
-            self, content, content_type="application/json", status=status
-        )
-        for header, value in headers.items():
-            self[header] = value
-        if status == HTTPStatus.OK:
-            patch_vary_headers(self, ["Cookie", "X-Next-Transport"])
-            ticket_binding().respond(request, self)
+    def render(self) -> HttpResponseBase:
+        """Return the response Django serves, the ticket reply for a negotiation.
+
+        Django renders any view response that has `render`, as a `TemplateResponse`.
+        """
+        if not self._negotiating:
+            return self
+        if self._reply is None:
+            callbacks = self._callbacks
+            reply = negotiate(
+                self._request,
+                self.topics,
+                transform=(callbacks.transform, callbacks.transform_ref),
+                authorize=(callbacks.authorize, callbacks.authorize_ref),
+                presence=(callbacks.presence, callbacks.presence_ref),
+            )
+            for name, value in self.headers.items():
+                if name not in self._stream_headers:
+                    reply.headers.setdefault(name, value)
+            self._reply = reply
+        return self._reply
 
     def _sync_messages(self, backend: BrokerBackend) -> Iterator[TopicItem]:
         """Yield broker messages and heartbeats while access is still granted."""
@@ -357,10 +366,8 @@ class TopicStream(PatchStreamWriter):
         identified = self._identifier is not None
         now = self._server_clock()
         return [
-            snapshot_message(
-                topic, snapshot if identified else Presence(snapshot.count), now
-            )
-            for topic, snapshot in ((topic, read(topic)) for topic in self.topics)
+            subscriber_snapshot(topic, read(topic), identified=identified, now=now)
+            for topic in self.topics
         ]
 
     async def _asnapshots(self, attendance: Attendance | None) -> list[Message]:
@@ -428,10 +435,21 @@ def _require_presence_option(presence: object) -> None:
         raise ImproperlyConfigured(msg)
 
 
-def _wants_websocket(request: HttpRequest) -> bool:
-    """Whether the client asked to negotiate the WebSocket transport."""
-    headers = getattr(request, "headers", {})
-    return str(headers.get("X-Next-Transport", "")).lower() == "ws"
+def _no_items(request: HttpRequest) -> Iterator[TopicItem] | AsyncIterator[TopicItem]:
+    """Return an empty source of the kind the server reads, for a negotiation."""
+    if isinstance(request, ASGIRequest):
+        return _NoAsyncItems()
+    return iter(())
+
+
+class _NoAsyncItems:
+    """An async source that ends at once, for a stream that is never served."""
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> TopicItem:
+        raise StopAsyncIteration
 
 
 def _stream_user(request: HttpRequest, session_key: str | None) -> object:
@@ -463,33 +481,6 @@ def _session_key(request: HttpRequest) -> str | None:
     return key if isinstance(key, str) and key else None
 
 
-async def _single_chunk(payload: bytes) -> AsyncIterator[bytes]:
-    """Yield one body chunk, the async form an ASGI server streams without buffering."""
-    yield payload
-
-
-def _reference(callback: object, explicit: object) -> str | None:
-    """Return the import-stable dotted path of a callback a ticket can name, or None."""
-    if callback is None:
-        return None
-    candidate = explicit if isinstance(explicit, str) else None
-    if candidate is None:
-        module = getattr(callback, "__module__", None)
-        qualified = getattr(callback, "__qualname__", None)
-        if (
-            isinstance(module, str)
-            and isinstance(qualified, str)
-            and "<locals>" not in qualified
-        ):
-            candidate = f"{module}.{qualified}"
-    if not _storable(candidate):
-        return None
-    try:
-        return candidate if import_string(candidate) is callback else None
-    except (ImportError, AttributeError, TypeError):
-        return None
-
-
 def _imported(path: str, kind: str) -> Callable[..., Any]:
     """Import the callable a dotted path names, refusing the stream when it cannot."""
     try:
@@ -500,75 +491,6 @@ def _imported(path: str, kind: str) -> Callable[..., Any]:
     except TypeError as exc:
         msg = f"TopicStream {kind}={path!r} does not name a callable."
         raise ImproperlyConfigured(msg) from exc
-
-
-def _storable(candidate: str | None) -> TypeGuard[str]:
-    """Whether a dotted reference fits the signed ticket."""
-    return isinstance(candidate, str) and 0 < len(candidate) <= MAX_REFERENCE_LENGTH
-
-
-def _negotiate_websocket(
-    request: HttpRequest,
-    topics: tuple[str, ...],
-    refs: tuple[str | None, str, bool | str] | str,
-) -> tuple[int, dict[str, object], dict[str, str]]:
-    """Return the status, JSON body and headers of a ticket or SSE fallback reply."""
-    if getattr(request, "method", "GET") != "GET":
-        return HTTPStatus.METHOD_NOT_ALLOWED, {"error": "method"}, {"Allow": "GET"}
-    if "ws" not in active_transports():
-        return HTTPStatus.NOT_ACCEPTABLE, {"error": "transport_unavailable"}, {}
-    selected = _grantable_topics(topics)
-    if selected is None:
-        return HTTPStatus.BAD_REQUEST, {"error": "invalid_topics"}, {}
-    if isinstance(refs, str):
-        return HTTPStatus.NOT_ACCEPTABLE, {"transport": "sse", "reason": refs}, {}
-    transform_ref, authorizer_ref, presence = refs
-    try:
-        grant = issue_ticket(
-            request,
-            selected,
-            transform_ref=transform_ref,
-            authorizer_ref=authorizer_ref,
-            presence=presence,
-        )
-    except InvalidTicketError:
-        return HTTPStatus.SERVICE_UNAVAILABLE, {"error": "session_unavailable"}, {}
-    return HTTPStatus.OK, grant.as_dict(), {"Cache-Control": "private, no-store"}
-
-
-def _grantable_topics(topics: tuple[str, ...]) -> tuple[str, ...] | None:
-    """Return the unique valid topics a ticket can grant, or None."""
-    try:
-        selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
-    except InvalidTopicError:
-        return None
-    if not selected or len(selected) > _MAX_TOPICS:
-        return None
-    return selected
-
-
-def _ticket_references(
-    transform: tuple[object, object],
-    authorizer: tuple[object, object],
-    presence: tuple[object, object],
-) -> tuple[str | None, str, bool | str] | str:
-    """Require import-stable filtering, authorization and identify, or name the reason.
-
-    Each argument pairs a callback with the dotted path it was given as, if any.
-    """
-    resolved_ref = _reference(*transform)
-    if transform[0] is not None and resolved_ref is None:
-        return "transform"
-    resolved_authorizer = _reference(*authorizer)
-    if resolved_authorizer is None:
-        return "authorization"
-    mode, identify_ref = presence
-    if isinstance(mode, bool):
-        return resolved_ref, resolved_authorizer, mode
-    resolved_identify = _reference(mode, identify_ref)
-    if resolved_identify is None:
-        return "presence"
-    return resolved_ref, resolved_authorizer, resolved_identify
 
 
 __all__ = ["TopicStream"]

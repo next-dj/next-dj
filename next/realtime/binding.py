@@ -5,6 +5,7 @@ import inspect
 import secrets
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from importlib import import_module
 from typing import NamedTuple, cast, override
 
 from django.conf import settings
@@ -384,6 +385,12 @@ def _seconds_left(store: SessionBase, expiry: object, *, deadline: bool) -> int 
     return None
 
 
+def session_store_class() -> type[SessionBase]:
+    """Return the `SessionStore` `SESSION_ENGINE` names, as `SessionMiddleware` does."""
+    store: type[SessionBase] = import_module(settings.SESSION_ENGINE).SessionStore
+    return store
+
+
 def _live_store(
     session_key: str, *, deadline: bool = True
 ) -> tuple[SessionBase, int | None] | None:
@@ -391,8 +398,7 @@ def _live_store(
 
     A failed load drops the key, and a database load already skips an expired row.
     """
-    engine = import_string(f"{settings.SESSION_ENGINE}.SessionStore")
-    store = _read_only(engine)(session_key)
+    store = _read_only(session_store_class())(session_key)
     expiry = store.get("_session_expiry")
     if store.session_key != session_key:
         return None
@@ -425,6 +431,7 @@ __all__ = [
     "opaque_subject",
     "request_subject",
     "session_alive",
+    "session_store_class",
     "session_user",
     "stored_session",
     "ticket_binding",

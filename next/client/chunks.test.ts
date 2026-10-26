@@ -359,14 +359,14 @@ describe("a scripts chunk past its moment", () => {
 });
 
 describe("a single-module chunk", () => {
-  it("ignores an sse payload key for the stream chunk", async () => {
+  it("loads nothing when the payload names only another chunk", async () => {
     const doc = document.implementation.createHTMLDocument("");
     const chunk = lazyChunk<string>(
       {
         dispatch: () => undefined,
         document: doc,
         nonce: undefined,
-        context: () => ({ $chunks: { sse: "/legacy-stream.js" } }),
+        context: () => ({ $chunks: { ws: "/ws.js" } }),
       },
       "stream",
     );

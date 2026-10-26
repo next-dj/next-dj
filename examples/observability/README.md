@@ -14,7 +14,7 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
-| `/realtime/` | Live streams per transport, publications, upstream waves, and unsubscribes by reason, read back from the Prometheus registry. The page holds its own topic stream, so opening it moves the numbers it shows. |
+| `/realtime/` | Live streams per transport, publications, upstream nudges, and unsubscribes by reason, read back from the Prometheus registry. The page holds its own topic stream, so opening it moves the numbers it shows. |
 | `/realtime/stream/` | The `TopicStream` of the `obs:pulse` topic the realtime page subscribes to, over a WebSocket under ASGI and over SSE otherwise. |
 | `/metrics/` | The Prometheus exposition. Open under `DEBUG`, a 404 otherwise, and a bearer token once `OBS_METRICS_TOKEN` is set. |
 | `POST` to `window_filter_form` | Re-aggregates under the chosen window. A partial apply from `/stats/` morphs the `live-totals` zone plus the `stats-window` heading label and emits the custom `metric-pulse` verb, otherwise it redirects with `?window=...`. |
@@ -32,7 +32,7 @@ uv run python manage.py runserver        # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-`next` sits above `django.contrib.staticfiles` in `INSTALLED_APPS`, so `runserver` is the next.dj command that serves `ASGI_APPLICATION` on uvicorn and mounts the WebSocket. Open `/realtime/` in two tabs, press **Wave** in one, and both tabs count the upstream event. `curl http://127.0.0.1:8000/metrics/` prints the same numbers in the Prometheus text format.
+`next` sits above `django.contrib.staticfiles` in `INSTALLED_APPS`, so `runserver` is the next.dj command that serves `ASGI_APPLICATION` on uvicorn and mounts the WebSocket. Open `/realtime/` in two tabs, press **Nudge** in one, and both tabs count the upstream event. `curl http://127.0.0.1:8000/metrics/` prints the same numbers in the Prometheus text format.
 
 Click around `/`, `/stats/`, the four sub-pages. Apply different windows. Counters move on every render, the overview tiles re-poll on their own every five seconds, and the windowed view actually narrows to the chosen aggregation slice.
 
@@ -74,7 +74,7 @@ obs/
 ├── serializers.py            <- PydanticJsContextSerializer + WrappedJsContextSerializer
 ├── signals.py                <- eighteen counter receivers, four Prometheus receivers
 ├── exporter.py               <- Prometheus series, topic families, the scrape guard
-├── realtime.py               <- obs:pulse topic, its authorizer, the `wave` upstream handler
+├── realtime.py               <- obs:pulse topic, its authorizer, the `nudge` upstream handler
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
@@ -88,8 +88,8 @@ obs/
     │   └── sparkline/        <- React + JSX sparkline, full render only, react/babel cdn via page.py
     ├── realtime/
     │   ├── page.py           <- @context realtime, bound to the realtime-totals zone
-    │   ├── template.djx      <- totals zone, pulse form, Wave button, data-next-sse
-    │   ├── template.js       <- Wave sends the upstream event, co-located
+    │   ├── template.djx      <- totals zone, pulse form, Nudge button, data-next-stream
+    │   ├── template.js       <- Nudge sends the upstream event, co-located
     │   └── stream/page.py    <- TopicStream on obs:pulse
     ├── metrics/page.py       <- generate_latest behind check_scrape
     └── stats/
@@ -320,7 +320,7 @@ def on_stream_unsubscribed(
 
 The stream signals go out with `send_robust`, so a receiver that raises is logged on `next.realtime.signals` and the stream stays open. `TestSseStream` connects a raising receiver beside these and asserts that the stream still delivers and the gauge still moves. `message_published`, `upstream_received` and `upstream_rejected` go out with `send_robust` too, so a receiver that raises is logged and the publication or the `ack` goes on. These receivers only touch a label and a number, nothing that can fail.
 
-`/realtime/` is the page the numbers are shown on. Its [`stream/page.py`](obs/pages/realtime/stream/page.py) returns `TopicStream(request, "obs:pulse", authorize=can_watch)`, and the importable `can_watch` is what lets the stream negotiate a WebSocket. **Publish a pulse** posts `PulseForm`, which publishes `refresh(zone="realtime-totals")` on the topic and redirects back. **Wave** sends the `wave` upstream event through `Next.partial.stream.send`, and the handler in [obs/realtime.py](obs/realtime.py) publishes the same refresh, so every open tab re-reads the totals. Any visitor may wave, and one `wave` makes every open tab refetch the zone, an amplification only `REALTIME['UPSTREAM']['RATE']` bounds per connection. Over SSE there is no upstream channel and the button does nothing.
+`/realtime/` is the page the numbers are shown on. Its [`stream/page.py`](obs/pages/realtime/stream/page.py) returns `TopicStream(request, "obs:pulse", authorize=can_watch)`, and the importable `can_watch` is what lets the stream negotiate a WebSocket. **Publish a pulse** posts `PulseForm`, which publishes `refresh(zone="realtime-totals")` on the topic and redirects back. **Nudge** sends the `nudge` upstream event through `Next.partial.stream.send`, and the handler in [obs/realtime.py](obs/realtime.py) publishes the same refresh, so every open tab re-reads the totals. Any visitor may nudge, and one `nudge` makes every open tab refetch the zone, an amplification only `REALTIME['UPSTREAM']['RATE']` bounds per connection. Over SSE there is no upstream channel and the button does nothing.
 
 #### Cardinality
 

@@ -56,7 +56,8 @@ A multi-process production deployment must use a shared backend such as Redis, b
 ``OPTIONS.CLIENT`` is a mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client.
 It overrides the defaults ``health_check_interval`` and ``socket_keepalive``, while ``decode_responses`` is always ``True``.
 A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` reaches Redis through Sentinel or Cluster.
-A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis`` logger.
+A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis.broker`` logger.
+The ``next.realtime.redis.broker`` and ``next.realtime.redis.pubsub`` loggers are children of ``next.realtime.redis``, so one handler on the parent catches both.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 
 ``RedisBroker.topic_key(kind, topic)`` names the keys of a topic as ``<PREFIX>:<kind>:{<topic>}``.
@@ -217,7 +218,8 @@ The storage calls are left to the project, and ``self.store`` stands for whateve
 
 ``listen`` returns only after the queue confirms the subscription, which is what makes the subscription live on entry.
 ``Message.from_dict`` rejects wrong wire types with ``TypeError`` or ``ValueError``, so a backend that reads from an untrusted channel logs and skips such a payload.
-``manage.py check`` reports a class that is not an importable concrete ``BrokerBackend`` subclass as ``next.E184`` and leaves the options of a custom backend to that backend.
+``manage.py check`` reports a class that is not an importable concrete ``BrokerBackend`` subclass as ``next.E184`` and passes the ``OPTIONS`` mapping to the ``BrokerBackend.check_options`` classmethod of the configured class.
+``check_options`` returns the system check messages for the options a backend reads, and the base implementation returns none.
 The skeleton keeps no replay log, so with a nonzero ``REPLAY['SIZE']`` the check warns with ``next.W143``.
 :doc:`/content/howto/write-a-broker-backend` adds the log and walks through a ``RedisBroker`` subclass.
 
@@ -580,6 +582,9 @@ Handshake
 A page opens a ``TopicStream`` through its guarded GET, and a client that asks for ``X-Next-Transport: ws`` receives a JSON ticket instead of a stream.
 The body is ``{"protocol": 2, "transport": "ws", "ticket": ..., "topics": [...], "url": ..., "expires_in": ...}``, where ``url`` is ``REALTIME['WS_PATH']`` under the script prefix of the request and ``expires_in`` is ``TICKET_MAX_AGE``.
 The ticket binds the session, the topics, and the transform and authorizer references of the stream.
+The constructor always returns a ``TopicStream``, and for a ``ws`` request Django calls its ``render()`` and serves the JSON reply that returns, as it does for a ``TemplateResponse``.
+Code that builds a ``TopicStream`` outside a request handler calls ``render()`` itself to get the reply.
+Headers the page pipeline set on the stream carry onto the reply.
 The connection then runs in this order.
 
 #. The client opens ``WS_PATH`` with the session cookie.
@@ -662,7 +667,7 @@ Server frames
      - ``{"type": "patches", "data": ...}``
      - One published message.
        ``data`` is the object the protocol backend's ``stream_data`` returns, which for the stock JSON backend is the envelope with ``server_time``, ``topic``, ``epoch``, and ``seq``.
-       A backend whose ``stream_data`` returns ``None`` sends the exact ``data:`` text of its ``sse_stream_event`` as a string.
+       A backend whose ``stream_data`` returns text sends that text as a string.
    * - ``skip``
      - ``{"type": "skip", "topic": "room:42", "epoch": "...", "seq": 18}``
      - A message the subscriber transform filtered out, sent so the cursor still advances.
@@ -719,7 +724,7 @@ The WebSocket ``hello`` tells the client the limits it builds its frames by.
 With the defaults the frame ends in ``"upstream":{"frame":16384},"tunnel":{"timeout":30.0,"frame":65536,"headers":["accept","content-type"],"prefixes":["x-next-"],"csrf":"x-csrftoken"}``.
 A client sends a header outside ``headers``, ``prefixes``, and ``csrf`` over HTTP, since the tunnel drops it.
 
-A stock JSON backend returns ``None`` from ``stream_data`` once a subclass sets its own ``content_type`` or overrides ``sse_event`` or ``sse_stream_event``.
+A stock JSON backend returns the frame as JSON text from ``stream_data`` once a subclass sets its own ``content_type``.
 The client hands a string ``data`` to the same parse hook the SSE transport uses, so a custom wire format works on both transports.
 ``server_time`` is stamped in milliseconds when each frame is written.
 
@@ -787,7 +792,7 @@ Limits
      - ``frames.MAX_INBOUND_BYTES``
    * - Topics in a ``last_seq`` cursor
      - 64
-     - ``frames.MAX_CURSOR_TOPICS``
+     - ``messages.MAX_TOPICS``
    * - Wait for the first ``sub``
      - 5 seconds
      - ``frames.SUB_TIMEOUT``
@@ -799,7 +804,7 @@ Limits
      - ``REALTIME['TICKET_MAX_AGE']``
    * - Heartbeat
      - 25 seconds by default
-     - ``REALTIME['HEARTBEAT']``
+     - ``REALTIME['HEARTBEAT']`` for the WebSocket ping and ``SSE.HEARTBEAT_SECONDS`` for SSE
    * - Frames after ``sub``
      - 10 a second with a burst of 20 by default
      - ``REALTIME['UPSTREAM']['RATE']`` and ``['BURST']``
@@ -975,8 +980,7 @@ The load is read-only.
 A session whose hash only matches a ``SECRET_KEY_FALLBACKS`` entry keeps working.
 Rotating the key belongs to the next HTTP request, and the socket has no response to carry a new cookie.
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
-The signed-cookie engine re-signs its cookie on every session save.
-A ticket issued before the save then no longer matches the handshake cookie, and the socket closes with ``4401``, which ``next.W142`` reports.
+The signed-cookie engine breaks the default binding, which ``next.W142`` reports, see :ref:`topics-realtime-signed-cookie`.
 ``SignedCookieBinding`` removes that limit and needs no server-side session engine, see `Ticket binding`_.
 The ``file`` engine replaces an expired session with a new file when it loads one, and the socket turns that write into a no-op.
 Under the default binding the socket loads the session at the handshake and on each recheck, so a cache-backed store that evicts live sessions closes sockets with ``4401``.

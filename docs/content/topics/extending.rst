@@ -84,7 +84,7 @@ Every family checks the configured class against the base named above, so a clas
 A custom backend usually subclasses the default so it inherits every default behaviour.
 
 Every base is an abstract base class that declares the methods a subclass must implement.
-``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``sse_event``, which returns the same envelope as a server-sent-events frame, and ``deserialize_envelope``, which reads a response body back into an ``Envelope`` so a reader such as the test client parses the format its writer produced.
+``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``stream_data``, which returns a topic frame with its stream metadata as a JSON object or as text, and ``deserialize_envelope``, which reads a response body back into an ``Envelope`` so a reader such as the test client parses the format its writer produced.
 It also expects the ``content_type`` class attribute that names the media type of the body, and it supplies the ``options`` property that reads ``OPTIONS`` out of the settings entry.
 The shipped ``next.partial.JsonPartialProtocolBackend`` implements that contract as compact JSON, and a subclass of it that only changes part of the wire format overrides both public methods rather than reaching through the internal ``_dumps`` helper, which carries no stability promise.
 

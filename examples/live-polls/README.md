@@ -8,7 +8,7 @@ A polling app where the results on every open tab refresh the moment someone vot
 | --- | --- |
 | `/` | Redirects to `/polls/` so the bare site root is never empty. |
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
-| `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, an "N watching" counter, and a `data-next-sse` element. |
+| `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, an "N watching" counter, and a `data-next-stream` element. |
 | `/polls/<id>/embed/` | The same live chart in a widget with its own bare document shell, linked as "Embed" from the vote page, where the link first opens the snippet to copy as a modal. |
 | `/admin/polls/poll/` | Staff host console for opening or closing a poll and setting its deadline. |
 | `/polls/<id>/stream/` | The topic stream with presence on. Each poll change emits a `next-patches` refresh of `poll-results` and a `poll:votes` event with the updated total, and every change in attendance emits a `next:presence` snapshot. |
@@ -24,10 +24,10 @@ The vote page wraps its results in a zone and connects the stream with one eleme
 {% zone "poll-results" %}
   {% component "poll_chart" %}
 {% endzone %}
-<div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
+<div data-next-stream="/polls/{{ poll.pk }}/stream/"></div>
 ```
 
-The runtime negotiates the configured transport from the guarded `data-next-sse` URL. When the process serves the WebSocket endpoint, it opens the socket with a short-lived ticket issued by that page, and otherwise it opens an `EventSource` for SSE. Both transports route `next-patches` into the same apply pipeline as an HTTP partial response. There is no hand-written transport client code.
+The runtime negotiates the configured transport from the guarded `data-next-stream` URL. When the process serves the WebSocket endpoint, it opens the socket with a short-lived ticket issued by that page, and otherwise it opens an `EventSource` for SSE. Both transports route `next-patches` into the same apply pipeline as an HTTP partial response. There is no hand-written transport client code.
 
 A vote posts with `X-Next-Request-Id`. A valid partial vote answers the voter's own tab with two ops on one envelope, a morph of the `poll-results` zone with the fresh server-rendered bars and a `context` patch that pushes the new snapshot into `window.Next.context.live_results`. The `live_results` name is a page-level `serialize=True` provider on `[int:id]/page.py`, so `Patches(request).context(live_results=...)` resolves it against the origin page the vote posted from. The Vue island reads the pushed snapshot on `context-updated` and rebinds without re-reading the DOM. A signal receiver publishes a `refresh` after the action transaction commits. The framework copies the originating request id from `Patches(request)`, so the voter's tab drops its echo. A bad choice never reaches the handler, so the dispatcher auto-morphs the `poll-results` zone in place because the vote form lives inside it, and the voter keeps the rest of the page. Without the runtime the vote falls back to a redirect to the poll page.
 
@@ -136,7 +136,7 @@ polls/pages/
         ├── page.py                   <- @context poll inherit, live_results serialize
         ├── page.vue                  <- mount entry, registers Next.partial.onMount
         ├── page.test.js              <- Vitest cover for the mount entry
-        ├── template.djx              <- poll-results zone + data-next-sse element
+        ├── template.djx              <- poll-results zone + data-next-stream element
         ├── stream/page.py            <- TopicStream for poll:<id>
         └── _components/poll_chart/   <- detail composite, owns the Vue layer
             ├── component.py          <- @component.context("results", serialize=True)
@@ -279,7 +279,7 @@ The parameter is named after the context key, so the callable receives the row t
 
 [`embed/layout.djx`](polls/pages/polls/[int:id]/embed/layout.djx) opens with `{% layout root %}`. That marker makes it the root of its chain, so neither `[int:id]/layout.djx`, `polls/layout.djx` nor the `studio/` envelope wraps the page. The layout writes its own `<html>`, pulls `page_head` for `{% metadata %}` and `{% collect_styles %}`, and ends with `{% collect_scripts %}`. Its `layout.css` is served and the studio chain adds nothing.
 
-What a cut layout used to provide is still there where it comes from `page.py`. The `poll` context is `inherit_context`, so the shell prints the question. The page declares its own `@page.metadata` for the tab title and a `live_results` provider, because the vote handler patches that key on the origin page and the parent's provider does not reach a page of its own. The template repeats the `poll-results` zone and the `data-next-sse` element, and `page.vue` imports the parent mount entry, so a vote on the poll page repaints the widget over the same stream. A cross-site `<iframe>` also needs the `X-Frame-Options` header lifted, which this example leaves at Django's default.
+What a cut layout used to provide is still there where it comes from `page.py`. The `poll` context is `inherit_context`, so the shell prints the question. The page declares its own `@page.metadata` for the tab title and a `live_results` provider, because the vote handler patches that key on the origin page and the parent's provider does not reach a page of its own. The template repeats the `poll-results` zone and the `data-next-stream` element, and `page.vue` imports the parent mount entry, so a vote on the poll page repaints the widget over the same stream. A cross-site `<iframe>` also needs the `X-Frame-Options` header lifted, which this example leaves at Django's default.
 
 ### 12. The embed snippet as an intercepting route
 

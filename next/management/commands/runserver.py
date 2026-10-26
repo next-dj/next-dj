@@ -5,13 +5,14 @@ Django runs the command of the app listed first, so `next` sits above staticfile
 
 import os
 import sys
-from typing import Any, override
+from typing import Any, Self, cast, override
 
 from django.apps import apps
 from django.conf import settings
-from django.contrib.staticfiles.handlers import StaticFilesHandler
+from django.contrib.staticfiles.management.commands.runserver import (
+    Command as StaticfilesRunserverCommand,
+)
 from django.core.exceptions import ImproperlyConfigured
-from django.core.handlers.wsgi import WSGIHandler
 from django.core.management.base import CommandError, CommandParser
 from django.core.management.commands.runserver import Command as RunserverCommand
 from django.db import connections
@@ -39,7 +40,7 @@ _NO_WEBSOCKET = (
 class Command(RunserverCommand):
     """Serve the project on the `DEV_SERVER` when it is installed, else over WSGI.
 
-    The static options join only with staticfiles installed, as in Django.
+    With staticfiles installed it is built on that app's command and its options.
     """
 
     addr: str
@@ -51,9 +52,15 @@ class Command(RunserverCommand):
         "the configured server is installed."
     )
 
+    def __new__(cls, *args: object, **kwargs: object) -> Self:
+        """Build the variant on the staticfiles command while that app is installed."""
+        del args, kwargs
+        static = cls is Command and apps.is_installed(_STATICFILES)
+        return cast("Self", super().__new__(_StaticCommand if static else cls))
+
     @override
     def add_arguments(self, parser: CommandParser) -> None:
-        """Take Django's arguments, `--wsgi`, and with staticfiles its static ones."""
+        """Take the arguments of the command below and `--wsgi`."""
         super().add_arguments(parser)
         parser.add_argument(
             "--wsgi",
@@ -61,28 +68,6 @@ class Command(RunserverCommand):
             dest="use_wsgi",
             help="Serve Django's WSGI handler even when the ASGI server is installed.",
         )
-        if not apps.is_installed(_STATICFILES):
-            return
-        parser.add_argument(
-            "--nostatic",
-            action="store_false",
-            dest="use_static_handler",
-            help="Do not serve static files at STATIC_URL.",
-        )
-        parser.add_argument(
-            "--insecure",
-            action="store_true",
-            dest="insecure_serving",
-            help="Serve static files even if DEBUG is False.",
-        )
-
-    @override
-    def get_handler(self, *args: Any, **options: Any) -> WSGIHandler:
-        """Return the WSGI handler, serving static files the way staticfiles does."""
-        handler: WSGIHandler = super().get_handler(*args, **options)
-        if _serves_static(options):
-            return StaticFilesHandler(handler)
-        return handler
 
     @override
     def inner_run(self, *args: Any, **options: Any) -> None:
@@ -132,6 +117,10 @@ class Command(RunserverCommand):
             self.stderr.write(_NO_WEBSOCKET)
 
 
+class _StaticCommand(Command, StaticfilesRunserverCommand):
+    """The command over staticfiles' own, its `--nostatic` and `--insecure` too."""
+
+
 def _configured_server() -> ASGIServer | None:
     """Return the development server, a bad `DEV_SERVER` as the error naming `E212`."""
     try:
@@ -142,7 +131,7 @@ def _configured_server() -> ASGIServer | None:
 
 
 def _serves_static(options: dict[str, Any]) -> bool:
-    """Whether staticfiles is installed and static serving is on, as in Django."""
+    """Whether staticfiles serves the static files, the way its command decides."""
     if not options.get("use_static_handler", False):
         return False
-    return bool(settings.DEBUG or options["insecure_serving"])
+    return bool(settings.DEBUG or options.get("insecure_serving", False))

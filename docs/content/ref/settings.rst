@@ -221,8 +221,8 @@ Any other string pins a release tag by hand.
 The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
 A version that never changes leaves the version guard silent at runtime, so a deploy of new assets cannot ask a connected client to reload.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
-``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds of a ``PatchEventStream`` with an async source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
-A ``TopicStream`` takes its keepalive from ``REALTIME['HEARTBEAT']`` instead, see `REALTIME`_.
+``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds of a ``PatchEventStream`` with an async source and of every ``TopicStream``, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
+A ``TopicStream`` takes its keepalive from the same option, and ``REALTIME['HEARTBEAT']`` times only the WebSocket ping, see `REALTIME`_.
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
 
@@ -314,12 +314,11 @@ Any other value is reported as ``next.E197``.
 It defaults to ``None``, and a routed endpoint with no token refuses every caller and is reported as ``next.E188``.
 Read it from the environment rather than committing it.
 
-``HEARTBEAT`` is the realtime keepalive and recheck interval in seconds, a positive finite number that ``next.E185`` enforces.
-It drives every ``TopicStream`` over SSE, under WSGI and ASGI alike, and every WebSocket served by a ``TopicSocket``.
-At that interval a quiet stream writes a heartbeat comment or a WebSocket ``ping`` frame, and a live connection rechecks its session and topic grants.
-``TopicStream(heartbeat_seconds=...)`` overrides it for one SSE stream.
-The ``SSE.HEARTBEAT_SECONDS`` option of ``PARTIAL_BACKENDS`` is a separate setting that times only a manual ``PatchEventStream`` with an async source, while ``SSE.RETRY_MS`` stays the reconnect hint of both stream kinds.
-Keep ``HEARTBEAT`` below the shortest idle timeout of every proxy and load balancer in front of the streams.
+``HEARTBEAT`` is the WebSocket ping and recheck interval in seconds, a positive finite number that ``next.E185`` enforces.
+It drives every WebSocket served by a ``TopicSocket``, which sends a ``ping`` frame at that interval and rechecks its session and topic grants.
+An SSE stream, a ``TopicStream`` or a manual ``PatchEventStream``, takes its heartbeat from the ``SSE.HEARTBEAT_SECONDS`` option of ``PARTIAL_BACKENDS`` instead.
+``TopicStream(heartbeat_seconds=...)`` overrides that option for one SSE stream.
+Keep both intervals below the shortest idle timeout of every proxy and load balancer in front of the streams.
 
 ``REPLAY`` sizes the per-topic log a reconnecting stream catches up from.
 ``SIZE`` is the number of newest messages kept per topic, an integer from ``0`` to ``10000`` that ``next.E189`` enforces, and ``0`` turns the log off.

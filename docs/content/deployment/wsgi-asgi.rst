@@ -152,10 +152,10 @@ It sets ``Cache-Control: no-cache, no-transform`` so no intermediary caches an e
 What the headers cannot state is the connection lifetime, so raise the proxy read and send timeouts above the expected stream duration and turn response buffering off for the streaming route on any proxy that ignores the hint.
 
 A manual ``PatchEventStream`` with an async source sends a comment heartbeat every ``SSE.HEARTBEAT_SECONDS`` to keep a quiet connection from being reaped, and one with a sync source sends none, so a sync source behind an idle timeout supplies its own keepalive.
-A ``TopicStream`` sends its heartbeat every ``REALTIME['HEARTBEAT']`` seconds under WSGI and ASGI alike, and the WebSocket sends a ``ping`` frame at the same interval.
+A ``TopicStream`` sends its heartbeat every ``SSE.HEARTBEAT_SECONDS`` seconds under WSGI and ASGI alike, and the WebSocket sends a ``ping`` frame every ``REALTIME['HEARTBEAT']`` seconds.
 
 For WebSockets, configure the proxy to forward ``Upgrade`` and ``Connection`` headers, set its read timeout above the connection lifetime, and allow heartbeats through without buffering.
-Keep ``REALTIME['HEARTBEAT']``, 25 seconds by default, below the shortest proxy or load balancer idle timeout.
+Keep ``REALTIME['HEARTBEAT']`` and ``SSE.HEARTBEAT_SECONDS``, 25 seconds each by default, below the shortest proxy or load balancer idle timeout.
 A WebSocket client closes a socket whose ``hello`` has not arrived within five seconds of opening, and the server sends ``hello`` only once the broker confirms the subscription, so a slow broker shows up as reconnects and then as SSE fallback.
 See :doc:`/content/topics/partial-rendering/sse` and :doc:`/content/howto/stream-over-websockets`.
 
@@ -201,14 +201,6 @@ Estimate capacity and scale out
 
 The framework fixes no capacity figure, because the number a process holds depends on the hardware, the broker, the proxy, and the work the pages do.
 Measure it on the install that serves the traffic.
-
-``make load`` runs the framework's own load harness from a repository checkout.
-It publishes and subscribes through the real broker and the real WebSocket and SSE paths, with ``PROFILE`` choosing the scenario, ``LOAD_DURATION`` the run length, and ``REDIS_URL`` the Redis to use.
-Point ``REDIS_URL`` at a Redis of the same kind as production and run it on the target hardware.
-The harness drives an app of the framework, not the pages of the project.
-It therefore measures the transport, meaning delivery latency, losses, and the cost of connections and replay, and it says nothing about how the project's own views, handlers, and queries behave.
-Measure those with a load tool of your own pointed at the deployed pages.
-:doc:`/content/contributing/quality-gates` describes the harness, its profiles, and its result file.
 
 Watch these signals during a run and in production.
 

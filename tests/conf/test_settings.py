@@ -339,10 +339,10 @@ class TestNextFrameworkChecksUnknownKeys:
             "FORM_WIZARD_BACKEND",
         ],
     )
-    def test_next_framework_rejects_legacy_prefixed_keys(
+    def test_next_framework_rejects_default_prefixed_keys(
         self, renamed_key: str
     ) -> None:
-        """Pre-rename keys with the dropped prefix are reported as unknown."""
+        """Keys under a ``DEFAULT_`` prefix are reported as unknown."""
         with override_settings(NEXT_FRAMEWORK={f"DEFAULT_{renamed_key}": []}):
             errors = check_next_framework_unknown_top_level_keys()
         assert any(e.id == "next.E035" for e in errors)

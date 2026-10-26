@@ -1,6 +1,6 @@
 {% zone "poll-results" %}
   {% component "poll_chart" %}
 {% endzone %}
-<div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
+<div data-next-stream="/polls/{{ poll.pk }}/stream/"></div>
 <p class="text-xs text-muted-foreground" data-poll-watchers hidden></p>
 <p class="sr-only" role="status" aria-live="polite" data-poll-vote-announcement></p>

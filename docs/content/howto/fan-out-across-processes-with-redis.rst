@@ -54,7 +54,7 @@ Every open WebSocket and SSE stream holds one Redis connection for its subscript
 The default pool size is the one redis-py picks.
 A process with many open streams raises ``max_connections`` before it runs out.
 An exhausted pool ends the affected stream with ``BrokerConnectionError``, so the browser reconnects.
-The default pool raises ``MaxConnectionsError``, which the broker also logs as a warning on the ``next.realtime.redis`` logger.
+The default pool raises ``MaxConnectionsError``, which the broker also logs as a warning on the ``next.realtime.redis.broker`` logger, a child of ``next.realtime.redis``.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` once its timeout runs out, so its exhaustion logs no such warning.
 
 Secure the broker

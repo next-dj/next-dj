@@ -247,9 +247,9 @@ describe("createPartial surface", () => {
     }));
     document.body.insertAdjacentHTML(
       "beforeend",
-      '<div data-next-sse="/stream/"></div>',
+      '<div data-next-stream="/stream/"></div>',
     );
-    partial.sse.scan(document);
+    partial.stream.scan(document);
     source.opened[0]!.message("stream-body");
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe(
       "streamed",
@@ -687,15 +687,15 @@ describe("createPartial surface", () => {
     });
     document.head.innerHTML = "";
     document.body.innerHTML = '<div data-next-zone="z"></div>';
-    lazy.sse.scan(document);
+    lazy.stream.scan(document);
     expect(stream.tags()).toBe(0);
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
-    lazy.sse.scan(document);
-    expect(lazy.sse.size()).toBe(0);
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    lazy.stream.scan(document);
+    expect(lazy.stream.size()).toBe(0);
     expect(stream.tags()).toBe(1);
     stream.land(createSse);
     expect(source.opened).toHaveLength(1);
-    expect(lazy.sse.size()).toBe(1);
+    expect(lazy.stream.size()).toBe(1);
     lazy._reset();
   });
 
@@ -821,7 +821,7 @@ describe("createPartial surface", () => {
       visibility: manualVisibility(),
     });
     document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
-    lazy.sse.scan(document);
+    lazy.stream.scan(document);
     await Promise.resolve();
     await Promise.resolve();
     expect(usedWebSocket).toBe(true);
@@ -847,10 +847,10 @@ describe("createPartial surface", () => {
       visibility: manualVisibility(),
     });
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
-    lazy.sse.scan(document);
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.stream.scan(document);
     // Only the last ECHO_LIMIT ids are kept, as the bridge's own ring keeps them.
-    for (let i = 0; i < 26; i += 1) lazy.sse.remember(`r${i}`);
+    for (let i = 0; i < 26; i += 1) lazy.stream.remember(`r${i}`);
     stream.land(createSse);
     const event = (id: string): string =>
       JSON.stringify({
@@ -878,11 +878,11 @@ describe("createPartial surface", () => {
       visibility: manualVisibility(),
     });
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
-    lazy.sse.scan(document);
-    lazy.sse.scan(document);
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.stream.scan(document);
+    lazy.stream.scan(document);
     expect(source.opened).toHaveLength(1);
-    lazy.sse.remember("own");
+    lazy.stream.remember("own");
     source.opened[0]!.message(
       JSON.stringify({
         version: "v1",
@@ -909,13 +909,13 @@ describe("createPartial surface", () => {
       visibility: manualVisibility(),
     });
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
-    lazy.sse.scan(document);
-    lazy.sse.remember("stale");
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
+    lazy.stream.scan(document);
+    lazy.stream.remember("stale");
     lazy._reset();
     stream.land(createSse);
     expect(source.opened).toEqual([]);
-    lazy.sse.scan(document);
+    lazy.stream.scan(document);
     expect(source.opened).toHaveLength(1);
     // The reset dropped the buffered id with the rest of the bridge state.
     source.opened[0]!.message(
@@ -931,14 +931,14 @@ describe("createPartial surface", () => {
 
   it("an SSE event applies through the same pipeline as a response", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
     const source = mockSource();
     partial._configure({
       document,
       source: source.adapter,
       visibility: manualVisibility(),
     });
-    partial.sse.scan(document);
+    partial.stream.scan(document);
     expect(source.opened).toHaveLength(1);
     source.opened[0]!.message(
       JSON.stringify({
@@ -954,7 +954,7 @@ describe("createPartial surface", () => {
   it("a completed stream resync does not abort a later GET on teardown", async () => {
     window.history.replaceState(null, "", "/");
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
     const source = mockSource();
     const signals: AbortSignal[] = [];
     let finishLatest: (() => void) | undefined;
@@ -980,7 +980,7 @@ describe("createPartial surface", () => {
       },
       navigate: () => undefined,
     });
-    partial.sse.scan(document);
+    partial.stream.scan(document);
     source.opened[0]!.control(
       "next-hello",
       JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
@@ -994,7 +994,7 @@ describe("createPartial surface", () => {
     await Promise.resolve();
     const newer = partial.fetch({ url: "/", zone: "z" });
     await vi.waitFor(() => expect(signals).toHaveLength(2));
-    document.querySelector('[data-next-sse="/stream/"]')!.remove();
+    document.querySelector('[data-next-stream="/stream/"]')!.remove();
     await vi.waitFor(() => expect(source.opened[0]!.closed).toBe(true));
     expect(signals[1]!.aborted).toBe(false);
     finishLatest!();
@@ -1004,7 +1004,7 @@ describe("createPartial surface", () => {
   it("teardown aborts a still pending stream resync", async () => {
     window.history.replaceState(null, "", "/");
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="z">old</div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
     const source = mockSource();
     let signal: AbortSignal | undefined;
     partial._configure({
@@ -1021,13 +1021,13 @@ describe("createPartial surface", () => {
       },
       navigate: () => undefined,
     });
-    partial.sse.scan(document);
+    partial.stream.scan(document);
     source.opened[0]!.control(
       "next-hello",
       JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
     );
     await vi.waitFor(() => expect(signal).toBeDefined());
-    document.querySelector('[data-next-sse="/stream/"]')!.remove();
+    document.querySelector('[data-next-stream="/stream/"]')!.remove();
     await vi.waitFor(() => expect(source.opened[0]!.closed).toBe(true));
     expect(signal!.aborted).toBe(true);
   });
@@ -1035,7 +1035,7 @@ describe("createPartial surface", () => {
   it("a host meta from a stream or a zone GET under a layer survives its close", async () => {
     window.history.replaceState(null, "", "/inbox/");
     document.title = "Inbox (0)";
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const source = mockSource();
     const meta = (title: string) =>
       JSON.stringify({
@@ -1052,7 +1052,7 @@ describe("createPartial surface", () => {
       fetch: async (url) =>
         patchesResponse(meta(url.endsWith("/inbox/7/") ? "Mail 7" : "Inbox (4)")),
     });
-    partial.sse.scan(document);
+    partial.stream.scan(document);
     await partial.layers.open(null, "/inbox/7/", "mail");
     expect(document.title).toBe("Mail 7");
     source.opened[0]!.message(meta("Inbox (3)"));
@@ -1067,7 +1067,7 @@ describe("createPartial surface", () => {
   });
 
   it("an SSE resume re-GETs the bound zones through the wire", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const source = mockSource();
     const visibility = manualVisibility();
     const calls: { url: string; init: RequestInit }[] = [];
@@ -1083,7 +1083,7 @@ describe("createPartial surface", () => {
       navigate: () => {},
     });
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
-    partial.sse.scan(document);
+    partial.stream.scan(document);
     source.opened[0]!.message(
       JSON.stringify({
         version: "v1",
@@ -1237,7 +1237,7 @@ describe("createPartial surface", () => {
     expect(() => off()).not.toThrow();
   });
 
-  it("layers and sse getters expose the live sub-surfaces", () => {
+  it("layers and stream getters expose the live sub-surfaces", () => {
     partial._configure({
       document,
       dialog: mockDialog(),
@@ -1245,13 +1245,12 @@ describe("createPartial surface", () => {
       visibility: manualVisibility(),
     });
     expect(typeof partial.layers.open).toBe("function");
-    expect(typeof partial.sse.scan).toBe("function");
-    expect(partial.stream).toBe(partial.sse);
+    expect(typeof partial.stream.scan).toBe("function");
     expect(partial.stream.offset()).toBe(0);
   });
 
   it("exposes topic listeners, stream metadata, and clock through the lazy facade", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const source = mockSource();
     partial._configure({
       document,
@@ -1264,7 +1263,7 @@ describe("createPartial surface", () => {
       current: StreamMeta | undefined;
     }[] = [];
     expect(partial.stream.now()).toBeGreaterThan(0);
-    partial.sse.remember("queued-id");
+    partial.stream.remember("queued-id");
     const off = partial.stream.on("room:1", "room:update", (detail, meta) => {
       received.push({ detail, meta, current: partial.stream.meta() });
     });
@@ -1306,7 +1305,7 @@ describe("createPartial surface", () => {
       source: source.adapter,
       visibility: manualVisibility(),
     });
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     late.stream.scan(document);
     late._reset();
     streamChunk.land(createSse);

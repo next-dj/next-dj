@@ -45,14 +45,14 @@ def test_a_pulse_refreshes_the_totals_of_another_tab(page: Page, base_url: str) 
     watcher.close()
 
 
-def test_a_wave_over_the_websocket_reaches_another_tab(
+def test_a_nudge_over_the_websocket_reaches_another_tab(
     page: Page, asgi_server: str
 ) -> None:
     watcher = open_streaming(page.context.new_page(), f"{asgi_server}/realtime/", "ws")
-    waves = int(stat(watcher, "Waves").inner_text())
+    nudges = int(stat(watcher, "Nudges").inner_text())
     open_streaming(page, f"{asgi_server}/realtime/", "ws")
-    page.get_by_role("button", name="Wave").click()
-    expect(stat(watcher, "Waves")).to_have_text(str(waves + 1))
-    expect(stat(page, "Waves")).to_have_text(str(waves + 1))
+    page.get_by_role("button", name="Nudge").click()
+    expect(stat(watcher, "Nudges")).to_have_text(str(nudges + 1))
+    expect(stat(page, "Nudges")).to_have_text(str(nudges + 1))
     expect(stat(watcher, "Open WebSocket")).to_have_text("2")
     watcher.close()

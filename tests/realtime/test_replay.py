@@ -1,9 +1,6 @@
 import asyncio
-import time
-from types import SimpleNamespace
 
 import fakeredis
-import fakeredis._basefakesocket
 import fakeredis.aioredis
 import pytest
 import redis
@@ -33,21 +30,10 @@ from next.realtime.replay import (
     parse_event_id,
     replay_after,
 )
-from tests.support.realtime import refresh_envelope
+from tests.support.realtime import ServerClock, freeze_fakeredis, refresh_envelope
 
 
 EPOCH = "0123456789abcdef"
-
-
-class _Clock:
-    def __init__(self, start: float) -> None:
-        self.now = start
-
-    def __call__(self) -> float:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += seconds
 
 
 class _Harness:
@@ -58,15 +44,13 @@ class _Harness:
     ) -> None:
         self.kind = kind
         self.asynchronous = asynchronous
-        self.clock = _Clock(time.time())
+        self.clock = ServerClock()
         self.server = fakeredis.FakeServer()
         self.redis = fakeredis.FakeRedis(server=self.server, decode_responses=True)
         if kind == "redis":
             monkeypatch.setattr(redis.Redis, "from_url", self._sync_client)
             monkeypatch.setattr(redis.asyncio.Redis, "from_url", self._async_client)
-            monkeypatch.setattr(
-                fakeredis._basefakesocket, "time", SimpleNamespace(time=self.clock)
-            )
+            freeze_fakeredis(monkeypatch, self.clock)
 
     def _sync_client(self, url: str, **kwargs: object) -> fakeredis.FakeRedis:
         return self.redis
@@ -220,7 +204,7 @@ def test_publish_after_the_ttl_starts_a_fresh_log_in_a_new_epoch(
     assert _seqs(harness.replay(broker, "poll:1", Position(fresh.epoch, 0))) == [1]
 
 
-def test_a_position_expires_a_ttl_after_its_last_publish(harness: _Harness) -> None:
+def test_position_expires_a_ttl_after_its_last_publish(harness: _Harness) -> None:
     broker = harness.broker(size=10, ttl=5)
     (first,) = _publish(broker, 1)
     harness.clock.advance(4.9)
@@ -230,7 +214,7 @@ def test_a_position_expires_a_ttl_after_its_last_publish(harness: _Harness) -> N
     assert asyncio.run(broker.apositions(["poll:1"])) == {"poll:1": Position("", 0)}
 
 
-def test_a_position_without_a_log_still_expires(harness: _Harness) -> None:
+def test_position_without_a_log_still_expires(harness: _Harness) -> None:
     broker = harness.broker(size=0, ttl=5)
     _publish(broker, 2)
     harness.clock.advance(5.1)
@@ -238,8 +222,9 @@ def test_a_position_without_a_log_still_expires(harness: _Harness) -> None:
     assert fresh.seq == 1
 
 
-def test_a_memory_position_idle_for_exactly_the_ttl_is_never_published() -> None:
-    clock = _Clock(0.0)
+def test_memory_position_idle_for_exactly_the_ttl_is_never_published(
+    clock: ServerClock,
+) -> None:
     broker = MemoryBroker(clock=clock, replay={"SIZE": 0, "TTL": 5})
     published = broker.publish("poll:1", refresh_envelope())
     clock.advance(4.999)
@@ -250,8 +235,7 @@ def test_a_memory_position_idle_for_exactly_the_ttl_is_never_published() -> None
     assert broker.positions(["poll:1"]) == {"poll:1": Position("", 0)}
 
 
-def test_memory_publish_sweeps_the_idle_positions() -> None:
-    clock = _Clock(0.0)
+def test_memory_publish_sweeps_the_idle_positions(clock: ServerClock) -> None:
     broker = MemoryBroker(clock=clock, replay={"SIZE": 0, "TTL": 5})
     for index in range(100):
         broker.publish(f"card:{index}", refresh_envelope())
@@ -269,8 +253,9 @@ def test_redis_sequence_key_carries_the_replay_ttl(
     assert harness.redis.pttl("next:seq:{poll:1}") == 1500
 
 
-def test_memory_publish_sweeps_the_expired_logs_once_per_ttl() -> None:
-    clock = _Clock(0.0)
+def test_memory_publish_sweeps_the_expired_logs_once_per_ttl(
+    clock: ServerClock,
+) -> None:
     broker = MemoryBroker(clock=clock, replay={"SIZE": 3, "TTL": 300})
     broker.publish("poll:a", refresh_envelope())
     clock.advance(100)
@@ -289,8 +274,9 @@ def test_memory_publish_sweeps_the_expired_logs_once_per_ttl() -> None:
     assert list(broker._logs) == ["poll:c"]
 
 
-def test_memory_publish_between_sweeps_still_restarts_an_expired_log() -> None:
-    clock = _Clock(0.0)
+def test_memory_publish_between_sweeps_still_restarts_an_expired_log(
+    clock: ServerClock,
+) -> None:
     broker = MemoryBroker(clock=clock, replay={"SIZE": 10, "TTL": 5})
     first = broker.publish("poll:a", refresh_envelope())
     clock.advance(4)
@@ -305,7 +291,7 @@ def test_memory_publish_between_sweeps_still_restarts_an_expired_log() -> None:
     assert _seqs(broker.replay("poll:a", Position(fresh.epoch, 0))) == [1]
 
 
-def test_the_log_restarts_after_a_pause_of_exactly_the_ttl() -> None:
+def test_log_restarts_after_a_pause_of_exactly_the_ttl() -> None:
     def message(seq: int, published_at: float) -> Message:
         return Message("poll:1", seq, refresh_envelope(), published_at, EPOCH)
 

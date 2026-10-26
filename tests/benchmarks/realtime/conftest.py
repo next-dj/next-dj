@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 
 import fakeredis
 import fakeredis.aioredis
@@ -35,15 +35,24 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> fakeredis.FakeRedis:
 
 
 @pytest.fixture()
-def memory_broker() -> MemoryBroker:
-    """Build a fresh process-local broker."""
-    return MemoryBroker()
+def replay(request: pytest.FixtureRequest) -> Mapping[str, object] | None:
+    """Pass an indirect replay log size to the brokers, the default log without one."""
+    size = getattr(request, "param", None)
+    return None if size is None else {"SIZE": size}
 
 
 @pytest.fixture()
-def redis_broker(fake_redis: fakeredis.FakeRedis) -> Iterator[RedisBroker]:
+def memory_broker(replay: Mapping[str, object] | None) -> MemoryBroker:
+    """Build a fresh process-local broker."""
+    return MemoryBroker(replay=replay)
+
+
+@pytest.fixture()
+def redis_broker(
+    fake_redis: fakeredis.FakeRedis, replay: Mapping[str, object] | None
+) -> Iterator[RedisBroker]:
     """Build a Redis broker backed by the fake server."""
-    broker = RedisBroker({"OPTIONS": {"URL": "redis://fake/1"}})
+    broker = RedisBroker({"OPTIONS": {"URL": "redis://fake/1"}}, replay=replay)
     yield broker
     broker.close()
 

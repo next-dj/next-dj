@@ -22,7 +22,7 @@ The core bundle loads on every page, and six lazy chunks load only for a page th
    * - ``scripts``
      - Consent and third-party scripts, fetched only for a page that needs them, see :doc:`client-extras`.
    * - ``stream``
-     - The shared stream state and the SSE transport, fetched once a scan finds a ``data-next-stream`` or ``data-next-sse`` container.
+     - The shared stream state and the SSE transport, fetched once a scan finds a ``data-next-stream`` container.
    * - ``ws``
      - The WebSocket transport, its upstream events, and the request tunnel, fetched only when the server enables WebSockets for a stream.
    * - ``csrf``
@@ -45,7 +45,6 @@ A member whose name starts with an underscore is a bootstrap or test seam rather
 
 Stable.
    ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.submit``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
-   ``Next.partial.sse`` is an alias of ``Next.partial.stream``.
    The ``next:*`` events and the ``partial:*`` document events belong to the same tier.
    Use these from a co-located asset, an island adapter, or a page script.
 
@@ -610,9 +609,6 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
    * - ``data-next-keep``
      - Hand-written on any element
      - The morph engine, which leaves the node and its subtree untouched so a mounted island root survives.
-   * - ``data-next-sse``
-     - Hand-written on a container
-     - Alias of ``data-next-stream``.
    * - ``data-next-stream``
      - Hand-written on a container
      - The stream bridge, which opens one stream per distinct URL, over WebSocket when negotiation succeeds and over ``EventSource`` otherwise, and rescans each inserted subtree.

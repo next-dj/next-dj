@@ -41,7 +41,7 @@ from next.realtime.manager import broker_manager
 from next.realtime.tickets import issue_ticket, verify_ticket
 from next.testing import SseReader, override_next_settings
 from next.testing.realtime import WebSocketCommunicator, override_websocket_mount
-from tests.support.realtime import ROOM_AUTHORIZER_REF
+from tests.support.realtime import ROOM_AUTHORIZER_REF, websocket_scope
 
 
 _SIGNED_BINDING = "next.realtime.SignedCookieBinding"
@@ -83,6 +83,19 @@ class AbstractBinding(TicketBinding):
 NOT_A_CLASS = "binding"
 
 
+def _served(
+    view: Callable[[HttpRequest], HttpResponseBase],
+) -> Callable[[HttpRequest], HttpResponseBase]:
+    """Render a view's response the way Django's handler does before middleware."""
+
+    def serve(request: HttpRequest) -> HttpResponseBase:
+        response = view(request)
+        render = getattr(response, "render", None)
+        return render() if callable(render) else response
+
+    return serve
+
+
 class Browser:
     def __init__(self) -> None:
         """Start without cookies."""
@@ -93,7 +106,7 @@ class Browser:
     ) -> HttpResponseBase:
         request = RequestFactory().get("/room/", **headers)
         request.COOKIES.update(self.cookies)
-        response = SessionMiddleware(AuthenticationMiddleware(view))(request)
+        response = SessionMiddleware(AuthenticationMiddleware(_served(view)))(request)
         for name, morsel in response.cookies.items():
             if morsel.value:
                 self.cookies[name] = morsel.value
@@ -103,7 +116,7 @@ class Browser:
 
     def negotiate(self) -> tuple[int, dict[str, object]]:
         response = self.visit(_stream, HTTP_X_NEXT_TRANSPORT="ws")
-        body = json.loads(b"".join(response.streaming_content))
+        body = json.loads(response.content)
         return response.status_code, body
 
     def ticket(self) -> str:
@@ -216,7 +229,7 @@ every_engine = pytest.mark.parametrize("engine", _ENGINES, indirect=True)
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_first_visit_without_a_session_subscribes(engine: str) -> None:
+def test_first_visit_without_a_session_subscribes(engine: str) -> None:
     browser = Browser()
     ticket = browser.ticket()
     assert set(browser.cookies) == {"next_visitor"}
@@ -226,7 +239,7 @@ def test_a_first_visit_without_a_session_subscribes(engine: str) -> None:
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_visitor_keeps_its_cookie_across_negotiations(engine: str) -> None:
+def test_visitor_keeps_its_cookie_across_negotiations(engine: str) -> None:
     browser = Browser()
     first = browser.ticket()
     cookie = browser.cookies["next_visitor"]
@@ -238,7 +251,7 @@ def test_a_visitor_keeps_its_cookie_across_negotiations(engine: str) -> None:
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_signed_in_ticket_binds_the_user(engine: str, user: AbstractBaseUser) -> None:
+def test_signed_in_ticket_binds_the_user(engine: str, user: AbstractBaseUser) -> None:
     browser = Browser()
     browser.sign_in(user)
     ticket = browser.ticket()
@@ -252,7 +265,7 @@ def test_a_signed_in_ticket_binds_the_user(engine: str, user: AbstractBaseUser) 
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_ticket_survives_a_session_save_after_it_was_issued(
+def test_ticket_survives_a_session_save_after_it_was_issued(
     engine: str, user: AbstractBaseUser
 ) -> None:
     browser = Browser()
@@ -285,7 +298,7 @@ def test_login_and_logout_move_the_binding(engine: str, user: AbstractBaseUser) 
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_password_change_ends_the_signed_in_binding(
+def test_password_change_ends_the_signed_in_binding(
     engine: str, user: AbstractBaseUser
 ) -> None:
     browser = Browser()
@@ -298,7 +311,7 @@ def test_a_password_change_ends_the_signed_in_binding(
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_negotiation_after_a_password_change_elsewhere_binds_a_visitor(
+def test_negotiation_after_a_password_change_elsewhere_binds_a_visitor(
     engine: str, user: AbstractBaseUser
 ) -> None:
     browser = Browser()
@@ -318,7 +331,7 @@ def test_a_negotiation_after_a_password_change_elsewhere_binds_a_visitor(
     ["forged", "abc:def:ghi", signing.TimestampSigner(salt="other").sign("x")],
     ids=["plain", "unsigned", "foreign-salt"],
 )
-def test_a_forged_visitor_cookie_is_replaced_and_refused(
+def test_forged_visitor_cookie_is_replaced_and_refused(
     engine: str, forged: str
 ) -> None:
     browser = Browser()
@@ -333,7 +346,7 @@ def test_a_forged_visitor_cookie_is_replaced_and_refused(
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_an_expired_visitor_cookie_is_refused_and_renewed(engine: str) -> None:
+def test_expired_visitor_cookie_is_refused_and_renewed(engine: str) -> None:
     browser = Browser()
     start = datetime(2030, 1, 1, tzinfo=UTC)
     with override_settings(SESSION_COOKIE_AGE=30):
@@ -350,7 +363,7 @@ def test_an_expired_visitor_cookie_is_refused_and_renewed(engine: str) -> None:
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_rotated_secret_key_keeps_bindings_through_its_fallbacks(
+def test_rotated_secret_key_keeps_bindings_through_its_fallbacks(
     engine: str, user: AbstractBaseUser
 ) -> None:
     visitor = Browser()
@@ -375,9 +388,7 @@ def test_a_rotated_secret_key_keeps_bindings_through_its_fallbacks(
 
 @every_engine
 @pytest.mark.usefixtures("realtime")
-def test_a_custom_binding_named_by_dotted_path_binds_its_own_cookie(
-    engine: str,
-) -> None:
+def test_custom_binding_named_by_dotted_path_binds_its_own_cookie(engine: str) -> None:
     browser = Browser()
     browser.cookies["device"] = "phone"
     with override_next_settings(
@@ -405,7 +416,7 @@ def test_a_custom_binding_named_by_dotted_path_binds_its_own_cookie(
     indirect=["engine"],
 )
 @pytest.mark.usefixtures("realtime")
-def test_a_gateway_handshake_from_cookies_matches_the_builtin_endpoint(
+def test_gateway_handshake_from_cookies_matches_the_builtin_endpoint(
     engine: str, binding: str, user: AbstractBaseUser, *, signed_in: bool
 ) -> None:
     browser = Browser()
@@ -416,10 +427,7 @@ def test_a_gateway_handshake_from_cookies_matches_the_builtin_endpoint(
         ticket = browser.ticket()
         cookies = parse_cookie(browser.header())
         handshake = asyncio.run(Handshake.from_cookies(cookies))
-        scope = {
-            "type": "websocket",
-            "headers": [(b"cookie", browser.header().encode())],
-        }
+        scope = websocket_scope([(b"cookie", browser.header().encode())])
         builtin = asyncio.run(WebSocketApp().authenticate(scope))
         assert handshake is not None
         assert builtin is not None
@@ -431,7 +439,7 @@ def test_a_gateway_handshake_from_cookies_matches_the_builtin_endpoint(
 
 @pytest.mark.parametrize("engine", [_ENGINES[0]], indirect=True)
 @pytest.mark.usefixtures("realtime")
-def test_a_gateway_handshake_refuses_a_credential_that_is_gone(engine: str) -> None:
+def test_gateway_handshake_refuses_a_credential_that_is_gone(engine: str) -> None:
     cookies = {settings.SESSION_COOKIE_NAME: "abcdefghijklmnopqrstuvwxyz012345"}
     with override_next_settings(
         REALTIME={"TICKET_BINDING": "next.realtime.SessionBinding"}
@@ -441,7 +449,7 @@ def test_a_gateway_handshake_refuses_a_credential_that_is_gone(engine: str) -> N
 
 @pytest.mark.parametrize("engine", _ENGINES[:4], indirect=True)
 @pytest.mark.usefixtures("realtime")
-def test_the_session_binding_still_serves_stored_engines(engine: str) -> None:
+def test_session_binding_still_serves_stored_engines(engine: str) -> None:
     browser = Browser()
     with override_next_settings(REALTIME={"TRANSPORTS": ["ws", "sse"]}):
         assert isinstance(ticket_binding(), SessionBinding)
@@ -452,9 +460,7 @@ def test_the_session_binding_still_serves_stored_engines(engine: str) -> None:
 
 @pytest.mark.parametrize("engine", [_SIGNED_ENGINE], indirect=True)
 @pytest.mark.usefixtures("realtime")
-def test_the_session_binding_cannot_serve_a_first_signed_cookie_visit(
-    engine: str,
-) -> None:
+def test_session_binding_cannot_serve_a_first_signed_cookie_visit(engine: str) -> None:
     with override_next_settings(REALTIME={"TRANSPORTS": ["ws", "sse"]}):
         assert Browser().negotiate() == (503, {"error": "session_unavailable"})
 
@@ -506,7 +512,7 @@ def test_sse_with_a_forged_session_cookie_streams_anonymously(engine: str) -> No
     ],
     ids=["default", "secure", "browser-session"],
 )
-def test_the_visitor_cookie_follows_the_session_cookie_policy(
+def test_visitor_cookie_follows_the_session_cookie_policy(
     overrides: dict[str, object], max_age: object, secure: object
 ) -> None:
     binding = SignedCookieBinding()
@@ -527,7 +533,7 @@ def test_the_visitor_cookie_follows_the_session_cookie_policy(
     assert morsel["secure"] == secure
 
 
-def test_the_visitor_lives_on_the_request_not_on_the_shared_binding() -> None:
+def test_visitor_lives_on_the_request_not_on_the_shared_binding() -> None:
     request = RequestFactory().get("/")
     subject = SignedCookieBinding().issue(request)
     first, second = HttpResponse(), HttpResponse()
@@ -540,7 +546,7 @@ def test_the_visitor_lives_on_the_request_not_on_the_shared_binding() -> None:
     assert binding._visitor(second.cookies["next_visitor"].value) is not None
 
 
-def test_a_reply_without_a_negotiation_sets_no_visitor_cookie() -> None:
+def test_reply_without_a_negotiation_sets_no_visitor_cookie() -> None:
     response = HttpResponse()
     SignedCookieBinding().respond(RequestFactory().get("/"), response)
     assert not response.cookies
@@ -548,7 +554,7 @@ def test_a_reply_without_a_negotiation_sets_no_visitor_cookie() -> None:
 
 @pytest.mark.parametrize("engine", [_ENGINES[0], _SIGNED_ENGINE], indirect=True)
 @pytest.mark.usefixtures("realtime")
-def test_a_planted_visitor_cookie_ends_with_the_first_signed_in_negotiation(
+def test_planted_visitor_cookie_ends_with_the_first_signed_in_negotiation(
     engine: str, user: AbstractBaseUser
 ) -> None:
     attacker = Browser()
@@ -575,7 +581,7 @@ def test_a_planted_visitor_cookie_ends_with_the_first_signed_in_negotiation(
     indirect=["engine"],
 )
 @pytest.mark.usefixtures("realtime")
-def test_the_handshake_subject_is_stable_and_opaque_across_reconnects(
+def test_handshake_subject_is_stable_and_opaque_across_reconnects(
     engine: str, binding: str, user: AbstractBaseUser
 ) -> None:
     def handshake(browser: Browser) -> Handshake:
@@ -599,12 +605,12 @@ def test_the_handshake_subject_is_stable_and_opaque_across_reconnects(
             assert found.credential not in repr(found)
 
 
-def test_a_handshake_whose_credential_proves_no_subject_has_an_empty_one() -> None:
+def test_handshake_whose_credential_proves_no_subject_has_an_empty_one() -> None:
     with override_next_settings(REALTIME={"TICKET_BINDING": _SIGNED_BINDING}):
         assert Handshake("gone", None, None).subject == ""
 
 
-def test_a_handshake_without_cookies_is_refused_before_the_pool(
+def test_handshake_without_cookies_is_refused_before_the_pool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pooled = Mock(side_effect=AssertionError("pooled"))
@@ -615,7 +621,7 @@ def test_a_handshake_without_cookies_is_refused_before_the_pool(
 
 @pytest.mark.parametrize("engine", [_ENGINES[0]], indirect=True)
 @pytest.mark.usefixtures("realtime")
-def test_a_signed_cookie_credential_reads_the_session_row_once(
+def test_signed_cookie_credential_reads_the_session_row_once(
     engine: str, user: AbstractBaseUser
 ) -> None:
     browser = Browser()
@@ -631,7 +637,7 @@ def test_a_signed_cookie_credential_reads_the_session_row_once(
 
 @pytest.mark.parametrize("engine", [_ENGINES[0]], indirect=True)
 @pytest.mark.usefixtures("realtime")
-def test_a_signed_cookie_binding_reads_an_sse_session_key_apart_from_a_credential(
+def test_signed_cookie_binding_reads_an_sse_session_key_apart_from_a_credential(
     engine: str, user: AbstractBaseUser
 ) -> None:
     browser = Browser()
@@ -645,14 +651,14 @@ def test_a_signed_cookie_binding_reads_an_sse_session_key_apart_from_a_credentia
     assert live.seconds_left is not None
 
 
-def test_a_session_binding_reply_carries_no_cookie() -> None:
+def test_session_binding_reply_carries_no_cookie() -> None:
     response = HttpResponse()
     SessionBinding().respond(RequestFactory().get("/"), response)
     assert not response.cookies
 
 
 @pytest.mark.django_db()
-def test_a_signed_cookie_credential_needs_a_signed_in_session_or_a_visitor() -> None:
+def test_signed_cookie_credential_needs_a_signed_in_session_or_a_visitor() -> None:
     binding = SignedCookieBinding()
     assert binding.credential({}) is None
     assert binding.credential({settings.SESSION_COOKIE_NAME: "gone"}) is None
@@ -661,7 +667,7 @@ def test_a_signed_cookie_credential_needs_a_signed_in_session_or_a_visitor() -> 
     assert binding.live("user:hash:missing.Backend:1") is None
 
 
-def test_a_visitor_credential_is_anonymous_without_a_deadline() -> None:
+def test_visitor_credential_is_anonymous_without_a_deadline() -> None:
     binding = SignedCookieBinding()
     value = binding._signer().sign("visitor-id")
     credential = binding.credential({"next_visitor": value})
@@ -705,7 +711,7 @@ def test_issue_without_session_middleware_binds_a_visitor() -> None:
     ],
     ids=["none", "int", "missing", "not-a-class", "foreign-class", "abstract"],
 )
-def test_an_unusable_binding_path_is_refused(path: object) -> None:
+def test_unusable_binding_path_is_refused(path: object) -> None:
     assert binding_class(path) is None
     with (
         override_next_settings(REALTIME={"TICKET_BINDING": path}),
@@ -714,14 +720,14 @@ def test_an_unusable_binding_path_is_refused(path: object) -> None:
         ticket_binding()
 
 
-def test_the_default_binding_is_built_once() -> None:
+def test_default_binding_is_built_once() -> None:
     assert ticket_binding() is ticket_binding()
     assert type(ticket_binding()) is SessionBinding
     assert binding_class(_SIGNED_BINDING) is SignedCookieBinding
 
 
 @pytest.mark.parametrize("digest", [None, 5, "0" * 64])
-def test_a_ticket_without_a_matching_digest_belongs_to_another_session(
+def test_ticket_without_a_matching_digest_belongs_to_another_session(
     digest: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sign_object = signing.TimestampSigner.sign_object

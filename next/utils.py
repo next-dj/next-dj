@@ -70,6 +70,16 @@ def positive_number(value: object, ceiling: float) -> TypeGuard[float]:
     )
 
 
+def non_negative_number(value: object, ceiling: float) -> TypeGuard[float]:
+    """Whether `value` is a finite int or float from zero up to `ceiling`."""
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and 0 <= value <= ceiling
+    )
+
+
 def after_fork(reset: Callable[[], object]) -> None:
     """Run `reset` in every forked child, nothing on a platform that cannot fork."""
     register = getattr(os, "register_at_fork", None)

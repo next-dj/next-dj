@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 from contextlib import ExitStack
+from dataclasses import replace
 from unittest.mock import AsyncMock, Mock, create_autospec
 
 import fakeredis
@@ -15,13 +16,8 @@ from django.core.exceptions import ImproperlyConfigured
 from redis.crc import key_slot
 
 from next.partial import Patches
-from next.realtime import (
-    BrokerConnectionError,
-    Position,
-    Presence,
-    RedisBroker,
-    redis as redis_backend,
-)
+from next.realtime import BrokerConnectionError, Position, Presence, RedisBroker
+from next.realtime.redis import broker as broker_module, pubsub as pubsub_module
 from tests.support.realtime import message_payload, refresh_envelope, silent_schedule
 
 
@@ -299,7 +295,7 @@ def test_redis_pool_exhaustion_is_told_apart_from_other_failures(
     pubsub = Mock(spec=redis.client.PubSub)
     pubsub.get_message.side_effect = failure
     with pytest.raises(BrokerConnectionError):
-        next(backend._sync_messages(pubsub, [], 0.01))
+        next(pubsub_module.messages(pubsub, [], 0.01, backend._failures))
     assert ("connection pool is exhausted" in caplog.text) is warned
 
 
@@ -409,7 +405,6 @@ def _frame(topic: str, seq: int) -> dict[str, object]:
 
 
 def test_redis_confirm_message_between_acks_is_buffered(clients) -> None:
-    backend = RedisBroker()
     pubsub = _scripted_pubsub(
         [
             {"type": "subscribe", "channel": "next:topic:a"},
@@ -419,7 +414,7 @@ def test_redis_confirm_message_between_acks_is_buffered(clients) -> None:
             {"type": "subscribe", "channel": "next:topic:b"},
         ]
     )
-    buffered = backend._confirm(pubsub, ("next:topic:a", "next:topic:b"))
+    buffered = pubsub_module.confirm(pubsub, ("next:topic:a", "next:topic:b"))
     assert [message.seq for message in buffered] == [4]
 
 
@@ -427,8 +422,8 @@ def test_redis_sync_buffered_setup_messages_are_yielded_first(clients) -> None:
     backend = RedisBroker()
     pubsub = Mock(spec=redis.client.PubSub)
     pubsub.get_message.return_value = None
-    early = backend._decode_message(_frame("a", 4)["data"])
-    messages = backend._sync_messages(pubsub, [early], 0.01)
+    early = pubsub_module.decode_message(_frame("a", 4)["data"])
+    messages = pubsub_module.messages(pubsub, [early], 0.01, backend._failures)
     assert next(messages) == early
     assert next(messages) is None
 
@@ -436,16 +431,15 @@ def test_redis_sync_buffered_setup_messages_are_yielded_first(clients) -> None:
 def test_redis_confirm_without_ack_raises_connection_error(
     clients, monkeypatch
 ) -> None:
-    monkeypatch.setattr(redis_backend, "_SUBSCRIBE_TIMEOUT", 0.01)
-    backend = RedisBroker()
+    monkeypatch.setattr(pubsub_module, "_SUBSCRIBE_TIMEOUT", 0.01)
     with pytest.raises(BrokerConnectionError, match="confirm"):
-        backend._confirm(_scripted_pubsub([]), ("next:topic:a",))
+        pubsub_module.confirm(_scripted_pubsub([]), ("next:topic:a",))
 
     async def scenario() -> None:
         pubsub = AsyncMock(spec=redis.asyncio.client.PubSub)
         pubsub.get_message.return_value = None
         with pytest.raises(BrokerConnectionError, match="confirm"):
-            await backend._aconfirm(pubsub, ("next:topic:a",))
+            await pubsub_module.aconfirm(pubsub, ("next:topic:a",))
 
     asyncio.run(scenario())
 
@@ -462,9 +456,11 @@ def test_redis_async_confirm_message_between_acks_is_yielded_first(clients) -> N
     pubsub.ping = AsyncMock(spec=redis.asyncio.client.PubSub.ping)
 
     async def scenario() -> None:
-        buffered = await backend._aconfirm(pubsub, ("next:topic:a", "next:topic:b"))
+        buffered = await pubsub_module.aconfirm(
+            pubsub, ("next:topic:a", "next:topic:b")
+        )
         assert [message.seq for message in buffered] == [7]
-        messages = backend._async_messages(pubsub, buffered, 0.01)
+        messages = pubsub_module.amessages(pubsub, buffered, 0.01, backend._failures)
         assert (await anext(messages)).seq == 7
         assert await anext(messages) is None
 
@@ -520,9 +516,9 @@ def test_redis_async_unanswered_liveness_probe_raises_connection_error(clients) 
     pubsub.ping = AsyncMock(spec=redis.asyncio.client.PubSub.ping)
 
     async def scenario() -> None:
-        messages = backend._async_messages(pubsub, [], 0.01)
+        messages = pubsub_module.amessages(pubsub, [], 0.01, backend._failures)
         assert await anext(messages) is None
-        pubsub.ping.assert_awaited_once_with(redis_backend._LIVENESS)
+        pubsub.ping.assert_awaited_once_with(pubsub_module._LIVENESS)
         with pytest.raises(BrokerConnectionError, match="stopped answering"):
             await anext(messages)
 
@@ -620,7 +616,7 @@ def test_redis_close_with_running_loop_schedules_async_close(
     worker.start()
 
     async def register() -> None:
-        backend._async_client()
+        backend._loop_client()
         ready.set()
 
     asyncio.run_coroutine_threadsafe(register(), loop).result(5)
@@ -644,7 +640,7 @@ def test_redis_close_with_stopped_loop_drops_its_client(clients) -> None:
     loop = asyncio.new_event_loop()
 
     async def register() -> None:
-        backend._async_client()
+        backend._loop_client()
 
     loop.run_until_complete(register())
     backend.close()
@@ -687,13 +683,13 @@ def test_redis_broker_with_redis_blocked_in_sys_modules_names_the_optional_extra
 
 @pytest.mark.parametrize("payload", [json.dumps([]), "not-json", None, b"\xff"])
 def test_redis_decode_invalid_payload_is_skipped_and_logged(payload, caplog) -> None:
-    assert RedisBroker._decode_message(payload) is None
+    assert pubsub_module.decode_message(payload) is None
     assert "Skipped a malformed realtime message" in caplog.text
 
 
 def test_redis_decode_bytes_payload_returns_message() -> None:
     payload = json.dumps(message_payload(seq=1, published_at=1.0)).encode()
-    message = RedisBroker._decode_message(payload)
+    message = pubsub_module.decode_message(payload)
     assert message is not None
     assert message.epoch == "e1"
 
@@ -733,7 +729,7 @@ def test_sync_message_loop_wraps_redis_transport_errors(clients, failure) -> Non
     pubsub = Mock(spec=redis.client.PubSub)
     pubsub.get_message.side_effect = failure
     with pytest.raises(BrokerConnectionError) as caught:
-        next(backend._sync_messages(pubsub, [], 0.01))
+        next(pubsub_module.messages(pubsub, [], 0.01, backend._failures))
     assert caught.value.__cause__ is failure
     assert isinstance(caught.value, ConnectionError)
 
@@ -745,7 +741,7 @@ def test_sync_liveness_probe_wraps_redis_transport_errors(clients, failure) -> N
     pubsub.get_message.return_value = None
     pubsub.ping.side_effect = failure
     with pytest.raises(BrokerConnectionError) as caught:
-        next(backend._sync_messages(pubsub, [], 0.0))
+        next(pubsub_module.messages(pubsub, [], 0.0, backend._failures))
     assert caught.value.__cause__ is failure
 
 
@@ -794,7 +790,7 @@ def test_async_loop_and_setup_wrap_redis_transport_errors(clients, failure) -> N
         pubsub = AsyncMock(spec=redis.asyncio.client.PubSub)
         pubsub.get_message.side_effect = failure
         with pytest.raises(BrokerConnectionError) as caught:
-            await anext(backend._async_messages(pubsub, [], 0.01))
+            await anext(pubsub_module.amessages(pubsub, [], 0.01, backend._failures))
         assert caught.value.__cause__ is failure
 
         probing = AsyncMock(spec=redis.asyncio.client.PubSub)
@@ -803,7 +799,7 @@ def test_async_loop_and_setup_wrap_redis_transport_errors(clients, failure) -> N
             spec=redis.asyncio.client.PubSub.ping, side_effect=failure
         )
         with pytest.raises(BrokerConnectionError):
-            await anext(backend._async_messages(probing, [], 0.0))
+            await anext(pubsub_module.amessages(probing, [], 0.0, backend._failures))
 
         clients.async_pubsub = pubsub
         with pytest.raises(BrokerConnectionError):
@@ -821,8 +817,11 @@ def test_publish_and_positions_wrap_redis_transport_errors(
     failure = redis.ConnectionError("Connection refused")
     monkeypatch.setattr(
         backend,
-        "_publish_script",
-        create_autospec(backend._publish_script, side_effect=failure),
+        "_scripts",
+        replace(
+            backend._scripts,
+            publish=create_autospec(backend._scripts.publish, side_effect=failure),
+        ),
     )
     pipe = Mock(spec=redis.client.Pipeline)
     pipe.execute.side_effect = failure
@@ -837,12 +836,11 @@ def test_publish_and_positions_wrap_redis_transport_errors(
         backend.positions(["poll:1"])
 
     async def scenario() -> None:
-        client, scripts = backend._async_client()
-        script_source = redis_backend._PUBLISH_SCRIPT
-        script = scripts[script_source]
-        backend._async_clients[asyncio.get_running_loop()] = (
-            client,
-            {**scripts, script_source: AsyncMock(spec=script, side_effect=failure)},
+        entry = backend._loop_client()
+        client, scripts = entry
+        failing = AsyncMock(spec=scripts.publish, side_effect=failure)
+        backend._async_clients[asyncio.get_running_loop()] = entry._replace(
+            scripts=replace(scripts, publish=failing)
         )
         monkeypatch.setattr(
             client, "pipeline", create_autospec(client.pipeline, side_effect=failure)
@@ -857,13 +855,10 @@ def test_publish_and_positions_wrap_redis_transport_errors(
 
 def test_unrelated_errors_are_not_translated(clients, monkeypatch) -> None:
     backend = RedisBroker()
-    monkeypatch.setattr(
-        backend,
-        "_publish_script",
-        create_autospec(
-            backend._publish_script, side_effect=redis.ResponseError("NOSCRIPT")
-        ),
+    refused = create_autospec(
+        backend._scripts.publish, side_effect=redis.ResponseError("NOSCRIPT")
     )
+    monkeypatch.setattr(backend, "_scripts", replace(backend._scripts, publish=refused))
     with pytest.raises(redis.ResponseError):
         backend.publish("poll:1", refresh_envelope())
 
@@ -878,7 +873,7 @@ def test_redis_forked_child_forgets_parent_async_clients(clients) -> None:
     loop.run_until_complete(use())
     parent_lock = backend._async_lock
     assert len(backend._async_clients) == 1
-    redis_backend._forget_async_clients()
+    broker_module._forget_async_clients()
     assert backend._async_lock is not parent_lock
     assert len(backend._async_clients) == 0
     asyncio.run(use())

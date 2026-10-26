@@ -115,7 +115,7 @@ def parse_event_id(value: object) -> Position | None:
 
 def format_event_id(epoch: str, seq: int) -> str | None:
     """Return the SSE event id of a message, None when its cursor would not parse."""
-    value = f"{epoch}:{seq}"
+    value = Position(epoch, seq).cursor
     return value if _EVENT_ID.fullmatch(value) is not None else None
 
 

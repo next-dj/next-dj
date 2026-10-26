@@ -17,7 +17,7 @@ metadata: MetadataDict = {"title": "Realtime"}
 
 @context("pulse_topic")
 def pulse_topic() -> str:
-    """Name the topic the wave button sends its upstream event on."""
+    """Name the topic the nudge button sends its upstream event on."""
     return PULSE_TOPIC
 
 
@@ -34,7 +34,7 @@ def realtime() -> dict[str, object]:
         "published": int(
             sum(totals_by(MESSAGES_PUBLISHED, "family", "_total").values())
         ),
-        "waves": int(totals_by(UPSTREAM_EVENTS, "name", "_total").get("wave", 0)),
+        "nudges": int(totals_by(UPSTREAM_EVENTS, "name", "_total").get("nudge", 0)),
         "mean_seconds": round(seconds / closed, 1) if closed else 0,
         "reasons": sorted(
             ((reason, int(count)) for reason, count in reasons.items()),

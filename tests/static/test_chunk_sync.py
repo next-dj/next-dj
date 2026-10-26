@@ -51,8 +51,15 @@ class TestChunkLists:
         modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(")
         assert modules == set(CHUNK_STATIC_PATHS)
 
-    def test_stream_chunk_has_no_legacy_sse_alias(self) -> None:
-        assert "sse" not in CHUNK_STATIC_PATHS
+    def test_chunk_keys_name_every_shipped_chunk(self) -> None:
+        assert set(CHUNK_STATIC_PATHS) == {
+            "scripts",
+            "stream",
+            "ws",
+            "csrf",
+            "poll",
+            "dev",
+        }
 
     def test_scripts_chunk_keys_match_the_payload_keys(self) -> None:
         source = (CLIENT / "chunks.ts").read_text(encoding="utf-8")

@@ -3,9 +3,29 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 from . import keys
+
+
+class StreamPosition(Protocol):
+    """The `(epoch, seq)` position of one topic, read from any broker's own type."""
+
+    @property
+    def epoch(self) -> str:
+        """Counter epoch that numbered the topic."""
+
+    @property
+    def seq(self) -> int:
+        """Latest sequence within the epoch."""
+
+
+class TopicPosition(StreamPosition, Protocol):
+    """The position of one message together with the topic it was published on."""
+
+    @property
+    def topic(self) -> str:
+        """Topic the message was published on."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +36,18 @@ class StreamMeta:
     topic: str | None = None
     seq: int | None = None
     epoch: str | None = None
+
+    @classmethod
+    def of(cls, message: TopicPosition, server_time: int) -> Self:
+        """Return a topic message's metadata, an unnumbered one without a position."""
+        if not message.seq:
+            return cls(server_time=server_time, topic=message.topic)
+        return cls(
+            server_time=server_time,
+            topic=message.topic,
+            seq=message.seq,
+            epoch=message.epoch,
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """Return only metadata present on this stream frame."""
@@ -57,18 +89,6 @@ class StreamHello:
             },
             "transports": list(self.transports),
         }
-
-
-class StreamPosition(Protocol):
-    """The `(epoch, seq)` position of one topic, read from any broker's own type."""
-
-    @property
-    def epoch(self) -> str:
-        """Counter epoch that numbered the topic."""
-
-    @property
-    def seq(self) -> int:
-        """Latest sequence within the epoch."""
 
 
 def stream_hello(
@@ -118,5 +138,6 @@ __all__ = [
     "StreamMeta",
     "StreamPosition",
     "StreamSkip",
+    "TopicPosition",
     "stream_hello",
 ]

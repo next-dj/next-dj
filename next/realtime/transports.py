@@ -2,9 +2,8 @@
 
 import functools
 import threading
-from collections.abc import Mapping
 
-from next.conf import next_framework_settings
+from next.conf.scopes import scope_value
 from next.static.runtime import forget_realtime_offer
 
 
@@ -17,11 +16,10 @@ def active_transports() -> tuple[str, ...]:
 
     Without an explicit `TRANSPORTS` list, `ws` follows a WebSocket app mounted here.
     """
-    realtime = getattr(next_framework_settings, "REALTIME", {})
-    selected = realtime.get("TRANSPORTS") if isinstance(realtime, Mapping) else None
+    selected = scope_value("REALTIME", "TRANSPORTS")
     if selected is None:
         return ("ws", "sse") if _websocket_mounted.is_set() else ("sse",)
-    if "ws" in selected:
+    if isinstance(selected, list | tuple) and "ws" in selected:
         return ("ws", "sse")
     return ("sse",)
 
@@ -44,7 +42,7 @@ def withdraw_websocket() -> bool:
 
 
 def forget_transports(**kwargs: object) -> None:
-    """Drop the cached transports when settings, apps or the WebSocket mount change."""
+    """Drop the cached transports when the settings or the WebSocket mount change."""
     active_transports.cache_clear()
     forget_realtime_offer()
 

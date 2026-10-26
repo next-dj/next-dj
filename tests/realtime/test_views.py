@@ -4,11 +4,10 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from django.contrib.auth import get_user_model, login
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.http import HttpRequest
-from django.test import Client, RequestFactory, override_settings
+from django.test import Client, override_settings
 from django.urls import include, path, reverse
 from django.utils import timezone
 
@@ -16,7 +15,11 @@ from next.realtime import TicketIntrospectionView
 from next.realtime.messages import Message
 from next.realtime.tickets import TicketClaims
 from next.testing.realtime import SocketTicket, issue_socket_ticket
-from tests.support.realtime import ROOM_AUTHORIZER_REF
+from tests.support.realtime import (
+    ROOM_AUTHORIZER_REF,
+    issue_session_ticket,
+    signed_in_session,
+)
 
 
 TOKEN = "gateway-secret"
@@ -132,7 +135,7 @@ def test_expires_in_is_what_the_stored_row_has_left(ticket: SocketTicket) -> Non
     assert 0 < _introspect(_body(ticket)).json()["expires_in"] <= 10
 
 
-def test_a_store_without_a_readable_deadline_leaves_expires_in_out() -> None:
+def test_store_without_a_readable_deadline_leaves_expires_in_out() -> None:
     with override_settings(SESSION_ENGINE="django.contrib.sessions.backends.cache"):
         ticket = issue_socket_ticket(("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF)
         response = _introspect(_body(ticket))
@@ -141,14 +144,8 @@ def test_a_store_without_a_readable_deadline_leaves_expires_in_out() -> None:
 
 
 def test_returns_the_user_id_of_a_logged_in_session() -> None:
-    user = get_user_model().objects.create_user("ada", password="pw")
-    request = RequestFactory().get("/")
-    request.session = SessionStore()
-    login(request, user)
-    request.session.save()
-    ticket = issue_socket_ticket(
-        ("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF, session=request.session
-    )
+    user, session = signed_in_session("ada")
+    ticket = issue_session_ticket(("room:1",), session=session)
     response = _introspect(_body(ticket))
     assert response.status_code == 200
     assert response.json()["user"] == str(user.pk)
@@ -178,7 +175,7 @@ def test_refuses_every_caller_without_a_configured_token(
 
 
 @pytest.mark.parametrize("token", [None, ""])
-def test_an_empty_bearer_never_matches_a_missing_token(
+def test_empty_bearer_never_matches_a_missing_token(
     ticket: SocketTicket, token: str | None
 ) -> None:
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"GATEWAY_TOKEN": token}}):
@@ -254,14 +251,14 @@ def test_logs_the_reason_it_hides_from_the_caller(
         {"ticket": 1, "cookie": "sessionid=x"},
     ],
 )
-def test_an_authorized_caller_with_a_malformed_body_gets_400(body: object) -> None:
+def test_authorized_caller_with_a_malformed_body_gets_400(body: object) -> None:
     response = _introspect(body)
     assert response.status_code == 400
     assert response.json() == {"error": "invalid"}
     assert "no-store" in response["Cache-Control"]
 
 
-def test_a_malformed_body_without_the_bearer_is_still_denied() -> None:
+def test_malformed_body_without_the_bearer_is_still_denied() -> None:
     _assert_denied(_introspect("not json", authorization="Bearer wrong"))
 
 
@@ -285,7 +282,7 @@ def test_skips_csrf_and_the_login_middleware(ticket: SocketTicket) -> None:
     assert response.status_code == 200
 
 
-def test_a_subclass_swaps_the_caller_check(ticket: SocketTicket) -> None:
+def test_subclass_swaps_the_caller_check(ticket: SocketTicket) -> None:
     url = reverse("custom")
     _assert_denied(
         _introspect(_body(ticket), authorization=None, url=url, **{"X-Gateway": "x"})
@@ -304,7 +301,7 @@ def _transform_ticket(transform: str = "skip_everything") -> SocketTicket:
     )
 
 
-def test_a_subclass_serves_a_transform_ticket_in_its_own_shape() -> None:
+def test_subclass_serves_a_transform_ticket_in_its_own_shape() -> None:
     ticket = _transform_ticket()
     response = _introspect(_body(ticket), url=reverse("transforms"))
     assert response.status_code == 200
@@ -314,7 +311,7 @@ def test_a_subclass_serves_a_transform_ticket_in_its_own_shape() -> None:
     assert "no-store" in response["Cache-Control"]
 
 
-def test_a_subclass_refuses_a_transform_it_does_not_serve(
+def test_subclass_refuses_a_transform_it_does_not_serve(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     ticket = _transform_ticket("keep_everything")
@@ -323,13 +320,13 @@ def test_a_subclass_refuses_a_transform_it_does_not_serve(
     assert "transform" in caplog.text
 
 
-def test_a_served_transform_still_needs_a_live_session() -> None:
+def test_served_transform_still_needs_a_live_session() -> None:
     ticket = _transform_ticket()
     ticket.session.delete()
     _assert_denied(_introspect(_body(ticket), url=reverse("transforms")))
 
 
-def test_a_ticket_without_a_transform_skips_the_transform_hook(
+def test_ticket_without_a_transform_skips_the_transform_hook(
     ticket: SocketTicket,
 ) -> None:
     response = _introspect(_body(ticket), url=reverse("transforms"))
@@ -337,7 +334,7 @@ def test_a_ticket_without_a_transform_skips_the_transform_hook(
     assert "transform" not in response.json()
 
 
-def test_a_subclass_changing_the_body_still_refuses_a_transform() -> None:
+def test_subclass_changing_the_body_still_refuses_a_transform() -> None:
     plain = issue_socket_ticket(("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF)
     response = _introspect(_body(plain), url=reverse("body"))
     assert response.json() == {"rooms": ["room:1"]}

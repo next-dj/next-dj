@@ -259,17 +259,13 @@ Subclass the root and serialize a different envelope shape to support another wi
    * - ``deserialize_envelope(body)``
      - Abstract
      - The inverse of ``serialize_envelope``, used by readers such as the test-client helper.
-   * - ``sse_event(envelope)``
+   * - ``stream_data(envelope, meta)``
      - Abstract
-     - One ``next-patches`` frame of a manual stream, with no topic metadata.
+     - One topic frame with its ``StreamMeta``, either a JSON object or the codec's own text.
+       A WebSocket ``patches`` frame carries it as ``data``, and a text value reaches the parse hook for ``content_type``.
    * - ``sse_stream_event(envelope, meta)``
      - Concrete
-     - One ``next-patches`` frame carrying a ``StreamMeta``, used for every stream frame and for the ``data`` of a WebSocket ``patches`` frame.
-       The root implementation drops ``meta`` and returns ``sse_event``.
-   * - ``stream_data(envelope, meta)``
-     - Concrete
-     - The object a WebSocket ``patches`` frame carries as ``data``, or ``None`` to send the ``sse_stream_event`` data text, which the client hands to the parse hook for ``content_type``.
-       The root implementation returns ``None``.
+     - One ``next-patches`` frame built from ``stream_data``, an object as compact JSON and a text with one ``data:`` line per line.
    * - ``sse_hello(frame)``, ``sse_skip(frame)``, ``sse_end(frame)``
      - Concrete
      - The ``next-hello``, ``next-skip``, and ``next-end`` control frames, compact JSON in a fixed schema.
@@ -277,9 +273,8 @@ Subclass the root and serialize a different envelope shape to support another wi
      - Property
      - The ``OPTIONS`` mapping of the ``PARTIAL_BACKENDS`` entry.
 
-``JsonPartialProtocolBackend.sse_stream_event`` merges the ``StreamMeta`` keys into the JSON envelope, and its ``stream_data`` returns that object until a subclass sets its own ``content_type`` or overrides ``sse_event`` or ``sse_stream_event``.
-A JSON subclass that overrides ``sse_event`` keeps that format, because the metadata merge then steps aside and the frame drops the metadata.
-Such a subclass, and any backend with a non-JSON format, overrides ``sse_stream_event`` to carry ``meta`` in its own encoding, or the client loses gap detection and topic listeners.
+``JsonPartialProtocolBackend.stream_data`` merges the ``StreamMeta`` keys into the JSON envelope and returns that object, or the same frame as JSON text once a subclass sets its own ``content_type``.
+A backend with another format overrides ``stream_data`` to carry ``meta`` in its own encoding, or the client loses gap detection and topic listeners.
 
 The control frames are part of the protocol, not of the wire format.
 The client parses ``next-hello``, ``next-skip``, and ``next-end`` as JSON in the schema :doc:`/content/topics/partial-rendering/reference` lists, and WebSocket control frames bypass these hooks entirely, so a backend leaves the three hooks alone.

@@ -25,7 +25,7 @@ from next.realtime.limits import SocketLimits, TunnelLimits
 from next.realtime.socket import Handshake, TopicSocket
 from next.realtime.tunnel import DjangoTunnel, TunnelHints
 from next.testing.realtime import MemoryPort, SocketTicket, override_websocket_mount
-from tests.support.realtime import issue_session_ticket
+from tests.support.realtime import issue_session_ticket, websocket_scope
 
 
 _ACTION = "/_next/form/abc/"
@@ -40,26 +40,7 @@ def unmounted() -> Iterator[None]:
         yield
 
 
-def _ws_scope(
-    headers: list[tuple[bytes, bytes]] | None = None, **extra: object
-) -> Scope:
-    scope: dict[str, object] = {
-        "type": "websocket",
-        "asgi": {"version": "3.0", "spec_version": "2.3"},
-        "http_version": "1.1",
-        "scheme": "ws",
-        "path": "/_next/ws/",
-        "raw_path": b"/_next/ws/",
-        "query_string": b"",
-        "root_path": "",
-        "headers": [(b"cookie", _CSRF)] if headers is None else headers,
-        "client": ("10.0.0.1", 5000),
-        "server": ("testserver", 80),
-        "subprotocols": ["x"],
-        "extensions": {"websocket.http.response": {}},
-    }
-    scope.update(extra)
-    return scope
+_CSRF_COOKIE = ((b"cookie", _CSRF),)
 
 
 def _request(
@@ -133,11 +114,13 @@ def _run(
     limit: int = 1024,
     tunnel_class: type[DjangoTunnel] = _Routed,
 ) -> Reply | Refusal:
-    tunnel = tunnel_class(app, scope or _ws_scope(), _limits(reply=limit))
+    tunnel = tunnel_class(
+        app, scope or websocket_scope(_CSRF_COOKIE), _limits(reply=limit)
+    )
     return asyncio.run(tunnel(request, connection="conn"))
 
 
-def test_the_http_scope_keeps_the_handshake_environment() -> None:
+def test_http_scope_keeps_the_handshake_environment() -> None:
     app = _App()
     handshake = [
         (b"host", b"example.com"),
@@ -153,8 +136,14 @@ def test_the_http_scope_keeps_the_handshake_environment() -> None:
         (b"upgrade", b"websocket"),
         (b"referer", b"https://example.com/old/"),
     ]
-    scope = _ws_scope(
-        handshake, scheme="wss", state={"pool": 1}, http_version="2", root_path=""
+    scope = websocket_scope(
+        handshake,
+        scheme="wss",
+        state={"pool": 1},
+        http_version="2",
+        client=("10.0.0.1", 5000),
+        subprotocols=["x"],
+        extensions={"websocket.http.response": {}},
     )
     request = _request(
         f"{_ACTION}?a=%20b",
@@ -201,10 +190,10 @@ def test_the_http_scope_keeps_the_handshake_environment() -> None:
 
 
 @override_settings(CSRF_HEADER_NAME="HTTP_X_XSRF_TOKEN")
-def test_the_csrf_header_follows_the_setting() -> None:
+def test_csrf_header_follows_the_setting() -> None:
     app = _App()
     request = _request(headers={"X-XSRF-Token": "a", "X-CSRFToken": "b"})
-    _run(app, request, _ws_scope([(b"cookie", _CSRF), (b"x-xsrf-token", b"old")]))
+    _run(app, request, websocket_scope([(b"cookie", _CSRF), (b"x-xsrf-token", b"old")]))
     assert app.scope is not None
     headers = dict(app.scope["headers"])
     assert headers[b"x-xsrf-token"] == b"a"
@@ -212,16 +201,16 @@ def test_the_csrf_header_follows_the_setting() -> None:
 
 
 @override_settings(CSRF_HEADER_NAME="CSRF_TOKEN_META")
-def test_a_csrf_meta_key_admits_no_header() -> None:
+def test_csrf_meta_key_admits_no_header() -> None:
     app = _App()
     _run(app, _request(headers={"csrf-token-meta": "a"}))
     assert app.scope is not None
     assert b"csrf-token-meta" not in dict(app.scope["headers"])
 
 
-def test_a_scope_without_cookies_or_scheme_builds_plain_http() -> None:
+def test_scope_without_cookies_or_scheme_builds_plain_http() -> None:
     app = _App()
-    scope = _ws_scope([])
+    scope = websocket_scope([])
     del scope["scheme"]
     with override_settings(CSRF_USE_SESSIONS=True):
         _run(app, _request(), scope)
@@ -260,7 +249,7 @@ def test_a_scope_without_cookies_or_scheme_builds_plain_http() -> None:
         (_request(headers={"content-type": "text/plain"}), Refusal.BODY),
     ],
 )
-def test_a_malformed_request_is_refused_before_the_app(
+def test_malformed_request_is_refused_before_the_app(
     request_: Request, refusal: Refusal
 ) -> None:
     app = _App()
@@ -287,11 +276,9 @@ def test_urlencoded_and_json_bodies_pass(content_type: str) -> None:
         ("/x", False),
     ],
 )
-def test_a_mounted_socket_tunnels_only_below_its_root(
-    path: str, *, passes: bool
-) -> None:
+def test_mounted_socket_tunnels_only_below_its_root(path: str, *, passes: bool) -> None:
     app = _App()
-    answer = _run(app, _request(path), _ws_scope(root_path="/app"))
+    answer = _run(app, _request(path), websocket_scope(_CSRF_COOKIE, root_path="/app"))
     assert isinstance(answer, Reply) is passes
 
 
@@ -299,21 +286,23 @@ def test_a_mounted_socket_tunnels_only_below_its_root(
 @pytest.mark.parametrize(
     ("path", "passes"), [("/site/_next/form/x/", True), ("/_next/form/x/", False)]
 )
-def test_the_script_prefix_follows_force_script_name(
-    path: str, *, passes: bool
-) -> None:
+def test_script_prefix_follows_force_script_name(path: str, *, passes: bool) -> None:
     app = _App()
-    answer = _run(app, _request(path), _ws_scope(root_path="/ignored"))
+    answer = _run(
+        app, _request(path), websocket_scope(_CSRF_COOKIE, root_path="/ignored")
+    )
     assert isinstance(answer, Reply) is passes
 
 
-def test_the_path_below_the_prefix_is_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_path_below_the_prefix_is_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
     monkeypatch.setattr(
         DjangoTunnel, "routes_to_action", lambda _self, path: seen.append(path)
     )
     app = _App()
-    tunnel = DjangoTunnel(app, _ws_scope(root_path="/app"), _limits())
+    tunnel = DjangoTunnel(
+        app, websocket_scope(_CSRF_COOKIE, root_path="/app"), _limits()
+    )
     answer = asyncio.run(tunnel(_request("/app/_next/form/x/"), connection="c"))
     assert answer is Refusal.TRANSPORT
     assert seen == ["/_next/form/x/"]
@@ -347,10 +336,10 @@ def _translated_urls(*, prefix_default_language: bool) -> ModuleType:
         (False, "/en/_next/form/x/", False),
     ],
 )
-def test_a_translated_action_routes_under_the_language_of_its_path(
+def test_translated_action_routes_under_the_language_of_its_path(
     *, prefixed: bool, path: str, routes: bool
 ) -> None:
-    tunnel = DjangoTunnel(_App(), _ws_scope(), _limits())
+    tunnel = DjangoTunnel(_App(), websocket_scope(_CSRF_COOKIE), _limits())
     with (
         override_settings(
             ROOT_URLCONF=_translated_urls(prefix_default_language=prefixed),
@@ -363,9 +352,9 @@ def test_a_translated_action_routes_under_the_language_of_its_path(
         assert tunnel.routes_to_action(path) is routes
 
 
-def test_a_handshake_without_the_csrf_cookie_is_stale() -> None:
+def test_handshake_without_the_csrf_cookie_is_stale() -> None:
     app = _App()
-    assert _run(app, _request(), _ws_scope([(b"cookie", b"sessionid=k")])) is (
+    assert _run(app, _request(), websocket_scope([(b"cookie", b"sessionid=k")])) is (
         Refusal.STALE
     )
     assert app.scope is None
@@ -373,17 +362,17 @@ def test_a_handshake_without_the_csrf_cookie_is_stale() -> None:
 
 @override_settings(CSRF_USE_SESSIONS=True)
 def test_session_csrf_needs_no_csrf_cookie() -> None:
-    assert isinstance(_run(_App(), _request(), _ws_scope([])), Reply)
+    assert isinstance(_run(_App(), _request(), websocket_scope([])), Reply)
 
 
 @pytest.mark.parametrize("path", ["/", "/missing/"])
-def test_a_path_outside_the_form_dispatch_is_refused(path: str) -> None:
+def test_path_outside_the_form_dispatch_is_refused(path: str) -> None:
     app = _App()
     assert _run(app, _request(path), tunnel_class=DjangoTunnel) is Refusal.TRANSPORT
     assert app.scope is None
 
 
-def test_a_cold_urlconf_imports_off_the_event_loop(
+def test_cold_urlconf_imports_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gate = ModuleType("tunnel_gate")
@@ -399,7 +388,7 @@ def test_a_cold_urlconf_imports_off_the_event_loop(
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     app = _App()
-    tunnel = DjangoTunnel(app, _ws_scope(), _limits())
+    tunnel = DjangoTunnel(app, websocket_scope(_CSRF_COOKIE), _limits())
 
     async def scenario() -> Reply | Refusal:
         call = asyncio.ensure_future(tunnel(_request(), connection="conn"))
@@ -417,7 +406,7 @@ def test_a_cold_urlconf_imports_off_the_event_loop(
     assert app.scope is None
 
 
-def test_the_reply_keeps_the_allowed_headers_and_decodes_the_body() -> None:
+def test_reply_keeps_the_allowed_headers_and_decodes_the_body() -> None:
     app = _App(
         _start(
             302,
@@ -468,14 +457,14 @@ def test_the_reply_keeps_the_allowed_headers_and_decodes_the_body() -> None:
         ((_bare(500), _body()), Refusal.INTERNAL),
     ],
 )
-def test_a_reply_the_socket_cannot_carry_is_refused(
+def test_reply_the_socket_cannot_carry_is_refused(
     events: tuple[dict[str, object], ...], refusal: Refusal
 ) -> None:
     app = _App(*events) if events else _NoReply()
     assert _run(app, _request()) is refusal
 
 
-def test_a_reply_body_of_exactly_the_limit_is_carried() -> None:
+def test_reply_body_of_exactly_the_limit_is_carried() -> None:
     app = _App(_start(), _body(b"x" * 8, more=True), _body(b"y" * 2))
     assert _run(app, _request(), limit=10) == Reply(200, _MARKED, "x" * 8 + "y" * 2)
     assert _run(_App(_start(), _body(b"x" * 11)), _request(), limit=10) is (
@@ -512,18 +501,18 @@ class _Dispatched(_App):
         ((_bare(421, (b"x-next-transport", b"session")), _body()), Refusal.HTTP_ONLY),
     ],
 )
-def test_a_reply_past_the_dispatch_is_the_action_answer(
+def test_reply_past_the_dispatch_is_the_action_answer(
     events: tuple[dict[str, object], ...], answer: Reply | Refusal
 ) -> None:
     assert _run(_Dispatched(*events), _request()) == answer
 
 
-def test_a_marked_421_is_a_plain_reply() -> None:
+def test_marked_421_is_a_plain_reply() -> None:
     answer = _run(_App(_start(421), _body()), _request())
     assert answer == Reply(421, _MARKED, "")
 
 
-def test_a_failing_app_is_internal(caplog: pytest.LogCaptureFixture) -> None:
+def test_failing_app_is_internal(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.ERROR, logger="next.realtime.tunnel"):
         assert _run(_App(fail=True), _request()) is Refusal.INTERNAL
     assert caplog.records[0].getMessage() == f"Realtime tunnel app failed on {_ACTION}"
@@ -546,7 +535,7 @@ def test_a_failing_app_is_internal(caplog: pytest.LogCaptureFixture) -> None:
         (b"bad name=1", False),
     ],
 )
-def test_a_set_cookie_passes_only_when_it_repeats_the_cookie(
+def test_set_cookie_passes_only_when_it_repeats_the_cookie(
     cookie: bytes, *, harmless: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
     app = _App(_start(200, (b"set-cookie", cookie)), _body(b"ok"))
@@ -563,7 +552,7 @@ def test_a_set_cookie_passes_only_when_it_repeats_the_cookie(
         assert b"secret" not in warning.getMessage().encode()
 
 
-def test_the_cookie_warning_names_cookies_never_values(
+def test_cookie_warning_names_cookies_never_values(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     app = _App(
@@ -606,13 +595,13 @@ class _Lingering(_App):
 
 
 @pytest.mark.parametrize("stubborn", [False, True])
-def test_a_cancelled_request_disconnects_and_never_cancels_the_app(
+def test_cancelled_request_disconnects_and_never_cancels_the_app(
     *, stubborn: bool
 ) -> None:
     app = _Lingering(stubborn=stubborn)
 
     async def scenario() -> None:
-        tunnel = _Routed(app, _ws_scope(), _limits())
+        tunnel = _Routed(app, websocket_scope(_CSRF_COOKIE), _limits())
         task = asyncio.create_task(tunnel(_request(), connection="c"))
         await app.started.wait()
         task.cancel()
@@ -643,11 +632,11 @@ class _Held(_App):
             await send(event)
 
 
-def test_a_detached_app_keeps_its_slot_until_it_ends() -> None:
+def test_detached_app_keeps_its_slot_until_it_ends() -> None:
     app = _Held()
 
     async def scenario() -> list[Reply | Refusal]:
-        tunnel = _Routed(app, _ws_scope(), _limits(concurrency=1))
+        tunnel = _Routed(app, websocket_scope(_CSRF_COOKIE), _limits(concurrency=1))
         first = asyncio.create_task(tunnel(_request(), connection="c"))
         await app.started.wait()
         first.cancel()
@@ -664,12 +653,12 @@ def test_a_detached_app_keeps_its_slot_until_it_ends() -> None:
     assert answers == [Refusal.LIMIT, Reply(200, _MARKED, "ok")]
 
 
-def test_the_hints_name_the_kept_headers() -> None:
+def test_hints_name_the_kept_headers() -> None:
     class _Wide(DjangoTunnel):
         request_headers = frozenset({"content-type", "accept", "x-requested-with"})
 
     with override_settings(CSRF_HEADER_NAME="HTTP_X_XSRF_TOKEN"):
-        hints = _Wide(_plain_app, _ws_scope(), _limits()).hints()
+        hints = _Wide(_plain_app, websocket_scope(_CSRF_COOKIE), _limits()).hints()
     assert hints == TunnelHints(
         frozenset({"content-type", "accept", "x-requested-with"}),
         ("x-next-",),
@@ -677,7 +666,7 @@ def test_the_hints_name_the_kept_headers() -> None:
     )
 
 
-def test_a_subclass_may_admit_more_cookies() -> None:
+def test_subclass_may_admit_more_cookies() -> None:
     class _Lenient(_Routed):
         def cookie_allowed(self, name: str, morsel: object) -> bool:
             return name == "theme" or super().cookie_allowed(name, morsel)
@@ -700,34 +689,34 @@ def test_application_binds_its_app_unless_the_socket_has_one(
     other = _App()
     bound = WebSocketApp()
     application(_plain_app, websocket=bound)
-    assert isinstance(bound.tunnel(_ws_scope()), DjangoTunnel)
+    assert isinstance(bound.tunnel(websocket_scope(_CSRF_COOKIE)), DjangoTunnel)
     explicit = WebSocketApp(http_app=other)
     explicit.bind(_plain_app)
-    tunnel = explicit.tunnel(_ws_scope())
+    tunnel = explicit.tunnel(websocket_scope(_CSRF_COOKIE))
     assert tunnel is not None
     assert asyncio.run(tunnel(_request(), connection="c")) == Reply(200, _MARKED, "ok")
     assert other.scope is not None
-    assert WebSocketApp().tunnel(_ws_scope()) is None
+    assert WebSocketApp().tunnel(websocket_scope(_CSRF_COOKIE)) is None
 
 
 @override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": False}})
-def test_a_disabled_tunnel_builds_none() -> None:
-    assert WebSocketApp(http_app=_plain_app).tunnel(_ws_scope()) is None
+def test_disabled_tunnel_builds_none() -> None:
+    assert (
+        WebSocketApp(http_app=_plain_app).tunnel(websocket_scope(_CSRF_COOKIE)) is None
+    )
 
 
 @override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": {"MAX_REPLY_BYTES": 5}}})
-def test_the_built_tunnel_takes_the_reply_limit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_built_tunnel_takes_the_reply_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(DjangoTunnel, "routes_to_action", lambda _self, _path: True)
     app = _App(_start(), _body(b"x" * 6))
-    tunnel = WebSocketApp(http_app=app).tunnel(_ws_scope())
+    tunnel = WebSocketApp(http_app=app).tunnel(websocket_scope(_CSRF_COOKIE))
     assert tunnel is not None
     assert asyncio.run(tunnel(_request(), connection="c")) is Refusal.TOO_BIG
 
 
 @override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": {"TIMEOUT": 0}}})
-def test_a_bad_limit_fails_when_the_app_is_built() -> None:
+def test_bad_limit_fails_when_the_app_is_built() -> None:
     with pytest.raises(ImproperlyConfigured):
         WebSocketApp()
 
@@ -822,7 +811,7 @@ def test_requests_past_the_concurrency_are_refused_with_retry() -> None:
     [_ScriptedTunnel(), _ScriptedTunnel(fail=True), _ScriptedTunnel(hang=True)],
     ids=["reply", "failure", "timeout"],
 )
-def test_a_finished_request_frees_its_slot(tunnel: _ScriptedTunnel) -> None:
+def test_finished_request_frees_its_slot(tunnel: _ScriptedTunnel) -> None:
     ticket = issue_session_ticket()
     tunnel.release.set()
 
@@ -865,7 +854,7 @@ def test_a_finished_request_frees_its_slot(tunnel: _ScriptedTunnel) -> None:
         (_ScriptedTunnel(hang=True), "timeout", {"TUNNEL": {"TIMEOUT": 0.05}}),
     ],
 )
-def test_a_request_without_an_answer_gets_a_refusal(
+def test_request_without_an_answer_gets_a_refusal(
     tunnel: object, error: str, settings: dict[str, object]
 ) -> None:
     ticket = issue_session_ticket()
@@ -883,7 +872,7 @@ def test_a_request_without_an_answer_gets_a_refusal(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_an_empty_bucket_refuses_a_request_with_retry() -> None:
+def test_empty_bucket_refuses_a_request_with_retry() -> None:
     ticket = issue_session_ticket()
 
     async def scenario() -> None:
@@ -931,7 +920,7 @@ class _Instant:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_slot_is_held_until_its_reply_is_sent() -> None:
+def test_slot_is_held_until_its_reply_is_sent() -> None:
     ticket = issue_session_ticket()
 
     async def scenario() -> int:
@@ -962,7 +951,7 @@ def test_a_slot_is_held_until_its_reply_is_sent() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_the_hello_carries_the_limits_of_a_custom_tunnel() -> None:
+def test_hello_carries_the_limits_of_a_custom_tunnel() -> None:
     ticket = issue_session_ticket()
 
     async def scenario() -> dict[str, object]:
@@ -1016,7 +1005,7 @@ def test_explicit_origins_outside_csrf_are_reported(
 
 
 @override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": False}})
-def test_a_disabled_tunnel_reports_no_origin(caplog: pytest.LogCaptureFixture) -> None:
+def test_disabled_tunnel_reports_no_origin(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="next.realtime.asgi"):
         WebSocketApp(origins=["https://partner.example"])
     assert not [record for record in caplog.records if "W146" in record.getMessage()]

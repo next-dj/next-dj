@@ -3,18 +3,10 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
 from next.realtime.limits import SocketLimits, TokenBucket, TunnelLimits, UpstreamLimits
+from tests.support.realtime import ServerClock
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
-def test_the_bucket_spends_its_burst_then_refills_at_the_rate() -> None:
-    clock = _Clock()
+def test_bucket_spends_its_burst_then_refills_at_the_rate(clock: ServerClock) -> None:
     bucket = TokenBucket(2.0, 3, clock=clock)
     assert [bucket.take() for _ in range(4)] == [True, True, True, False]
     clock.now = 0.5
@@ -23,7 +15,7 @@ def test_the_bucket_spends_its_burst_then_refills_at_the_rate() -> None:
     assert [bucket.take() for _ in range(4)] == [True, True, True, False]
 
 
-def test_the_defaults_read_from_the_framework_settings() -> None:
+def test_defaults_read_from_the_framework_settings() -> None:
     with override_settings(NEXT_FRAMEWORK={}):
         assert UpstreamLimits.configured() == UpstreamLimits(10.0, 20, 16384, 16, 10.0)
         assert TunnelLimits.configured() == TunnelLimits(4, 30.0, 1048576)
@@ -39,8 +31,7 @@ def test_partial_mappings_keep_the_other_defaults() -> None:
         assert TunnelLimits.configured() == TunnelLimits(4, 5.0, 1048576)
 
 
-def test_a_bucket_ignores_a_clock_that_steps_back() -> None:
-    clock = _Clock()
+def test_bucket_ignores_a_clock_that_steps_back(clock: ServerClock) -> None:
     clock.now = 10.0
     bucket = TokenBucket(1.0, 1, clock=clock)
     assert bucket.take() is True
@@ -57,7 +48,7 @@ def test_socket_limits_read_both_settings() -> None:
     assert limits.upstream.burst == 20
 
 
-def test_a_false_tunnel_is_off() -> None:
+def test_false_tunnel_is_off() -> None:
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": False}}):
         assert TunnelLimits.configured() is None
 
@@ -75,7 +66,7 @@ def test_a_false_tunnel_is_off() -> None:
         {"OTHER": 1},
     ],
 )
-def test_a_bad_upstream_raises(upstream: object) -> None:
+def test_bad_upstream_raises(upstream: object) -> None:
     with (
         override_settings(NEXT_FRAMEWORK={"REALTIME": {"UPSTREAM": upstream}}),
         pytest.raises(ImproperlyConfigured),
@@ -86,7 +77,7 @@ def test_a_bad_upstream_raises(upstream: object) -> None:
 @pytest.mark.parametrize(
     "tunnel", [True, None, {"CONCURRENCY": 0}, {"TIMEOUT": float("inf")}, {"OTHER": 1}]
 )
-def test_a_bad_tunnel_raises(tunnel: object) -> None:
+def test_bad_tunnel_raises(tunnel: object) -> None:
     with (
         override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": tunnel}}),
         pytest.raises(ImproperlyConfigured),

@@ -7,6 +7,7 @@ import fakeredis
 import pytest
 import redis
 from django.core.management import CommandError, call_command
+from django.core.management.base import SystemCheckError
 from django.test import override_settings
 
 from next.management.commands.realtime import Command
@@ -228,10 +229,15 @@ class TestPositions:
 
 
 class TestSystemChecks:
-    """The command runs no system checks, like `shell`, so a broken project is reachable."""
+    """The command runs the system checks first, so a bad broker never connects."""
 
-    def test_requires_none(self) -> None:
-        assert Command.requires_system_checks == ()
+    def test_a_bad_broker_fails_the_checks(self) -> None:
+        config = {"REALTIME": {"BROKER": {"BACKEND": "missing.module.Broker"}}}
+        with (
+            override_settings(NEXT_FRAMEWORK=config),
+            pytest.raises(SystemCheckError, match=r"next\.E184"),
+        ):
+            call_command("realtime", "positions", TOPIC, skip_checks=False)
 
 
 class TestPresence:

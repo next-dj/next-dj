@@ -14,7 +14,7 @@ from next.partial.signals import partial_backend_loaded
 from next.partial.stream import StreamEnd, StreamHello, StreamMeta, StreamSkip
 from next.testing import capture_signals
 from tests.support.cases.realtime import TEXT_FRAME_CASES, TextFrameCase
-from tests.support.codecs import MimeJsonCodec, SseEventJsonCodec, sse_data_text
+from tests.support.codecs import MimeJsonCodec, sse_data_text
 
 
 def _sample_envelope() -> Envelope:
@@ -72,20 +72,14 @@ class TestDeserializeEnvelope:
 
 
 class TestSseEvent:
-    """The SSE frame wraps the same JSON envelope as a `next-patches` event."""
+    """The SSE frame wraps the JSON envelope and its metadata as `next-patches`."""
 
     def test_event_name_and_data(self) -> None:
-        frame = JsonPartialProtocolBackend().sse_event(_sample_envelope())
-        assert frame.startswith("event: next-patches\n")
+        frame = JsonPartialProtocolBackend().sse_stream_event(
+            _sample_envelope(), StreamMeta(server_time=1)
+        )
+        assert frame.startswith("event: next-patches\ndata: ")
         assert frame.endswith("\n\n")
-
-    def test_event_carries_same_json_as_body(self) -> None:
-        backend = JsonPartialProtocolBackend()
-        envelope = _sample_envelope()
-        body = backend.serialize_envelope(envelope).decode()
-        frame = backend.sse_event(envelope)
-        data_line = frame.splitlines()[1]
-        assert data_line == f"data: {body}"
 
     def test_stream_metadata_is_added_only_to_the_sse_copy(self) -> None:
         backend = JsonPartialProtocolBackend()
@@ -139,14 +133,7 @@ class _HttpOnlyJsonBackend(JsonPartialProtocolBackend):
 
 
 class TestJsonSubclassStreamEvents:
-    """A JSON subclass keeps its own SSE shape, and HTTP overrides leave SSE alone."""
-
-    def test_overridden_sse_event_wins_over_the_metadata_path(self) -> None:
-        backend = SseEventJsonCodec()
-        envelope = _sample_envelope()
-        frame = backend.sse_stream_event(envelope, StreamMeta(server_time=1, seq=2))
-        assert frame == backend.sse_event(envelope)
-        assert backend.serialize_envelope(envelope) != frame.encode()
+    """Topic frames follow `stream_data`, whatever else a JSON subclass overrides."""
 
     def test_http_only_override_keeps_metadata_on_the_stream(self) -> None:
         backend = _HttpOnlyJsonBackend()
@@ -203,24 +190,11 @@ class _TurboProtocolBackend(PartialProtocolBackend):
     def serialize_envelope(self, envelope: Envelope) -> bytes:
         return str(len(envelope.ops)).encode()
 
-    def sse_event(self, envelope: Envelope) -> str:
-        return f"event: turbo\ndata: {len(envelope.ops)}\n\n"
+    def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
+        return f"{len(envelope.ops)}\r\n{meta.seq}"
 
     def deserialize_envelope(self, body: bytes) -> Envelope:
         return Envelope(version=body.decode())
-
-
-class _OpaqueProtocolBackend(_TurboProtocolBackend):
-    def serialize_envelope(self, envelope: Envelope) -> bytes:
-        return b"turbo-stream"
-
-
-class _CustomSseProtocolBackend(_TurboProtocolBackend):
-    def serialize_envelope(self, envelope: Envelope) -> bytes:
-        return b'{"version":"custom"}'
-
-    def sse_event(self, envelope: Envelope) -> str:
-        return 'event: custom\ndata: {"wrapped":true}\n\n'
 
 
 class TestProtocolContract:
@@ -237,7 +211,6 @@ class TestProtocolContract:
         backend = _TurboProtocolBackend()
         assert backend.content_type == "text/vnd.turbo-stream.html"
         assert backend.serialize_envelope(_sample_envelope()) == b"2"
-        assert backend.sse_event(_sample_envelope()).startswith("event: turbo\n")
 
     def test_replacement_backend_inherits_options(self) -> None:
         backend = _TurboProtocolBackend({"OPTIONS": {"VERSION": "7"}})
@@ -247,23 +220,25 @@ class TestProtocolContract:
         backend = _TurboProtocolBackend()
         assert backend.deserialize_envelope(b"v9").version == "v9"
 
-    def test_custom_sse_framing_is_not_replaced_by_http_json(self) -> None:
-        backend = _CustomSseProtocolBackend()
-        assert backend.sse_stream_event(
-            _sample_envelope(), StreamMeta(server_time=1)
-        ) == backend.sse_event(_sample_envelope())
-
-    def test_non_object_json_backend_keeps_its_legacy_stream_event(self) -> None:
+    def test_text_stream_data_frames_one_data_line_per_line(self) -> None:
         backend = _TurboProtocolBackend()
-        assert backend.sse_stream_event(
-            _sample_envelope(), StreamMeta(server_time=1)
-        ) == backend.sse_event(_sample_envelope())
+        frame = backend.sse_stream_event(
+            _sample_envelope(), StreamMeta(server_time=1, seq=4)
+        )
+        assert frame == "event: next-patches\ndata: 2\ndata: 4\n\n"
 
-    def test_unparsable_backend_keeps_its_legacy_stream_event(self) -> None:
-        backend = _OpaqueProtocolBackend()
-        assert backend.sse_stream_event(
-            _sample_envelope(), StreamMeta(server_time=1)
-        ) == backend.sse_event(_sample_envelope())
+    def test_a_backend_without_stream_data_is_abstract(self) -> None:
+        class _NoStream(PartialProtocolBackend):
+            content_type = "text/plain"
+
+            def serialize_envelope(self, envelope: Envelope) -> bytes:
+                return b""
+
+            def deserialize_envelope(self, body: bytes) -> Envelope:
+                return Envelope(version=body.decode())
+
+        with pytest.raises(TypeError, match="stream_data"):
+            _NoStream()
 
     def test_a_backend_without_a_reader_is_abstract(self) -> None:
         class _WriteOnly(PartialProtocolBackend):
@@ -272,7 +247,7 @@ class TestProtocolContract:
             def serialize_envelope(self, envelope: Envelope) -> bytes:
                 return b""
 
-            def sse_event(self, envelope: Envelope) -> str:
+            def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
                 return ""
 
         with pytest.raises(TypeError, match="deserialize_envelope"):
@@ -283,7 +258,7 @@ _STREAM_META = StreamMeta(server_time=1700, topic="room:7", seq=3, epoch="e1")
 
 
 class TestStreamData:
-    """Only a JSON backend with stock SSE hooks hands the WebSocket an object."""
+    """The stream data is the frame both transports carry, an object or text."""
 
     def test_json_backend_returns_the_object_its_sse_frame_encodes(self) -> None:
         backend = JsonPartialProtocolBackend()
@@ -296,12 +271,16 @@ class TestStreamData:
 
     def test_http_only_override_still_returns_the_object(self) -> None:
         data = _HttpOnlyJsonBackend().stream_data(_sample_envelope(), _STREAM_META)
-        assert data is not None
+        assert isinstance(data, dict)
         assert data["topic"] == "room:7"
 
     @pytest.mark.parametrize("case", TEXT_FRAME_CASES, ids=lambda case: case.id)
-    def test_text_frame_codec_returns_none(self, case: TextFrameCase) -> None:
-        assert case.backend.stream_data(_sample_envelope(), _STREAM_META) is None
+    def test_text_frame_codec_frames_its_text(self, case: TextFrameCase) -> None:
+        envelope = _sample_envelope()
+        data = case.backend.stream_data(envelope, _STREAM_META)
+        frame = case.backend.sse_stream_event(envelope, _STREAM_META)
+        assert isinstance(data, str)
+        assert sse_data_text(frame) == data
 
     def test_custom_mime_type_keeps_the_merged_sse_frame(self) -> None:
         envelope = _sample_envelope()
@@ -310,6 +289,9 @@ class TestStreamData:
         assert frame == stock.sse_stream_event(envelope, _STREAM_META)
         assert json.loads(sse_data_text(frame)) == stock.stream_data(
             envelope, _STREAM_META
+        )
+        assert MimeJsonCodec().stream_data(envelope, _STREAM_META) == sse_data_text(
+            frame
         )
 
 

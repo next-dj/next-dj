@@ -3,13 +3,12 @@ import math
 import os
 import threading
 from collections.abc import Iterator
-from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import DEFAULT, Mock, patch
+from unittest.mock import DEFAULT, patch
 
 import pytest
-from django.contrib.auth import HASH_SESSION_KEY, SESSION_KEY, get_user_model, login
+from django.contrib.auth import HASH_SESSION_KEY, SESSION_KEY, get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.backends.cache import SessionStore as CacheStore
 from django.contrib.sessions.backends.cached_db import SessionStore as CachedDbStore
@@ -17,13 +16,15 @@ from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.backends.file import SessionStore as FileStore
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
-from django.test import RequestFactory, override_settings
+from django.test import override_settings
 from django.utils import timezone
-from django.utils.module_loading import import_string
 
-from next.realtime import access as access_module, binding as binding_module
-from next.realtime.access import Access, AccessCheck, heartbeat_seconds, run_detached
+from next.realtime import binding as binding_module
+from next.realtime.access import Access, AccessCheck
 from next.realtime.binding import session_user, stored_session
+from next.realtime.limits import heartbeat_seconds
+from next.realtime.pool import run_detached
+from tests.support.realtime import ServerClock, signed_in_session
 
 
 _CACHE = "django.contrib.sessions.backends.cache"
@@ -31,23 +32,6 @@ _CACHED_DB = "django.contrib.sessions.backends.cached_db"
 _FILE = "django.contrib.sessions.backends.file"
 _SIGNED = "django.contrib.sessions.backends.signed_cookies"
 _ENGINES = ("django.contrib.sessions.backends.db", _CACHE, _CACHED_DB, _FILE, _SIGNED)
-
-
-@dataclass
-class FakeClock:
-    now: float = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
-def _logged_in(username: str = "reader"):
-    user = get_user_model().objects.create_user(username=username, password="secret")
-    request = RequestFactory().get("/")
-    request.session = SessionStore()
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    request.session.save()
-    return user, request.session
 
 
 @pytest.mark.parametrize(
@@ -61,20 +45,15 @@ def test_heartbeat_seconds_invalid_value_falls_back_to_default(
         assert heartbeat_seconds() == expected
 
 
-def test_heartbeat_seconds_non_mapping_setting_falls_back_to_default(
-    monkeypatch: pytest.MonkeyPatch,
+def test_heartbeat_seconds_non_mapping_setting_falls_back_to_default() -> None:
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
+        assert heartbeat_seconds() == 25.0
+
+
+def test_access_check_throttles_the_authorizer_to_one_call_per_interval(
+    clock: ServerClock,
 ) -> None:
-    monkeypatch.setattr(
-        access_module,
-        "next_framework_settings",
-        Mock(spec=access_module.next_framework_settings, REALTIME="invalid"),
-    )
-    assert heartbeat_seconds() == 25.0
-
-
-def test_access_check_throttles_the_authorizer_to_one_call_per_interval() -> None:
     calls: list[str] = []
-    clock = FakeClock()
 
     def authorizer(_user: object, topic: str) -> bool:
         calls.append(topic)
@@ -97,7 +76,7 @@ def test_access_check_throttles_the_authorizer_to_one_call_per_interval() -> Non
     assert calls == ["a", "b", "a", "b"]
 
 
-def test_concurrent_async_rechecks_share_one_evaluation() -> None:
+def test_concurrent_async_rechecks_share_one_evaluation(clock: ServerClock) -> None:
     calls: list[str] = []
     entered = threading.Event()
     release = threading.Event()
@@ -114,7 +93,7 @@ def test_concurrent_async_rechecks_share_one_evaluation() -> None:
         session_key=None,
         user=AnonymousUser(),
         interval=10,
-        clock=FakeClock(),
+        clock=clock,
     )
 
     async def scenario() -> list[Access]:
@@ -141,9 +120,8 @@ def test_access_check_non_true_authorizer_answer_denies(answer: object) -> None:
     assert check.check() is Access.TOPIC_DENIED
 
 
-def test_access_check_denied_topic_is_not_asked_again() -> None:
+def test_access_check_denied_topic_is_not_asked_again(clock: ServerClock) -> None:
     calls: list[str] = []
-    clock = FakeClock()
 
     def authorizer(_user: object, topic: str) -> bool:
         calls.append(topic)
@@ -164,8 +142,10 @@ def test_access_check_denied_topic_is_not_asked_again() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_access_check_rechecks_at_the_deadline_and_follows_a_renewed_session() -> None:
-    user, session = _logged_in()
+def test_access_check_rechecks_at_the_deadline_and_follows_a_renewed_session(
+    clock: ServerClock,
+) -> None:
+    user, session = signed_in_session()
     rows = Session.objects.filter(session_key=session.session_key)
     rows.update(expire_date=timezone.now() + timedelta(seconds=10))
     calls: list[str] = []
@@ -174,7 +154,6 @@ def test_access_check_rechecks_at_the_deadline_and_follows_a_renewed_session() -
         calls.append(topic)
         return True
 
-    clock = FakeClock()
     check = AccessCheck(
         ("a",),
         authorizer=authorizer,
@@ -200,10 +179,11 @@ def test_access_check_rechecks_at_the_deadline_and_follows_a_renewed_session() -
 
 
 @pytest.mark.django_db(transaction=True)
-def test_access_check_revokes_an_anonymous_session_expired_after_open() -> None:
+def test_access_check_revokes_an_anonymous_session_expired_after_open(
+    clock: ServerClock,
+) -> None:
     session = SessionStore()
     session.create()
-    clock = FakeClock()
     check = AccessCheck(
         ("a",),
         authorizer=None,
@@ -258,7 +238,7 @@ def test_async_access_check_runs_off_the_event_loop_thread() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_access_check_passes_the_reloaded_user_to_the_authorizer() -> None:
-    user, session = _logged_in()
+    user, session = signed_in_session()
     seen: list[object] = []
 
     def authorizer(current: object, _topic: str) -> bool:
@@ -281,7 +261,7 @@ def test_access_check_passes_the_reloaded_user_to_the_authorizer() -> None:
     "revocation", ["flush", "rotate", "password", "inactive", "swap"]
 )
 def test_access_check_invalidated_session_or_user_is_revoked(revocation: str) -> None:
-    user, session = _logged_in()
+    user, session = signed_in_session()
     key = session.session_key
     if revocation == "flush":
         session.flush()
@@ -325,14 +305,15 @@ def test_run_detached_returns_the_result_from_a_pool_thread() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_access_check_unbinds_a_stale_anonymous_cookie_at_open() -> None:
+def test_access_check_unbinds_a_stale_anonymous_cookie_at_open(
+    clock: ServerClock,
+) -> None:
     seen: list[object] = []
 
     def authorizer(user: object, _topic: str) -> bool:
         seen.append(user)
         return True
 
-    clock = FakeClock()
     check = AccessCheck(
         ("a",),
         authorizer=authorizer,
@@ -351,10 +332,11 @@ def test_access_check_unbinds_a_stale_anonymous_cookie_at_open() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_access_check_revokes_an_anonymous_session_lost_after_open() -> None:
+def test_access_check_revokes_an_anonymous_session_lost_after_open(
+    clock: ServerClock,
+) -> None:
     session = SessionStore()
     session.create()
-    clock = FakeClock()
     check = AccessCheck(
         ("a",),
         authorizer=None,
@@ -380,7 +362,7 @@ def _stored_rows() -> dict[str, str]:
 
 @pytest.mark.django_db(transaction=True)
 def test_session_user_loads_the_logged_in_user() -> None:
-    user, session = _logged_in()
+    user, session = signed_in_session()
     loaded = session_user(SessionStore(session_key=session.session_key))
     assert getattr(loaded, "pk", None) == user.pk
     assert getattr(loaded, "is_authenticated", False) is True
@@ -397,7 +379,7 @@ def test_session_user_of_a_session_without_login_is_anonymous() -> None:
 @pytest.mark.django_db(transaction=True)
 def test_session_user_matching_a_fallback_secret_leaves_the_store_untouched() -> None:
     with override_settings(SECRET_KEY=_OLD_SECRET, SECRET_KEY_FALLBACKS=[]):
-        user, session = _logged_in()
+        user, session = signed_in_session()
     key = session.session_key
     rows = _stored_rows()
     store = SessionStore(session_key=key)
@@ -415,7 +397,7 @@ def test_session_user_matching_a_fallback_secret_leaves_the_store_untouched() ->
 
 @pytest.mark.django_db(transaction=True)
 def test_session_user_with_a_stale_hash_is_anonymous_without_a_flush() -> None:
-    user, session = _logged_in()
+    user, session = signed_in_session()
     user.set_password("changed")
     user.save(update_fields=["password"])
     key = session.session_key
@@ -435,7 +417,7 @@ def test_access_check_under_a_fallback_secret_stays_granted_and_keeps_the_sessio
     mode: str,
 ) -> None:
     with override_settings(SECRET_KEY=_OLD_SECRET, SECRET_KEY_FALLBACKS=[]):
-        user, session = _logged_in()
+        user, session = signed_in_session()
     rows = _stored_rows()
     seen: list[object] = []
 
@@ -624,20 +606,12 @@ def session_engine(
         yield request.param
 
 
-def _engine_login(engine: str):
-    user = get_user_model().objects.create_user(username="reader", password="secret")
-    request = RequestFactory().get("/")
-    request.session = import_string(f"{engine}.SessionStore")()
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    request.session.save()
-    return user, request.session.session_key
-
-
 @pytest.mark.django_db(transaction=True)
 def test_stored_session_loads_the_logged_in_user_of_every_engine(
     session_engine: str,
 ) -> None:
-    user, key = _engine_login(session_engine)
+    user, session = signed_in_session()
+    key = session.session_key
     live = stored_session(key)
     assert live is not None
     assert getattr(live[0], "pk", None) == user.pk
@@ -646,16 +620,16 @@ def test_stored_session_loads_the_logged_in_user_of_every_engine(
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("mode", ["sync", "async"])
 def test_access_check_keeps_a_logged_in_session_of_every_engine_granted(
-    session_engine: str, mode: str
+    session_engine: str, mode: str, clock: ServerClock
 ) -> None:
-    user, key = _engine_login(session_engine)
+    user, session = signed_in_session()
+    key = session.session_key
     seen: list[object] = []
 
     def authorizer(current: object, _topic: str) -> bool:
         seen.append(getattr(current, "pk", None))
         return True
 
-    clock = FakeClock()
     check = AccessCheck(
         ("a",),
         authorizer=authorizer,
@@ -674,10 +648,10 @@ def test_access_check_keeps_a_logged_in_session_of_every_engine_granted(
 
 @pytest.mark.django_db(transaction=True)
 def test_access_check_revokes_a_changed_password_under_every_engine(
-    session_engine: str,
+    session_engine: str, clock: ServerClock
 ) -> None:
-    user, key = _engine_login(session_engine)
-    clock = FakeClock()
+    user, session = signed_in_session()
+    key = session.session_key
     check = AccessCheck(
         ("a",), authorizer=None, session_key=key, user=user, interval=1, clock=clock
     )
@@ -691,12 +665,14 @@ def test_access_check_revokes_a_changed_password_under_every_engine(
 @pytest.mark.django_db(transaction=True)
 @override_settings(SESSION_ENGINE=_SIGNED)
 def test_stored_session_of_a_tampered_signed_cookie_is_gone() -> None:
-    _user, key = _engine_login(_SIGNED)
+    _user, session = signed_in_session()
+    key = session.session_key
     assert stored_session(f"{key}x") is None
 
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(SESSION_ENGINE=_SIGNED, SESSION_COOKIE_AGE=-1)
 def test_stored_session_of_an_expired_signed_cookie_is_gone() -> None:
-    _user, key = _engine_login(_SIGNED)
+    _user, session = signed_in_session()
+    key = session.session_key
     assert stored_session(key) is None

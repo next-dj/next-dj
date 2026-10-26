@@ -1,3 +1,4 @@
+import importlib.util
 import math
 from types import ModuleType
 
@@ -13,7 +14,6 @@ from next.realtime import (
     SignedCookieBinding,
     TicketBinding,
     TicketIntrospectionView,
-    checks,
 )
 from next.realtime.checks import check_realtime_settings, check_ticket_introspection
 from next.realtime.replay import MAX_SIZE, MAX_TTL
@@ -111,7 +111,7 @@ def test_check_reports_invalid_broker_and_options_shapes() -> None:
 
 
 def test_check_reports_missing_redis_extra(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(checks.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
     config = {"REALTIME": {"BROKER": {"BACKEND": "next.realtime.RedisBroker"}}}
     with override_settings(NEXT_FRAMEWORK=config):
         assert {message.id for message in check_realtime_settings()} == {"next.E179"}
@@ -123,11 +123,7 @@ def test_check_reports_non_backend_path() -> None:
         assert {message.id for message in check_realtime_settings()} == {"next.E184"}
 
 
-def test_check_reports_unimportable_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing_backend(_path: str):
-        raise ImportError
-
-    monkeypatch.setattr(checks, "import_class_cached", missing_backend)
+def test_check_reports_unimportable_backend() -> None:
     config = {"REALTIME": {"BROKER": {"BACKEND": "not.installed.Backend"}}}
     with override_settings(NEXT_FRAMEWORK=config):
         messages = check_realtime_settings()

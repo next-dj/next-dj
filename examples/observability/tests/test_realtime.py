@@ -160,17 +160,17 @@ class TestWebSocket:
         assert (await communicator.subscribe(ticket))["type"] == "hello"
         return communicator
 
-    def test_a_wave_is_counted_and_republished_on_the_pulse_family(self) -> None:
+    def test_a_nudge_is_counted_and_republished_on_the_pulse_family(self) -> None:
         async def scenario() -> None:
             communicator = await self.connected()
             assert sample("next_realtime_streams_open", transport="ws") == 1
-            assert await communicator.send_up(PULSE_TOPIC, "wave") is None
+            assert await communicator.send_up(PULSE_TOPIC, "nudge") is None
             await communicator.disconnect()
 
         with capture_published(PULSE_TOPIC) as published:
             self.run(scenario)
         assert len(published) == 1
-        assert sample("next_realtime_upstream_events_total", name="wave") == 1
+        assert sample("next_realtime_upstream_events_total", name="nudge") == 1
         assert sample("next_realtime_messages_published_total", family="obs") == 1
         assert sample("next_realtime_streams_open", transport="ws") == 0
         assert (
@@ -207,13 +207,13 @@ class TestWebSocket:
     ) -> None:
         async def scenario() -> None:
             communicator = await self.connected()
-            error = await communicator.send_up("obs:elsewhere", "wave")
+            error = await communicator.send_up("obs:elsewhere", "nudge")
             assert error is UpstreamError.TOPIC
             await communicator.disconnect()
 
         self.run(scenario)
         assert sample("next_realtime_upstream_rejected_total", reason="topic") == 1
-        assert sample("next_realtime_upstream_events_total", name="wave") is None
+        assert sample("next_realtime_upstream_events_total", name="nudge") is None
         reasons = {
             child.labels["reason"]
             for metric in UPSTREAM_REJECTED.collect()
@@ -291,8 +291,8 @@ class TestRealtimePage:
         response = next_client.get("/realtime/")
         html = response.content.decode()
         assert response.status_code == 200
-        assert f'data-next-sse="{STREAM_URL}"' in html
-        assert f'data-obs-wave="{PULSE_TOPIC}"' in html
+        assert f'data-next-stream="{STREAM_URL}"' in html
+        assert f'data-obs-nudge="{PULSE_TOPIC}"' in html
         for reason in UnsubscribeReason:
             assert f"<span>{reason.value}</span>" in html
 
@@ -330,7 +330,7 @@ class TestRealtimeContext:
         assert totals["mean_seconds"] == 4.5
         assert totals["reasons"][0] == ("error", 2)
 
-    def test_the_wave_topic_is_the_pulse(self) -> None:
+    def test_the_nudge_topic_is_the_pulse(self) -> None:
         assert pulse_topic() == PULSE_TOPIC
 
 

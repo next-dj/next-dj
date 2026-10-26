@@ -9,8 +9,7 @@ Module summary
 The ``next`` application ships five management commands, and ``manage.py help`` lists them under ``[next]``.
 ``routes`` prints the page routes, ``permissions`` prints the access rule of every endpoint, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
 ``realtime`` publishes to realtime topics and reads what the broker holds, and ``runserver`` serves the project on uvicorn with the realtime WebSocket once uvicorn is installed.
-The first three run the system checks first like any Django command, so ``--skip-checks`` prints the table of a project whose checks fail.
-``realtime`` runs none, as ``shell`` does, and ``runserver`` runs them as Django's own does.
+Every command runs the system checks first like any Django command, so ``--skip-checks`` prints the table of a project whose checks fail.
 
 routes
 ------

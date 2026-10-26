@@ -3,7 +3,6 @@
 import { defaultVisibility } from "./adapters";
 import {
   ATTR_STREAM,
-  ATTR_SSE,
   ATTR_ZONE,
   ECHO_LIMIT,
   EPOCH,
@@ -27,7 +26,7 @@ const MAX_BOUND = 64;
 // a connection registered while paused whose socket resume opens.
 /* v8 ignore next */
 const NOOP: TransportControl = { close: () => undefined };
-const STREAM_SELECTOR = `[${ATTR_STREAM}], [${ATTR_SSE}]`;
+const STREAM_SELECTOR = `[${ATTR_STREAM}]`;
 
 /** A patches frame body, raw text for the parse hook or an already decoded object. */
 export type PatchesData = string | Record<string, unknown>;
@@ -558,7 +557,7 @@ export function createStream(deps: StreamDeps): Stream {
   }
 
   function streamUrl(el: Element): string | null {
-    return el.getAttribute(ATTR_STREAM) ?? el.getAttribute(ATTR_SSE);
+    return el.getAttribute(ATTR_STREAM);
   }
 
   function scan(root: ParentNode): void {

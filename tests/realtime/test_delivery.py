@@ -11,13 +11,7 @@ from next.partial.headers import REQUEST_ID
 from next.realtime import MemoryBroker, TopicPayloadError, apublish, delivery, publish
 from next.realtime.roster import announce
 from next.realtime.signals import message_published
-from next.testing import SignalRecorder, memory_broker as install_memory_broker
-
-
-@pytest.fixture()
-def memory_broker() -> Iterator[MemoryBroker]:
-    with install_memory_broker() as backend:
-        yield backend
+from next.testing import SignalRecorder
 
 
 def _envelope(*patches: Patch, **metadata) -> Envelope:
@@ -263,7 +257,7 @@ def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 @pytest.mark.usefixtures("failing_receiver")
-def test_a_failing_receiver_leaves_publish_delivered_and_logged(
+def test_failing_receiver_leaves_publish_delivered_and_logged(
     memory_broker: MemoryBroker, caplog: pytest.LogCaptureFixture
 ) -> None:
     with (
@@ -278,7 +272,7 @@ def test_a_failing_receiver_leaves_publish_delivered_and_logged(
 
 
 @pytest.mark.usefixtures("failing_receiver")
-def test_a_failing_receiver_leaves_apublish_returning_and_logged(
+def test_failing_receiver_leaves_apublish_returning_and_logged(
     memory_broker: MemoryBroker, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level("ERROR", "next.realtime.signals"):
@@ -289,14 +283,14 @@ def test_a_failing_receiver_leaves_apublish_returning_and_logged(
     assert "topic room:2" in logged
 
 
-def test_a_numbered_message_is_not_ephemeral(memory_broker: MemoryBroker) -> None:
+def test_numbered_message_is_not_ephemeral(memory_broker: MemoryBroker) -> None:
     with SignalRecorder(message_published) as recorder:
         publish("room:3", Patches(None).event("ping"), on_commit=False)
         asyncio.run(apublish("room:3", Patches(None).event("ping")))
     assert [event.kwargs["ephemeral"] for event in recorder] == [False, False]
 
 
-def test_a_presence_snapshot_is_ephemeral(memory_broker: MemoryBroker) -> None:
+def test_presence_snapshot_is_ephemeral(memory_broker: MemoryBroker) -> None:
     with SignalRecorder(message_published) as recorder:
         announce(memory_broker, "room:4")
     (event,) = recorder

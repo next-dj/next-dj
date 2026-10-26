@@ -11,7 +11,7 @@ def can_watch(_user: object, topic: str) -> bool:
     return topic == PULSE_TOPIC
 
 
-@on(PULSE_TOPIC, "wave")
-async def wave(upstream: Upstream) -> None:
-    """Ask every open realtime page to re-read its totals after a wave."""
+@on(PULSE_TOPIC, "nudge")
+async def nudge(upstream: Upstream) -> None:
+    """Ask every open realtime page to re-read its totals after a nudge."""
     await apublish(upstream.topic, Patches(None).refresh(zone=REALTIME_TOTALS_ZONE))

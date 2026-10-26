@@ -7,15 +7,25 @@ from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import instantiate_backend, resolve_backend_class
-from next.conf import next_framework_settings
-from next.conf.defaults import DEFAULTS
+from next.conf.merge import FROZEN_DEFAULTS
+from next.conf.scopes import scope_value
 
 from .backends import BrokerBackend
 from .signals import broker_backend_loaded
 
 
-_SETTING = "REALTIME"
-_DEFAULT_BACKEND = str(DEFAULTS[_SETTING]["BROKER"]["BACKEND"])
+_DEFAULT_BACKEND = str(FROZEN_DEFAULTS["REALTIME"]["BROKER"]["BACKEND"])
+
+
+def broker_class(config: Mapping[str, object]) -> type[BrokerBackend]:
+    """Resolve the concrete class a broker entry selects without building it."""
+    try:
+        return resolve_backend_class(
+            config, base=BrokerBackend, default=_DEFAULT_BACKEND
+        )
+    except ImportError as exc:
+        msg = f"Could not import the configured realtime broker: {exc}"
+        raise ImproperlyConfigured(msg) from exc
 
 
 class BrokerManager:
@@ -65,19 +75,11 @@ class BrokerManager:
 
     def _resolve(self) -> tuple[type[BrokerBackend], Mapping[str, object]]:
         """Resolve the class the nested broker entry selects."""
-        realtime = getattr(next_framework_settings, _SETTING, {})
-        config = realtime.get("BROKER", {}) if isinstance(realtime, Mapping) else {}
+        config = scope_value("REALTIME", "BROKER")
         if not isinstance(config, Mapping):
             msg = "NEXT_FRAMEWORK['REALTIME']['BROKER'] must be a mapping."
             raise ImproperlyConfigured(msg)
-        try:
-            klass = resolve_backend_class(
-                config, base=BrokerBackend, default=_DEFAULT_BACKEND
-            )
-        except ImportError as exc:
-            msg = f"Could not import the configured realtime broker: {exc}"
-            raise ImproperlyConfigured(msg) from exc
-        return klass, config
+        return broker_class(config), config
 
     def reset(self) -> None:
         """Drop the cached backend after settings change and close its resources."""
@@ -102,4 +104,4 @@ def forget_realtime_broker(**kwargs: object) -> None:
     broker_manager.reset()
 
 
-__all__ = ["BrokerManager", "broker_manager", "forget_realtime_broker"]
+__all__ = ["BrokerManager", "broker_class", "broker_manager", "forget_realtime_broker"]

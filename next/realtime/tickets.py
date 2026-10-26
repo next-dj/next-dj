@@ -6,7 +6,7 @@ import json
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
 from django.conf import settings
 from django.core import signing
@@ -14,11 +14,13 @@ from django.urls import get_script_prefix
 from django.utils.crypto import constant_time_compare, salted_hmac
 from django.utils.module_loading import import_string
 
-from next.conf import next_framework_settings
+from next.conf.merge import FROZEN_DEFAULTS
+from next.conf.scopes import scope_value
+from next.utils import int_between
 
 from .binding import ticket_binding
 from .errors import InvalidTicketError
-from .messages import validate_topic
+from .messages import MAX_TOPICS, validate_topic
 
 
 if TYPE_CHECKING:
@@ -35,11 +37,11 @@ if TYPE_CHECKING:
 
 
 _SALT = "next.realtime.websocket.ticket.v1"
-_DEFAULT_AGE = 60
-_MAX_TOPICS = 64
+_DEFAULT_AGE: int = FROZEN_DEFAULTS["REALTIME"]["TICKET_MAX_AGE"]
+_DEFAULT_PATH: str = FROZEN_DEFAULTS["REALTIME"]["WS_PATH"]
 _MAX_TOPIC_LENGTH = 200
 MAX_REFERENCE_LENGTH = 512
-_MAX_TICKET_AGE = 600
+MAX_TICKET_AGE = 600
 _SIGNATURE_OVERHEAD = 128
 
 
@@ -50,7 +52,7 @@ def _max_ticket_length() -> int:
     """
     payload = {
         "session": "0" * 64,
-        "topics": ["t" * _MAX_TOPIC_LENGTH] * _MAX_TOPICS,
+        "topics": ["t" * _MAX_TOPIC_LENGTH] * MAX_TOPICS,
         "transform": "\U0010ffff" * MAX_REFERENCE_LENGTH,
         "authorizer": "\U0010ffff" * MAX_REFERENCE_LENGTH,
         "presence": "\U0010ffff" * MAX_REFERENCE_LENGTH,
@@ -128,8 +130,8 @@ def issue_ticket(
 
 def _require_grant(topics: tuple[str, ...], references: tuple[str | None, ...]) -> None:
     """Refuse a grant the verifier would reject."""
-    if not topics or len(topics) > _MAX_TOPICS or len(set(topics)) != len(topics):
-        msg = f"A WebSocket ticket grants 1 to {_MAX_TOPICS} unique topics."
+    if not topics or len(topics) > MAX_TOPICS or len(set(topics)) != len(topics):
+        msg = f"A WebSocket ticket grants 1 to {MAX_TOPICS} unique topics."
         raise ValueError(msg)
     for topic in topics:
         validate_topic(topic)
@@ -220,7 +222,7 @@ def _ticket_claims(payload: Mapping[str, Any]) -> TicketClaims:
     if (
         not isinstance(raw_topics, list)
         or not raw_topics
-        or len(raw_topics) > _MAX_TOPICS
+        or len(raw_topics) > MAX_TOPICS
     ):
         msg = "The WebSocket ticket has an invalid topic grant."
         raise InvalidTicketError(msg)
@@ -259,39 +261,31 @@ def _ticket_claims(payload: Mapping[str, Any]) -> TicketClaims:
     return TicketClaims(topics, transform_ref, authorizer_ref, presence)
 
 
-def ticket_max_age() -> int:
-    """Return the configured ticket lifetime after validating its safe shape."""
-    realtime = getattr(next_framework_settings, "REALTIME", {})
-    value = (
-        realtime.get("TICKET_MAX_AGE", _DEFAULT_AGE)
-        if isinstance(realtime, Mapping)
-        else _DEFAULT_AGE
+def valid_ticket_age(value: object) -> TypeGuard[int]:
+    """Whether a `TICKET_MAX_AGE` value is a whole number of seconds up to the cap."""
+    return int_between(value, 1, MAX_TICKET_AGE)
+
+
+def valid_ws_path(value: object) -> TypeGuard[str]:
+    """Whether a `WS_PATH` value is an absolute path without a query or a fragment."""
+    return (
+        isinstance(value, str)
+        and value.startswith("/")
+        and "?" not in value
+        and "#" not in value
     )
-    if (
-        not isinstance(value, int)
-        or isinstance(value, bool)
-        or not 1 <= value <= _MAX_TICKET_AGE
-    ):
-        return _DEFAULT_AGE
-    return value
+
+
+def ticket_max_age() -> int:
+    """Return the configured ticket lifetime, the default for a bad value."""
+    value = scope_value("REALTIME", "TICKET_MAX_AGE")
+    return value if valid_ticket_age(value) else _DEFAULT_AGE
 
 
 def websocket_path() -> str:
-    """Return the configured same-origin WebSocket route below the script prefix."""
-    realtime = getattr(next_framework_settings, "REALTIME", {})
-    path = (
-        realtime.get("WS_PATH", "/_next/ws/")
-        if isinstance(realtime, Mapping)
-        else "/_next/ws/"
-    )
-    if (
-        not isinstance(path, str)
-        or not path.startswith("/")
-        or "?" in path
-        or "#" in path
-    ):
-        return "/_next/ws/"
-    return path
+    """Return the WebSocket route below the script prefix, the default for a bad one."""
+    path = scope_value("REALTIME", "WS_PATH")
+    return path if valid_ws_path(path) else _DEFAULT_PATH
 
 
 def _session_digest(subject: str, secret: str | bytes) -> str:
@@ -311,6 +305,7 @@ def _bound(digest: object, subject: str) -> bool:
 
 __all__ = [
     "MAX_REFERENCE_LENGTH",
+    "MAX_TICKET_AGE",
     "TicketClaims",
     "TicketGrant",
     "import_callable",
@@ -318,6 +313,8 @@ __all__ = [
     "resolve_claims",
     "resolve_identify",
     "ticket_max_age",
+    "valid_ticket_age",
+    "valid_ws_path",
     "verify_ticket",
     "websocket_path",
 ]

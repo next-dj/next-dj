@@ -13,8 +13,8 @@ from next.realtime import Upstream, checks, handlers
 from next.realtime.checks import check_realtime_settings, check_upstream_handlers
 from next.realtime.handlers import (
     MAX_PATTERN_LENGTH,
-    Binding,
     HandlerRegistry,
+    Route,
     compile_pattern,
     dispatch,
     handler_modules,
@@ -139,19 +139,19 @@ class TestBinding:
     """A binding matches its own name and topic."""
 
     def test_an_invalid_name_leaves_no_matcher(self) -> None:
-        bound = Binding.bind("room:{code}", "bad name", _first)
+        bound = Route.bind("room:{code}", "bad name", _first)
         assert bound.valid is False
         assert bound.placeholders == 0
         assert bound.match("room:a", "bad name") is None
 
     def test_a_literal_pattern_matches_without_params(self) -> None:
-        bound = Binding.bind("lobby", "typing", _first)
+        bound = Route.bind("lobby", "typing", _first)
         assert bound.match("lobby", "typing") == {}
         assert bound.match("lobby", "cursor") is None
         assert bound.match("hall", "typing") is None
 
     def test_params_are_read_only(self) -> None:
-        params = Binding.bind("room:{code}", "typing", _first).match("room:a", "typing")
+        params = Route.bind("room:{code}", "typing", _first).match("room:a", "typing")
         assert params == {"code": "a"}
         with pytest.raises(TypeError):
             cast("dict[str, str]", params)["code"] = "b"
@@ -162,31 +162,31 @@ class TestRegistry:
 
     def test_add_keeps_registration_order_and_bumps_the_version(self) -> None:
         held = HandlerRegistry()
-        first = held.add(Binding.bind("a:{x}", "typing", _first))
-        second = held.add(Binding.bind("b:{x}", "typing", _second))
+        first = held.add(Route.bind("a:{x}", "typing", _first))
+        second = held.add(Route.bind("b:{x}", "typing", _second))
         assert list(held) == [first, second]
         assert len(held) == 2
         assert held.version == 2
 
     def test_the_same_function_again_replaces_its_pair(self) -> None:
         held = HandlerRegistry()
-        held.add(Binding.bind("a", "typing", _first))
-        again = held.add(Binding.bind("a", "typing", _first))
+        held.add(Route.bind("a", "typing", _first))
+        again = held.add(Route.bind("a", "typing", _first))
         assert list(held) == [again]
         assert held.duplicates() == ()
 
     def test_a_redefined_function_replaces_its_pair(self) -> None:
         held = HandlerRegistry()
-        held.add(Binding.bind("a", "typing", _first))
+        held.add(Route.bind("a", "typing", _first))
         reloaded = types.FunctionType(_first.__code__, globals(), "_first")
-        redefined = held.add(Binding.bind("a", "typing", reloaded))
+        redefined = held.add(Route.bind("a", "typing", reloaded))
         assert list(held) == [redefined]
         assert held.duplicates() == ()
 
     def test_another_function_is_kept_aside_as_a_duplicate(self) -> None:
         held = HandlerRegistry()
-        first = held.add(Binding.bind("a", "typing", _first))
-        other = Binding.bind("a", "typing", _second)
+        first = held.add(Route.bind("a", "typing", _first))
+        other = Route.bind("a", "typing", _second)
         assert held.add(other) is first
         assert list(held) == [first]
         assert held.duplicates() == ((first, other),)
@@ -194,15 +194,15 @@ class TestRegistry:
 
     def test_a_handler_without_code_is_a_duplicate(self) -> None:
         held = HandlerRegistry()
-        first = held.add(Binding.bind("a", "typing", print))
-        assert held.add(Binding.bind("a", "typing", repr)) is first
+        first = held.add(Route.bind("a", "typing", print))
+        assert held.add(Route.bind("a", "typing", repr)) is first
         assert len(held.duplicates()) == 1
 
     def test_the_fewest_placeholders_win_then_the_first(self) -> None:
         held = HandlerRegistry()
-        wide = held.add(Binding.bind("room:{code}", "typing", _first))
-        held.add(Binding.bind("{kind}:{code}", "typing", _second))
-        exact = held.add(Binding.bind("room:lobby", "typing", _second))
+        wide = held.add(Route.bind("room:{code}", "typing", _first))
+        held.add(Route.bind("{kind}:{code}", "typing", _second))
+        exact = held.add(Route.bind("room:lobby", "typing", _second))
         assert held.resolve("room:lobby", "typing") == (exact, {})
         assert held.resolve("room:abc", "typing") == (wide, {"code": "abc"})
         assert held.resolve("room:abc", "cursor") is None
@@ -213,24 +213,24 @@ class TestRegistry:
             ("{kind}:lobby", "room:{code}"),
         ):
             held = HandlerRegistry()
-            first = held.add(Binding.bind(patterns[0], "typing", _first))
-            held.add(Binding.bind(patterns[1], "typing", _second))
+            first = held.add(Route.bind(patterns[0], "typing", _first))
+            held.add(Route.bind(patterns[1], "typing", _second))
             resolved = held.resolve("room:lobby", "typing")
             assert resolved is not None
             assert resolved[0] is first
 
     def test_fewer_placeholders_beat_an_earlier_binding_with_more(self) -> None:
         held = HandlerRegistry()
-        held.add(Binding.bind("{kind}:{code}", "typing", _first))
-        narrow = held.add(Binding.bind("room:{code}", "typing", _second))
+        held.add(Route.bind("{kind}:{code}", "typing", _first))
+        narrow = held.add(Route.bind("room:{code}", "typing", _second))
         resolved = held.resolve("room:abc", "typing")
         assert resolved is not None
         assert resolved[0] is narrow
 
     def test_reset_drops_everything(self) -> None:
         held = HandlerRegistry()
-        held.add(Binding.bind("a", "typing", _first))
-        held.add(Binding.bind("a", "typing", _second))
+        held.add(Route.bind("a", "typing", _first))
+        held.add(Route.bind("a", "typing", _second))
         held.reset()
         assert len(held) == 0
         assert held.duplicates() == ()

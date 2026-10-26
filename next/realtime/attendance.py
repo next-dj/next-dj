@@ -12,8 +12,8 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from typing import cast
 
-from .access import run_detached
 from .errors import BrokerConnectionError
+from .pool import run_detached
 from .roster import Member, PresenceBroker, presence_broker
 
 

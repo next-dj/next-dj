@@ -157,8 +157,8 @@ describe("createSse", () => {
     stream._reset();
   });
 
-  it("scan opens one stream per data-next-sse container and applies events", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+  it("scan opens one stream per data-next-stream container and applies events", () => {
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -191,17 +191,9 @@ describe("createSse", () => {
     ]);
   });
 
-  it("lets data-next-stream win on an element carrying both attributes", () => {
-    document.body.innerHTML =
-      '<div data-next-sse="/legacy/" data-next-stream="/stream/"></div>';
-    const { adapter, opened } = mockSource();
-    makeSse(adapter, manualVisibility()).scan(document);
-    expect(opened.map((source) => source.url)).toEqual(["/stream/"]);
-  });
-
   it("opens no stream for a container removed before its scan ran", () => {
     const root = document.createElement("div");
-    root.innerHTML = '<div data-next-sse="/stream/"></div>';
+    root.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     makeSse(adapter, manualVisibility()).scan(root);
     expect(opened).toEqual([]);
@@ -222,7 +214,7 @@ describe("createSse", () => {
   });
 
   it("applies each event on behalf of the page the stream subscribed from", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const pages: string[] = [];
     const sse = createSse({
@@ -241,7 +233,7 @@ describe("createSse", () => {
   });
 
   it("scan opens a stream only once per url", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -251,7 +243,7 @@ describe("createSse", () => {
   });
 
   it("drops an event whose request_id is the client's own echo", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -263,7 +255,7 @@ describe("createSse", () => {
   });
 
   it("tracks sequence before echo suppression and ignores duplicate frames", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -285,7 +277,7 @@ describe("createSse", () => {
 
   it("does not resync when the next contiguous topic sequence arrives", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -300,7 +292,7 @@ describe("createSse", () => {
 
   it("resyncs the page zones when the initial hello already has history", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -316,7 +308,7 @@ describe("createSse", () => {
 
   it("limits initial revalidation to zones owned by the stream page", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/" data-page="/"></div>' +
+      '<div data-next-stream="/stream/" data-page="/"></div>' +
       '<div data-next-zone="main" data-page="/"></div>' +
       '<div data-next-zone="layer" data-page="/layer/"></div>';
     const { adapter, opened } = mockSource();
@@ -336,7 +328,7 @@ describe("createSse", () => {
       { length: 100 },
       (_, index) => `<div data-next-zone="zone-${index}"></div>`,
     ).join("");
-    document.body.innerHTML = `<div data-next-sse="/stream/"></div>${zones}`;
+    document.body.innerHTML = `<div data-next-stream="/stream/"></div>${zones}`;
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -350,7 +342,7 @@ describe("createSse", () => {
 
   it("batches initial hello gaps for several topics into one page GET", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -369,7 +361,7 @@ describe("createSse", () => {
 
   it("records zones from an echo before suppressing it", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -391,7 +383,7 @@ describe("createSse", () => {
   });
 
   it("resyncs a batched page for each sequence gap and drops duplicate frames", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -417,7 +409,7 @@ describe("createSse", () => {
   });
 
   it("cancels an in-flight resync that predates a later gap and issues a fresh one", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const requests: { url: string; zone: string }[] = [];
     const cancels: { url: string; zone: string }[] = [];
@@ -446,7 +438,7 @@ describe("createSse", () => {
     expect(cancels[0]).toBe(requests[0]);
     finishes[0]!();
     await Promise.resolve();
-    document.querySelector("[data-next-sse]")!.remove();
+    document.querySelector("[data-next-stream]")!.remove();
     await Promise.resolve();
     expect(cancels).toEqual([requests[0], requests[1]]);
     expect(cancels[1]).toBe(requests[1]);
@@ -455,7 +447,7 @@ describe("createSse", () => {
   });
 
   it("resyncs after a reconnect hello advances the last known sequence", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const sse = makeSse(adapter, visibility);
@@ -477,7 +469,7 @@ describe("createSse", () => {
 
   it("resets the sequence cursor and resyncs when a reconnect hello has a new epoch", async () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="results"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="results"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const sse = makeSse(adapter, visibility);
@@ -508,7 +500,7 @@ describe("createSse", () => {
   });
 
   it("acknowledges skipped messages and resyncs only when a skip exposes a gap", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -541,7 +533,7 @@ describe("createSse", () => {
   });
 
   it("reports malformed and unsupported stream control payloads", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -574,7 +566,7 @@ describe("createSse", () => {
   });
 
   it("does not resync a sequence jump when no zone has been bound yet", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -599,7 +591,7 @@ describe("createSse", () => {
 
   it("batches zones across streams for the same page and cancels on container teardown", async () => {
     document.body.innerHTML =
-      '<div data-next-sse="/one/"></div><div data-next-sse="/two/"></div>';
+      '<div data-next-stream="/one/"></div><div data-next-stream="/two/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -607,15 +599,15 @@ describe("createSse", () => {
     opened[1]!.message(topicEnvelope([{ op: "refresh", zone: "beta" }], "room", 1));
     opened[0]!.message(topicEnvelope([], "room", 3));
     expect(fetched).toEqual([{ url: "/", zone: "alpha,beta" }]);
-    document.querySelector('[data-next-sse="/one/"]')!.remove();
-    document.querySelector('[data-next-sse="/two/"]')!.remove();
+    document.querySelector('[data-next-stream="/one/"]')!.remove();
+    document.querySelector('[data-next-stream="/two/"]')!.remove();
     await Promise.resolve();
     expect(cancelled).toContainEqual({ url: "/", zone: "alpha,beta" });
     expect(sse.size()).toBe(0);
   });
 
   it("transfers pending resync ownership to a later same-page connection", async () => {
-    document.body.innerHTML = '<div data-next-sse="/one/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/one/"></div>';
     const { adapter, opened } = mockSource();
     const cancelled: { url: string; zone: string }[] = [];
     let finish: (() => void) | undefined;
@@ -632,10 +624,10 @@ describe("createSse", () => {
     opened[0]!.message(topicEnvelope([{ op: "refresh", zone: "alpha" }], "room", 1));
     opened[0]!.message(topicEnvelope([], "room", 3));
     const later = document.createElement("div");
-    later.setAttribute("data-next-sse", "/two/");
+    later.setAttribute("data-next-stream", "/two/");
     document.body.append(later);
     sse.scan(document);
-    document.querySelector('[data-next-sse="/one/"]')!.remove();
+    document.querySelector('[data-next-stream="/one/"]')!.remove();
     await Promise.resolve();
     expect(cancelled).toEqual([]);
     later.remove();
@@ -647,7 +639,7 @@ describe("createSse", () => {
 
   it("drops superseded shared resync ownership without a cancel adapter", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/one/"></div><div data-next-sse="/two/"></div>';
+      '<div data-next-stream="/one/"></div><div data-next-stream="/two/"></div>';
     const { adapter, opened } = mockSource();
     const requests: { url: string; zone: string }[] = [];
     const sse = createSse({
@@ -676,11 +668,11 @@ describe("createSse", () => {
 
   it("keeps a stream owner when its container moves within the document", async () => {
     document.body.innerHTML =
-      '<section id="first"><div data-next-sse="/stream/"></div></section><section id="second"></section>';
+      '<section id="first"><div data-next-stream="/stream/"></div></section><section id="second"></section>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
-    const container = document.querySelector('[data-next-sse="/stream/"]')!;
+    const container = document.querySelector('[data-next-stream="/stream/"]')!;
     document.querySelector("#second")!.append(container);
     await Promise.resolve();
     expect(sse.size()).toBe(1);
@@ -688,7 +680,7 @@ describe("createSse", () => {
   });
 
   it("uses the stream fetch promise to clear completed resync ownership", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const cancelled: { url: string; zone: string }[] = [];
     const sse = createSse({
@@ -704,14 +696,14 @@ describe("createSse", () => {
     opened[0]!.message(topicEnvelope([{ op: "refresh", zone: "alpha" }], "room", 1));
     opened[0]!.message(topicEnvelope([], "room", 3));
     await Promise.resolve();
-    document.querySelector("[data-next-sse]")!.remove();
+    document.querySelector("[data-next-stream]")!.remove();
     await Promise.resolve();
     expect(cancelled).toEqual([]);
     expect(sse.size()).toBe(0);
   });
 
   it("does not let a stale resync completion release a newer page batch", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const requests: { url: string; zone: string }[] = [];
     const cancelled: { url: string; zone: string }[] = [];
@@ -735,14 +727,14 @@ describe("createSse", () => {
     opened[0]!.message(topicEnvelope([], "room", 6));
     releases[0]!();
     await Promise.resolve();
-    document.querySelector("[data-next-sse]")!.remove();
+    document.querySelector("[data-next-stream]")!.remove();
     await Promise.resolve();
     expect(requests.map((request) => request.zone)).toEqual(["alpha", "alpha,beta"]);
     expect(cancelled.map((request) => request.zone)).toEqual(["alpha", "alpha,beta"]);
   });
 
   it("keeps a pending resync cancellable across a short visibility pause", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const cancelled: { url: string; zone: string }[] = [];
@@ -764,7 +756,7 @@ describe("createSse", () => {
     visibility.setHidden(true);
     currentTime = 1000;
     visibility.setHidden(false);
-    document.querySelector("[data-next-sse]")!.remove();
+    document.querySelector("[data-next-stream]")!.remove();
     await Promise.resolve();
     expect(cancelled).toEqual([{ url: "/", zone: "alpha" }]);
     finish!();
@@ -773,7 +765,7 @@ describe("createSse", () => {
 
   it("replaces a pending resync when long-pause revalidation adds zones", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="alpha"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="alpha"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const fetchedRequests: { url: string; zone: string }[] = [];
@@ -799,7 +791,7 @@ describe("createSse", () => {
     visibility.setHidden(true);
     document.body.insertAdjacentHTML(
       "beforeend",
-      '<div data-next-sse="/second/"></div><div data-next-zone="beta"></div>',
+      '<div data-next-stream="/second/"></div><div data-next-zone="beta"></div>',
     );
     sse.scan(document);
     currentTime = 5000;
@@ -813,7 +805,7 @@ describe("createSse", () => {
 
   it("reuses the pending resync when long-pause revalidation has the same zones", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="alpha"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="alpha"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const fetchedRequests: { url: string; zone: string }[] = [];
@@ -859,10 +851,10 @@ describe("createSse", () => {
 
   it("keeps another page's stream resync independent", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/one/"></div><div data-next-sse="/two/"></div>';
+      '<div data-next-stream="/one/"></div><div data-next-stream="/two/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility(), {
-      pageUrl: (el) => el.getAttribute("data-next-sse") ?? "/",
+      pageUrl: (el) => el.getAttribute("data-next-stream") ?? "/",
     });
     sse.scan(document);
     opened[0]!.message(topicEnvelope([{ op: "refresh", zone: "alpha" }], "room", 1));
@@ -877,11 +869,11 @@ describe("createSse", () => {
 
   it("closes one stream without resync ownership when a same-page sibling stays open", async () => {
     document.body.innerHTML =
-      '<div data-next-sse="/one/"></div><div data-next-sse="/two/"></div>';
+      '<div data-next-stream="/one/"></div><div data-next-stream="/two/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
-    document.querySelector('[data-next-sse="/one/"]')!.remove();
+    document.querySelector('[data-next-stream="/one/"]')!.remove();
     await Promise.resolve();
     expect(sse.size()).toBe(1);
     expect(opened[0]!.closed).toBe(true);
@@ -889,7 +881,7 @@ describe("createSse", () => {
   });
 
   it("samples server time and gives topic listeners isolated metadata", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const received: unknown[] = [];
     const sse = makeSse(adapter, manualVisibility(), { now: () => 1000 });
@@ -923,7 +915,7 @@ describe("createSse", () => {
   });
 
   it("keeps applying when a topic listener throws and normalizes non-object detail", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const received: unknown[] = [];
@@ -950,7 +942,7 @@ describe("createSse", () => {
   });
 
   it("keeps only five server clock samples and uses a server-time fallback", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility(), { now: () => 1000 });
     sse.scan(document);
@@ -978,7 +970,7 @@ describe("createSse", () => {
   });
 
   it("keeps only the last 25 request ids in the echo ring", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -990,7 +982,7 @@ describe("createSse", () => {
   });
 
   it("still suppresses the oldest id while the ring sits exactly at the limit", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1000,7 +992,7 @@ describe("createSse", () => {
   });
 
   it("evicts only the oldest id when one more overflows the ring", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1013,7 +1005,7 @@ describe("createSse", () => {
   });
 
   it("a repeated id moves to the young end of the ring", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1028,7 +1020,7 @@ describe("createSse", () => {
   });
 
   it("drops the echo of a mutation whose id the wire fed into the ring", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1058,7 +1050,7 @@ describe("createSse", () => {
 
   function tunneled(answer: (echo: () => void) => Promise<Response | string>) {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1118,7 +1110,7 @@ describe("createSse", () => {
   });
 
   it("fires partial:error on a malformed event and keeps the stream alive", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1130,7 +1122,7 @@ describe("createSse", () => {
   });
 
   it("evicts the connection and fires partial:error on a fatal error", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1142,7 +1134,7 @@ describe("createSse", () => {
   });
 
   it("leaves a transient error to the native reconnect without a toast", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1165,7 +1157,7 @@ describe("createSse", () => {
     const sse = makeSse(adapter, visibility, { now: () => clock });
     visibility.setHidden(true);
     // A background-tab mount registers a connection but opens no socket while paused.
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     sse.scan(document);
     expect(opened).toHaveLength(0);
     expect(sse.size()).toBe(1);
@@ -1177,7 +1169,7 @@ describe("createSse", () => {
   });
 
   it("does not reopen a fatally evicted url on resume", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const sse = makeSse(adapter, visibility);
@@ -1191,7 +1183,7 @@ describe("createSse", () => {
   });
 
   it("pauses in a background tab and reconnects with a re-GET of bound zones", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1216,7 +1208,7 @@ describe("createSse", () => {
 
   it("re-GETs bound zones against the path and query open captured", () => {
     window.history.replaceState(null, "", "/catalog/?q=novel");
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1234,7 +1226,7 @@ describe("createSse", () => {
 
   it("captures the owning page through the pageUrl seam, not the address bar", () => {
     window.history.replaceState(null, "", "/modal/");
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1253,7 +1245,7 @@ describe("createSse", () => {
   });
 
   it("a resume re-GET passes zone intent and stamps no headers of its own", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1266,8 +1258,8 @@ describe("createSse", () => {
     expect(fetched).toEqual([{ url: "/", zone: "poll" }]);
   });
 
-  it("opens a stream when the scan root itself carries data-next-sse", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+  it("opens a stream when the scan root itself carries data-next-stream", () => {
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const el = document.querySelector("div")!;
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
@@ -1278,7 +1270,7 @@ describe("createSse", () => {
   });
 
   it("reconnects without a re-GET when the tab flickers briefly", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1300,7 +1292,7 @@ describe("createSse", () => {
   });
 
   it("ignores callbacks from a source closed before resume", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const sse = makeSse(adapter, visibility);
@@ -1321,7 +1313,7 @@ describe("createSse", () => {
   });
 
   it("applies a non-record event body without binding any zone", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1330,7 +1322,7 @@ describe("createSse", () => {
   });
 
   it("binds no zone when the event ops field is not an array", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1344,7 +1336,7 @@ describe("createSse", () => {
   });
 
   it("skips a non-record op and an op without a zone when binding", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1365,7 +1357,7 @@ describe("createSse", () => {
   });
 
   it("resume copies bound zones so a late event on the paused stream does not leak", async () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1387,7 +1379,7 @@ describe("createSse", () => {
   });
 
   it("caps the bound registry so a long sleep does not re-GET an unbounded set", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     let clock = 0;
@@ -1405,8 +1397,8 @@ describe("createSse", () => {
     expect(fetched[0]!.zone.split(",")).toHaveLength(64);
   });
 
-  it("ignores a data-next-sse container with an empty url", () => {
-    document.body.innerHTML = '<div data-next-sse=""></div>';
+  it("ignores a data-next-stream container with an empty url", () => {
+    document.body.innerHTML = '<div data-next-stream=""></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1415,7 +1407,7 @@ describe("createSse", () => {
   });
 
   it("_reset closes every connection and detaches visibility", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const detach = vi.fn();
     const sse = createSse({
@@ -1434,7 +1426,7 @@ describe("createSse", () => {
   });
 
   it("_reset empties the echo ring so a remembered id no longer suppresses", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1449,7 +1441,7 @@ describe("createSse", () => {
 
   it("resyncs a real gap that arrives as the client's own echo", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1479,7 +1471,7 @@ describe("createSse", () => {
 
   it("resets the cursor when a live frame carries a new epoch", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1501,7 +1493,7 @@ describe("createSse", () => {
 
   function emptyHello() {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1560,7 +1552,7 @@ describe("createSse", () => {
 
   it("resyncs a skip under a new epoch and reads a missing epoch as empty", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1581,7 +1573,7 @@ describe("createSse", () => {
   });
 
   it("decodes only well-formed hello positions", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
@@ -1609,7 +1601,7 @@ describe("createSse", () => {
 
   it("resolves the resync page at gap time, not the page captured at open", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="list"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="list"></div>';
     const { adapter, opened } = mockSource();
     let page = "/items/?status=open";
     const sse = makeSse(adapter, manualVisibility(), { pageUrl: () => page });
@@ -1623,13 +1615,13 @@ describe("createSse", () => {
 
   it("keeps the captured page when no stream owner is still in the document", () => {
     document.body.innerHTML =
-      '<div data-next-sse="/stream/"></div><div data-next-zone="list"></div>';
+      '<div data-next-stream="/stream/"></div><div data-next-zone="list"></div>';
     const { adapter, opened } = mockSource();
     let page = "/before/";
     const sse = makeSse(adapter, manualVisibility(), { pageUrl: () => page });
     sse.scan(document);
     opened[0]!.message(topicEnvelope([], "room", 1));
-    document.querySelector("[data-next-sse]")!.remove();
+    document.querySelector("[data-next-stream]")!.remove();
     page = "/after/";
     opened[0]!.message(topicEnvelope([], "room", 3));
     expect(fetched).toEqual([{ url: "/before/", zone: "list" }]);
@@ -1716,7 +1708,7 @@ describe("createSse", () => {
   });
 
   it("closes for good on a terminal end event and reports its code", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = manualVisibility();
     const sse = makeSse(adapter, visibility, { now: () => 0 });
@@ -1738,7 +1730,7 @@ describe("createSse", () => {
   });
 
   it("still closes on an end event whose payload is malformed", () => {
-    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);

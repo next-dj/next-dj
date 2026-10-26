@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import fields, replace
 from types import MappingProxyType
 
 import fakeredis
@@ -21,7 +22,6 @@ from next.realtime import (
     Message,
     Presence,
     TopicStream,
-    redis as redis_module,
     roster as roster_module,
 )
 from next.realtime.attendance import Attendance
@@ -191,11 +191,13 @@ def test_redis_async_scripts_are_bound_once_per_loop(server, clock) -> None:
     broker = _redis(server, clock)
 
     async def scenario() -> None:
-        first = broker._async_script(redis_module._JOIN_SCRIPT)
+        first = broker._loop_client().scripts
         await broker.ajoin(TOPIC, "a", None, 30)
-        assert broker._async_script(redis_module._JOIN_SCRIPT) is first
+        assert broker._loop_client().scripts is first
         (_, scripts), *_ = broker._async_clients.values()
-        assert set(scripts) == set(redis_module._SCRIPTS)
+        bound = [getattr(scripts, field.name) for field in fields(scripts)]
+        assert len(bound) == 6
+        assert len({id(script) for script in bound}) == 6
         await broker.aclose()
 
     asyncio.run(scenario())
@@ -213,17 +215,14 @@ def test_redis_leave_reports_a_refused_script_as_a_broker_failure(
     async def arefuse(**_kwargs: object) -> None:
         raise failure
 
-    monkeypatch.setattr(broker, "_leave_script", refuse)
+    monkeypatch.setattr(broker, "_scripts", replace(broker._scripts, leave=refuse))
     with pytest.raises(BrokerConnectionError, match="READONLY"):
         broker.leave(TOPIC, "a")
 
     async def scenario() -> None:
-        _, scripts = broker._async_client()
-        loop = asyncio.get_running_loop()
-        client = broker._async_clients[loop][0]
-        broker._async_clients[loop] = (
-            client,
-            {**scripts, redis_module._LEAVE_SCRIPT: arefuse},
+        entry = broker._loop_client()
+        broker._async_clients[asyncio.get_running_loop()] = entry._replace(
+            scripts=replace(entry.scripts, leave=arefuse)
         )
         with pytest.raises(BrokerConnectionError, match="READONLY"):
             await broker.aleave(TOPIC, "a")

@@ -159,7 +159,7 @@ class TestZoneGetMergeIntent:
         assert "X-Next-Merge" in response.get("Vary", "")
 
 
-class TestFullRenderRegression:
+class TestFullRenderUnchanged:
     """Without the partial switch the page render stays byte-for-byte."""
 
     def test_full_render_keeps_zones_inline(self) -> None:

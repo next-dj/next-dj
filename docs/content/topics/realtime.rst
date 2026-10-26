@@ -176,7 +176,7 @@ The page's regular access checks and dependency resolution run before the stream
 
 ``DUrl[str]`` reads the ``code`` segment of the URL, see :doc:`/content/topics/dependency-injection`.
 The backend subscription is selected from the request's WSGI or ASGI type.
-The broker wait timeout is ``NEXT_FRAMEWORK['REALTIME']['HEARTBEAT']``, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
+The broker wait timeout is the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
 Closing the stream releases the broker subscription.
 
@@ -223,6 +223,8 @@ Size the session cache for the open connections, or use the ``db`` or ``cached_d
 
 WebSocket is optional and SSE remains the fallback.
 A stream without a stable, importable ``authorize`` callback answers negotiation with ``406`` and stays on SSE.
+
+.. _topics-realtime-signed-cookie:
 
 The signed-cookie session engine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -442,7 +444,7 @@ Crashed connections
 ~~~~~~~~~~~~~~~~~~~
 
 An open connection refreshes its record once per heartbeat, and the record lives three heartbeat intervals unless an ``Attendance`` subclass sets another ``ttl_heartbeats``.
-A process that dies without a goodbye therefore drops out of the attendance after at most three intervals, 75 seconds at the default ``HEARTBEAT``.
+A process that dies without a goodbye therefore drops out of the attendance after at most three intervals, 75 seconds at the default heartbeat.
 Any later join, refresh, or leave on the topic prunes the expired records and publishes the new snapshot.
 A read through ``presence(topic)`` never counts an expired record.
 

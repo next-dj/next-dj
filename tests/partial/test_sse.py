@@ -10,8 +10,8 @@ from django.test import AsyncRequestFactory, RequestFactory, override_settings
 from next.partial import Envelope, JsonPartialProtocolBackend, Patches, PatchEventStream
 from next.partial.manager import partial_backend_manager
 from next.partial.signals import sse_stream_closed, sse_stream_opened
-from next.partial.sse import _heartbeat_seconds, _retry_ms
-from next.partial.stream import StreamEnd
+from next.partial.sse import _retry_ms, sse_heartbeat_seconds
+from next.partial.stream import StreamEnd, StreamMeta
 from next.testing import capture_signals
 
 
@@ -176,12 +176,14 @@ class TestHeartbeatOption:
 
     def test_falls_back_without_sse_option(self) -> None:
         with _partial_backend_config(_NO_SSE_BACKEND):
-            assert _heartbeat_seconds() == 25.0
+            assert sse_heartbeat_seconds() == 25.0
 
-    @pytest.mark.parametrize("seconds", ["nope", True], ids=["non_numeric", "bool"])
+    @pytest.mark.parametrize(
+        "seconds", ["nope", True, 0, -1.0], ids=["non_numeric", "bool", "zero", "neg"]
+    )
     def test_invalid_heartbeat_value_falls_back(self, seconds: object) -> None:
         with _partial_backend_config(_custom_heartbeat_backend(seconds)):
-            assert _heartbeat_seconds() == 25.0
+            assert sse_heartbeat_seconds() == 25.0
 
 
 class _Recorder:
@@ -552,8 +554,8 @@ class _NumberedStream(PatchEventStream):
 
 
 class _TextBackend(JsonPartialProtocolBackend):
-    def sse_event(self, envelope: Envelope) -> str:
-        return f"event: custom\ndata: {len(envelope.ops)}\n\n"
+    def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
+        return str(len(envelope.ops))
 
 
 def _topic_message(epoch: str = "e9") -> SimpleNamespace:
@@ -586,7 +588,7 @@ class TestTopicFrameEventId:
         backend = {"BACKEND": "tests.partial.test_sse._TextBackend", "OPTIONS": {}}
         with _partial_backend_config([backend]):
             frames = _consume(_NumberedStream(request_obj, [_topic_message()]))
-        assert frames[1] == b"id: e9:3\nevent: custom\ndata: 1\n\n"
+        assert frames[1] == b"id: e9:3\nevent: next-patches\ndata: 1\n\n"
 
 
 class TestEndFrame:

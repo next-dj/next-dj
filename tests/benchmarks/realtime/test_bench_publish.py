@@ -9,31 +9,20 @@ class TestBenchBrokerPublish:
     """Number and store one envelope on a single broker."""
 
     @pytest.mark.benchmark(group="realtime.publish")
-    def test_memory_broker(self, memory_broker: MemoryBroker, benchmark) -> None:
+    def test_publish(self, any_broker: MemoryBroker | RedisBroker, benchmark) -> None:
+        """Runs the sequence script on the fake server for Redis."""
         envelope = small_envelope()
-        benchmark(memory_broker.publish, "room:1", envelope)
+        benchmark(any_broker.publish, "room:1", envelope)
 
     @pytest.mark.benchmark(group="realtime.publish")
-    def test_redis_broker(self, redis_broker: RedisBroker, benchmark) -> None:
-        """Runs the sequence script on the fake server."""
+    @pytest.mark.parametrize("replay", [0], indirect=True, ids=["log-off"])
+    @pytest.mark.usefixtures("replay")
+    def test_publish_without_replay(
+        self, any_broker: MemoryBroker | RedisBroker, benchmark
+    ) -> None:
+        """Numbers the envelope with the log off, the cost before replay."""
         envelope = small_envelope()
-        benchmark(redis_broker.publish, "room:1", envelope)
-
-    @pytest.mark.benchmark(group="realtime.publish")
-    def test_memory_broker_without_replay(self, benchmark) -> None:
-        broker = MemoryBroker(replay={"SIZE": 0})
-        envelope = small_envelope()
-        benchmark(broker.publish, "room:1", envelope)
-
-    @pytest.mark.benchmark(group="realtime.publish")
-    def test_redis_broker_without_replay(self, fake_redis, benchmark) -> None:
-        """Runs the sequence script with the log off, the cost before replay."""
-        broker = RedisBroker({"OPTIONS": {"URL": "redis://fake/1"}}, replay={"SIZE": 0})
-        envelope = small_envelope()
-        try:
-            benchmark(broker.publish, "room:1", envelope)
-        finally:
-            broker.close()
+        benchmark(any_broker.publish, "room:1", envelope)
 
 
 class TestBenchPublicPublish:

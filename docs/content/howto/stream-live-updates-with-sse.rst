@@ -88,7 +88,7 @@ A project that keeps the publish point out of the form connects a receiver to ``
    {% endzone %}
    <div data-next-stream="/polls/{{ poll.pk }}/stream/"></div>
 
-The ``data-next-stream`` element makes the runtime open the stream, and ``data-next-sse`` is an alias of it.
+The ``data-next-stream`` element makes the runtime open the stream.
 
 The stream page
 ~~~~~~~~~~~~~~~

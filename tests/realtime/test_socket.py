@@ -2,18 +2,16 @@ import asyncio
 import json
 import logging
 import threading
-from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+import time
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from django.contrib.auth import get_user_model, login
-from django.contrib.auth.models import AnonymousUser, Permission
-from django.contrib.sessions.backends.db import SessionStore
-from django.test import RequestFactory, override_settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
+from django.test import override_settings
 
 from next.partial import JsonPartialProtocolBackend, Patches, StreamMeta
 from next.partial.manager import partial_backend_manager
@@ -26,7 +24,7 @@ from next.realtime.manager import broker_manager
 from next.realtime.messages import Message, Position
 from next.realtime.socket import Handshake, SocketClock, TopicSocket, _Writer
 from next.realtime.tunnel import TunnelHints
-from next.testing.realtime import MemoryPort, SocketTicket, issue_socket_ticket
+from next.testing.realtime import MemoryPort, SocketTicket
 from tests.support.cases.realtime import (
     MALFORMED_SUBSCRIPTION_CASES,
     RAW_FRAME_CASES,
@@ -36,8 +34,13 @@ from tests.support.cases.realtime import (
     TextFrameCase,
     TicketReferenceCase,
 )
-from tests.support.codecs import sse_data_text
-from tests.support.realtime import LiveStreams, issue_session_ticket
+from tests.support.realtime import (
+    LiveStreams,
+    ScriptedBroker,
+    ServerClock,
+    issue_session_ticket,
+    signed_in_session,
+)
 
 
 _HERE = "tests.realtime.test_socket"
@@ -98,57 +101,13 @@ def _reset_module_state():
     _TRANSFORM_RELEASE.set()
 
 
-@dataclass
-class ManualClock:
-    now: float = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 @pytest.fixture()
-def access_clock(monkeypatch: pytest.MonkeyPatch) -> ManualClock:
+def access_clock(monkeypatch: pytest.MonkeyPatch, clock: ServerClock) -> ServerClock:
     """Drive the access recheck interval by hand instead of waiting for it."""
-    clock = ManualClock()
     monkeypatch.setattr(
         socket_module, "SocketAccessCheck", partial(SocketAccessCheck, clock=clock)
     )
     return clock
-
-
-class ScriptedBroker(MemoryBroker):
-    """A memory broker whose subscription yields what the test feeds it."""
-
-    def __init__(self, calls: list[str] | None = None) -> None:
-        """Start with an empty feed and an optional shared call log."""
-        super().__init__()
-        self.calls = calls if calls is not None else []
-        self.timeouts: list[float] = []
-        self.feed: asyncio.Queue[Message | None] = asyncio.Queue()
-
-    def asubscribe(self, topics: Sequence[str], *, timeout: float):
-        self.calls.append("asubscribe")
-        self.timeouts.append(timeout)
-        selected = tuple(topics)
-        subscriber = object()
-
-        @asynccontextmanager
-        async def subscription() -> AsyncIterator[AsyncIterator[Message | None]]:
-            self._register(selected, subscriber)
-            try:
-                yield self._fed()
-            finally:
-                self._unregister(selected, subscriber)
-
-        return subscription()
-
-    async def _fed(self) -> AsyncIterator[Message | None]:
-        while True:
-            yield await self.feed.get()
-
-    async def apositions(self, topics: Sequence[str]) -> dict[str, Position]:
-        self.calls.append("apositions")
-        return await super().apositions(topics)
 
 
 class FailingBroker(MemoryBroker):
@@ -247,6 +206,7 @@ def _socket(
     *,
     heartbeat: float | None = 60,
     socket_class: type[TopicSocket] = TopicSocket,
+    monotonic: Callable[[], float] = time.monotonic,
     **handshake: object,
 ) -> TopicSocket:
     return socket_class(
@@ -254,7 +214,7 @@ def _socket(
         _handshake(ticket, **handshake),
         broker=broker,
         heartbeat=heartbeat,
-        clock=SocketClock(wall=lambda: _SERVER_SECONDS),
+        clock=SocketClock(wall=lambda: _SERVER_SECONDS, monotonic=monotonic),
     )
 
 
@@ -441,12 +401,12 @@ def test_published_message_is_the_json_backend_patches_frame(
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("case", TEXT_FRAME_CASES, ids=lambda case: case.id)
-def test_custom_codec_frame_carries_its_sse_data_text(
+def test_custom_codec_frame_carries_its_stream_text(
     monkeypatch: pytest.MonkeyPatch, session_ticket: SocketTicket, case: TextFrameCase
 ) -> None:
-    frame_of = case.backend.sse_stream_event
-    spy = Mock(wraps=frame_of)
-    monkeypatch.setattr(case.backend, "sse_stream_event", spy)
+    data_of = case.backend.stream_data
+    spy = Mock(wraps=data_of)
+    monkeypatch.setattr(case.backend, "stream_data", spy)
     monkeypatch.setattr(partial_backend_manager, "get", lambda: case.backend)
     envelope = Patches.versioned("v7").refresh(zone="score").envelope()
 
@@ -464,7 +424,8 @@ def test_custom_codec_frame_carries_its_sse_data_text(
             published.epoch,
             _SERVER_TIME,
         )
-        assert frame == {"type": "patches", "data": sse_data_text(frame_of(sent, meta))}
+        assert frame == {"type": "patches", "data": data_of(sent, meta)}
+        assert isinstance(frame["data"], str)
         port.disconnect()
         await _finish(task)
 
@@ -593,7 +554,7 @@ def test_denied_topic_closes_before_subscribing_to_the_broker() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_topic_revoked_while_subscribed_closes_topic_denied(
-    access_clock: ManualClock, streams: LiveStreams
+    access_clock: ServerClock, streams: LiveStreams
 ) -> None:
     ticket = issue_session_ticket(authorizer_ref=f"{_HERE}._toggled_authorizer")
 
@@ -614,7 +575,7 @@ def test_topic_revoked_while_subscribed_closes_topic_denied(
 
 @pytest.mark.django_db(transaction=True)
 def test_heartbeat_rechecks_access_before_its_ping(
-    access_clock: ManualClock, session_ticket: SocketTicket, streams: LiveStreams
+    access_clock: ServerClock, session_ticket: SocketTicket, streams: LiveStreams
 ) -> None:
     async def scenario() -> None:
         broker = ScriptedBroker()
@@ -635,17 +596,10 @@ def test_heartbeat_rechecks_access_before_its_ping(
     asyncio.run(scenario())
 
 
-def _logged_in_ticket() -> tuple[object, SocketTicket]:
-    user = get_user_model().objects.create_user(username="reader", password="before")
-    user.user_permissions.add(Permission.objects.get(codename="view_user"))
-    request = RequestFactory().get("/")
-    request.session = SessionStore()
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    request.session.save()
-    ticket = issue_socket_ticket(
-        ("room:42",),
-        authorizer_ref=f"{_HERE}._user_authorizer",
-        session=request.session,
+def _signed_in_ticket() -> tuple[object, SocketTicket]:
+    user, session = signed_in_session("reader", "view_user")
+    ticket = issue_session_ticket(
+        authorizer_ref=f"{_HERE}._user_authorizer", session=session
     )
     return user, ticket
 
@@ -671,9 +625,9 @@ def _revoke(user: object, revocation: str) -> None:
     ],
 )
 def test_user_revoked_while_subscribed_closes_before_delivery(
-    access_clock: ManualClock, revocation: str, code: Close, streams: LiveStreams
+    access_clock: ServerClock, revocation: str, code: Close, streams: LiveStreams
 ) -> None:
-    user, ticket = _logged_in_ticket()
+    user, ticket = _signed_in_ticket()
 
     async def scenario() -> None:
         broker = MemoryBroker()
@@ -1025,16 +979,21 @@ def test_watchdog_drops_a_client_that_stopped_reading(
     monkeypatch: pytest.MonkeyPatch,
     session_ticket: SocketTicket,
     streams: LiveStreams,
+    clock: ServerClock,
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
-    _monotonic(monkeypatch, 0.0, 0.0, 10.0)
+    # One hand-driven clock times both the stalled send and the liveness pings.
+    monkeypatch.setattr(socket_module, "time", SimpleNamespace(monotonic=clock))
 
     async def scenario() -> None:
         broker = MemoryBroker()
         port = GatedPort()
-        socket = _socket(port, session_ticket, broker, heartbeat=0.001)
+        socket = _socket(port, session_ticket, broker, heartbeat=0.001, monotonic=clock)
         task = asyncio.create_task(socket.serve(port.inbound()))
         port.push_json(session_ticket.subscribe_frame())
+        async with asyncio.timeout(5):
+            await port.entered.wait()
+        clock.advance(10)
         await _finish(task)
         assert port.entered.is_set()
         assert port.sent == []
@@ -1135,7 +1094,7 @@ class _TimingOutTunnel:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_timeout_raised_inside_the_tunnel_is_internal_not_timeout(
+def test_timeout_raised_inside_the_tunnel_is_internal_not_timeout(
     session_ticket: SocketTicket,
 ) -> None:
     async def scenario() -> dict[str, object]:

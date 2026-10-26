@@ -7,7 +7,7 @@ Problem
 -------
 
 A WebSocket ticket is bound to the Django session of the browser that negotiated it.
-That binding fails with the signed-cookie session engine, which has no session key on a first visit and re-signs its cookie on every save.
+That binding fails with the signed-cookie session engine, see :ref:`topics-realtime-signed-cookie`.
 It also fails when the identity of the browser lives in something else than a Django session, such as an API token cookie.
 
 Solution
@@ -35,7 +35,6 @@ It works under any ``SESSION_ENGINE``, yet it fits the signed-cookie engine, whe
        },
    }
 
-Neither binding changes when the engine re-signs the session, so a first visit and a page that saves the session keep their sockets.
 ``manage.py check`` reports ``next.W142`` for the signed-cookie engine only while the binding is the default, so setting this key clears it.
 The visitor cookie takes the path, domain, ``Secure`` flag, ``SameSite`` value, and lifetime of the session cookie, and it is always ``HttpOnly``.
 

@@ -40,7 +40,7 @@ URL = "/static/next/next.min.js"
 BREAKOUT_URL = '/static/next.min.js"><script>alert(1)</script>'
 
 
-def _legacy_init_payload(
+def _reference_init_payload(
     js_context: Mapping[str, Any],
     key_serializers: Mapping[str, JsContextSerializer] | None,
 ) -> str:
@@ -296,8 +296,8 @@ class TestInitScriptGoldenParity:
         new = builder.init_script(
             js_context, key_serializers=key_serializers, encoded=encoded
         )
-        legacy = _legacy_init_payload(js_context, key_serializers)
-        assert new == f"<script>Next._init({legacy});</script>"
+        expected = _reference_init_payload(js_context, key_serializers)
+        assert new == f"<script>Next._init({expected});</script>"
         return new
 
     def test_default_serializer_simple_value(self) -> None:

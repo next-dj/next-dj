@@ -30,7 +30,6 @@ class Command(BaseCommand):
     """Publish a refresh or an event, or read positions, presence and the replay log."""
 
     help = "Publish to realtime topics and read their positions, presence and log."
-    requires_system_checks = ()
 
     @override
     def add_arguments(self, parser: CommandParser) -> None:
@@ -115,14 +114,14 @@ class Command(BaseCommand):
         if as_json:
             self._json(
                 {
-                    topic: {"epoch": p.epoch, "seq": p.seq} if p.epoch else None
-                    for topic, p in positions.items()
+                    topic: position.as_dict() if position.epoch else None
+                    for topic, position in positions.items()
                 }
             )
             return
         rows = [
-            (topic, f"{p.epoch}:{p.seq}" if p.epoch else "-")
-            for topic, p in positions.items()
+            (topic, position.cursor if position.epoch else "-")
+            for topic, position in positions.items()
         ]
         write_table(self, ("Topic", "Position"), rows)
 
@@ -166,7 +165,7 @@ class Command(BaseCommand):
 
 
 def _cursor(message: Message) -> str:
-    return f"{message.epoch}:{message.seq}"
+    return Position(message.epoch, message.seq).cursor
 
 
 def _published_at(message: Message) -> str:

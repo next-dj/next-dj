@@ -15,7 +15,7 @@ Check registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.server.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
@@ -909,7 +909,8 @@ Errors
      - The configured broker backend is not an importable ``BrokerBackend`` subclass.
      - ``next.realtime.checks``
    * - ``next.E185``
-     - ``NEXT_FRAMEWORK['REALTIME']['HEARTBEAT']`` is not a positive finite number of seconds.
+     - ``NEXT_FRAMEWORK['REALTIME']['HEARTBEAT']``, the WebSocket ping interval, is not a positive finite number of seconds.
+       An SSE stream takes its heartbeat from the ``HEARTBEAT_SECONDS`` option of the partial backend instead.
        A boolean, a string, zero, a negative value, ``inf`` and ``nan`` all fail it.
      - ``next.realtime.checks``
    * - ``next.E186``
@@ -1431,10 +1432,10 @@ Warnings
        ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
      - ``next.realtime.deployment``
    * - ``next.W148``
-     - uvicorn is importable while ``django.contrib.staticfiles`` sits above ``next`` in ``INSTALLED_APPS``.
-       Django runs the command of the application listed first, so ``manage.py runserver`` stays the staticfiles command and never serves the project on uvicorn with the realtime WebSocket.
-       Moving ``next`` above ``django.contrib.staticfiles`` clears it.
-     - ``next.apps.checks``
+     - uvicorn is importable while an installed app above ``next`` in ``INSTALLED_APPS`` ships the ``runserver`` command that wins, such as ``django.contrib.staticfiles``.
+       Django runs the command of the application listed first, so ``manage.py runserver`` stays that command and never serves the project on uvicorn with the realtime WebSocket.
+       Moving ``next`` above the named app clears it.
+     - ``next.server.checks``
 
 Codes are assigned per check and are not contiguous.
 

@@ -8,6 +8,7 @@ from django.test import Client, TestCase
 from django.utils import timezone
 from polls.models import Choice, Poll
 
+from next.conf import extend_default_backend
 from next.forms.signals import action_dispatched, form_validation_failed
 from next.partial import Patches
 from next.realtime import MemoryBroker, presence, publish
@@ -142,7 +143,7 @@ class TestPollDetailPage:
         self, next_client: NextClient, poll: Poll
     ) -> None:
         body = _detail_html(next_client, poll)
-        assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
+        assert f'data-next-stream="/polls/{poll.pk}/stream/"' in body
 
     def test_page_reserves_a_hidden_watcher_label(
         self, next_client: NextClient, poll: Poll
@@ -577,8 +578,12 @@ class TestStreamRevocation:
         self, next_client: NextClient
     ) -> None:
         poll = Poll.objects.create(question="Short-lived?")
+        backends = extend_default_backend(
+            "PARTIAL_BACKENDS",
+            OPTIONS={"VERSION": "v1", "SSE": {"HEARTBEAT_SECONDS": 0.05}},
+        )
         with override_next_settings(
-            REALTIME={"TRANSPORTS": ["sse"], "HEARTBEAT": 0.05}
+            REALTIME={"TRANSPORTS": ["sse"]}, PARTIAL_BACKENDS=backends
         ):
             response = next_client.get(f"/polls/{poll.pk}/stream/")
             frames = iter(response.streaming_content)
@@ -646,7 +651,7 @@ class TestEmbedWidget:
         body = self._embed_html(next_client, poll)
         assert poll.question in body
         assert f'data-poll-chart="{poll.pk}"' in body
-        assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
+        assert f'data-next-stream="/polls/{poll.pk}/stream/"' in body
         assert f'href="/polls/{poll.pk}/"' in body
 
     def test_ancestor_metadata_still_applies(

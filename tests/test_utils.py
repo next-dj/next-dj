@@ -33,6 +33,7 @@ from next.utils import (
     join_trail,
     load_tree_source,
     middleware_listed,
+    non_negative_number,
     page_roots_shape_error,
     parse_intercept,
     positive_number,
@@ -255,6 +256,16 @@ class TestTypePredicates:
         self, value: object, *, inside: bool
     ) -> None:
         assert positive_number(value, 2) is inside
+
+    @pytest.mark.parametrize(
+        ("value", "inside"),
+        [(0, True), (2.0, True), (-0.5, False), (2.5, False), (float("nan"), False)],
+        ids=["zero", "ceiling", "negative", "above", "nan"],
+    )
+    def test_non_negative_number_takes_zero_too(
+        self, value: object, *, inside: bool
+    ) -> None:
+        assert non_negative_number(value, 2) is inside
 
 
 class TestAfterFork:

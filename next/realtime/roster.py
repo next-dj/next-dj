@@ -7,6 +7,7 @@ import threading
 import time
 import weakref
 from abc import ABC, abstractmethod
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
@@ -21,8 +22,8 @@ from next.partial.manager import asset_version
 from next.utils import after_fork, int_between, positive_number
 
 from .errors import InvalidMemberError
+from .lifecycle import published
 from .messages import Message
-from .signals import published
 
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,14 @@ def snapshot_message(topic: str, snapshot: Presence, published_at: float) -> Mes
     return Message(topic, 0, presence_envelope(snapshot), published_at)
 
 
+def subscriber_snapshot(
+    topic: str, snapshot: Presence, *, identified: bool, now: float
+) -> Message:
+    """Return the snapshot one subscriber gets, its members only when it identifies."""
+    shown = snapshot if identified else Presence(snapshot.count)
+    return snapshot_message(topic, shown, now)
+
+
 def counted(message: Message) -> Message:
     """Return the message with the members cut from every presence event it carries.
 
@@ -310,6 +319,7 @@ class PresenceSchedule:
     def reset(self) -> None:
         """Drop the pending topics, the lock and the thread, as a forked child must."""
         self._due: list[tuple[float, str]] = []
+        self._queued: Counter[str] = Counter()
         self._condition = threading.Condition()
         self._thread: threading.Thread | None = None
 
@@ -318,7 +328,7 @@ class PresenceSchedule:
         with self._condition:
             if self._closed:
                 return
-            heapq.heappush(self._due, (self._clock() + delay, topic))
+            self._push(topic, self._clock() + delay)
             if self._threaded and self._thread is None:
                 self._thread = threading.Thread(
                     target=self._run, name="next-realtime-presence", daemon=True
@@ -340,7 +350,7 @@ class PresenceSchedule:
         ripe: list[str] = []
         with self._condition:
             while self._due and self._due[0][0] <= moment:
-                ripe.append(heapq.heappop(self._due)[1])
+                ripe.append(self._pop())
         for topic in ripe:
             try:
                 self._publish(topic)
@@ -352,10 +362,23 @@ class PresenceSchedule:
     def _again(self, topic: str) -> None:
         """Queue a failed topic `retry` seconds out unless it is pending already."""
         with self._condition:
-            if self._closed or any(queued == topic for _, queued in self._due):
+            if self._closed or topic in self._queued:
                 return
-            heapq.heappush(self._due, (self._clock() + self._retry, topic))
+            self._push(topic, self._clock() + self._retry)
             self._condition.notify()
+
+    def _push(self, topic: str, due: float) -> None:
+        """Queue a topic on the heap and count it among the queued ones."""
+        heapq.heappush(self._due, (due, topic))
+        self._queued[topic] += 1
+
+    def _pop(self) -> str:
+        """Take the soonest topic off the heap, uncounting it once no entry is left."""
+        _, topic = heapq.heappop(self._due)
+        self._queued[topic] -= 1
+        if not self._queued[topic]:
+            del self._queued[topic]
+        return topic
 
     def close(self) -> None:
         """Publish what is pending right away and let the thread exit at its wakeup."""
@@ -363,6 +386,7 @@ class PresenceSchedule:
             self._closed = True
             ripe = tuple(dict.fromkeys(topic for _, topic in sorted(self._due)))
             self._due.clear()
+            self._queued.clear()
             self._condition.notify_all()
         for topic in ripe:
             try:
@@ -444,4 +468,5 @@ __all__ = [
     "decode_member",
     "encode_member",
     "presence_limits",
+    "subscriber_snapshot",
 ]

@@ -33,17 +33,10 @@ from next.testing import SseReader
 from tests.support.realtime import (
     FakeServerBroker,
     PlainBroker,
+    ServerClock,
     manual_schedule,
     silent_schedule,
 )
-
-
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
 
 
 def _identify(user: object, topic: str) -> dict[str, object]:
@@ -51,12 +44,7 @@ def _identify(user: object, topic: str) -> dict[str, object]:
 
 
 @pytest.fixture()
-def clock() -> _Clock:
-    return _Clock()
-
-
-@pytest.fixture()
-def memory(clock: _Clock) -> MemoryBroker:
+def memory(clock: ServerClock) -> MemoryBroker:
     return MemoryBroker(clock=clock, schedule=manual_schedule(clock))
 
 
@@ -81,7 +69,7 @@ def test_memory_join_counts_every_connection_and_lists_identified_ones(
 
 
 def test_memory_changes_inside_one_window_schedule_one_snapshot(
-    memory: MemoryBroker, clock: _Clock
+    memory: MemoryBroker, clock: ServerClock
 ) -> None:
     memory.join("room:1", "a", None, 30)
     memory.join("room:1", "b", None, 30)
@@ -98,7 +86,7 @@ def test_memory_changes_inside_one_window_schedule_one_snapshot(
 
 
 def test_memory_touch_refuses_an_expired_record_and_prunes_it(
-    memory: MemoryBroker, clock: _Clock
+    memory: MemoryBroker, clock: ServerClock
 ) -> None:
     memory.join("room:1", "a", None, 3)
     memory.join("room:1", "b", None, 30)
@@ -111,7 +99,7 @@ def test_memory_touch_refuses_an_expired_record_and_prunes_it(
     assert memory.presence("room:1").count == 1
 
 
-def test_memory_presence_caps_members_but_keeps_the_count(clock: _Clock) -> None:
+def test_memory_presence_caps_members_but_keeps_the_count(clock: ServerClock) -> None:
     broker = MemoryBroker(clock=clock, presence={"SIZE": 2})
     for index in range(5):
         broker.join("room:1", f"c{index}", {"index": index}, 30)
@@ -347,7 +335,7 @@ def test_sync_refresh_touches_exactly_when_a_heartbeat_is_due(memory, clock) -> 
     assert touches == ["room:1"]
 
 
-def test_a_record_lasts_three_heartbeats(memory, clock) -> None:
+def test_record_lasts_three_heartbeats(memory, clock) -> None:
     attendance = Attendance(memory, {"room:1": None}, heartbeat=10, clock=clock)
     attendance.join()
     joined = clock.now
@@ -445,7 +433,7 @@ class _LongStream(TopicStream):
 
 @pytest.mark.django_db()
 def test_stream_attend_hook_keeps_its_own_attendance(
-    memory: MemoryBroker, clock: _Clock, monkeypatch
+    memory: MemoryBroker, clock: ServerClock, monkeypatch
 ) -> None:
     monkeypatch.setattr(broker_manager, "_backend", memory)
     request = RequestFactory().get("/rooms/1/stream/")
@@ -468,7 +456,7 @@ class _Recording(MemoryBroker):
         super().announce_presence(topic)
 
 
-def test_broker_announce_hook_receives_every_closed_window(clock: _Clock) -> None:
+def test_broker_announce_hook_receives_every_closed_window(clock: ServerClock) -> None:
     broker = _Recording(clock=clock, schedule=manual_schedule(clock))
     broker.join("room:1", "a", None, 30)
     clock.now += 2

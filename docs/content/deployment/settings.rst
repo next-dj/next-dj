@@ -177,7 +177,8 @@ Realtime
 Set ``BROKER`` to ``RedisBroker``, because the default ``MemoryBroker`` reaches subscribers of one process only.
 The ``max_connections`` value is a placeholder, and the pool needs one connection per open stream of the process, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
 Read ``GATEWAY_TOKEN`` from the environment and set it only when a gateway outside Python calls the ticket introspection endpoint.
-Keep ``HEARTBEAT`` below the shortest idle timeout of the proxy and load balancer in front of the streams.
+``HEARTBEAT`` is the WebSocket ping interval, and an SSE stream takes its heartbeat from the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend.
+Keep both below the shortest idle timeout of the proxy and load balancer in front of the streams.
 List ``TRANSPORTS`` explicitly in a split deployment where the process that renders the pages never mounts the socket, see :doc:`wsgi-asgi`.
 See :doc:`/content/ref/realtime` for every key.
 

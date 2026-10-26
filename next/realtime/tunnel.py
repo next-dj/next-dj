@@ -35,9 +35,9 @@ from next.forms.transport import (
     dispatches_actions,
 )
 
-from .access import run_detached
 from .frames import Refusal, Reply, Request
 from .limits import TunnelLimits
+from .pool import run_detached
 
 
 logger = logging.getLogger(__name__)

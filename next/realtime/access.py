@@ -7,19 +7,12 @@ import asyncio
 import enum
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Sequence
 from typing import override
 
-from asgiref.sync import sync_to_async
-from django.db import close_old_connections
-
-from next.conf import next_framework_settings
-
 from .binding import LiveIdentity, ticket_binding
+from .pool import run_detached
 
-
-_DEFAULT_HEARTBEAT = 25.0
 
 type TopicAuthorizer = Callable[[object, str], bool]
 
@@ -30,61 +23,6 @@ class Access(enum.Enum):
     GRANTED = "granted"
     SESSION_REVOKED = "session_revoked"
     TOPIC_DENIED = "topic_denied"
-
-
-def heartbeat_seconds() -> float:
-    """Return the configured realtime heartbeat, or the default for a bad value."""
-    realtime = getattr(next_framework_settings, "REALTIME", {})
-    value = (
-        realtime.get("HEARTBEAT", _DEFAULT_HEARTBEAT)
-        if isinstance(realtime, Mapping)
-        else _DEFAULT_HEARTBEAT
-    )
-    if (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value > 0
-    ):
-        return float(value)
-    return _DEFAULT_HEARTBEAT
-
-
-async def run_detached[**P, R](
-    func: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> R:
-    """Run blocking subscriber code on the shared pool instead of the one sync thread.
-
-    A long-lived socket opens no thread-sensitive context, so such calls serialize.
-    """
-    call = _fresh_links(func, *args, **kwargs)
-    return await sync_to_async(call, thread_sensitive=False)()
-
-
-async def run_pooled[**P, R](
-    executor: ThreadPoolExecutor,
-    func: Callable[P, R],
-    *args: P.args,
-    **kwargs: P.kwargs,
-) -> R:
-    """Run blocking code on its own pool, so it never queues the shared one."""
-    call = _fresh_links(func, *args, **kwargs)
-    return await sync_to_async(call, thread_sensitive=False, executor=executor)()
-
-
-def _fresh_links[**P, R](
-    func: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> Callable[[], R]:
-    """Wrap a call in `close_old_connections`, as a request cycle would."""
-
-    def call() -> R:
-        close_old_connections()
-        try:
-            return func(*args, **kwargs)
-        finally:
-            close_old_connections()
-
-    return call
 
 
 class AccessCheck:
@@ -213,12 +151,4 @@ class SocketAccessCheck(AccessCheck):
         return ticket_binding().live(key)
 
 
-__all__ = [
-    "Access",
-    "AccessCheck",
-    "SocketAccessCheck",
-    "TopicAuthorizer",
-    "heartbeat_seconds",
-    "run_detached",
-    "run_pooled",
-]
+__all__ = ["Access", "AccessCheck", "SocketAccessCheck", "TopicAuthorizer"]

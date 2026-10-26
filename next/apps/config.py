@@ -96,7 +96,6 @@ if TYPE_CHECKING:
 
 _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     reload_on_setting_changed,
-    forget_transports,
     forget_trusted_origins,
     forget_app_page_roots,
     forget_urlconf_translations,

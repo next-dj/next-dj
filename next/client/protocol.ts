@@ -60,7 +60,6 @@ export interface Diagnostics {
 export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
-export const ATTR_SSE = "data-next-sse";
 export const ATTR_STREAM = "data-next-stream";
 export const ATTR_POLL = "data-next-poll";
 export const ATTR_TRANSPORT = "data-next-transport";

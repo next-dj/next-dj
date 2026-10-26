@@ -10,13 +10,13 @@ from django.test import AsyncRequestFactory, RequestFactory
 
 from next import signals as framework_signals
 from next.partial import Patches
-from next.realtime import TopicStream, access as access_module, apublish, publish
+from next.realtime import TopicStream, apublish, pool as pool_module, publish
 from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.errors import BrokerConnectionError
+from next.realtime.lifecycle import StreamLifecycle
 from next.realtime.messages import Message
 from next.realtime.signals import (
-    StreamLifecycle,
     UnsubscribeReason,
     stream_subscribed,
     stream_unsubscribed,
@@ -672,7 +672,7 @@ class TestPooledSend:
     ) -> None:
         steps: list[str] = []
         monkeypatch.setattr(
-            access_module, "close_old_connections", lambda: steps.append("clean")
+            pool_module, "close_old_connections", lambda: steps.append("clean")
         )
 
         def receiver(**_kwargs: object) -> None:
@@ -749,6 +749,24 @@ class TestPooledSend:
         assert pooled.levelname == django.levelname == "ERROR"
         assert pooled.exc_info is not None
         assert isinstance(pooled.exc_info[1], ValueError)
+
+    def test_django_splits_the_live_receivers_into_sync_and_async(self) -> None:
+        def blocking(**_kwargs: object) -> None:
+            return None
+
+        async def waiting(**_kwargs: object) -> None:
+            return None
+
+        stream_subscribed.connect(blocking, weak=False)
+        stream_subscribed.connect(waiting, weak=False)
+        try:
+            sync, asynchronous = stream_subscribed._live_receivers(object)
+        finally:
+            stream_subscribed.disconnect(blocking)
+            stream_subscribed.disconnect(waiting)
+        assert blocking in sync
+        assert waiting in asynchronous
+        assert waiting not in sync
 
     def test_a_signal_without_receivers_answers_nothing(self) -> None:
         assert asyncio.run(stream_subscribed.asend_robust(sender=object)) == []

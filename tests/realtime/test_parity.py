@@ -1,34 +1,37 @@
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from contextlib import AbstractAsyncContextManager
 from functools import partial
 
 import pytest
-from django.test import AsyncRequestFactory
 
+from next.partial import Patches
 from next.realtime import (
-    TopicStream,
-    WebSocketApp,
+    BrokerBackend,
+    Position,
     apublish,
     socket as socket_module,
     topics as topics_module,
 )
-from next.realtime.access import AccessCheck, SocketAccessCheck
+from next.realtime.access import Access, AccessCheck, SocketAccessCheck
+from next.realtime.frames import Close
+from next.realtime.manager import broker_manager
 from next.realtime.messages import Message
-from next.testing import SseReader, memory_broker
-from next.testing.realtime import (
-    SocketTicket,
-    WebSocketCommunicator,
-    override_websocket_mount,
+from tests.support.realtime import (
+    ROOM_TOPIC,
+    PlainBroker,
+    ResumingClient,
+    ServerClock,
+    Wire,
+    WireFrame,
+    WireOpener,
+    publish_during,
+    published,
+    refresh_envelope,
 )
-from tests.support.realtime import ServerClock, issue_session_ticket, refresh_envelope
 
 
 _HERE = "tests.realtime.test_parity"
-_TOPIC = "room:42"
 _GRANTS = {"room": True}
-_Observation = tuple[object, ...]
 
 
 def toggled_authorizer(_user: object, topic: str) -> bool:
@@ -39,10 +42,10 @@ def skip_everything(_message: Message) -> None:
     return None
 
 
-@dataclass
-class _Wire:
-    hello: dict[str, object]
-    receive: Callable[[], Awaitable[_Observation]]
+def skip_second(message: Message) -> Patches | None:
+    if message.seq == 2:
+        return None
+    return Patches(None).event("room:update", {"seq": message.seq})
 
 
 @pytest.fixture(autouse=True)
@@ -51,8 +54,7 @@ def _grant_the_room() -> None:
 
 
 @pytest.fixture()
-def clock(monkeypatch: pytest.MonkeyPatch) -> ServerClock:
-    clock = ServerClock(0.0)
+def access_clock(monkeypatch: pytest.MonkeyPatch, clock: ServerClock) -> ServerClock:
     monkeypatch.setattr(
         socket_module, "SocketAccessCheck", partial(SocketAccessCheck, clock=clock)
     )
@@ -60,81 +62,128 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> ServerClock:
     return clock
 
 
-@asynccontextmanager
-async def _over_sse() -> AsyncIterator[_Wire]:
-    stream = TopicStream(
-        AsyncRequestFactory().get("/rooms/42/stream/"),
-        _TOPIC,
-        transform=skip_everything,
-        authorize=toggled_authorizer,
-        heartbeat_seconds=15,
-    )
-    async with SseReader(stream) as events:
-        hello = await anext(events)
-        assert hello.event == "next-hello"
-
-        async def receive() -> _Observation:
-            event = await anext(events)
-            body = event.json()
-            if event.event == "next-skip":
-                return ("skip", body["topic"], body["seq"])
-            assert event.event == "next-end"
-            return ("end", body["code"])
-
-        yield _Wire(hello.json(), receive)
-
-
-@asynccontextmanager
-async def _over_websocket(ticket: SocketTicket) -> AsyncIterator[_Wire]:
-    communicator = WebSocketCommunicator(
-        WebSocketApp(),
-        "/_next/ws/",
-        headers=[
-            (b"host", b"testserver"),
-            (b"origin", b"http://testserver"),
-            ticket.cookie,
-        ],
-    )
-    connected, _ = await communicator.connect()
-    assert connected
-    hello = await communicator.subscribe(ticket)
-
-    async def receive() -> _Observation:
-        frame = await communicator.receive_json_from()
-        if frame["type"] == "skip":
-            return ("skip", frame["topic"], frame["seq"])
-        assert frame["type"] == "error"
-        return ("end", frame["code"])
-
-    try:
-        yield _Wire(hello, receive)
-    finally:
-        await communicator.disconnect()
-
-
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize("transport", ["sse", "ws"])
-def test_both_transports_say_hello_skip_and_end_on_a_revoked_grant(
-    transport: str, clock: ServerClock
+@pytest.mark.usefixtures("memory_broker")
+def test_revoked_grant_says_hello_skip_and_end(
+    wire: WireOpener, access_clock: ServerClock
 ) -> None:
-    ticket = issue_session_ticket(
+    opening = wire(
         authorizer_ref=f"{_HERE}.toggled_authorizer",
         transform_ref=f"{_HERE}.skip_everything",
     )
 
-    async def scenario() -> tuple[object, list[_Observation]]:
-        wire = _over_sse() if transport == "sse" else _over_websocket(ticket)
-        async with wire as opened:
-            await apublish(_TOPIC, refresh_envelope())
-            skipped = await opened.receive()
+    async def scenario() -> list[object]:
+        async with opening as client:
+            hello = await client.receive()
+            await apublish(ROOM_TOPIC, refresh_envelope())
+            skipped = await client.receive()
             _GRANTS["room"] = False
-            clock.advance(10_000)
-            await apublish(_TOPIC, refresh_envelope())
-            ended = await opened.receive()
-        return opened.hello["topics"], [skipped, ended]
+            access_clock.advance(10_000)
+            await apublish(ROOM_TOPIC, refresh_envelope())
+            ended = await client.receive()
+            closed = await client.ends()
+        assert (hello.topic, hello.epoch) == (ROOM_TOPIC, "")
+        return [hello.trace, skipped.trace, ended.trace, closed]
 
-    with memory_broker(), override_websocket_mount():
-        topics, observed = asyncio.run(scenario())
+    closed = Close.TOPIC_DENIED if wire.transport == "ws" else None
+    traced = [("hello", 0), ("skip", 1), ("end", "auth"), closed]
+    assert asyncio.run(scenario()) == traced
 
-    assert topics == {_TOPIC: {"epoch": "", "seq": 0}}
-    assert observed == [("skip", _TOPIC, 1), ("end", "auth")]
+
+def _resumed(
+    opening: AbstractAsyncContextManager[Wire],
+    broker: BrokerBackend,
+    count: int,
+    *,
+    live: int = 0,
+) -> list[WireFrame]:
+    """Read `count` frames, publish `live` more and read those too."""
+
+    async def scenario() -> list[WireFrame]:
+        async with opening as client:
+            frames = await client.frames(count)
+            for _ in range(live):
+                await broker.apublish(ROOM_TOPIC, refresh_envelope())
+            return frames + await client.frames(live)
+
+    return asyncio.run(scenario())
+
+
+def test_cursor_in_the_current_epoch_replays_the_gap_before_hello(
+    wire: WireOpener, replaying_broker: BrokerBackend
+) -> None:
+    epoch = published(replaying_broker, 3)
+    opening = wire(cursor=Position(epoch, 1))
+    frames = _resumed(opening, replaying_broker, 3, live=1)
+    assert [frame.trace for frame in frames] == [2, 3, ("hello", 3), 4]
+    assert {frame.epoch for frame in frames} == {epoch}
+
+
+@pytest.mark.parametrize(
+    ("step", "expected"),
+    [("positions", [2, 3, 4, ("hello", 4), 4]), ("replay", [2, 3, ("hello", 3), 4])],
+    ids=["before-snapshot", "during-replay"],
+)
+def test_live_message_around_replay_is_neither_lost_nor_applied_twice(
+    wire: WireOpener,
+    replaying_broker: BrokerBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    step: str,
+    expected: list[object],
+) -> None:
+    epoch = published(replaying_broker, 3)
+    publish_during(replaying_broker, step, monkeypatch)
+    opening = wire(cursor=Position(epoch, 1))
+    frames = _resumed(opening, replaying_broker, len(expected))
+    assert [frame.trace for frame in frames] == expected
+    client = ResumingClient({ROOM_TOPIC: (epoch, 1)})
+    for frame in frames:
+        client.read(frame)
+    assert client.applied == [(ROOM_TOPIC, epoch, seq) for seq in (2, 3, 4)]
+    assert client.dropped == [(ROOM_TOPIC, epoch, 4)] * (len(expected) - 4)
+    assert client.gaps == []
+    assert client.cursors == {ROOM_TOPIC: (epoch, 4)}
+
+
+def test_replayed_messages_pass_through_the_transform(
+    wire: WireOpener, replaying_broker: BrokerBackend
+) -> None:
+    epoch = published(replaying_broker, 3)
+    opening = wire(cursor=Position(epoch, 1), transform_ref=f"{_HERE}.skip_second")
+    skipped, replayed, hello = _resumed(opening, replaying_broker, 3)
+    assert (skipped.kind, skipped.epoch, skipped.seq) == ("skip", epoch, 2)
+    assert replayed.seq == 3
+    assert replayed.data["ops"][0]["name"] == "room:update"
+    assert hello.trace == ("hello", 3)
+
+
+def test_access_revoked_during_replay_ends_before_hello(
+    wire: WireOpener, replaying_broker: BrokerBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    epoch = published(replaying_broker, 3)
+    verdicts = iter([Access.GRANTED, Access.GRANTED, Access.TOPIC_DENIED])
+
+    async def acheck(self: AccessCheck) -> Access:
+        return next(verdicts)
+
+    monkeypatch.setattr(AccessCheck, "check", lambda _self: next(verdicts))
+    monkeypatch.setattr(AccessCheck, "acheck", acheck)
+    opening = wire(cursor=Position(epoch, 1))
+
+    async def scenario() -> list[object]:
+        async with opening as client:
+            frames = await client.frames(2)
+            return [*(frame.trace for frame in frames), await client.ends()]
+
+    closed = Close.TOPIC_DENIED if wire.transport == "ws" else None
+    assert asyncio.run(scenario()) == [2, ("end", "auth"), closed]
+
+
+def test_broker_without_replay_goes_straight_to_hello(
+    wire: WireOpener, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = PlainBroker()
+    monkeypatch.setattr(broker_manager, "_backend", broker)
+    epoch = published(broker, 3)
+    opening = wire(cursor=Position(epoch, 1))
+    frames = _resumed(opening, broker, 1, live=1)
+    assert [frame.trace for frame in frames] == [("hello", 3), 4]

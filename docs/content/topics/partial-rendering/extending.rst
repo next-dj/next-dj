@@ -234,9 +234,6 @@ The example below keeps compact JSON and wraps it in an object of its own, which
        def deserialize_envelope(self, body: bytes) -> Envelope:
            return Envelope.from_dict(json.loads(body.decode("utf-8"))["envelope"])
 
-       def sse_event(self, envelope: Envelope) -> str:
-           data = self.serialize_envelope(envelope).decode("utf-8")
-           return f"event: next-patches\ndata: {data}\n\n"
 
 .. code-block:: python
    :caption: settings.py
@@ -249,12 +246,11 @@ The example below keeps compact JSON and wraps it in an object of its own, which
 
 ``content_type`` is stamped on every patch response and is the marker the runtime keys on, so the client learns the new type through a ``Next.partial.parseHook`` registered for it, see :doc:`/content/ref/client`.
 ``serialize_envelope`` and ``deserialize_envelope`` are inverses, because a reader such as the test-client helper parses a response through the backend that wrote it.
-``sse_event`` frames one envelope for a manual stream and keeps the ``next-patches`` event name.
 The constructor receives the whole ``PARTIAL_BACKENDS`` entry and exposes its ``OPTIONS`` mapping through ``self.options``, so a format of its own reads its own keys there.
 
-A topic stream frames each message through ``sse_stream_event(envelope, meta)``, where ``meta`` is a ``StreamMeta`` of ``server_time``, ``topic``, ``epoch``, and ``seq``.
-The JSON backend merges those keys into the envelope only while ``sse_event`` is its own, so the override above keeps its wrapper and the stream frame loses the metadata.
-The example therefore also overrides ``sse_stream_event`` to put the metadata where its parse hook reads it.
+A topic stream frames each message through ``stream_data(envelope, meta)``, where ``meta`` is a ``StreamMeta`` of ``server_time``, ``topic``, ``epoch``, and ``seq``.
+The base class builds the SSE frame from it, so a codec overrides this one method for both transports.
+The example overrides ``stream_data`` to put the metadata where its parse hook reads it.
 
 .. code-block:: python
    :caption: wire/backends.py, carrying stream metadata
@@ -268,15 +264,14 @@ The example therefore also overrides ``sse_stream_event`` to put the metadata wh
    class StreamingWrappedJsonBackend(WrappedJsonBackend):
        """Carry the stream metadata inside the same wrapper."""
 
-       def sse_stream_event(self, envelope: Envelope, meta: StreamMeta) -> str:
+       def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
            payload = {"wire": 1, "envelope": envelope.as_dict(), "meta": meta.as_dict()}
-           data = json.dumps(payload, separators=(",", ":"))
-           return f"event: next-patches\ndata: {data}\n\n"
+           return json.dumps(payload, separators=(",", ":"))
 
 Every SSE frame reaches ``Next.partial.parseHook`` registered for the backend's ``content_type``.
 A WebSocket ``patches`` frame reaches it too when its ``data`` is text.
-The stock ``JsonPartialProtocolBackend`` sends an object instead and skips the hook, but only with the stock ``content_type`` and neither ``sse_event`` nor ``sse_stream_event`` overridden.
-A backend with its own ``content_type`` or SSE framing sends the ``data:`` text of ``sse_stream_event`` unchanged, so a non-JSON format works on both transports.
+The stock ``JsonPartialProtocolBackend`` sends an object instead and skips the hook, but only with the stock ``content_type``.
+A backend whose ``stream_data`` returns text sends that text unchanged, as the ``data:`` lines of the SSE frame and as the ``data`` of the WebSocket frame, so a non-JSON format works on both transports.
 The hook must return the regular patch envelope with ``topic``, ``epoch``, ``seq``, and ``server_time`` beside it, so the runtime can apply the patches, detect gaps and epoch changes, and keep topic listeners informed.
 
 The ``next-hello``, ``next-skip``, and ``next-end`` control frames are a fixed JSON schema that the client parses without the hook.

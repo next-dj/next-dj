@@ -153,7 +153,7 @@ The authorization of that page is therefore the first gate on the stream.
 Row-level access that a topic callback does not express belongs in that guarded page.
 
 An importable ``authorize(user, topic)`` callback on ``TopicStream`` keeps protecting the stream after the page guard ran, over SSE and WebSocket alike.
-Each connection rechecks its session and calls the callback at most once per ``REALTIME['HEARTBEAT']`` interval, so a revocation is noticed within about two heartbeat intervals plus the callback's latency.
+Each connection rechecks its session and calls the callback at most once per heartbeat interval, so a revocation is noticed within about two heartbeat intervals plus the callback's latency.
 A topic denial ends an SSE stream with a terminal ``next-end`` frame, while a revoked session ends it without one so the reconnect meets the page guard again.
 A denied socket closes with ``4401`` for a session problem or ``4403`` for a topic denial.
 
@@ -170,7 +170,7 @@ WebSocket negotiation issues a short-lived session-bound ticket through that gua
 The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
 A ticket is signed from ``SECRET_KEY`` and stays reusable until ``REALTIME['TICKET_MAX_AGE']``, see :doc:`/content/ref/realtime`.
 If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
-The default binding needs a server-side session engine, because a signed-cookie session outlives logout and re-signs on every save, and ``next.W142`` reports it.
+The default binding needs a server-side session engine, and ``next.W142`` reports the signed-cookie engine, see :ref:`topics-realtime-signed-cookie`.
 ``SignedCookieBinding`` serves the signed-cookie engine, keeps an open socket running after logout, and ``next.W147`` reports it next to a server-side engine.
 A handler sees an opaque ``subject`` digest of the identity and never the session key or another credential.
 Under the default binding the socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.

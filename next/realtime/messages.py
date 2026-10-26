@@ -1,9 +1,9 @@
 """Immutable broker messages, topic positions and the topic names that address them."""
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from next.partial.envelope import Envelope
 
@@ -12,6 +12,8 @@ from .errors import InvalidTopicError
 
 _TOPIC = re.compile(r"[A-Za-z0-9_.:-]{1,200}")
 _RESERVED_PREFIX = "next:"
+MAX_TOPICS: Final = 64
+"""The most topics one ticket grants and one subscribe frame carries a cursor for."""
 
 
 def validate_topic(topic: str) -> str:
@@ -23,12 +25,32 @@ def validate_topic(topic: str) -> str:
     return topic
 
 
+def validate_topics(
+    topics: Iterable[str], *, at_least_one: bool = False
+) -> tuple[str, ...]:
+    """Return the valid topics once each in first-seen order, raising for a bad one."""
+    selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
+    if at_least_one and not selected:
+        msg = "A realtime subscription needs at least one topic."
+        raise ValueError(msg)
+    return selected
+
+
 @dataclass(frozen=True, slots=True)
 class Position:
     """The latest sequence of a topic within the counter epoch that numbered it."""
 
     epoch: str
     seq: int
+
+    @property
+    def cursor(self) -> str:
+        """Return the `<epoch>:<seq>` form an SSE id and `manage.py realtime` use."""
+        return f"{self.epoch}:{self.seq}"
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe `{epoch, seq}` mapping of the position."""
+        return {"epoch": self.epoch, "seq": self.seq}
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,4 +118,4 @@ class Message:
         return cls(topic, seq, decoded, float(published_at), epoch)
 
 
-__all__ = ["Message", "Position", "validate_topic"]
+__all__ = ["MAX_TOPICS", "Message", "Position", "validate_topic", "validate_topics"]

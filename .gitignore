@@ -158,5 +158,3 @@ coverage/
 
 # sphinx docs build outputs
 docs/_build*/
-
-tests/load/results/

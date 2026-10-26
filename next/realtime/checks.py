@@ -1,8 +1,5 @@
 """System checks for realtime broker settings and optional dependencies."""
 
-import importlib.util
-import inspect
-import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from django.conf import settings
@@ -18,18 +15,17 @@ from django.urls import URLPattern, URLResolver, get_resolver
 
 from next.checks import NEXT
 from next.checks.common import errors_for_unknown_keys
-from next.conf import import_class_cached
 from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
 
-from .backends import BrokerBackend, MemoryBroker
+from .backends import BrokerBackend
 from .binding import binding_class
 from .deployment import websocket_deployment_messages
 from .frames import MAX_INBOUND_BYTES
 from .handlers import (
     MAX_NAME_LENGTH,
     MAX_PATTERN_LENGTH,
-    Binding,
+    Route,
     handler_registry,
     valid_modules,
     valid_name,
@@ -44,12 +40,13 @@ from .limits import (
     UPSTREAM_KEYS,
     valid_burst,
     valid_concurrency,
+    valid_heartbeat,
     valid_max_bytes,
     valid_rate,
     valid_reply_bytes,
     valid_timeout,
 )
-from .redis import RedisBroker, valid_prefix
+from .manager import broker_class
 from .replay import (
     MAX_SIZE,
     MAX_TTL,
@@ -69,11 +66,11 @@ from .roster import (
     valid_snapshot_size,
     valid_window,
 )
+from .tickets import MAX_TICKET_AGE, valid_ticket_age, valid_ws_path
 from .views import TicketIntrospectionView
 
 
 _PREFIX = "NEXT_FRAMEWORK['REALTIME']"
-_OPTIONS = f"{_PREFIX}['BROKER']['OPTIONS']"
 _BROKER_KEYS = frozenset({"BACKEND", "OPTIONS"})
 _REALTIME_KEYS = frozenset(
     {
@@ -91,18 +88,6 @@ _REALTIME_KEYS = frozenset(
         "TUNNEL",
     }
 )
-_BROKER_OPTIONS = {
-    "next.realtime.backends.MemoryBroker": frozenset({"QUEUE_SIZE"}),
-    "next.realtime.redis.RedisBroker": frozenset(
-        {"URL", "PREFIX", "HEALTH_CHECK_INTERVAL", "CLIENT"}
-    ),
-}
-_REDIS_BACKENDS = frozenset(
-    {"next.realtime.RedisBroker", "next.realtime.redis.RedisBroker"}
-)
-_MAX_TICKET_AGE = 600
-_DEFAULT_TICKET_AGE = 60
-_DEFAULT_HEARTBEAT = 25.0
 
 
 @register(NEXT)
@@ -131,26 +116,18 @@ def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
             ),
         ]
     errors.extend(_transport_errors(realtime))
-    age = realtime.get("TICKET_MAX_AGE", _DEFAULT_TICKET_AGE)
-    if (
-        not isinstance(age, int)
-        or isinstance(age, bool)
-        or not 1 <= age <= _MAX_TICKET_AGE
+    if "TICKET_MAX_AGE" in realtime and not valid_ticket_age(
+        realtime["TICKET_MAX_AGE"]
     ):
         errors.append(
             Error(
-                f"{_PREFIX}['TICKET_MAX_AGE'] must be an integer from 1 to 600.",
+                f"{_PREFIX}['TICKET_MAX_AGE'] must be an integer from 1 to "
+                f"{MAX_TICKET_AGE}.",
                 obj=settings,
                 id="next.E182",
             )
         )
-    ws_path = realtime.get("WS_PATH", "/_next/ws/")
-    if (
-        not isinstance(ws_path, str)
-        or not ws_path.startswith("/")
-        or "?" in ws_path
-        or "#" in ws_path
-    ):
+    if "WS_PATH" in realtime and not valid_ws_path(realtime["WS_PATH"]):
         errors.append(
             Error(
                 f"{_PREFIX}['WS_PATH'] must be absolute and have no query or fragment.",
@@ -190,18 +167,16 @@ def _binding_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
 
 
 def _heartbeat_errors(realtime: Mapping[str, object]) -> list[CheckMessage]:
-    """Require a positive finite heartbeat interval in seconds."""
-    heartbeat = realtime.get("HEARTBEAT", _DEFAULT_HEARTBEAT)
-    if (
-        isinstance(heartbeat, int | float)
-        and not isinstance(heartbeat, bool)
-        and math.isfinite(heartbeat)
-        and heartbeat > 0
-    ):
+    """Require a positive finite WebSocket ping interval in seconds."""
+    if "HEARTBEAT" not in realtime or valid_heartbeat(realtime["HEARTBEAT"]):
         return []
     return [
         Error(
             f"{_PREFIX}['HEARTBEAT'] must be a positive finite number of seconds.",
+            hint=(
+                "It times the WebSocket ping, an SSE stream takes its heartbeat from "
+                "the HEARTBEAT_SECONDS option of the partial backend."
+            ),
             obj=settings,
             id="next.E185",
         )
@@ -422,7 +397,7 @@ def _presence_warnings(
     """
     if "PRESENCE" not in realtime:
         return []
-    backend_class = _broker_class(broker.get("BACKEND"))
+    backend_class = _broker_class(broker)
     if backend_class is None or issubclass(backend_class, PresenceBroker):
         return []
     return [
@@ -480,8 +455,7 @@ def _broker_errors(broker: Mapping[str, object]) -> list[CheckMessage]:
             dict(broker), allowed=_BROKER_KEYS, prefix=f"{_PREFIX}['BROKER']"
         )
     )
-    backend = broker.get("BACKEND")
-    backend_class = _broker_class(backend)
+    backend_class = _broker_class(broker)
     options = broker.get("OPTIONS")
     if options is not None and not isinstance(options, Mapping):
         errors.append(
@@ -491,9 +465,9 @@ def _broker_errors(broker: Mapping[str, object]) -> list[CheckMessage]:
                 id="next.E180",
             )
         )
-    if isinstance(options, Mapping):
-        errors.extend(_option_errors(options, backend_class))
-    errors.extend(_dependency_errors(backend, backend_class))
+    if backend_class is not None:
+        checked = options if isinstance(options, Mapping) else {}
+        errors.extend(backend_class.check_options(checked))
     errors.extend(_replay_warnings(backend_class))
     if backend_class is None:
         errors.append(
@@ -533,123 +507,19 @@ def _replay_warnings(backend_class: type[BrokerBackend] | None) -> list[CheckMes
     ]
 
 
-def _broker_class(backend: object) -> type[BrokerBackend] | None:
-    """Resolve the class without constructing optional backend resources."""
-    if backend is None:
-        return MemoryBroker
+def _broker_class(broker: Mapping[str, object]) -> type[BrokerBackend] | None:
+    """Resolve the class the broker manager would build, None when it cannot."""
     try:
-        klass = import_class_cached(backend) if isinstance(backend, str) else None
-    except ImportError:
+        return broker_class(broker)
+    except ImproperlyConfigured:
         return None
-    if (
-        isinstance(klass, type)
-        and issubclass(klass, BrokerBackend)
-        and not inspect.isabstract(klass)
-    ):
-        return klass
-    return None
-
-
-def _option_errors(
-    options: Mapping[str, object], backend_class: type[BrokerBackend] | None
-) -> list[CheckMessage]:
-    """Check built-in options while leaving custom backend options to their owner."""
-    if backend_class is None:
-        return []
-    qualified = f"{backend_class.__module__}.{backend_class.__qualname__}"
-    allowed = _BROKER_OPTIONS.get(qualified)
-    if allowed is None:
-        return []
-    errors = errors_for_unknown_keys(dict(options), allowed=allowed, prefix=_OPTIONS)
-    if backend_class is MemoryBroker:
-        size = options.get("QUEUE_SIZE", 256)
-        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
-            errors.append(
-                Error(
-                    f"{_OPTIONS}['QUEUE_SIZE'] must be a positive integer.",
-                    obj=settings,
-                    id="next.E178",
-                )
-            )
-    if backend_class is RedisBroker:
-        errors.extend(_redis_option_errors(options))
-    return errors
-
-
-def _redis_option_errors(options: Mapping[str, object]) -> list[CheckMessage]:
-    """Check the Redis prefix, interval and client keywords the broker validates."""
-    errors: list[CheckMessage] = []
-    if "PREFIX" in options and not valid_prefix(options["PREFIX"]):
-        errors.append(
-            Error(
-                f"{_OPTIONS}['PREFIX'] must be a string with a non-colon character "
-                "and no { or }.",
-                hint="A brace moves the Redis Cluster hash tag off the topic name.",
-                obj=settings,
-                id="next.E192",
-            )
-        )
-    interval = options.get("HEALTH_CHECK_INTERVAL", 0)
-    if (
-        not isinstance(interval, int | float)
-        or isinstance(interval, bool)
-        or not math.isfinite(interval)
-        or interval < 0
-    ):
-        errors.append(
-            Error(
-                f"{_OPTIONS}['HEALTH_CHECK_INTERVAL'] must be a non-negative number "
-                "of seconds.",
-                obj=settings,
-                id="next.E186",
-            )
-        )
-    client = options.get("CLIENT", {})
-    if (
-        not isinstance(client, Mapping)
-        or not all(isinstance(key, str) for key in client)
-        or client.get("decode_responses", True) is not True
-    ):
-        errors.append(
-            Error(
-                f"{_OPTIONS}['CLIENT'] must be a mapping of keyword names that "
-                "keeps decode_responses on.",
-                obj=settings,
-                id="next.E187",
-            )
-        )
-    return errors
-
-
-def _dependency_errors(
-    backend: object, backend_class: type[BrokerBackend] | None
-) -> list[CheckMessage]:
-    """Report a missing redis package for the public and module-qualified paths."""
-    qualified = (
-        f"{backend_class.__module__}.{backend_class.__qualname__}"
-        if backend_class is not None
-        else backend
-        if isinstance(backend, str)
-        else ""
-    )
-    if qualified in _REDIS_BACKENDS and importlib.util.find_spec("redis") is None:
-        return [
-            Error(
-                f"{_PREFIX} selects RedisBroker but the redis package is not "
-                "installed.",
-                hint="Install next.dj[broker].",
-                obj=settings,
-                id="next.E179",
-            )
-        ]
-    return []
 
 
 @register(NEXT)
 def check_upstream_handlers(*args, **kwargs) -> list[CheckMessage]:
     """Report handlers that can never match and pairs two handlers claim."""
     messages: list[CheckMessage] = [
-        Error(_invalid_binding(entry), obj=_handler_label(entry), id="next.E198")
+        Error(_invalid_route(entry), obj=_handler_label(entry), id="next.E198")
         for entry in handler_registry
         if not entry.valid
     ]
@@ -667,8 +537,8 @@ def check_upstream_handlers(*args, **kwargs) -> list[CheckMessage]:
     return messages
 
 
-def _invalid_binding(entry: Binding) -> str:
-    """Describe why a binding can never match."""
+def _invalid_route(entry: Route) -> str:
+    """Describe why a route can never match."""
     if not valid_name(entry.name):
         return (
             f"The upstream event name {entry.name!r} of {_handler_label(entry)} is "
@@ -682,8 +552,8 @@ def _invalid_binding(entry: Binding) -> str:
     )
 
 
-def _handler_label(entry: Binding) -> str:
-    """Return the dotted name of a binding's handler."""
+def _handler_label(entry: Route) -> str:
+    """Return the dotted name of a route's handler."""
     handler = entry.handler
     module = getattr(handler, "__module__", None) or "?"
     name = getattr(handler, "__qualname__", None) or repr(handler)

@@ -25,8 +25,7 @@ Mount the socket
 
 The socket rechecks its session on the server while it stays open, so ``SESSION_ENGINE`` should store sessions on the server.
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
-The signed-cookie engine re-signs its cookie on every session save, which breaks the ticket of a socket that opens after the save, and ``manage.py check`` reports it as ``next.W142``.
-See :ref:`topics-realtime` for the details.
+The signed-cookie engine breaks the default ticket binding, and ``manage.py check`` reports it as ``next.W142``, see :ref:`topics-realtime-signed-cookie`.
 
 Wrap Django's HTTP ASGI application with ``next.realtime.application``.
 The helper serves the socket at ``REALTIME['WS_PATH']``, loads the Django session from the cookie, and validates the WebSocket Origin the way Django's CSRF check does.

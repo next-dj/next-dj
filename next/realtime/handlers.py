@@ -16,8 +16,8 @@ from django.utils.module_loading import autodiscover_modules
 from next.conf import next_framework_settings
 from next.utils import after_fork
 
-from .access import run_pooled
-from .signals import areceived
+from .lifecycle import areceived
+from .pool import run_pooled
 
 
 type Handler = Callable[[Upstream], Awaitable[None] | None]
@@ -110,7 +110,7 @@ def _runner(handler: Handler) -> Callable[[Upstream], Awaitable[None]]:
 
 
 @dataclass(frozen=True, slots=True)
-class Binding:
+class Route:
     """One handler bound to a topic pattern and an event name."""
 
     pattern: str
@@ -120,14 +120,14 @@ class Binding:
     run: Callable[[Upstream], Awaitable[None]]
 
     @classmethod
-    def bind(cls, pattern: str, name: str, handler: Handler) -> "Binding":
+    def bind(cls, pattern: str, name: str, handler: Handler) -> "Route":
         """Bind a handler, with no matcher when the pattern or the name is invalid."""
         matcher = compile_pattern(pattern) if valid_name(name) else None
         return cls(pattern, name, handler, matcher, _runner(handler))
 
     @property
     def valid(self) -> bool:
-        """Whether the pattern and the name both parse, so the binding can match."""
+        """Whether the pattern and the name both parse, so the route can match."""
         return self.matcher is not None
 
     @property
@@ -166,16 +166,16 @@ def _redefined(held: Handler, handler: Handler) -> bool:
 
 
 class HandlerRegistry:
-    """Hold one binding per topic pattern and event name, in registration order.
+    """Hold one route per topic pattern and event name, in registration order.
 
     A second handler under a taken pair is kept aside for the duplicate check.
     """
 
     def __init__(self) -> None:
         """Start empty."""
-        self._bindings: list[Binding] = []
-        self._index: dict[tuple[str, str], Binding] = {}
-        self._duplicates: dict[tuple[str, str], Binding] = {}
+        self._routes: list[Route] = []
+        self._index: dict[tuple[str, str], Route] = {}
+        self._duplicates: dict[tuple[str, str], Route] = {}
         self._version = 0
 
     @property
@@ -183,14 +183,14 @@ class HandlerRegistry:
         """Monotonic counter bumped on every change, a token for derived memos."""
         return self._version
 
-    def add(self, entry: Binding) -> Binding:
-        """Register a binding, the same function defined again replacing its pair."""
+    def add(self, entry: Route) -> Route:
+        """Register a route, the same function defined again replacing its pair."""
         key = (entry.pattern, entry.name)
         held = self._index.get(key)
         if held is None:
-            self._bindings.append(entry)
+            self._routes.append(entry)
         elif held.handler is entry.handler or _redefined(held.handler, entry.handler):
-            self._bindings[self._bindings.index(held)] = entry
+            self._routes[self._routes.index(held)] = entry
         else:
             self._duplicates[key] = entry
             return held
@@ -198,38 +198,36 @@ class HandlerRegistry:
         self._version += 1
         return entry
 
-    def resolve(
-        self, topic: str, name: str
-    ) -> tuple[Binding, Mapping[str, str]] | None:
-        """Return the binding serving an event and its placeholder values, or None.
+    def resolve(self, topic: str, name: str) -> tuple[Route, Mapping[str, str]] | None:
+        """Return the route serving an event and its placeholder values, or None.
 
         The pattern with the fewest placeholders wins, then the one registered first.
         """
-        best: tuple[Binding, Mapping[str, str]] | None = None
-        for binding in self._bindings:
-            params = binding.match(topic, name)
+        best: tuple[Route, Mapping[str, str]] | None = None
+        for route in self._routes:
+            params = route.match(topic, name)
             if params is None:
                 continue
-            if best is None or binding.placeholders < best[0].placeholders:
-                best = (binding, params)
+            if best is None or route.placeholders < best[0].placeholders:
+                best = (route, params)
         return best
 
-    def duplicates(self) -> tuple[tuple[Binding, Binding], ...]:
-        """Return each held binding with the other handler claiming its pair."""
+    def duplicates(self) -> tuple[tuple[Route, Route], ...]:
+        """Return each held route with the other handler claiming its pair."""
         duplicates = self._duplicates.items()
         return tuple((self._index[key], other) for key, other in duplicates)
 
-    def __iter__(self) -> Iterator[Binding]:
-        """Yield every binding in registration order."""
-        return iter(tuple(self._bindings))
+    def __iter__(self) -> Iterator[Route]:
+        """Yield every route in registration order."""
+        return iter(tuple(self._routes))
 
     def __len__(self) -> int:
-        """Return how many bindings are registered."""
-        return len(self._bindings)
+        """Return how many routes are registered."""
+        return len(self._routes)
 
     def reset(self) -> None:
-        """Drop every binding and every recorded duplicate."""
-        self._bindings.clear()
+        """Drop every route and every recorded duplicate."""
+        self._routes.clear()
         self._index.clear()
         self._duplicates.clear()
         self._version += 1
@@ -245,7 +243,7 @@ def on[H: Handler](pattern: str, name: str) -> Callable[[H], H]:
     """
 
     def decorator(handler: H) -> H:
-        handler_registry.add(Binding.bind(pattern, name, handler))
+        handler_registry.add(Route.bind(pattern, name, handler))
         return handler
 
     return decorator
@@ -301,9 +299,9 @@ def autodiscover_handlers() -> None:
 __all__ = [
     "MAX_NAME_LENGTH",
     "MAX_PATTERN_LENGTH",
-    "Binding",
     "Handler",
     "HandlerRegistry",
+    "Route",
     "Upstream",
     "autodiscover_handlers",
     "compile_pattern",

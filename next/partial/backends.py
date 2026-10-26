@@ -1,6 +1,7 @@
 """Pluggable protocol-backend contract and its JSON wire format implementation."""
 
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, override
 
@@ -15,12 +16,21 @@ if TYPE_CHECKING:
 
 
 _SSE_EVENT_NAME = "next-patches"
+_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
 
 def _sse_json_event(name: str, data: object) -> str:
     """Encode one control event using compact JSON and standard SSE framing."""
     payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
     return f"event: {name}\ndata: {payload}\n\n"
+
+
+def _sse_data_event(name: str, data: dict[str, Any] | str) -> str:
+    """Frame text as one `data:` line per line, and an object as compact JSON."""
+    if not isinstance(data, str):
+        return _sse_json_event(name, data)
+    lines = "".join(f"data: {line}\n" for line in _LINE_BREAK.split(data))
+    return f"event: {name}\n{lines}\n"
 
 
 def _stream_frame(envelope: "Envelope", meta: StreamMeta) -> dict[str, Any]:
@@ -55,26 +65,17 @@ class PartialProtocolBackend(ABC):
         """Serialize one envelope for an HTTP response body."""
 
     @abstractmethod
-    def sse_event(self, envelope: "Envelope") -> str:
-        """Serialize one envelope as an SSE event frame."""
-
-    def sse_stream_event(self, envelope: "Envelope", meta: StreamMeta) -> str:
-        """Serialize one topic frame, dropping the metadata in this fallback.
-
-        A non-JSON codec overrides it to carry `meta`, or clients lose gap detection.
-        """
-        del meta
-        return self.sse_event(envelope)
-
     def stream_data(
         self, envelope: "Envelope", meta: StreamMeta
-    ) -> dict[str, Any] | None:
-        """Return a topic frame as a JSON object, or None for a text-only codec.
+    ) -> dict[str, Any] | str:
+        """Return one topic frame with its `meta`, a JSON object or the codec's text.
 
-        The WebSocket transport sends the object as is, and the SSE data text on None.
+        A WebSocket sends it as is, and the SSE frame of the topic is built from it.
         """
-        del envelope, meta
-        return None
+
+    def sse_stream_event(self, envelope: "Envelope", meta: StreamMeta) -> str:
+        """Serialize one topic frame as the `next-patches` event of its stream data."""
+        return _sse_data_event(_SSE_EVENT_NAME, self.stream_data(envelope, meta))
 
     def sse_hello(self, frame: "Mapping[str, object]") -> str:
         """Serialize a stream handshake control frame in the fixed JSON schema."""
@@ -96,11 +97,6 @@ class PartialProtocolBackend(ABC):
         """
 
 
-def _custom_sse_event(cls: type["JsonPartialProtocolBackend"]) -> bool:
-    """Tell whether a JSON backend subclass overrides `sse_event` with its own shape."""
-    return cls.sse_event is not JsonPartialProtocolBackend.sse_event
-
-
 class JsonPartialProtocolBackend(PartialProtocolBackend):
     """Serialize envelopes as compact JSON under the next.dj patch MIME type.
 
@@ -119,36 +115,17 @@ class JsonPartialProtocolBackend(PartialProtocolBackend):
         return self._dumps(envelope).encode("utf-8")
 
     @override
-    def sse_event(self, envelope: "Envelope") -> str:
-        """Serialize one envelope as an SSE event frame."""
-        return f"event: {_SSE_EVENT_NAME}\ndata: {self._dumps(envelope)}\n\n"
-
-    @override
-    def sse_stream_event(self, envelope: "Envelope", meta: StreamMeta) -> str:
-        """Merge stream metadata into the JSON frame unless `sse_event` is overridden.
-
-        An overridden `sse_event` defines its own SSE shape, so that shape wins.
-        """
-        if _custom_sse_event(type(self)):
-            return super().sse_stream_event(envelope, meta)
-        return _sse_json_event(_SSE_EVENT_NAME, _stream_frame(envelope, meta))
-
-    @override
     def stream_data(
         self, envelope: "Envelope", meta: StreamMeta
-    ) -> dict[str, Any] | None:
-        """Return the SSE frame object, or None under a custom MIME type or SSE shape.
+    ) -> dict[str, Any] | str:
+        """Return the envelope with its metadata, as JSON text under a custom MIME type.
 
         A custom MIME type keys its own client parse hook, which only reads text frames.
         """
-        cls = type(self)
-        if (
-            self.content_type != CONTENT_TYPE
-            or _custom_sse_event(cls)
-            or cls.sse_stream_event is not JsonPartialProtocolBackend.sse_stream_event
-        ):
-            return None
-        return _stream_frame(envelope, meta)
+        frame = _stream_frame(envelope, meta)
+        if self.content_type != CONTENT_TYPE:
+            return json.dumps(frame, separators=(",", ":"), ensure_ascii=False)
+        return frame
 
     @override
     def deserialize_envelope(self, body: bytes) -> "Envelope":

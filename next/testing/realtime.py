@@ -7,7 +7,6 @@ from collections import deque
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from importlib import import_module
 from types import MappingProxyType, TracebackType
 from typing import Self, cast
 from urllib.parse import unquote, urlparse
@@ -23,7 +22,7 @@ from django.http import HttpResponse, StreamingHttpResponse
 from django.test import RequestFactory
 
 from next.realtime.backends import MemoryBroker
-from next.realtime.binding import ticket_binding
+from next.realtime.binding import session_store_class, ticket_binding
 from next.realtime.frames import Refusal, Reply, UpstreamError
 from next.realtime.manager import broker_manager
 from next.realtime.messages import Message
@@ -353,7 +352,7 @@ def issue_socket_ticket(
     """
     extra = dict(cookies or {})
     if session is None:
-        session = import_module(settings.SESSION_ENGINE).SessionStore()
+        session = session_store_class()()
     request = RequestFactory().get("/")
     if session.session_key is not None:
         request.COOKIES[settings.SESSION_COOKIE_NAME] = session.session_key

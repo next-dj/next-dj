@@ -4,7 +4,7 @@ import asyncio
 import logging
 import secrets
 import time
-from collections.abc import AsyncIterable, AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -13,13 +13,7 @@ from typing import TYPE_CHECKING, ClassVar, Final, NoReturn, Protocol, Self
 from next.partial.manager import partial_backend_manager
 
 from . import frames
-from .access import (
-    Access,
-    AccessCheck,
-    SocketAccessCheck,
-    heartbeat_seconds,
-    run_detached,
-)
+from .access import Access, AccessCheck, SocketAccessCheck
 from .attendance import Attendance, Identifier, aattend, aattending
 from .backends import BrokerBackend
 from .binding import opaque_subject, ticket_binding
@@ -37,12 +31,14 @@ from .frames import (
     UpstreamError,
 )
 from .handlers import Upstream, dispatch as dispatch_upstream
-from .limits import SocketLimits, TokenBucket, TunnelLimits
+from .lifecycle import StreamLifecycle, arejected
+from .limits import SocketLimits, TokenBucket, TunnelLimits, heartbeat_seconds
 from .manager import broker_manager
 from .messages import Message, Position
+from .pool import run_detached
 from .replay import acatch_up
-from .roster import Presence, counted, snapshot_message
-from .signals import StreamLifecycle, UnsubscribeReason, arejected
+from .roster import counted, subscriber_snapshot
+from .signals import UnsubscribeReason
 from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
 from .tunnel import Tunnel
 
@@ -417,19 +413,15 @@ class TopicSocket:
             self.handshake.subject,
             self.connection_id,
         )
-        deadline = asyncio.timeout(self._limits.upstream.timeout)
-        try:
-            async with deadline:
-                delivered = await self.handle(upstream)
-        except TimeoutError:
-            if not deadline.expired():
-                logger.exception("Realtime upstream handler for %r failed", frame.name)
-                return UpstreamError.INTERNAL
-            logger.warning("Realtime upstream handler for %r timed out", frame.name)
-            return UpstreamError.TIMEOUT
-        except Exception:
-            logger.exception("Realtime upstream handler for %r failed", frame.name)
-            return UpstreamError.INTERNAL
+        delivered = await _bounded(
+            self.handle(upstream),
+            self._limits.upstream.timeout,
+            timed_out=UpstreamError.TIMEOUT,
+            failed=UpstreamError.INTERNAL,
+            what=f"upstream handler for {frame.name!r}",
+        )
+        if isinstance(delivered, UpstreamError):
+            return delivered
         return None if delivered else UpstreamError.UNKNOWN
 
     async def _rejected(self, frame: Up, reason: UpstreamError) -> None:
@@ -473,19 +465,13 @@ class TopicSocket:
     async def _tunneled(
         self, tunnel: Tunnel, frame: Request, limits: TunnelLimits
     ) -> Reply | Refusal:
-        deadline = asyncio.timeout(limits.timeout)
-        try:
-            async with deadline:
-                return await tunnel(frame, connection=self.connection_id)
-        except TimeoutError:
-            if not deadline.expired():
-                logger.exception("Realtime tunnel request to %s failed", frame.path)
-                return Refusal.INTERNAL
-            logger.warning("Realtime tunnel request to %s timed out", frame.path)
-            return Refusal.TIMEOUT
-        except Exception:
-            logger.exception("Realtime tunnel request to %s failed", frame.path)
-            return Refusal.INTERNAL
+        return await _bounded(
+            tunnel(frame, connection=self.connection_id),
+            limits.timeout,
+            timed_out=Refusal.TIMEOUT,
+            failed=Refusal.INTERNAL,
+            what=f"tunnel request to {frame.path}",
+        )
 
     async def _deliver(self, frame: Subscribe) -> None:
         """Stream the granted topics in the subscribe, join, catch up, hello order.
@@ -568,11 +554,12 @@ class TopicSocket:
 
     async def _snapshots(self, attendance: Attendance, topics: tuple[str, ...]) -> None:
         """Send each topic's current presence right after hello, unnumbered."""
+        identified = self._identify is not None
         for topic in topics:
             snapshot = await attendance.broker.apresence(topic)
-            if self._identify is None:
-                snapshot = Presence(snapshot.count)
-            message = snapshot_message(topic, snapshot, self._clock())
+            message = subscriber_snapshot(
+                topic, snapshot, identified=identified, now=self._clock()
+            )
             await self._writer.send(await self._frame_for(message))
 
     async def _subscribe(self, frame: Subscribe) -> TicketClaims:
@@ -659,6 +646,28 @@ class TopicSocket:
 
     def _now(self) -> int:
         return int(self._clock() * 1000)
+
+
+async def _bounded[T, E](
+    call: Awaitable[T], limit: float, *, timed_out: E, failed: E, what: str
+) -> T | E:
+    """Await a handler within `limit` seconds, returning the outcome of a failure.
+
+    Only an expired deadline is a timeout, a `TimeoutError` the call raised fails.
+    """
+    deadline = asyncio.timeout(limit)
+    try:
+        async with deadline:
+            return await call
+    except TimeoutError:
+        if not deadline.expired():
+            logger.exception("Realtime %s failed", what)
+            return failed
+        logger.warning("Realtime %s timed out", what)
+        return timed_out
+    except Exception:
+        logger.exception("Realtime %s failed", what)
+        return failed
 
 
 __all__ = ["Handshake", "SocketClock", "SocketPort", "TopicSocket"]

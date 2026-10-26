@@ -25,7 +25,9 @@ Implement the broker contract
 
 ``BrokerBackend`` is the abstract root of every broker.
 A subclass implements ``publish``, ``apublish``, ``subscribe``, ``asubscribe``, ``positions``, and ``apositions``, and may override ``close`` and ``aclose``.
-The constructor receives the whole ``BROKER`` entry and exposes its ``OPTIONS`` as ``self.options``, and ``manage.py check`` leaves those options to the backend.
+The constructor receives the whole ``BROKER`` entry and exposes its ``OPTIONS`` as ``self.options``, and ``manage.py check`` hands them to the ``check_options`` classmethod of the backend.
+``check_options(options)`` receives the ``OPTIONS`` mapping and returns a list of Django system check messages, empty by default.
+A third-party broker overrides it to report a bad or missing option as an error before the first request.
 One instance serves the process, so every method runs from many threads and event loops at once.
 
 The rules that matter most are these.
@@ -260,7 +262,7 @@ The broker refuses a ``PREFIX`` with ``{`` or ``}`` when it is created, since a 
 
 Every stream holds one pooled Redis connection, so size ``CLIENT['max_connections']`` for the open streams.
 The ``200`` in the registration below is an example value to size from measurement, see :ref:`deployment-capacity`.
-The default pool raises ``MaxConnectionsError`` when it runs out, and the broker logs a warning on ``next.realtime.redis`` for it.
+The default pool raises ``MaxConnectionsError`` when it runs out, and the broker logs a warning on ``next.realtime.redis.broker`` for it.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 
 Register the backend
@@ -287,8 +289,8 @@ Register the backend
        },
    }
 
-``manage.py check`` leaves the options of a ``RedisBroker`` subclass alone.
-A missing ``SENTINELS`` or ``SERVICE`` therefore raises ``KeyError`` when the broker is created.
+``RedisBroker.check_options`` validates the keys ``RedisBroker`` reads and reports no unknown key for a subclass.
+A missing ``SENTINELS`` or ``SERVICE`` therefore raises ``KeyError`` when the broker is created, unless the subclass overrides ``check_options`` to report it.
 A publisher outside Django passes ``replay={"SIZE": 100, "TTL": 300}`` to the constructor, which then reads no replay setting.
 
 Verification

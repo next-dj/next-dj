@@ -8,11 +8,20 @@ from django.contrib.sessions.backends.signed_cookies import (
     SessionStore as SignedCookieSessionStore,
 )
 from django.core.checks import CheckMessage, Warning as DjangoWarning
-from django.utils.module_loading import import_string
 
 from next.conf.scopes import scope_value
+from next.utils import middleware_listed
 
-from .binding import SessionBinding, SignedCookieBinding, TicketBinding, binding_class
+from .binding import (
+    SessionBinding,
+    SignedCookieBinding,
+    TicketBinding,
+    binding_class,
+    session_store_class,
+)
+
+
+_SESSION_MIDDLEWARE = "django.contrib.sessions.middleware.SessionMiddleware"
 
 
 def websocket_deployment_messages() -> list[CheckMessage]:
@@ -21,8 +30,7 @@ def websocket_deployment_messages() -> list[CheckMessage]:
     `manage.py check` never sees a mounted socket, so the app reports these itself.
     """
     messages: list[CheckMessage] = []
-    middleware = getattr(settings, "MIDDLEWARE", ())
-    sessions = any(item.endswith("SessionMiddleware") for item in middleware)
+    sessions = middleware_listed(settings.MIDDLEWARE, _SESSION_MIDDLEWARE)
     if not sessions and _bound_to(SessionBinding):
         messages.append(
             DjangoWarning(
@@ -93,10 +101,9 @@ def _bound_to(base: type[TicketBinding]) -> bool:
 
 def _session_store() -> type[SessionBase] | None:
     """Return the session engine's store class, None when it does not import."""
-    engine = getattr(settings, "SESSION_ENGINE", "")
     try:
-        store = import_string(f"{engine}.SessionStore")
-    except ImportError:
+        store = session_store_class()
+    except (ImportError, AttributeError):
         return None
     return store if isinstance(store, type) and issubclass(store, SessionBase) else None
 

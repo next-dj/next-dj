@@ -2,22 +2,18 @@
 
 import enum
 import json
-import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Final
 
-from django.core.exceptions import ImproperlyConfigured
-
 from next.partial.backends import PartialProtocolBackend
 from next.partial.stream import StreamMeta, StreamPosition, StreamSkip, stream_hello
 
-from .messages import Message, Position
+from .messages import MAX_TOPICS, Message, Position
 
 
 MAX_INBOUND_BYTES: Final = 64 * 1024
-MAX_CURSOR_TOPICS: Final = 64
 MAX_ID_LENGTH: Final = 64
 SUB_TIMEOUT: Final = 5.0
 
@@ -26,7 +22,6 @@ _SUBSCRIBE_KEYS: Final = frozenset({"type", "ticket", "last_seq"})
 _POSITION_KEYS: Final = frozenset({"epoch", "seq"})
 _UP_KEYS: Final = frozenset({"type", "topic", "name", "data", "id"})
 _REQUEST_KEYS: Final = frozenset({"type", "id", "method", "path", "headers", "body"})
-_SSE_LINE: Final = re.compile(r"\r\n|\r|\n")
 _EMPTY_CURSOR: Final[Mapping[str, Position | int]] = MappingProxyType({})
 
 
@@ -265,7 +260,7 @@ def _cursor(value: object) -> Mapping[str, Position | int]:
     """Read `last_seq`, a bare sequence or an `{epoch, seq}` entry per topic."""
     if value is None:
         return _EMPTY_CURSOR
-    if not isinstance(value, dict) or len(value) > MAX_CURSOR_TOPICS:
+    if not isinstance(value, dict) or len(value) > MAX_TOPICS:
         raise FrameError
     return MappingProxyType(
         {topic: _position(position) for topic, position in value.items()}
@@ -312,26 +307,12 @@ def hello(
 def patches(
     message: Message, backend: PartialProtocolBackend, *, server_time: int
 ) -> str:
-    """Encode a topic message as the backend's JSON object, or its exact SSE data.
+    """Encode a topic message as the stream data of the backend, object or text.
 
     An unnumbered message carries no `seq` or `epoch`, so the client cursor stays.
     """
-    meta = (
-        StreamMeta(
-            server_time=server_time,
-            topic=message.topic,
-            seq=message.seq,
-            epoch=message.epoch,
-        )
-        if message.seq
-        else StreamMeta(server_time=server_time, topic=message.topic)
-    )
-    data: object = backend.stream_data(message.envelope, meta)
-    if data is None:
-        data = _sse_data(backend.sse_stream_event(message.envelope, meta))
-    if data is None:
-        msg = "A partial backend must emit an SSE data field for WebSocket streams."
-        raise ImproperlyConfigured(msg)
+    meta = StreamMeta.of(message, server_time)
+    data = backend.stream_data(message.envelope, meta)
     return _encode({"type": "patches", "data": data})
 
 
@@ -385,20 +366,10 @@ def _encode(frame: dict[str, Any]) -> str:
     return json.dumps(frame, separators=(",", ":"))
 
 
-def _sse_data(frame: str) -> str | None:
-    """Join the `data:` field lines of one SSE frame the way an EventSource does."""
-    values = [
-        line[6:] if line.startswith("data: ") else line[5:]
-        for line in _SSE_LINE.split(frame)
-        if line.startswith("data:")
-    ]
-    return "\n".join(values) if values else None
-
-
 __all__ = [
-    "MAX_CURSOR_TOPICS",
     "MAX_ID_LENGTH",
     "MAX_INBOUND_BYTES",
+    "MAX_TOPICS",
     "SUB_TIMEOUT",
     "Close",
     "FrameError",

@@ -10,11 +10,9 @@ from functools import partial
 from unittest.mock import patch
 
 import pytest
-from django.contrib.auth import get_user_model, login
-from django.contrib.auth.models import AnonymousUser, Permission
-from django.contrib.sessions.backends.db import SessionStore
+from django.contrib.auth.models import AnonymousUser
 from django.dispatch import Signal
-from django.test import RequestFactory, override_settings
+from django.test import override_settings
 
 from next.realtime import Upstream, checks, handlers, socket as socket_module
 from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
@@ -25,8 +23,8 @@ from next.realtime.signals import upstream_received, upstream_rejected
 from next.realtime.socket import Handshake, SocketClock, TopicSocket
 from next.realtime.tickets import TicketClaims
 from next.testing import SignalRecorder, capture_signals
-from next.testing.realtime import MemoryPort, SocketTicket, issue_socket_ticket
-from tests.support.realtime import issue_session_ticket
+from next.testing.realtime import MemoryPort, SocketTicket
+from tests.support.realtime import ServerClock, issue_session_ticket, signed_in_session
 
 
 _GRANTS = {"room": True}
@@ -160,7 +158,7 @@ def _up(name: str, data: object = None, *, topic: str = "room:42", **extra: obje
         ),
     ],
 )
-def test_an_event_with_an_id_is_acknowledged(
+def test_event_with_an_id_is_acknowledged(
     frame: dict[str, object], expected: dict[str, object]
 ) -> None:
     _register()
@@ -178,9 +176,7 @@ def test_an_event_with_an_id_is_acknowledged(
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(("slack", "error"), [(0, None), (-1, "too_big")])
-def test_a_frame_of_exactly_max_bytes_is_delivered(
-    slack: int, error: str | None
-) -> None:
+def test_frame_of_exactly_max_bytes_is_delivered(slack: int, error: str | None) -> None:
     _register()
     ticket = _ticket()
     frame = _up("typing", {"on": True}, id="1")
@@ -265,7 +261,7 @@ def test_two_sockets_of_one_session_get_distinct_connections() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_an_event_without_an_id_gets_no_ack() -> None:
+def test_event_without_an_id_gets_no_ack() -> None:
     _register()
     ticket = _ticket()
 
@@ -285,7 +281,7 @@ def test_an_event_without_an_id_gets_no_ack() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_refused_authorizer_answers_denied_and_closes() -> None:
+def test_refused_authorizer_answers_denied_and_closes() -> None:
     _register()
     ticket = _ticket()
 
@@ -310,7 +306,7 @@ def test_a_refused_authorizer_answers_denied_and_closes() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_refused_event_without_an_id_still_closes() -> None:
+def test_refused_event_without_an_id_still_closes() -> None:
     _register()
     ticket = _ticket()
 
@@ -328,7 +324,7 @@ def test_a_refused_event_without_an_id_still_closes() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_an_event_before_hello_waits_for_the_grant() -> None:
+def test_event_before_hello_waits_for_the_grant() -> None:
     _register()
     ticket = _ticket()
 
@@ -349,7 +345,7 @@ _TIGHT = {"REALTIME": {"UPSTREAM": {"RATE": 0.001, "BURST": 2}}}
 
 
 @pytest.mark.django_db(transaction=True)
-def test_an_empty_bucket_refuses_and_three_refusals_close_with_4429() -> None:
+def test_empty_bucket_refuses_and_three_refusals_close_with_4429() -> None:
     _register()
     ticket = _ticket()
 
@@ -380,19 +376,10 @@ def test_an_empty_bucket_refuses_and_three_refusals_close_with_4429() -> None:
         asyncio.run(scenario())
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 @pytest.mark.django_db(transaction=True)
-def test_an_admitted_frame_resets_the_strikes() -> None:
+def test_admitted_frame_resets_the_strikes(clock: ServerClock) -> None:
     _register()
     ticket = _ticket()
-    clock = _Clock()
     refill = [False, False, False, True, False, False, True]
 
     async def scenario() -> list[object]:
@@ -443,7 +430,7 @@ class _Routing(TopicSocket):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_subclass_routes_events_through_handle() -> None:
+def test_subclass_routes_events_through_handle() -> None:
     _register()
     ticket = _ticket()
 
@@ -465,7 +452,7 @@ def test_a_subclass_routes_events_through_handle() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_slow_handler_times_out_on_its_own_pool() -> None:
+def test_slow_handler_times_out_on_its_own_pool() -> None:
     release = threading.Event()
     threads: list[str] = []
 
@@ -543,7 +530,7 @@ def test_events_past_the_concurrency_are_refused_without_a_strike() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_handler_never_sees_the_session_key_behind_the_subject() -> None:
+def test_handler_never_sees_the_session_key_behind_the_subject() -> None:
     received: list[Upstream] = []
 
     @on("room:{room}", "typing")
@@ -586,7 +573,7 @@ def _rejections(recorder: SignalRecorder) -> list[str]:
         (_up("typing", "x" * 20000, id="1"), "too_big"),
     ],
 )
-def test_a_rejected_event_is_reported_before_its_ack(
+def test_rejected_event_is_reported_before_its_ack(
     frame: dict[str, object], reason: str
 ) -> None:
     _register()
@@ -616,7 +603,7 @@ def test_a_rejected_event_is_reported_before_its_ack(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_delivered_event_is_never_reported_as_rejected() -> None:
+def test_delivered_event_is_never_reported_as_rejected() -> None:
     _register()
     ticket = _ticket()
 
@@ -633,7 +620,7 @@ def test_a_delivered_event_is_never_reported_as_rejected() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_denied_event_is_reported_before_the_close() -> None:
+def test_denied_event_is_reported_before_the_close() -> None:
     _register()
     ticket = _ticket()
 
@@ -678,7 +665,7 @@ def test_refused_events_are_reported_as_limit_with_or_without_an_id() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_an_event_past_the_concurrency_is_reported_as_limit() -> None:
+def test_event_past_the_concurrency_is_reported_as_limit() -> None:
     @on("room:{room}", "hold")
     async def hold(upstream: Upstream) -> None:
         await _GATE["open"].wait()
@@ -715,7 +702,7 @@ class _LoopClock:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_timed_out_event_is_reported_as_timeout() -> None:
+def test_timed_out_event_is_reported_as_timeout() -> None:
     @on("room:{room}", "stall")
     async def stall(upstream: Upstream) -> None:
         _GATE["started"].set()
@@ -746,7 +733,7 @@ def test_a_timed_out_event_is_reported_as_timeout() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_slow_rejected_receiver_never_stalls_the_reads() -> None:
+def test_slow_rejected_receiver_never_stalls_the_reads() -> None:
     _register()
     ticket = _ticket()
     entered = asyncio.Event()
@@ -846,7 +833,7 @@ def test_failing_receivers_leave_the_acks_as_they_were(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_timeout_raised_inside_the_handler_is_internal_not_timeout() -> None:
+def test_timeout_raised_inside_the_handler_is_internal_not_timeout() -> None:
     @on("room:{room}", "raises")
     async def raises(upstream: Upstream) -> None:
         raise TimeoutError
@@ -867,37 +854,15 @@ def test_a_timeout_raised_inside_the_handler_is_internal_not_timeout() -> None:
     assert _rejections(recorder) == ["internal"]
 
 
-class _AccessClock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
-def _signed_in_ticket() -> tuple[object, SocketTicket]:
-    user = get_user_model().objects.create_user(username="writer", password="x")
-    user.user_permissions.add(Permission.objects.get(codename="view_user"))
-    request = RequestFactory().get("/")
-    request.session = SessionStore()
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    request.session.save()
-    ticket = issue_socket_ticket(
-        ("room:42",), authorizer_ref=_AUTHORIZER, session=request.session
-    )
-    return user, ticket
-
-
 @pytest.mark.django_db(transaction=True)
-def test_a_handler_sees_the_user_the_last_recheck_loaded() -> None:
-    user, ticket = _signed_in_ticket()
+def test_handler_sees_the_user_the_last_recheck_loaded(clock: ServerClock) -> None:
+    user, session = signed_in_session("writer", "view_user")
+    ticket = issue_session_ticket(authorizer_ref=_AUTHORIZER, session=session)
     allowed: list[bool] = []
 
     @on("room:{room}", "perm")
     def perm(upstream: Upstream) -> None:
         allowed.append(upstream.user.has_perm("auth.view_user"))
-
-    clock = _AccessClock()
 
     async def scenario() -> None:
         port = MemoryPort()

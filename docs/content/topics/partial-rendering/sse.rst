@@ -90,7 +90,6 @@ The HTTP envelope shape is preserved and ``server_time`` is added only to the SS
 Topic streams also add ``topic``, ``epoch``, and ``seq``.
 The active protocol backend owns the stream codec.
 A ``data-next-stream="/url/"`` element on the page opens an ``EventSource``, or the WebSocket when the server enables it, and routes each event into the same apply pipeline an HTTP response uses.
-``data-next-sse`` is an alias of the same attribute.
 
 The refresh fan-out
 -------------------

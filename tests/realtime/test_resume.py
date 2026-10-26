@@ -6,14 +6,17 @@ import pytest
 from django.core.handlers.asgi import ASGIRequest
 from django.test import AsyncRequestFactory, RequestFactory
 
-from next.partial import Patches
-from next.partial.stream import StreamEnd, StreamHello, StreamSkip
+from next.partial.stream import StreamHello, StreamSkip
 from next.realtime import Message, TopicStream
-from next.realtime.access import Access
 from next.realtime.backends import BrokerBackend
 from next.realtime.manager import broker_manager
 from next.testing import SseEvent, SseReader
-from tests.support.realtime import PlainBroker, ResumingClient, refresh_envelope
+from tests.support.realtime import (
+    ResumingClient,
+    publish_during,
+    published,
+    refresh_envelope,
+)
 
 
 _MAX_PULLS = 50
@@ -21,42 +24,8 @@ _DONE = object()
 
 
 @pytest.fixture()
-def broker(
-    make_broker: Callable[..., BrokerBackend], monkeypatch: pytest.MonkeyPatch
-) -> BrokerBackend:
-    backend = make_broker()
-    monkeypatch.setattr(broker_manager, "_backend", backend)
-    return backend
-
-
-def _publish_during(
-    broker: BrokerBackend, step: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Publish one live message the first time the stream reaches a broker step."""
-    fired: list[bool] = []
-    sync_step = getattr(broker, step)
-    async_step = getattr(broker, f"a{step}")
-
-    def fire() -> None:
-        if not fired:
-            fired.append(True)
-            broker.publish("poll:1", refresh_envelope())
-
-    def publishing(*args: object) -> object:
-        fire()
-        return sync_step(*args)
-
-    async def apublishing(*args: object) -> object:
-        fire()
-        return await async_step(*args)
-
-    monkeypatch.setattr(broker, step, publishing)
-    monkeypatch.setattr(broker, f"a{step}", apublishing)
-
-
-def _published(broker: BrokerBackend, count: int, topic: str = "poll:1") -> str:
-    messages = [broker.publish(topic, refresh_envelope()) for _ in range(count)]
-    return messages[0].epoch
+def broker(replaying_broker: BrokerBackend) -> BrokerBackend:
+    return replaying_broker
 
 
 def _stream(*topics: str, asynchronous: bool, cursor: str | None = None) -> TopicStream:
@@ -117,16 +86,6 @@ def mode(request: pytest.FixtureRequest) -> str:
     return request.param
 
 
-def test_last_event_id_replays_the_missed_messages_before_hello(
-    mode: str, broker: BrokerBackend
-) -> None:
-    epoch = _published(broker, 3)
-    stream = _stream("poll:1", asynchronous=mode == "async", cursor=f"{epoch}:1")
-    items = _items(stream, broker, 3)
-    assert _trace(items) == [2, 3, ("hello", 3)]
-    assert items[-1].topics == {"poll:1": (epoch, 3)}
-
-
 @pytest.mark.parametrize(
     "header",
     [
@@ -146,7 +105,7 @@ def test_malformed_last_event_id_means_no_cursor(
     mode: str, broker: BrokerBackend, header: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(secrets, "token_hex", lambda nbytes: "a1" * nbytes)
-    epoch = _published(broker, 3)
+    epoch = published(broker, 3, "poll:1")
     assert epoch.upper() != epoch
     value = header.format(epoch=epoch, EPOCH=epoch.upper())
     stream = _stream("poll:1", asynchronous=mode == "async", cursor=value)
@@ -157,23 +116,16 @@ def test_malformed_last_event_id_means_no_cursor(
 def test_unreplayable_cursor_falls_back_to_hello_and_resync(
     mode: str, broker: BrokerBackend
 ) -> None:
-    epoch = _published(broker, 3)
+    epoch = published(broker, 3, "poll:1")
     for cursor in (f"{'f' * 16}:1", f"{epoch}:9", f"{epoch}:3"):
         stream = _stream("poll:1", asynchronous=mode == "async", cursor=cursor)
         assert _trace(_items(stream, broker, 1)) == [("hello", 3)]
 
 
-def test_broker_without_replay_goes_straight_to_hello(mode: str) -> None:
-    broker = PlainBroker()
-    epoch = _published(broker, 3)
-    stream = _stream("poll:1", asynchronous=mode == "async", cursor=f"{epoch}:1")
-    assert _trace(_items(stream, broker, 1)) == [("hello", 3)]
-
-
 def test_multi_topic_stream_ignores_last_event_id(
     mode: str, broker: BrokerBackend
 ) -> None:
-    epoch = _published(broker, 3)
+    epoch = published(broker, 3, "poll:1")
     stream = _stream(
         "poll:1", "poll:2", asynchronous=mode == "async", cursor=f"{epoch}:1"
     )
@@ -181,62 +133,10 @@ def test_multi_topic_stream_ignores_last_event_id(
     assert _trace(_items(stream, broker, 1)) == [("hello", 3)]
 
 
-@pytest.mark.parametrize(
-    ("step", "expected"),
-    [("positions", [2, 3, 4, ("hello", 4), 4]), ("replay", [2, 3, ("hello", 3), 4])],
-    ids=["before-snapshot", "during-replay"],
-)
-def test_live_message_around_replay_is_neither_lost_nor_applied_twice(
-    mode: str,
-    broker: BrokerBackend,
-    monkeypatch: pytest.MonkeyPatch,
-    step: str,
-    expected: list[object],
-) -> None:
-    epoch = _published(broker, 3)
-    _publish_during(broker, step, monkeypatch)
-    stream = _stream("poll:1", asynchronous=mode == "async", cursor=f"{epoch}:1")
-    trace = _trace(_items(stream, broker, len(expected)))
-    assert trace == expected
-
-
-def test_replayed_messages_pass_through_the_stream_transform(
-    mode: str, broker: BrokerBackend
-) -> None:
-    epoch = _published(broker, 3)
-    factory = AsyncRequestFactory() if mode == "async" else RequestFactory()
-    request = factory.get("/polls/1/stream/", headers={"Last-Event-ID": f"{epoch}:1"})
-
-    def transform(message: Message):
-        if message.seq == 2:
-            return None
-        return Patches(None).event("poll:update", {"seq": message.seq})
-
-    stream = TopicStream(request, "poll:1", transform=transform, heartbeat_seconds=0.01)
-    items = _items(stream, broker, 3)
-    assert _trace(items) == [("skip", 2), 3, ("hello", 3)]
-    assert items[1].envelope.ops[0].extras["name"] == "poll:update"
-
-
-def test_revoked_access_during_replay_ends_before_hello(
-    mode: str, broker: BrokerBackend, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    epoch = _published(broker, 3)
-    stream = _stream("poll:1", asynchronous=mode == "async", cursor=f"{epoch}:1")
-    verdicts = iter([Access.GRANTED, Access.GRANTED, Access.TOPIC_DENIED])
-
-    async def acheck() -> Access:
-        return next(verdicts)
-
-    monkeypatch.setattr(stream._access, "check", lambda: next(verdicts))
-    monkeypatch.setattr(stream._access, "acheck", acheck)
-    assert _trace(_items(stream, broker, 3)) == [2, StreamEnd("auth")]
-
-
 def test_single_topic_sse_frames_carry_the_epoch_and_seq_as_id(
     broker: BrokerBackend,
 ) -> None:
-    epoch = _published(broker, 2)
+    epoch = published(broker, 2, "poll:1")
     request = RequestFactory().get(
         "/polls/1/stream/", headers={"Last-Event-ID": f"{epoch}:1"}
     )
@@ -265,7 +165,7 @@ def test_multi_topic_sse_frames_carry_no_id(broker: BrokerBackend) -> None:
 
 
 def test_async_sse_stream_resumes_from_last_event_id(broker: BrokerBackend) -> None:
-    epoch = _published(broker, 3)
+    epoch = published(broker, 3, "poll:1")
 
     async def scenario() -> tuple[int | None, list[SseEvent]]:
         request = AsyncRequestFactory().get(
@@ -324,7 +224,7 @@ def test_filtered_stream_resumes_past_the_log_from_its_last_skip(
 ) -> None:
     broker = make_broker(size=2)
     monkeypatch.setattr(broker_manager, "_backend", broker)
-    epoch = _published(broker, 1)
+    epoch = published(broker, 1, "poll:1")
     first = _sse_frames(_filtered("poll:1", mode=mode), 1, live=3)
     assert [frame.id for frame in first] == [f"{epoch}:{seq}" for seq in (1, 2, 3, 4)]
     client = ResumingClient({"poll:1": (epoch, 4)})
@@ -339,7 +239,7 @@ def test_filtered_stream_resumes_past_the_log_from_its_last_skip(
 def test_multi_topic_hello_and_skip_frames_carry_no_id(
     mode: str, broker: BrokerBackend
 ) -> None:
-    _published(broker, 1)
+    published(broker, 1, "poll:1")
     frames = _sse_frames(_filtered("poll:1", "poll:2", mode=mode), 1, live=1)
     assert [(frame.event, frame.id) for frame in frames] == [
         ("next-hello", None),
@@ -370,8 +270,8 @@ def test_client_applies_each_cursor_once_across_replay_and_live_frames(
     events: list[str],
     dropped: list[int],
 ) -> None:
-    epoch = _published(broker, 3)
-    _publish_during(broker, step, monkeypatch)
+    epoch = published(broker, 3, "poll:1")
+    publish_during(broker, step, monkeypatch, "poll:1")
     stream = _stream("poll:1", asynchronous=mode == "async", cursor=f"{epoch}:1")
     client = ResumingClient({"poll:1": (epoch, 1)})
     frames = _sse_frames(stream, len(events))

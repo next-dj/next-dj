@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import math
 import time
 from collections.abc import AsyncIterable
 from typing import TYPE_CHECKING, cast
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING, cast
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
+
+from next.utils import positive_number
 
 from .envelope import Envelope
 from .headers import set_partial_vary
@@ -83,7 +86,9 @@ class PatchStreamWriter(StreamingHttpResponse):
         self._clock = clock if clock is not None else time.monotonic
         self._server_clock = server_clock if server_clock is not None else time.time
         self._heartbeat_seconds = (
-            heartbeat_seconds if heartbeat_seconds is not None else _heartbeat_seconds()
+            heartbeat_seconds
+            if heartbeat_seconds is not None
+            else sse_heartbeat_seconds()
         )
         self._retry_ms = _retry_ms()
         self._opened_at = self._clock()
@@ -253,16 +258,10 @@ class PatchStreamWriter(StreamingHttpResponse):
 
         A message with seq 0 is unnumbered, so it carries no position and no id.
         """
+        frame = backend.sse_stream_event(envelope, StreamMeta.of(message, server_time))
         if message.seq == 0:
-            meta = StreamMeta(server_time=server_time, topic=message.topic)
-            return backend.sse_stream_event(envelope, meta).encode("utf-8")
-        meta = StreamMeta(
-            server_time=server_time,
-            topic=message.topic,
-            seq=message.seq,
-            epoch=message.epoch,
-        )
-        return self._identified(message, backend.sse_stream_event(envelope, meta))
+            return frame.encode("utf-8")
+        return self._identified(message, frame)
 
     def _identified(self, item: "StreamPosition | StreamHello", frame: str) -> bytes:
         """Prefix a codec frame with the `id` line `event_id` gives it, if any."""
@@ -304,15 +303,10 @@ class PatchStreamWriter(StreamingHttpResponse):
 
 
 def _sse_interval(option: str, default: float) -> float:
-    """Return one numeric SSE option of the active backend, or its default.
-
-    A bool is an int to Python but no interval, so `True` falls back to the default.
-    """
+    """Return one positive SSE option of the active backend, or its default."""
     sse = partial_backend_manager.get().options.get(_SSE_OPTION)
     value = sse.get(option, default) if isinstance(sse, dict) else default
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        return float(value)
-    return default
+    return float(value) if positive_number(value, math.inf) else default
 
 
 def _retry_ms() -> int:
@@ -320,8 +314,8 @@ def _retry_ms() -> int:
     return int(_sse_interval(_RETRY_OPTION, _DEFAULT_RETRY_MS))
 
 
-def _heartbeat_seconds() -> float:
-    """Return the heartbeat interval from the active backend options."""
+def sse_heartbeat_seconds() -> float:
+    """Return the SSE heartbeat interval from the active backend options."""
     return _sse_interval(_HEARTBEAT_OPTION, _DEFAULT_HEARTBEAT_SECONDS)
 
 
@@ -342,4 +336,4 @@ class PatchEventStream(PatchStreamWriter):
         )
 
 
-__all__ = ["PatchEventStream", "PatchStreamWriter"]
+__all__ = ["PatchEventStream", "PatchStreamWriter", "sse_heartbeat_seconds"]

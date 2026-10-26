@@ -16,7 +16,6 @@ from django import forms as django_forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import (
-    BACKEND_SESSION_KEY,
     HASH_SESSION_KEY,
     SESSION_KEY,
     get_user_model,
@@ -43,7 +42,11 @@ from next.testing.realtime import (
     issue_socket_ticket,
     override_websocket_mount,
 )
-from tests.support.realtime import ROOM_AUTHORIZER_REF
+from tests.support.realtime import (
+    ROOM_AUTHORIZER_REF,
+    issue_session_ticket,
+    signed_in_session,
+)
 
 
 _ORIGIN = "http://testserver"
@@ -185,16 +188,8 @@ def csrf() -> tuple[str, str]:
 
 @pytest.fixture()
 def signed_in(transactional_db: None) -> tuple[SocketTicket, str]:
-    user = get_user_model().objects.create_user("browser-user")
-    session = SessionStore()
-    session[SESSION_KEY] = str(user.pk)
-    session[BACKEND_SESSION_KEY] = "django.contrib.auth.backends.ModelBackend"
-    session[HASH_SESSION_KEY] = user.get_session_auth_hash()
-    session.create()
-    ticket = issue_socket_ticket(
-        ("room:42",), authorizer_ref=ROOM_AUTHORIZER_REF, session=session
-    )
-    return ticket, str(user.pk)
+    user, session = signed_in_session("browser-user")
+    return issue_session_ticket(session=session), str(user.pk)
 
 
 def _url(name: str) -> str:
@@ -275,7 +270,7 @@ def _comparable(response: HttpResponse) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("email", ["not-an-email", "user@example.com"])
-def test_a_form_answers_the_same_envelope_over_http_and_the_tunnel(
+def test_form_answers_the_same_envelope_over_http_and_the_tunnel(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str], email: str
 ) -> None:
     secret, token = csrf
@@ -290,7 +285,7 @@ def test_a_form_answers_the_same_envelope_over_http_and_the_tunnel(
 
 
 @pytest.mark.parametrize("name", ["tunnel_echo", "tunnel_guarded"])
-def test_a_post_that_fails_csrf_is_stale_and_retried_over_http(
+def test_post_that_fails_csrf_is_stale_and_retried_over_http(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str], name: str
 ) -> None:
     secret, _ = csrf
@@ -308,7 +303,7 @@ def test_a_post_that_fails_csrf_is_stale_and_retried_over_http(
     }
 
 
-def test_an_anonymous_guarded_action_answers_as_over_http(
+def test_anonymous_guarded_action_answers_as_over_http(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -332,7 +327,7 @@ def test_an_anonymous_guarded_action_answers_as_over_http(
         ("tunnel_plain", {"status": 0, "error": "transport", "retry": True}),
     ],
 )
-def test_the_tunnel_answers_by_what_the_reply_needs(
+def test_tunnel_answers_by_what_the_reply_needs(
     app: ASGI3Application,
     ticket: SocketTicket,
     csrf: tuple[str, str],
@@ -361,7 +356,7 @@ def test_session_messages_pass_the_tunnel(
     assert (answer["status"], answer["body"]) == (200, "flashed")
 
 
-def test_the_cookie_guard_logs_the_dropped_names(
+def test_cookie_guard_logs_the_dropped_names(
     app: ASGI3Application,
     ticket: SocketTicket,
     csrf: tuple[str, str],
@@ -394,7 +389,7 @@ def test_the_cookie_guard_logs_the_dropped_names(
         (_frame("/_next/form/x/", {}), None, "stale"),
     ],
 )
-def test_a_request_the_tunnel_cannot_run_is_refused_with_retry(
+def test_request_the_tunnel_cannot_run_is_refused_with_retry(
     app: ASGI3Application,
     ticket: SocketTicket,
     frame: dict[str, object],
@@ -411,7 +406,7 @@ def test_a_request_the_tunnel_cannot_run_is_refused_with_retry(
     }
 
 
-def test_a_socket_without_an_app_is_disabled(
+def test_socket_without_an_app_is_disabled(
     ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -445,7 +440,7 @@ class TenantUrlconf:
         return self.get_response(request)
 
 
-def test_a_request_urlconf_cannot_reach_a_view_outside_the_dispatch(
+def test_request_urlconf_cannot_reach_a_view_outside_the_dispatch(
     ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -467,7 +462,7 @@ def test_a_request_urlconf_cannot_reach_a_view_outside_the_dispatch(
     }
 
 
-def test_a_rotated_csrf_token_is_stale(
+def test_rotated_csrf_token_is_stale(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, _ = csrf
@@ -524,7 +519,7 @@ async def _connect(
     return communicator, hello
 
 
-def test_a_sync_view_past_the_timeout_never_blocks_the_loop(
+def test_sync_view_past_the_timeout_never_blocks_the_loop(
     ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -574,7 +569,7 @@ def test_closing_the_socket_leaves_a_running_view_alone(
     assert _SLOW["released"] is True
 
 
-def test_the_hello_tells_the_client_the_tunnel_contract(
+def test_hello_tells_the_client_the_tunnel_contract(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, _ = csrf
@@ -596,7 +591,7 @@ def test_the_hello_tells_the_client_the_tunnel_contract(
 
 
 @override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": False}})
-def test_a_disabled_tunnel_leaves_its_hello_key_out(
+def test_disabled_tunnel_leaves_its_hello_key_out(
     ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, _ = csrf
@@ -623,7 +618,7 @@ _ROTATED = {
 
 
 @pytest.mark.parametrize("name", ["tunnel_login", "tunnel_logout"])
-def test_a_tunneled_rotation_keeps_the_signed_in_browser_session(
+def test_tunneled_rotation_keeps_the_signed_in_browser_session(
     app: ASGI3Application,
     signed_in: tuple[SocketTicket, str],
     csrf: tuple[str, str],
@@ -648,7 +643,7 @@ def test_a_tunneled_rotation_keeps_the_signed_in_browser_session(
     assert f"action {name!r} rotated the session" in caplog.text
 
 
-def test_a_tunneled_login_keeps_an_anonymous_browser_session(
+def test_tunneled_login_keeps_an_anonymous_browser_session(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -678,7 +673,7 @@ def test_atomic_requests_roll_back_what_ran_before_the_rotation(
     assert created is not atomic
 
 
-def test_a_caught_rotation_still_refuses_the_reply(
+def test_caught_rotation_still_refuses_the_reply(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -691,7 +686,7 @@ def test_a_caught_rotation_still_refuses_the_reply(
 
 
 @pytest.mark.parametrize("name", ["tunnel_denied", "tunnel_missing"])
-def test_an_action_that_raises_answers_as_over_http_and_runs_once(
+def test_action_that_raises_answers_as_over_http_and_runs_once(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str], name: str
 ) -> None:
     secret, token = csrf
@@ -706,7 +701,7 @@ def test_an_action_that_raises_answers_as_over_http_and_runs_once(
     assert tunneled == _comparable(plain)
 
 
-def test_an_http_only_action_never_runs_over_the_tunnel(
+def test_http_only_action_never_runs_over_the_tunnel(
     app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
@@ -739,16 +734,9 @@ def engine(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[str]:
 
 @pytest.fixture()
 def member(transactional_db: None, engine: str) -> tuple[SocketTicket, str]:
-    user = get_user_model().objects.create_user("engine-user")
-    session = import_module(engine).SessionStore()
-    session[SESSION_KEY] = str(user.pk)
-    session[BACKEND_SESSION_KEY] = "django.contrib.auth.backends.ModelBackend"
-    session[HASH_SESSION_KEY] = user.get_session_auth_hash()
-    session.save()
-    ticket = issue_socket_ticket(
-        ("room:42",), authorizer_ref=ROOM_AUTHORIZER_REF, session=session
-    )
-    return ticket, str(user.pk)
+    assert engine in _ENGINES
+    user, session = signed_in_session("engine-user")
+    return issue_session_ticket(session=session), str(user.pk)
 
 
 def _both(
@@ -762,124 +750,121 @@ def _both(
     return tunneled, _http(ticket, _url(name), data, secret=secret)
 
 
-class TestSessionEngines:
-    """Every session engine keeps the signed-in user and its data across the tunnel."""
+@pytest.fixture()
+def engine_app(engine: str) -> Iterator[ASGI3Application]:
+    """Build the app under the engine, since the session middleware reads it once."""
+    assert engine in _ENGINES
+    with override_websocket_mount():
+        yield application(ASGIHandler())
 
-    @pytest.fixture()
-    def app(self, engine: str) -> Iterator[ASGI3Application]:
-        """Build the app under the engine, since the session middleware reads it once."""
-        assert engine in _ENGINES
-        with override_websocket_mount():
-            yield application(ASGIHandler())
 
-    @pytest.mark.parametrize("name", ["tunnel_guarded", "tunnel_perm"])
-    def test_an_action_answers_as_over_http(
-        self,
-        app: ASGI3Application,
-        member: tuple[SocketTicket, str],
-        csrf: tuple[str, str],
-        name: str,
-    ) -> None:
-        tunneled, plain = _both(app, member[0], csrf, name)
-        assert plain.status_code in {200, 403}
-        assert tunneled == _comparable(plain)
+@pytest.mark.parametrize("name", ["tunnel_guarded", "tunnel_perm"])
+def test_engine_action_answers_as_over_http(
+    engine_app: ASGI3Application,
+    member: tuple[SocketTicket, str],
+    csrf: tuple[str, str],
+    name: str,
+) -> None:
+    tunneled, plain = _both(engine_app, member[0], csrf, name)
+    assert plain.status_code in {200, 403}
+    assert tunneled == _comparable(plain)
 
-    @pytest.mark.parametrize(
-        "engine",
-        [
-            "django.contrib.sessions.backends.db",
-            "django.contrib.sessions.backends.file",
-            _SIGNED,
-        ],
-        ids=["db", "file", "signed_cookies"],
-        indirect=True,
-    )
-    def test_a_session_pickles_as_over_http(
-        self,
-        app: ASGI3Application,
-        member: tuple[SocketTicket, str],
-        csrf: tuple[str, str],
-    ) -> None:
-        tunneled, plain = _both(app, member[0], csrf, "tunnel_pickle")
-        assert (tunneled["status"], tunneled["body"]) == (200, "True")
-        assert tunneled == _comparable(plain)
 
-    def test_a_granted_permission_passes_the_tunnel(
-        self,
-        app: ASGI3Application,
-        member: tuple[SocketTicket, str],
-        csrf: tuple[str, str],
-    ) -> None:
-        ticket, user_id = member
-        user = get_user_model().objects.get(pk=user_id)
-        user.user_permissions.add(Permission.objects.get(codename="add_user"))
-        tunneled, plain = _both(app, ticket, csrf, "tunnel_perm")
-        assert (tunneled["status"], tunneled["body"]) == (200, "permitted")
-        assert tunneled == _comparable(plain)
+@pytest.mark.parametrize(
+    "engine",
+    [
+        "django.contrib.sessions.backends.db",
+        "django.contrib.sessions.backends.file",
+        _SIGNED,
+    ],
+    ids=["db", "file", "signed_cookies"],
+    indirect=True,
+)
+def test_engine_session_pickles_as_over_http(
+    engine_app: ASGI3Application,
+    member: tuple[SocketTicket, str],
+    csrf: tuple[str, str],
+) -> None:
+    tunneled, plain = _both(engine_app, member[0], csrf, "tunnel_pickle")
+    assert (tunneled["status"], tunneled["body"]) == (200, "True")
+    assert tunneled == _comparable(plain)
 
-    def test_a_tunneled_write_reaches_the_next_request(
-        self,
-        app: ASGI3Application,
-        member: tuple[SocketTicket, str],
-        csrf: tuple[str, str],
-        engine: str,
-    ) -> None:
-        ticket, user_id = member
-        written, _ = _both(app, ticket, csrf, "tunnel_write")
-        _, seen = _both(app, ticket, csrf, "tunnel_whoami")
-        stored = import_module(engine).SessionStore(ticket.session.session_key).load()
-        assert stored[SESSION_KEY] == user_id
-        if engine == _SIGNED:
-            assert written["error"] == "http_only"
-            assert seen.content == b"True None"
-            return
-        assert (written["status"], written["body"]) == (200, "wrote")
-        assert seen.content == b"True tunnel"
-        assert stored["seen"] == "tunnel"
 
-    @override_settings(
-        MESSAGE_STORAGE="django.contrib.messages.storage.session.SessionStorage"
-    )
-    def test_a_tunneled_message_reaches_the_next_request(
-        self,
-        app: ASGI3Application,
-        member: tuple[SocketTicket, str],
-        csrf: tuple[str, str],
-        engine: str,
-    ) -> None:
-        ticket, _ = member
-        secret, token = csrf
-        data = {"csrfmiddlewaretoken": token}
-        flashed = async_to_sync(_tunnel)(
-            app, ticket, _frame(_url("tunnel_flash"), data), secret=secret
-        )
-        inbox = _http(ticket, _url("tunnel_inbox"), data, secret=secret)
-        if engine == _SIGNED:
-            assert flashed["error"] == "http_only"
-            assert inbox.content == b""
-            return
-        assert (flashed["status"], flashed["body"]) == (200, "flashed")
-        assert inbox.content == b"saved"
+def test_engine_granted_permission_passes_the_tunnel(
+    engine_app: ASGI3Application,
+    member: tuple[SocketTicket, str],
+    csrf: tuple[str, str],
+) -> None:
+    ticket, user_id = member
+    user = get_user_model().objects.get(pk=user_id)
+    user.user_permissions.add(Permission.objects.get(codename="add_user"))
+    tunneled, plain = _both(engine_app, ticket, csrf, "tunnel_perm")
+    assert (tunneled["status"], tunneled["body"]) == (200, "permitted")
+    assert tunneled == _comparable(plain)
 
-    @pytest.mark.parametrize("name", ["tunnel_login", "tunnel_logout"])
-    def test_a_rotation_keeps_the_session_whole(
-        self,
-        app: ASGI3Application,
-        member: tuple[SocketTicket, str],
-        csrf: tuple[str, str],
-        engine: str,
-        name: str,
-    ) -> None:
-        ticket, user_id = member
-        secret, token = csrf
-        answer = async_to_sync(_tunnel)(
-            app,
-            ticket,
-            _frame(_url(name), {"csrfmiddlewaretoken": token}),
-            secret=secret,
-        )
-        _, seen = _both(app, ticket, csrf, "tunnel_whoami")
-        stored = import_module(engine).SessionStore(ticket.session.session_key).load()
-        assert answer == _ROTATED
-        assert stored[SESSION_KEY] == user_id
+
+def test_engine_tunneled_write_reaches_the_next_request(
+    engine_app: ASGI3Application,
+    member: tuple[SocketTicket, str],
+    csrf: tuple[str, str],
+    engine: str,
+) -> None:
+    ticket, user_id = member
+    written, _ = _both(engine_app, ticket, csrf, "tunnel_write")
+    _, seen = _both(engine_app, ticket, csrf, "tunnel_whoami")
+    stored = import_module(engine).SessionStore(ticket.session.session_key).load()
+    assert stored[SESSION_KEY] == user_id
+    if engine == _SIGNED:
+        assert written["error"] == "http_only"
         assert seen.content == b"True None"
+        return
+    assert (written["status"], written["body"]) == (200, "wrote")
+    assert seen.content == b"True tunnel"
+    assert stored["seen"] == "tunnel"
+
+
+@override_settings(
+    MESSAGE_STORAGE="django.contrib.messages.storage.session.SessionStorage"
+)
+def test_engine_tunneled_message_reaches_the_next_request(
+    engine_app: ASGI3Application,
+    member: tuple[SocketTicket, str],
+    csrf: tuple[str, str],
+    engine: str,
+) -> None:
+    ticket, _ = member
+    secret, token = csrf
+    data = {"csrfmiddlewaretoken": token}
+    flashed = async_to_sync(_tunnel)(
+        engine_app, ticket, _frame(_url("tunnel_flash"), data), secret=secret
+    )
+    inbox = _http(ticket, _url("tunnel_inbox"), data, secret=secret)
+    if engine == _SIGNED:
+        assert flashed["error"] == "http_only"
+        assert inbox.content == b""
+        return
+    assert (flashed["status"], flashed["body"]) == (200, "flashed")
+    assert inbox.content == b"saved"
+
+
+@pytest.mark.parametrize("name", ["tunnel_login", "tunnel_logout"])
+def test_engine_rotation_keeps_the_session_whole(
+    engine_app: ASGI3Application,
+    member: tuple[SocketTicket, str],
+    csrf: tuple[str, str],
+    engine: str,
+    name: str,
+) -> None:
+    ticket, user_id = member
+    secret, token = csrf
+    answer = async_to_sync(_tunnel)(
+        engine_app,
+        ticket,
+        _frame(_url(name), {"csrfmiddlewaretoken": token}),
+        secret=secret,
+    )
+    _, seen = _both(engine_app, ticket, csrf, "tunnel_whoami")
+    stored = import_module(engine).SessionStore(ticket.session.session_key).load()
+    assert answer == _ROTATED
+    assert stored[SESSION_KEY] == user_id
+    assert seen.content == b"True None"

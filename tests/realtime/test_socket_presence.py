@@ -3,10 +3,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-from django.contrib.auth import get_user_model, login
 from django.contrib.auth.models import AnonymousUser
-from django.contrib.sessions.backends.db import SessionStore
-from django.test import RequestFactory
 
 from next.partial import Patches
 from next.realtime import WebSocketApp, socket as socket_module
@@ -21,16 +18,17 @@ from next.testing.realtime import (
     MemoryPort,
     SocketTicket,
     WebSocketCommunicator,
-    issue_socket_ticket,
     override_websocket_mount,
 )
 from tests.support.realtime import (
-    ROOM_AUTHORIZER_REF,
     LiveStreams,
     PlainBroker,
+    ScriptedBroker,
+    ServerClock,
     issue_session_ticket,
     manual_schedule,
     refresh_envelope,
+    signed_in_session,
 )
 
 
@@ -118,7 +116,7 @@ def test_ticket_presence_joins_before_hello_under_the_connection_id() -> None:
     asyncio.run(scenario())
 
 
-def test_an_identify_taking_the_subject_names_an_anonymous_member() -> None:
+def test_identify_taking_the_subject_names_an_anonymous_member() -> None:
     ticket = issue_session_ticket(presence=f"{_HERE}.identify_visitor")
 
     async def scenario() -> None:
@@ -253,39 +251,66 @@ class StalledPort(MemoryPort):
 
 
 class _LongLived(Attendance):
+    """Outlive the test however late it runs, and tell it once the join landed."""
+
     ttl_heartbeats = 60_000
+
+    def __init__(self, broker, members, *, joined: asyncio.Event, **options) -> None:
+        """Keep the event the join sets."""
+        super().__init__(broker, members, **options)
+        self.joined = joined
+
+    async def ajoin(self) -> None:
+        await super().ajoin()
+        self.joined.set()
 
 
 class _PatientSocket(TopicSocket):
+    def __init__(self, *args, joined: asyncio.Event, **kwargs) -> None:
+        """Hand the join event to the attendance it builds."""
+        super().__init__(*args, **kwargs)
+        self.joined = joined
+
     async def attend(self, broker, claims):
-        members = dict.fromkeys(claims.topics)
         return _LongLived(
-            broker, members, heartbeat=self._heartbeat, connection=self.connection_id
+            broker,
+            dict.fromkeys(claims.topics),
+            heartbeat=self._heartbeat,
+            connection=self.connection_id,
+            joined=self.joined,
         )
 
 
 def test_watchdog_drop_leaves_the_roster(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    clock: ServerClock,
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
     ticket = issue_session_ticket(presence=True)
-    readings = [0.0, 0.0]
-
-    def monotonic() -> float:
-        return readings.pop(0) if readings else 10.0
-
-    monkeypatch.setattr(socket_module, "time", SimpleNamespace(monotonic=monotonic))
+    # One hand-driven clock times both the stalled send and the liveness pings.
+    monkeypatch.setattr(socket_module, "time", SimpleNamespace(monotonic=clock))
 
     async def scenario() -> None:
         broker = _broker()
         port = StalledPort()
         handshake = Handshake(ticket.credential, AnonymousUser(), None)
-        socket = _PatientSocket(port, handshake, broker=broker, heartbeat=0.001)
+        joined = asyncio.Event()
+        socket = _PatientSocket(
+            port,
+            handshake,
+            broker=broker,
+            heartbeat=0.001,
+            clock=SocketClock(monotonic=clock),
+            joined=joined,
+        )
         task = asyncio.create_task(socket.serve(port.inbound()))
         port.push_json(ticket.subscribe_frame())
         async with asyncio.timeout(5):
+            await joined.wait()
             await port.entered.wait()
         assert broker.presence(_TOPIC).count == 1
+        clock.advance(10)
         await _finish(task)
         assert port.close_code is None
         assert broker.presence(_TOPIC).count == 0
@@ -294,19 +319,11 @@ def test_watchdog_drop_leaves_the_roster(
     assert "dropped a client that stopped reading" in caplog.text
 
 
-class _ManualClock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 _LIVENESS_HEARTBEAT = 0.05
 
 
 def _live_socket(
-    port: MemoryPort, ticket: SocketTicket, broker: BrokerBackend, clock: _ManualClock
+    port: MemoryPort, ticket: SocketTicket, broker: BrokerBackend, clock: ServerClock
 ) -> TopicSocket:
     handshake = Handshake(ticket.credential, AnonymousUser(), None)
     return TopicSocket(
@@ -324,15 +341,14 @@ async def _ping(port: MemoryPort) -> None:
             pass
 
 
-def test_a_peer_silent_two_heartbeats_past_a_ping_is_dropped_from_the_roster(
-    caplog: pytest.LogCaptureFixture,
+def test_peer_silent_two_heartbeats_past_a_ping_is_dropped_from_the_roster(
+    caplog: pytest.LogCaptureFixture, clock: ServerClock
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
     ticket = issue_session_ticket(presence=True)
 
     async def scenario() -> None:
         broker = _broker()
-        clock = _ManualClock()
         port = MemoryPort()
         socket = _live_socket(port, ticket, broker, clock)
         task = asyncio.create_task(socket.serve(port.inbound()))
@@ -351,12 +367,11 @@ def test_a_peer_silent_two_heartbeats_past_a_ping_is_dropped_from_the_roster(
     assert "dropped a client that stopped answering" in caplog.text
 
 
-def test_a_peer_answering_every_ping_stays_in_the_roster() -> None:
+def test_peer_answering_every_ping_stays_in_the_roster(clock: ServerClock) -> None:
     ticket = issue_session_ticket(presence=True)
 
     async def scenario() -> None:
         broker = _broker()
-        clock = _ManualClock()
         port = MemoryPort()
         socket = _live_socket(port, ticket, broker, clock)
         task = asyncio.create_task(socket.serve(port.inbound()))
@@ -379,15 +394,14 @@ async def _trickle(broker: BrokerBackend) -> None:
         await asyncio.sleep(_LIVENESS_HEARTBEAT / 5)
 
 
-def test_a_silent_peer_on_a_trickling_topic_is_pinged_and_dropped(
-    caplog: pytest.LogCaptureFixture,
+def test_silent_peer_on_a_trickling_topic_is_pinged_and_dropped(
+    caplog: pytest.LogCaptureFixture, clock: ServerClock
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
     ticket = issue_session_ticket(presence=True)
 
     async def scenario() -> None:
         broker = _broker()
-        clock = _ManualClock()
         port = MemoryPort()
         socket = _live_socket(port, ticket, broker, clock)
         task = asyncio.create_task(socket.serve(port.inbound()))
@@ -408,12 +422,11 @@ def test_a_silent_peer_on_a_trickling_topic_is_pinged_and_dropped(
     assert "dropped a client that stopped answering" in caplog.text
 
 
-def test_a_ponging_peer_on_a_trickling_topic_stays() -> None:
+def test_ponging_peer_on_a_trickling_topic_stays(clock: ServerClock) -> None:
     ticket = issue_session_ticket(presence=True)
 
     async def scenario() -> None:
         broker = _broker()
-        clock = _ManualClock()
         port = MemoryPort()
         socket = _live_socket(port, ticket, broker, clock)
         task = asyncio.create_task(socket.serve(port.inbound()))
@@ -432,21 +445,49 @@ def test_a_ponging_peer_on_a_trickling_topic_stays() -> None:
     asyncio.run(scenario())
 
 
-def test_idle_heartbeat_touches_the_record_before_its_ping() -> None:
+class _ClockedAttendanceSocket(TopicSocket):
+    """Keep the presence record fresh on a test clock instead of the monotonic one."""
+
+    def __init__(
+        self, port: MemoryPort, handshake: Handshake, *, broker, clock: ServerClock
+    ) -> None:
+        """Serve on a heartbeat long enough that the liveness watch never pings."""
+        super().__init__(port, handshake, broker=broker, heartbeat=_IDLE_HEARTBEAT)
+        self.attendance_clock = clock
+
+    async def attend(self, broker, claims) -> Attendance | None:
+        attendance = await super().attend(broker, claims)
+        assert attendance is not None
+        return Attendance(
+            attendance.broker,
+            attendance.members,
+            heartbeat=_IDLE_HEARTBEAT,
+            connection=attendance.connection,
+            clock=self.attendance_clock,
+        )
+
+
+_IDLE_HEARTBEAT = 60.0
+
+
+def test_idle_heartbeat_touches_the_record_before_its_ping(clock: ServerClock) -> None:
     ticket = issue_session_ticket(presence=True)
 
     async def scenario() -> None:
-        broker = _broker()
+        broker = ScriptedBroker(clock=clock, schedule=manual_schedule(clock))
         port = MemoryPort()
-        socket = _socket(port, ticket, broker, heartbeat=0.01)
+        handshake = Handshake(ticket.credential, AnonymousUser(), None)
+        socket = _ClockedAttendanceSocket(port, handshake, broker=broker, clock=clock)
         task = asyncio.create_task(socket.serve(port.inbound()))
         port.push_json(ticket.subscribe_frame())
         assert (await _frame(port))["type"] == "hello"
         (record,) = broker._rosters[_TOPIC].anonymous.values()
         assert _presence_detail(await _frame(port)) == {"count": 1}
+        clock.advance(_IDLE_HEARTBEAT)
+        broker.feed.put_nowait(None)
         assert (await _frame(port))["type"] == "ping"
         (touched,) = broker._rosters[_TOPIC].anonymous.values()
-        assert touched > record
+        assert touched == record + _IDLE_HEARTBEAT
         port.disconnect()
         await _finish(task)
 
@@ -493,17 +534,8 @@ def test_unusable_identify_reference_closes_with_auth_error(reference: str) -> N
 def test_app_identifies_the_session_user_by_the_ticket_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = get_user_model().objects.create_user(username="ada", password="pw")
-    request = RequestFactory().get("/")
-    request.session = SessionStore()
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    request.session.save()
-    ticket = issue_socket_ticket(
-        (_TOPIC,),
-        authorizer_ref=ROOM_AUTHORIZER_REF,
-        presence=_IDENTIFY,
-        session=request.session,
-    )
+    _user, session = signed_in_session("ada")
+    ticket = issue_session_ticket(presence=_IDENTIFY, session=session)
     broker = _broker()
     monkeypatch.setattr(broker_manager, "_backend", broker)
 

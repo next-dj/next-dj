@@ -466,9 +466,6 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - List rows, repeated ``<form>``
      - The match key for the morph and for ``append`` dedup, falling back to ``id``.
        On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
-   * - ``data-next-sse``
-     - A container
-     - Alias of ``data-next-stream``.
    * - ``data-next-stream``
      - A container
      - Subscribe to a patch stream at the URL, over WebSocket when the server enables it and over ``EventSource`` otherwise.

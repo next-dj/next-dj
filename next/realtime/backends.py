@@ -23,11 +23,18 @@ from contextlib import (
     asynccontextmanager,
     contextmanager,
 )
-from typing import override
+from typing import Final, NamedTuple, Protocol, TypeGuard, override
 
+from django.conf import settings
+from django.core.checks import CheckMessage, Error
+
+from next.conf.checks import errors_for_unknown_keys
+from next.conf.merge import FROZEN_DEFAULTS
 from next.partial.envelope import Envelope
+from next.utils import is_int
 
-from .messages import Message, Position, validate_topic
+from .lifecycle import published
+from .messages import Message, Position, validate_topic, validate_topics
 from .replay import INCOMPLETE, Replay, replay_after, replay_window
 from .roster import (
     Member,
@@ -37,10 +44,18 @@ from .roster import (
     encode_member,
     presence_envelope,
 )
-from .signals import published
 
 
 _NEVER_PUBLISHED = Position(epoch="", seq=0)
+_QUEUE_SIZE: Final[int] = FROZEN_DEFAULTS["REALTIME"]["BROKER"]["OPTIONS"]["QUEUE_SIZE"]
+_MEMORY_OPTIONS: Final = frozenset({"QUEUE_SIZE"})
+BROKER_OPTIONS: Final = "NEXT_FRAMEWORK['REALTIME']['BROKER']['OPTIONS']"
+"""The setting path the option checks of every built-in broker report against."""
+
+
+def valid_queue_size(value: object) -> TypeGuard[int]:
+    """Whether a `QUEUE_SIZE` option is a positive whole number of messages."""
+    return is_int(value) and value >= 1
 
 
 class BrokerBackend(ABC):
@@ -50,6 +65,12 @@ class BrokerBackend(ABC):
         """Read backend options from its settings entry."""
         options = {} if config is None else config.get("OPTIONS", {})
         self.options = options if isinstance(options, Mapping) else {}
+
+    @classmethod
+    def check_options(cls, options: Mapping[str, object]) -> list[CheckMessage]:
+        """Return the system check messages for the `OPTIONS` this backend reads."""
+        del options
+        return []
 
     def validate_publication(self, topic: str, envelope: object) -> Envelope:
         """Check the topic name and envelope type before a broker numbers anything."""
@@ -104,10 +125,28 @@ class BrokerBackend(ABC):
         self.close()
 
 
+class _Subscriber(Protocol):
+    def enqueue(self, message: Message) -> bool: ...
+
+
+class _Logged(NamedTuple):
+    """The latest position of a topic and the moment it was published."""
+
+    position: Position
+    at: float
+
+
 class _SyncSubscriber:
     def __init__(self, size: int) -> None:
         self.queue: deque[Message] = deque(maxlen=size)
         self.condition = threading.Condition()
+
+    def enqueue(self, message: Message) -> bool:
+        """Buffer one message and wake the blocked reader, True as no loop can close."""
+        with self.condition:
+            self.queue.append(message)
+            self.condition.notify()
+        return True
 
 
 class _AsyncSubscriber:
@@ -319,23 +358,42 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         `schedule` builds the presence schedule from the announce hook it is handed.
         """
         super().__init__(config)
-        size = self.options.get("QUEUE_SIZE", 256)
-        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+        size = self.options.get("QUEUE_SIZE", _QUEUE_SIZE)
+        if not valid_queue_size(size):
             msg = "REALTIME.BROKER.OPTIONS.QUEUE_SIZE must be a positive integer."
             raise ValueError(msg)
         self._queue_size = size
         self.clock = clock
         self.replay_size, self.replay_ttl = replay_window(replay)
         self._lock = threading.RLock()
-        self._positions: dict[str, tuple[Position, float]] = {}
+        self._positions: dict[str, _Logged] = {}
         self._logs: defaultdict[str, deque[Message]] = defaultdict(self._new_log)
         self._sweep_at = -math.inf
-        self._subscribers: dict[str, set[_SyncSubscriber | _AsyncSubscriber]] = (
-            defaultdict(set)
-        )
+        self._subscribers: dict[str, set[_Subscriber]] = defaultdict(set)
         self._rosters: dict[str, _Roster] = {}
         self._windows: dict[str, float] = {}
         self.keep_presence(presence, schedule, clock)
+
+    @classmethod
+    @override
+    def check_options(cls, options: Mapping[str, object]) -> list[CheckMessage]:
+        """Check `QUEUE_SIZE`, and unknown keys unless a subclass reads its own."""
+        errors = (
+            errors_for_unknown_keys(
+                dict(options), allowed=_MEMORY_OPTIONS, prefix=BROKER_OPTIONS
+            )
+            if cls is MemoryBroker
+            else []
+        )
+        if not valid_queue_size(options.get("QUEUE_SIZE", _QUEUE_SIZE)):
+            errors.append(
+                Error(
+                    f"{BROKER_OPTIONS}['QUEUE_SIZE'] must be a positive integer.",
+                    obj=settings,
+                    id="next.E178",
+                )
+            )
+        return errors
 
     @override
     def publish(self, topic: str, envelope: Envelope) -> Message:
@@ -351,7 +409,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
                 if current is _NEVER_PUBLISHED
                 else Position(current.epoch, current.seq + 1)
             )
-            self._positions[topic] = (position, now)
+            self._positions[topic] = _Logged(position, now)
             message = Message(topic, position.seq, envelope, now, position.epoch)
             if self.replay_size:
                 self._logs[topic].append(message)
@@ -370,19 +428,15 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
     def _fan_out(self, topic: str, message: Message) -> None:
         """Queue a message for every subscriber of its topic, under the broker lock."""
         for subscriber in tuple(self._subscribers.get(topic, ())):
-            if isinstance(subscriber, _SyncSubscriber):
-                with subscriber.condition:
-                    subscriber.queue.append(message)
-                    subscriber.condition.notify()
-            elif not subscriber.enqueue(message):
+            if not subscriber.enqueue(message):
                 self._remove_subscriber(subscriber)
 
     def _position(self, topic: str, now: float) -> Position:
         """Return the position of a topic, never published once a TTL passed idle."""
         entry = self._positions.get(topic)
-        if entry is None or now - entry[1] >= self.replay_ttl:
+        if entry is None or now - entry.at >= self.replay_ttl:
             return _NEVER_PUBLISHED
-        return entry[0]
+        return entry.position
 
     def _sweep(self, now: float) -> None:
         """Drop expired logs and positions at most once a TTL, on a publish."""
@@ -390,7 +444,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         self._positions = {
             topic: entry
             for topic, entry in self._positions.items()
-            if now - entry[1] < ttl
+            if now - entry.at < ttl
         }
         self._logs = defaultdict(
             self._new_log,
@@ -543,10 +597,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         self, topics: Sequence[str], *, timeout: float
     ) -> AbstractContextManager[Iterator[Message | None]]:
         """Return a context manager for a blocking subscription iterator."""
-        selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
-        if not selected:
-            msg = "A broker subscription needs at least one topic."
-            raise ValueError(msg)
+        selected = validate_topics(topics, at_least_one=True)
         subscriber = _SyncSubscriber(self._queue_size)
 
         @contextmanager
@@ -574,10 +625,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         self, topics: Sequence[str], *, timeout: float
     ) -> AbstractAsyncContextManager[AsyncIterator[Message | None]]:
         """Return a context manager for a bounded asynchronous subscription."""
-        selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
-        if not selected:
-            msg = "A broker subscription needs at least one topic."
-            raise ValueError(msg)
+        selected = validate_topics(topics, at_least_one=True)
         loop = asyncio.get_running_loop()
         subscriber = _AsyncSubscriber(loop, self._queue_size)
 
@@ -597,16 +645,12 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         while True:
             yield await subscriber.get(wait_seconds)
 
-    def _register(
-        self, topics: Iterable[str], subscriber: _SyncSubscriber | _AsyncSubscriber
-    ) -> None:
+    def _register(self, topics: Iterable[str], subscriber: _Subscriber) -> None:
         with self._lock:
             for topic in topics:
                 self._subscribers[topic].add(subscriber)
 
-    def _unregister(
-        self, topics: Iterable[str], subscriber: _SyncSubscriber | _AsyncSubscriber
-    ) -> None:
+    def _unregister(self, topics: Iterable[str], subscriber: _Subscriber) -> None:
         with self._lock:
             for topic in topics:
                 subscribers = self._subscribers.get(topic)
@@ -616,9 +660,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
                 if not subscribers:
                     self._subscribers.pop(topic, None)
 
-    def _remove_subscriber(
-        self, subscriber: _SyncSubscriber | _AsyncSubscriber
-    ) -> None:
+    def _remove_subscriber(self, subscriber: _Subscriber) -> None:
         for subscribed_topic, subscribers in tuple(self._subscribers.items()):
             subscribers.discard(subscriber)
             if not subscribers:
@@ -627,7 +669,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
     @override
     def positions(self, topics: Sequence[str]) -> dict[str, Position]:
         """Return the local topic positions, empty for topics never published."""
-        selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
+        selected = validate_topics(topics)
         with self._lock:
             now = self.clock()
             return {topic: self._position(topic, now) for topic in selected}
@@ -638,4 +680,4 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         return self.positions(topics)
 
 
-__all__ = ["BrokerBackend", "MemoryBroker"]
+__all__ = ["BROKER_OPTIONS", "BrokerBackend", "MemoryBroker", "valid_queue_size"]

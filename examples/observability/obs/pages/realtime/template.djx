@@ -8,7 +8,7 @@
       {% form "pulse_form" %}
         <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700">Publish a pulse</button>
       {% endform %}
-      <button type="button" data-obs-wave="{{ pulse_topic }}" class="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted">Wave</button>
+      <button type="button" data-obs-nudge="{{ pulse_topic }}" class="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted">Nudge</button>
     </div>
   </section>
 
@@ -18,7 +18,7 @@
         {% component "stat_card" label="Open SSE" value=realtime.open_sse %}
         {% component "stat_card" label="Open WebSocket" value=realtime.open_ws %}
         {% component "stat_card" label="Published" value=realtime.published %}
-        {% component "stat_card" label="Waves" value=realtime.waves %}
+        {% component "stat_card" label="Nudges" value=realtime.nudges %}
         {% component "stat_card" label="Mean stream seconds" value=realtime.mean_seconds %}
       </div>
       <div class="rounded-md border border-border bg-card p-6 shadow-sm">
@@ -31,5 +31,5 @@
       </div>
     </div>
   {% endzone %}
-  <div data-next-sse="/realtime/stream/"></div>
+  <div data-next-stream="/realtime/stream/"></div>
 </div>

@@ -1,7 +1,7 @@
 from collections.abc import Iterator
-from unittest.mock import Mock
 
 import pytest
+from django.test import override_settings
 
 from next.conf import next_framework_settings
 from next.ports import realtime_negotiation_slot
@@ -76,15 +76,10 @@ def test_active_transports_non_mapping_setting_follows_the_mount(
 ) -> None:
     if mounted == "yes":
         transports.announce_websocket()
-    monkeypatch.setattr(
-        transports,
-        "next_framework_settings",
-        Mock(spec=transports.next_framework_settings, REALTIME="invalid"),
-    )
-    transports.forget_transports()
-    assert transports.active_transports() == (
-        ("ws", "sse") if mounted == "yes" else ("sse",)
-    )
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
+        assert transports.active_transports() == (
+            ("ws", "sse") if mounted == "yes" else ("sse",)
+        )
 
 
 def test_announce_websocket_drops_the_memoised_page_offer() -> None:

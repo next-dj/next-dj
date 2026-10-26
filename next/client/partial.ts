@@ -36,7 +36,6 @@ import { createNavigation } from "./navigation";
 import type { NavigationState } from "./navigation";
 import { defaultHistory, defaultNavigate } from "./adapters";
 import {
-  ATTR_SSE,
   ATTR_STREAM,
   CONTENT_TYPE,
   ECHO_LIMIT,
@@ -119,8 +118,7 @@ export interface PartialSurface {
   /** Register a mount callback, returning a teardown that unregisters it. */
   onMount(selector: string, callback: (el: Element) => void): () => void;
   layers: LayerStack;
-  sse: StreamSurface;
-  /** Transport-neutral stream API; `sse` remains an alias during the migration. */
+  /** Transport-neutral API over the live stream bridge. */
   stream: StreamSurface;
   /** Run the on-`ready` work, called by the core from the inline `_init`. */
   ready(): void;
@@ -158,7 +156,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       for (const el of matching(root, entry.selector)) entry.callback(el);
     }
     triggers.scan(root);
-    sse.scan(root);
+    stream.scan(root);
   };
 
   let assets = createAssets(assetsDeps());
@@ -201,9 +199,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   const tag = <T extends StreamMeta | undefined>(meta: T): T =>
     wsTransport?.tag(meta) ?? meta;
   // A page with no stream never fetches the bridge.
-  const sse: StreamSurface = {
+  const stream: StreamSurface = {
     scan(root) {
-      if (matching(root, `[${ATTR_SSE}], [${ATTR_STREAM}]`).length === 0) return;
+      if (matching(root, `[${ATTR_STREAM}]`).length === 0) return;
       const started = epoch;
       withBridge((factory) => {
         if (started === epoch) live(factory).scan(root);
@@ -374,8 +372,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       csrf: { current: () => csrf.current(), ensure: () => csrf.ensure() },
       dirtySnapshot: () => dirty.snapshot(),
       // Feeds the ring id to the SSE bridge so the echo stream event drops.
-      rememberRequestId: (id: string) => sse.remember(id),
-      forgetRequestId: (id: string) => sse.forget(id),
+      rememberRequestId: (id: string) => stream.remember(id),
+      forgetRequestId: (id: string) => stream.forget(id),
       tunnel: (target: string, init: RequestInit, header?: string) =>
         wsTransport?.http(target, init, header),
     };
@@ -446,11 +444,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     get layers() {
       return layers;
     },
-    get sse() {
-      return sse;
-    },
     get stream() {
-      return sse;
+      return stream;
     },
     _current: () => navigation.current(),
     ready() {
@@ -477,7 +472,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       detachCsrf();
       // Stop the old pollers and observers, or they orphan onto the live wire.
       triggers._reset();
-      sse._reset();
+      stream._reset();
       // The token outlives the rebuild, only the fetch seam it mints through changes.
       const token = csrf.current();
       csrf = createCsrf({ ...adapters, mint: deps.csrf, rotated });
@@ -502,7 +497,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       layers._reset();
       triggers._reset();
       assets._reset();
-      sse._reset();
+      stream._reset();
       mounts.length = 0;
       mounted = false;
       csrf._reset();

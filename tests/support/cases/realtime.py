@@ -6,8 +6,7 @@ from next.partial import PartialProtocolBackend
 from tests.support.codecs import (
     InstanceMimeJsonCodec,
     MimeJsonCodec,
-    SseEventJsonCodec,
-    SseStreamEventJsonCodec,
+    TextDataJsonCodec,
     TextStreamCodec,
 )
 from tests.support.realtime import ROOM_AUTHORIZER_REF
@@ -72,7 +71,7 @@ UNUSABLE_REFERENCE_CASES: tuple[TicketReferenceCase, ...] = (
 
 @dataclass(frozen=True, slots=True)
 class TextFrameCase:
-    """One codec whose topic frame reaches the socket as its SSE data text."""
+    """One codec whose stream data reaches the socket as text."""
 
     id: str
     backend: PartialProtocolBackend
@@ -80,8 +79,7 @@ class TextFrameCase:
 
 TEXT_FRAME_CASES: tuple[TextFrameCase, ...] = (
     TextFrameCase("text_codec", TextStreamCodec()),
-    TextFrameCase("sse_event_override", SseEventJsonCodec()),
-    TextFrameCase("sse_stream_event_override", SseStreamEventJsonCodec()),
+    TextFrameCase("stream_data_override", TextDataJsonCodec()),
     TextFrameCase("custom_mime_type", MimeJsonCodec()),
     TextFrameCase("instance_mime_type", InstanceMimeJsonCodec()),
 )

@@ -27,35 +27,23 @@ class TextStreamCodec(PartialProtocolBackend):
         """Write the envelope version as the whole body."""
         return envelope.version.encode()
 
-    def sse_event(self, envelope: Envelope) -> str:
-        """Frame the envelope version as one data line."""
-        return f"event: next-patches\ndata: {envelope.version}\n\n"
-
-    def sse_stream_event(self, envelope: Envelope, meta: StreamMeta) -> str:
-        """Frame the topic position as two data lines."""
+    def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
+        """Carry the topic position as two lines of text."""
         del envelope
-        return f"event: next-patches\ndata: seq={meta.seq}\ndata: {meta.epoch}\n\n"
+        return f"seq={meta.seq}\n{meta.epoch}"
 
     def deserialize_envelope(self, body: bytes) -> Envelope:
         """Read the envelope version back from the body."""
         return Envelope(version=body.decode())
 
 
-class SseEventJsonCodec(JsonPartialProtocolBackend):
-    """A JSON codec whose own SSE event shape replaces the stream metadata."""
+class TextDataJsonCodec(JsonPartialProtocolBackend):
+    """A JSON codec whose own topic frame carries the position as two lines of text."""
 
-    def sse_event(self, envelope: Envelope) -> str:
-        """Frame the envelope version alone."""
-        return f"event: next-patches\ndata: version={envelope.version}\n\n"
-
-
-class SseStreamEventJsonCodec(JsonPartialProtocolBackend):
-    """A JSON codec whose own topic frame carries the position as two data lines."""
-
-    def sse_stream_event(self, envelope: Envelope, meta: StreamMeta) -> str:
-        """Frame the topic position as two data lines."""
+    def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
+        """Carry the topic position as two lines of text."""
         del envelope
-        return f"event: next-patches\ndata: seq={meta.seq}\ndata: {meta.epoch}\n\n"
+        return f"seq={meta.seq}\n{meta.epoch}"
 
 
 class MimeJsonCodec(JsonPartialProtocolBackend):

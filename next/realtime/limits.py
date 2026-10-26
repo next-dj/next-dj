@@ -1,9 +1,10 @@
-"""Per-connection limits on the frames a WebSocket client sends upstream."""
+"""Per-connection limits of a WebSocket, its ping interval and its upstream frames."""
 
+import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Final, Self
+from typing import Final, Self, TypeGuard
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -16,6 +17,7 @@ from .frames import MAX_INBOUND_BYTES
 
 _UPSTREAM: Final[Mapping[str, int | float]] = FROZEN_DEFAULTS["REALTIME"]["UPSTREAM"]
 _TUNNEL: Final[Mapping[str, int | float]] = FROZEN_DEFAULTS["REALTIME"]["TUNNEL"]
+_HEARTBEAT: Final[float] = FROZEN_DEFAULTS["REALTIME"]["HEARTBEAT"]
 UPSTREAM_KEYS: Final = frozenset(_UPSTREAM)
 TUNNEL_KEYS: Final = frozenset(_TUNNEL)
 MAX_RATE: Final = 1000
@@ -23,6 +25,17 @@ MAX_BURST: Final = 1000
 MAX_CONCURRENCY: Final = 64
 MAX_TIMEOUT: Final = 600
 MAX_REPLY_BYTES: Final = 64 * 1024 * 1024
+
+
+def valid_heartbeat(value: object) -> TypeGuard[float]:
+    """Whether a `HEARTBEAT` value is a positive finite number of seconds."""
+    return positive_number(value, math.inf)
+
+
+def heartbeat_seconds() -> float:
+    """Return the WebSocket ping interval of `HEARTBEAT`, the default for a bad one."""
+    value = scope_value("REALTIME", "HEARTBEAT")
+    return float(value) if valid_heartbeat(value) else _HEARTBEAT
 
 
 def valid_rate(value: object) -> bool:
@@ -179,8 +192,10 @@ __all__ = [
     "TokenBucket",
     "TunnelLimits",
     "UpstreamLimits",
+    "heartbeat_seconds",
     "valid_burst",
     "valid_concurrency",
+    "valid_heartbeat",
     "valid_max_bytes",
     "valid_rate",
     "valid_reply_bytes",

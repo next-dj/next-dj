@@ -588,7 +588,7 @@ class TestWizardSignalsWiring:
 
 
 class SenderProbeForm(Form):
-    """Form whose validation failure drives the sender regression checks."""
+    """Form whose validation failure drives the sender checks."""
 
     name = django_forms.CharField(max_length=100)
 

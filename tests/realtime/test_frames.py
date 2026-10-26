@@ -2,18 +2,12 @@ import json
 from types import MappingProxyType
 
 import pytest
-from django.core.exceptions import ImproperlyConfigured
 
-from next.partial import (
-    Envelope,
-    JsonPartialProtocolBackend,
-    PartialProtocolBackend,
-    StreamMeta,
-)
+from next.partial import JsonPartialProtocolBackend, PartialProtocolBackend, StreamMeta
 from next.realtime import frames
 from next.realtime.frames import (
-    MAX_CURSOR_TOPICS,
     MAX_INBOUND_BYTES,
+    MAX_TOPICS,
     SUB_TIMEOUT,
     Close,
     FrameError,
@@ -22,29 +16,8 @@ from next.realtime.frames import (
     Unsupported,
 )
 from next.realtime.messages import Message, Position
-from tests.support.codecs import (
-    MimeJsonCodec,
-    SseEventJsonCodec,
-    SseStreamEventJsonCodec,
-    TextStreamCodec,
-)
+from tests.support.codecs import MimeJsonCodec, TextDataJsonCodec, TextStreamCodec
 from tests.support.realtime import refresh_envelope
-
-
-class FixedFrameCodec(TextStreamCodec):
-    """A text codec whose topic frame is a fixed SSE text chosen by the test."""
-
-    frame = ""
-
-    def sse_stream_event(self, envelope: Envelope, meta: StreamMeta) -> str:
-        del envelope, meta
-        return self.frame
-
-
-def _fixed(frame: str) -> FixedFrameCodec:
-    codec = FixedFrameCodec()
-    codec.frame = frame
-    return codec
 
 
 def _message(**overrides: object) -> Message:
@@ -78,7 +51,7 @@ def test_close_codes_match_the_wire_specification() -> None:
 
 def test_limits_match_the_wire_specification() -> None:
     assert MAX_INBOUND_BYTES == 64 * 1024
-    assert MAX_CURSOR_TOPICS == 64
+    assert MAX_TOPICS == 64
     assert SUB_TIMEOUT == 5.0
 
 
@@ -131,7 +104,7 @@ def test_parse_subscribe_missing_or_non_string_ticket_reads_empty(
 
 
 def test_parse_subscribe_accepts_the_cursor_topic_cap() -> None:
-    cursor = {f"poll:{index}": index for index in range(MAX_CURSOR_TOPICS)}
+    cursor = {f"poll:{index}": index for index in range(MAX_TOPICS)}
     frame = frames.parse(_sub(ticket="t", last_seq=cursor))
     assert isinstance(frame, Subscribe)
     assert dict(frame.cursor) == cursor
@@ -143,7 +116,7 @@ def test_parse_subscribe_accepts_the_cursor_topic_cap() -> None:
         [],
         "poll:1",
         7,
-        {f"poll:{index}": 0 for index in range(MAX_CURSOR_TOPICS + 1)},
+        {f"poll:{index}": 0 for index in range(MAX_TOPICS + 1)},
         {"poll:1": -1},
         {"poll:1": True},
         {"poll:1": 1.5},
@@ -289,22 +262,13 @@ def test_hello_frame_lists_only_the_subscribed_topics() -> None:
     assert json.loads(text)["topics"] == {"poll:1": {"epoch": "e1", "seq": 1}}
 
 
-@pytest.mark.parametrize(
-    "backend", [JsonPartialProtocolBackend(), SseEventJsonCodec(), MimeJsonCodec()]
-)
-def test_patches_frame_matches_the_backend_stream_object_or_sse_text(
+@pytest.mark.parametrize("backend", [JsonPartialProtocolBackend(), MimeJsonCodec()])
+def test_patches_frame_carries_the_backend_stream_data(
     backend: PartialProtocolBackend,
 ) -> None:
     message = _message()
     meta = StreamMeta(server_time=99, topic="poll:1", seq=3, epoch="e1")
     expected = backend.stream_data(message.envelope, meta)
-    if expected is None:
-        sse = backend.sse_stream_event(message.envelope, meta)
-        expected = "\n".join(
-            line.removeprefix("data:").removeprefix(" ")
-            for line in sse.splitlines()
-            if line.startswith("data:")
-        )
     text = frames.patches(message, backend, server_time=99)
     assert json.loads(text) == {"type": "patches", "data": expected}
 
@@ -320,36 +284,12 @@ def test_patches_frame_of_the_json_backend_is_an_object_with_metadata() -> None:
     assert data["seq"] == 3
 
 
-@pytest.mark.parametrize("backend", [TextStreamCodec(), SseStreamEventJsonCodec()])
+@pytest.mark.parametrize("backend", [TextStreamCodec(), TextDataJsonCodec()])
 def test_patches_frame_of_a_text_codec_carries_its_exact_data_text(
     backend: PartialProtocolBackend,
 ) -> None:
     text = frames.patches(_message(), backend, server_time=7)
     assert text == '{"type":"patches","data":"seq=3\\ne1"}'
-
-
-@pytest.mark.parametrize(
-    ("frame", "data"),
-    [
-        ("data: one\n\n", "one"),
-        ("data:one\n\n", "one"),
-        ("data:  two spaces\n\n", " two spaces"),
-        ("event: x\r\ndata: a\r\ndata: b\r\n\r\n", "a\nb"),
-        ("event: x\rdata: a\rdata:\r\r", "a\n"),
-        (": note\nid: 3\ndata: kept\nretry: 5\n\n", "kept"),
-    ],
-)
-def test_patches_frame_joins_sse_data_lines_like_an_event_source(
-    frame: str, data: str
-) -> None:
-    text = frames.patches(_message(), _fixed(frame), server_time=0)
-    assert json.loads(text) == {"type": "patches", "data": data}
-
-
-@pytest.mark.parametrize("frame", ["", "event: next-patches\n\n", ": ping\n\n"])
-def test_patches_frame_without_sse_data_is_a_misconfigured_backend(frame: str) -> None:
-    with pytest.raises(ImproperlyConfigured, match="SSE data field"):
-        frames.patches(_message(), _fixed(frame), server_time=0)
 
 
 def test_skip_frame_acknowledges_the_filtered_position() -> None:
