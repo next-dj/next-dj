@@ -94,7 +94,8 @@ def bar_of(page: Page, choice: Choice) -> Locator:
 
 def vote_for(page: Page, choice: Choice) -> None:
     seen = applied_count(page)
-    page.get_by_role("button", name=choice.text, exact=True).click()
+    with page.expect_response(lambda response: response.request.method == "POST"):
+        page.get_by_role("button", name=choice.text, exact=True).click()
     wait_for_apply(page, seen)
 
 
