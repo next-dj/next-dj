@@ -2,8 +2,8 @@
 // guarded stream URL, then feeds the shared stream protocol used by SSE.
 
 import { defaultWebSocket } from "./adapters";
-import type { Transport, TransportControl } from "./stream";
-import { REFUSAL_DISABLED, REFUSAL_STALE, isRecord } from "./protocol";
+import type { StreamMeta, Transport, TransportControl } from "./stream";
+import { REFUSAL_DISABLED, REFUSAL_STALE, asString, isRecord } from "./protocol";
 import type { FetchAdapter } from "./wire";
 
 const NEGOTIATION_HEADER = "X-Next-Transport";
@@ -39,6 +39,7 @@ interface Link {
   up: number;
   renewed: boolean;
   renew: () => void;
+  connection?: string | undefined;
 }
 
 /** A WebSocket seam that returns a send function only after the handshake opens. */
@@ -69,6 +70,7 @@ export interface SocketTransport extends Transport {
     csrf?: string,
   ): Promise<Response | string | undefined> | undefined;
   renew(token: string | undefined): void;
+  tag<T extends StreamMeta | undefined>(meta: T): T;
 }
 
 export type WsTransportFactory = (
@@ -121,11 +123,23 @@ export function createWebSocketTransport(
     });
   };
 
+  const holder = (topic: string): Link | undefined =>
+    [...links].find((open) => open.topics.has(topic));
+
   return {
-    name: "websocket",
+    name: "ws",
+    tag(meta) {
+      if (meta) meta.connection = holder(meta.topic)?.connection;
+      return meta;
+    },
     up(topic, name, data, ack) {
-      const link = [...links].find((open) => open.topics.has(topic));
-      const reply = ask(link, { type: "up", topic, name, data }, ACK_MS, "up", ack);
+      const reply = ask(
+        holder(topic),
+        { type: "up", topic, name, data },
+        ACK_MS,
+        "up",
+        ack,
+      );
       return reply?.then((frame) => frame?.ok === true) ?? Promise.resolve(false);
     },
     http(target, init, csrf) {
@@ -332,6 +346,7 @@ export function createWebSocketTransport(
                   const tunnel = frame.tunnel;
                   const upstream = isRecord(frame.upstream) ? frame.upstream : {};
                   link.up = positive(upstream.frame, MAX_UP);
+                  link.connection = asString(frame.connection);
                   if (isRecord(tunnel)) {
                     link.off = false;
                     link.frame = positive(tunnel.frame, MAX_FRAME);

@@ -2,18 +2,20 @@
 
 import { Applier, mountNodes } from "./apply";
 import type {
+  Applied,
   ApplyDeps,
   Envelope,
   HistoryAdapter,
   MountCallback,
   OpHandler,
 } from "./apply";
-import { Wire } from "./wire";
+import { Wire, none } from "./wire";
 import type {
   Clock,
   CsrfPayload,
   FetchAdapter,
   Navigate,
+  Outcome,
   ParseHook,
   WireRequest,
 } from "./wire";
@@ -32,17 +34,19 @@ import type { LazyModule } from "./chunks";
 import type { PollFactory } from "./poll";
 import { createNavigation } from "./navigation";
 import type { NavigationState } from "./navigation";
-import { defaultFetch, defaultHistory, defaultNavigate } from "./adapters";
+import { defaultHistory, defaultNavigate } from "./adapters";
 import {
   ATTR_SSE,
   ATTR_STREAM,
   CONTENT_TYPE,
   ECHO_LIMIT,
+  ORIGIN_FIELD,
   currentUrl,
   fire,
   matching,
 } from "./protocol";
-import type { Diagnostics } from "./protocol";
+import type { Diagnostics, WireTransport } from "./protocol";
+import type { StreamMeta } from "./stream";
 
 /** The core seams the applier and the fetch layer read from. */
 export interface PartialDeps {
@@ -87,10 +91,24 @@ export type StreamSurface = Sse & {
   ): Promise<boolean>;
 };
 
+type SubmitValue = string | number | boolean | Blob;
+
+/** An action POST built without a form, the `{% action_url %}` URL and its fields. */
+export interface SubmitAction {
+  action: string;
+  data?: FormData | Record<string, SubmitValue>;
+  zone?: string;
+  transport?: WireTransport;
+  key?: string;
+  navigate?: boolean;
+  from?: Element;
+}
+
 /** The public `Next.partial` surface plus its underscore-prefixed test seams. */
 export interface PartialSurface {
   apply(raw: unknown): Envelope;
-  fetch(request: WireRequest): Promise<void>;
+  fetch(request: WireRequest): Promise<Outcome>;
+  submit(target: HTMLFormElement | SubmitAction): Promise<Outcome>;
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
@@ -168,13 +186,19 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     }
     return bridge;
   };
+  const realtime = () =>
+    deps.context().$realtime as
+      | { content_type?: string; transports?: unknown[] }
+      | undefined;
+  const socketFirst = (): boolean => realtime()?.transports?.includes("ws") === true;
   const withBridge = (callback: (factory: SseFactory) => void): void => {
-    const realtime = deps.context().$realtime as { transports?: unknown[] } | undefined;
     const loadStream = (): void => deps.stream.whenLoaded(callback);
-    if (realtime?.transports?.includes("ws") === true && deps.ws !== undefined) {
+    if (socketFirst() && deps.ws !== undefined) {
       void deps.ws.load().then(loadStream);
     } else loadStream();
   };
+  const tag = <T extends StreamMeta | undefined>(meta: T): T =>
+    wsTransport?.tag(meta) ?? meta;
   // A page with no stream never fetches the bridge.
   const sse: StreamSurface = {
     scan(root) {
@@ -197,7 +221,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       let unsubscribe: (() => void) | undefined;
       withBridge((factory) => {
         if (active && started === epoch) {
-          unsubscribe = live(factory).on(topic, name, callback);
+          unsubscribe = live(factory).on(topic, name, (detail, meta) =>
+            callback(detail, tag(meta)),
+          );
         }
       });
       return () => {
@@ -205,7 +231,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         unsubscribe?.();
       };
     },
-    meta: () => bridge?.meta(),
+    meta: () => tag(bridge?.meta()),
     send: (topic, name, data, options) =>
       wsTransport?.up(topic, name, data, options?.ack !== false) ??
       Promise.resolve(false),
@@ -294,22 +320,20 @@ export function createPartial(deps: PartialDeps): PartialSurface {
 
   function sseDeps(adapters?: PartialAdapters) {
     const { websocket: socket, ...streamAdapters } = adapters ?? {};
-    const realtime = deps.context().$realtime as
-      | { content_type?: string; transports?: unknown[] }
-      | undefined;
-    const contentType = realtime?.content_type ?? CONTENT_TYPE;
+    const contentType = realtime()?.content_type ?? CONTENT_TYPE;
     const wsFactory = deps.ws?.get();
     return {
       ...streamAdapters,
-      ...(wsFactory === undefined
-        ? {}
-        : {
-            websocket: (options: Parameters<WsTransportFactory>[0]) =>
-              (wsTransport = wsFactory({ ...options, token: csrf.current()?.token })),
-          }),
-      useWebSocket: realtime?.transports?.includes("ws") === true,
-      ...(socket === undefined ? {} : { socket }),
-      websocketFetch: adapters?.fetch ?? defaultFetch(),
+      websocket:
+        wsFactory &&
+        ((options: Parameters<WsTransportFactory>[0]) =>
+          (wsTransport = wsFactory({
+            ...options,
+            fetch: adapters?.fetch,
+            socket,
+            token: csrf.current()?.token,
+          }))),
+      useWebSocket: socketFirst(),
       // A stream event carries no dirty snapshot, so the server value wins.
       apply: (raw: unknown, page: string) => void applier.apply(raw, { owner: page }),
       parse: (body: string) => wire.parseStream(contentType, body),
@@ -333,13 +357,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         key: string | undefined,
         page: string | undefined,
         owner: string | undefined,
-      ) => {
-        // A mutation scopes no zones, but its meta op belongs to the submitting page.
-        const envelope = applier.apply(raw, { snapshot, key, page, owner });
-        // A csrf meta rotates the token so the next mutation submits the fresh
-        // one, not just the forms already in the document.
-        if (envelope.csrf) surface.setCsrf(envelope.csrf);
-      },
+      ) =>
+        new Promise<Applied>((done) => {
+          // A mutation scopes no zones, but its meta op belongs to the submitting page.
+          const envelope = applier.apply(raw, { snapshot, key, page, owner, done });
+          // A csrf meta rotates the token so the next mutation submits the fresh
+          // one, not just the forms already in the document.
+          if (envelope.csrf) surface.setCsrf(envelope.csrf);
+        }),
       version: () => assets.version(),
       csrf: { current: () => csrf.current(), ensure: () => csrf.ensure() },
       dirtySnapshot: () => dirty.snapshot(),
@@ -350,12 +375,41 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     };
   }
 
+  function fields(data: SubmitAction["data"], origin: string): FormData {
+    const body = new FormData();
+    for (const [name, value] of data instanceof FormData
+      ? data
+      : Object.entries(data ?? {}))
+      body.append(name, value instanceof Blob ? value : String(value));
+    if (!body.has(ORIGIN_FIELD)) body.set(ORIGIN_FIELD, origin);
+    return body;
+  }
+
   const surface: PartialSurface = {
     apply(raw) {
       return applier.apply(raw);
     },
     fetch(request) {
       return wire.fetch(request);
+    },
+    async submit(target) {
+      if (target instanceof HTMLFormElement)
+        return wire.fetch({ ...triggers.submission(target), wait: true });
+      try {
+        const { from, data, ...action } = target;
+        const sender = from ? triggers.sender(from) : {};
+        return await wire.fetch({
+          ...action,
+          ...sender,
+          url: action.action,
+          method: "POST",
+          uid: action.key ?? action.action,
+          body: fields(data, sender.owner ?? currentUrl(document)),
+          wait: action.key === undefined || "latest",
+        });
+      } catch (error) {
+        return { ...none("error"), error: { kind: "network", error } };
+      }
     },
     defineOp(name, handler) {
       applier.defineOp(name, handler);
@@ -376,9 +430,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // A callback registered after `ready` catches up over the present DOM,
       // mirroring `Next.on("ready")` for late subscribers.
       if (mounted) {
-        for (const el of Array.from(document.querySelectorAll(selector))) {
-          callback(el);
-        }
+        for (const el of matching(document, selector)) callback(el);
       }
       return () => {
         const index = mounts.indexOf(entry);

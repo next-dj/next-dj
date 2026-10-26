@@ -33,7 +33,7 @@ The surface splits into tiers that describe the intended audience for each name.
 A member whose name starts with an underscore is a bootstrap or test seam rather than application API.
 
 Stable.
-   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
+   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.submit``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
    ``Next.partial.sse`` remains an alias for the stream API.
    The ``next:*`` events and the ``partial:*`` document events belong to the same tier.
    Use these from a co-located asset, an island adapter, or a page script.
@@ -251,13 +251,27 @@ The partial surface
        The return is the parsed envelope rather than a completion signal, because a stylesheet in the manifest gates the ops into a continuation.
        A body that is not an object, or one carrying no ``version``, raises a ``TypeError``.
    * - ``fetch(request: WireRequest)``
-     - ``Promise<void>``
-     - Send one partial request through the queues and the per-uid lock.
-       Network, HTTP, and parse failures surface as ``partial:error`` rather than as a rejection.
+     - ``Promise<Outcome>``
+     - Send one partial request through the queues and the per-uid lock, and resolve with its `Outcome`_ once the reply is applied.
+       Network, HTTP, and parse failures surface as ``partial:error`` and as an outcome rather than as a rejection.
+       A mutation sent while its uid is locked is not sent and resolves as ``dropped``.
+       ``navigate: false`` keeps the page on a redirect, or on a non-envelope reply to a GET, and resolves its URL in ``location`` instead of navigating there.
        A zone GET refused with 403 or 404 publishes ``partial:error`` of kind ``http`` with the status and the body before the runtime navigates to the page, and a redirect to the login page navigates without the event.
        The request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, and a URL off that origin is refused unsent with a ``partial:error`` of kind ``network``.
        ``transport`` is ``"http"`` or ``"any"``, and the triggers set it from the form's ``data-next-transport``.
        A POST marked ``"any"`` rides the open WebSocket when one advertises the tunnel, see `The stream API`_, and anything else, or a request the socket cannot carry, goes over ``fetch``.
+   * - ``submit(target: HTMLFormElement | SubmitAction)``
+     - ``Promise<Outcome>``
+     - Send a form, or an action without one, through the same pipeline as a declarative submit and resolve with its `Outcome`_.
+       A form posts to its ``action`` with its fields, zone, key, and ``data-next-transport``, locked on its ``data-next-action`` uid, or on its URL without one.
+       A ``SubmitAction`` is ``{ action, data?, zone?, transport?, key?, navigate?, from? }``, where ``action`` is the URL ``{% action_url %}`` renders and ``data`` is a ``FormData`` or a record of strings, numbers, booleans, and blobs.
+       The body gains ``_next_form_origin`` with the page of ``from``, or the current path and query without it, unless ``data`` already carries one, and ``transport`` defaults to ``"http"``.
+       ``from`` is the element the action is fired from, and a ``from`` inside a modal layer stamps the owner page and the ``X-Next-Origin`` host the way a ``<form>`` in that layer does, so the reply resolves its zones against the right page.
+       A submit while the lock is held waits for it, and the waiting submits run one by one in the order they were made, so three quick creates send three requests.
+       A ``SubmitAction`` locks on its ``key``, or on its ``action`` without one, so moves of two cards keyed by card id neither wait for nor replace each other.
+       With a ``key`` the newest waiting submit wins and the older one resolves as ``dropped``, so only the last move of a card is sent after the one in flight.
+       The ``key`` also travels as the request key, so a ``form`` op of the reply prefers the repeated form whose ``data-next-key`` matches it.
+       With ``navigate: false`` a redirect reply leaves the page in place and resolves ``ok`` with its target in ``location``, over ``fetch`` and the WebSocket tunnel alike.
    * - ``defineOp(name: string, handler: OpHandler)``
      - ``void``
      - Register the client handler of a custom verb.
@@ -298,6 +312,53 @@ The partial surface
      - ``void``
      - Tear down every registry, timer, observer, and open layer, a harness seam.
 
+Outcome
+~~~~~~~
+
+``fetch`` and ``submit`` resolve with an ``Outcome`` of ``status``, ``applied``, and the optional ``errors``, ``envelope``, ``error``, and ``location``.
+The promise never rejects, and the usual ``partial:before-request``, ``partial:applied``, and ``partial:error`` events still fire.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - ``status``
+     - Meaning
+   * - ``"ok"``
+     - An envelope came back with a status below 400 and no invalid form, or a reply that is no envelope sent the runtime to another page.
+   * - ``"invalid"``
+     - The envelope's form meta is invalid, and ``errors`` holds its field errors.
+   * - ``"error"``
+     - The request fired ``partial:error``, kept in ``error``, or an envelope came back with a status of 400 or above, or the CSRF chunk failed to load.
+   * - ``"dropped"``
+     - The request was never answered for this caller, since the lock dropped it, a newer submit of the same ``key`` replaced it, or a newer GET of the same queue aborted it.
+
+``applied`` is the ``ok`` of the matching ``partial:applied``, true once every op ran, and false when an op failed, the page refused the envelope in ``partial:before-apply``, a version mismatch reloaded the page, or no envelope came back.
+A mount callback or a script that throws after the ops still settles the outcome with ``applied`` false and frees the lock, and the error itself propagates to the page.
+A header name the browser refuses fires ``partial:error`` of kind ``network`` and sends nothing, and a ``SubmitAction`` whose ``data`` cannot be read resolves as ``error`` with that ``network`` error in ``error`` and fires nothing.
+``envelope`` is the parsed envelope whenever one came back.
+``location`` is the absolute URL a reply would have navigated to, set only for a request sent with ``navigate: false``, the way a create returns the id of the new row without leaving the page.
+A declarative submit still drops a second submit of a busy form, so a double click sends one request, while ``submit`` queues because a script submits on purpose, such as a second drop of a drag while the first is in flight.
+
+.. code-block:: javascript
+   :caption: static/board/move.js
+
+   const outcome = await Next.partial.submit({
+     action: board.actions.move,
+     data: { card: id, column, position },
+     zone: "board",
+     transport: "any",
+     key: `card-${id}`,
+   });
+   if (outcome.status !== "ok" || !outcome.applied) rollback();
+
+   const created = await Next.partial.submit({
+     action: board.actions.create,
+     data: { title },
+     navigate: false,
+   });
+   const card = new URL(created.location ?? location.href).searchParams.get("created");
+
 ``defineOp`` and ``parseHook`` are the two extension points, and the rest of the surface drives machinery that already exists.
 ``defineOp`` widens the verb vocabulary.
 A handler receives the raw ``CustomPatch`` and an ``ApplyContext`` of ``dispatch``, ``mergeContext``, ``root``, and ``dev``, and a second registration under one name replaces the first.
@@ -332,7 +393,8 @@ The stream API
 
 ``Next.partial.stream`` keeps one connection per distinct ``data-next-stream`` URL and an ``(epoch, seq)`` cursor per topic on it.
 ``on(topic, name, callback)`` calls ``callback(detail, meta)`` for each ``event`` patch of that name on that topic and returns the function that removes the listener.
-``meta`` is a ``StreamMeta`` of ``topic``, ``epoch``, ``seq``, and ``serverTime``, and ``meta()`` returns the same object while a delivery runs and ``undefined`` outside it.
+``meta`` is a ``StreamMeta`` of ``topic``, ``epoch``, ``seq``, ``serverTime``, and ``connection``, and ``meta()`` returns the same object while a delivery runs and ``undefined`` outside it.
+``connection`` is the opaque id the ``hello`` of the WebSocket carrying the topic names, the same id the server hands an upstream handler, so a listener can skip the echo of its own ``send``, and it is ``undefined`` on SSE.
 ``now()`` adds the median ``offset()`` of the last five ``server_time`` samples to the local clock.
 ``send(topic, name, data, options?)`` sends an upstream event over the WebSocket that carries ``topic`` and returns a ``Promise<boolean>``.
 ``options`` is ``{ ack?: boolean }``, and ``ack`` defaults to ``true``.
@@ -344,6 +406,7 @@ On an SSE connection there is no upstream channel, so the promise resolves to ``
 See :ref:`topics-realtime` for handlers.
 
 Every change of a connection's state fires ``next:stream-state`` with ``url``, ``transport``, and ``state``.
+``transport`` is ``"sse"`` or ``"ws"``, the names ``REALTIME['TRANSPORTS']``, the ``hello`` frame, and the ``stream_subscribed`` signal use.
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
 A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
 A ``next:stream-gap`` event with ``topic``, ``from``, and ``to`` fires for every gap or epoch change that triggers a zone resync.
@@ -493,8 +556,9 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
      "next:stream-gap": { topic: string; from: number; to: number };
      "next:stream-state": {
        url: string;
-       transport: "sse" | "websocket";
+       transport: "sse" | "ws";
        state: "connecting" | "open" | "closed";
+       code?: string;
      };
      "next:toast": { text: string; variant: string };
      "next:navigated": NavigatedDetail;

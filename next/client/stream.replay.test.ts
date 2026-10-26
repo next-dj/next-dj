@@ -160,7 +160,7 @@ afterEach(() => {
 
 describe.each([
   ["sse", sseHarness],
-  ["websocket", wsHarness],
+  ["ws", wsHarness],
 ])("message replay over %s", (_name, make) => {
   it("applies replayed frames and advances the cursor past them", async () => {
     const harness = make();
@@ -242,7 +242,7 @@ function presence(count: number): Record<string, unknown> {
 
 describe.each([
   ["sse", sseHarness],
-  ["websocket", wsHarness],
+  ["ws", wsHarness],
 ])("ephemeral frames over %s", (_name, make) => {
   async function watched(harness: Harness) {
     const sse = start(harness);

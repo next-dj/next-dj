@@ -426,6 +426,7 @@ Pass ``HTTP_X_NEXT_VALIDATE="title"`` to drive the validate-only branch, ``HTTP_
 ``envelope_of(response)`` decodes a patch response into a ``PartialEnvelope``.
 It raises ``AssertionError`` when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
 ``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+``zone_targets`` lists the zone of every op that addresses one, the ``zone`` a ``refresh`` names on itself included, so a published ``Patches(None).refresh(zone="results")`` reads as ``["results"]``.
 ``html_for_zone`` raises ``AssertionError`` when no op targets the named zone.
 See :doc:`/content/topics/partial-rendering/index` for the zone and patch model these helpers exercise.
 

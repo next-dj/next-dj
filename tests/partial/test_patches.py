@@ -810,18 +810,20 @@ class TestBuilderZoneManifest:
             }
         ]
 
-    def test_builder_path_emits_no_automatic_context_op(self) -> None:
+    def test_builder_path_carries_the_zone_context_op(self) -> None:
         envelope = (
             Patches(partial_request(origin="/zoned_inline/"))
             .morph(zone="styled")
             .envelope()
         )
-        assert [op.op for op in envelope.ops] == ["morph"]
+        assert [op.as_dict() for op in envelope.ops][1:] == [
+            {"op": "context", "data": {"seen": 7}}
+        ]
 
     def test_explicit_context_still_rides_on_the_builder_path(self) -> None:
         envelope = (
             Patches(partial_request(origin="/zoned_inline/"))
-            .morph(zone="styled")
+            .morph(zone="styled", context=False)
             .context(seen=7)
             .envelope()
         )

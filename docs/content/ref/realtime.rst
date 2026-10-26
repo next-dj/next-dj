@@ -322,7 +322,8 @@ The ``presence`` parameter
        Every connection counts, and no data about people is stored or sent.
    * - ``identify`` or its dotted path
      - Member mode.
-       ``identify(user, topic)`` returns a mapping of JSON values or ``None``, and the mapping is shown to every subscriber of the topic that identifies its own members too.
+       ``identify(user, topic, subject)`` returns a mapping of JSON values or ``None``, and the mapping is shown to every subscriber of the topic that identifies its own members too.
+       ``identify(user, topic)`` without ``subject`` works as well, see `The identify callable`_.
 
 ``transform``, ``authorize``, and ``presence`` accept a callable or its dotted path, and a path is imported when the stream is built.
 A path that does not import or does not name a callable raises ``ImproperlyConfigured``, and so does a ``presence`` that is no bool, callable, or string, such as ``None`` or ``0``.
@@ -333,6 +334,28 @@ The stream joins after it read the topic positions and before it sends the repla
 It refreshes its record once per heartbeat and leaves in the ``finally`` of the generator, on a disconnect, a cancellation, and a revoked grant alike.
 A broker failure on leave is logged on ``next.realtime.attendance``, the other topics are still left, and the time to live removes the record.
 An asynchronous leave waits at most one heartbeat, so a broker that hangs never holds the close, and the time to live removes what it did not confirm.
+
+The identify callable
+~~~~~~~~~~~~~~~~~~~~~
+
+``subject`` is the opaque id of the connection's user or visitor, the ``Handshake.subject`` and ``Upstream.subject`` of a WebSocket and the same digest an SSE stream derives from the cookies of its request.
+It is a keyed digest that is stable across reconnects and across both transports of one browser, never yields the credential back, and is empty when the cookies prove no subject.
+Under ``SessionBinding`` it follows the session, so it changes when the session key rotates, at login for one.
+Under ``SignedCookieBinding`` a signed-in user keeps one subject on every device and an anonymous browser keeps the visitor cookie's subject, which a WebSocket negotiation sets, so a guest is the same member after a reload.
+A stream whose request carries no session or visitor cookie gets an empty ``subject``, and an ``identify`` returns ``None`` for it to count that connection without a member.
+
+The signature of a hashable callable is read once for all streams and sockets, ``next.realtime.attendance.Identifier`` holds the result, and a callable that accepts a third positional argument gets the subject.
+A ``*args`` signature or an optional third parameter counts as accepting it, and a decorator should apply ``functools.wraps`` so the read sees the wrapped signature.
+An SSE stream derives the subject only for such a callable, so a two-argument ``identify`` costs no extra session read.
+
+.. code-block:: python
+   :caption: rooms/realtime.py
+
+   def identify(user, topic, subject):
+       """Name signed-in users and give each guest a short stable tag."""
+       if user.is_authenticated:
+           return {"name": user.get_full_name()}
+       return {"name": f"Guest {subject[:4]}"} if subject else None
 
 ``TopicStream.attend(backend)``, ``TopicStream.aattend(backend)``, and ``TopicSocket.attend(broker, claims)`` are the hooks that build the ``Attendance`` of a connection from ``next.realtime.attendance``.
 An override returns another ``Attendance``, such as a subclass with its own ``ttl_heartbeats``, or ``None`` to keep the connection out of the roster.
@@ -348,7 +371,7 @@ A member that leaves entirely and comes back joins the end of the order.
 ``Presence.as_detail()`` returns the detail of the event, ``{"count": n}`` without members and ``{"count": n, "members": [...]}`` with them, so the key is absent when no identified member attends or ``SIZE`` is ``0``.
 
 The event is an ``event`` operation named ``next:presence`` that the broker broadcasts unnumbered through ``BrokerBackend.broadcast``.
-It takes no ``seq``, never enters the replay log, and fires ``message_published`` with a message whose ``seq`` is ``0``.
+It takes no ``seq``, never enters the replay log, and fires ``message_published`` with ``ephemeral=True`` and a message whose ``seq`` is ``0``.
 It passes the access check but skips the subscriber ``transform``.
 The stream cuts ``members`` from every ``next:presence`` event, numbered or not and wherever it sits among the operations, for every subscriber that does not identify its own.
 An SSE frame of it has no ``id`` line and a WebSocket ``patches`` frame of it has no ``seq`` or ``epoch``, so a client applies it without moving its cursor or counting a gap.
@@ -562,10 +585,11 @@ Server frames
      - Shape
      - Meaning
    * - ``hello``
-     - ``{"type": "hello", "protocol": 2, "server_time": 1761300000000, "topics": {"room:42": {"epoch": "9f2c41d07a3be851", "seq": 17}}, "transports": ["ws", "sse"], "heartbeat": 25.0}``
+     - ``{"type": "hello", "protocol": 2, "server_time": 1761300000000, "topics": {"room:42": {"epoch": "9f2c41d07a3be851", "seq": 17}}, "transports": ["ws", "sse"], "heartbeat": 25.0, "connection": "kq3Vx0b9cE2mTnYfJw1sPA"}``
      - The subscription is live.
-       It carries the keys of the SSE ``next-hello`` frame plus ``type`` and ``heartbeat``, the server interval in seconds, and the ``upstream`` and ``tunnel`` limits below.
+       It carries the keys of the SSE ``next-hello`` frame plus ``type`` and ``heartbeat``, the server interval in seconds, ``connection``, and the ``upstream`` and ``tunnel`` limits below.
        A client sizes its missed-ping watchdog from ``heartbeat``.
+       ``connection`` is the ``TopicSocket.connection_id`` of the socket, the ``Upstream.connection`` its handlers see, see `The connection id`_.
    * - ``patches``
      - ``{"type": "patches", "data": ...}``
      - One published message.
@@ -590,6 +614,16 @@ Server frames
        ``protocol`` and ``auth`` precede a close with ``4400``, ``4401``, or ``4403``, while ``unsupported`` leaves the socket open.
        ``limit`` refuses an ``up`` frame without an ``id`` and precedes the close with ``4429``.
        Every frame after ``sub`` draws a token, so a ``pong`` or an unsupported frame that finds the bucket empty gets no answer and counts towards ``4429`` as well.
+
+The connection id
+~~~~~~~~~~~~~~~~~
+
+``connection`` in the WebSocket ``hello`` is ``TopicSocket.connection_id``, 16 random bytes in URL-safe base64 drawn when the socket is built.
+It names one socket and nothing else, it derives from no session, user, or ticket, and a reconnect draws a new one.
+The same string is ``Upstream.connection`` in every handler of the socket, the ``connection`` of ``upstream_rejected``, and the key of its presence record.
+A page reads it from ``Next.partial.stream.meta().connection``, so an upstream handler that copies it into the data it publishes lets the sending tab drop its own echo, see :doc:`/content/topics/realtime`.
+Knowing another socket's id grants nothing, as no frame or endpoint takes a connection id from a client.
+An SSE stream has no ``hello`` key of that name, because it carries no upstream events.
 
 The WebSocket ``hello`` tells the client the limits it builds its frames by.
 
@@ -756,6 +790,7 @@ An admitted ``up`` frame is checked in this order, and the first failure is the 
      - The bucket was empty, or ``UPSTREAM['CONCURRENCY']`` events of the connection are still running.
        Only the bucket counts towards ``4429``.
 
+Every refusal in the table, and the frame that closes the socket with ``4429``, fires ``upstream_rejected`` with the ``error`` as ``reason``, see :doc:`signals`.
 ``{"type": "ack", "id": ..., "ok": true}`` means the handler ran to completion.
 Each admitted frame runs as its own task, so acks may arrive in another order than the frames.
 The recheck runs at most once per heartbeat, so an ``up`` frame may still reach its handler up to one heartbeat after the session or the grant is revoked.
@@ -770,6 +805,7 @@ An ``http`` frame runs a form action through the same ASGI application ``applica
 Middleware, CSRF, sessions, guards, and ``FormActionDispatch`` see an ordinary request, and ``request.scope["next.transport"]`` is ``"ws"``.
 The session keeps its engine and class, and during the action only ``cycle_key()``, ``flush()``, and their async forms are replaced on the instance with a refusal.
 Only an action declared with ``transport="any"`` runs, and the other actions answer ``421`` with ``X-Next-Transport: http`` before their guards.
+The envelope of a reply is the one HTTP gets, so a zone morph carries the zone's ``context`` op and the page applies it through ``context-updated``, see :doc:`/content/topics/partial-rendering/extending`.
 
 The frame contributes only ``content-type``, ``accept``, the header ``CSRF_HEADER_NAME`` names, and ``x-next-*`` headers, and every other header of the frame is dropped.
 A request may carry at most 32 headers, each name an RFC 7230 token and each value at most 4096 Latin-1 characters without CR, LF, or NUL.
@@ -1086,8 +1122,10 @@ Signals
 -------
 
 ``broker_backend_loaded`` fires when the lazy manager creates the configured backend, after the manager lock is released.
-``message_published`` fires after the broker accepts a publication.
+``message_published`` fires after the broker accepts a publication, with ``ephemeral`` true for an unnumbered presence snapshot.
 ``upstream_received`` fires before an upstream handler runs, with the ``Upstream`` it gets.
+``upstream_rejected`` fires for every ``up`` frame that is not delivered, with the ``error`` of its ack as ``reason``.
+All of them go out robust, so a raising receiver is logged and never fails the publication or the event.
 ``stream_subscribed`` and ``stream_unsubscribed`` bracket the life of every ``TopicStream`` and ``TopicSocket``, the second with the ``duration`` and an ``UnsubscribeReason``.
 See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for receiver usage.
 

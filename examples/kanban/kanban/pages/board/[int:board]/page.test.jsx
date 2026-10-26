@@ -26,6 +26,7 @@ const mockBoard = {
     },
     { id: 2, title: "Done", wip_limit: null, cards: [] },
   ],
+  topic: "board:1",
   csrf: "test-csrf-token",
   move_card_url: "/actions/kanban/move_card",
   create_card_url: "/actions/kanban/create_card",
@@ -39,10 +40,78 @@ const submitNewCard = (columnId, title) => {
   fireEvent.submit(column.querySelector("form"));
 };
 
-beforeEach(() => {
-  globalThis.window.Next = {
-    context: { board: structuredClone(mockBoard) },
+let runtime;
+
+function fakeRuntime() {
+  const bus = new Map();
+  const topics = new Map();
+  const subscribe = (registry, key, listener) => {
+    registry.set(key, [...(registry.get(key) ?? []), listener]);
+    return () =>
+      registry.set(
+        key,
+        registry.get(key).filter((l) => l !== listener),
+      );
   };
+  const answers = [];
+  const submit = vi.fn(() => new Promise((resolve) => answers.push(resolve)));
+  const send = vi.fn(async () => true);
+  window.Next = {
+    context: { board: structuredClone(mockBoard) },
+    on: (event, listener) => subscribe(bus, event, listener),
+    partial: {
+      submit,
+      stream: {
+        on: (topic, name, listener) => subscribe(topics, `${topic} ${name}`, listener),
+        meta: () => ({ topic: "board:1", connection: "own-socket" }),
+        send,
+      },
+    },
+  };
+  const emit = (event, payload) =>
+    act(() => {
+      for (const listener of bus.get(event) ?? []) listener(payload);
+    });
+  return {
+    submit,
+    send,
+    emit,
+    answer: (status, extra = {}) =>
+      act(async () => answers.shift()({ status, applied: true, ...extra })),
+    push: (topic, name, detail) =>
+      act(() => {
+        for (const listener of topics.get(`${topic} ${name}`) ?? []) listener(detail);
+      }),
+    listeners: () => [...bus.values(), ...topics.values()].flat().length,
+  };
+}
+
+const dropOn = (columnId, cardId = "10") =>
+  fireEvent.drop(document.querySelector(`[data-kanban-column='${columnId}']`), {
+    dataTransfer: { getData: () => cardId },
+  });
+
+const cardIn = (columnId, cardId) =>
+  document.querySelector(
+    `[data-kanban-column='${columnId}'] [data-kanban-card='${cardId}']`,
+  );
+
+const movedColumns = () => {
+  const columns = structuredClone(mockBoard.columns);
+  columns[1].cards = columns[0].cards;
+  columns[0].cards = [];
+  return columns;
+};
+
+const serverBoard = (columns) => ({
+  context: { board: { ...mockBoard, columns } },
+  changed: ["board"],
+});
+
+const grace = { name: "Grace Hopper", initials: "GH" };
+
+beforeEach(() => {
+  runtime = fakeRuntime();
 });
 
 afterEach(() => {
@@ -62,237 +131,399 @@ describe("Board", () => {
     expect(screen.getByText("Task A")).toBeInTheDocument();
   });
 
-  it("posts to move_card_url with correct payload on drop", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
-    globalThis.fetch = mockFetch;
-
+  it("submits the move action over any transport into the board zone", () => {
     render(<Board />);
-
-    const col2 = document.querySelector("[data-kanban-column='2']");
-    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
-
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/actions/kanban/move_card");
-    expect(opts.method).toBe("POST");
-
-    const body = new URLSearchParams(opts.body);
-    expect(body.get("card_id")).toBe("10");
-    expect(body.get("target_column")).toBe("2");
-    expect(body.get("csrfmiddlewaretoken")).toBe("test-csrf-token");
+    dropOn(2);
+    expect(runtime.submit.mock.calls).toEqual([
+      [
+        {
+          action: "/actions/kanban/move_card",
+          data: { card_id: "10", target_column: 2, target_position: 0 },
+          zone: "board",
+          transport: "any",
+          key: "card:10",
+        },
+      ],
+    ]);
   });
 
-  it("applies the move optimistically before the fetch resolves", () => {
-    let resolveFetch;
-    globalThis.fetch = vi.fn(() => new Promise((resolve) => (resolveFetch = resolve)));
-
+  it("applies the move before the server answers", () => {
     render(<Board />);
-
-    expect(
-      document
-        .querySelector("[data-kanban-column='1']")
-        .querySelector("[data-kanban-card]"),
-    ).toBeTruthy();
-
-    const col2 = document.querySelector("[data-kanban-column='2']");
-    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
-
-    expect(
-      document
-        .querySelector("[data-kanban-column='1']")
-        .querySelector("[data-kanban-card]"),
-    ).toBeNull();
-    expect(
-      document
-        .querySelector("[data-kanban-column='2']")
-        .querySelector("[data-kanban-card='10']"),
-    ).toBeTruthy();
-
-    resolveFetch({ ok: true });
+    dropOn(2);
+    expect(cardIn(1, 10)).toBeNull();
+    expect(cardIn(2, 10)).toBeTruthy();
   });
 
-  it("rolls back to previous state and shows error when server rejects", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
-
+  it("hands a second drop to the runtime while the first is in flight", () => {
     render(<Board />);
-
-    const col2 = document.querySelector("[data-kanban-column='2']");
-    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
-
-    await waitFor(() =>
-      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
-    );
-
-    expect(
-      document
-        .querySelector("[data-kanban-column='1']")
-        .querySelector("[data-kanban-card='10']"),
-    ).toBeTruthy();
-    expect(screen.getByText(/rejected/i)).toBeInTheDocument();
+    dropOn(2);
+    dropOn(1);
+    expect(runtime.submit).toHaveBeenCalledTimes(2);
+    expect(cardIn(1, 10)).toBeTruthy();
   });
 
-  it("rolls back on a network failure", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
-
+  it("keeps the move once the server accepts it", async () => {
     render(<Board />);
+    dropOn(2);
+    await runtime.answer("ok");
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(document.querySelector("[data-kanban-error]")).toBeNull();
+  });
 
-    const col2 = document.querySelector("[data-kanban-column='2']");
-    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
+  it("leaves a move a newer drop replaced to the reply of that drop", async () => {
+    render(<Board />);
+    dropOn(2);
+    dropOn(1);
+    await runtime.answer("dropped");
+    expect(cardIn(1, 10)).toBeTruthy();
+    expect(document.querySelector("[data-kanban-error]")).toBeNull();
+  });
 
-    await waitFor(() =>
-      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
-    );
+  it("keeps a second move in flight through the board the first reply carries", async () => {
+    window.Next.context.board.columns[0].cards.push({
+      id: 11,
+      title: "Task B",
+      position: 1,
+    });
+    render(<Board />);
+    dropOn(2, "10");
+    dropOn(2, "11");
+    const columns = structuredClone(window.Next.context.board.columns);
+    columns[1].cards = [{ ...columns[0].cards[0], position: 0 }];
+    columns[0].cards = [{ ...columns[0].cards[1], position: 0 }];
+    runtime.emit("context-updated", serverBoard(columns));
+    await runtime.answer("ok");
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(cardIn(2, 11)).toBeTruthy();
+    expect(cardIn(1, 11)).toBeNull();
+    await runtime.answer("invalid");
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(cardIn(1, 11)).toBeTruthy();
+  });
 
-    expect(
-      document
-        .querySelector("[data-kanban-column='1']")
-        .querySelector("[data-kanban-card='10']"),
-    ).toBeTruthy();
+  it("skips the move when the runtime offers no submit", () => {
+    delete window.Next.partial.submit;
+    render(<Board />);
+    dropOn(2);
+    expect(cardIn(1, 10)).toBeTruthy();
+  });
+
+  it("skips the move when the context carries no action url", () => {
+    delete window.Next.context.board.move_card_url;
+    render(<Board />);
+    dropOn(2);
+    expect(runtime.submit).not.toHaveBeenCalled();
+    expect(cardIn(1, 10)).toBeTruthy();
+  });
+
+  it("rolls back onto the board the invalid reply carries and alerts", async () => {
+    render(<Board />);
+    dropOn(2);
+    const columns = structuredClone(mockBoard.columns);
+    columns[0].cards = [];
+    runtime.emit("context-updated", serverBoard(columns));
+    await runtime.answer("invalid");
+    expect(document.querySelector("[data-kanban-card='10']")).toBeNull();
+    expect(screen.getByText("Move rejected by server.")).toBeInTheDocument();
+  });
+
+  it("rolls back when the move never reaches the server", async () => {
+    render(<Board />);
+    dropOn(2);
+    await runtime.answer("error");
+    expect(cardIn(1, 10)).toBeTruthy();
+    expect(screen.getByText(/rolled back/i)).toBeInTheDocument();
   });
 
   it("dismisses the error banner when the user clicks ×", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
-
     render(<Board />);
-    const col2 = document.querySelector("[data-kanban-column='2']");
-    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
-
-    await waitFor(() =>
-      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
-    );
-
+    dropOn(2);
+    await runtime.answer("error");
     fireEvent.click(screen.getByLabelText("Dismiss"));
     expect(document.querySelector("[data-kanban-error]")).toBeNull();
   });
 
-  it("posts to create_card_url with the column id and title", async () => {
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, url: "/board/1/?created=77" });
-    globalThis.fetch = mockFetch;
-
+  it("adopts the board another tab changed", () => {
     render(<Board />);
-    submitNewCard(2, "Write docs");
-
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
-
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toBe("/actions/kanban/create_card");
-    expect(opts.method).toBe("POST");
-
-    const body = new URLSearchParams(opts.body);
-    expect(body.get("column")).toBe("2");
-    expect(body.get("title")).toBe("Write docs");
-    expect(body.get("csrfmiddlewaretoken")).toBe("test-csrf-token");
+    runtime.emit("context-updated", {
+      context: { board: { ...mockBoard, columns: movedColumns() } },
+      changed: ["board"],
+    });
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(cardIn(1, 10)).toBeNull();
   });
 
-  it("shows the card as pending before the fetch resolves", () => {
-    let resolveFetch;
-    globalThis.fetch = vi.fn(() => new Promise((resolve) => (resolveFetch = resolve)));
-
+  it("keeps a pending card through a server update", () => {
     render(<Board />);
     submitNewCard(2, "Write docs");
+    runtime.emit("context-updated", {
+      context: { board: { ...mockBoard, columns: movedColumns() } },
+      changed: ["board"],
+    });
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(document.querySelector("[data-kanban-card-pending]").textContent).toContain(
+      "Write docs",
+    );
+  });
 
+  it("ignores a context update that leaves the board alone", () => {
+    render(<Board />);
+    runtime.emit("context-updated", {
+      context: { board: { ...mockBoard, columns: movedColumns() } },
+      changed: ["flash"],
+    });
+    runtime.emit("context-updated", { context: {}, changed: ["board"] });
+    expect(cardIn(1, 10)).toBeTruthy();
+  });
+
+  it("drops a pending card the server update already delivered", async () => {
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+    const columns = structuredClone(mockBoard.columns);
+    columns[1].cards = [{ id: 77, title: "Write docs", position: 0 }];
+    runtime.emit("context-updated", {
+      context: { board: { ...mockBoard, columns } },
+      changed: ["board"],
+    });
+    await runtime.answer("ok", { location: "http://localhost/board/1/?created=77" });
+    expect(document.querySelectorAll("[data-kanban-card='77']")).toHaveLength(1);
+    expect(document.querySelector("[data-kanban-card-pending]")).toBeNull();
+  });
+
+  it("keeps a move that landed while a rejected create was in flight", async () => {
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+    dropOn(2);
+    await runtime.answer("error");
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(screen.queryByText("Write docs")).toBeNull();
+  });
+
+  it("shows who watches the board from the presence event", () => {
+    render(<Board />);
+    expect(document.querySelector("[data-kanban-presence]")).toBeNull();
+    runtime.push("board:1", "next:presence", {
+      count: 3,
+      members: [
+        { name: "Ada Lovelace", initials: "AL" },
+        { name: "Grace Hopper", initials: "GH" },
+      ],
+    });
+    const region = screen.getByRole("region", { name: "Watching this board" });
+    expect(region.querySelectorAll("[data-kanban-member]")).toHaveLength(2);
+    expect(region).toHaveTextContent("Ada Lovelace");
+    expect(region.querySelector("[data-kanban-guests]")).toHaveTextContent("+1 guest");
+  });
+
+  it("counts guests alone when nobody watching is signed in", () => {
+    render(<Board />);
+    runtime.push("board:1", "next:presence", { count: 2 });
+    expect(document.querySelector("[data-kanban-guests]")).toHaveTextContent(
+      "2 guests",
+    );
+    expect(document.querySelector("[data-kanban-member]")).toBeNull();
+  });
+
+  it("marks the card someone else is dragging until they drop it", () => {
+    render(<Board />);
+    const from = "other-socket";
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: true,
+      by: grace,
+      from,
+    });
+    expect(cardIn(1, 10)).toHaveTextContent("Grace Hopper is moving this card");
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: false,
+      by: grace,
+      from,
+    });
+    expect(cardIn(1, 10)).not.toHaveTextContent("is moving this card");
+  });
+
+  it("sends the drag start and end upstream", () => {
+    render(<Board />);
+    const card = cardIn(1, 10);
+    fireEvent.dragStart(card, { dataTransfer: { setData: () => {} } });
+    fireEvent.dragEnd(card);
+    expect(runtime.send.mock.calls).toEqual([
+      ["board:1", "dragging", { card: 10, active: true }, { ack: false }],
+      ["board:1", "dragging", { card: 10, active: false }, { ack: false }],
+    ]);
+  });
+
+  it("skips the echo its own socket sent", () => {
+    render(<Board />);
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: true,
+      by: { name: "Ada Lovelace", initials: "AL" },
+      from: "own-socket",
+    });
+    expect(cardIn(1, 10)).not.toHaveTextContent("is moving this card");
+  });
+
+  it("clears the mark once the member dragging the card leaves the board", () => {
+    render(<Board />);
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: true,
+      by: grace,
+      from: "other-socket",
+    });
+    runtime.push("board:1", "next:presence", { count: 2, members: [grace] });
+    expect(cardIn(1, 10)).toHaveTextContent("Grace Hopper is moving this card");
+    runtime.push("board:1", "next:presence", { count: 1 });
+    expect(cardIn(1, 10)).not.toHaveTextContent("is moving this card");
+  });
+
+  it("clears the mark when only a namesake of the member dragging stays", () => {
+    render(<Board />);
+    runtime.push("board:1", "board:dragging", {
+      card: 10,
+      active: true,
+      by: { ...grace, key: "first" },
+      from: "other-socket",
+    });
+    runtime.push("board:1", "next:presence", {
+      count: 1,
+      members: [{ ...grace, key: "second" }],
+    });
+    expect(cardIn(1, 10)).not.toHaveTextContent("is moving this card");
+  });
+
+  it("stays off the stream when the board names no topic", () => {
+    delete window.Next.context.board.topic;
+    render(<Board />);
+    const card = cardIn(1, 10);
+    fireEvent.dragStart(card, { dataTransfer: { setData: () => {} } });
+    expect(runtime.send).not.toHaveBeenCalled();
+    expect(runtime.listeners()).toBe(1);
+  });
+
+  it("releases every listener on unmount", () => {
+    const { unmount } = render(<Board />);
+    expect(runtime.listeners()).toBe(3);
+    unmount();
+    expect(runtime.listeners()).toBe(0);
+  });
+
+  it("submits the create action without navigating", () => {
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+    expect(runtime.submit.mock.calls).toEqual([
+      [
+        {
+          action: "/actions/kanban/create_card",
+          data: { column: 2, title: "Write docs" },
+          navigate: false,
+        },
+      ],
+    ]);
+  });
+
+  it("shows the card as pending before the server answers", () => {
+    render(<Board />);
+    submitNewCard(2, "Write docs");
     const pending = document.querySelector(
       "[data-kanban-column='2'] [data-kanban-card-pending]",
     );
     expect(pending).toBeTruthy();
     expect(pending.textContent).toContain("Write docs");
-
-    resolveFetch({ ok: true, url: "/board/1/?created=77" });
   });
 
-  it("adopts the card id the redirect carries", async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, url: "/board/1/?created=77" });
-
+  it("adopts the card id the location carries", async () => {
     render(<Board />);
     submitNewCard(2, "Write docs");
-
-    await waitFor(() =>
-      expect(
-        document.querySelector("[data-kanban-column='2'] [data-kanban-card='77']"),
-      ).toBeTruthy(),
-    );
+    await runtime.answer("ok", { location: "http://localhost/board/1/?created=77" });
+    expect(
+      document.querySelector("[data-kanban-column='2'] [data-kanban-card='77']"),
+    ).toBeTruthy();
     expect(document.querySelector("[data-kanban-card-pending]")).toBeNull();
   });
 
   it("rolls back the new card when the server rejects it", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, url: "/board/1/" });
-
     render(<Board />);
     submitNewCard(2, "Over the limit");
-
-    await waitFor(() =>
-      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
-    );
+    await runtime.answer("invalid");
+    expect(document.querySelector("[data-kanban-error]")).toBeTruthy();
     expect(screen.queryByText("Over the limit")).toBeNull();
     expect(
       document.querySelector("[data-kanban-column='2'] [data-kanban-card]"),
     ).toBeNull();
   });
 
-  it("rolls back a success the redirect never named", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, url: "/board/1/" });
+  it("ignores a drop of a card the board does not hold", () => {
+    render(<Board />);
+    dropOn(2, "999");
+    expect(cardIn(1, 10)).toBeTruthy();
+    expect(
+      document.querySelector("[data-kanban-column='2'] [data-kanban-card]"),
+    ).toBeNull();
+  });
 
+  it("shows a column the server added after the first render", () => {
+    render(<Board />);
+    const columns = structuredClone(mockBoard.columns);
+    columns.push({ id: 3, title: "Review", wip_limit: null, cards: [] });
+    runtime.emit("context-updated", serverBoard(columns));
+    expect(screen.getByText("Review")).toBeInTheDocument();
+  });
+
+  it("renumbers the siblings of a card moved out of a column", () => {
+    render(<Board />);
+    submitNewCard(1, "Write docs");
+    dropOn(2);
+    expect(cardIn(2, 10)).toBeTruthy();
+    expect(document.querySelector("[data-kanban-card-pending]")).toBeTruthy();
+  });
+
+  it("rolls back a success the location never named", async () => {
     render(<Board />);
     submitNewCard(2, "Write docs");
-
-    await waitFor(() =>
-      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
-    );
+    await runtime.answer("ok", { location: "http://localhost/board/1/" });
+    expect(document.querySelector("[data-kanban-error]")).toBeTruthy();
     expect(document.querySelector("[data-kanban-card-pending]")).toBeNull();
     expect(screen.queryByText("Write docs")).toBeNull();
   });
 
-  it("keeps a move that landed while a rejected create was in flight", async () => {
-    let rejectCreate;
-    globalThis.fetch = vi.fn((url) =>
-      url === "/actions/kanban/create_card"
-        ? new Promise((resolve) => {
-            rejectCreate = () => resolve({ ok: false, url: "/board/1/" });
-          })
-        : Promise.resolve({ ok: true }),
-    );
-
+  it("rolls back a success that carried no location", async () => {
     render(<Board />);
     submitNewCard(2, "Write docs");
-    fireEvent.drop(document.querySelector("[data-kanban-column='2']"), {
-      dataTransfer: { getData: () => "10" },
-    });
-
-    await act(async () => rejectCreate());
-
-    expect(
-      document.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
-    ).toBeTruthy();
+    await runtime.answer("ok");
     expect(screen.queryByText("Write docs")).toBeNull();
   });
 
-  it("rolls back the new card on a network failure", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline"));
-
+  it("withdraws a create the runtime dropped without an alert", async () => {
     render(<Board />);
     submitNewCard(2, "Write docs");
+    await runtime.answer("dropped");
+    expect(screen.queryByText("Write docs")).toBeNull();
+    expect(document.querySelector("[data-kanban-error]")).toBeNull();
+  });
 
-    await waitFor(() =>
-      expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
-    );
+  it("rolls back the new card on a network failure", async () => {
+    render(<Board />);
+    submitNewCard(2, "Write docs");
+    await runtime.answer("error");
     expect(screen.getByText(/rolled back/i)).toBeInTheDocument();
     expect(screen.queryByText("Write docs")).toBeNull();
   });
 
   it("skips the create request when the context carries no action url", () => {
     delete globalThis.window.Next.context.board.create_card_url;
-    const mockFetch = vi.fn();
-    globalThis.fetch = mockFetch;
-
     render(<Board />);
     submitNewCard(2, "Write docs");
+    expect(runtime.submit).not.toHaveBeenCalled();
+    expect(screen.queryByText("Write docs")).toBeNull();
+  });
 
-    expect(mockFetch).not.toHaveBeenCalled();
+  it("skips the create request when the runtime offers no submit", () => {
+    delete window.Next.partial.submit;
+    render(<Board />);
+    submitNewCard(2, "Write docs");
     expect(screen.queryByText("Write docs")).toBeNull();
   });
 
@@ -329,17 +560,13 @@ describe("board island lifecycle", () => {
     expect(el.querySelectorAll("[data-kanban-column]")).toHaveLength(2);
   });
 
-  it("keeps the live root when onMount re-runs on the same element", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+  it("keeps the live root when onMount re-runs on the same element", () => {
     act(() => island.mount(el));
 
-    const col2 = el.querySelector("[data-kanban-column='2']");
-    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
-    await waitFor(() =>
-      expect(
-        el.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
-      ).toBeTruthy(),
-    );
+    dropOn(2);
+    expect(
+      el.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
+    ).toBeTruthy();
 
     act(() => island.mount(el));
 

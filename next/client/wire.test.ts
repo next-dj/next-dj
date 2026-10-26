@@ -5,6 +5,7 @@ import type { CsrfMint } from "./csrf";
 import { lazyChunk } from "./chunks";
 import type { CsrfPayload, CsrfSource, WireDeps, WireRequest } from "./wire";
 import type { SessionStore } from "./assets";
+import type { Envelope } from "./apply";
 import {
   ACCEPT,
   CONTENT_TYPE,
@@ -48,6 +49,7 @@ function makeWire(
     csrf?: CsrfPayload;
     ensure?: CsrfSource["ensure"];
     session?: SessionStore;
+    applied?: boolean;
     tunnel?: WireDeps["tunnel"];
     document?: Document;
   } = {},
@@ -66,9 +68,10 @@ function makeWire(
     navigate: (url) => navigated.push(url),
     session,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
-    onEnvelope: (raw, _response, _snapshot, _key, page) => {
+    onEnvelope: async (raw, _response, _snapshot, _key, page) => {
       envelopes.push(raw);
       pages.push(page);
+      return { envelope: raw as Envelope, ok: opts.applied ?? true };
     },
     ...(opts.tunnel === undefined ? {} : { tunnel: opts.tunnel }),
     ...(opts.document === undefined ? {} : { document: opts.document }),
@@ -266,7 +269,10 @@ describe("Wire classification", () => {
 
   it("reports a body read the connection cut off as a network error", async () => {
     const h = makeWire(async () => cutOff(new TypeError("connection reset")));
-    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toMatchObject({
+      status: "error",
+      applied: false,
+    });
     const err = h.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail).toMatchObject({
       kind: "network",
@@ -279,7 +285,10 @@ describe("Wire classification", () => {
     const aborted = new Error("The operation was aborted.");
     aborted.name = "AbortError";
     const h = makeWire(async () => cutOff(aborted));
-    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toMatchObject({
+      status: "dropped",
+      applied: false,
+    });
     expect(h.dispatched.some((d) => d.event === "partial:error")).toBe(false);
   });
 
@@ -294,7 +303,10 @@ describe("Wire classification", () => {
       },
       csrf: { current: () => undefined, ensure: async () => undefined },
     });
-    await expect(wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    await expect(wire.fetch({ url: "/list/", zone: "z" })).resolves.toMatchObject({
+      status: "error",
+      applied: false,
+    });
     const errors = dispatched.filter((d) => d.event === "partial:error");
     expect(errors.map((d) => d.detail)).toEqual([
       { kind: "parse", body: "{}", error: expect.any(TypeError) },
@@ -308,7 +320,10 @@ describe("Wire classification", () => {
     h.wire.parseHook("text/vnd.next.stream+html", () => {
       throw new SyntaxError("bad frame");
     });
-    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toBeUndefined();
+    await expect(h.wire.fetch({ url: "/list/", zone: "z" })).resolves.toMatchObject({
+      status: "error",
+      applied: false,
+    });
     const err = h.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail).toMatchObject({ kind: "parse", body: "raw-body" });
     expect(h.envelopes).toEqual([]);
@@ -436,7 +451,10 @@ describe("Wire access refusals", () => {
         navigate: (url) => log.push({ navigate: url }),
         session: memorySession(),
         dispatch: (event, detail) => log.push({ event, detail }),
-        onEnvelope: (raw) => log.push({ applied: raw }),
+        onEnvelope: async (raw) => {
+          log.push({ applied: raw });
+          return { envelope: raw as Envelope, ok: true };
+        },
         csrf: { current: () => undefined, ensure: async () => undefined },
       });
       await wire.fetch({ url: "/orders/", zone: "list" });
@@ -449,6 +467,17 @@ describe("Wire access refusals", () => {
       ]);
     },
   );
+
+  it("navigates a refused zone GET to its own target when the response has no url", async () => {
+    const h = makeWire(async () => refusal(403, ""));
+    await expect(
+      h.wire.fetch({ url: "/orders/", zone: "list" }),
+    ).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "http", status: 403 },
+    });
+    expect(h.navigated).toEqual([`${location.origin}/orders/`]);
+  });
 
   it("frees the zone queue after a refusal, so the next GET runs", async () => {
     const h = makeWire(async () => refusal(403, "/orders/"));
@@ -506,6 +535,181 @@ describe("Wire mutation lock", () => {
     await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
     await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
     expect(h.calls).toHaveLength(2);
+  });
+});
+
+describe("Wire outcomes", () => {
+  const POST = { url: "/_next/form/u1/", method: "POST", uid: "u1" } as const;
+
+  function pending() {
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)));
+    const answer = async (body = ENVELOPE): Promise<void> => {
+      replies.shift()!(envelopeResponse(body));
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    };
+    return { h, answer };
+  }
+
+  it("resolves an applied envelope as ok with the envelope", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    const outcome = await h.wire.fetch(POST);
+    expect(outcome).toEqual({
+      status: "ok",
+      applied: true,
+      envelope: JSON.parse(ENVELOPE),
+      errors: undefined,
+    });
+  });
+
+  it("resolves an invalid form with its field errors", async () => {
+    const errors = { title: ["This field is required."] };
+    const body = JSON.stringify({ form: { uid: "u1", valid: false, errors } });
+    const h = makeWire(async () => envelopeResponse(body), { applied: false });
+    await expect(h.wire.fetch(POST)).resolves.toMatchObject({
+      status: "invalid",
+      applied: false,
+      errors,
+    });
+  });
+
+  it("resolves an envelope answered with a client error as an error", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE, { status: 422 }));
+    await expect(h.wire.fetch(POST)).resolves.toMatchObject({
+      status: "error",
+      applied: true,
+      envelope: JSON.parse(ENVELOPE),
+    });
+    expect(h.dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("resolves a network failure with the error it fired", async () => {
+    const h = makeWire(async () => {
+      throw new TypeError("offline");
+    });
+    const outcome = await h.wire.fetch(POST);
+    expect(outcome).toEqual({
+      status: "error",
+      applied: false,
+      error: { kind: "network", error: expect.any(TypeError) },
+    });
+    expect(h.dispatched.find((d) => d.event === "partial:error")!.detail).toBe(
+      outcome.error,
+    );
+  });
+
+  it("resolves a redirect the runtime follows as ok and not applied", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("", { type: "text/html", redirected: true, url: "/done/" }),
+    );
+    await expect(h.wire.fetch(POST)).resolves.toEqual({ status: "ok", applied: false });
+    expect(h.navigated).toEqual(["/done/"]);
+  });
+
+  it("resolves a redirect with its location when the request keeps the page", async () => {
+    const urls = ["/c/?id=7", ""];
+    const h = makeWire(async () =>
+      envelopeResponse("", { type: "text/html", redirected: true, url: urls.shift()! }),
+    );
+    await expect(h.wire.fetch({ ...POST, navigate: false })).resolves.toEqual({
+      status: "ok",
+      applied: false,
+      location: "/c/?id=7",
+    });
+    await expect(
+      h.wire.fetch({ url: "/page/", navigate: false }),
+    ).resolves.toMatchObject({ location: `${location.origin}/page/` });
+    expect(h.navigated).toEqual([]);
+  });
+
+  it("resolves a deferred token the csrf chunk failed to load as an error", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: async () => null,
+    });
+    await expect(h.wire.fetch(POST)).resolves.toEqual({
+      status: "error",
+      applied: false,
+    });
+    expect(h.calls).toEqual([]);
+  });
+
+  it("resolves a submit dropped by the lock as dropped", async () => {
+    const { h, answer } = pending();
+    const first = h.wire.fetch(POST);
+    await expect(h.wire.fetch(POST)).resolves.toEqual({
+      status: "dropped",
+      applied: false,
+    });
+    await answer();
+    await expect(first).resolves.toMatchObject({ status: "ok" });
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it("runs waiting submits in turn once the lock frees, each one sent", async () => {
+    const { h, answer } = pending();
+    const bodies = (): unknown[] => h.calls.map((call) => call.init.body);
+    const first = h.wire.fetch({ ...POST, body: "a" });
+    const second = h.wire.fetch({ ...POST, body: "b", wait: true });
+    const third = h.wire.fetch({ ...POST, body: "c", wait: true });
+    await answer();
+    await expect(first).resolves.toMatchObject({ status: "ok" });
+    expect(bodies()).toEqual(["a", "b"]);
+    await answer();
+    await expect(second).resolves.toMatchObject({ status: "ok", applied: true });
+    expect(bodies()).toEqual(["a", "b", "c"]);
+    await answer();
+    await expect(third).resolves.toMatchObject({ status: "ok", applied: true });
+    const free = h.wire.fetch(POST);
+    await answer();
+    await expect(free).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("drops the older waiters for a latest submit, the newest winning", async () => {
+    const { h, answer } = pending();
+    const bodies = (): unknown[] => h.calls.map((call) => call.init.body);
+    const first = h.wire.fetch({ ...POST, body: "a" });
+    const second = h.wire.fetch({ ...POST, body: "b", wait: "latest" });
+    const third = h.wire.fetch({ ...POST, body: "c", wait: "latest" });
+    await expect(second).resolves.toEqual({ status: "dropped", applied: false });
+    expect(bodies()).toEqual(["a"]);
+    await answer();
+    await expect(first).resolves.toMatchObject({ status: "ok" });
+    expect(bodies()).toEqual(["a", "c"]);
+    await answer();
+    await expect(third).resolves.toMatchObject({ status: "ok", applied: true });
+    expect(bodies()).toEqual(["a", "c"]);
+  });
+
+  it("resolves an invalid header name as a network error", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    const outcome = await h.wire.fetch({
+      url: "/p/",
+      zone: "z",
+      headers: { "bad header": "1" },
+    });
+    expect(outcome).toMatchObject({ status: "error", applied: false });
+    expect(outcome.error).toMatchObject({ kind: "network" });
+    expect(h.calls).toEqual([]);
+  });
+
+  it("drops the waiting submit on reset", async () => {
+    const { h } = pending();
+    void h.wire.fetch(POST);
+    const waiting = h.wire.fetch({ ...POST, wait: true });
+    h.wire._reset();
+    await expect(waiting).resolves.toEqual({ status: "dropped", applied: false });
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it("resolves a GET a newer one superseded as dropped", async () => {
+    const { h, answer } = pending();
+    const first = h.wire.fetch({ url: "/p/", zone: "list" });
+    const second = h.wire.fetch({ url: "/p/", zone: "list" });
+    await answer();
+    await answer();
+    await expect(first).resolves.toEqual({ status: "dropped", applied: false });
+    await expect(second).resolves.toMatchObject({ status: "ok" });
   });
 });
 
@@ -892,7 +1096,7 @@ describe("Wire echo request id", () => {
       },
       navigate: () => undefined,
       dispatch: () => undefined,
-      onEnvelope: () => undefined,
+      onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
       csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => remembered.push(id),
     });

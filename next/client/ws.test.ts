@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Transport, TransportSink } from "./stream";
+import type { StreamMeta, Transport, TransportSink } from "./stream";
 import { createWebSocketTransport, csrfSecret } from "./ws";
 import type { WebSocketAdapter } from "./ws";
 
@@ -908,6 +908,32 @@ function formBody(entries: [string, string | Blob][]): FormData {
   for (const [key, value] of entries) body.append(key, value);
   return body;
 }
+
+describe("WebSocket connection id", () => {
+  const meta = (topic: string): StreamMeta => ({
+    topic,
+    epoch: "e",
+    seq: 1,
+    serverTime: 0,
+  });
+
+  it("names the connection a hello announced for the topics it holds", async () => {
+    const s = await subscribed({ room: {} }, { connection: "c-1" });
+    expect(s.transport.tag(meta("room")).connection).toBe("c-1");
+    expect(s.transport.tag(meta("other")).connection).toBeUndefined();
+    expect(s.transport.tag(undefined)).toBeUndefined();
+    s.socket.message(JSON.stringify({ type: "hello", topics: { room: {} } }));
+    expect(s.transport.tag(meta("room")).connection).toBeUndefined();
+    s.control.close();
+  });
+
+  it("names no connection once the socket is gone", async () => {
+    const s = await subscribed({ room: {} }, { connection: "c-1" });
+    s.socket.refuse(4403);
+    expect(s.transport.tag(meta("room")).connection).toBeUndefined();
+    s.control.close();
+  });
+});
 
 describe("WebSocket upstream events", () => {
   it("sends an up frame and resolves with the ack", async () => {

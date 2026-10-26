@@ -1,0 +1,26 @@
+<div class="mx-auto w-full max-w-sm space-y-6">
+  {% component "page_header" title="Sign in" description="Pick a demo member, so the board can show who is watching it." %}
+  <div class="rounded-md border border-border bg-card p-6 shadow-sm">
+    {% form "sign_in_form" %}
+      <div class="space-y-4">
+        {% if form.non_field_errors %}
+          {% #component "alert" variant="destructive" %}
+            {% #slot "content" %}
+              {% for err in form.non_field_errors %}<div>{{ err }}</div>{% endfor %}
+            {% /slot %}
+          {% /component %}
+        {% endif %}
+        <div class="space-y-1.5">
+          <label for="sign-in-username" class="block text-sm font-medium">Username</label>
+          {% component "input" name="username" id="sign-in-username" autocomplete="username" required=True %}
+        </div>
+        <div class="space-y-1.5">
+          <label for="sign-in-password" class="block text-sm font-medium">Password</label>
+          {% component "input" name="password" id="sign-in-password" type="password" autocomplete="current-password" required=True %}
+        </div>
+        {% component "button" type="submit" text="Sign in" variant="default" extra="w-full" %}
+      </div>
+    {% endform %}
+    <p class="mt-4 text-xs text-muted-foreground">Demo members are <code>ada</code> and <code>grace</code>, both with the password <code>kanban</code>.</p>
+  </div>
+</div>

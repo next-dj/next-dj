@@ -1,0 +1,35 @@
+<div class="space-y-6">
+  <section class="flex flex-col gap-3 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <div class="space-y-1">
+      <h1 class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Realtime</h1>
+      <p class="text-sm text-muted-foreground">Stream series of this process, the same numbers <a class="underline" href="/metrics/">/metrics/</a> exports.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      {% form "pulse_form" %}
+        <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700">Publish a pulse</button>
+      {% endform %}
+      <button type="button" data-obs-wave="{{ pulse_topic }}" class="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground hover:bg-muted">Wave</button>
+    </div>
+  </section>
+
+  {% zone "realtime-totals" %}
+    <div class="space-y-6">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-5">
+        {% component "stat_card" label="Open SSE" value=realtime.open_sse %}
+        {% component "stat_card" label="Open WebSocket" value=realtime.open_ws %}
+        {% component "stat_card" label="Published" value=realtime.published %}
+        {% component "stat_card" label="Waves" value=realtime.waves %}
+        {% component "stat_card" label="Mean stream seconds" value=realtime.mean_seconds %}
+      </div>
+      <div class="rounded-md border border-border bg-card p-6 shadow-sm">
+        <h2 class="text-sm font-semibold text-foreground">Unsubscribes by reason</h2>
+        <ul class="mt-3 divide-y divide-border text-sm">
+          {% for reason, count in realtime.reasons %}
+            <li class="flex justify-between py-2"><span>{{ reason }}</span><span class="tabular-nums">{{ count }}</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  {% endzone %}
+  <div data-next-sse="/realtime/stream/"></div>
+</div>

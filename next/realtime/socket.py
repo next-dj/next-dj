@@ -20,7 +20,7 @@ from .access import (
     heartbeat_seconds,
     run_detached,
 )
-from .attendance import Attendance, aattend, aattending
+from .attendance import Attendance, Identifier, aattend, aattending
 from .backends import BrokerBackend
 from .binding import opaque_subject, ticket_binding
 from .delivery import transformed
@@ -42,14 +42,13 @@ from .manager import broker_manager
 from .messages import Message, Position
 from .replay import acatch_up
 from .roster import Presence, counted, snapshot_message
-from .signals import StreamLifecycle, UnsubscribeReason
+from .signals import StreamLifecycle, UnsubscribeReason, arejected
 from .tickets import TicketClaims, resolve_claims, resolve_identify, verify_ticket
 from .tunnel import Tunnel
 
 
 if TYPE_CHECKING:
     from .access import TopicAuthorizer
-    from .attendance import Identify
     from .tickets import TopicTransform
 
 
@@ -198,7 +197,7 @@ class TopicSocket:
         self._heartbeat = heartbeat if heartbeat is not None else heartbeat_seconds()
         self._clock = clock
         self._transform: TopicTransform | None = None
-        self._identify: Identify | None = None
+        self._identify: Identifier | None = None
         self._limits = limits if limits is not None else SocketLimits.configured()
         self._tunnel = tunnel if self._limits.tunnel is not None else None
         upstream = self._limits.upstream
@@ -207,6 +206,7 @@ class TopicSocket:
         self._events = 0
         self._requests = 0
         self._topics: frozenset[str] = frozenset()
+        self._reports: set[asyncio.Task[None]] = set()
         self._ready = asyncio.Event()
         self._lifecycle = StreamLifecycle(self, "ws")
 
@@ -219,6 +219,7 @@ class TopicSocket:
         try:
             reason = await self._run(inbound)
         finally:
+            await asyncio.gather(*self._reports)
             await self._lifecycle.aclose(reason)
 
     async def _run(self, inbound: AsyncIterable[str | bytes]) -> UnsubscribeReason:
@@ -309,7 +310,7 @@ class TopicSocket:
 
         An event or a request runs as its own task, so a slow one never stalls a pong.
         """
-        admitted = await self._admit()
+        admitted = await self._admit(frame)
         match frame:
             case Pong():
                 return
@@ -317,7 +318,7 @@ class TopicSocket:
                 if admitted:
                     group.create_task(self._up(frame))
                 else:
-                    await self._refuse_up(frame.id)
+                    await self._refuse_up(frame)
             case Request():
                 if admitted:
                     group.create_task(self._request(frame))
@@ -327,21 +328,33 @@ class TopicSocket:
                 if admitted:
                     await self._writer.send(frames.error("unsupported"))
 
-    async def _admit(self) -> bool:
+    async def _admit(self, frame: frames.Inbound) -> bool:
         """Draw a token for a frame, closing with 4429 after `strikes` refusals."""
         if self._bucket.take():
             self._strikes = 0
             return True
         self._strikes += 1
         if self._strikes >= self.strikes:
+            if isinstance(frame, Up):
+                self._report(frame, UpstreamError.LIMIT)
             await self._fail(Close.RATE_LIMITED)
         return False
 
-    async def _refuse_up(self, frame_id: str | None) -> None:
-        if frame_id is not None:
-            await self._writer.send(frames.ack(frame_id, UpstreamError.LIMIT))
+    async def _refuse_up(self, frame: Up) -> None:
+        if frame.id is not None:
+            await self._writer.send(frames.ack(frame.id, UpstreamError.LIMIT))
         else:
             await self._writer.send(frames.error("limit"))
+        self._report(frame, UpstreamError.LIMIT)
+
+    def _report(self, frame: Up, reason: UpstreamError) -> None:
+        """Send `upstream_rejected` in a task, so a slow receiver never stalls reading.
+
+        `serve` awaits every report before it ends, a connection closed by 4429 too.
+        """
+        task = asyncio.create_task(self._rejected(frame, reason))
+        self._reports.add(task)
+        task.add_done_callback(self._reports.discard)
 
     async def _up(self, frame: Up) -> None:
         """Hand an event to its handler within the connection's concurrency, then ack.
@@ -349,11 +362,13 @@ class TopicSocket:
         An event past `UPSTREAM['CONCURRENCY']` is refused but never counts to 4429.
         """
         if self._events >= self._limits.upstream.concurrency:
-            await self._refuse_up(frame.id)
+            await self._refuse_up(frame)
             return
         self._events += 1
         try:
             error = await self._deliver_up(frame)
+            if error is not None:
+                await self._rejected(frame, error)
             if frame.id is not None:
                 await self._writer.send(frames.ack(frame.id, error))
         finally:
@@ -367,6 +382,7 @@ class TopicSocket:
             return UpstreamError.TOPIC
         verdict = await self._access.acheck()
         if verdict is not Access.GRANTED:
+            await self._rejected(frame, UpstreamError.DENIED)
             if frame.id is not None:
                 await self._writer.send(frames.ack(frame.id, UpstreamError.DENIED))
             await self._fail(_CLOSE_CODES[verdict])
@@ -388,6 +404,16 @@ class TopicSocket:
             logger.exception("Realtime upstream handler for %r failed", frame.name)
             return UpstreamError.INTERNAL
         return None if delivered else UpstreamError.UNKNOWN
+
+    async def _rejected(self, frame: Up, reason: UpstreamError) -> None:
+        await arejected(
+            type(self),
+            topic=frame.topic,
+            name=frame.name,
+            reason=reason,
+            connection=self.connection_id,
+            subject=self.handshake.subject,
+        )
 
     async def handle(self, upstream: Upstream) -> bool:
         """Route one granted event, to its `@realtime.on` handler by default.
@@ -458,6 +484,7 @@ class TopicSocket:
                         heartbeat=self._heartbeat,
                         server_time=self._now(),
                         limits=self._hello_limits(),
+                        connection=self.connection_id,
                     )
                 )
                 if attendance is not None:
@@ -503,6 +530,7 @@ class TopicSocket:
             self.handshake.user,
             heartbeat=self._heartbeat,
             connection=self.connection_id,
+            subject=self.handshake.subject,
         )
 
     async def _snapshots(self, attendance: Attendance, topics: tuple[str, ...]) -> None:
@@ -519,11 +547,12 @@ class TopicSocket:
         try:
             claims = verify_ticket(frame.ticket, self.handshake.credential)
             transform, authorizer = resolve_claims(claims)
-            self._identify = resolve_identify(claims)
+            identify = resolve_identify(claims)
         except InvalidTicketError:
             await self._fail(Close.SESSION)
         self.cursor = frame.cursor
         self._transform = transform
+        self._identify = None if identify is None else Identifier.of(identify)
         self._access = self.access_check(claims, authorizer)
         self._access.bind()
         self._topics = frozenset(claims.topics)

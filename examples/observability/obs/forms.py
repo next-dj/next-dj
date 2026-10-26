@@ -3,9 +3,11 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.partial import Patches, zone_requested
+from next.realtime import publish
 from next.urls import page_reverse, with_query
 
 from .apps import METRIC_PULSE_OP
+from .realtime import PULSE_TOPIC, REALTIME_TOTALS_ZONE
 
 
 WINDOW_CHOICES = (("1m", "Last minute"), ("5m", "Last 5 minutes"), ("1h", "Last hour"))
@@ -13,6 +15,7 @@ DEFAULT_WINDOW = "5m"
 LIVE_TOTALS_ZONE = "live-totals"
 WINDOW_LABEL_ZONE = "stats-window"
 STATS_PAGE = "stats"
+REALTIME_PAGE = "realtime"
 
 
 class WindowFilterForm(Form):
@@ -55,3 +58,16 @@ class WindowFilterForm(Form):
             .op(METRIC_PULSE_OP, window=chosen, selector="[data-metric-pulse-target]")
             .response()
         )
+
+
+class PulseForm(Form):
+    """Publish one refresh on the pulse topic, so every open realtime page re-reads."""
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Publish at once, since the pulse writes nothing a commit would guard."""
+        publish(
+            PULSE_TOPIC,
+            Patches(request).refresh(zone=REALTIME_TOTALS_ZONE),
+            on_commit=False,
+        )
+        return HttpResponseRedirect(page_reverse(REALTIME_PAGE))

@@ -1,3 +1,5 @@
+from django.contrib.auth import get_user_model
+
 from kanban.models import Board, Card, Column
 
 
@@ -64,8 +66,24 @@ DEMO_BOARDS = [
 ]
 
 
+DEMO_PASSWORD = "kanban"
+DEMO_MEMBERS = [
+    {"username": "ada", "first_name": "Ada", "last_name": "Lovelace"},
+    {"username": "grace", "first_name": "Grace", "last_name": "Hopper"},
+]
+
+
+def seed_members() -> None:
+    """Create the demo members the sign-in page offers."""
+    users = get_user_model()
+    for member in DEMO_MEMBERS:
+        if not users.objects.filter(username=member["username"]).exists():
+            users.objects.create_user(password=DEMO_PASSWORD, **member)
+
+
 def seed_demo() -> None:
-    """Create two active demo boards plus one archived board."""
+    """Create the demo members, two active demo boards and one archived board."""
+    seed_members()
     for board_data in DEMO_BOARDS:
         board, created = Board.objects.get_or_create(
             slug=board_data["slug"],

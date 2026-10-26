@@ -8,4 +8,6 @@ from next.realtime import TopicStream
 
 def render(request: HttpRequest, poll: DPoll[Poll]) -> TopicStream:
     """Open the authorized topic stream for one poll."""
-    return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
+    return TopicStream(
+        request, f"poll:{poll.pk}", authorize=can_subscribe_topic, presence=True
+    )

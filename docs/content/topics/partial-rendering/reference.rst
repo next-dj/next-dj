@@ -102,6 +102,7 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
        The target names a zone or a form by uid.
        ``extract: true`` carries a whole document the client trims to the target, and ``morph_form(uid, html)`` is the builder route that sets it.
        ``morph(zone=, overrides=)`` merges a mapping into the zone's render context, so a handler can bind a value the zone body reads without registering a provider for it.
+       ``morph(zone=)`` follows the morph with the ``context`` op a zone GET sends, ``context=`` merges a mapping of serialize-provider values over it, and ``context=False`` leaves the client context alone.
      - ``extract: false``
    * - ``replace``
      - ``replace()``
@@ -198,7 +199,7 @@ An event name that starts with ``partial:`` or ``next:``, or equals ``ready`` or
 ``Patches.event()`` rejects such a name with ``ReservedEventNameError``, symmetric to ``op()`` rejecting a built-in verb on the generic channel, so an application cannot forge a lifecycle event.
 
 The ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent`` keys of the init payload are reserved the same way.
-``Patches.context()`` rejects any of them with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op.
+``Patches.context()`` and ``morph(zone=, context=)`` reject any of them with ``ReservedContextKeyError``, and the js-context delta of a zone render drops them before it becomes a ``context`` op.
 The ``$`` namespace therefore belongs to the framework on a patch exactly as it does on a full render.
 A full render drops a page or component key of such a name from the payload whether or not it has a framework value to write there, so no patch has a registered value to update.
 

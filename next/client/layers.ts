@@ -81,7 +81,7 @@ export interface LayerDeps {
     zone: string;
     queue?: string;
     headers?: Record<string, string>;
-  }) => Promise<void>;
+  }) => Promise<unknown>;
   // Abort a queued fetch, so a closed layer drops its body in flight.
   abort?: (key: string) => void;
   document?: Document;
@@ -138,7 +138,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
 
   // Top layer first, the order every lookup resolves in.
   function topDown(): Layer[] {
-    return Array.from(stack).reverse();
+    return [...stack].reverse();
   }
 
   // The topmost layer holding an element, absent for one on the base page.
@@ -150,6 +150,10 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return pageUrl(doc);
   }
 
+  function basePage(): string {
+    return stack[0]?.host ?? currentUrl();
+  }
+
   // A page-scoped lookup searches only that page's subtree, an unmatched page
   // (its layer closed mid-flight) degrades to the top-down walk.
   function resolveZone(name: string, root: ParentNode, page?: string): Element | null {
@@ -157,9 +161,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (page !== undefined) {
       const owner = topDown().find((layer) => layer.pushedUrl === page);
       if (owner !== undefined) return findIn(owner.root, selector);
-      const bottom = stack[0];
-      const base = bottom === undefined ? currentUrl() : bottom.host;
-      if (page === base) return findOutsideLayers(selector, root);
+      if (page === basePage()) return findOutsideLayers(selector, root);
     }
     return resolveSelector(selector, root);
   }
@@ -181,7 +183,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
 
   // Dialogs live in the body, so skip matches inside any dialog subtree.
   function findOutsideLayers(selector: string, root: ParentNode): Element | null {
-    for (const el of Array.from(root.querySelectorAll(selector))) {
+    for (const el of root.querySelectorAll(selector)) {
       if (!stack.some((layer) => layer.dialog.contains(el))) return el;
     }
     return null;
@@ -192,9 +194,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
   function urlFor(el: Element): string {
     // A seeded layer pushed no URL, its zones belong to the opening page.
     const layer = layerOf(el);
-    if (layer !== undefined) return layer.pushedUrl ?? layer.host;
-    const bottom = stack[0];
-    return bottom === undefined ? currentUrl() : bottom.host;
+    return layer === undefined ? basePage() : (layer.pushedUrl ?? layer.host);
   }
 
   // The opening page of the layer an element is in. A mutation fired there sends it as
@@ -208,7 +208,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
   // page under one that did, leave the address bar unchanged.
   function rewrite(el: Element, href: string): boolean {
     const layer = layerOf(el);
-    const page = layer?.pushedUrl ?? stack[0]?.host ?? currentUrl();
+    const page = layer?.pushedUrl ?? basePage();
     if (layer?.committed === false || page !== currentUrl()) return false;
     if (layer !== undefined) layer.pushedUrl = href;
     return true;
@@ -378,7 +378,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (page === undefined) return stack.length;
     const owner = topDown().find((layer) => layer.pushedUrl === page);
     if (owner !== undefined) return stack.indexOf(owner) + 1;
-    return page === (stack[0]?.host ?? currentUrl()) ? 0 : -1;
+    return page === basePage() ? 0 : -1;
   }
 
   // Back past the URL of the topmost layer with a history entry closes that layer and

@@ -12,6 +12,7 @@ from types import MappingProxyType, TracebackType
 from typing import Self, cast
 from urllib.parse import unquote, urlparse
 
+from asgiref.sync import sync_to_async
 from asgiref.testing import ApplicationCommunicator
 from asgiref.typing import ASGIApplication, WebSocketScope
 from django.conf import settings
@@ -375,6 +376,24 @@ def issue_socket_ticket(
     return SocketTicket(session, grant, MappingProxyType(cookies), credential)
 
 
+async def aissue_socket_ticket(
+    topics: tuple[str, ...],
+    *,
+    authorizer_ref: str,
+    transform_ref: str | None = None,
+    presence: bool | str = False,
+    session: SessionBase | None = None,
+) -> SocketTicket:
+    """Issue a WebSocket ticket from an event loop, the session work off it."""
+    return await sync_to_async(issue_socket_ticket)(
+        topics,
+        authorizer_ref=authorizer_ref,
+        transform_ref=transform_ref,
+        presence=presence,
+        session=session,
+    )
+
+
 @contextmanager
 def override_websocket_mount(*, mounted: bool = False) -> Iterator[None]:
     """Set whether this process serves the WebSocket, restoring the flag on exit.
@@ -631,6 +650,7 @@ __all__ = [
     "SseEvent",
     "SseReader",
     "WebsocketCommunicator",
+    "aissue_socket_ticket",
     "capture_published",
     "issue_socket_ticket",
     "memory_broker",

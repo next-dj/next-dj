@@ -293,15 +293,20 @@ def hello(
     heartbeat: float,
     server_time: int,
     limits: Mapping[str, object] | None = None,
+    connection: str | None = None,
 ) -> str:
     """Encode the frame that opens a live subscription with its starting positions.
 
-    `limits` adds the `upstream` and `tunnel` keys a client sizes its frames by.
+    `limits` sizes the client frames, `connection` lets a page drop its own echo.
     """
     body = stream_hello(
         topics, positions, server_time=server_time, transports=_TRANSPORTS
     ).as_dict()
-    return _encode({"type": "hello", **body, "heartbeat": heartbeat, **(limits or {})})
+    frame: dict[str, object] = {"type": "hello", **body, "heartbeat": heartbeat}
+    if connection is not None:
+        frame["connection"] = connection
+    frame.update(limits or {})
+    return _encode(frame)
 
 
 def patches(

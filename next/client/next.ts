@@ -27,6 +27,8 @@ export type { ConsentChange } from "./consent";
 export type { ScriptsChunk } from "./chunks";
 export type { ScriptStatus } from "./scripts";
 export type { StreamMeta } from "./sse";
+export type { Outcome } from "./wire";
+export type { SubmitAction } from "./partial";
 
 /** The module each single-module chunk registers through Next._land, by chunk name. */
 interface NextModules {
@@ -67,7 +69,7 @@ export interface NextEventMap {
   "next:stream-gap": { topic: string; from: number; to: number };
   "next:stream-state": {
     url: string;
-    transport: "sse" | "websocket";
+    transport: "sse" | "ws";
     state: "connecting" | "open" | "closed";
     code?: string;
   };

@@ -6,6 +6,7 @@
     {% #slot "actions" %}
       {% component "nav_link" url="/" label="Overview" variant="bar" %}
       {% component "nav_link" url="/stats/" label="Stats" variant="bar" %}
+      {% component "nav_link" url="/realtime/" label="Realtime" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}
       {% template %}

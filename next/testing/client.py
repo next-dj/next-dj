@@ -42,11 +42,14 @@ class PartialEnvelope:
         return self._parsed
 
     def _addressed(self, selector: str) -> list[str]:
-        return [
-            patch.target[selector]
-            for patch in self._envelope().ops
-            if isinstance(patch.target, dict) and selector in patch.target
-        ]
+        """Return the selector value of every op naming it, a refresh's in its extras."""
+        named: list[str] = []
+        for patch in self._envelope().ops:
+            if isinstance(patch.target, dict) and selector in patch.target:
+                named.append(patch.target[selector])
+            elif patch.op == "refresh" and selector in patch.extras:
+                named.append(patch.extras[selector])
+        return named
 
     @property
     def version(self) -> str:
@@ -75,7 +78,10 @@ class PartialEnvelope:
         ]
 
     def zone_targets(self) -> list[str]:
-        """Return the zone name of every op that addresses a zone, in order."""
+        """Return the zone name of every op that addresses a zone, in order.
+
+        A `refresh` names its zone on the op itself rather than in a target.
+        """
         return self._addressed(keys.ZONE)
 
     def form_targets(self) -> list[str]:

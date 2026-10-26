@@ -250,18 +250,23 @@ The access check still gates the stream, so a subscriber that loses its grant st
 Members and privacy
 ~~~~~~~~~~~~~~~~~~~
 
-``identify(user, topic)`` returns a mapping of JSON values that describes the user to the other subscribers, or ``None`` to attend without a description.
+``identify(user, topic, subject)`` returns a mapping of JSON values that describes the user to the other subscribers, or ``None`` to attend without a description.
 It runs once per topic when the connection opens, with the session user of the request, and under ASGI it runs on the shared worker pool, so it may query the database.
+``subject`` is the opaque id of the browser's user or visitor, the same string ``Upstream.subject`` holds, so an anonymous visitor can be named too.
+It stays the same across reconnects and on both transports, and under ``SignedCookieBinding`` a guest keeps the visitor cookie's subject across reloads.
+It is empty when the request carries no session or visitor cookie, and ``identify(user, topic)`` without the third parameter keeps working.
 
 .. code-block:: python
    :caption: rooms/presence.py
 
    from collections.abc import Mapping
 
-   def identify(user, topic: str) -> Mapping[str, object] | None:
-       if not user.is_authenticated:
+   def identify(user, topic: str, subject: str) -> Mapping[str, object] | None:
+       if user.is_authenticated:
+           return {"handle": user.username, "name": user.get_full_name()}
+       if not subject:
            return None
-       return {"handle": user.username, "name": user.get_full_name()}
+       return {"handle": subject[:4], "name": f"Guest {subject[:4]}"}
 
 .. code-block:: python
    :caption: rooms/pages/rooms/[slug:code]/stream/page.py
@@ -402,7 +407,7 @@ A pattern may not start with ``next:`` and a name is 1 to 100 topic characters.
 A synchronous handler runs on a thread pool of its own and may use the ORM.
 An asynchronous handler runs on the event loop.
 A handler returns nothing, and an exception it raises is logged and reaches the sender as a failed acknowledgment.
-The ``upstream_received`` signal fires before each handler runs, with the handler as its sender.
+The ``upstream_received`` signal fires before each handler runs, with the handler as its sender, and ``upstream_rejected`` fires for an event refused before a handler finished.
 
 Discovery
 ~~~~~~~~~
@@ -465,6 +470,31 @@ It resolves to ``false`` when the handler is missing or failed, the bucket was e
 ``{ack: false}`` sends the frame without an id and resolves to ``true`` as soon as it is queued, which suits events whose loss is harmless.
 A page on SSE has no WebSocket, so the promise resolves to ``false`` and nothing is sent.
 A frame over the ``upstream.frame`` limit of ``hello``, 16 KiB by default, resolves to ``false`` as well.
+
+Drop your own echo
+~~~~~~~~~~~~~~~~~~
+
+A publication reaches every subscriber of the topic, the sending tab included.
+The WebSocket ``hello`` names the socket in ``connection``, the same id a handler reads from ``upstream.connection``, so a handler copies it into what it publishes and the sender skips the event.
+The id names one socket only and reveals nothing about the session or the user.
+
+.. code-block:: python
+   :caption: rooms/realtime.py
+
+   @on("room:{code}", "typing")
+   async def typing(upstream: Upstream) -> None:
+       detail = {"who": str(upstream.user), "from": upstream.connection}
+       await apublish(upstream.topic, Patches(None).event("room:typing", detail))
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/typing.js
+
+   Next.partial.stream.on("room:42", "room:typing", (detail) => {
+     if (detail.from === Next.partial.stream.meta()?.connection) return;
+     document.querySelector("#typing").textContent = `${detail.who} is typing`;
+   });
+
+Each tab and each reconnect gets its own id, so a second tab of the same user still sees the event.
 
 .. _topics-realtime-tunnel:
 

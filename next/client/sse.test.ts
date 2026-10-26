@@ -10,6 +10,7 @@ import type {
 import { manualVisibility, chunkModules } from "./test-doubles";
 import { Wire } from "./wire";
 import { createCsrf } from "./csrf";
+import type { Envelope } from "./apply";
 import { CONTENT_TYPE, HEADER_REQUEST_ID } from "./protocol";
 
 interface MockSource {
@@ -143,7 +144,8 @@ describe("createSse", () => {
           up: vi.fn(),
           http: vi.fn(),
           renew: vi.fn(),
-          name: "websocket",
+          tag: vi.fn(),
+          name: "ws",
           open: (_url, sink) => {
             sink.opened();
             return { close: () => undefined };
@@ -1039,7 +1041,7 @@ describe("createSse", () => {
       },
       navigate: () => undefined,
       dispatch: () => undefined,
-      onEnvelope: () => undefined,
+      onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
       csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => sse.remember(id),
     });
@@ -1585,7 +1587,8 @@ describe("createSse", () => {
         up: vi.fn(),
         http: vi.fn(),
         renew: vi.fn(),
-        name: "websocket",
+        tag: vi.fn(),
+        name: "ws",
         open: (_url, opened, last) => {
           sink = opened;
           cursor = last;
@@ -1629,7 +1632,8 @@ describe("createSse", () => {
         up: vi.fn(),
         http: vi.fn(),
         renew: vi.fn(),
-        name: "websocket",
+        tag: vi.fn(),
+        name: "ws",
         open: (_url, opened) => {
           sink = opened;
           return { close: () => undefined };

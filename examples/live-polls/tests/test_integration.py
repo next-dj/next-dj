@@ -10,7 +10,7 @@ from polls.models import Choice, Poll
 
 from next.forms.signals import action_dispatched, form_validation_failed
 from next.partial import Patches
-from next.realtime import MemoryBroker, publish
+from next.realtime import MemoryBroker, presence, publish
 from next.realtime.signals import message_published
 from next.testing import (
     NextClient,
@@ -143,6 +143,12 @@ class TestPollDetailPage:
     ) -> None:
         body = _detail_html(next_client, poll)
         assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
+
+    def test_page_reserves_a_hidden_watcher_label(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(next_client, poll)
+        assert "data-poll-watchers hidden" in body
 
 
 class TestPollHost:
@@ -327,7 +333,7 @@ class TestPartialVote:
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph"]
+        assert envelope.op_verbs() == ["morph", "context"]
         assert envelope.zone_targets() == ["poll-results"]
         meta = envelope.form_meta()
         assert meta is not None
@@ -487,6 +493,21 @@ class TestStreamEndpoint:
         finally:
             response.close()
 
+    def test_an_open_stream_counts_as_one_watcher(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        topic = f"poll:{poll.pk}"
+        assert presence(topic).count == 0
+        response = next_client.get(f"/polls/{poll.pk}/stream/")
+        try:
+            frames = iter(response.streaming_content)
+            next(frames)
+            next(frames)
+            assert presence(topic).count == 1
+        finally:
+            response.close()
+        assert presence(topic).count == 0
+
     def test_memory_broker_fans_out_to_each_subscriber(self) -> None:
         backend = MemoryBroker()
         patches = Patches(None).refresh(zone="poll-results").envelope()
@@ -533,8 +554,11 @@ class TestStreamPatchFrame:
                 Patches(None, echo_of="r9").refresh(zone="poll-results"),
                 on_commit=False,
             )
+            presence_frame = next(iterator)
             frame = next(iterator)
             response.close()
+            presence_ops = _frame_data(presence_frame)["ops"]
+            assert [op["name"] for op in presence_ops] == ["next:presence"]
             assert b"event: next-patches" in frame
             envelope = _frame_data(frame)
             assert [op["op"] for op in envelope["ops"]] == ["refresh"]

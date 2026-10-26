@@ -66,7 +66,7 @@ function collectIds(
 ): void {
   consume(root, root, into, universe, keyed);
   const tagged = root.querySelectorAll(`[id],[${ATTR_KEY}]`);
-  for (const el of Array.from(tagged)) {
+  for (const el of tagged) {
     consume(el, root, into, universe, keyed);
   }
 }

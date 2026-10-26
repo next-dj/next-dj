@@ -15,7 +15,7 @@ from .errors import TopicPayloadError
 from .manager import broker_manager
 from .messages import Message, validate_topic
 from .roster import Presence, presence_broker
-from .signals import message_published, published
+from .signals import apublished, published
 
 
 _ALLOWED_OPS = frozenset({"refresh", "event", "toast", "remove"})
@@ -136,11 +136,7 @@ async def apublish(topic: str, patches: Patches | Envelope) -> Message:
     validated_topic = validate_topic(topic)
     envelope = _prepare(patches)
     backend = await broker_manager.aget()
-    message = await backend.apublish(validated_topic, envelope)
-    await message_published.asend(
-        sender=type(backend), topic=validated_topic, message=message
-    )
-    return message
+    return await apublished(backend, await backend.apublish(validated_topic, envelope))
 
 
 def presence(topic: str) -> Presence:

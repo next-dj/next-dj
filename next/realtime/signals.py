@@ -4,15 +4,21 @@ import enum
 import logging
 import time
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from django.dispatch import Signal
 
 from .messages import Message
 
 
+if TYPE_CHECKING:
+    from .handlers import Upstream
+
+
 broker_backend_loaded: Signal = Signal(use_caching=True)
 message_published: Signal = Signal(use_caching=True)
 upstream_received: Signal = Signal(use_caching=True)
+upstream_rejected: Signal = Signal(use_caching=True)
 stream_subscribed: Signal = Signal(use_caching=True)
 stream_unsubscribed: Signal = Signal(use_caching=True)
 
@@ -144,22 +150,69 @@ class StreamLifecycle:
 
     def _log(self, signal: str, responses: Sequence[tuple[object, object]]) -> None:
         """Log each receiver that raised, the stream going on without it."""
-        for receiver, response in responses:
-            if isinstance(response, Exception):
-                logger.error(
-                    "Realtime %s receiver %r failed on %s topics %s",
-                    signal,
-                    receiver,
-                    self._transport,
-                    ", ".join(self._topics),
-                    exc_info=response,
-                )
+        topics = ", ".join(self._topics)
+        log_failures(signal, responses, f"{self._transport} topics", topics)
+
+
+def log_failures(
+    signal: str, responses: Sequence[tuple[object, object]], scope: str, name: str
+) -> None:
+    """Log each receiver a robust send caught raising, the caller going on."""
+    for receiver, response in responses:
+        if isinstance(response, Exception):
+            logger.error(
+                "Realtime %s receiver %r failed on %s %s",
+                signal,
+                receiver,
+                scope,
+                name,
+                exc_info=response,
+            )
 
 
 def published(broker: object, message: Message) -> Message:
     """Send `message_published` for a message the broker accepted and return it."""
-    message_published.send(sender=type(broker), topic=message.topic, message=message)
+    responses = message_published.send_robust(
+        sender=type(broker),
+        topic=message.topic,
+        message=message,
+        ephemeral=not message.numbered,
+    )
+    log_failures("message_published", responses, "topic", message.topic)
     return message
+
+
+async def apublished(broker: object, message: Message) -> Message:
+    """Send `message_published` from an event loop and return the message."""
+    responses = await message_published.asend_robust(
+        sender=type(broker),
+        topic=message.topic,
+        message=message,
+        ephemeral=not message.numbered,
+    )
+    log_failures("message_published", responses, "topic", message.topic)
+    return message
+
+
+async def areceived(handler: object, upstream: "Upstream") -> None:
+    """Send `upstream_received` for an event about to reach its handler."""
+    responses = await upstream_received.asend_robust(sender=handler, upstream=upstream)
+    log_failures("upstream_received", responses, "topic", upstream.topic)
+
+
+async def arejected(
+    sender: type, *, topic: str, name: str, reason: str, connection: str, subject: str
+) -> None:
+    """Send `upstream_rejected` for an event the socket refused to deliver."""
+    responses = await upstream_rejected.asend_robust(
+        sender=sender,
+        topic=topic,
+        name=name,
+        reason=reason,
+        connection=connection,
+        subject=subject,
+    )
+    log_failures("upstream_rejected", responses, "topic", topic)
 
 
 __all__ = [
@@ -169,4 +222,5 @@ __all__ = [
     "stream_subscribed",
     "stream_unsubscribed",
     "upstream_received",
+    "upstream_rejected",
 ]

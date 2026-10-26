@@ -9,6 +9,7 @@ from django.test import RequestFactory, TestCase
 from next.partial import Envelope, Patch, Patches
 from next.partial.headers import REQUEST_ID
 from next.realtime import MemoryBroker, TopicPayloadError, apublish, delivery, publish
+from next.realtime.roster import announce
 from next.realtime.signals import message_published
 from next.testing import SignalRecorder, memory_broker as install_memory_broker
 
@@ -239,3 +240,65 @@ def test_publish_broker_failure_in_autocommit_is_logged(
     with caplog.at_level(logging.ERROR, logger="django.db.backends.base"):
         publish("poll:autocommit", Patches(None).refresh(zone="results"))
     assert "poll:autocommit" in caplog.text
+
+
+def _broken_receiver(**kwargs: object) -> None:
+    msg = "receiver failed"
+    raise ValueError(msg)
+
+
+@pytest.fixture()
+def failing_receiver() -> Iterator[None]:
+    message_published.connect(_broken_receiver, weak=False)
+    yield
+    message_published.disconnect(_broken_receiver)
+
+
+def _logged(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "next.realtime.signals"
+    ]
+
+
+@pytest.mark.usefixtures("failing_receiver")
+def test_a_failing_receiver_leaves_publish_delivered_and_logged(
+    memory_broker: MemoryBroker, caplog: pytest.LogCaptureFixture
+) -> None:
+    with (
+        memory_broker.subscribe(["room:1"], timeout=0.01) as messages,
+        caplog.at_level("ERROR", "next.realtime.signals"),
+    ):
+        returned = publish("room:1", Patches(None).event("ping"), on_commit=False)
+        assert next(messages) == returned
+    (logged,) = _logged(caplog)
+    assert "message_published" in logged
+    assert "topic room:1" in logged
+
+
+@pytest.mark.usefixtures("failing_receiver")
+def test_a_failing_receiver_leaves_apublish_returning_and_logged(
+    memory_broker: MemoryBroker, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("ERROR", "next.realtime.signals"):
+        message = asyncio.run(apublish("room:2", Patches(None).event("ping")))
+    assert message.seq == 1
+    (logged,) = _logged(caplog)
+    assert "message_published" in logged
+    assert "topic room:2" in logged
+
+
+def test_a_numbered_message_is_not_ephemeral(memory_broker: MemoryBroker) -> None:
+    with SignalRecorder(message_published) as recorder:
+        publish("room:3", Patches(None).event("ping"), on_commit=False)
+        asyncio.run(apublish("room:3", Patches(None).event("ping")))
+    assert [event.kwargs["ephemeral"] for event in recorder] == [False, False]
+
+
+def test_a_presence_snapshot_is_ephemeral(memory_broker: MemoryBroker) -> None:
+    with SignalRecorder(message_published) as recorder:
+        announce(memory_broker, "room:4")
+    (event,) = recorder
+    assert event.kwargs["ephemeral"] is True
+    assert event.kwargs["message"].numbered is False

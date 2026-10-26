@@ -9,12 +9,12 @@ from unittest.mock import patch
 
 import pytest
 from django.conf import settings
-from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth.models import AnonymousUser, User
 from django.core.management import call_command
 from django.http import Http404, HttpRequest
 from django.test import override_settings
 from kanban.backends import ViteManifestBackend
-from kanban.demo import seed_demo
+from kanban.demo import DEMO_PASSWORD, seed_demo
 from kanban.deps import CardProvider, DCard, scope
 from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, BoardQuerySet, Card, Column
@@ -527,3 +527,12 @@ class TestDemoSeed:
     def test_seeding_twice_keeps_one_copy(self, demo_data: None) -> None:
         seed_demo()
         assert Board.objects.count() == 3
+
+    def test_seeding_creates_each_demo_member_once(self, demo_data: None) -> None:
+        seed_demo()
+        members = User.objects.order_by("username")
+        assert [(m.username, m.get_full_name()) for m in members] == [
+            ("ada", "Ada Lovelace"),
+            ("grace", "Grace Hopper"),
+        ]
+        assert members[0].check_password(DEMO_PASSWORD)

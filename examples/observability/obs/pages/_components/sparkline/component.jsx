@@ -9,7 +9,11 @@
  */
 const Sparkline = ({ bars }) => {
   if (!Array.isArray(bars) || bars.length === 0) {
-    return <p className="text-sm text-slate-500">No data yet. Click around the dashboard to populate.</p>;
+    return (
+      <p className="text-sm text-slate-500">
+        No data yet. Click around the dashboard to populate.
+      </p>
+    );
   }
   const palette = { pages: "#0f172a", components: "#0369a1", actions: "#15803d" };
   const max = Math.max(1, ...bars.map((b) => b.value));
@@ -43,9 +47,10 @@ Next.partial.onMount("#sparkline-mount", (mount) => {
     return;
   }
   const envelope = window.Next.context.totals_chart;
-  const bars = envelope && envelope.data && Array.isArray(envelope.data.bars)
-    ? envelope.data.bars
-    : [];
+  const bars =
+    envelope && envelope.data && Array.isArray(envelope.data.bars)
+      ? envelope.data.bars
+      : [];
   const root = window.ReactDOM.createRoot(mount);
   root.render(<Sparkline bars={bars} />);
   roots.set(mount, root);

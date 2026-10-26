@@ -1,23 +1,47 @@
+import asyncio
 import base64
 import re
 from io import StringIO
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth.models import AnonymousUser, User
+from django.core.asgi import get_asgi_application
 from django.core.management import call_command
 from django.urls import reverse
+from kanban.demo import DEMO_PASSWORD
 from kanban.models import Board, BoardQuerySet, Card, Column
+from kanban.realtime import (
+    GUEST,
+    board_topic,
+    can_watch_board,
+    dragging,
+    identify_member,
+    public_profile,
+)
 
+from next import realtime
+from next.realtime import Upstream, presence
 from next.testing import (
     NextClient,
+    SseReader,
+    WebsocketCommunicator,
     assert_metadata,
+    capture_published,
     envelope_of,
     find_anchor,
+    find_form,
     init_payload,
+    issue_socket_ticket,
+    memory_broker,
+    override_websocket_mount,
 )
 
 
 pytestmark = pytest.mark.django_db
+
+SUBJECT = "f00dcafe0123456789abcdef"
+OTHER_SUBJECT = "c0ffee00aaaabbbbccccdddd"
 
 
 @pytest.fixture()
@@ -663,3 +687,362 @@ class TestBoardPeek:
         row = next(line for line in out.getvalue().splitlines() if "(.)board" in line)
         assert "/board/<int:board>/" in row
         assert row.rstrip().endswith("board-peek")
+
+
+def _sign_in(next_client: NextClient, user: User) -> None:
+    response = next_client.post_action(
+        "sign_in_form", {"username": user.username, "password": DEMO_PASSWORD}
+    )
+    assert response.status_code == 302
+
+
+class TestSignIn:
+    """Demo members sign in so the board can name who is watching it."""
+
+    def test_the_page_offers_the_form_and_the_demo_accounts(
+        self, next_client: NextClient
+    ) -> None:
+        response = next_client.get("/sign-in/")
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert 'name="password"' in find_form(body, contains="sign-in-username")
+        assert "<code>ada</code>" in body
+        assert_metadata(body, title="Sign in · next.dj Kanban")
+
+    def test_a_guest_sees_the_sign_in_link(self, next_client: NextClient) -> None:
+        body = next_client.get("/").content.decode()
+        assert 'href="/sign-in/"' in body
+        assert "data-kanban-viewer" not in body
+
+    def test_a_member_signs_in_and_the_header_names_them(
+        self, next_client: NextClient, ada: User
+    ) -> None:
+        response = next_client.post_action(
+            "sign_in_form", {"username": "ada", "password": DEMO_PASSWORD}
+        )
+        assert response.status_code == 302
+        assert response["Location"] == "/"
+        body = next_client.get("/").content.decode()
+        assert "Ada Lovelace" in body
+        assert "Sign out" in find_form(body, contains="Sign out")
+
+    def test_a_wrong_password_is_refused(
+        self, next_client: NextClient, ada: User
+    ) -> None:
+        response = next_client.post_action(
+            "sign_in_form", {"username": "ada", "password": "nope"}, origin="/sign-in/"
+        )
+        assert "Unknown username or password." in response.content.decode()
+        assert "_auth_user_id" not in next_client.session
+
+    def test_signing_out_ends_the_session(
+        self, next_client: NextClient, ada: User
+    ) -> None:
+        _sign_in(next_client, ada)
+        response = next_client.post_action("sign_out_form", {})
+        assert response.status_code == 302
+        assert "_auth_user_id" not in next_client.session
+
+
+class TestRealtimeAccess:
+    """The board topic, its authorizer and the public member profile."""
+
+    def test_the_topic_names_the_board(self) -> None:
+        assert board_topic(7) == "board:7"
+
+    @pytest.mark.parametrize("topic", ["poll:1", "board", "board:", "board:x"], ids=str)
+    def test_a_malformed_topic_is_refused(self, topic: str) -> None:
+        assert can_watch_board(AnonymousUser(), topic) is False
+
+    def test_an_existing_board_is_granted(self, board: Board) -> None:
+        assert can_watch_board(AnonymousUser(), board_topic(board.pk)) is True
+
+    def test_a_deleted_board_is_refused(self, board: Board) -> None:
+        topic = board_topic(board.pk)
+        board.delete()
+        assert can_watch_board(AnonymousUser(), topic) is False
+
+    def test_a_member_is_listed_by_name_initials_and_a_subject_key(
+        self, ada: User
+    ) -> None:
+        assert identify_member(ada, "board:1", SUBJECT) == {
+            "name": "Ada Lovelace",
+            "initials": "AL",
+            "key": SUBJECT[:12],
+        }
+
+    def test_two_members_sharing_a_name_stay_apart(self, ada: User) -> None:
+        first = identify_member(ada, "board:1", SUBJECT)
+        second = identify_member(ada, "board:1", OTHER_SUBJECT)
+        assert first["name"] == second["name"]
+        assert first != second
+
+    def test_a_member_without_a_full_name_falls_back_to_the_username(self, db) -> None:
+        user = User.objects.create_user("linus")
+        assert public_profile(user) == {"name": "linus", "initials": "L"}
+
+    def test_a_guest_is_named_by_a_short_tag_of_its_subject(self) -> None:
+        assert identify_member(AnonymousUser(), "board:1", SUBJECT) == {
+            "name": "Guest f00d",
+            "initials": "G",
+            "key": SUBJECT[:12],
+        }
+
+    def test_a_guest_without_a_subject_is_counted_unnamed(self) -> None:
+        assert identify_member(AnonymousUser(), "board:1", "") is None
+
+
+class TestBoardStream:
+    """The board page subscribes to its topic through the stream page."""
+
+    def test_the_board_page_names_the_stream_and_wraps_the_island_in_a_zone(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        body = _board_html(next_client, board)
+        assert f'data-next-stream="/board/{board.pk}/stream/"' in body
+        assert '<div data-next-zone="board">' in body
+        assert '<div id="kanban-board" data-next-keep' in body
+        assert init_payload(body)["board"]["topic"] == f"board:{board.pk}"
+
+    def test_the_stream_lists_a_signed_in_watcher(
+        self, next_client: NextClient, board: Board, ada: User
+    ) -> None:
+        _sign_in(next_client, ada)
+        topic = board_topic(board.pk)
+        with memory_broker():
+            response = next_client.get(f"/board/{board.pk}/stream/")
+            with SseReader(response) as events:
+                assert next(events).event == "next-hello"
+                attendance = presence(topic)
+        (member,) = attendance.members
+        assert attendance.count == 1
+        assert (member["name"], member["initials"]) == ("Ada Lovelace", "AL")
+        assert len(member["key"]) == 12
+
+    def test_the_stream_lists_a_guest_under_a_short_tag(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        next_client.session.save()
+        with memory_broker():
+            response = next_client.get(f"/board/{board.pk}/stream/")
+            with SseReader(response) as events:
+                assert next(events).event == "next-hello"
+                attendance = presence(board_topic(board.pk))
+        (guest,) = attendance.members
+        assert guest["name"].startswith("Guest ")
+        assert len(guest["name"]) == len("Guest ") + 4
+        assert guest["key"].startswith(guest["name"].removeprefix("Guest "))
+        assert len(guest["key"]) == 12
+
+    def test_an_unknown_board_has_no_stream(self, next_client: NextClient) -> None:
+        assert next_client.get("/board/9999/stream/").status_code == 404
+
+
+class TestBoardBroadcast:
+    """A committed move or create asks the other tabs to refresh the board zone."""
+
+    def test_a_partial_move_answers_with_the_board_it_now_reads(
+        self,
+        next_client: NextClient,
+        board: Board,
+        backlog: Column,
+        done: Column,
+        django_capture_on_commit_callbacks,
+    ) -> None:
+        card = backlog.cards.get(title="Plan")
+        with (
+            memory_broker(),
+            capture_published(board_topic(board.pk)) as published,
+            django_capture_on_commit_callbacks(execute=True),
+        ):
+            response = next_client.post_action(
+                "move_card_form",
+                {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
+                origin=f"/board/{board.pk}/",
+                partial=True,
+                zones="board",
+                headers={"X-Next-Request-Id": "move-1"},
+            )
+        envelope = envelope_of(response)
+        ops = envelope.ops
+        assert [op["op"] for op in ops] == ["context"]
+        columns = ops[0]["data"]["board"]["columns"]
+        landed = next(col for col in columns if col["id"] == done.pk)
+        assert [c["title"] for c in landed["cards"]] == ["Plan", "Ship"]
+        (message,) = published.messages
+        assert message.envelope.request_id == "move-1"
+        assert [op.op for op in message.envelope.ops] == ["refresh"]
+
+    def test_a_rejected_partial_move_morphs_the_board_zone_and_publishes_nothing(
+        self, next_client: NextClient, board: Board, done: Column
+    ) -> None:
+        with memory_broker(), capture_published() as published:
+            response = next_client.post_action(
+                "move_card_form",
+                {"card_id": "9999", "target_column": done.pk, "target_position": "0"},
+                origin=f"/board/{board.pk}/",
+                partial=True,
+                zones="board",
+            )
+        assert response["X-Next-Form"] == "invalid"
+        morph, board_context = envelope_of(response).ops
+        assert morph["target"] == {"zone": "board"}
+        assert board_context["op"] == "context"
+        assert board_context["data"]["board"]["id"] == board.pk
+        assert len(published) == 0
+
+    def test_a_created_card_refreshes_the_board(
+        self,
+        next_client: NextClient,
+        board: Board,
+        backlog: Column,
+        django_capture_on_commit_callbacks,
+    ) -> None:
+        with (
+            memory_broker(),
+            capture_published(board_topic(board.pk)) as published,
+            django_capture_on_commit_callbacks(execute=True),
+        ):
+            next_client.post_action(
+                "create_card_form", {"column": backlog.pk, "title": "Fresh"}
+            )
+        assert len(published) == 1
+
+    def test_a_card_over_the_limit_publishes_nothing(
+        self, next_client: NextClient, progress: Column
+    ) -> None:
+        Card.objects.create(column=progress, title="Fill", position=1)
+        with (
+            patch("kanban.forms._is_full", side_effect=[False, True]),
+            memory_broker(),
+            capture_published() as published,
+        ):
+            response = next_client.post_action(
+                "create_card_form", {"column": progress.pk, "title": "Late"}
+            )
+        assert response.status_code == 400
+        assert len(published) == 0
+
+    def test_other_actions_publish_nothing(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        with memory_broker(), capture_published() as published:
+            next_client.post_action(
+                "rename_board_form",
+                {"title": "Renamed"},
+                origin=f"/board/{board.pk}/settings/",
+            )
+        assert len(published) == 0
+
+
+def _upstream(board: Board, data: object, user: object, subject: str = "") -> Upstream:
+    return Upstream(
+        topic=board_topic(board.pk),
+        name="dragging",
+        data=data,
+        user=user,
+        subject=subject,
+        connection="c1",
+        params={"id": str(board.pk)},
+    )
+
+
+class TestDraggingHandler:
+    """A picked-up card is announced to the board with who holds it."""
+
+    def test_a_drag_start_names_the_member(
+        self, board: Board, backlog: Column, ada: User
+    ) -> None:
+        card = backlog.cards.first()
+        with memory_broker(), capture_published() as published:
+            dragging(_upstream(board, {"card": card.pk, "active": True}, ada))
+        (message,) = published.messages
+        (op,) = message.envelope.as_dict()["ops"]
+        assert op["name"] == "board:dragging"
+        assert op["detail"] == {
+            "card": card.pk,
+            "active": True,
+            "by": {"name": "Ada Lovelace", "initials": "AL", "key": ""},
+            "from": "c1",
+        }
+
+    def test_a_guest_drag_names_the_guest_presence_lists(
+        self, board: Board, backlog: Column
+    ) -> None:
+        card = backlog.cards.first()
+        upstream = _upstream(
+            board, {"card": card.pk, "active": True}, AnonymousUser(), "beefcafe"
+        )
+        with memory_broker(), capture_published() as published:
+            dragging(upstream)
+        detail = published.messages[0].envelope.as_dict()["ops"][0]["detail"]
+        assert detail["by"] == {
+            "name": "Guest beef",
+            "initials": "G",
+            "key": "beefcafe",
+        }
+
+    def test_a_guest_without_a_subject_drags_as_a_guest(
+        self, board: Board, backlog: Column
+    ) -> None:
+        card = backlog.cards.first()
+        with memory_broker(), capture_published() as published:
+            dragging(
+                _upstream(board, {"card": card.pk, "active": True}, AnonymousUser())
+            )
+        detail = published.messages[0].envelope.as_dict()["ops"][0]["detail"]
+        assert detail["by"] == GUEST
+
+    @pytest.mark.parametrize(
+        "data",
+        [None, {"card": "1", "active": True}, {"card": 1, "active": 1}, {"card": True}],
+        ids=["no-object", "string-card", "int-active", "bool-card"],
+    )
+    def test_malformed_data_is_dropped(self, board: Board, data: object) -> None:
+        with memory_broker(), capture_published() as published:
+            dragging(_upstream(board, data, AnonymousUser()))
+        assert len(published) == 0
+
+    def test_a_card_of_another_board_is_dropped(self, board: Board) -> None:
+        other = Board.objects.create(title="Other", slug="other")
+        column = Column.objects.create(board=other, title="X", position=0)
+        card = Card.objects.create(column=column, title="Elsewhere", position=0)
+        with memory_broker(), capture_published() as published:
+            dragging(_upstream(board, {"card": card.pk, "active": True}, None))
+        assert len(published) == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_dragging_event_over_the_socket_reaches_the_board(demo_data: None) -> None:
+    board = Board.objects.get(slug="engineering-roadmap")
+    card = Card.objects.filter(column__board=board).first()
+    topic = board_topic(board.pk)
+    ticket = issue_socket_ticket(
+        (topic,), authorizer_ref="kanban.realtime.can_watch_board"
+    )
+    headers = [(b"origin", b"http://testserver"), (b"host", b"testserver")]
+    headers.append(ticket.cookie)
+
+    async def scenario() -> tuple[object, str]:
+        app = realtime.application(get_asgi_application())
+        communicator = WebsocketCommunicator(app, "/_next/ws/", headers, timeout=5)
+        connected, _ = await communicator.connect()
+        assert connected
+        hello = await communicator.subscribe(ticket)
+        ack = await communicator.send_up(
+            topic, "dragging", {"card": card.pk, "active": True}
+        )
+        await communicator.disconnect()
+        return ack, hello["connection"]
+
+    with (
+        override_websocket_mount(),
+        memory_broker(),
+        capture_published(topic) as published,
+    ):
+        ack, connection = asyncio.run(scenario())
+    assert ack is None
+    (message,) = published.messages
+    detail = message.envelope.as_dict()["ops"][0]["detail"]
+    assert detail["from"] == connection
+    assert detail["by"]["name"].startswith("Guest ")

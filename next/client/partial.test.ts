@@ -22,6 +22,8 @@ function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":nul
   });
 }
 
+const ENVELOPE_OK = JSON.stringify({ version: "v1", ops: [] });
+
 // A dialog adapter the harness drives without jsdom's missing showModal.
 function mockDialog(): DialogAdapter {
   return { open: () => () => undefined };
@@ -302,9 +304,10 @@ describe("createPartial surface", () => {
     "reports a well-typed response whose JSON %s is no envelope as a parse error",
     async (body) => {
       partial._configure({ document, fetch: async () => patchesResponse(body) });
-      await expect(
-        partial.fetch({ url: "/list/", zone: "z" }),
-      ).resolves.toBeUndefined();
+      await expect(partial.fetch({ url: "/list/", zone: "z" })).resolves.toMatchObject({
+        status: "error",
+        error: { kind: "parse", body },
+      });
       const errors = dispatched.filter((d) => d.event === "partial:error");
       expect(errors.map((d) => d.detail)).toEqual([
         { kind: "parse", body, error: expect.any(TypeError) },
@@ -798,7 +801,8 @@ describe("createPartial surface", () => {
       up: vi.fn(),
       http: vi.fn(),
       renew: vi.fn(),
-      name: "websocket",
+      tag: vi.fn(),
+      name: "ws",
       open(url, sink, lastSeq) {
         usedWebSocket = true;
         return deps.fallback.open(url, sink, lastSeq);
@@ -1281,6 +1285,7 @@ describe("createPartial surface", () => {
     );
     expect(received[0]?.detail).toEqual({ count: 2 });
     expect(received[0]?.meta).toMatchObject({ topic: "room:1", seq: 1 });
+    expect(received[0]?.meta.connection).toBeUndefined();
     expect(received[0]?.current).toEqual(received[0]?.meta);
     expect(partial.stream.meta()).toBeUndefined();
     off();
@@ -1364,6 +1369,324 @@ describe("createPartial surface", () => {
     expect(calls).toHaveLength(1);
     const { origin, pathname, search } = document.location;
     expect(calls[0]!.url).toBe(origin + pathname + search);
+  });
+});
+
+describe("Next.partial.submit", () => {
+  const FORM =
+    '<div data-next-zone="z">old</div>' +
+    '<form action="/_next/form/u/" data-next-action="u" data-next-target="z">' +
+    '<input name="title" value="x"></form>';
+
+  function answering(...bodies: string[]) {
+    const made = makeSurface();
+    const calls: { url: string; init: RequestInit }[] = [];
+    const replies: ((r: Response) => void)[] = [];
+    made.partial._configure({
+      document,
+      navigate: () => undefined,
+      fetch: (url, init) => {
+        calls.push({ url, init });
+        const body = bodies.shift();
+        return body === undefined
+          ? new Promise<Response>((resolve) => replies.push(resolve))
+          : Promise.resolve(patchesResponse(body));
+      },
+    });
+    const fields = (n: number): [string, FormDataEntryValue][] => [
+      ...(calls[n]!.init.body as FormData),
+    ];
+    return { ...made, calls, replies, fields };
+  }
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = FORM;
+  });
+
+  it("resolves an applied form reply as ok and fires the usual events", async () => {
+    const reply = JSON.stringify({
+      version: "v1",
+      ops: [{ op: "inner", target: { zone: "z" }, html: "new" }],
+    });
+    const s = answering(reply);
+    const outcome = await s.partial.submit(document.querySelector("form")!);
+    expect(outcome).toMatchObject({ status: "ok", applied: true, errors: undefined });
+    expect(outcome.envelope?.ops).toHaveLength(1);
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+    expect(s.calls[0]!.url).toBe(`${location.origin}/_next/form/u/`);
+    expect(new Headers(s.calls[0]!.init.headers).get("X-Next-Zone")).toBe("z");
+    expect(s.fields(0)).toEqual([["title", "x"]]);
+    const events = s.dispatched.map((d) => d.event);
+    expect(events).toEqual([
+      "partial:before-request",
+      "partial:before-apply",
+      "partial:applied",
+    ]);
+    const applied = s.dispatched[2]!.detail;
+    expect(applied).toMatchObject({ envelope: outcome.envelope, ok: true });
+  });
+
+  it("resolves an invalid form with its errors", async () => {
+    const errors = { title: ["Too short."] };
+    const s = answering(
+      JSON.stringify({
+        version: "v1",
+        ops: [],
+        form: { uid: "u", valid: false, errors },
+      }),
+    );
+    await expect(
+      s.partial.submit(document.querySelector("form")!),
+    ).resolves.toMatchObject({ status: "invalid", applied: true, errors });
+  });
+
+  it("resolves a reply the page refused to apply as not applied", async () => {
+    const s = answering(ENVELOPE_OK);
+    document.addEventListener("partial:before-apply", (e) => e.preventDefault(), {
+      once: true,
+    });
+    await expect(
+      s.partial.submit(document.querySelector("form")!),
+    ).resolves.toMatchObject({ status: "ok", applied: false });
+  });
+
+  it("resolves a network failure as the error it fired", async () => {
+    const made = makeSurface();
+    made.partial._configure({
+      document,
+      fetch: async () => {
+        throw new TypeError("offline");
+      },
+    });
+    const outcome = await made.partial.submit(document.querySelector("form")!);
+    expect(outcome).toMatchObject({ status: "error", applied: false });
+    const error = made.dispatched.find((d) => d.event === "partial:error")!.detail;
+    expect(outcome.error).toBe(error);
+  });
+
+  it("posts an action with its fields, the page origin and the zone", async () => {
+    const s = answering(ENVELOPE_OK);
+    const file = new Blob(["x"]);
+    await expect(
+      s.partial.submit({
+        action: "/_next/form/move/",
+        data: { card: 3, done: false, note: "n", file },
+        zone: "board",
+      }),
+    ).resolves.toMatchObject({ status: "ok" });
+    expect(s.calls[0]!.url).toBe(`${location.origin}/_next/form/move/`);
+    expect(s.calls[0]!.init.method).toBe("POST");
+    expect(new Headers(s.calls[0]!.init.headers).get("X-Next-Zone")).toBe("board");
+    const fields = s.fields(0);
+    expect(fields.slice(0, 3)).toEqual([
+      ["card", "3"],
+      ["done", "false"],
+      ["note", "n"],
+    ]);
+    expect(fields[3]![1]).toBeInstanceOf(Blob);
+    const { pathname, search } = document.location;
+    expect(fields[4]).toEqual(["_next_form_origin", pathname + search]);
+  });
+
+  it("keeps the origin and every value of a FormData it is given", async () => {
+    const s = answering(ENVELOPE_OK, ENVELOPE_OK);
+    const data = new FormData();
+    data.append("tag", "a");
+    data.append("tag", "b");
+    data.append("_next_form_origin", "/board/1/");
+    await s.partial.submit({ action: "/_next/form/tag/", data });
+    await s.partial.submit({ action: "/_next/form/tag/" });
+    expect(s.fields(0)).toEqual([
+      ["tag", "a"],
+      ["tag", "b"],
+      ["_next_form_origin", "/board/1/"],
+    ]);
+    expect(s.fields(1).map(([name]) => name)).toEqual(["_next_form_origin"]);
+  });
+
+  it("locks a form without an action uid on its url", async () => {
+    document.body.innerHTML =
+      '<form action="/plain/"><input name="a" value="1"></form>';
+    const s = answering();
+    const form = document.querySelector("form")!;
+    void s.partial.submit(form);
+    void s.partial.submit(form);
+    await flush();
+    expect(s.calls).toHaveLength(1);
+    expect(s.dispatched[0]!.detail).toMatchObject({
+      intent: { uid: `/plain/` },
+    });
+  });
+
+  it("queues submits behind the busy form, each one sent in turn", async () => {
+    const s = answering();
+    const form = document.querySelector<HTMLFormElement>("form")!;
+    const input = form.querySelector("input")!;
+    const first = s.partial.submit(form);
+    input.value = "second";
+    const second = s.partial.submit(form);
+    input.value = "third";
+    const third = s.partial.submit(form);
+    s.replies.shift()!(patchesResponse());
+    await expect(first).resolves.toMatchObject({ status: "ok" });
+    await flush();
+    expect(s.fields(1)).toEqual([["title", "second"]]);
+    s.replies.shift()!(patchesResponse());
+    await expect(second).resolves.toMatchObject({ status: "ok" });
+    await flush();
+    expect(s.fields(2)).toEqual([["title", "third"]]);
+    s.replies.shift()!(patchesResponse());
+    await expect(third).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("sends every keyless action submit in order, none dropped", async () => {
+    const s = answering();
+    const create = (title: string) =>
+      s.partial.submit({
+        action: "/_next/form/create/",
+        data: { title },
+        navigate: false,
+      });
+    const outcomes = [create("A"), create("B"), create("C")];
+    for (let n = 0; n < 3; n += 1) {
+      await flush();
+      s.replies.shift()!(patchesResponse());
+      await expect(outcomes[n]).resolves.toMatchObject({ status: "ok" });
+    }
+    expect([0, 1, 2].map((n) => s.fields(n)[0])).toEqual([
+      ["title", "A"],
+      ["title", "B"],
+      ["title", "C"],
+    ]);
+  });
+
+  it("settles a reply whose mount throws behind a new stylesheet and frees the lock", async () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const made = makeSurface();
+    const links: ((ok: boolean) => void)[] = [];
+    let sent = 0;
+    made.partial._configure({
+      document,
+      navigate: () => undefined,
+      loadLink: (_url, _nonce, done) => links.push(done),
+      fetch: async () => {
+        sent += 1;
+        return patchesResponse(
+          JSON.stringify({
+            version: "v1",
+            assets: [{ kind: "css", url: `/sheet-${sent}.css` }],
+            ops: [
+              { op: "inner", target: { zone: "z" }, html: '<p class="boom">n</p>' },
+            ],
+          }),
+        );
+      },
+    });
+    made.partial.onMount(".boom", () => {
+      throw new Error("user mount");
+    });
+    const move = () => made.partial.submit({ action: "/_next/form/a/", key: "k" });
+    const first = move();
+    await flush();
+    expect(() => links.shift()!(true)).toThrow("user mount");
+    await expect(first).resolves.toMatchObject({ status: "ok", applied: false });
+    const second = move();
+    await flush();
+    expect(sent).toBe(2);
+    expect(() => links.shift()!(true)).toThrow("user mount");
+    await expect(second).resolves.toMatchObject({ status: "ok", applied: false });
+  });
+
+  it("resolves an action whose data cannot be read as an error", async () => {
+    const s = answering(ENVELOPE_OK);
+    const broken = {
+      toString(): string {
+        throw new Error("unreadable");
+      },
+    } as unknown as string;
+    const outcome = await s.partial.submit({
+      action: "/_next/form/x/",
+      data: { a: broken },
+    });
+    expect(outcome).toMatchObject({ status: "error", applied: false });
+    expect(outcome.error).toMatchObject({
+      kind: "network",
+      error: { message: "unreadable" },
+    });
+    expect(s.calls).toEqual([]);
+  });
+
+  it("locks an action on its key, so other keys never wait or drop", async () => {
+    const s = answering();
+    const move = (key: string) => s.partial.submit({ action: "/_next/form/m/", key });
+    const first = move("card-1");
+    const second = move("card-2");
+    await flush();
+    expect(s.calls).toHaveLength(2);
+    const queued = move("card-1");
+    const latest = move("card-1");
+    await expect(queued).resolves.toEqual({ status: "dropped", applied: false });
+    expect(s.dispatched.map((d) => d.detail.intent)).toMatchObject([
+      { uid: "card-1" },
+      { uid: "card-2" },
+    ]);
+    s.replies.shift()!(patchesResponse());
+    s.replies.shift()!(patchesResponse());
+    await expect(first).resolves.toMatchObject({ status: "ok" });
+    await expect(second).resolves.toMatchObject({ status: "ok" });
+    await flush();
+    expect(s.calls).toHaveLength(3);
+    s.replies.shift()!(patchesResponse());
+    await expect(latest).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("resolves a redirect with its location instead of navigating when asked", async () => {
+    const made = makeSurface();
+    const navigate = vi.fn();
+    made.partial._configure({
+      document,
+      navigate,
+      fetch: async () => {
+        const response = new Response("<p>", {
+          headers: { "content-type": "text/html" },
+        });
+        Object.defineProperties(response, {
+          redirected: { value: true },
+          url: { value: `${location.origin}/board/?created=9` },
+        });
+        return response;
+      },
+    });
+    const create = (navigate = true) =>
+      made.partial.submit({ action: "/_next/form/c/", navigate });
+    await expect(create(false)).resolves.toEqual({
+      status: "ok",
+      applied: false,
+      location: `${location.origin}/board/?created=9`,
+    });
+    expect(navigate).not.toHaveBeenCalled();
+    await expect(create()).resolves.toEqual({ status: "ok", applied: false });
+    expect(navigate).toHaveBeenCalledWith(`${location.origin}/board/?created=9`);
+  });
+
+  it("still drops a declarative double submit while the form is busy", async () => {
+    const s = answering();
+    const form = document.querySelector("form")!;
+    const event = (): Event => new Event("submit", { bubbles: true, cancelable: true });
+    form.dispatchEvent(event());
+    form.dispatchEvent(event());
+    const queued = s.partial.submit(form);
+    await flush();
+    expect(s.calls).toHaveLength(1);
+    s.replies.shift()!(patchesResponse());
+    await flush();
+    expect(s.calls).toHaveLength(2);
+    s.replies.shift()!(patchesResponse());
+    await expect(queued).resolves.toMatchObject({ status: "ok" });
   });
 });
 
@@ -1535,6 +1858,94 @@ describe("createPartial over an open WebSocket", () => {
     expect(c.fetch.mock.calls.filter(([url]) => url.endsWith("/stream/"))).toHaveLength(
       1,
     );
+    c.partial._reset();
+  });
+
+  it("resolves a submit through the socket tunnel and an undelivered one", async () => {
+    const c = connected(["ws", "sse"]);
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: {}, tunnel: {} });
+    const form = document.querySelector("form")!;
+    const tunneled = c.partial.submit(form);
+    await flush();
+    expect(c.last()).toMatchObject({ type: "http", method: "POST", body: "t=x" });
+    c.message({
+      type: "http",
+      id: c.last().id,
+      status: 200,
+      headers: { "content-type": "application/vnd.next.patches+json" },
+      body: REPLY,
+    });
+    await expect(tunneled).resolves.toMatchObject({ status: "ok", applied: true });
+    const refused = c.partial.submit({
+      action: "/_next/form/u/",
+      data: { t: "y" },
+      transport: "any",
+    });
+    await flush();
+    expect(c.last()).toMatchObject({ type: "http", method: "POST" });
+    c.message({ type: "http", id: c.last().id, status: 0, error: "limit" });
+    await expect(refused).resolves.toMatchObject({
+      status: "error",
+      applied: false,
+      error: { kind: "undelivered", reason: "limit" },
+    });
+    expect(c.fetch).toHaveBeenCalledOnce();
+    c.partial._reset();
+  });
+
+  it("resolves a tunneled redirect with its location when asked", async () => {
+    const c = connected(["ws", "sse"]);
+    await flush();
+    c.opens[0]!();
+    c.message({ type: "hello", topics: {}, tunnel: {} });
+    const created = c.partial.submit({
+      action: "/_next/form/c/",
+      transport: "any",
+      navigate: false,
+    });
+    await flush();
+    c.message({
+      type: "http",
+      id: c.last().id,
+      status: 302,
+      headers: { location: "/board/?created=9" },
+    });
+    await expect(created).resolves.toEqual({
+      status: "ok",
+      applied: false,
+      location: `${location.origin}/board/?created=9`,
+    });
+    expect(c.fetch).toHaveBeenCalledOnce();
+    c.partial._reset();
+  });
+
+  it("names the socket connection in the metadata of a topic event", async () => {
+    const c = connected(["ws", "sse"]);
+    const seen: (string | undefined)[] = [];
+    c.partial.stream.on("room", "moved", (_detail, meta) => {
+      seen.push(meta.connection, c.partial.stream.meta()?.connection);
+    });
+    await flush();
+    c.opens[0]!();
+    c.message({
+      type: "hello",
+      topics: { room: { epoch: "e", seq: 0 } },
+      connection: "c-7",
+    });
+    c.message({
+      type: "patches",
+      data: {
+        version: "v1",
+        topic: "room",
+        seq: 1,
+        epoch: "e",
+        ops: [{ op: "event", name: "moved" }],
+      },
+    });
+    expect(seen).toEqual(["c-7", "c-7"]);
+    expect(c.partial.stream.meta()).toBeUndefined();
     c.partial._reset();
   });
 

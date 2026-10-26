@@ -1,6 +1,7 @@
 from typing import ClassVar
 
 from django import forms as django_forms
+from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.db import transaction
 from django.db.models import QuerySet
@@ -13,8 +14,11 @@ from django.http import (
 
 from kanban.deps import CARD_PARAM, DCard
 from kanban.models import Board, Card, Column
+from kanban.services import move_card
+from kanban.snapshots import board_snapshot
 from next.deps import Depends, DObject
 from next.forms import ComponentWidget, Form, ModelForm
+from next.partial import Patches, is_partial_request
 from next.urls import page_reverse, with_query
 
 
@@ -40,6 +44,9 @@ class MoveCardForm(Form):
         min_value=0, widget=django_forms.HiddenInput
     )
 
+    class Meta:
+        transport = "any"
+
     def __init__(
         self, *args, targets: QuerySet[Column] | None = None, **kwargs
     ) -> None:
@@ -62,32 +69,13 @@ class MoveCardForm(Form):
         targets = Column.objects.filter(board__in=boards)
         return {**super().get_form_kwargs(request), "targets": targets}
 
-    def on_valid(self, request: HttpRequest, card: DCard[Card]) -> HttpResponseRedirect:
-        """Detach the card and re-insert it at the requested position."""
+    def on_valid(self, request: HttpRequest, card: DCard[Card]) -> HttpResponse:
+        """Move the card, answering the island with the board it now reads."""
         target_column = self.cleaned_data["target_column"]
-        target_position = self.cleaned_data["target_position"]
-        with transaction.atomic():
-            source_column = card.column
-            siblings = list(
-                source_column.cards.exclude(pk=card.pk).order_by("position", "id")
-            )
-            for index, sibling in enumerate(siblings):
-                if sibling.position != index:
-                    sibling.position = index
-                    sibling.save(update_fields=["position"])
-            targets = list(
-                target_column.cards.exclude(pk=card.pk).order_by("position", "id")
-            )
-            position = min(target_position, len(targets))
-            targets.insert(position, card)
-            for index, sibling in enumerate(targets):
-                if sibling.pk == card.pk:
-                    card.column = target_column
-                    card.position = index
-                    card.save(update_fields=["column", "position"])
-                elif sibling.position != index:
-                    sibling.position = index
-                    sibling.save(update_fields=["position"])
+        move_card(card, target_column, self.cleaned_data["target_position"])
+        if is_partial_request(request):
+            snapshot = board_snapshot(target_column.board, request)
+            return Patches(request).context(board=snapshot).response()
         return HttpResponseRedirect(
             with_query(
                 page_reverse(BOARD_PAGE, board=target_column.board_id), moved=card.pk
@@ -219,3 +207,35 @@ class ArchiveBoardForm(BoardSettingsForm):
         return HttpResponseRedirect(
             page_reverse(BOARD_SETTINGS_PAGE, board=self.instance.pk)
         )
+
+
+class SignInForm(Form):
+    """Sign a demo member in, so the board can name who is watching it."""
+
+    username = django_forms.CharField(max_length=150, widget=ComponentWidget("input"))
+    password = django_forms.CharField(widget=ComponentWidget("input", type="password"))
+
+    def clean(self) -> dict[str, object]:
+        """Reject a username and password pair that names no active account."""
+        cleaned = super().clean() or {}
+        self.user = authenticate(
+            username=cleaned.get("username"), password=cleaned.get("password")
+        )
+        if self.user is None:
+            msg = "Unknown username or password."
+            raise django_forms.ValidationError(msg)
+        return cleaned
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Start the session and go back to the board list."""
+        login(request, self.user)
+        return HttpResponseRedirect(page_reverse())
+
+
+class SignOutForm(Form):
+    """End the session of the signed-in member."""
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Log out and go back to the board list."""
+        logout(request)
+        return HttpResponseRedirect(page_reverse())

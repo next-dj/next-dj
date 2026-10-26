@@ -26,8 +26,8 @@ from .access import (
     heartbeat_seconds as realtime_heartbeat_seconds,
     run_detached,
 )
-from .attendance import aattend, aattending, attend, attending
-from .binding import ticket_binding
+from .attendance import Identifier, aattend, aattending, attend, attending
+from .binding import request_subject, ticket_binding
 from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError, InvalidTopicError
 from .manager import broker_manager
@@ -108,7 +108,9 @@ class TopicStream(PatchStreamWriter):
         self._presence: bool | Identify = (
             _imported(presence, "presence") if isinstance(presence, str) else presence
         )
-        self._identifies = not isinstance(self._presence, bool)
+        self._identifier = (
+            None if isinstance(self._presence, bool) else Identifier.of(self._presence)
+        )
         self._server_clock = server_clock if server_clock is not None else time.time
         if _wants_websocket(request):
             self.topics = topics
@@ -238,9 +240,10 @@ class TopicStream(PatchStreamWriter):
         return attend(
             backend,
             self.topics,
-            self._identify(),
+            self._identifier,
             self._user,
             heartbeat=self._subscription_timeout,
+            subject=self._subject,
         )
 
     async def aattend(self, backend: BrokerBackend) -> Attendance | None:
@@ -250,9 +253,10 @@ class TopicStream(PatchStreamWriter):
         return await aattend(
             backend,
             self.topics,
-            self._identify(),
+            self._identifier,
             self._user,
             heartbeat=self._subscription_timeout,
+            subject=self._subject,
         )
 
     def _sync_item(self, message: Message | None) -> Message | StreamSkip | None:
@@ -267,7 +271,7 @@ class TopicStream(PatchStreamWriter):
             if result is None:
                 return StreamSkip(message.topic, message.seq, message.epoch)
             message = result
-        return message if self._identifies else counted(message)
+        return message if self._identifier is not None else counted(message)
 
     async def _async_messages(
         self, backend: BrokerBackend | None = None
@@ -335,16 +339,15 @@ class TopicStream(PatchStreamWriter):
             if result is None:
                 return StreamSkip(message.topic, message.seq, message.epoch)
             message = result
-        return message if self._identifies else counted(message)
+        return message if self._identifier is not None else counted(message)
 
-    def _identify(self) -> Identify | None:
-        """Return the member callable, None when the stream only counts."""
-        presence = self._presence
-        return None if isinstance(presence, bool) else presence
+    def _subject(self) -> str:
+        """Return the request's opaque subject, read only when identify takes it."""
+        return request_subject(self._request)
 
     def _snapshots(self, read: Callable[[str], Presence]) -> list[Message]:
         """Return the unnumbered snapshots a new subscriber gets right after hello."""
-        identified = self._identifies
+        identified = self._identifier is not None
         now = self._server_clock()
         return [
             snapshot_message(

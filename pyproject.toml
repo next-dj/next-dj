@@ -63,6 +63,7 @@ dev = [
     "pytest-benchmark==5.3.0",
     "pydantic>=2.0",
     "markdown>=3.7",
+    "prometheus-client>=0.21",
     "time-machine>=2.16",
     "fakeredis[lua]>=2",
     "redis>=8",

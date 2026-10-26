@@ -18,8 +18,8 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "django.contrib.staticfiles",
     "next",
+    "django.contrib.staticfiles",
     "obs",
 ]
 
@@ -51,6 +51,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
@@ -79,6 +80,8 @@ sys.path.insert(0, str(SHARED_DIR))
 STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+OBS_METRICS_TOKEN = os.environ.get("OBS_METRICS_TOKEN", "")
 
 # The custom `jsx` kind has no insertion verb, so next.W074 fires.
 SILENCED_SYSTEM_CHECKS = ["next.W074"]

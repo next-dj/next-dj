@@ -8,10 +8,10 @@ A polling app where the results on every open tab refresh the moment someone vot
 | --- | --- |
 | `/` | Redirects to `/polls/` so the bare site root is never empty. |
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
-| `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, and a `data-next-sse` element. |
+| `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, an "N watching" counter, and a `data-next-sse` element. |
 | `/polls/<id>/embed/` | The same live chart in a widget with its own bare document shell, linked as "Embed" from the vote page, where the link first opens the snippet to copy as a modal. |
 | `/admin/polls/poll/` | Staff host console for opening or closing a poll and setting its deadline. |
-| `/polls/<id>/stream/` | The topic stream. Each poll change emits a `next-patches` refresh of `poll-results` and a `poll:votes` event with the updated total. |
+| `/polls/<id>/stream/` | The topic stream with presence on. Each poll change emits a `next-patches` refresh of `poll-results` and a `poll:votes` event with the updated total, and every change in attendance emits a `next:presence` snapshot. |
 | `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the zone refresh and vote-count event after commit. |
 
 Two demo polls live in [`polls/demo.py`](polls/demo.py) and load through `manage.py seed_demo` ("Tabs or spaces?" and "Vim or Emacs?", two choices each) so the index page is never empty once seeded.
@@ -42,6 +42,7 @@ The fan-out uses `refresh` because each subscriber must load its own authorized 
 | Staff host saves `is_open` or `closes_at` in Django admin | `ModelAdmin.save_model` publishes `poll:phase` and refreshes `poll-results` with `on_commit=True` | Open tabs update their status, and the result zone is rendered again for each subscriber. |
 | A visitor submits a choice | `VoteForm` validates the poll state, then increments with `F("votes") + 1` | The voter receives a zone morph and context snapshot, and the signal publishes a refresh and vote-count event to other tabs. |
 | A visitor watches updates | `TopicStream` on the guarded stream page | Negotiation prefers the WebSocket when the process serves it and falls back to SSE. Both use the guarded stream URL and recheck the topic authorizer once per heartbeat. |
+| A visitor opens or closes a tab | `TopicStream(..., presence=True)` and `Next.partial.stream.on(topic, "next:presence", ...)` | The broker counts open connections of the topic and publishes one snapshot per coalescing window, so every tab shows "N watching". The counter sends a number and no data about people, and it counts connections, so two tabs of one visitor count twice. |
 | Staff delete a poll | `can_subscribe_topic` denies the topic at the next recheck | Each open stream for that poll ends with `next-end` and the tab stops reconnecting. |
 | A tab misses messages or reconnects | Per-topic `(epoch, seq)` cursor, the broker's replay log, and guarded zone resync | After a drop that stays inside `NEXT_FRAMEWORK["REALTIME"]["REPLAY"]`, 100 messages and 300 seconds by default, the stream replays the missed messages before its hello, so the tab catches up without a GET. A gap the log cannot close or a new broker epoch re-renders current state with that tab's access and cookies. |
 | A poll has a deadline | Server-side form validation plus `Next.partial.stream.now()` in the chart island | The browser shows an estimated server-clock countdown, and the server refuses a vote after close. |
@@ -93,7 +94,7 @@ The `runserver` command is a single-process toy in both modes. Without uvicorn i
 
 The heartbeat also paces access. On both transports the stream rechecks the session and `polls.realtime.can_subscribe_topic`, an importable authorizer that allows a topic only while its poll exists, at most once per heartbeat. Delete a poll in the admin and every open stream for it ends with a `next-end` frame at that recheck, so the tab detaches the stream instead of reconnecting.
 
-[`config/asgi.py`](config/asgi.py) wraps the Django app with `next.realtime.application`, which routes `NEXT_FRAMEWORK["REALTIME"]["WS_PATH"]` to the framework's WebSocket endpoint and leaves every other request to Django. Creating that endpoint turns `ws` on for the process, so no `TRANSPORTS` setting is needed. With uvicorn installed, as in the dev dependencies, `uv run python manage.py runserver` serves the app `ASGI_APPLICATION` names on uvicorn, with Django's autoreloader and static files, and the pages negotiate a WebSocket with SSE as the fallback. The settings list `next` above `django.contrib.staticfiles`, since Django runs the `runserver` of the app listed first. Without uvicorn the same command is Django's WSGI server and the example speaks SSE, since WSGI cannot hold a WebSocket. The socket opens with a short-lived session-bound ticket issued by the guarded stream page. The Origin must name the request Host or appear in `CSRF_TRUSTED_ORIGINS`, as with Django's CSRF check, and a handshake without an Origin is refused. The E2E suite covers the WSGI SSE path, a real WebSocket under uvicorn on both `wsproto` and `websockets-sansio`, a dropped socket that catches up on the missed vote counts from the replay log without a resync GET, and a refused foreign Origin.
+[`config/asgi.py`](config/asgi.py) wraps the Django app with `next.realtime.application`, which routes `NEXT_FRAMEWORK["REALTIME"]["WS_PATH"]` to the framework's WebSocket endpoint and leaves every other request to Django. Creating that endpoint turns `ws` on for the process, so no `TRANSPORTS` setting is needed. With uvicorn installed, as in the dev dependencies, `uv run python manage.py runserver` serves the app `ASGI_APPLICATION` names on uvicorn, with Django's autoreloader and static files, and the pages negotiate a WebSocket with SSE as the fallback. The settings list `next` above `django.contrib.staticfiles`, since Django runs the `runserver` of the app listed first. Without uvicorn the same command is Django's WSGI server and the example speaks SSE, since WSGI cannot hold a WebSocket. The socket opens with a short-lived session-bound ticket issued by the guarded stream page. The Origin must name the request Host or appear in `CSRF_TRUSTED_ORIGINS`, as with Django's CSRF check, and a handshake without an Origin is refused. The browser suite in [`tests/e2e/`](tests/e2e/) serves the app under uvicorn with the WebSocket endpoint mounted, so every page test runs over a real WebSocket by default, and the `sse_only` fixture withdraws the mount to run the same page over `EventSource`. It also covers both uvicorn WebSocket implementations (`wsproto` and `websockets-sansio`), the watcher count over both transports (two tabs show 2, closing one leaves 1), a refused foreign Origin, and the catch-up after a network loss. That test sets the context offline, cuts every open connection on the server, publishes three vote counts, and goes back online. The page then shows the latest count with no stream gap and no request outside the stream, so the missed messages came from the replay log and not from a zone GET. Chromium keeps already open connections alive when a context goes offline, which is why the test aborts them on the server.
 
 To peek at the stream from a second terminal:
 
@@ -171,8 +172,12 @@ from next.realtime import TopicStream
 
 
 def render(request: HttpRequest, poll: DPoll[Poll]) -> TopicStream:
-    return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
+    return TopicStream(
+        request, f"poll:{poll.pk}", authorize=can_subscribe_topic, presence=True
+    )
 ```
+
+`presence=True` records every open stream of the topic and publishes the attendance as a `next:presence` event. `page.vue` subscribes to it with `Next.partial.stream.on("poll:<id>", "next:presence", ...)` beside the `poll:phase` listener and writes `N watching` into the `data-poll-watchers` label, which the template renders hidden until the first snapshot arrives. The label sits outside the `poll-results` zone, so a refresh never resets it, and both subscriptions are dropped with the island on `next:removed`.
 
 The page's normal guards and DI run before the subscription opens. The authorizer runs at subscription and again once per heartbeat on either transport, and a denial ends the stream with `next-end`. `TopicStream` handles transport negotiation, SSE framing, cache and proxy headers, retry hints, heartbeat frames, and stream cleanup. It selects `subscribe` under WSGI or `asubscribe` under ASGI.
 

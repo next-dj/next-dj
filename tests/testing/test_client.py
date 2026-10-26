@@ -184,6 +184,20 @@ class TestEnvelopeHelpers:
             {"op": "toast", "text": "Saved", "variant": "success"}
         ]
 
+    def test_zone_targets_read_the_zone_a_refresh_names_on_itself(self) -> None:
+        envelope = PartialEnvelope(
+            {
+                "version": "v1",
+                "ops": [
+                    {"op": "morph", "target": {"zone": "a"}, "html": "<div></div>"},
+                    {"op": "refresh", "zone": "b"},
+                    {"op": "layer.open", "zone": "c"},
+                    {"op": "refresh"},
+                ],
+            }
+        )
+        assert envelope.zone_targets() == ["a", "b"]
+
     def test_version_op_verbs_and_targets(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", ("alpha", "beta")))
         assert isinstance(envelope, PartialEnvelope)

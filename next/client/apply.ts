@@ -318,6 +318,13 @@ export interface ApplyOptions {
   page?: string | undefined;
   // The page a meta op belongs to, apart from page so a stream never scopes zones.
   owner?: string | undefined;
+  done?: (applied: Applied) => void;
+}
+
+/** The parsed envelope of one apply and whether every op of it succeeded. */
+export interface Applied {
+  envelope: Envelope;
+  ok: boolean;
 }
 
 export interface ApplyDeps {
@@ -476,15 +483,17 @@ export class Applier {
    * rest runs in a continuation.
    */
   apply(raw: unknown, options: ApplyOptions = {}): Envelope {
-    const { snapshot, key, page, owner = page } = options;
+    const { snapshot, key, page, owner = page, done } = options;
     const envelope = parseEnvelope(raw, this.#diagnostics());
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
-    if (this.#assets()?.versionMismatch(envelope.version, this.#here())) {
+    if (
+      this.#assets()?.versionMismatch(envelope.version, this.#here()) ||
+      this.#emit("partial:before-apply", { envelope }, true).defaultPrevented
+    ) {
+      done?.({ envelope, ok: false });
       return envelope;
     }
-    const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
-    if (beforeApply.defaultPrevented) return envelope;
     // Captured per-apply and threaded through the ops, so two overlapping
     // applies keep their dirty predicate, request key, and touched set apart.
     const state: ApplyState = {
@@ -496,7 +505,7 @@ export class Applier {
       head: undefined,
       intents: [],
     };
-    const runOps = (): void => this.#runOps(envelope, state);
+    const runOps = (): void => this.#runOps(envelope, state, done);
     const assets = this.#assets();
     if (assets !== undefined) {
       assets.loadCss(envelope.assets, runOps);
@@ -506,9 +515,13 @@ export class Applier {
     return envelope;
   }
 
-  #runOps(envelope: Envelope, state: ApplyState): void {
+  #runOps(envelope: Envelope, state: ApplyState, done: ApplyOptions["done"]): void {
     // Opened before the ops, so a layer.close writing history folds into this commit.
     const commit = this.#navigation()?.begin();
+    let applied: { envelope: Envelope; ok: boolean; nodes?: Element[] } = {
+      envelope,
+      ok: false,
+    };
     try {
       // ok becomes false on any caught failure, and partial:applied reports it.
       let ok = true;
@@ -530,9 +543,11 @@ export class Applier {
       this.#assets()?.loadJs(envelope.assets);
       this.#assets()?.acceptVersion(envelope.version);
       mountNodes(state.touched, this.#mount);
-      this.#emit("partial:applied", { envelope, ok, nodes: state.touched }, false);
+      applied = { envelope, ok, nodes: state.touched };
+      this.#emit("partial:applied", applied, false);
     } finally {
       commit?.end();
+      done?.(applied);
     }
   }
 
@@ -631,13 +646,6 @@ export class Applier {
       case "meta":
         this.#meta(patch, state);
         return;
-      // A verb missing here would be a silent no-op reported as ok, so the never
-      // binding turns it into a build error, and this throw is that error at runtime.
-      /* v8 ignore next 3 */
-      default: {
-        const unhandled: never = patch;
-        throw new TypeError(`unhandled built-in op ${JSON.stringify(unhandled)}`);
-      }
     }
   }
 
@@ -867,14 +875,14 @@ export class Applier {
 
   #neutraliseScripts(root: ParentNode, target: Target | undefined): void {
     const scripts = root.querySelectorAll("script");
-    for (const script of Array.from(scripts)) {
+    for (const script of scripts) {
       script.remove();
       this.#diagnostics()?.stripped(describeTarget(target));
     }
     // querySelectorAll does not reach template content, and a consented block runs
     // its scripts when revealed, so template content is cleaned as well. A block
     // rendered with the page keeps its scripts, since it did not come from a patch.
-    for (const template of Array.from(root.querySelectorAll("template"))) {
+    for (const template of root.querySelectorAll("template")) {
       this.#neutraliseScripts(template.content, target);
     }
   }
@@ -953,7 +961,7 @@ export class Applier {
     const inputs = this.#document.querySelectorAll<HTMLInputElement>(
       'input[name="csrfmiddlewaretoken"]',
     );
-    for (const input of Array.from(inputs)) {
+    for (const input of inputs) {
       input.value = csrf.token;
     }
   }

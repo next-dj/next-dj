@@ -17,8 +17,9 @@ Every signal below is a Django ``Signal``.
 The ``sender`` column lists the value passed to ``Signal.send``.
 Receivers connected with a matching ``sender`` only fire for that sender.
 
-Most signals are sent with ``Signal.send``, or ``Signal.asend`` for ``upstream_received`` and for ``message_published`` from ``apublish``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
-``stream_subscribed`` and ``stream_unsubscribed`` are sent with ``Signal.send_robust``, or ``Signal.asend_robust`` on an async stream and a WebSocket, which log a raising receiver and keep the stream open, as `Stream lifecycle`_ describes.
+Most signals are sent with ``Signal.send``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
+The realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` are sent with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop.
+A receiver of theirs that raises is logged at ``ERROR`` on the ``next.realtime.signals`` logger, and the publication, the upstream event, or the stream goes on as `Stream lifecycle`_ describes.
 ``settings_reloaded`` is sent with ``Signal.send_robust`` too, and runs the whole chain before it re-raises the first error.
 A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
 
@@ -91,13 +92,21 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        The manager lock is already released, so a receiver may read the broker again from any thread.
    * - ``message_published``
      - The realtime broker class
-     - ``topic``, ``message``
+     - ``topic``, ``message``, ``ephemeral``
      - After the broker accepts a publication.
+       ``ephemeral`` is ``True`` for an unnumbered message, a presence snapshot, whose ``message.numbered`` is ``False`` and which never enters the replay log.
    * - ``upstream_received``
      - The handler of the matched ``@realtime.on``
      - ``upstream``
      - Before the handler of an ``up`` frame runs, once the topic grant and the access recheck passed.
-       ``upstream`` is the ``Upstream`` the handler gets, and the signal goes out with ``asend``, so a raising receiver turns the ``ack`` into ``internal``.
+       ``upstream`` is the ``Upstream`` the handler gets, and a raising receiver is logged while the handler still runs.
+   * - ``upstream_rejected``
+     - ``type(socket)``, so ``TopicSocket``
+     - ``topic``, ``name``, ``reason``, ``connection``, ``subject``
+     - When an ``up`` frame is not delivered, before its ``ack`` or its ``error`` frame goes out.
+       ``reason`` is the ``UpstreamError`` the ack carries, ``limit``, ``too_big``, ``topic``, ``denied``, ``unknown``, ``timeout``, or ``internal``, and an event without an ``id`` is reported too.
+       ``topic`` and ``name`` are what the client sent, unchecked, so a receiver that labels metrics with them bounds their values first.
+       ``connection`` and ``subject`` are the ``Upstream.connection`` and ``Upstream.subject`` a handler would have seen.
    * - ``stream_subscribed``
      - ``type(connection)``, so ``TopicStream`` or ``TopicSocket``
      - ``transport``, ``topics``, ``connection``, ``request``, ``subject``, ``user``
@@ -335,7 +344,7 @@ Connect it from ``AppConfig.ready`` by importing the module there.
            logger.warning("stream on %s failed after %.1fs", topics, duration)
 
 A receiver of a WebSocket or of an async stream runs on the event loop when it is async, and a synchronous one runs on a worker thread, so a receiver shared by both guards its state with a lock as above.
-A receiver that raises an ``Exception`` does not end the stream, because both signals go out with ``send_robust``.
+A receiver that raises an ``Exception`` does not end the stream, because both signals go out with ``send_robust``, as do ``message_published``, ``upstream_received``, and ``upstream_rejected``.
 The error is logged at ``ERROR`` on the ``next.realtime.signals`` logger with the transport and the topics, and Django logs it on ``django.dispatch`` as well.
 A ``CancelledError`` from a receiver is not swallowed.
 

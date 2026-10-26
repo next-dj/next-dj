@@ -16,7 +16,7 @@ from django.utils.module_loading import autodiscover_modules
 from next.conf import next_framework_settings
 
 from .access import run_pooled
-from .signals import upstream_received
+from .signals import areceived
 
 
 type Handler = Callable[[Upstream], Awaitable[None] | None]
@@ -261,7 +261,7 @@ async def dispatch(upstream: Upstream) -> bool:
     bound, params = found
     if params:
         upstream = replace(upstream, params=params)
-    await upstream_received.asend(sender=bound.handler, upstream=upstream)
+    await areceived(bound.handler, upstream)
     await bound(upstream)
     return True
 

@@ -3,11 +3,13 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import fields
 from unittest.mock import patch
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
+from django.dispatch import Signal
 from django.test import override_settings
 
 from next.realtime import Upstream, checks, handlers
@@ -15,8 +17,10 @@ from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.frames import Close
 from next.realtime.handlers import HandlerRegistry, on
+from next.realtime.signals import upstream_received, upstream_rejected
 from next.realtime.socket import Handshake, TopicSocket
 from next.realtime.tickets import TicketClaims
+from next.testing import SignalRecorder, capture_signals
 from next.testing.realtime import MemoryPort, SocketTicket
 from tests.support.realtime import issue_session_ticket
 
@@ -181,6 +185,47 @@ def test_sync_and_async_handlers_get_the_event_and_its_connection() -> None:
         ] == _SEEN
 
     asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_hello_names_the_connection_a_handler_sees() -> None:
+    _register()
+    ticket = _ticket()
+
+    async def scenario() -> None:
+        port = MemoryPort()
+        socket = _socket(port, ticket)
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        hello = await _frame(port)
+        port.push_json(_up("cursor", {"x": 1}, id="1"))
+        await _frame(port)
+        await _close(port, task)
+        assert hello["connection"] == socket.connection_id
+        assert [("cursor", {"x": 1}, hello["connection"], False)] == _SEEN
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_sockets_of_one_session_get_distinct_connections() -> None:
+    ticket = _ticket()
+
+    async def scenario() -> list[object]:
+        seen: list[object] = []
+        for _ in range(2):
+            port = MemoryPort()
+            socket = _socket(port, ticket)
+            task = asyncio.create_task(socket.serve(port.inbound()))
+            port.push_json(ticket.subscribe_frame())
+            seen.append((await _frame(port))["connection"])
+            await _close(port, task)
+        return seen
+
+    first, second = asyncio.run(scenario())
+    assert isinstance(first, str)
+    assert first
+    assert first != second
 
 
 @pytest.mark.django_db(transaction=True)
@@ -489,3 +534,276 @@ def test_a_handler_never_sees_the_session_key_behind_the_subject() -> None:
     assert key not in repr(socket.handshake)
     assert upstream.subject == socket.handshake.subject
     assert len(upstream.subject) == 64
+
+
+def _rejections(recorder: SignalRecorder) -> list[str]:
+    return [event.kwargs["reason"] for event in recorder.events_for(upstream_rejected)]
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("frame", "reason"),
+    [
+        (_up("typing", topic="room:7", id="1"), "topic"),
+        (_up("nobody", id="1"), "unknown"),
+        (_up("boom", id="1"), "internal"),
+        (_up("typing", "x" * 20000, id="1"), "too_big"),
+    ],
+)
+def test_a_rejected_event_is_reported_before_its_ack(
+    frame: dict[str, object], reason: str
+) -> None:
+    _register()
+    ticket = _ticket()
+
+    async def scenario() -> TopicSocket:
+        port = MemoryPort()
+        socket, task = await _open(port, ticket)
+        port.push_json(frame)
+        ack = await _frame(port)
+        assert ack["error"] == reason
+        assert _rejections(recorder) == [reason]
+        await _close(port, task)
+        return socket
+
+    with capture_signals(upstream_rejected) as recorder:
+        socket = asyncio.run(scenario())
+    (event,) = recorder.events_for(upstream_rejected)
+    assert event.sender is TopicSocket
+    assert event.kwargs == {
+        "topic": frame["topic"],
+        "name": frame["name"],
+        "reason": reason,
+        "connection": socket.connection_id,
+        "subject": socket.handshake.subject,
+    }
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_delivered_event_is_never_reported_as_rejected() -> None:
+    _register()
+    ticket = _ticket()
+
+    async def scenario() -> None:
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        port.push_json(_up("typing", id="1"))
+        assert (await _frame(port))["ok"] is True
+        await _close(port, task)
+
+    with capture_signals(upstream_rejected) as recorder:
+        asyncio.run(scenario())
+    assert len(recorder) == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_denied_event_is_reported_before_the_close() -> None:
+    _register()
+    ticket = _ticket()
+
+    async def scenario() -> None:
+        port = MemoryPort()
+        _, task = await _open(port, ticket, recheck=True)
+        _GRANTS["room"] = False
+        port.push_json(_up("typing"))
+        async with asyncio.timeout(5):
+            await task
+
+    with capture_signals(upstream_rejected) as recorder:
+        asyncio.run(scenario())
+    assert _rejections(recorder) == ["denied"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_refused_events_are_reported_as_limit_with_or_without_an_id() -> None:
+    _register()
+    ticket = _ticket()
+
+    async def scenario() -> None:
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        for frame in (
+            _up("typing", id="1"),
+            _up("typing", id="2"),
+            _up("typing", id="3"),
+            _up("typing"),
+            _up("typing", id="5"),
+        ):
+            port.push_json(frame)
+        async with asyncio.timeout(5):
+            await task
+
+    with (
+        override_settings(NEXT_FRAMEWORK=_TIGHT),
+        capture_signals(upstream_rejected) as recorder,
+    ):
+        asyncio.run(scenario())
+    assert _rejections(recorder) == ["limit", "limit", "limit"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_event_past_the_concurrency_is_reported_as_limit() -> None:
+    @on("room:{room}", "hold")
+    async def hold(upstream: Upstream) -> None:
+        await _GATE["open"].wait()
+
+    ticket = _ticket()
+
+    async def scenario() -> None:
+        _GATE["open"] = asyncio.Event()
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        port.push_json(_up("hold", id="1"))
+        port.push_json(_up("hold", id="2"))
+        assert (await _frame(port))["error"] == "limit"
+        _GATE["open"].set()
+        assert (await _frame(port))["ok"] is True
+        await _close(port, task)
+
+    limits = {"REALTIME": {"UPSTREAM": {"CONCURRENCY": 1}}}
+    with (
+        override_settings(NEXT_FRAMEWORK=limits),
+        capture_signals(upstream_rejected) as recorder,
+    ):
+        asyncio.run(scenario())
+    assert _rejections(recorder) == ["limit"]
+
+
+class _LoopClock:
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._real = loop.time
+        self.offset = 0.0
+
+    def __call__(self) -> float:
+        return self._real() + self.offset
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timed_out_event_is_reported_as_timeout() -> None:
+    @on("room:{room}", "stall")
+    async def stall(upstream: Upstream) -> None:
+        _GATE["started"].set()
+        await _GATE["open"].wait()
+
+    ticket = _ticket()
+
+    async def scenario() -> None:
+        _GATE["started"], _GATE["open"] = asyncio.Event(), asyncio.Event()
+        loop = asyncio.get_running_loop()
+        clock = _LoopClock(loop)
+        port = MemoryPort()
+        with patch.object(loop, "time", clock):
+            _, task = await _open(port, ticket)
+            port.push_json(_up("stall", id="1"))
+            await _GATE["started"].wait()
+            clock.offset += 31
+            assert (await _frame(port))["error"] == "timeout"
+            await _close(port, task)
+
+    limits = {"REALTIME": {"UPSTREAM": {"TIMEOUT": 30}}}
+    with (
+        override_settings(NEXT_FRAMEWORK=limits),
+        capture_signals(upstream_rejected) as recorder,
+    ):
+        asyncio.run(scenario())
+    assert _rejections(recorder) == ["timeout"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_slow_rejected_receiver_never_stalls_the_reads() -> None:
+    _register()
+    ticket = _ticket()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(**kwargs: object) -> None:
+        entered.set()
+        await release.wait()
+
+    async def scenario() -> list[dict[str, object]]:
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        port.push_json(_up("typing", id="1"))
+        port.push_json(_up("typing", id="2"))
+        received = [await _frame(port), await _frame(port)]
+        await entered.wait()
+        port.push_json({"type": "pong"})
+        port.push_json({"type": "pong"})
+        received.append(await _frame(port))
+        assert not task.done()
+        release.set()
+        async with asyncio.timeout(5):
+            await task
+        assert port.close_code == Close.RATE_LIMITED
+        return received
+
+    limits = {"REALTIME": {"UPSTREAM": {"RATE": 0.001, "BURST": 1}}}
+    upstream_rejected.connect(slow, weak=False)
+    try:
+        with (
+            override_settings(NEXT_FRAMEWORK=limits),
+            capture_signals(upstream_rejected) as recorder,
+        ):
+            received = asyncio.run(scenario())
+    finally:
+        upstream_rejected.disconnect(slow)
+    assert sorted(received, key=lambda frame: str(frame.get("id"))) == [
+        {"type": "ack", "id": "1", "ok": True},
+        {"type": "ack", "id": "2", "ok": False, "error": "limit"},
+        {"type": "error", "code": "limit"},
+    ]
+    assert _rejections(recorder) == ["limit"]
+
+
+def _broken_receiver(**kwargs: object) -> None:
+    msg = "receiver failed"
+    raise ValueError(msg)
+
+
+@contextmanager
+def _failing(*signals: Signal) -> Iterator[None]:
+    for signal in signals:
+        signal.connect(_broken_receiver, weak=False)
+    try:
+        yield
+    finally:
+        for signal in signals:
+            signal.disconnect(_broken_receiver)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_failing_receivers_leave_the_acks_as_they_were(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _register()
+    ticket = _ticket()
+
+    async def scenario() -> list[dict[str, object]]:
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        port.push_json(_up("typing", 1, id="1"))
+        first = await _frame(port)
+        port.push_json(_up("nobody", id="2"))
+        second = await _frame(port)
+        await _close(port, task)
+        return [first, second]
+
+    with (
+        _failing(upstream_received, upstream_rejected),
+        caplog.at_level("ERROR", "next.realtime.signals"),
+    ):
+        acks = asyncio.run(scenario())
+    assert acks == [
+        {"type": "ack", "id": "1", "ok": True},
+        {"type": "ack", "id": "2", "ok": False, "error": "unknown"},
+    ]
+    assert [entry[1] for entry in _SEEN] == [1]
+    logged = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "next.realtime.signals"
+    ]
+    assert len(logged) == 2
+    assert "upstream_received" in logged[0]
+    assert "upstream_rejected" in logged[1]
+    assert "topic room:42" in logged[1]

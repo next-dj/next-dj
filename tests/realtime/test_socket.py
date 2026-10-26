@@ -323,9 +323,8 @@ def test_hello_carries_positions_heartbeat_and_the_clock(streams: LiveStreams) -
         broker = MemoryBroker()
         published = await broker.apublish("room:43", _envelope())
         port = MemoryPort()
-        task, hello = await _open(
-            _socket(port, ticket, broker, heartbeat=7.5), port, ticket
-        )
+        socket = _socket(port, ticket, broker, heartbeat=7.5)
+        task, hello = await _open(socket, port, ticket)
         assert hello == {
             "type": "hello",
             "protocol": 2,
@@ -336,6 +335,7 @@ def test_hello_carries_positions_heartbeat_and_the_clock(streams: LiveStreams) -
             },
             "transports": ["ws", "sse"],
             "heartbeat": 7.5,
+            "connection": socket.connection_id,
             "upstream": {"frame": 16384},
         }
         port.disconnect()

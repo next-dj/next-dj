@@ -266,6 +266,19 @@ def test_hello_frame_carries_positions_transports_and_heartbeat() -> None:
     )
 
 
+def test_hello_frame_names_the_connection_before_the_limits() -> None:
+    text = frames.hello(
+        ("poll:1",),
+        {"poll:1": Position("e1", 1)},
+        heartbeat=1,
+        server_time=0,
+        limits={"upstream": {"frame": 16}},
+        connection="c0nn",
+    )
+    assert list(json.loads(text))[-2:] == ["connection", "upstream"]
+    assert json.loads(text)["connection"] == "c0nn"
+
+
 def test_hello_frame_lists_only_the_subscribed_topics() -> None:
     text = frames.hello(
         ("poll:1",),

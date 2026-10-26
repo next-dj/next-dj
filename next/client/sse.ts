@@ -30,7 +30,7 @@ export interface EventSourceAdapter {
 export type SseDeps = Omit<StreamDeps, "transport"> & {
   source?: EventSourceAdapter;
   socket?: WebSocketAdapter;
-  websocket?: WsTransportFactory;
+  websocket?: WsTransportFactory | undefined;
   websocketFetch?: FetchAdapter;
   useWebSocket?: boolean;
 };

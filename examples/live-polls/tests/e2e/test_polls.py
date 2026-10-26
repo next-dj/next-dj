@@ -37,11 +37,6 @@ READ_VUE_APP = f"() => document.querySelector('{CHART_APP}').__vue_app__?.kept ?
 
 
 @pytest.fixture()
-def tabs_or_spaces(demo_data: None) -> Poll:
-    return Poll.objects.get(question="Tabs or spaces?")
-
-
-@pytest.fixture()
 def vim_or_emacs(demo_data: None) -> Poll:
     return Poll.objects.get(question="Vim or Emacs?")
 

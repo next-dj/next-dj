@@ -13,6 +13,7 @@ export const HEADER_MERGE = "X-Next-Merge";
 export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
+export const ORIGIN_FIELD = "_next_form_origin";
 /** Stream metadata and control-frame event names mirrored by next.partial.keys. */
 export const TOPIC = "topic";
 export const SEQ = "seq";

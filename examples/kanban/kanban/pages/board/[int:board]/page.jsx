@@ -1,6 +1,7 @@
 import ReactDOM from "react-dom/client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Column } from "./_components/column/component";
+import { Presence } from "./_components/presence/component";
 
 function applyMoveLocally(columns, cardId, targetColumnId, targetPosition) {
   const id = Number(cardId);
@@ -53,12 +54,54 @@ function dropCardLocally(columns, cardId) {
 }
 
 function namePendingCard(columns, pendingId, cardId) {
+  const known = columns.some((col) => col.cards.some((card) => card.id === cardId));
+  if (known) return dropCardLocally(columns, pendingId);
   return columns.map((col) => ({
     ...col,
     cards: col.cards.map((card) =>
       card.id === pendingId ? { ...card, id: cardId, pending: false } : card,
     ),
   }));
+}
+
+function withPendingCards(serverColumns, localColumns) {
+  return serverColumns.map((col) => {
+    const local = localColumns.find((candidate) => candidate.id === col.id);
+    const pending = (local?.cards ?? []).filter((card) => card.pending);
+    if (pending.length === 0) return col;
+    const cards = [...col.cards, ...pending];
+    return {
+      ...col,
+      cards: cards.map((card, index) => ({ ...card, position: index })),
+    };
+  });
+}
+
+function withLocalChanges(serverCols, localCols, moves) {
+  let cols = withPendingCards(serverCols, localCols);
+  for (const [cardId, move] of moves) {
+    cols = applyMoveLocally(cols, cardId, move.column, move.position);
+  }
+  return cols;
+}
+
+function trackDragging(current, { card, active, by }) {
+  const next = { ...current };
+  if (active) next[card] = by;
+  else delete next[card];
+  return next;
+}
+
+const sameMember = (a, b) =>
+  a.key === b.key && a.name === b.name && a.initials === b.initials;
+
+function keepPresentDraggers(current, members) {
+  const kept = Object.entries(current).filter(([, by]) =>
+    members.some((member) => sameMember(member, by)),
+  );
+  return kept.length === Object.keys(current).length
+    ? current
+    : Object.fromEntries(kept);
 }
 
 // The create action answers with a redirect that carries the new row id, so the
@@ -70,41 +113,100 @@ function readCreatedId(responseUrl) {
   return raw && Number.isInteger(id) ? id : null;
 }
 
+const MOVE_FAILED = {
+  invalid: "Move rejected by server.",
+  error: "Network error. The move was rolled back.",
+};
+
+const CREATE_FAILED = {
+  invalid: "Card rejected by server.",
+  error: "Network error. The card was rolled back.",
+};
+
 export function Board() {
   const ctx = window.Next?.context?.board ?? {};
+  const topic = ctx.topic;
   const [columns, setColumns] = useState(ctx.columns ?? []);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [presence, setPresence] = useState({ count: 0, members: [] });
+  const [dragging, setDragging] = useState({});
   const pendingSeq = useRef(0);
+  const serverColumns = useRef(ctx.columns ?? []);
+  const movesInFlight = useRef(new Map());
+
+  useEffect(() => {
+    const next = window.Next;
+    const offs = [
+      next?.on?.("context-updated", ({ context, changed }) => {
+        const fresh = context.board?.columns;
+        if (!changed.includes("board") || !fresh) return;
+        serverColumns.current = fresh;
+        setColumns((cols) => withLocalChanges(fresh, cols, movesInFlight.current));
+      }),
+    ];
+    const stream = next?.partial?.stream;
+    if (topic && stream) {
+      offs.push(
+        stream.on(topic, "next:presence", ({ count, members = [] }) => {
+          setPresence({ count, members });
+          setDragging((current) => keepPresentDraggers(current, members));
+        }),
+        stream.on(topic, "board:dragging", (detail) => {
+          if (detail.from === stream.meta()?.connection) return;
+          setDragging((current) => trackDragging(current, detail));
+        }),
+      );
+    }
+    return () => {
+      for (const off of offs) off?.();
+    };
+  }, [topic]);
+
+  function announceDrag(cardId, active) {
+    if (!topic) return;
+    window.Next?.partial?.stream?.send(
+      topic,
+      "dragging",
+      { card: cardId, active },
+      { ack: false },
+    );
+  }
 
   async function moveCard(cardId, targetColumnId, targetPosition) {
-    if (!ctx.move_card_url) return;
-    const prev = columns;
-    setColumns(applyMoveLocally(prev, cardId, targetColumnId, targetPosition));
+    const partial = window.Next?.partial;
+    if (!ctx.move_card_url || !partial?.submit) return;
+    const move = { column: targetColumnId, position: targetPosition };
+    movesInFlight.current.set(Number(cardId), move);
+    setColumns((cols) =>
+      applyMoveLocally(cols, cardId, targetColumnId, targetPosition),
+    );
     setErrorMsg(null);
-    try {
-      const response = await fetch(ctx.move_card_url, {
-        method: "POST",
-        headers: { "X-CSRFToken": ctx.csrf ?? "" },
-        body: new URLSearchParams({
-          card_id: cardId,
-          target_column: targetColumnId,
-          target_position: String(targetPosition),
-          csrfmiddlewaretoken: ctx.csrf ?? "",
-        }),
-      });
-      if (!response.ok) {
-        setColumns(prev);
-        setErrorMsg("Move rejected by server.");
-      }
-    } catch {
-      setColumns(prev);
-      setErrorMsg("Network error. The move was rolled back.");
+    const { status } = await partial.submit({
+      action: ctx.move_card_url,
+      data: {
+        card_id: cardId,
+        target_column: targetColumnId,
+        target_position: targetPosition,
+      },
+      zone: "board",
+      transport: "any",
+      key: `card:${cardId}`,
+    });
+    if (movesInFlight.current.get(Number(cardId)) === move) {
+      movesInFlight.current.delete(Number(cardId));
     }
+    const message = MOVE_FAILED[status];
+    if (!message) return;
+    setColumns((cols) =>
+      withLocalChanges(serverColumns.current, cols, movesInFlight.current),
+    );
+    setErrorMsg(message);
   }
 
   async function createCard(columnId, title) {
     const text = title.trim();
-    if (!ctx.create_card_url || !text) return;
+    const partial = window.Next?.partial;
+    if (!ctx.create_card_url || !partial?.submit || !text) return;
     const pendingId = `pending-${(pendingSeq.current += 1)}`;
     setColumns((cols) =>
       appendCardLocally(cols, columnId, {
@@ -115,33 +217,24 @@ export function Board() {
       }),
     );
     setErrorMsg(null);
-    try {
-      const response = await fetch(ctx.create_card_url, {
-        method: "POST",
-        headers: { "X-CSRFToken": ctx.csrf ?? "" },
-        body: new URLSearchParams({
-          column: String(columnId),
-          title: text,
-          csrfmiddlewaretoken: ctx.csrf ?? "",
-        }),
-      });
-      const cardId = response.ok ? readCreatedId(response.url) : null;
-      // Dropping the one pending card rather than restoring a snapshot keeps
-      // a move that landed while the post was in flight.
-      if (cardId === null) {
-        setColumns((cols) => dropCardLocally(cols, pendingId));
-        setErrorMsg("Card rejected by server.");
-        return;
-      }
+    const { status, location } = await partial.submit({
+      action: ctx.create_card_url,
+      data: { column: columnId, title: text },
+      navigate: false,
+    });
+    const cardId = status === "ok" ? readCreatedId(location) : null;
+    if (cardId !== null) {
       setColumns((cols) => namePendingCard(cols, pendingId, cardId));
-    } catch {
-      setColumns((cols) => dropCardLocally(cols, pendingId));
-      setErrorMsg("Network error. The card was rolled back.");
+      return;
     }
+    setColumns((cols) => dropCardLocally(cols, pendingId));
+    if (status === "dropped") return;
+    setErrorMsg(CREATE_FAILED[status] ?? CREATE_FAILED.invalid);
   }
 
   return (
     <div className="space-y-3">
+      <Presence count={presence.count} members={presence.members} />
       {errorMsg && (
         <div
           role="alert"
@@ -161,7 +254,14 @@ export function Board() {
       )}
       <div className="flex gap-4 overflow-x-auto pb-4">
         {columns.map((col) => (
-          <Column key={col.id} column={col} onDrop={moveCard} onCreate={createCard} />
+          <Column
+            key={col.id}
+            column={col}
+            dragging={dragging}
+            onDrop={moveCard}
+            onCreate={createCard}
+            onDragChange={announceDrag}
+          />
         ))}
       </div>
     </div>

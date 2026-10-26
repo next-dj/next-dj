@@ -171,7 +171,7 @@ class TestMorphFacadeRefusals:
             f"morph() got {case.named}, which the selected route does not accept."
         )
 
-    def test_a_misspelled_keyword_is_refused_by_the_interpreter(self) -> None:
+    def test_a_misspelled_keyword_is_refused_as_unexpected(self) -> None:
         with pytest.raises(TypeError, match="unexpected keyword argument"):
             Patches(partial_request()).morph(zone="alpha", overide={"x": 1})
 

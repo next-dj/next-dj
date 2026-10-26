@@ -1,10 +1,39 @@
 import base64
 
+from django import forms as django_forms
 from django.conf import settings
+from django.dispatch import receiver
+from django.http import HttpRequest
 
+from kanban.realtime import board_topic
 from next.conf import next_framework_settings
+from next.forms.signals import action_dispatched
+from next.partial import Patches
+from next.realtime import publish
 from next.static import StaticAsset
 from next.static.signals import collector_finalized
+
+
+BOARD_ACTIONS = {"move_card_form": "target_column", "create_card_form": "column"}
+HTTP_ERROR_FLOOR = 400
+
+
+@receiver(action_dispatched)
+def broadcast_board_change(
+    action_name: str = "",
+    form: django_forms.Form | None = None,
+    request: HttpRequest | None = None,
+    response_status: int = 200,
+    **kwargs,
+) -> None:
+    """Ask every other tab of the board to refresh it once the change commits."""
+    field = BOARD_ACTIONS.get(action_name)
+    if field is None or form is None or request is None:
+        return
+    if response_status >= HTTP_ERROR_FLOOR:
+        return
+    column = form.cleaned_data[field]
+    publish(board_topic(column.board_id), Patches(request).refresh(zone="board"))
 
 
 def _has_module_assets(collector: object) -> bool:

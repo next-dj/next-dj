@@ -4,7 +4,9 @@ let mountChart;
 let contextUpdated;
 let voteCountUpdated;
 let phaseUpdated;
+let presenceUpdated;
 let serverNow;
+const unsubscribe = vi.fn();
 
 beforeEach(async () => {
   vi.resetModules();
@@ -12,6 +14,7 @@ beforeEach(async () => {
   contextUpdated = null;
   voteCountUpdated = null;
   phaseUpdated = null;
+  presenceUpdated = null;
   serverNow = 1000;
   window.Next = {
     partial: {
@@ -19,9 +22,10 @@ beforeEach(async () => {
         now: () => serverNow,
         on: (topic, name, callback) => {
           expect(topic).toBe("poll:1");
-          expect(name).toBe("poll:phase");
-          phaseUpdated = callback;
-          return () => {};
+          if (name === "poll:phase") phaseUpdated = callback;
+          else if (name === "next:presence") presenceUpdated = callback;
+          else throw new Error(`unexpected topic event: ${name}`);
+          return unsubscribe;
         },
       },
       onMount: (selector, callback) => {
@@ -263,5 +267,42 @@ describe("vote count announcements", () => {
     expect(document.querySelector("[data-poll-vote-announcement]").textContent).toBe(
       "5 total votes",
     );
+  });
+});
+
+describe("watcher count", () => {
+  it("shows the attendance of the poll topic", () => {
+    document.body.innerHTML = "<p data-poll-watchers hidden></p>";
+    const root = chartRoot();
+    mountChart(root);
+    presenceUpdated({ count: 2 });
+    const label = document.querySelector("[data-poll-watchers]");
+    expect(label.textContent).toBe("2 watching");
+    expect(label.hidden).toBe(false);
+    presenceUpdated({ count: 1 });
+    expect(label.textContent).toBe("1 watching");
+  });
+
+  it("ignores a snapshot without a numeric count", () => {
+    document.body.innerHTML = "<p data-poll-watchers hidden></p>";
+    mountChart(chartRoot());
+    presenceUpdated({ count: "2" });
+    expect(document.querySelector("[data-poll-watchers]").hidden).toBe(true);
+  });
+
+  it("copes with a page that has no watcher label", () => {
+    document.body.innerHTML = "";
+    mountChart(chartRoot());
+    expect(() => presenceUpdated({ count: 2 })).not.toThrow();
+  });
+
+  it("drops both subscriptions when the island leaves the document", () => {
+    const root = chartRoot();
+    document.body.append(root);
+    mountChart(root);
+    unsubscribe.mockClear();
+    root.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    expect(unsubscribe).toHaveBeenCalledTimes(2);
+    root.remove();
   });
 });

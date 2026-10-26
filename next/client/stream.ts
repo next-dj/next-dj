@@ -71,7 +71,7 @@ export interface StreamDeps {
   apply: (raw: unknown, page: string) => void;
   parse?: (body: string) => unknown;
   // The zone re-GET that revalidates bound zones on resume, intent not headers.
-  fetch: (request: { url: string; zone: string }) => Promise<void>;
+  fetch: (request: { url: string; zone: string }) => Promise<unknown>;
   cancel?: (request: { url: string; zone: string }) => void;
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
@@ -134,6 +134,7 @@ export interface StreamMeta {
   epoch: string;
   seq: number | undefined;
   serverTime: number;
+  connection?: string | undefined;
 }
 
 interface Listener {

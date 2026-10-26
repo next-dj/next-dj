@@ -125,4 +125,28 @@ describe("Column", () => {
     const badge = document.querySelector("[data-kanban-wip]");
     expect(badge.className).toContain("rose");
   });
+
+  it("hands each card who is dragging it and the drag callback", () => {
+    const onDragChange = vi.fn();
+    const col = makeColumn([
+      { id: 10, title: "Task A", position: 0 },
+      { id: 11, title: "Task B", position: 1 },
+    ]);
+    render(
+      <Column
+        column={col}
+        dragging={{ 11: { name: "Ada Lovelace", initials: "AL" } }}
+        onDrop={vi.fn()}
+        onDragChange={onDragChange}
+      />,
+    );
+    expect(document.querySelectorAll("[data-kanban-dragged-by]")).toHaveLength(1);
+    expect(
+      document.querySelector("[data-kanban-card='11'] [data-kanban-dragged-by]"),
+    ).toBeTruthy();
+    fireEvent.dragStart(document.querySelector("[data-kanban-card='10']"), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    expect(onDragChange).toHaveBeenCalledWith(10, true);
+  });
 });

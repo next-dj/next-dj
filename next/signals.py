@@ -44,6 +44,7 @@ from next.realtime.signals import (
     stream_subscribed,
     stream_unsubscribed,
     upstream_received,
+    upstream_rejected,
 )
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
@@ -100,6 +101,7 @@ __all__ = [
     "stream_unsubscribed",
     "template_loaded",
     "upstream_received",
+    "upstream_rejected",
     "watch_specs_ready",
     "wizard_backend_loaded",
     "wizard_completed",

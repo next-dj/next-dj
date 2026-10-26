@@ -53,16 +53,18 @@ function mountChart(root) {
   const app = createApp(PollChart, { snapshot });
   const vm = app.mount(target);
   const stream = window.Next?.partial?.stream;
+  const topic = `poll:${root.dataset.pollChart}`;
   let entry;
-  const unsubscribe = stream?.on(
-    `poll:${root.dataset.pollChart}`,
-    "poll:phase",
-    ({ is_open, deadline }) => {
-      root.dataset.pollOpen = String(is_open === true);
-      root.dataset.pollDeadline = deadline == null ? "" : String(deadline);
-      renderPollPhase(root, entry);
-    },
-  );
+  const stopPhase = stream?.on(topic, "poll:phase", ({ is_open, deadline }) => {
+    root.dataset.pollOpen = String(is_open === true);
+    root.dataset.pollDeadline = deadline == null ? "" : String(deadline);
+    renderPollPhase(root, entry);
+  });
+  const stopPresence = stream?.on(topic, "next:presence", showWatchers);
+  const unsubscribe = () => {
+    stopPhase?.();
+    stopPresence?.();
+  };
   entry = { app, vm, timer: null, unsubscribe };
   instances.set(root, entry);
   renderPollPhase(root, entry);
@@ -84,9 +86,10 @@ function renderPollPhase(root, entry) {
     if (status.textContent !== message) status.textContent = message;
   }
   if (countdown) {
-    countdown.textContent = accepting && remaining !== null
-      ? `Voting closes in ${Math.ceil(remaining / 1000)} seconds`
-      : "";
+    countdown.textContent =
+      accepting && remaining !== null
+        ? `Voting closes in ${Math.ceil(remaining / 1000)} seconds`
+        : "";
   }
   for (const button of root.querySelectorAll('button[type="submit"]')) {
     button.disabled = !accepting;
@@ -109,6 +112,13 @@ function applyContextSnapshot({ context, changed }) {
     const entry = instances.get(root);
     if (entry) entry.vm.applySnapshot(snapshot);
   }
+}
+
+function showWatchers({ count }) {
+  const label = document.querySelector("[data-poll-watchers]");
+  if (!label || !Number.isInteger(count)) return;
+  label.textContent = `${count} watching`;
+  label.hidden = false;
 }
 
 function announceVoteCount({ total_votes }) {

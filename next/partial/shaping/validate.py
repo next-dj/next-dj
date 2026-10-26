@@ -54,7 +54,7 @@ def shape_validate(
     zone = _form_zone(request, page_path)
     if zone is not None:
         overrides = _zone_overrides(form, wizard, action.action_name)
-        patches.morph(zone=zone, overrides=overrides)
+        patches.morph(zone=zone, overrides=overrides, context=False)
     else:
         html = backend.render_invalid_page(
             request, action.action_name, form, page_path, url_kwargs

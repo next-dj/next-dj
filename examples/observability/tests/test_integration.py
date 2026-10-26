@@ -444,7 +444,13 @@ class TestMetricPulseVerb:
         response = apply_window("1h")
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph", "morph", "metric-pulse"]
+        assert envelope.op_verbs() == [
+            "morph",
+            "context",
+            "morph",
+            "context",
+            "metric-pulse",
+        ]
         assert envelope.zone_targets() == ["live-totals", "stats-window"]
 
     def test_partial_apply_morphs_the_window_label_beside_the_totals(

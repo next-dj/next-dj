@@ -274,6 +274,15 @@ def opaque_subject(credential: str) -> str:
     return salted_hmac(_SUBJECT_SALT, subject, algorithm="sha256").hexdigest()
 
 
+def request_subject(request: HttpRequest) -> str:
+    """Return the opaque subject an SSE request's cookies prove, empty for none.
+
+    It equals the `Handshake.subject` a WebSocket of the same browser derives.
+    """
+    credential = ticket_binding().credential(request.COOKIES)
+    return "" if credential is None else opaque_subject(credential)
+
+
 def binding_class(path: object) -> type[TicketBinding] | None:
     """Return the concrete `TicketBinding` subclass a dotted path names, or None."""
     if not isinstance(path, str):
@@ -414,6 +423,7 @@ __all__ = [
     "TicketBinding",
     "binding_class",
     "opaque_subject",
+    "request_subject",
     "session_alive",
     "session_user",
     "stored_session",

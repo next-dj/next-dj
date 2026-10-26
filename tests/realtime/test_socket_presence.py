@@ -46,6 +46,10 @@ def identify_guest(user: object, topic: str) -> dict[str, object]:
     return {"name": name, "topic": topic}
 
 
+def identify_visitor(user: object, topic: str, subject: str) -> dict[str, object]:
+    return {"name": f"Guest {subject[:4]}"}
+
+
 def failing_transform(message: Message) -> Patches:
     if message.envelope.ops[0].op == "event":
         return Patches(None).event("room:update", {"seq": message.seq})
@@ -110,6 +114,44 @@ def test_ticket_presence_joins_before_hello_under_the_connection_id() -> None:
         port.disconnect()
         await _finish(task)
         assert broker.presence(_TOPIC).count == 0
+
+    asyncio.run(scenario())
+
+
+def test_an_identify_taking_the_subject_names_an_anonymous_member() -> None:
+    ticket = issue_session_ticket(presence=f"{_HERE}.identify_visitor")
+
+    async def scenario() -> None:
+        broker = _broker()
+        port = MemoryPort()
+        socket, task, _ = await _open(port, ticket, broker)
+        subject = socket.handshake.subject
+        assert subject
+        assert broker.presence(_TOPIC).members == ({"name": f"Guest {subject[:4]}"},)
+        port.disconnect()
+        await _finish(task)
+
+    asyncio.run(scenario())
+
+
+def test_two_visitors_are_two_members_under_their_own_subjects() -> None:
+    reference = f"{_HERE}.identify_visitor"
+    tickets = [issue_session_ticket(presence=reference) for _ in range(2)]
+
+    async def scenario() -> None:
+        broker = _broker()
+        ports = [MemoryPort() for _ in tickets]
+        opened = [
+            await _open(port, ticket, broker)
+            for port, ticket in zip(ports, tickets, strict=True)
+        ]
+        names = {f"Guest {socket.handshake.subject[:4]}" for socket, _, _ in opened}
+        members = broker.presence(_TOPIC).members
+        assert len(members) == 2
+        assert {member["name"] for member in members} == names
+        for port, (_, task, _) in zip(ports, opened, strict=True):
+            port.disconnect()
+            await _finish(task)
 
     asyncio.run(scenario())
 

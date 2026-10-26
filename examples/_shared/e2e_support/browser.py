@@ -10,15 +10,9 @@ from dataclasses import dataclass, field
 from typing import NamedTuple
 
 import pytest
-from playwright.sync_api import (
-    ConsoleMessage,
-    Error,
-    Page,
-    Request,
-    Response,
-    Route,
-    TimeoutError as PlaywrightTimeoutError,
-)
+from playwright.sync_api import ConsoleMessage, Error, Page, Request, Response, Route
+
+from e2e_support.suite import call_passed
 
 
 CDN_URL_PATTERN = re.compile(
@@ -213,12 +207,6 @@ def _serve_from_cache(route: Route) -> None:
     route.fulfill(status=200, content_type=_content_type(path), body=path.read_bytes())
 
 
-def _test_failed(request: pytest.FixtureRequest) -> bool:
-    """Report whether the call phase failed, counting a missing report as failed."""
-    report = getattr(request.node, "rep_call", None)
-    return report is None or bool(report.failed)
-
-
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
     """Fail the call phase on collected noise so failure artefacts are kept."""
@@ -233,12 +221,26 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
     return outcome
 
 
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, object, object]:
+    """Unload the pages of a passed test before any fixture, the database first.
+
+    Its streams then close while the test still holds the database.
+    """
+    page = getattr(item, "funcargs", {}).get("page")
+    if isinstance(page, Page) and call_passed(item):
+        for opened in page.context.pages:
+            with suppress(Error):
+                opened.goto("about:blank", timeout=SETTLE_TIMEOUT_MS)
+    return (yield)
+
+
 def _settle(page: Page) -> None:
     """Let the requests the page still has in flight finish before the test ends.
 
     A teardown flush would race Django closing connections in `request_finished`.
     """
-    with suppress(PlaywrightTimeoutError):
+    with suppress(Error):
         page.wait_for_load_state("networkidle", timeout=SETTLE_TIMEOUT_MS)
 
 
@@ -256,10 +258,11 @@ def next_probe(request: pytest.FixtureRequest) -> Iterator[PageProbe]:
     yield collected
     collected.detach(page)
 
-    failed = _test_failed(request)
+    failed = not call_passed(request.node)
     if not failed:
         _settle(page)
-    page.context.unroute_all(behavior="ignoreErrors")
+    with suppress(Error):
+        page.context.unroute_all(behavior="ignoreErrors")
     if not failed:
         # A failed test keeps its page open for the failure screenshot.
         page.close()

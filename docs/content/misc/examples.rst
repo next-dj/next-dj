@@ -11,6 +11,8 @@ That component renders the head through ``{% metadata %}``, and every example na
 The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
 Every application keeps its pages in ``pages/`` and its page-tree components in ``pages/_components/``, and every example registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``.
 The ``admin`` example also serves the components at the root of its ``shadcn_admin`` application through ``COMPONENT_BACKENDS`` ``DIRS``.
+Three of them show realtime, ``live-polls``, ``kanban`` and ``observability``, and each one is described in its row below.
+Their streams run over SSE on any server, and the WebSocket transport needs an ASGI server, so install ``uvicorn`` and start the project with ``manage.py runserver``, whose ``next`` override serves the WebSocket upgrade.
 The :repo:`examples README <blob/main/examples/README.md>` carries the run commands and the conventions every folder follows.
 
 Catalog
@@ -63,9 +65,11 @@ The table runs roughly in order of how much it assumes.
      - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/static-assets/backends`, :doc:`/content/topics/seo/metadata`
    * - :repo:`kanban <tree/main/examples/kanban>`
      - Drives a board of React cards, teaching the pipeline a ``.jsx`` asset kind through a custom static backend, deep-merging serialised context across levels, and deduplicating co-located CSS by content hash.
-     - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`
+       Shows a realtime board as well, with an action that moves a card over the WebSocket, a presence list of who has the board open, and upstream events that broadcast a card while it is dragged.
+     - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`, :doc:`/content/topics/realtime`
    * - :repo:`live-polls <tree/main/examples/live-polls>`
      - Streams poll results to every open browser over SSE by default, with optional WebSocket delivery under ASGI, fanning out from a signal receiver that reads the bound form.
+       Publishes to topics, replays the messages a reconnecting browser missed, and shows a presence count of the viewers.
        A staff host opens or closes polls and sets a deadline through Django admin.
        Server-side form validation enforces the deadline, and the live countdown uses the stream's estimated server clock.
        The runtime opens the stream from ``data-next-sse``.
@@ -75,6 +79,7 @@ The table runs roughly in order of how much it assumes.
      - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`, :doc:`/content/howto/count-down-to-a-server-deadline`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - :repo:`observability <tree/main/examples/observability>`
      - Watches a running project through one receiver per signal group, refreshing a dashboard from polling and lazy zones and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.
+       Exports Prometheus metrics from the signals of the realtime streams.
        Keeps the whole dashboard ``noindex`` from one root ``metadata`` dict and titles each stats page.
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`
    * - :repo:`admin <tree/main/examples/admin>`

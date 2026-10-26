@@ -26,6 +26,12 @@ PLUGIN_NOT_LOADED = (
 )
 
 
+def call_passed(node: pytest.Item | pytest.Collector) -> bool:
+    """Report whether the call phase of a test passed, a missing report counting not."""
+    report = getattr(node, "rep_call", None)
+    return report is not None and bool(report.passed)
+
+
 def ignore_browser_suite(config: pytest.Config) -> bool | None:
     """Skip the browser suite with a warning so bare `pytest` still runs the rest."""
     if config.pluginmanager.has_plugin(BROWSER_PLUGIN):

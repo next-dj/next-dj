@@ -126,6 +126,29 @@ The event payload carries the whole merged store in ``context`` and the keys of 
        String(context.cart_count);
    });
 
+A zone morph carries the context of its render on its own.
+``morph(zone=...)`` in a handler, the re-render of an invalid form in a zone, and the success funnel of a zoned form follow the morph with the same ``context`` op a zone GET sends, the ``serialize=True`` values of the origin page and of the components the zone rendered.
+The client applies it through the same ``context-updated``, so an island next to the zone sees the state the server re-rendered, an error re-render included.
+
+.. code-block:: python
+   :caption: cart/page.py
+
+   @action("remove_from_cart")
+   def remove_from_cart(request: HttpRequest) -> HttpResponse:
+       """Re-render the cart zone, with the badge count riding along."""
+       cart = Cart.for_request(request)
+       cart.remove(request.POST["sku"])
+       return (
+           Patches(request)
+           .morph(zone="cart", context={"cart_count": cart.count})
+           .response()
+       )
+
+``context=`` takes a mapping of ``serialize=True`` provider names, validated as ``context()`` validates them and merged over the zone delta in one op, for a value the handler holds fresher than the provider computed.
+``context=False`` keeps the morph alone.
+The validate pass of a form morphs its zone with ``context=False``, so an island does not re-render on every keystroke.
+A foreign-page morph, ``morph(zone=, page=)``, sends no context op, because the client context belongs to the origin page.
+
 A stream source cannot build a ``context`` patch, because it has no page-render origin to read a provider value from.
 A stream that needs to push fresh context drives a ``refresh`` instead, and the re-fetched zone delivers the new context through its own render, see :doc:`sse`.
 

@@ -292,6 +292,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "SseReader",
             "StaticCollectorProxy",
             "WebsocketCommunicator",
+            "aissue_socket_ticket",
             "assert_has_class",
             "assert_metadata",
             "assert_missing_class",

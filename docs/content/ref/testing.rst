@@ -187,6 +187,7 @@ Without a ``session`` it builds one from ``SESSION_ENGINE``, so a test that sign
 The returned ``SocketTicket`` holds the ``grant``, the ``session``, the ``cookies`` the browser would present, and the ``credential`` the binding reads from them.
 Its ``cookie`` property is the ready ``cookie`` header pair for the handshake, ``subscribe_frame()`` builds the ``sub`` frame.
 The ``credential`` is what a ``Handshake`` for the ticket carries.
+``aissue_socket_ticket`` takes the same arguments and awaits the session work on a worker thread, so an async test issues a ticket inside its scenario without ``SynchronousOnlyOperation``, under ``django_db(transaction=True)`` as the socket itself needs.
 Under the default binding the credential is the session key, and under ``SignedCookieBinding`` it is the ``user:`` or ``visitor:`` credential of the binding.
 
 .. code-block:: python

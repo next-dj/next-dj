@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 from e2e_support.browser import PageProbe, expect_no_partial_request, wait_for_runtime
 from kanban.models import Board, Card, Column
@@ -13,7 +15,6 @@ CARD = "[data-kanban-card]"
 PENDING_CARD = "[data-kanban-card-pending]"
 WIP_BADGE = "[data-kanban-wip]"
 ALERT = "[data-kanban-error]"
-BAD_REQUEST = "400 (Bad Request)"
 
 TAG_ISLAND = f"() => {{ document.querySelector('{ISLAND}').keptItsNode = true; }}"
 READ_ISLAND_TAG = f"() => document.querySelector('{ISLAND}').keptItsNode"
@@ -43,18 +44,8 @@ async () => {
 
 
 @pytest.fixture()
-def board(demo_data: None) -> Board:
-    return Board.objects.get(slug="engineering-roadmap")
-
-
-@pytest.fixture()
 def other_board(demo_data: None) -> Board:
     return Board.objects.get(slug="marketing-launch")
-
-
-@pytest.fixture()
-def backlog(board: Board) -> Column:
-    return board.columns.get(title="Backlog")
 
 
 @pytest.fixture()
@@ -62,19 +53,8 @@ def in_progress(board: Board) -> Column:
     return board.columns.get(title="In progress")
 
 
-@pytest.fixture()
-def done(board: Board) -> Column:
-    return board.columns.get(title="Done")
-
-
 def is_action_post(response: Response) -> bool:
     return response.request.method == "POST"
-
-
-def open_board(page: Page, base_url: str, board: Board) -> None:
-    page.goto(f"{base_url}/board/{board.pk}/")
-    wait_for_runtime(page)
-    expect(page.locator(SERVER_CARD_LIST)).to_have_count(0)
 
 
 def header_count(page: Page) -> Locator:
@@ -106,15 +86,12 @@ def move_card(page: Page, card: Locator, target: Locator) -> None:
         card.drag_to(target)
 
 
-def drain_expected_rejection(probe: PageProbe, url: str) -> None:
-    assert probe.bad_responses == [f"400 {url}"]
-    assert [entry for entry in probe.console if BAD_REQUEST not in entry] == []
-    probe.bad_responses.clear()
-    probe.console.clear()
-
-
 def test_the_react_island_mounts_over_the_server_rendered_board(
-    page: Page, base_url: str, board: Board, next_probe: PageProbe
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    next_probe: PageProbe,
 ) -> None:
     open_board(page, base_url, board)
 
@@ -133,7 +110,12 @@ def test_the_react_island_mounts_over_the_server_rendered_board(
 
 
 def test_dragging_a_card_moves_it_and_the_move_survives_a_reload(
-    page: Page, base_url: str, board: Board, backlog: Column, done: Column
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    backlog: Column,
+    done: Column,
 ) -> None:
     open_board(page, base_url, board)
     card = backlog.cards.get(title="Audit static pipeline")
@@ -156,26 +138,24 @@ def test_dragging_a_card_moves_it_and_the_move_survives_a_reload(
     assert card.column_id == done.pk
 
 
-def test_a_move_the_server_rejects_rolls_the_card_back_and_alerts(
+def test_a_move_the_server_rejects_rolls_back_onto_the_board_the_reply_carries(
     page: Page,
+    open_board: Callable[..., None],
     base_url: str,
     board: Board,
     backlog: Column,
     done: Column,
-    next_probe: PageProbe,
 ) -> None:
     open_board(page, base_url, board)
     card = backlog.cards.get(title="Audit static pipeline")
-    action_url = page.evaluate("() => window.Next.context.board.move_card_url")
     Card.objects.filter(pk=card.pk).delete()
 
     move_card(page, card_of(page, card), column_of(page, done))
 
     expect(page.locator(ALERT)).to_contain_text("Move rejected by server.")
-    expect(column_of(page, backlog).locator(CARD)).to_have_count(2)
+    expect(card_of(page, card)).to_have_count(0)
+    expect(column_of(page, backlog).locator(CARD)).to_have_count(1)
     expect(column_of(page, done).locator(CARD)).to_have_count(1)
-    expect(column_of(page, backlog).locator(CARD).first).to_contain_text(card.title)
-    drain_expected_rejection(next_probe, f"{base_url}{action_url}")
 
     page.get_by_role("button", name="Dismiss").click()
 
@@ -183,7 +163,11 @@ def test_a_move_the_server_rejects_rolls_the_card_back_and_alerts(
 
 
 def test_a_new_card_shows_as_pending_until_the_server_names_it(
-    page: Page, base_url: str, board: Board, backlog: Column
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    backlog: Column,
 ) -> None:
     open_board(page, base_url, board)
     action_url = page.evaluate("() => window.Next.context.board.create_card_url")
@@ -219,11 +203,14 @@ def test_a_new_card_shows_as_pending_until_the_server_names_it(
 
 
 def test_a_card_over_the_wip_limit_is_rolled_back_and_the_badge_holds(
-    page: Page, base_url: str, board: Board, in_progress: Column, next_probe: PageProbe
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    in_progress: Column,
 ) -> None:
     open_board(page, base_url, board)
     badge = column_of(page, in_progress).locator(WIP_BADGE)
-    action_url = page.evaluate("() => window.Next.context.board.create_card_url")
     expect(badge).to_have_text("1/2")
 
     add_card(page, in_progress, "Fills the lane")
@@ -237,7 +224,6 @@ def test_a_card_over_the_wip_limit_is_rolled_back_and_the_badge_holds(
     expect(badge).to_have_text("2/2")
     expect(column_of(page, in_progress).locator(CARD)).to_have_count(2)
     assert Card.objects.filter(title="One over the limit").count() == 0
-    drain_expected_rejection(next_probe, f"{base_url}{action_url}")
 
 
 def test_renaming_and_archiving_keep_the_header_count_agreed_everywhere(
@@ -271,7 +257,11 @@ def test_renaming_and_archiving_keep_the_header_count_agreed_everywhere(
 
 
 def test_a_mount_replay_keeps_the_live_island_and_its_typed_state(
-    page: Page, base_url: str, board: Board, backlog: Column
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    backlog: Column,
 ) -> None:
     open_board(page, base_url, board)
     lane = column_of(page, backlog)
@@ -295,7 +285,11 @@ def test_a_mount_replay_keeps_the_live_island_and_its_typed_state(
 
 
 def test_replacing_the_island_unmounts_the_old_root_and_mounts_one_new(
-    page: Page, base_url: str, board: Board, backlog: Column
+    page: Page,
+    open_board: Callable[..., None],
+    base_url: str,
+    board: Board,
+    backlog: Column,
 ) -> None:
     open_board(page, base_url, board)
     page.evaluate(TAG_ISLAND)

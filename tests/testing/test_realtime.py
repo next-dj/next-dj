@@ -31,6 +31,7 @@ from next.testing import (
     SseEvent,
     SseReader,
     WebsocketCommunicator,
+    aissue_socket_ticket,
     capture_published,
     issue_socket_ticket,
     memory_broker,
@@ -279,6 +280,31 @@ class TestIssueSocketTicket:
         claims = verify_ticket(ticket.grant.token, ticket.credential)
         assert claims.topics == ("room:1", "room:2")
         assert claims.authorizer_ref == ROOM_AUTHORIZER_REF
+        assert claims.transform_ref == "tests.support.realtime.refresh_envelope"
+
+    @pytest.mark.django_db(transaction=True)
+    def test_the_async_twin_issues_from_an_event_loop(self) -> None:
+        session = SessionStore()
+        session.create()
+
+        async def scenario() -> tuple[SocketTicket, SocketTicket]:
+            fresh = await aissue_socket_ticket(
+                ("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF
+            )
+            bound = await aissue_socket_ticket(
+                ("room:2",),
+                authorizer_ref=ROOM_AUTHORIZER_REF,
+                transform_ref="tests.support.realtime.refresh_envelope",
+                session=session,
+            )
+            return fresh, bound
+
+        fresh, bound = asyncio.run(scenario())
+        assert fresh.session.exists(fresh.credential)
+        assert verify_ticket(fresh.grant.token, fresh.credential).topics == ("room:1",)
+        assert bound.session is session
+        claims = verify_ticket(bound.grant.token, session.session_key)
+        assert claims.topics == ("room:2",)
         assert claims.transform_ref == "tests.support.realtime.refresh_envelope"
 
     def test_binds_to_a_given_session(self) -> None:
