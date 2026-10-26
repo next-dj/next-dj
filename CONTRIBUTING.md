@@ -79,7 +79,7 @@ Tests mirror this layout:
 | `make test-examples` | Each example must have `tests/` or `tests.py`. Runs pytest with coverage per example. |
 | `make test-js` | Vitest unit tests for `next/client/next.ts`. |
 | `uv run pytest tests/ -n auto` | Fast iteration without coverage flags. |
-| `make bench` | Opt-in micro-benchmarks with CI-aligned flags (warmup, max-time, min-rounds, gc-disabled, storage under `.benchmarks/`). Override via `BENCH_FLAGS`. See [Benchmarks](#benchmarks). |
+| `make bench` | Opt-in local micro-benchmarks under pytest-benchmark (warmup, max-time, min-rounds, gc-disabled, storage under `.benchmarks/`). Override via `BENCH_FLAGS`. See [Benchmarks](#benchmarks). |
 
 ### Lint, types, format
 
@@ -121,7 +121,7 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additional
 - On pull requests: dependency review (`dependency-review` job).
 - In CI, `lint` runs on **`next/` only**. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with `uv pip install "django==…"` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment with side-by-side deltas. The `bench` job has a hard gate at `median:99%` (≈×2 slowdown). The job fails and blocks merge if the gate trips. On `main`, HEAD numbers are pushed to `gh-pages` with an informational `alert-threshold: 200%` that never blocks. See [Benchmarks](#benchmarks).
+- A dedicated **CodSpeed** workflow ([.github/workflows/codspeed.yml](.github/workflows/codspeed.yml)) runs the benchmarks on every PR and every push to `main`, and CodSpeed posts a performance report on the PR. See [Benchmarks](#benchmarks).
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [pyproject.toml](pyproject.toml) (line length 88, isort with `known-first-party = ["next"]`, relaxed rules for `examples/`, `tests/`, and `conftest.py`).
 
@@ -195,24 +195,26 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 
 **Running locally**
 
-- `make bench` runs all benchmarks with the `perf` marker using the same flags as CI (warmup=1000, max-time=0.2s, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
+- `make bench` runs all benchmarks with the `perf` marker under pytest-benchmark (warmup=1000, max-time=0.2s, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
 - Benchmarks are **excluded from `make test`** (ignored via `addopts`) and auto-marked `perf` by [tests/benchmarks/conftest.py](tests/benchmarks/conftest.py), so tests need no decorator of their own.
-- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR. The CI workflow below does the machine-stable comparison.
+- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR. CodSpeed does the machine-stable comparison.
 
 **CI integration**
 
-The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and every push to `main` that touches `next/`, `tests/benchmarks/`, the dependency files or the workflow itself:
+The [CodSpeed workflow](.github/workflows/codspeed.yml) runs on every PR and every push to `main` that touches `next/`, `tests/benchmarks/`, the dependency files or the workflow itself. It uses a single Python version (3.13) and three CodSpeed instruments:
 
-- On `main`: writes a baseline into `gh-pages` under `dev/bench/`.
-- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `median:99%` (≈×2 of base, the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
-- Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
+- **CPU simulation** runs the whole suite. It counts instructions in a simulated CPU instead of timing the runner, so results do not depend on the hardware and small regressions show up in the PR report. System calls are left out of the measure.
+- **Memory** runs the whole suite and tracks every heap allocation, so a change that allocates more shows up even when it costs no CPU.
+- **Walltime** times only the benchmarks marked `walltime` on a CodSpeed bare-metal macro runner. These are the benchmarks dominated by system calls (filesystem walks, module loads, sockets, Redis), whose real cost the simulation understates.
 
-The [CodSpeed workflow](.github/workflows/codspeed.yml) runs the same suite on the same triggers under `pytest-codspeed` in simulation mode. It counts instructions in a simulated CPU instead of timing the runner, so results do not depend on the hardware and small regressions show up in its PR report. The suite is split into four shards that run in parallel, and CodSpeed merges them into one report per commit. `make bench-codspeed` runs the suite locally under the same plugin, in walltime mode since the simulation needs Valgrind on Linux. A benchmark must run under both plugins, so pass the arguments of a `pedantic` call through its `setup` return value, not through `args=` alongside `setup`, and do not pass a `name=` keyword to `benchmark(...)`.
+The simulation and memory runs are split into four shards each, and CodSpeed merges them into one report per commit. The walltime run spends macro runner minutes, so mark a benchmark `walltime` only when system calls dominate it. `make bench-codspeed` runs the suite locally under the same plugin, in walltime mode since the simulation needs Valgrind on Linux.
+
+A benchmark must run under both plugins, so pass the arguments of a `pedantic` call through its `setup` return value, not through `args=` alongside `setup`, and do not pass a `name=` keyword to `benchmark(...)`.
 
 **Adding a benchmark**
 
 1. Mirror the `next/<area>/` layout: put the file at `tests/benchmarks/<area>/test_bench_<topic>.py`.
-2. Set the group via `@pytest.mark.benchmark(group="<area>.<aspect>")`. The PR comment draws one bar chart per group.
+2. Set the group via `@pytest.mark.benchmark(group="<area>.<aspect>")`. Add `@pytest.mark.walltime` when system calls dominate the benchmark.
 3. Reuse scaffolding: tree builders in [tests/benchmarks/factories.py](tests/benchmarks/factories.py), shared fixtures from [tests/fixtures.py](tests/fixtures.py) (loaded automatically).
 4. Cover **both cold and warm** cases when the code has a cache (e.g. `mtime_hit`, `resolve_cached`). Deltas on hit paths are where regressions hide.
 5. Keep each round cheap. A single bench should complete well under a second so the whole suite stays near a minute.
@@ -232,7 +234,7 @@ Always run `make bench` locally when your change touches any `next/<area>/` file
 - Any caching or invalidation logic, regardless of area.
 - Any code in a hot render, autoreload, or URL-generation path.
 
-Non-hot paths (checks, one-shot app startup code, templatetag glue) do not need a local bench pass. The CI comment covers those.
+Non-hot paths (checks, one-shot app startup code, templatetag glue) do not need a local bench pass. The CodSpeed report covers those.
 
 ## Examples
 
@@ -267,7 +269,7 @@ Build locally using `make docs`. CI enables Sphinx warnings as errors.
 - [ ] TS changes: `next.min.js` rebuilt (`make build-js`) and vitest tests updated
 - [ ] Example + tests when adding public API or behavior users copy from `examples/`
 - [ ] Docs updated when behavior or usage changes
-- [ ] `make bench` checked locally when touching a hot path (see [Benchmarks](#benchmarks)). Confirm the PR bench comment before requesting review
+- [ ] `make bench` checked locally when touching a hot path (see [Benchmarks](#benchmarks)). Confirm the CodSpeed report before requesting review
 - [ ] Link issues with `Fixes #123` / `Closes #123` when applicable
 
 ### Branches

@@ -25,6 +25,7 @@ class TestBenchPresence:
         benchmark.pedantic(broker.join, setup=leave, rounds=500, warmup_rounds=5)
         assert broker.presence("room:1").count == count + 1
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("count", [1, 1000])
     @pytest.mark.benchmark(group="realtime.presence")
     def test_touch(

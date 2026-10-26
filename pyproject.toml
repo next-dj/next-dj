@@ -167,6 +167,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "perf: performance benchmarks (opt-in, run with -m perf)",
+    "walltime: benchmarks dominated by system calls, also timed by the CodSpeed walltime job",
 ]
 addopts = [
     "--strict-markers",

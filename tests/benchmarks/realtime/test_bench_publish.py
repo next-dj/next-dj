@@ -8,12 +8,14 @@ from tests.benchmarks.factories import small_envelope
 class TestBenchBrokerPublish:
     """Number and store one envelope on a single broker."""
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="realtime.publish")
     def test_publish(self, any_broker: MemoryBroker | RedisBroker, benchmark) -> None:
         """Runs the sequence script on the fake server for Redis."""
         envelope = small_envelope()
         benchmark(any_broker.publish, "room:1", envelope)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="realtime.publish")
     @pytest.mark.parametrize("replay", [0], indirect=True, ids=["log-off"])
     @pytest.mark.usefixtures("replay")
@@ -28,6 +30,7 @@ class TestBenchBrokerPublish:
 class TestBenchPublicPublish:
     """Publish through the configured broker, paying validation, snapshot and signal."""
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="realtime.publish")
     def test_full_publish(self, configured_broker, benchmark) -> None:
         def run() -> None:

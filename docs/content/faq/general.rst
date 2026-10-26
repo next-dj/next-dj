@@ -34,7 +34,7 @@ Is next.dj production ready
 ---------------------------
 
 Yes for a project that pins an exact release and reads what changed before it upgrades, and no for one that expects a frozen API and a long-term support line.
-The code itself is held to strict gates, 100 percent line and branch coverage on ``next/`` and on every example, strict mypy, and a benchmark comparison that blocks a merge on a regression, as :doc:`/content/contributing/quality-gates` records.
+The code itself is held to strict gates, 100 percent line and branch coverage on ``next/`` and on every example, strict mypy, and a CodSpeed benchmark report on every pull request, as :doc:`/content/contributing/quality-gates` records.
 What is not settled is the public API, so the documented surface is a contract that can still change in ways that require edits to application code, and :ref:`faq-safe-symbols` below defines exactly what it covers.
 The manual carries no release history by policy, so each change states its own impact in the pull request that makes it.
 Pin the Python and Django releases the matrix tests (see :doc:`/content/intro/install`), pin an exact next.dj release, and read the pull requests behind an upgrade before taking it.

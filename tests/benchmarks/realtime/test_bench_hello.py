@@ -14,6 +14,7 @@ _SERVER_TIME = 1_700_000_000_000
 class TestBenchPositions:
     """Read the latest position of every subscribed topic in one batch."""
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("count", [1, 64])
     @pytest.mark.benchmark(group="realtime.hello")
     def test_positions(self, any_broker, count: int, benchmark) -> None:

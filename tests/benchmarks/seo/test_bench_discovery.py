@@ -27,6 +27,7 @@ def _tree(tmp_path: Path) -> Path:
 class TestBenchDiscovery:
     """Finding and loading the SEO sources of the routed page trees."""
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="seo.discovery")
     def test_discover_every_source(self, tmp_path: Path, benchmark) -> None:
         with routed(_tree(tmp_path)):

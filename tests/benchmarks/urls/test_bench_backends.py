@@ -126,6 +126,7 @@ def _write_grouped_tree(root: Path, sections: int = _SECTIONS) -> int:
     return routed_pages
 
 
+@pytest.mark.walltime()
 class TestBenchFileRouter:
     """A fresh backend per round, because the second call is a cache copy.
 
@@ -148,6 +149,7 @@ class TestBenchFileRouter:
         benchmark(lambda: _router_for(tmp_path).generate_urls())
 
 
+@pytest.mark.walltime()
 class TestBenchGroupedAndInterceptedTree:
     """Route groups and intercept directories, against the plain trees above."""
 
@@ -174,6 +176,7 @@ class TestBenchGroupedAndInterceptedTree:
         benchmark(lambda: _router_for(tmp_path).generate_urls())
 
 
+@pytest.mark.walltime()
 class TestBenchAppDirsRouter:
     """App resolution walks the app registry, which no root-only router touches."""
 
@@ -192,6 +195,7 @@ class TestBenchAppDirsRouter:
         benchmark(lambda: _app_dirs_router().page_roots())
 
 
+@pytest.mark.walltime()
 class TestBenchManyInstalledApps:
     """The page-root listing runs per static lookup and per reloader tick."""
 
@@ -206,6 +210,7 @@ class TestBenchManyInstalledApps:
         benchmark(lambda: _app_dirs_router().generate_urls())
 
 
+@pytest.mark.walltime()
 class TestBenchPrivateFolders:
     """A `_name` folder is skipped, so its subtree costs one directory entry."""
 

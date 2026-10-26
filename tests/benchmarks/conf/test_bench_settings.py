@@ -27,6 +27,7 @@ class TestBenchSettingsMerge:
         _ = settings.PAGE_BACKENDS
         benchmark(lambda: settings.PAGE_BACKENDS)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="conf.settings")
     def test_reload_cycle(self, benchmark) -> None:
         settings = NextFrameworkSettings()

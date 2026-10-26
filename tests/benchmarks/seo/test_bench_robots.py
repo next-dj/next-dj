@@ -50,6 +50,7 @@ class TestBenchRobots:
         robots = DeclaredRobots(Path("robots.py"), module)
         benchmark(robots.render, None, "https://acme.example/sitemap.xml")
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="seo.robots")
     def test_static_file_read_on_a_warm_memo(self, tmp_path: Path, benchmark) -> None:
         path = tmp_path / "robots.txt"

@@ -108,6 +108,7 @@ class TestBenchShapeInvalid:
         )
         return backend, outcome
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="partial.shaping")
     def test_shape_invalid_outcome(
         self, invalid_setup: tuple[RegistryFormActionBackend, ActionOutcome], benchmark

@@ -10,6 +10,7 @@ FLAG = {"HTTP_X_NEXT_REQUEST": "1", "HTTP_SEC_FETCH_SITE": "same-origin"}
 class TestBenchCsrfView:
     """The token endpoint the runtime of every shared page calls before a post."""
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="csrf.view")
     def test_a_token(self, benchmark) -> None:
         """A flagged same-origin read, minting a masked token and every header."""

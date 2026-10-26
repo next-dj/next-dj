@@ -54,7 +54,9 @@ class TestBenchResponsePolicy:
         benchmark(finish)
 
     @pytest.mark.parametrize(
-        "body", ["x = 1\n", _POLICY_PAGE], ids=["no-policy", "static-policy"]
+        "body",
+        [pytest.param("x = 1\n", marks=pytest.mark.walltime), _POLICY_PAGE],
+        ids=["no-policy", "static-policy"],
     )
     @pytest.mark.benchmark(group="pages.view")
     def test_static_view_warm(self, tmp_path: Path, body: str, benchmark) -> None:

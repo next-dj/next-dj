@@ -11,6 +11,7 @@ from next.realtime.redis.pubsub import decode_message
 from tests.benchmarks.factories import medium_envelope, small_envelope
 
 
+@pytest.mark.walltime()
 class TestBenchFanout:
     """One publish reaching many sync subscribers of the same topic."""
 
@@ -54,6 +55,7 @@ async def _closed(
 class TestBenchAsyncFanout:
     """One sync publish reaching many async subscribers that live on one event loop."""
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("subscribers", [1, 100, 1000])
     @pytest.mark.benchmark(group="realtime.fanout")
     def test_wakeup_per_subscriber(

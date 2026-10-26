@@ -122,6 +122,7 @@ class TestBenchErrorRerenderWithLayouts:
         benchmark(run)
 
 
+@pytest.mark.walltime()
 class TestBenchPageGetRender:
     """GET render of a page whose template carries a `{% form %}` block."""
 
@@ -159,6 +160,7 @@ class TestBenchPageGetRender:
         benchmark(run)
 
 
+@pytest.mark.walltime()
 class TestBenchFormTag:
     """Full ``{% form %}`` block render with URL reverse and hidden inputs."""
 

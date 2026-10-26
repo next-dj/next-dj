@@ -77,6 +77,7 @@ def _refused(view: Callable[..., object], request: object, kwargs: dict) -> bool
 class TestBenchPageAccess:
     """A full render of a page under three `page.py` files, by what they hold."""
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("shape", ["bare", "plain", "declared"])
     @pytest.mark.benchmark(group="pages.page_access")
     def test_full_render(self, tmp_path: Path, shape: str, benchmark) -> None:
@@ -93,6 +94,7 @@ class TestBenchPageAccess:
             request.user = QuietHolder(*_HELD)
             benchmark(match.func, request, **match.kwargs)
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("shape", ["plain", "declared"])
     @pytest.mark.benchmark(group="pages.page_access")
     def test_full_render_after_the_rules_drop(

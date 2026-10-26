@@ -52,8 +52,8 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
      - ``make docs-lint``
      - ``docs`` job, "Check documentation code snippets" step
    * - Benchmarks
-     - ``make bench``
-     - ``bench`` workflow on every pull request
+     - ``make bench``, ``make bench-codspeed``
+     - CodSpeed workflow on every pull request
    * - Supply chain
      - ``make pre-commit-run``
      - ``security`` and ``dependency-review`` jobs
@@ -100,15 +100,14 @@ Benchmarks
 ----------
 
 Benchmarks live in ``tests/benchmarks/`` and stay out of the default test run through ``--ignore=tests/benchmarks``.
-``make bench`` runs them with the flags continuous integration uses, which are the ``perf`` marker, a warmup of 1000 iterations, a minimum of 10 rounds, garbage collection disabled, and result storage under ``.benchmarks/``.
-Local numbers compare only against other numbers from the same machine, so a pull request cites the workflow comparison rather than a local delta.
+``make bench`` runs them locally under pytest-benchmark with the ``perf`` marker, a warmup of 1000 iterations, a minimum of 10 rounds, garbage collection disabled, and result storage under ``.benchmarks/``.
+Local numbers compare only against other numbers from the same machine, so a pull request cites the CodSpeed report rather than a local delta.
 
-The benchmark workflow runs on every pull request and compares the head commit against the base commit on one runner.
-The hard gate is ``--benchmark-compare-fail=median:99%``, which is roughly twice the base median and the strictest value the flag parser accepts, and tripping it fails the job and blocks the merge.
-A softer tier warns when a median drifts more than 30 percent above the base without failing the job.
-The comparison runs on a single Python and Django combination so matrix noise stays out of the numbers, and ``[skip bench]`` in the pull request title or the commit message bypasses the workflow.
-
-On ``main`` the workflow pushes the head numbers to the ``gh-pages`` branch with an informational alert threshold of 200 percent that never blocks.
+The CodSpeed workflow runs on every pull request and every push to ``main`` on a single Python version, and CodSpeed posts its report on the pull request.
+The CPU simulation instrument runs the whole suite and counts instructions instead of timing the runner, so the numbers do not depend on the hardware, but it leaves system calls out of the measure.
+The memory instrument runs the whole suite as well and tracks every heap allocation.
+The walltime instrument times only the benchmarks marked ``walltime`` on a CodSpeed bare-metal runner, the ones dominated by filesystem, socket, and Redis calls whose real cost the simulation understates.
+``make bench-codspeed`` runs the suite locally under ``pytest-codspeed`` in walltime mode, since the simulation needs Valgrind on Linux.
 
 The realtime benchmarks live in ``tests/benchmarks/realtime/`` and need no running Redis.
 The ``realtime.publish``, ``realtime.hello``, ``realtime.presence``, and ``realtime.replay`` groups run on ``MemoryBroker`` and on a ``RedisBroker`` backed by ``fakeredis``, ``realtime.fanout`` runs on the memory broker alone, and the other groups touch no broker.

@@ -103,7 +103,7 @@ BENCH_FLAGS ?= \
 # Example: make bench BENCH_EXTRA="--benchmark-save=before"
 BENCH_EXTRA ?=
 
-bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
+bench: # run performance benchmarks locally (opt-in, no coverage, paired comparisons via BENCH_EXTRA)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
 
 bench-codspeed: # run the benchmarks under pytest-codspeed (walltime off Linux CI)

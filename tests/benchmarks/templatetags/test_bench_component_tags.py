@@ -70,6 +70,7 @@ def _vanilla_page(root: Path, source: str, count: int) -> CompiledTemplate:
     return engine.from_string(source * count)
 
 
+@pytest.mark.walltime()
 class TestBenchColdComponentTag:
     """The tag rendering a page whose component caches were just dropped.
 

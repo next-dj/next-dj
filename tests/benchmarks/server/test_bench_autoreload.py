@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.mark.walltime()
 class TestBenchTreeSignature:
     @pytest.mark.parametrize(
         ("depth", "fanout"), [(3, 3), (4, 5)], ids=["small", "large"]
@@ -27,6 +28,7 @@ class TestBenchTreeSignature:
         benchmark(_tree_dir_signature, tmp_path)
 
 
+@pytest.mark.walltime()
 class TestBenchCollectRoutes:
     @pytest.mark.benchmark(group="server.autoreload")
     def test_collect_routes_cached(
