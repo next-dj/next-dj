@@ -9,6 +9,7 @@ import functools
 import importlib.machinery
 import importlib.util
 import logging
+import math
 import os
 import re
 from contextlib import suppress
@@ -52,6 +53,28 @@ WEB_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https"})
 def is_int(value: object) -> TypeGuard[int]:
     """Whether `value` is an int that is not a bool."""
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def int_between(value: object, low: int, high: int) -> TypeGuard[int]:
+    """Whether `value` is an int that is not a bool, from `low` up to `high`."""
+    return is_int(value) and low <= value <= high
+
+
+def positive_number(value: object, ceiling: float) -> TypeGuard[float]:
+    """Whether `value` is a finite int or float above zero and up to `ceiling`."""
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and 0 < value <= ceiling
+    )
+
+
+def after_fork(reset: Callable[[], object]) -> None:
+    """Run `reset` in every forked child, nothing on a platform that cannot fork."""
+    register = getattr(os, "register_at_fork", None)
+    if register is not None:
+        register(after_in_child=reset)
 
 
 ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(

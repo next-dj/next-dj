@@ -1,4 +1,4 @@
-"""Broker contracts and message types for realtime delivery."""
+"""Realtime topics over SSE and WebSocket with brokers, presence and upstream events."""
 
 from . import checks, frames, signals
 from .asgi import WebSocketApp, application

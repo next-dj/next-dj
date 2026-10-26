@@ -1,5 +1,3 @@
-import importlib
-import importlib.util
 import sys
 from collections.abc import Generator
 from types import ModuleType
@@ -17,6 +15,7 @@ from next.realtime.transports import (
 )
 from next.server import asgi
 from next.server.asgi import (
+    UvicornServer,
     asgi_server,
     banner,
     development_application,
@@ -26,14 +25,29 @@ from next.server.asgi import (
     project_application,
     serve,
     serve_development,
+    server_class,
     server_options,
     speaks_websocket,
 )
-from next.testing import override_websocket_mount
+from next.testing import override_next_settings, override_websocket_mount
 
 
 async def named_app(scope, receive, send) -> None:
     """Stand in for the app a project names in `ASGI_APPLICATION`."""
+
+
+class RecordingServer:
+    """A development server a project names in `DEV_SERVER`."""
+
+    def run(self, app, **options: object) -> None:
+        """Serve nothing."""
+
+
+class Runless:
+    """A class without the `run` method of `ASGIServer`."""
+
+
+not_a_class = RecordingServer()
 
 
 @pytest.fixture(autouse=True)
@@ -45,12 +59,37 @@ def _withdrawn_websocket() -> Generator[None, None, None]:
 class TestAsgiServer:
     """uvicorn is optional, so its absence reads as no ASGI server."""
 
-    def test_returns_the_installed_module(self) -> None:
-        assert asgi_server() is importlib.import_module("uvicorn")
+    def test_returns_the_uvicorn_server_by_default(self) -> None:
+        assert isinstance(asgi_server(), UvicornServer)
 
     def test_returns_none_without_uvicorn(self, monkeypatch) -> None:
         monkeypatch.setitem(sys.modules, "uvicorn", None)
         assert asgi_server() is None
+
+    def test_the_uvicorn_server_runs_the_app_on_uvicorn(self, monkeypatch) -> None:
+        calls: list[tuple[object, dict[str, object]]] = []
+        fake = ModuleType("uvicorn")
+        fake.run = lambda app, **options: calls.append((app, options))
+        monkeypatch.setitem(sys.modules, "uvicorn", fake)
+        UvicornServer().run(named_app, port=1)
+        assert calls == [(named_app, {"port": 1})]
+
+    def test_builds_the_server_the_setting_names(self, monkeypatch) -> None:
+        monkeypatch.setitem(sys.modules, "uvicorn", None)
+        with override_next_settings(DEV_SERVER=f"{__name__}.RecordingServer"):
+            assert isinstance(asgi_server(), RecordingServer)
+
+    @pytest.mark.parametrize(
+        ("name", "message"),
+        [
+            ("Missing", "does not import"),
+            ("Runless", "is no class with the run"),
+            ("not_a_class", "is no class with the run"),
+        ],
+    )
+    def test_refuses_a_path_that_names_no_server(self, name, message) -> None:
+        with pytest.raises(ImproperlyConfigured, match=message):
+            server_class(f"{__name__}.{name}")
 
     def test_speaks_websocket_with_a_library(self) -> None:
         assert speaks_websocket() is True

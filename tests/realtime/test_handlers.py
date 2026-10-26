@@ -12,6 +12,7 @@ from next import realtime
 from next.realtime import Upstream, checks, handlers
 from next.realtime.checks import check_realtime_settings, check_upstream_handlers
 from next.realtime.handlers import (
+    MAX_PATTERN_LENGTH,
     Binding,
     HandlerRegistry,
     compile_pattern,
@@ -116,6 +117,10 @@ class TestPattern:
     def test_an_invalid_pattern_compiles_to_none(self, pattern: object) -> None:
         assert compile_pattern(pattern) is None
 
+    def test_a_pattern_of_exactly_the_maximum_length_compiles(self) -> None:
+        assert compile_pattern("a" * MAX_PATTERN_LENGTH) is not None
+        assert compile_pattern("a" * (MAX_PATTERN_LENGTH + 1)) is None
+
     @pytest.mark.parametrize(
         ("name", "expected"),
         [
@@ -201,6 +206,26 @@ class TestRegistry:
         assert held.resolve("room:lobby", "typing") == (exact, {})
         assert held.resolve("room:abc", "typing") == (wide, {"code": "abc"})
         assert held.resolve("room:abc", "cursor") is None
+
+    def test_equal_placeholders_resolve_to_the_first_registered(self) -> None:
+        for patterns in (
+            ("room:{code}", "{kind}:lobby"),
+            ("{kind}:lobby", "room:{code}"),
+        ):
+            held = HandlerRegistry()
+            first = held.add(Binding.bind(patterns[0], "typing", _first))
+            held.add(Binding.bind(patterns[1], "typing", _second))
+            resolved = held.resolve("room:lobby", "typing")
+            assert resolved is not None
+            assert resolved[0] is first
+
+    def test_fewer_placeholders_beat_an_earlier_binding_with_more(self) -> None:
+        held = HandlerRegistry()
+        held.add(Binding.bind("{kind}:{code}", "typing", _first))
+        narrow = held.add(Binding.bind("room:{code}", "typing", _second))
+        resolved = held.resolve("room:abc", "typing")
+        assert resolved is not None
+        assert resolved[0] is narrow
 
     def test_reset_drops_everything(self) -> None:
         held = HandlerRegistry()

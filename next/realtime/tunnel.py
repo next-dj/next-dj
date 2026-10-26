@@ -24,6 +24,7 @@ from django.core.handlers.asgi import get_script_prefix
 from django.http import parse_cookie
 from django.urls import Resolver404, resolve
 from django.utils.http import parse_http_date_safe
+from django.utils.translation import get_language_from_path, override
 
 from next.forms.transport import (
     DISPATCHED_SCOPE_KEY,
@@ -334,12 +335,14 @@ class DjangoTunnel:
         )
 
     def routes_to_action(self, path_info: str) -> bool:
-        """Whether the root URLconf sends the path to the form action dispatch.
+        """Whether the URLconf, under the language of the path, routes it to an action.
 
         It runs on the shared pool, since a cold URLconf import or a converter blocks.
         """
+        language = get_language_from_path(path_info) or settings.LANGUAGE_CODE
         try:
-            match = resolve(path_info)
+            with override(language):
+                match = resolve(path_info)
         except Resolver404:
             return False
         return dispatches_actions(match.func)

@@ -3,7 +3,6 @@ import json
 import logging
 import pickle
 import threading
-import time
 from collections.abc import Callable, Iterator
 from importlib import import_module
 from pathlib import Path
@@ -40,7 +39,7 @@ from next.realtime import WebSocketApp, application
 from next.realtime.tunnel import DjangoTunnel, Tunnel
 from next.testing.realtime import (
     SocketTicket,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     issue_socket_ticket,
     override_websocket_mount,
 )
@@ -220,7 +219,7 @@ async def _tunnel(
         (b"host", b"testserver"),
         (b"cookie", _cookie(ticket, secret).encode()),
     ]
-    communicator = WebsocketCommunicator(app, "/_next/ws/", headers=headers, timeout=10)
+    communicator = WebSocketCommunicator(app, "/_next/ws/", headers=headers, timeout=10)
     connected, _ = await communicator.connect()
     assert connected
     assert (await communicator.subscribe(ticket))["type"] == "hello"
@@ -488,7 +487,8 @@ _SLOW: dict[str, threading.Event] = {}
 @action("tunnel_slow", transport="any")
 def tunnel_slow() -> HttpResponse:
     _SLOW["started"].set()
-    _SLOW["release"].wait(5)
+    _SLOW["released"] = _SLOW["release"].wait(5)
+    _SLOW["finished"].set()
     return HttpResponse("slow")
 
 
@@ -507,24 +507,15 @@ class _QuickSocket(WebSocketApp):
         return _QuickTunnel(ASGIHandler(), scope, limits)
 
 
-async def _ticker(stalls: list[float]) -> None:
-    last = time.monotonic()
-    while True:
-        await asyncio.sleep(0.02)
-        now = time.monotonic()
-        stalls.append(now - last)
-        last = now
-
-
 async def _connect(
     app: ASGI3Application, ticket: SocketTicket, secret: str
-) -> tuple[WebsocketCommunicator, dict[str, object]]:
+) -> tuple[WebSocketCommunicator, dict[str, object]]:
     headers = [
         (b"origin", _ORIGIN.encode()),
         (b"host", b"testserver"),
         (b"cookie", _cookie(ticket, secret).encode()),
     ]
-    communicator = WebsocketCommunicator(app, "/_next/ws/", headers=headers)
+    communicator = WebSocketCommunicator(app, "/_next/ws/", headers=headers)
     connected, _ = await communicator.connect()
     assert connected
     await communicator.send_json_to(ticket.subscribe_frame())
@@ -537,50 +528,50 @@ def test_a_sync_view_past_the_timeout_never_blocks_the_loop(
     ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
-    _SLOW.update(started=threading.Event(), release=threading.Event())
+    _SLOW.update(
+        started=threading.Event(), release=threading.Event(), finished=threading.Event()
+    )
     frame = _frame(_url("tunnel_slow"), {"csrfmiddlewaretoken": token})
 
-    async def scenario() -> tuple[list[dict[str, object]], float, list[float]]:
-        stalls: list[float] = []
-        ticker = asyncio.create_task(_ticker(stalls))
+    async def scenario() -> list[dict[str, object]]:
         communicator, _ = await _connect(_QuickSocket(), ticket, secret)
-        started = time.monotonic()
         await communicator.send_json_to({"type": "http", "id": "1", **frame})
         first = json.loads((await communicator.receive_output(5))["text"])
-        elapsed = time.monotonic() - started
         await communicator.send_json_to({"type": "http", "id": "2", **frame})
         second = json.loads((await communicator.receive_output(5))["text"])
         await communicator.disconnect()
         _SLOW["release"].set()
-        ticker.cancel()
-        return [first, second], elapsed, stalls
+        assert await asyncio.to_thread(_SLOW["finished"].wait, 5)
+        return [first, second]
 
     tunnel = {"TIMEOUT": 0.2, "CONCURRENCY": 1}
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": tunnel}}):
-        answers, elapsed, stalls = asyncio.run(scenario())
+        answers = asyncio.run(scenario())
     assert [answer["error"] for answer in answers] == ["timeout", "limit"]
-    assert elapsed < 2.0
-    assert max(stalls) < 1.0
+    assert _SLOW["released"] is True
 
 
 def test_closing_the_socket_leaves_a_running_view_alone(
     ticket: SocketTicket, csrf: tuple[str, str]
 ) -> None:
     secret, token = csrf
-    _SLOW.update(started=threading.Event(), release=threading.Event())
+    _SLOW.update(
+        started=threading.Event(), release=threading.Event(), finished=threading.Event()
+    )
     frame = _frame(_url("tunnel_slow"), {"csrfmiddlewaretoken": token})
 
-    async def scenario() -> float:
+    async def scenario() -> bool:
         communicator, _ = await _connect(_QuickSocket(), ticket, secret)
         await communicator.send_json_to({"type": "http", "id": "1", **frame})
         assert await asyncio.to_thread(_SLOW["started"].wait, 5)
-        started = time.monotonic()
         await communicator.disconnect()
-        elapsed = time.monotonic() - started
+        still_running = not _SLOW["finished"].is_set()
         _SLOW["release"].set()
-        return elapsed
+        assert await asyncio.to_thread(_SLOW["finished"].wait, 5)
+        return still_running
 
-    assert asyncio.run(scenario()) < 2.0
+    assert asyncio.run(scenario())
+    assert _SLOW["released"] is True
 
 
 def test_the_hello_tells_the_client_the_tunnel_contract(

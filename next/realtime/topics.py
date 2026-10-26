@@ -7,13 +7,16 @@ import json
 import math
 import time
 from contextlib import aclosing
+from functools import partial
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, TypeGuard, override
+from typing import TYPE_CHECKING, Any, TypeGuard, cast, override
 
+from django.contrib.sessions.backends.base import SessionBase
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
 from django.utils.cache import patch_vary_headers
+from django.utils.functional import SimpleLazyObject, empty
 from django.utils.module_loading import import_string
 
 from next.partial.sse import PatchStreamWriter
@@ -27,7 +30,7 @@ from .access import (
     run_detached,
 )
 from .attendance import Identifier, aattend, aattending, attend, attending
-from .binding import request_subject, ticket_binding
+from .binding import request_subject, session_user, ticket_binding
 from .delivery import transformed
 from .errors import BrokerConnectionError, InvalidTicketError, InvalidTopicError
 from .manager import broker_manager
@@ -58,6 +61,8 @@ if TYPE_CHECKING:
         Mapping,
     )
 
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
     from django.http import HttpRequest
 
     from next.partial.envelope import Envelope
@@ -136,14 +141,15 @@ class TopicStream(PatchStreamWriter):
         self.topics = selected
         self._single = len(selected) == 1
         self._subscription_timeout = interval
+        session_key = _session_key(request)
+        self._user = _stream_user(request, session_key)
         self._access = AccessCheck(
             selected,
             authorizer=self._authorize,
-            session_key=_session_key(request),
-            user=getattr(request, "user", None),
+            session_key=session_key,
+            user=self._user,
             interval=interval,
         )
-        self._user = getattr(request, "user", None)
         source: Iterator[TopicItem] | AsyncIterator[TopicItem]
         if isinstance(request, ASGIRequest):
             if presence is not False:
@@ -266,12 +272,9 @@ class TopicStream(PatchStreamWriter):
         """
         if message is None:
             return None
-        if message.seq:
-            result = self._transform_message(message)
-            if result is None:
-                return StreamSkip(message.topic, message.seq, message.epoch)
-            message = result
-        return message if self._identifier is not None else counted(message)
+        if message.seq and self._transform is not None:
+            return self._item(message, transformed(message, self._transform(message)))
+        return self._item(message, message)
 
     async def _async_messages(
         self, backend: BrokerBackend | None = None
@@ -335,11 +338,15 @@ class TopicStream(PatchStreamWriter):
         if message is None:
             return None
         if message.seq and self._transform is not None:
-            result = transformed(message, await run_detached(self._transform, message))
-            if result is None:
-                return StreamSkip(message.topic, message.seq, message.epoch)
-            message = result
-        return message if self._identifier is not None else counted(message)
+            output = await run_detached(self._transform, message)
+            return self._item(message, transformed(message, output))
+        return self._item(message, message)
+
+    def _item(self, message: Message, result: Message | None) -> Message | StreamSkip:
+        """Return what this stream sends for a message, the skip of its seq for None."""
+        if result is None:
+            return StreamSkip(message.topic, message.seq, message.epoch)
+        return result if self._identifier is not None else counted(result)
 
     def _subject(self) -> str:
         """Return the request's opaque subject, read only when identify takes it."""
@@ -396,12 +403,6 @@ class TopicStream(PatchStreamWriter):
             transports=("sse",),
         )
 
-    def _transform_message(self, message: Message) -> Message | None:
-        """Apply the subscriber-local transform and validate its output."""
-        if self._transform is None:
-            return message
-        return transformed(message, self._transform(message))
-
 
 def _closing_frames(verdict: Access) -> tuple[StreamEnd, ...]:
     """End for good only on a topic denial, so a session change reconnects instead.
@@ -431,6 +432,29 @@ def _wants_websocket(request: HttpRequest) -> bool:
     """Whether the client asked to negotiate the WebSocket transport."""
     headers = getattr(request, "headers", {})
     return str(headers.get("X-Next-Transport", "")).lower() == "ws"
+
+
+def _stream_user(request: HttpRequest, session_key: str | None) -> object:
+    """Return the request's user, an unloaded lazy one swapped for the stored session's.
+
+    The request gets the swap too, as loading Django's lazy user may rotate the key.
+    """
+    user = getattr(request, "user", None)
+    if (
+        session_key is None
+        or not isinstance(user, SimpleLazyObject)
+        or user._wrapped is not empty
+    ):
+        return user
+    baseline = SimpleLazyObject(partial(_stored_user, session_key))
+    request.user = cast("AbstractBaseUser | AnonymousUser", baseline)
+    return baseline
+
+
+def _stored_user(session_key: str) -> object:
+    """Load the user of a stored session without writing to it, anonymous once gone."""
+    live = ticket_binding().live_session(session_key)
+    return session_user(SessionBase()) if live is None else live.user
 
 
 def _session_key(request: HttpRequest) -> str | None:

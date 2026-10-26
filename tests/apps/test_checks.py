@@ -11,6 +11,8 @@ from next.apps.checks import (
     check_django_templates_backend_present,
 )
 from next.apps.templates import _BUILTIN_MODULES
+from next.server import asgi
+from next.testing import override_next_settings
 from tests.support import check_ids
 
 
@@ -64,3 +66,34 @@ class TestBuiltinTagLibrariesComplete:
         objs = {m.obj for m in messages}
         assert "next.templatetags.forms" not in objs
         assert "next.templatetags.partial" in objs
+
+
+class TestRunserverOverrideOrderCheck:
+    """``check_runserver_override_order`` guards the uvicorn ``runserver``."""
+
+    @staticmethod
+    def _ids(apps_list: list[str], *, uvicorn: bool = True) -> list[str]:
+        spec = object() if uvicorn else None
+        with (
+            override_settings(INSTALLED_APPS=apps_list),
+            patch.object(asgi.importlib.util, "find_spec", return_value=spec),
+        ):
+            return check_ids(checks.check_runserver_override_order(app_configs=None))
+
+    def test_staticfiles_above_next_emits_w148(self) -> None:
+        assert self._ids(["django.contrib.staticfiles", "next"]) == ["next.W148"]
+
+    def test_next_above_staticfiles_is_quiet(self) -> None:
+        assert self._ids(["next", "django.contrib.staticfiles"]) == []
+
+    def test_without_staticfiles_is_quiet(self) -> None:
+        assert self._ids(["next"]) == []
+
+    def test_a_named_server_warns_without_uvicorn(self) -> None:
+        apps_list = ["django.contrib.staticfiles", "next"]
+        with override_next_settings(DEV_SERVER="config.devserver.Server"):
+            assert self._ids(apps_list, uvicorn=False) == ["next.W148"]
+
+    def test_without_uvicorn_is_quiet(self) -> None:
+        apps_list = ["django.contrib.staticfiles", "next"]
+        assert self._ids(apps_list, uvicorn=False) == []

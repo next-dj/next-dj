@@ -97,6 +97,38 @@ def test_access_check_throttles_the_authorizer_to_one_call_per_interval() -> Non
     assert calls == ["a", "b", "a", "b"]
 
 
+def test_concurrent_async_rechecks_share_one_evaluation() -> None:
+    calls: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def authorizer(_user: object, topic: str) -> bool:
+        calls.append(topic)
+        entered.set()
+        release.wait(5)
+        return True
+
+    check = AccessCheck(
+        ("a",),
+        authorizer=authorizer,
+        session_key=None,
+        user=AnonymousUser(),
+        interval=10,
+        clock=FakeClock(),
+    )
+
+    async def scenario() -> list[Access]:
+        first = asyncio.create_task(check.acheck())
+        await asyncio.to_thread(entered.wait, 5)
+        second = asyncio.create_task(check.acheck())
+        await asyncio.sleep(0.01)
+        release.set()
+        return [await first, await second]
+
+    assert asyncio.run(scenario()) == [Access.GRANTED, Access.GRANTED]
+    assert calls == ["a"]
+
+
 @pytest.mark.parametrize("answer", [False, None, 1, "yes"])
 def test_access_check_non_true_authorizer_answer_denies(answer: object) -> None:
     check = AccessCheck(

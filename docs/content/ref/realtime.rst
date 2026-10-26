@@ -121,7 +121,7 @@ A stream enters the subscription first, reads the positions second, replays what
 A message published after the subscription appears in the iterator and may also be counted in the positions or replayed, which the client treats as a duplicate rather than as a gap.
 A subscription that cannot guarantee delivery any more, after a reconnect or an unanswered liveness ping, raises ``BrokerConnectionError`` from its iterator.
 A backend also translates its own transport failures into ``BrokerConnectionError``, so a stream catches one error type.
-The SSE stream then ends without a terminal frame so the browser reconnects and receives a fresh ``hello``, and the WebSocket closes with ``1011``.
+The SSE stream then ends without a terminal frame so the browser reconnects and receives a fresh ``hello``, and the WebSocket closes with ``1013``.
 
 Epochs
 ~~~~~~
@@ -245,9 +245,11 @@ A value that is not a mapping is ``next.E191``, another key is ``next.E035``, an
 ``MemoryBroker`` keeps the newest ``SIZE`` messages of each topic in the process and drops the whole log once ``TTL`` seconds pass without a publication on the topic.
 A publication on a topic whose log has already expired starts a new log, as ``PEXPIRE`` does on Redis, and the first publication a ``TTL`` after the last sweep drops the expired logs of every topic.
 An idle log therefore holds its memory for two ``TTL`` periods at most while the broker keeps publishing.
+A topic idle for ``TTL`` seconds reports the position ``("", 0)``, and its next publication opens a new epoch at ``seq`` ``1``.
+A live client adopts the first message of that new epoch without a resync, while a client that reconnects with a cursor that no longer matches the position resyncs its zones.
 Its ``clock`` keyword, ``time.time`` by default, stamps ``published_at`` and times the expiry from the same reading, so a test passes a fake one.
 ``RedisBroker`` writes the log in the same Lua script that numbers and publishes a message, so the three steps are atomic, and the script publishes only after the log write.
-The log is a list trimmed to ``SIZE`` entries whose expiry each publication pushes out by ``TTL``, and the script deletes it when the topic starts a new epoch.
+The log is a list trimmed to ``SIZE`` entries whose expiry each publication pushes out by ``TTL``, the sequence key expires with it, and the script deletes the log when the topic starts a new epoch.
 With ``SIZE`` set to ``0`` the script never touches the log key.
 ``replay`` reads the counter and the log in one ``MULTI`` transaction.
 
@@ -593,7 +595,8 @@ The connection then runs in this order.
 #. The server subscribes to the broker, reads the positions of the topics, sends the messages the ``last_seq`` cursor missed, and sends ``hello``, see `Replay`_.
    A message published after the subscription arrives after ``hello`` as well, and the client treats it as a duplicate rather than a gap.
 
-From then on the server sends ``patches`` and ``skip`` frames as messages arrive, and a ``ping`` whenever a whole heartbeat passes without one.
+From then on the server sends ``patches`` and ``skip`` frames as messages arrive, and a ``ping`` once a whole heartbeat passes with nothing to send or with no frame from the client, however busy the topic.
+Any frame from the client answers the ping, and a peer that sent nothing for more than two heartbeats after an unanswered ping is dropped without a close frame, leaves presence, and fires ``stream_unsubscribed`` with the reason ``client``.
 The same access check repeats when a message or a heartbeat arrives after the heartbeat interval has elapsed, and a failure closes the socket as in the fifth step.
 
 Client frames
@@ -665,7 +668,7 @@ Server frames
      - A message the subscriber transform filtered out, sent so the cursor still advances.
    * - ``ping``
      - ``{"type": "ping", "server_time": 1761300000000}``
-     - A heartbeat on an idle subscription.
+     - A heartbeat on an idle subscription, or a probe of a client silent for a whole heartbeat.
        The client answers with ``pong``.
    * - ``ack``
      - ``{"type": "ack", "id": "7", "ok": true}`` or ``{"type": "ack", "id": "7", "ok": false, "error": "topic"}``
@@ -742,11 +745,13 @@ Close codes
        No ``error`` frame precedes it.
    * - ``1011``
      - ``INTERNAL``
-     - The broker subscription is lost or an unexpected error ends the stream.
+     - An ``OSError`` or an unexpected error ends the stream.
+       The client reconnects with backoff.
    * - ``1013``
      - ``TRY_AGAIN``
-     - Available to a gateway that closes a client that stopped reading.
-       The built-in socket drops such a connection without a close frame.
+     - The broker subscription is lost.
+       The client reconnects with backoff.
+       A gateway may send it to a client that stopped reading, which the built-in socket drops without a close frame.
    * - ``4400``
      - ``PROTOCOL``
      - A binary, empty, non-JSON, or malformed frame, a first frame that is not ``sub``, or no ``sub`` within five seconds.
@@ -761,7 +766,7 @@ Close codes
      - Three frames in a row found the token bucket empty, see `Upstream events`_.
        An ``error`` frame with the ``limit`` code precedes it.
 
-The browser client decides by the close code rather than the ``error`` frame before it, falling back to SSE for good on ``4403`` and negotiating a fresh ticket once on ``4401`` before it does.
+The browser client decides by the close code rather than the ``error`` frame before it, falling back to SSE for the life of the page on ``4403`` and negotiating a fresh ticket once on ``4401`` before it does.
 Every other close is transient.
 The client retries after ``150 * 2^(n-1)`` milliseconds plus up to 150 milliseconds of jitter, and it falls back to SSE after three failures in a row.
 A watchdog wakes once per heartbeat and drops a peer whose send has been blocked for longer than a heartbeat.
@@ -862,6 +867,7 @@ The recheck runs at most once per heartbeat, so an ``up`` frame may still reach 
 ``TopicSocket.access_check(claims, authorizer)`` builds that recheck, and an override with a shorter interval tightens it.
 A sync handler runs on a thread pool of its own, sized like the default executor, so a slow handler never queues the session loads and transforms of other sockets.
 ``TopicSocket.handle(upstream)`` routes a granted event and returns whether anything served it, and an override replaces the ``@on`` registry with routing of its own.
+``Upstream.user`` is the user the last access recheck loaded, not the one of the handshake, so a revoked permission reaches the handler after the next recheck.
 
 Request tunnel
 ~~~~~~~~~~~~~~
@@ -869,6 +875,10 @@ Request tunnel
 An ``http`` frame runs a form action through the same ASGI application ``application()`` serves, as a ``POST`` with the cookies, host, origin, and proxy headers of the WebSocket handshake.
 Middleware, CSRF, sessions, guards, and ``FormActionDispatch`` see an ordinary request, and ``request.scope["next.transport"]`` is ``"ws"``.
 The session keeps its engine and class, and during the action only ``cycle_key()``, ``flush()``, and their async forms are replaced on the instance with a refusal.
+The refusal starts at the dispatch, because ``SessionMiddleware`` builds the session inside the Django handler, out of the tunnel's reach.
+Middleware that reads ``request.user`` before the view therefore still rotates a session whose hash only matches a ``SECRET_KEY_FALLBACKS`` entry.
+That reply sets a new session cookie, so it becomes the ``http_only`` refusal after the action has run, and the browser keeps the cookie of the replaced session.
+An action behind such middleware keeps ``transport="http"`` while ``SECRET_KEY_FALLBACKS`` holds the previous key.
 Only an action declared with ``transport="any"`` runs, and the other actions answer ``421`` with ``X-Next-Transport: http`` before their guards.
 The envelope of a reply is the one HTTP gets, so a zone morph carries the zone's ``context`` op and the page applies it through ``context-updated``, see :doc:`/content/topics/partial-rendering/extending`.
 

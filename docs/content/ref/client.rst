@@ -32,7 +32,7 @@ The core bundle loads on every page, and six lazy chunks load only for a page th
    * - ``dev``
      - The diagnostics of a ``DEBUG`` render, never fetched by a production page.
 
-A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` once and is fetched again on its next need, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` once and is fetched again on its next need, three attempts in all, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
 A chunk that lands after its timeout is still delivered to every subscriber that waited for it.
 The TypeScript sources are not part of the installed package, so a project imports no TypeScript and installs no Node toolchain.
 :doc:`/content/contributing/quality-gates` describes how the bundles are built and budgeted, and :doc:`static` describes the finder that serves them.
@@ -493,16 +493,18 @@ Every change of a connection's state fires ``next:stream-state`` with ``url``, `
 A connection is ``connecting`` while it opens and again while a dropped socket or ``EventSource`` waits to reconnect, ``open`` once the transport is up, and ``closed`` when it is paused, removed, or ended.
 A ``next-end`` frame, sent when the topic authorizer denies a grant, is terminal, so the connection closes for good, its ``next:stream-state`` detail also carries the frame's ``code``, and ``partial:error`` of kind ``network`` fires with that code as its ``error``.
 Only an SSE stream carries ``next-end``.
-A WebSocket has no end frame, and a denied grant there closes the socket with ``4403`` after an ``error`` frame, which sends the connection to SSE for good, where the authorizer answers with ``next-end``.
+A WebSocket has no end frame, and a denied grant there closes the socket with ``4403`` after an ``error`` frame, which sends that stream URL to SSE for the life of the page, where the authorizer answers with ``next-end``.
 A ``next:stream-gap`` event with ``topic``, ``from``, and ``to`` fires for every gap or epoch change that triggers a zone resync.
 A change between two non-empty epochs resets the cursor and resyncs, while a change from the empty epoch of a never-published topic is contiguous at ``seq`` ``1`` and a gap above it.
+A topic idle past the replay TTL starts a new epoch at ``seq`` ``1``, and a connection whose ``hello`` already landed and that has no resync in flight adopts that epoch without a resync, since the broker delivered every message live.
+Any other epoch change, a later ``seq``, a pending resync, or a reconnect ``hello`` under a new epoch, still resyncs.
 
 WebSocket negotiation
 ^^^^^^^^^^^^^^^^^^^^^
 
 With WebSockets enabled, the client first sends the stream URL a GET with ``X-Next-Transport: ws`` and ``Accept: application/json``.
 It opens the socket only for a ``200`` reply whose content type is ``application/json``.
-A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, a ``4403`` close, or three failed attempts in a row sends that connection to SSE for good.
+A ``401``, ``403``, or ``406`` reply, any other content type, no reply within five seconds, or three failed attempts in a row sends that connection to SSE until a resume reopens it, and a ``4403`` close sends its stream URL to SSE for the life of the page.
 The server sends an ``error`` frame before a ``4400``, ``4401``, or ``4403`` close, and the client decides by the close code, while an ``auth`` frame that no close follows within five seconds counts as a ``4401``.
 A ``4401`` close drops the connection once and negotiates again for a fresh ticket, since two negotiations on a first visit can issue different anonymous identities and the browser keeps the cookie of the last.
 A second ``4401`` with no ``hello`` between the two sends the connection to SSE for good, and each ``hello`` earns one such retry.
@@ -525,6 +527,7 @@ A body travels only as a string, ``URLSearchParams``, or ``FormData`` without fi
 
 A refusal the server marks ``retry`` never reached the application, so the client resends the request over ``fetch`` once.
 Any other refusal ends a mutation in ``partial:error`` of kind ``undelivered`` whose ``reason`` is the refusal code.
+When the echo of such a mutation already arrived and the ring dropped it, the stream resyncs the zones of its page once, and an echo that arrives later applies as a foreign event.
 The codes with a rule of their own are in the table.
 
 .. list-table::

@@ -38,9 +38,9 @@ def build_test_settings() -> dict[str, object]:
             "django.contrib.contenttypes",
             "django.contrib.sessions",
             "django.contrib.messages",
+            "next",
             "django.contrib.staticfiles",
             "django.contrib.sitemaps",
-            "next",
         ],
         "MIDDLEWARE": [
             "django.middleware.security.SecurityMiddleware",

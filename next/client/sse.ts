@@ -12,8 +12,7 @@ import type {
   VisibilityAdapter,
 } from "./stream";
 import { SSE_END, SSE_HELLO, SSE_SKIP } from "./protocol";
-import type { WebSocketAdapter, WsTransportFactory } from "./ws";
-import type { FetchAdapter } from "./wire";
+import type { WsTransportFactory } from "./ws";
 
 /** The EventSource seam over the native API, which jsdom does not model. */
 export interface EventSourceAdapter {
@@ -29,9 +28,7 @@ export interface EventSourceAdapter {
 /** The seams the SSE factory draws on, injectable so jsdom-blind pieces stay testable. */
 export type SseDeps = Omit<StreamDeps, "transport"> & {
   source?: EventSourceAdapter;
-  socket?: WebSocketAdapter;
   websocket?: WsTransportFactory | undefined;
-  websocketFetch?: FetchAdapter;
   useWebSocket?: boolean;
 };
 
@@ -50,8 +47,6 @@ export function createSse(deps: SseDeps): Sse {
       deps.useWebSocket && deps.websocket !== undefined
         ? deps.websocket({
             fallback,
-            fetch: deps.websocketFetch,
-            socket: deps.socket,
             origin: deps.document?.location.origin,
           })
         : fallback,

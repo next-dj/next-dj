@@ -4,7 +4,7 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from django.middleware.locale import LocaleMiddleware
@@ -19,9 +19,11 @@ from next.utils import (
     InterceptPage,
     PageRoot,
     TreeSource,
+    after_fork,
     child_nodelists,
     classify_dirs_entries,
     exec_module_file,
+    int_between,
     is_dynamic_trail,
     is_int,
     is_intercept_name,
@@ -33,6 +35,7 @@ from next.utils import (
     middleware_listed,
     page_roots_shape_error,
     parse_intercept,
+    positive_number,
     prefix_trail,
     redirect_or_fallback,
     regex_trail,
@@ -223,6 +226,51 @@ class TestTypePredicates:
     )
     def test_a_bool_is_never_an_int(self, value: object, *, integer: bool) -> None:
         assert is_int(value) is integer
+
+    @pytest.mark.parametrize(
+        ("value", "inside"),
+        [(0, False), (1, True), (3, True), (4, False), (True, False), (2.0, False)],
+        ids=["below", "low", "high", "above", "bool", "float"],
+    )
+    def test_int_between_takes_only_ints_inside_both_bounds(
+        self, value: object, *, inside: bool
+    ) -> None:
+        assert int_between(value, 1, 3) is inside
+
+    @pytest.mark.parametrize(
+        ("value", "inside"),
+        [
+            (0, False),
+            (0.5, True),
+            (2, True),
+            (2.5, False),
+            (float("inf"), False),
+            (float("nan"), False),
+            (True, False),
+            ("1", False),
+        ],
+        ids=["zero", "float", "ceiling", "above", "inf", "nan", "bool", "str"],
+    )
+    def test_positive_number_takes_finite_numbers_up_to_the_ceiling(
+        self, value: object, *, inside: bool
+    ) -> None:
+        assert positive_number(value, 2) is inside
+
+
+class TestAfterFork:
+    def test_registers_the_reset_for_a_forked_child(self) -> None:
+        reset = Mock()
+        with patch.object(os, "register_at_fork", create=True) as register:
+            after_fork(reset)
+        register.assert_called_once_with(after_in_child=reset)
+
+    def test_does_nothing_where_the_platform_cannot_fork(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delattr(os, "register_at_fork", raising=False)
+        reset = Mock()
+        after_fork(reset)
+        reset.assert_not_called()
 
 
 class TestIsDynamicTrail:

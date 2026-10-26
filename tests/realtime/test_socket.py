@@ -21,10 +21,11 @@ from next.realtime import frames, socket as socket_module
 from next.realtime.access import SocketAccessCheck
 from next.realtime.backends import MemoryBroker
 from next.realtime.errors import BrokerConnectionError
-from next.realtime.frames import Close
+from next.realtime.frames import Close, Reply, Request
 from next.realtime.manager import broker_manager
 from next.realtime.messages import Message, Position
-from next.realtime.socket import Handshake, TopicSocket, _Writer
+from next.realtime.socket import Handshake, SocketClock, TopicSocket, _Writer
+from next.realtime.tunnel import TunnelHints
 from next.testing.realtime import MemoryPort, SocketTicket, issue_socket_ticket
 from tests.support.cases.realtime import (
     MALFORMED_SUBSCRIPTION_CASES,
@@ -253,7 +254,7 @@ def _socket(
         _handshake(ticket, **handshake),
         broker=broker,
         heartbeat=heartbeat,
-        clock=lambda: _SERVER_SECONDS,
+        clock=SocketClock(wall=lambda: _SERVER_SECONDS),
     )
 
 
@@ -895,20 +896,25 @@ def test_control_frames_accept_pong_and_refuse_the_rest(
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
-    ("failure", "log"),
+    ("failure", "log", "code"),
     [
-        (BrokerConnectionError("reconnected"), "lost its broker subscription"),
-        (ConnectionRefusedError(), "broker connection failed"),
-        (OSError(), "broker connection failed"),
-        (RuntimeError("boom"), "Realtime WebSocket stream failed"),
+        (
+            BrokerConnectionError("reconnected"),
+            "lost its broker subscription",
+            Close.TRY_AGAIN,
+        ),
+        (ConnectionRefusedError(), "broker connection failed", Close.INTERNAL),
+        (OSError(), "broker connection failed", Close.INTERNAL),
+        (RuntimeError("boom"), "Realtime WebSocket stream failed", Close.INTERNAL),
     ],
     ids=["dropped", "refused", "os", "unexpected"],
 )
-def test_broker_failure_closes_internal_without_a_leak(
+def test_broker_failure_closes_with_its_code_without_a_leak(
     caplog: pytest.LogCaptureFixture,
     session_ticket: SocketTicket,
     failure: BaseException,
     log: str,
+    code: Close,
     streams: LiveStreams,
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
@@ -921,7 +927,7 @@ def test_broker_failure_closes_internal_without_a_leak(
             port, socket, json.dumps(session_ticket.subscribe_frame())
         )
         assert frames_sent == []
-        assert port.close_code == Close.INTERNAL
+        assert port.close_code == code
         assert streams.live() == 0
 
     asyncio.run(scenario())
@@ -1118,3 +1124,35 @@ def test_every_frame_and_close_goes_through_the_writer(
     assert written == port.sent
     assert {json.loads(text)["type"] for text in written} >= {"hello", "error"}
     assert closed == [port.close_code] == [Close.PROTOCOL]
+
+
+class _TimingOutTunnel:
+    async def __call__(self, request: Request, *, connection: str) -> Reply:
+        raise TimeoutError
+
+    def hints(self) -> TunnelHints:
+        return TunnelHints(frozenset(), (), None)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timeout_raised_inside_the_tunnel_is_internal_not_timeout(
+    session_ticket: SocketTicket,
+) -> None:
+    async def scenario() -> dict[str, object]:
+        port = MemoryPort()
+        socket = TopicSocket(
+            port,
+            _handshake(session_ticket),
+            broker=MemoryBroker(),
+            heartbeat=60,
+            tunnel=_TimingOutTunnel(),
+        )
+        task, _ = await _open(socket, port, session_ticket)
+        port.push_json({"type": "http", "id": "1", "method": "POST", "path": "/x/"})
+        reply = await _frame(port)
+        port.disconnect()
+        await _finish(task)
+        return reply
+
+    reply = asyncio.run(scenario())
+    assert reply["error"] == "internal"

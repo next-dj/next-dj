@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from next.apps.checks import (
         check_builtin_tag_libraries_complete,
         check_django_templates_backend_present,
+        check_runserver_override_order,
     )
     from next.components.checks import (
         check_component_context_registration_files,
@@ -192,6 +193,7 @@ if TYPE_CHECKING:
         check_sitemap_section_labels,
         check_sitemap_templates,
     )
+    from next.server.checks import check_dev_server
     from next.site.checks import check_site_settings, check_site_url_for_deploy
     from next.static.checks import (
         check_app_directories_finder,
@@ -223,6 +225,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.apps.checks": (
         "check_builtin_tag_libraries_complete",
         "check_django_templates_backend_present",
+        "check_runserver_override_order",
     ),
     "next.components.checks": (
         "check_component_context_registration_files",
@@ -395,6 +398,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_sitemap_section_labels",
         "check_sitemap_templates",
     ),
+    "next.server.checks": ("check_dev_server",),
     "next.site.checks": ("check_site_settings", "check_site_url_for_deploy"),
     "next.static.checks": (
         "check_app_directories_finder",
@@ -464,6 +468,7 @@ __all__ = [
     "check_custom_patch_ops_well_formed",
     "check_declarations_without_page",
     "check_declaring_modules",
+    "check_dev_server",
     "check_django_templates_backend_present",
     "check_duplicate_component_names",
     "check_duplicate_zone_names",
@@ -551,6 +556,7 @@ __all__ = [
     "check_root_marker_outside_layouts",
     "check_route_group_breadcrumbs",
     "check_router_manager",
+    "check_runserver_override_order",
     "check_runtime_bundles_deployed",
     "check_script_categories",
     "check_script_declarations",

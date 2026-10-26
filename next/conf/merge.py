@@ -44,6 +44,7 @@ STR_KEYS: Final[frozenset[str]] = frozenset(
         "COMPONENT_TEMPLATE_LOADER",
         "CSRF_DELIVERY",
         "DEPENDENCY_RESOLVER",
+        "DEV_SERVER",
         "URL_NAME_TEMPLATE",
         "URL_RESOLVER",
     }

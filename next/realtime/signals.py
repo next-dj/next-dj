@@ -1,13 +1,15 @@
 """Django signals emitted by realtime brokers, topic streams and upstream handlers."""
 
+import asyncio
 import enum
 import logging
 import time
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TYPE_CHECKING, override
 
 from django.dispatch import Signal
 
+from .access import run_detached
 from .messages import Message
 
 
@@ -15,12 +17,77 @@ if TYPE_CHECKING:
     from .handlers import Upstream
 
 
+_dispatch_logger = logging.getLogger("django.dispatch")
+_ROBUST_FAILURE = "Error calling %s in Signal.send_robust() (%s)"
+"""The message `Signal._log_robust_failure` logs, which django-stubs leave out."""
+
+type _Responses = list[tuple[Callable[..., object], object]]
+
+
+class _PooledSignal(Signal):
+    """A signal whose async send runs sync receivers on the shared pool, cleaned up.
+
+    `Signal.asend_robust` queues every socket's sync receivers on one shared thread.
+    """
+
+    @override
+    async def asend_robust(self, sender: object, **named: object) -> _Responses:
+        """Run sync receivers off the loop, then await the async ones together."""
+        blocking, waiting = self._live_receivers(sender)
+        if not (blocking or waiting):
+            return []
+        responses = (
+            await run_detached(self._robust, blocking, sender, named)
+            if blocking
+            else []
+        )
+        answers = await asyncio.gather(
+            *(self._awaited(receiver, sender, named) for receiver in waiting)
+        )
+        responses.extend(zip(waiting, answers, strict=True))
+        return responses
+
+    def _robust(
+        self,
+        receivers: list[Callable[..., object]],
+        sender: object,
+        named: dict[str, object],
+    ) -> _Responses:
+        responses: _Responses = []
+        for receiver in receivers:
+            try:
+                response = receiver(signal=self, sender=sender, **named)
+            except Exception as error:
+                reason = str(error)
+                _dispatch_logger.exception(_ROBUST_FAILURE, _name(receiver), reason)
+                response = error
+            responses.append((receiver, response))
+        return responses
+
+    async def _awaited(
+        self,
+        receiver: Callable[..., Awaitable[object]],
+        sender: object,
+        named: dict[str, object],
+    ) -> object:
+        try:
+            return await receiver(signal=self, sender=sender, **named)
+        except Exception as error:
+            reason = str(error)
+            _dispatch_logger.exception(_ROBUST_FAILURE, _name(receiver), reason)
+            return error
+
+
+def _name(receiver: Callable[..., object]) -> object:
+    return getattr(receiver, "__qualname__", receiver)
+
+
 broker_backend_loaded: Signal = Signal(use_caching=True)
-message_published: Signal = Signal(use_caching=True)
-upstream_received: Signal = Signal(use_caching=True)
-upstream_rejected: Signal = Signal(use_caching=True)
-stream_subscribed: Signal = Signal(use_caching=True)
-stream_unsubscribed: Signal = Signal(use_caching=True)
+message_published: Signal = _PooledSignal(use_caching=True)
+upstream_received: Signal = _PooledSignal(use_caching=True)
+upstream_rejected: Signal = _PooledSignal(use_caching=True)
+stream_subscribed: Signal = _PooledSignal(use_caching=True)
+stream_unsubscribed: Signal = _PooledSignal(use_caching=True)
 
 logger = logging.getLogger(__name__)
 

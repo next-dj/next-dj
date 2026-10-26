@@ -49,7 +49,7 @@ Each key accepts one shape, and a value of any other type is dropped in favour o
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
 - The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
-- The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
+- The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
@@ -433,6 +433,22 @@ The subclass is built like any other object, so its ``__init__`` runs and it is 
 The object the swap replaces takes its state with it, the compiled plans as well as anything registered on it at runtime, so a dependency registered through ``resolver.dependency`` is registered again after a swap.
 
 See :doc:`/content/internals/di-resolver` for the resolution algorithm and :doc:`deps` for the resolver API.
+
+Development server
+------------------
+
+DEV_SERVER
+~~~~~~~~~~
+
+Dotted path to the ``ASGIServer`` class ``manage.py runserver`` serves the project on.
+
+Default value ``"next.server.asgi.UvicornServer"``.
+
+The class is built without arguments, and its ``run(app, **options)`` serves the app until it stops, the way ``uvicorn.run`` does.
+The default runs uvicorn, and without uvicorn installed the command is Django's WSGI ``runserver``.
+A project-named class is imported on every ``runserver`` after the system checks, and a path that fails to import or names no class with a ``run`` method is ``next.E212`` at ``manage.py check`` and at ``runserver``.
+``manage.py runserver --wsgi`` skips the class and serves WSGI whatever the key names.
+See :doc:`management` for the options ``run`` receives and an example server.
 
 Templates
 ---------

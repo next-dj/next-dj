@@ -172,7 +172,7 @@ The reader is a context manager of both kinds.
        assert patches.json()["topic"] == "poll:1"
        assert len(published) == 1
 
-``WebsocketCommunicator(app, path, headers=(), subprotocols=(), *, timeout=1)`` drives any ASGI application through one WebSocket connection.
+``WebSocketCommunicator(app, path, headers=(), subprotocols=(), *, timeout=1)`` drives any ASGI application through one WebSocket connection.
 The ``timeout`` in seconds belongs to the constructor and bounds every receive and every wait below, because a receive that times out ends the application.
 ``subscribe(ticket, last_seq=None)`` sends the ``sub`` frame of a ``SocketTicket`` and returns the ``hello`` frame as a dict.
 ``send_up(topic, name, data=None)`` sends an ``up`` event with a fresh id and returns ``None`` once the handler ran, or the ``UpstreamError`` its ``ack`` names.
@@ -202,7 +202,7 @@ Under the default binding the credential is the session key, and under ``SignedC
 
    from next.realtime import application
    from next.testing import (
-       WebsocketCommunicator,
+       WebSocketCommunicator,
        capture_published,
        issue_socket_ticket,
        memory_broker,
@@ -220,7 +220,7 @@ Under the default binding the credential is the session key, and under ``SignedC
 
        async def scenario() -> None:
            app = application(get_asgi_application())
-           communicator = WebsocketCommunicator(app, "/_next/ws/", headers, timeout=5)
+           communicator = WebSocketCommunicator(app, "/_next/ws/", headers, timeout=5)
            connected, _ = await communicator.connect()
            assert connected
            assert (await communicator.subscribe(ticket))["type"] == "hello"

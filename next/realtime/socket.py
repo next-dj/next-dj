@@ -8,7 +8,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, ClassVar, NoReturn, Protocol, Self
+from typing import TYPE_CHECKING, ClassVar, Final, NoReturn, Protocol, Self
 
 from next.partial.manager import partial_backend_manager
 
@@ -124,6 +124,20 @@ class Handshake:
         return cls(credential, user, expires_at)
 
 
+@dataclass(frozen=True, slots=True)
+class SocketClock:
+    """The wall clock that stamps frames and the monotonic one that times liveness.
+
+    Liveness and rate limits read the monotonic one, so an NTP jump drops no peer.
+    """
+
+    wall: Callable[[], float] = time.time
+    monotonic: Callable[[], float] = time.monotonic
+
+
+_SYSTEM_CLOCK: Final = SocketClock()
+
+
 class _ClosedError(Exception):
     """Unwind the connection, closing with `code` or dropping it when None."""
 
@@ -181,7 +195,7 @@ class TopicSocket:
         *,
         broker: BrokerBackend | None = None,
         heartbeat: float | None = None,
-        clock: Callable[[], float] = time.time,
+        clock: SocketClock = _SYSTEM_CLOCK,
         tunnel: Tunnel | None = None,
         limits: SocketLimits | None = None,
     ) -> None:
@@ -195,17 +209,20 @@ class TopicSocket:
         self._writer = _Writer(port)
         self._broker = broker
         self._heartbeat = heartbeat if heartbeat is not None else heartbeat_seconds()
-        self._clock = clock
+        self._clock = clock.wall
+        self._monotonic = clock.monotonic
         self._transform: TopicTransform | None = None
         self._identify: Identifier | None = None
         self._limits = limits if limits is not None else SocketLimits.configured()
         self._tunnel = tunnel if self._limits.tunnel is not None else None
         upstream = self._limits.upstream
-        self._bucket = TokenBucket(upstream.rate, upstream.burst, clock=clock)
+        self._bucket = TokenBucket(upstream.rate, upstream.burst, clock=clock.monotonic)
         self._strikes = 0
         self._events = 0
         self._requests = 0
         self._topics: frozenset[str] = frozenset()
+        self._pinged_at: float | None = None
+        self._heard = False
         self._reports: set[asyncio.Task[None]] = set()
         self._ready = asyncio.Event()
         self._lifecycle = StreamLifecycle(self, "ws")
@@ -229,7 +246,7 @@ class TopicSocket:
         try:
             async with asyncio.TaskGroup() as group:
                 group.create_task(self._read(inbound, group))
-                group.create_task(self._watch())
+                group.create_task(self._watch(group))
         except* _ClosedError as closed:
             codes.extend(
                 error.code
@@ -239,7 +256,7 @@ class TopicSocket:
             reasons.extend(_LEFT.get(code, UnsubscribeReason.SERVER) for code in codes)
         except* BrokerConnectionError:
             logger.info("Realtime WebSocket stream lost its broker subscription")
-            codes.append(Close.INTERNAL)
+            codes.append(Close.TRY_AGAIN)
             reasons.append(UnsubscribeReason.ERROR)
         except* OSError:
             logger.warning("Realtime WebSocket broker connection failed", exc_info=True)
@@ -274,14 +291,18 @@ class TopicSocket:
             await self._writer.send(await self._frame_for(message))
 
     async def tick(self) -> None:
-        """Answer an idle heartbeat of the subscription with a ping."""
+        """Send the heartbeat ping, on an idle subscription and to a silent peer."""
         await self._writer.send(frames.ping(self._now()))
 
     async def _read(
         self, inbound: AsyncIterable[str | bytes], group: asyncio.TaskGroup
     ) -> None:
-        """Subscribe on the first frame, then dispatch every later one by type."""
+        """Subscribe on the first frame, then dispatch every later one by type.
+
+        Any frame answers an outstanding ping, so a busy client needs no pong.
+        """
         stream = aiter(inbound)
+        self._heard = True
         try:
             async with asyncio.timeout(frames.SUB_TIMEOUT):
                 first = await anext(stream, None)
@@ -294,6 +315,8 @@ class TopicSocket:
             await self._fail(Close.PROTOCOL)
         group.create_task(self._deliver(frame))
         async for item in stream:
+            self._heard = True
+            self._pinged_at = None
             await self._dispatch(await self._parse(item), group)
         raise _ClosedError(None)
 
@@ -390,14 +413,18 @@ class TopicSocket:
             frame.topic,
             frame.name,
             frame.data,
-            self.handshake.user,
+            self._access.user,
             self.handshake.subject,
             self.connection_id,
         )
+        deadline = asyncio.timeout(self._limits.upstream.timeout)
         try:
-            async with asyncio.timeout(self._limits.upstream.timeout):
+            async with deadline:
                 delivered = await self.handle(upstream)
         except TimeoutError:
+            if not deadline.expired():
+                logger.exception("Realtime upstream handler for %r failed", frame.name)
+                return UpstreamError.INTERNAL
             logger.warning("Realtime upstream handler for %r timed out", frame.name)
             return UpstreamError.TIMEOUT
         except Exception:
@@ -446,10 +473,14 @@ class TopicSocket:
     async def _tunneled(
         self, tunnel: Tunnel, frame: Request, limits: TunnelLimits
     ) -> Reply | Refusal:
+        deadline = asyncio.timeout(limits.timeout)
         try:
-            async with asyncio.timeout(limits.timeout):
+            async with deadline:
                 return await tunnel(frame, connection=self.connection_id)
         except TimeoutError:
+            if not deadline.expired():
+                logger.exception("Realtime tunnel request to %s failed", frame.path)
+                return Refusal.INTERNAL
             logger.warning("Realtime tunnel request to %s timed out", frame.path)
             return Refusal.TIMEOUT
         except Exception:
@@ -492,6 +523,8 @@ class TopicSocket:
                 async for item in stream:
                     await self._grant()
                     if item is None:
+                        if self._pinged_at is None:
+                            self._pinged_at = self._monotonic()
                         await self.tick()
                     else:
                         await self._writer.send(await self._frame_for(item))
@@ -595,13 +628,27 @@ class TopicSocket:
             message, partial_backend_manager.get(), server_time=self._now()
         )
 
-    async def _watch(self) -> None:
-        """Drop a connection whose peer stopped reading for a whole heartbeat."""
+    async def _watch(self, group: asyncio.TaskGroup) -> None:
+        """Drop a peer that stopped reading for a heartbeat or answering for two.
+
+        A peer silent for a whole heartbeat gets a ping however busy the topic is.
+        """
         while True:
             await asyncio.sleep(self._heartbeat)
             if self._writer.stalled(self._heartbeat):
                 logger.info("Realtime WebSocket dropped a client that stopped reading")
                 raise _ClosedError(None)
+            pinged = self._pinged_at
+            now = self._monotonic()
+            if pinged is not None and now - pinged > 2 * self._heartbeat:
+                logger.info(
+                    "Realtime WebSocket dropped a client that stopped answering"
+                )
+                raise _ClosedError(None)
+            if pinged is None and not self._heard:
+                self._pinged_at = now
+                group.create_task(self.tick())
+            self._heard = False
 
     async def _fail(self, code: Close) -> NoReturn:
         """Send the error frame a close code carries, then close with it."""
@@ -614,4 +661,4 @@ class TopicSocket:
         return int(self._clock() * 1000)
 
 
-__all__ = ["Handshake", "SocketPort", "TopicSocket"]
+__all__ = ["Handshake", "SocketClock", "SocketPort", "TopicSocket"]

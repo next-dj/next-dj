@@ -53,12 +53,14 @@ from next.ports import (
     page_scan_slot,
     page_scripts_slot,
     partial_shaper_slot,
+    realtime_negotiation_slot,
     router_access_slot,
     seo_routes_slot,
     static_assets_slot,
 )
 from next.realtime.asgi import forget_trusted_origins
 from next.realtime.manager import forget_realtime_broker
+from next.realtime.ports import RealtimeNegotiationImpl
 from next.realtime.transports import forget_transports
 from next.scripts.manager import forget_script_srcs, forget_scripts
 from next.scripts.ports import PageScriptsImpl
@@ -186,6 +188,7 @@ class NextFrameworkConfig(AppConfig):
         form_routes_slot.set(form_action_manager)
         page_scan_slot.set(PageScanImpl())
         partial_shaper_slot.set(PartialShaperImpl())
+        realtime_negotiation_slot.set(RealtimeNegotiationImpl())
         router_access_slot.set(RouterAccessImpl())
         page_scripts_slot.set(PageScriptsImpl())
         seo_routes_slot.set(SeoRoutesImpl())

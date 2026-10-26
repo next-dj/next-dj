@@ -25,7 +25,7 @@ from next.realtime import Upstream, presence
 from next.testing import (
     NextClient,
     SseReader,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     assert_metadata,
     capture_published,
     envelope_of,
@@ -1025,7 +1025,7 @@ def test_a_dragging_event_over_the_socket_reaches_the_board(demo_data: None) -> 
 
     async def scenario() -> tuple[object, str]:
         app = realtime.application(get_asgi_application())
-        communicator = WebsocketCommunicator(app, "/_next/ws/", headers, timeout=5)
+        communicator = WebSocketCommunicator(app, "/_next/ws/", headers, timeout=5)
         connected, _ = await communicator.connect()
         assert connected
         hello = await communicator.subscribe(ticket)

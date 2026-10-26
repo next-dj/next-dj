@@ -1979,3 +1979,170 @@ describe("createPartial over an open WebSocket", () => {
     plain.partial._reset();
   });
 });
+
+describe("createPartial after a mutation that got no reply", () => {
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  }
+
+  const zoneGets = (fetch: { mock: { calls: unknown[][] } }): number =>
+    fetch.mock.calls.filter(([, init]) =>
+      new Headers((init as RequestInit).headers).has("X-Next-Zone"),
+    ).length;
+
+  const echo = (id: string | null, seq: number) => ({
+    version: "v1",
+    topic: "room",
+    epoch: "e",
+    seq,
+    request_id: id,
+    ops: [{ op: "refresh", zone: "z" }],
+  });
+
+  it("refreshes zones on the echo of a tunneled mutation a hidden tab cut off", async () => {
+    const sent: string[][] = [];
+    const deliver: ((body: unknown) => void)[] = [];
+    const opens: (() => void)[] = [];
+    const websocket: WebSocketAdapter = {
+      open(_url, onOpen, onMessage) {
+        const mine: string[] = [];
+        sent.push(mine);
+        opens.push(() => onOpen((body) => mine.push(body)));
+        deliver.push(onMessage);
+        return { close: () => undefined };
+      },
+    };
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith("/stream/")
+        ? Response.json({
+            protocol: 2,
+            transport: "ws",
+            ticket: "t",
+            url: "/_next/ws/",
+          })
+        : patchesResponse(ENVELOPE_OK),
+    );
+    const visibility = manualVisibility();
+    const partial = createPartial({
+      ...chunkModules,
+      context: () => ({ $realtime: { transports: ["ws", "sse"] } }),
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    partial._configure({
+      document,
+      fetch,
+      websocket,
+      source: mockSource().adapter,
+      visibility,
+    });
+    document.body.innerHTML =
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
+    partial.stream.scan(document);
+    await flush();
+    opens[0]!();
+    const hello = (seq: number): string =>
+      JSON.stringify({
+        type: "hello",
+        topics: { room: { epoch: "e", seq } },
+        tunnel: {},
+      });
+    deliver[0]!(hello(0));
+    const outcome = partial.submit({
+      action: "/_next/form/u/",
+      data: { t: "x" },
+      transport: "any",
+    });
+    await flush();
+    const frame = JSON.parse(sent[0]!.at(-1)!) as { headers: Record<string, string> };
+    const id = frame.headers["x-next-request-id"]!;
+    visibility.setHidden(true);
+    await expect(outcome).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "undelivered", reason: "closed" },
+    });
+    visibility.setHidden(false);
+    await flush();
+    opens[1]!();
+    deliver[1]!(JSON.stringify({ type: "patches", data: echo(id, 1) }));
+    deliver[1]!(hello(1));
+    await flush();
+    expect(zoneGets(fetch)).toBe(1);
+    partial._reset();
+  });
+
+  it("refreshes zones on the echo of an HTTP mutation that failed on the network", async () => {
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === "POST") throw new TypeError("network down");
+      return patchesResponse(ENVELOPE_OK);
+    });
+    const source = mockSource();
+    const partial = createPartial({
+      ...chunkModules,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    partial._configure({ document, fetch, source: source.adapter });
+    document.body.innerHTML =
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
+    partial.stream.scan(document);
+    const outcome = await partial.submit({
+      action: "/_next/form/u/",
+      data: { t: "x" },
+    });
+    expect(outcome).toMatchObject({ status: "error", error: { kind: "network" } });
+    const id = new Headers(fetch.mock.calls[0]![1].headers).get("X-Next-Request-Id");
+    expect(id).toEqual(expect.any(String));
+    source.opened[0]!.message(JSON.stringify(echo(id, 1)));
+    await flush();
+    expect(zoneGets(fetch)).toBe(1);
+    partial._reset();
+  });
+
+  it("forgets an id sent before the bridge was built", async () => {
+    const stream = unloaded<SseFactory>("stream");
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === "POST") throw new TypeError("network down");
+      return patchesResponse(ENVELOPE_OK);
+    });
+    const source = mockSource();
+    const partial = createPartial({
+      ...chunkModules,
+      stream,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    partial._configure({ document, fetch, source: source.adapter });
+    document.head.innerHTML = "";
+    document.body.innerHTML =
+      '<div data-next-stream="/stream/"></div><div data-next-zone="z">old</div>';
+    partial.stream.scan(document);
+    await partial.submit({ action: "/_next/form/u/", data: { t: "x" } });
+    const id = new Headers(fetch.mock.calls[0]![1].headers).get("X-Next-Request-Id");
+    stream.land(createSse);
+    source.opened[0]!.message(JSON.stringify(echo(id, 1)));
+    await flush();
+    expect(zoneGets(fetch)).toBe(1);
+    partial._reset();
+  });
+
+  it("fetches the ws and stream chunks together on a WebSocket page", () => {
+    const ws = unloaded<WsTransportFactory>("ws");
+    const stream = unloaded<SseFactory>("stream");
+    const lazy = createPartial({
+      ...chunkModules,
+      context: () => ({ $realtime: { transports: ["ws", "sse"] } }),
+      ws,
+      stream,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    lazy._configure({ document, source: mockSource().adapter });
+    document.head.innerHTML = "";
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    lazy.stream.scan(document);
+    expect(ws.tags()).toBe(1);
+    expect(stream.tags()).toBe(1);
+    lazy._reset();
+  });
+});

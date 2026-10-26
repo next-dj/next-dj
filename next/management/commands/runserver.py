@@ -1,4 +1,4 @@
-"""`manage.py runserver`, on uvicorn with the realtime WebSocket once it is installed.
+"""`manage.py runserver`, over ASGI with the realtime WebSocket once a server imports.
 
 Django runs the command of the app listed first, so `next` sits above staticfiles.
 """
@@ -10,13 +10,15 @@ from typing import Any, override
 from django.apps import apps
 from django.conf import settings
 from django.contrib.staticfiles.handlers import StaticFilesHandler
+from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.wsgi import WSGIHandler
-from django.core.management.base import CommandParser
+from django.core.management.base import CommandError, CommandParser
 from django.core.management.commands.runserver import Command as RunserverCommand
 from django.db import connections
 from django.utils import autoreload
 
 from next.server.asgi import (
+    ASGIServer,
     asgi_server,
     banner,
     development_warning,
@@ -35,7 +37,7 @@ _NO_WEBSOCKET = (
 
 
 class Command(RunserverCommand):
-    """Serve the project on uvicorn when it is installed, else as Django's runserver.
+    """Serve the project on the `DEV_SERVER` when it is installed, else over WSGI.
 
     The static options join only with staticfiles installed, as in Django.
     """
@@ -45,14 +47,20 @@ class Command(RunserverCommand):
     _raw_ipv6: bool
 
     help = (
-        "Start a development server, on uvicorn with the realtime WebSocket when "
-        "uvicorn is installed."
+        "Start a development server, over ASGI with the realtime WebSocket when "
+        "the configured server is installed."
     )
 
     @override
     def add_arguments(self, parser: CommandParser) -> None:
-        """Take Django's arguments and, with staticfiles installed, its static ones."""
+        """Take Django's arguments, `--wsgi`, and with staticfiles its static ones."""
         super().add_arguments(parser)
+        parser.add_argument(
+            "--wsgi",
+            action="store_true",
+            dest="use_wsgi",
+            help="Serve Django's WSGI handler even when the ASGI server is installed.",
+        )
         if not apps.is_installed(_STATICFILES):
             return
         parser.add_argument(
@@ -78,15 +86,21 @@ class Command(RunserverCommand):
 
     @override
     def inner_run(self, *args: Any, **options: Any) -> None:
-        """Check the project as Django does, then serve it on uvicorn when installed."""
-        server = asgi_server()
-        if server is None:
+        """Check the project as Django does, then serve it over ASGI when it can.
+
+        The checks run before the server resolves, so a bad `DEV_SERVER` is `E212`.
+        """
+        if options.get("use_wsgi"):
             super().inner_run(*args, **options)
             return
         autoreload.raise_last_exception()
         if not options["skip_checks"]:
             self.stdout.write("Performing system checks...\n\n")
             self.check(display_num_errors=True)
+        server = _configured_server()
+        if server is None:
+            super().inner_run(*args, **{**options, "skip_checks": True})
+            return
         self.check_migrations()
         for connection in connections.all(initialized_only=True):
             connection.close()
@@ -116,6 +130,15 @@ class Command(RunserverCommand):
             self.stdout.write(self.style.WARNING(warning))
         if offered and not speaks:
             self.stderr.write(_NO_WEBSOCKET)
+
+
+def _configured_server() -> ASGIServer | None:
+    """Return the development server, a bad `DEV_SERVER` as the error naming `E212`."""
+    try:
+        return asgi_server()
+    except ImproperlyConfigured as exc:
+        msg = f"{exc} (next.E212)"
+        raise CommandError(msg) from exc
 
 
 def _serves_static(options: dict[str, Any]) -> bool:

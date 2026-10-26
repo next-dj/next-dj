@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from next.conf import next_framework_settings
+from next.ports import realtime_negotiation_slot
 from next.realtime import transports
 from next.static import runtime
 from next.testing import override_next_settings, override_websocket_mount
@@ -57,7 +58,7 @@ def test_active_transports_repeated_reads_are_cached_until_settings_change() -> 
 def test_runtime_payload_transports_match_the_shared_resolution() -> None:
     transports.announce_websocket()
     transports.forget_transports()
-    assert runtime._active_transports() == ("ws", "sse")
+    assert realtime_negotiation_slot.get().transports() == ("ws", "sse")
 
 
 @pytest.mark.parametrize("requested", [("ws",), ("sse", "ws"), ["ws", "invalid"]])

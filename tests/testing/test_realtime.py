@@ -31,7 +31,7 @@ from next.testing import (
     SocketTicket,
     SseEvent,
     SseReader,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     aissue_socket_ticket,
     capture_published,
     issue_socket_ticket,
@@ -64,14 +64,14 @@ def _scripted(*replies: Mapping[str, object], scopes: list[Scope] | None = None)
 _ACCEPT = {"type": "websocket.accept", "subprotocol": None}
 
 
-class TestWebsocketCommunicator:
+class TestWebSocketCommunicator:
     """The communicator speaks the ASGI WebSocket events of any application."""
 
     def test_scope_carries_the_path_query_headers_and_subprotocols(self) -> None:
         scopes: list[Scope] = []
 
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(
+            communicator = WebSocketCommunicator(
                 _scripted(_ACCEPT, scopes=scopes),
                 "/_next/ws/a%20b/?x=1",
                 headers=[(b"origin", b"http://testserver")],
@@ -92,7 +92,7 @@ class TestWebsocketCommunicator:
     def test_connect_returns_the_accepted_subprotocol(self) -> None:
         async def scenario() -> None:
             accept = {"type": "websocket.accept", "subprotocol": "next"}
-            communicator = WebsocketCommunicator(_scripted(accept), "/")
+            communicator = WebSocketCommunicator(_scripted(accept), "/")
             assert await communicator.connect() == (True, "next")
             await communicator.disconnect()
 
@@ -109,7 +109,7 @@ class TestWebsocketCommunicator:
         self, close: dict[str, object], code: int
     ) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_scripted(close), "/")
+            communicator = WebSocketCommunicator(_scripted(close), "/")
             assert await communicator.connect() == (False, code)
             await communicator.disconnect()
 
@@ -118,7 +118,7 @@ class TestWebsocketCommunicator:
     def test_connect_rejects_an_unexpected_event(self) -> None:
         async def scenario() -> None:
             send = {"type": "websocket.send", "text": "early"}
-            communicator = WebsocketCommunicator(_scripted(send), "/")
+            communicator = WebSocketCommunicator(_scripted(send), "/")
             with pytest.raises(AssertionError, match=r"websocket\.accept"):
                 await communicator.connect()
             await communicator.disconnect()
@@ -127,7 +127,7 @@ class TestWebsocketCommunicator:
 
     def test_frames_round_trip_as_text_bytes_and_json(self) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_scripted(_ACCEPT), "/")
+            communicator = WebSocketCommunicator(_scripted(_ACCEPT), "/")
             await communicator.connect()
             await communicator.send_to("hi")
             assert await communicator.receive_from() == "hi"
@@ -146,7 +146,7 @@ class TestWebsocketCommunicator:
         self, frame: dict[str, object]
     ) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_scripted(_ACCEPT), "/")
+            communicator = WebSocketCommunicator(_scripted(_ACCEPT), "/")
             await communicator.connect()
             await communicator.send_to(
                 text_data=frame.get("text"), bytes_data=frame.get("bytes")
@@ -160,7 +160,7 @@ class TestWebsocketCommunicator:
     def test_receive_from_rejects_a_close(self) -> None:
         async def scenario() -> None:
             close = {"type": "websocket.close", "code": 4400}
-            communicator = WebsocketCommunicator(_scripted(_ACCEPT, close), "/")
+            communicator = WebSocketCommunicator(_scripted(_ACCEPT, close), "/")
             await communicator.connect()
             with pytest.raises(AssertionError, match=r"websocket\.send"):
                 await communicator.receive_from()
@@ -179,7 +179,7 @@ class TestWebsocketCommunicator:
         self, close: dict[str, object], code: int
     ) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_scripted(_ACCEPT, close), "/")
+            communicator = WebSocketCommunicator(_scripted(_ACCEPT, close), "/")
             await communicator.connect()
             assert await communicator.receive_close() == code
             await communicator.disconnect()
@@ -188,7 +188,7 @@ class TestWebsocketCommunicator:
 
     def test_receive_close_rejects_a_frame(self) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_scripted(_ACCEPT), "/")
+            communicator = WebSocketCommunicator(_scripted(_ACCEPT), "/")
             await communicator.connect()
             await communicator.send_to("hi")
             with pytest.raises(AssertionError, match=r"websocket\.close"):
@@ -418,7 +418,7 @@ class TestCommunicatorProtocol:
         ticket = issue_socket_ticket(("room:1",), authorizer_ref=ROOM_AUTHORIZER_REF)
 
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_protocol_app(), "/")
+            communicator = WebSocketCommunicator(_protocol_app(), "/")
             await communicator.connect()
             hello = await communicator.subscribe(ticket, {"room:1": 3})
             assert hello == {"type": "hello", "topics": {}}
@@ -434,7 +434,7 @@ class TestCommunicatorProtocol:
 
     def test_send_up_returns_none_or_the_ack_error(self) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_protocol_app(), "/")
+            communicator = WebSocketCommunicator(_protocol_app(), "/")
             await communicator.connect()
             assert await communicator.send_up("room:1", "typing", {"on": True}) is None
             assert await communicator.send_up("room:1", "unknown") == "unknown"
@@ -447,7 +447,7 @@ class TestCommunicatorProtocol:
         self, name: str
     ) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_protocol_app(), "/")
+            communicator = WebSocketCommunicator(_protocol_app(), "/")
             await communicator.connect()
             with pytest.raises(AssertionError, match="names a known error"):
                 await communicator.send_up("room:1", name)
@@ -457,7 +457,7 @@ class TestCommunicatorProtocol:
 
     def test_a_held_answer_is_found_before_waiting(self) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_protocol_app(), "/")
+            communicator = WebSocketCommunicator(_protocol_app(), "/")
             await communicator.connect()
             await communicator.send_json_to(
                 {"type": "up", "topic": "room:1", "name": "typing", "id": "2"}
@@ -471,7 +471,7 @@ class TestCommunicatorProtocol:
 
     def test_request_returns_the_reply_or_the_refusal(self) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_protocol_app(), "/", timeout=5)
+            communicator = WebSocketCommunicator(_protocol_app(), "/", timeout=5)
             await communicator.connect()
             reply = await communicator.request(
                 "POST", "/form/", headers={"accept": "*/*"}, body="a=1"
@@ -488,7 +488,7 @@ class TestCommunicatorProtocol:
         close = {"type": "websocket.close", "code": 4401}
 
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(
+            communicator = WebSocketCommunicator(
                 _scripted(_ACCEPT, event, close), "/", timeout=0.2
             )
             await communicator.connect()
@@ -504,7 +504,7 @@ class TestCommunicatorProtocol:
 
     def test_a_missing_answer_times_out(self) -> None:
         async def scenario() -> None:
-            communicator = WebsocketCommunicator(_scripted(_ACCEPT), "/", timeout=0.05)
+            communicator = WebSocketCommunicator(_scripted(_ACCEPT), "/", timeout=0.05)
             await communicator.connect()
             with pytest.raises(TimeoutError):
                 await communicator.send_up("room:1", "typing")

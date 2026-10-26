@@ -1,16 +1,18 @@
-"""System checks for next-dj template engine wiring."""
+"""System checks for next-dj template engine wiring and app order."""
 
 from __future__ import annotations
 
 import pkgutil
 from importlib import import_module
 
+from django.apps import apps
 from django.conf import settings
 from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
 from django.template import Library
 
 import next.templatetags
 from next.checks import NEXT
+from next.server.asgi import server_installed
 
 from .templates import _BUILTIN_MODULES, _DJANGO_BACKEND
 
@@ -69,7 +71,34 @@ def check_builtin_tag_libraries_complete(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+_STATICFILES = "django.contrib.staticfiles"
+
+
+@register(Tags.staticfiles, NEXT)
+def check_runserver_override_order(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when staticfiles shadows the ASGI `runserver` of next (`next.W148`).
+
+    Django runs the command of the app listed first, so the override silently drops.
+    """
+    if not server_installed():
+        return []
+    names = [config.name for config in apps.get_app_configs()]
+    if _STATICFILES not in names or names.index(_STATICFILES) > names.index("next"):
+        return []
+    return [
+        DjangoWarning(
+            f"{_STATICFILES} is listed above next in INSTALLED_APPS, so manage.py "
+            "runserver is the staticfiles command and never serves the project on "
+            "uvicorn with the realtime WebSocket.",
+            hint=f"Move 'next' above '{_STATICFILES}' in INSTALLED_APPS.",
+            obj=settings,
+            id="next.W148",
+        )
+    ]
+
+
 __all__ = [
     "check_builtin_tag_libraries_complete",
     "check_django_templates_backend_present",
+    "check_runserver_override_order",
 ]

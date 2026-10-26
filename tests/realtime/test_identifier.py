@@ -1,5 +1,8 @@
 import asyncio
+import gc
 import inspect
+import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from unittest.mock import patch
 
@@ -77,6 +80,20 @@ class TestIdentifierSignature:
             assert Identifier.of(identify).takes_subject
             assert Identifier.of(identify).takes_subject
         assert read.call_count == 2
+
+    def test_a_per_request_closure_is_not_kept_alive_by_the_cache(self) -> None:
+        def build(room: str) -> Callable[[object, str], dict[str, object]]:
+            def identify(user: object, topic: str) -> dict[str, object]:
+                return {"room": room}
+
+            return identify
+
+        identify = build("room:1")
+        alive = weakref.ref(identify)
+        assert not Identifier.of(identify).takes_subject
+        del identify
+        gc.collect()
+        assert alive() is None
 
     def test_an_identifier_passes_through(self) -> None:
         identifier = Identifier.of(_by_user)

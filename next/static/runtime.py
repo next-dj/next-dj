@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import enum
 import functools
-import importlib
 import json
 import logging
 import re
 from dataclasses import dataclass
 from html import escape
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.csrf import csrf_payload
 from next.diagnostics import FailureLog
+from next.ports import realtime_negotiation_slot
 
 from .serializers import resolve_serializer
 
@@ -136,24 +136,6 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     return csrf_payload(request)
 
 
-def _active_transports() -> tuple[str, ...]:
-    """Read the realtime transports lazily, as `next.realtime` imports this module."""
-    realtime = importlib.import_module("next.realtime.transports")
-    return cast("tuple[str, ...]", realtime.active_transports())
-
-
-def _partial_content_types() -> tuple[str, str]:
-    """Return the content type of the active partial backend and the stock one.
-
-    The import is lazy, as the partial patch modules import this runtime module.
-    """
-    partial_backend_manager = importlib.import_module(
-        "next.partial.manager"
-    ).partial_backend_manager
-    stock = importlib.import_module("next.partial.headers").CONTENT_TYPE
-    return (cast("str", partial_backend_manager.get().content_type), cast("str", stock))
-
-
 @dataclass(frozen=True, slots=True)
 class RealtimeOffer:
     """The `$realtime` payload entry and whether the `ws` chunk is listed.
@@ -165,11 +147,19 @@ class RealtimeOffer:
     websocket: bool
 
 
-@functools.cache
 def realtime_offer() -> RealtimeOffer:
-    """Return the realtime negotiation every page carries, memoised per config."""
-    transports = _active_transports()
-    content_type, stock = _partial_content_types()
+    """Return the realtime negotiation every page carries, memoised per config.
+
+    The memo is keyed on the content types, so a reset partial backend never lingers.
+    """
+    return _offer(realtime_negotiation_slot.get().content_types())
+
+
+@functools.lru_cache(maxsize=1)
+def _offer(types: tuple[str, str]) -> RealtimeOffer:
+    """Build the offer for the enabled transports and one pair of content types."""
+    transports = realtime_negotiation_slot.get().transports()
+    content_type, stock = types
     if transports == DEFAULT_TRANSPORTS and content_type == stock:
         return RealtimeOffer("", websocket=False)
     payload = json.dumps(
@@ -183,8 +173,8 @@ def realtime_offer() -> RealtimeOffer:
 
 
 def forget_realtime_offer(**kwargs: object) -> None:
-    """Drop the memoised offer when the transports or the partial backend change."""
-    realtime_offer.cache_clear()
+    """Drop the memoised offer when the transports change."""
+    _offer.cache_clear()
 
 
 TAG_FIELDS: Final = ("url", "nonce_attr")

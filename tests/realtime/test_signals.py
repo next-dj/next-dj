@@ -1,15 +1,16 @@
 import asyncio
-import time
+import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
+from django.dispatch import Signal
 from django.test import AsyncRequestFactory, RequestFactory
 
 from next import signals as framework_signals
 from next.partial import Patches
-from next.realtime import TopicStream, apublish, publish
+from next.realtime import TopicStream, access as access_module, apublish, publish
 from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.errors import BrokerConnectionError
@@ -30,7 +31,7 @@ from next.testing import (
     capture_signals,
     memory_broker,
 )
-from tests.support.realtime import issue_session_ticket
+from tests.support.realtime import ServerClock, issue_session_ticket
 
 
 _HERE = "tests.realtime.test_signals"
@@ -267,10 +268,12 @@ class TestSyncStream:
         stream = TopicStream(
             request, "room:1", authorize=_room_authorizer, heartbeat_seconds=0.001
         )
+        clock = ServerClock(0.0)
+        stream._access._clock = clock
         with SseReader(stream) as events:
             assert next(events).event == "next-hello"
             _GRANTS["room"] = False
-            time.sleep(0.01)
+            clock.advance(0.01)
             publish("room:1", _refresh(), on_commit=False)
             assert next(events).event == "next-end"
         assert _reasons(recorder) == ["revoked"]
@@ -368,10 +371,12 @@ class TestAsyncStream:
                 authorize=_room_authorizer,
                 heartbeat_seconds=0.001,
             )
+            clock = ServerClock(0.0)
+            stream._access._clock = clock
             source = stream._async_messages(broker)
             assert type(await anext(source)).__name__ == "StreamHello"
             _GRANTS["room"] = False
-            await asyncio.sleep(0.01)
+            clock.advance(0.01)
             await apublish("room:1", _refresh())
             return [type(item).__name__ async for item in source if item is not None]
 
@@ -636,3 +641,114 @@ class TestSocket:
 
         asyncio.run(scenario())
         assert len(recorder) == 0
+
+
+class TestPooledSend:
+    """An async send runs sync receivers on the shared pool, never on one thread."""
+
+    def test_two_streams_run_their_sync_receivers_side_by_side(self) -> None:
+        barrier = threading.Barrier(2, timeout=5)
+        threads: list[int] = []
+
+        def receiver(**_kwargs: object) -> None:
+            barrier.wait()
+            threads.append(threading.get_ident())
+
+        async def scenario() -> None:
+            first = StreamLifecycle(object(), "ws")
+            second = StreamLifecycle(object(), "ws")
+            await asyncio.gather(first.aopen(("room:1",)), second.aopen(("room:2",)))
+
+        stream_subscribed.connect(receiver, weak=False)
+        try:
+            asyncio.run(scenario())
+        finally:
+            stream_subscribed.disconnect(receiver)
+        assert len(set(threads)) == 2
+        assert threading.get_ident() not in threads
+
+    def test_each_sync_call_is_wrapped_in_connection_cleanup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        steps: list[str] = []
+        monkeypatch.setattr(
+            access_module, "close_old_connections", lambda: steps.append("clean")
+        )
+
+        def receiver(**_kwargs: object) -> None:
+            steps.append("receiver")
+
+        stream_unsubscribed.connect(receiver, weak=False)
+        try:
+            asyncio.run(stream_unsubscribed.asend_robust(sender=object))
+        finally:
+            stream_unsubscribed.disconnect(receiver)
+        assert steps == ["clean", "receiver", "clean"]
+
+    def test_async_receivers_are_awaited_on_the_loop_and_failures_returned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        threads: list[int] = []
+
+        async def listening(**_kwargs: object) -> str:
+            threads.append(threading.get_ident())
+            return "heard"
+
+        async def failing(**_kwargs: object) -> None:
+            msg = "receiver failed"
+            raise LookupError(msg)
+
+        stream_subscribed.connect(listening, weak=False)
+        stream_subscribed.connect(failing, weak=False)
+        try:
+            with caplog.at_level("ERROR", "django.dispatch"):
+                responses = asyncio.run(stream_subscribed.asend_robust(sender=object))
+        finally:
+            stream_subscribed.disconnect(listening)
+            stream_subscribed.disconnect(failing)
+        assert threads == [threading.get_ident()]
+        assert responses[0] == (listening, "heard")
+        assert responses[1][0] is failing
+        assert isinstance(responses[1][1], LookupError)
+        assert "failing" in caplog.text
+
+    def test_a_failing_sync_receiver_is_returned_and_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        stream_subscribed.connect(_broken_receiver, weak=False)
+        try:
+            with caplog.at_level("ERROR", "django.dispatch"):
+                responses = asyncio.run(stream_subscribed.asend_robust(sender=object))
+        finally:
+            stream_subscribed.disconnect(_broken_receiver)
+        [(receiver, error)] = responses
+        assert receiver is _broken_receiver
+        assert isinstance(error, ValueError)
+        assert "_broken_receiver" in caplog.text
+
+    @pytest.mark.parametrize("mode", ["sync", "async"])
+    def test_a_failure_logs_the_message_django_logs(
+        self, caplog: pytest.LogCaptureFixture, mode: str
+    ) -> None:
+        async def failing(**_kwargs: object) -> None:
+            _broken_receiver()
+
+        receiver = failing if mode == "async" else _broken_receiver
+        plain = Signal()
+        for signal in (plain, stream_subscribed):
+            signal.connect(receiver, weak=False)
+        try:
+            with caplog.at_level("ERROR", "django.dispatch"):
+                plain.send_robust(sender=object)
+                asyncio.run(stream_subscribed.asend_robust(sender=object))
+        finally:
+            for signal in (plain, stream_subscribed):
+                signal.disconnect(receiver)
+        django, pooled = caplog.records
+        assert pooled.getMessage() == django.getMessage()
+        assert pooled.levelname == django.levelname == "ERROR"
+        assert pooled.exc_info is not None
+        assert isinstance(pooled.exc_info[1], ValueError)
+
+    def test_a_signal_without_receivers_answers_nothing(self) -> None:
+        assert asyncio.run(stream_subscribed.asend_robust(sender=object)) == []

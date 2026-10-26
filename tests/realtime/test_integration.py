@@ -4,7 +4,7 @@ import os
 import signal
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
@@ -55,6 +55,14 @@ def _connections(admin: redis.Redis, client_name: str) -> list[dict]:
 async def _aconnections(admin: redis.asyncio.Redis, client_name: str) -> list[dict]:
     clients = await admin.client_list()
     return [entry for entry in clients if entry["name"] == client_name]
+
+
+def _wait_for(condition: Callable[[], object], timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() >= deadline:
+            pytest.fail("The awaited condition never held.")
+        time.sleep(0.01)
 
 
 def _wait_until_gone(admin: redis.Redis, client_name: str) -> list[dict]:
@@ -369,8 +377,11 @@ def test_redis_snapshot_after_the_window_owner_died_arrives_on_a_touch(prefix) -
             owner.presence_schedule.close()
             owner.join(ROOM, "owner", {"id": 2}, 30)
             other.join(ROOM, "other", {"id": 1}, 30)
-            time.sleep(0.3)
-            assert other.touch(ROOM, "other", 30)
+            _wait_for(
+                lambda: (
+                    other.touch(ROOM, "other", 30) and other.presence_schedule.pending()
+                )
+            )
             snapshot = _next_snapshot(messages)
         position = other.positions([ROOM])[ROOM]
     finally:
@@ -410,12 +421,9 @@ def test_redis_presence_keys_of_a_short_visit_expire(admin, prefix, member) -> N
         broker.join(ROOM, "visitor", member, 0.3)
         _assert_expiring(admin, prefix)
         broker.leave(ROOM, "visitor")
-        time.sleep(0.06)
-        assert broker.presence_schedule.run_due() >= 1
+        _wait_for(lambda: broker.presence_schedule.run_due() >= 1)
         _assert_expiring(admin, prefix)
-        deadline = time.monotonic() + 5
-        while _lasting(admin, prefix) and time.monotonic() < deadline:
-            time.sleep(0.05)
+        _wait_for(lambda: not _lasting(admin, prefix))
     finally:
         broker.close()
 
@@ -467,8 +475,7 @@ def test_redis_last_leave_under_a_dead_window_is_announced(prefix) -> None:
             other.join(ROOM, "other", None, 30)
             other.leave(ROOM, "other")
             assert other.presence_schedule.pending() == (ROOM,)
-            time.sleep(0.25)
-            assert other.presence_schedule.run_due() == 1
+            _wait_for(lambda: other.presence_schedule.run_due() == 1)
             snapshot = _next_snapshot(messages)
     finally:
         owner.close()

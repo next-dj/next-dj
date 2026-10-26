@@ -126,7 +126,7 @@ The command serves the application that ``ASGI_APPLICATION`` names, and falls ba
 
 The command restarts on code changes through Django's own autoreloader and serves static files under ``DEBUG``.
 With ``staticfiles`` listed first, or without uvicorn, it is the WSGI ``runserver`` and clients stay on SSE.
-The command caps inbound frames at 64 KiB and turns off the protocol ping of uvicorn, because the socket pings an idle subscription itself.
+The command caps inbound frames at 64 KiB and turns off the protocol ping of uvicorn, because the socket checks the liveness of its peer itself.
 See :doc:`/content/ref/management` for the options.
 
 Production runs several uvicorn workers, either through uvicorn itself or under gunicorn with the uvicorn worker class.
@@ -140,12 +140,14 @@ The ``--workers`` value below is an example to size from measurement, see :ref:`
 
 The socket closes a larger inbound frame with ``1009`` anyway.
 ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
-Uvicorn pings every 20 seconds by default, which duplicates the heartbeat of the socket, so ``--ws-ping-interval`` is a deployment decision.
+Uvicorn pings every 20 seconds by default, which the socket does not need, so ``--ws-ping-interval`` is a deployment decision and a server-level ping is only an extra layer.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
 The default ``MemoryBroker`` reaches subscribers in one process only.
 Use ``RedisBroker`` once there is more than one worker, see :doc:`fan-out-across-processes-with-redis`.
 
-The socket sends a ``ping`` frame every ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]`` seconds, 25 by default.
+The socket sends a ``ping`` frame once a ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]``, 25 seconds by default, passes with nothing to send or with no frame from the client, and any frame from the client answers it.
+A peer that sent nothing for more than two heartbeats after an unanswered ping is dropped without a close frame, leaves presence, and fires ``stream_unsubscribed`` with the reason ``client``.
+A busy topic does not hold the ping back, so a half-open peer is dropped before the send buffer of the kernel fills.
 Keep that value below the idle timeout of every proxy in front of it.
 The browser renews a ticket when it reconnects.
 Tests drive the socket and the SSE stream with the helpers of :doc:`/content/ref/testing`.

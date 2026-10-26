@@ -191,11 +191,12 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       | { content_type?: string; transports?: unknown[] }
       | undefined;
   const socketFirst = (): boolean => realtime()?.transports?.includes("ws") === true;
+  // Fetched together, and the bridge waits on ws since it reads that factory once.
   const withBridge = (callback: (factory: SseFactory) => void): void => {
-    const loadStream = (): void => deps.stream.whenLoaded(callback);
-    if (socketFirst() && deps.ws !== undefined) {
-      void deps.ws.load().then(loadStream);
-    } else loadStream();
+    const ws = socketFirst() ? deps.ws?.load() : undefined;
+    deps.stream.whenLoaded((factory) =>
+      ws === undefined ? callback(factory) : void ws.then(() => callback(factory)),
+    );
   };
   const tag = <T extends StreamMeta | undefined>(meta: T): T =>
     wsTransport?.tag(meta) ?? meta;
@@ -211,6 +212,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     remember(id) {
       if (bridge !== undefined) bridge.remember(id);
       else unbridged = [...unbridged, id].slice(-ECHO_LIMIT);
+    },
+    forget(id) {
+      bridge?.forget(id);
+      unbridged = unbridged.filter((kept) => kept !== id);
     },
     size: () => bridge?.size() ?? 0,
     now: () => bridge?.now() ?? Date.now(),
@@ -370,6 +375,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dirtySnapshot: () => dirty.snapshot(),
       // Feeds the ring id to the SSE bridge so the echo stream event drops.
       rememberRequestId: (id: string) => sse.remember(id),
+      forgetRequestId: (id: string) => sse.forget(id),
       tunnel: (target: string, init: RequestInit, header?: string) =>
         wsTransport?.http(target, init, header),
     };

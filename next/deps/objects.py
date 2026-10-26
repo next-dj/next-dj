@@ -65,7 +65,6 @@ class _ScopedQuery(Protocol):
 
     def __call__(self, scope: object, /) -> QuerySet[Any]:
         """Return the rows `scope` may see."""
-        ...
 
 
 class DObject[M](DDependencyBase[M]):

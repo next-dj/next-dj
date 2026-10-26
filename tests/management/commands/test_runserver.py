@@ -9,7 +9,8 @@ from django.contrib.staticfiles.handlers import (
     StaticFilesHandler,
 )
 from django.core.handlers.wsgi import WSGIHandler
-from django.core.management import call_command, get_commands
+from django.core.management import CommandError, call_command, get_commands
+from django.core.management.base import SystemCheckError
 from django.core.management.commands import runserver as django_runserver
 from django.test import override_settings
 
@@ -17,13 +18,14 @@ from next.management.commands import runserver
 from next.management.commands.runserver import Command
 from next.realtime.frames import MAX_INBOUND_BYTES
 from next.realtime.transports import announce_websocket
-from next.testing import override_websocket_mount
+from next.testing import override_next_settings, override_websocket_mount
 
 
 pytestmark = pytest.mark.django_db
 
 SOCKET = {"ws_max_size": MAX_INBOUND_BYTES, "ws_ping_interval": None}
 NAMED_APP = "tests.management.commands.test_runserver.named_app"
+MISSING_SERVER = "tests.management.commands.test_runserver.MissingServer"
 
 
 async def named_app(scope, receive, send) -> None:
@@ -218,6 +220,11 @@ class TestWithoutUvicorn:
         assert isinstance(handler, WSGIHandler)
         assert not isinstance(handler, StaticFilesHandler)
 
+    def test_wsgi_flag_skips_an_installed_server(self, wsgi, monkeypatch) -> None:
+        monkeypatch.setattr(runserver, "asgi_server", pytest.fail)
+        _run("--skip-checks", "--wsgi")
+        assert wsgi[0][:2] == ("127.0.0.1", 8000)
+
     def test_takes_no_static_options_without_staticfiles(self, wsgi) -> None:
         with _apps("next"), override_settings(MIDDLEWARE=[]):
             parser = Command().create_parser("manage.py", "runserver")
@@ -225,3 +232,35 @@ class TestWithoutUvicorn:
             _run("--skip-checks")
         assert not {"use_static_handler", "insecure_serving"} & dests
         assert not isinstance(wsgi[0][2], StaticFilesHandler)
+
+
+class TestBadDevServer:
+    """A `DEV_SERVER` that names no server is `next.E212`, never a bare traceback."""
+
+    @pytest.fixture(autouse=True)
+    def _missing_server(self) -> Generator[None, None, None]:
+        with override_next_settings(DEV_SERVER=MISSING_SERVER):
+            yield
+
+    def test_the_checks_report_it_before_the_server_resolves(self) -> None:
+        with pytest.raises(SystemCheckError, match=r"next\.E212"):
+            _run(skip_checks=False)
+
+    def test_skipped_checks_leave_a_command_error_naming_it(self) -> None:
+        with pytest.raises(CommandError, match=r"MissingServer.*\(next\.E212\)$"):
+            _run("--skip-checks")
+
+
+class TestChecksBeforeWsgi:
+    """The WSGI fallback runs the checks the ASGI branch already ran only once."""
+
+    def test_checks_run_once_before_the_fallback(self, monkeypatch) -> None:
+        calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(runserver, "asgi_server", lambda: None)
+        monkeypatch.setattr(
+            django_runserver, "run", lambda *args, **kwargs: calls.append(args)
+        )
+        out, err = _run(skip_checks=False)
+        assert out.count("Performing system checks...") == 1
+        assert (out + err).count("silenced)") == 1
+        assert calls[0][:2] == ("127.0.0.1", 8000)

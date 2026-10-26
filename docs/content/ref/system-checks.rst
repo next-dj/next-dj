@@ -1014,6 +1014,9 @@ Errors
    * - ``next.E211``
      - ``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` is not the dotted path of an importable concrete ``TicketBinding`` subclass.
      - ``next.realtime.checks``
+   * - ``next.E212``
+     - ``NEXT_FRAMEWORK['DEV_SERVER']`` names a path that does not import, or one that is no class with the ``run(app, **options)`` method of ``ASGIServer``.
+     - ``next.server.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1393,14 +1396,14 @@ Warnings
      - The WebSocket transport is enabled while ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it and ``MIDDLEWARE`` lists no ``SessionMiddleware``, so every negotiation answers ``503``.
        ``SignedCookieBinding`` binds a visitor without the middleware, and a custom binding answers for its own requirements, so neither raises it.
        ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
-     - ``next.realtime.checks``
+     - ``next.realtime.deployment``
    * - ``next.W142``
      - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine and ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it.
        That engine has no session key on a first visit and re-signs the key on every session save, so negotiation answers ``503`` or the handshake cookie stops matching the ticket and the socket closes with ``4401``.
        Setting ``TICKET_BINDING`` to ``next.realtime.SignedCookieBinding``, or switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine, clears it.
        A signed cookie still outlives logout until ``SESSION_COOKIE_AGE``, and only a password change or an inactive user revokes it.
        ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
-     - ``next.realtime.checks``
+     - ``next.realtime.deployment``
    * - ``next.W143``
      - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is above zero while the configured broker class is no ``ReplayingBroker``, so every reconnect resynchronises from ``hello``.
        Implementing ``replay`` and ``areplay`` on the broker, or setting ``SIZE`` to ``0``, clears it.
@@ -1420,13 +1423,18 @@ Warnings
        A ``.example.com`` or ``*`` entry does not count, since the CSRF check compares the origin with the exact ``Host`` of the request.
        ``WebSocketApp`` logs it when it is created, since ``manage.py check`` never sees the list.
        Adding the origin to ``CSRF_TRUSTED_ORIGINS``, or setting ``REALTIME['TUNNEL']`` to ``False``, clears it.
-     - ``next.realtime.checks``
+     - ``next.realtime.deployment``
    * - ``next.W147``
      - ``TICKET_BINDING`` is ``SignedCookieBinding`` or a subclass of it while ``SESSION_ENGINE`` is a server-side engine.
        The binding reloads a signed-in user by pk and auth hash, so an open socket outlives logout and the expiry of the stored session.
        Setting ``TICKET_BINDING`` to ``next.realtime.SessionBinding``, which rechecks the stored session, clears it.
        ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
-     - ``next.realtime.checks``
+     - ``next.realtime.deployment``
+   * - ``next.W148``
+     - uvicorn is importable while ``django.contrib.staticfiles`` sits above ``next`` in ``INSTALLED_APPS``.
+       Django runs the command of the application listed first, so ``manage.py runserver`` stays the staticfiles command and never serves the project on uvicorn with the realtime WebSocket.
+       Moving ``next`` above ``django.contrib.staticfiles`` clears it.
+     - ``next.apps.checks``
 
 Codes are assigned per check and are not contiguous.
 

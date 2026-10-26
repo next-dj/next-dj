@@ -16,7 +16,7 @@ from next.realtime.socket import Handshake, TopicSocket
 from next.testing.realtime import (
     MemoryPort,
     SocketTicket,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     override_websocket_mount,
 )
 from tests.support.realtime import (
@@ -270,7 +270,7 @@ def test_app_replays_from_the_default_broker_over_the_websocket(
     epoch = _published(broker, 2)
 
     async def scenario() -> list[object]:
-        communicator = WebsocketCommunicator(
+        communicator = WebSocketCommunicator(
             WebSocketApp(),
             "/_next/ws/",
             headers=[

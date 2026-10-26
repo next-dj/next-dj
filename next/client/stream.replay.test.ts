@@ -79,9 +79,8 @@ function wsHarness(): Harness {
   return {
     deps: {
       useWebSocket: true,
-      websocket: createWebSocketTransport,
-      socket,
-      websocketFetch,
+      websocket: (options) =>
+        createWebSocketTransport({ ...options, socket, fetch: websocketFetch }),
     },
     async connect() {
       await vi.advanceTimersByTimeAsync(1000);
@@ -223,6 +222,89 @@ describe.each([
     expect(applied).toEqual([1, 2, 3, 5]);
     expect(fetched).toEqual([{ url: "/", zone: "results" }]);
     expect(gaps).toEqual([{ topic: "room", from: 3, to: 5 }]);
+    sse._reset();
+  });
+});
+
+describe.each([
+  ["sse", sseHarness],
+  ["ws", wsHarness],
+])("epoch restart over %s", (_name, make) => {
+  async function opened(harness: Harness) {
+    const sse = start(harness);
+    sse.scan(document);
+    await harness.connect();
+    harness.hello(position(0));
+    for (const seq of [1, 2, 3]) harness.send(frame(seq));
+    return sse;
+  }
+
+  it("adopts a new epoch at seq 1 on a live stream without a resync", async () => {
+    const harness = make();
+    const sse = await opened(harness);
+    harness.send(frame(1, "f"));
+    harness.send(frame(2, "f"));
+    harness.send(frame(2, "f"));
+    expect(applied).toEqual([1, 2, 3, 1, 2]);
+    expect(fetched).toEqual([]);
+    expect(gaps).toEqual([]);
+    sse._reset();
+  });
+
+  it("drops an own echo that opens the new epoch", async () => {
+    const harness = make();
+    const sse = await opened(harness);
+    sse.remember("own");
+    harness.send({ ...frame(1, "f"), request_id: "own" });
+    harness.send(frame(2, "f"));
+    expect(applied).toEqual([1, 2, 3, 2]);
+    expect(fetched).toEqual([]);
+    sse._reset();
+  });
+
+  it("resyncs a new epoch that starts past seq 1", async () => {
+    const harness = make();
+    const sse = await opened(harness);
+    harness.send(frame(3, "f"));
+    expect(applied).toEqual([1, 2, 3, 3]);
+    expect(fetched).toEqual([{ url: "/", zone: "results" }]);
+    expect(gaps).toEqual([{ topic: "room", from: 3, to: 3 }]);
+    sse._reset();
+  });
+
+  it("resyncs a new epoch at seq 1 while a gap is pending", async () => {
+    const harness = make();
+    const sse = await opened(harness);
+    harness.send(frame(5));
+    harness.send(frame(1, "f"));
+    expect(fetched).toEqual([
+      { url: "/", zone: "results" },
+      { url: "/", zone: "results" },
+    ]);
+    expect(gaps).toEqual([
+      { topic: "room", from: 3, to: 5 },
+      { topic: "room", from: 5, to: 1 },
+    ]);
+    sse._reset();
+  });
+
+  it("resyncs a new epoch at seq 1 that arrives before the reconnect hello", async () => {
+    const harness = make();
+    const sse = await live(harness);
+    harness.send(frame(1, "f"));
+    expect(fetched).toEqual([{ url: "/", zone: "results" }]);
+    expect(gaps).toEqual([{ topic: "room", from: 3, to: 1 }]);
+    sse._reset();
+  });
+
+  it("resyncs a reconnect hello under a new epoch", async () => {
+    const harness = make();
+    const sse = await live(harness);
+    harness.hello(position(1, "f"));
+    harness.send(frame(2, "f"));
+    expect(applied).toEqual([1, 2, 3, 2]);
+    expect(fetched).toEqual([{ url: "/", zone: "results" }]);
+    expect(gaps).toEqual([{ topic: "room", from: 3, to: 1 }]);
     sse._reset();
   });
 });

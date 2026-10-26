@@ -230,8 +230,10 @@ runserver
 ---------
 
 ``manage.py runserver`` takes the arguments of Django's :doc:`runserver <django:ref/django-admin>`, ``addrport``, ``--ipv6``, ``--noreload``, ``--nothreading`` and ``--skip-checks``, and with ``django.contrib.staticfiles`` installed its ``--nostatic`` and ``--insecure``.
+``--wsgi`` serves Django's WSGI handler even with an ASGI server installed.
 
-With uvicorn installed it runs the system checks and the migration check as Django does, then serves the project over ASGI on uvicorn.
+With uvicorn installed it runs the system checks and the migration check as Django does, then serves the project over ASGI on the server ``NEXT_FRAMEWORK['DEV_SERVER']`` names, uvicorn by default.
+The checks run before the command resolves the server, so a ``DEV_SERVER`` that names no server stops it with ``next.E212``, and under ``--skip-checks`` with a ``CommandError`` that names the path and ``next.E212``.
 The banner reads ``Starting ASGI development server with the realtime WebSocket`` only while the app mounts the socket and uvicorn finds a WebSocket library, and Django's development-server warning follows it unless ``DJANGO_RUNSERVER_HIDE_WARNING`` is ``true``.
 A numeric ``addrport`` host shows as the socket reads it, so ``0`` binds every interface and shows as ``0.0.0.0``.
 The app is the one the ``ASGI_APPLICATION`` setting names by dotted path, the key Daphne and Channels read, since Django has no ASGI setting of its own.
@@ -239,13 +241,13 @@ Without the setting it is ``next.realtime.application`` over :func:`~django.core
 Under ``DEBUG``, or with ``--insecure``, static files under ``STATIC_URL`` come from the staticfiles finders through Django's ``ASGIStaticFilesHandler`` unless ``--nostatic`` is given, and a WebSocket passes through it.
 Django's autoreloader restarts the process, so the watch list of ``next.server`` applies as it does under WSGI and uvicorn runs without a reloader of its own, while ``--nothreading`` has no effect.
 A uvicorn that finds neither ``websockets`` nor ``wsproto`` cannot accept a WebSocket, so the command warns on stderr while the app mounts the socket, and the pages fall back to SSE.
-The command hands uvicorn ``ws_max_size`` set to the 64 KiB inbound frame limit and ``ws_ping_interval`` set to ``None``, because the socket pings an idle subscription itself every ``HEARTBEAT`` seconds.
+The command hands uvicorn ``ws_max_size`` set to the 64 KiB inbound frame limit and ``ws_ping_interval`` set to ``None``, because the socket pings after one ``HEARTBEAT`` with nothing to send or no frame from the client, however busy the topic, and drops a peer that sent nothing for more than two heartbeats after an unanswered ping, so a server-level ping is only an extra layer.
 It leaves lifespan on uvicorn's ``auto``, since ``next.realtime.application`` answers lifespan itself and an app from ``ASGI_APPLICATION`` may not speak it.
 
-Without uvicorn the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
+Without uvicorn, or with ``--wsgi``, the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
 
 Django runs the command of the application listed first in ``INSTALLED_APPS``, so ``next`` sits above ``django.contrib.staticfiles``, as Daphne asks of its own ``runserver``.
-Listed below it, ``manage.py runserver`` is the staticfiles command and serves WSGI, where the pages speak SSE.
+Listed below it, ``manage.py runserver`` is the staticfiles command and serves WSGI, where the pages speak SSE, and ``next.W148`` reports the order while an ASGI server is installed.
 A framework CLI that serves the same app calls ``serve_development`` from ``next.server.asgi``, see :doc:`server`.
 
 .. code-block:: python
@@ -258,6 +260,36 @@ A framework CLI that serves the same app calls ``serve_development`` from ``next
        "next",
        "django.contrib.staticfiles",
    ]
+
+Use your own development server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``NEXT_FRAMEWORK['DEV_SERVER']`` names the class the command serves on, see :doc:`settings`.
+The class is built without arguments, and ``run`` receives the app, ``host``, ``port``, and the ``ws_max_size`` and ``ws_ping_interval`` options of ``server_options()``, which it maps onto its own server or ignores.
+Hypercorn stands in here as one example, and the framework depends on neither it nor uvicorn.
+
+.. code-block:: python
+   :caption: config/devserver.py
+
+   import asyncio
+
+   from hypercorn.asyncio import serve
+   from hypercorn.config import Config
+
+   class HypercornServer:
+       def run(self, app, *, host, port, **options):
+           config = Config()
+           config.bind = [f"{host}:{port}"]
+           config.websocket_max_message_size = options.get("ws_max_size", 65536)
+           asyncio.run(serve(app, config))
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {"DEV_SERVER": "config.devserver.HypercornServer"}
+
+The rest of the command stays the same, from the system checks and Django's autoreloader to the static files and the banner.
+A path that does not import or names no class with a ``run`` method is ``next.E212`` at ``manage.py check`` and at ``manage.py runserver``.
 
 See also
 --------

@@ -44,11 +44,11 @@ class BrokerManager:
         return backend
 
     async def aget(self) -> BrokerBackend:
-        """Build outside the event loop so sync and async signal receivers work."""
+        """Build on the shared pool, so no socket waits on the one sync thread."""
         backend = self._backend
         if backend is not None:
             return backend
-        return await sync_to_async(self.get, thread_sensitive=True)()
+        return await sync_to_async(self.get, thread_sensitive=False)()
 
     def backend_class(self) -> type[BrokerBackend]:
         """Return the class of the configured backend without building one."""

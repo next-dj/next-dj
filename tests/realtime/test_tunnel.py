@@ -1,17 +1,22 @@
 import asyncio
 import logging
 import sys
+import threading
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 
 import pytest
 from asgiref.typing import ASGIReceiveCallable, ASGISendCallable, Scope
+from django.conf.urls.i18n import i18n_patterns
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest, HttpResponse
 from django.test import override_settings
+from django.urls import path as route
+from django.utils import translation
 
-from next.forms.transport import DISPATCHED_SCOPE_KEY, DispatchMark
+from next.forms.transport import ACTION_KIND, DISPATCHED_SCOPE_KEY, DispatchMark
 from next.realtime import application
 from next.realtime.asgi import WebSocketApp
 from next.realtime.backends import MemoryBroker
@@ -314,6 +319,50 @@ def test_the_path_below_the_prefix_is_resolved(monkeypatch: pytest.MonkeyPatch) 
     assert seen == ["/_next/form/x/"]
 
 
+def _action_view(request: HttpRequest) -> HttpResponse:
+    return HttpResponse()
+
+
+_action_view.next_access_kind = ACTION_KIND
+
+
+def _translated_urls(*, prefix_default_language: bool) -> ModuleType:
+    urls = ModuleType("translated_tunnel_urls")
+    urls.urlpatterns = i18n_patterns(
+        route("_next/form/x/", _action_view),
+        prefix_default_language=prefix_default_language,
+    )
+    return urls
+
+
+@pytest.mark.parametrize(
+    ("prefixed", "path", "routes"),
+    [
+        (True, "/en/_next/form/x/", True),
+        (True, "/de/_next/form/x/", True),
+        (True, "/fr/_next/form/x/", False),
+        (True, "/_next/form/x/", False),
+        (False, "/_next/form/x/", True),
+        (False, "/de/_next/form/x/", True),
+        (False, "/en/_next/form/x/", False),
+    ],
+)
+def test_a_translated_action_routes_under_the_language_of_its_path(
+    *, prefixed: bool, path: str, routes: bool
+) -> None:
+    tunnel = DjangoTunnel(_App(), _ws_scope(), _limits())
+    with (
+        override_settings(
+            ROOT_URLCONF=_translated_urls(prefix_default_language=prefixed),
+            USE_I18N=True,
+            LANGUAGE_CODE="en",
+            LANGUAGES=[("en", "English"), ("de", "German")],
+        ),
+        translation.override("de" if path.startswith("/en/") else "en"),
+    ):
+        assert tunnel.routes_to_action(path) is routes
+
+
 def test_a_handshake_without_the_csrf_cookie_is_stale() -> None:
     app = _App()
     assert _run(app, _request(), _ws_scope([(b"cookie", b"sessionid=k")])) is (
@@ -337,28 +386,34 @@ def test_a_path_outside_the_form_dispatch_is_refused(path: str) -> None:
 def test_a_cold_urlconf_imports_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    gate = ModuleType("tunnel_gate")
+    gate.entered = threading.Event()
+    gate.release = threading.Event()
+    gate.released = False
+    monkeypatch.setitem(sys.modules, "tunnel_gate", gate)
     (tmp_path / "slow_tunnel_urls.py").write_text(
-        "import time\n\ntime.sleep(0.3)\nurlpatterns = []\n"
+        "import tunnel_gate\n\n"
+        "tunnel_gate.entered.set()\n"
+        "tunnel_gate.released = tunnel_gate.release.wait(5)\n"
+        "urlpatterns = []\n"
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     app = _App()
     tunnel = DjangoTunnel(app, _ws_scope(), _limits())
 
-    async def scenario() -> tuple[Reply | Refusal, int]:
-        ticks = 0
+    async def scenario() -> Reply | Refusal:
         call = asyncio.ensure_future(tunnel(_request(), connection="conn"))
-        while not call.done():
-            await asyncio.sleep(0.01)
-            ticks += 1
-        return call.result(), ticks
+        assert await asyncio.to_thread(gate.entered.wait, 5)
+        gate.release.set()
+        return await call
 
     try:
         with override_settings(ROOT_URLCONF="slow_tunnel_urls"):
-            answer, ticks = asyncio.run(scenario())
+            answer = asyncio.run(scenario())
     finally:
         sys.modules.pop("slow_tunnel_urls", None)
     assert answer is Refusal.TRANSPORT
-    assert ticks >= 10
+    assert gate.released
     assert app.scope is None
 
 
@@ -418,6 +473,14 @@ def test_a_reply_the_socket_cannot_carry_is_refused(
 ) -> None:
     app = _App(*events) if events else _NoReply()
     assert _run(app, _request()) is refusal
+
+
+def test_a_reply_body_of_exactly_the_limit_is_carried() -> None:
+    app = _App(_start(), _body(b"x" * 8, more=True), _body(b"y" * 2))
+    assert _run(app, _request(), limit=10) == Reply(200, _MARKED, "x" * 8 + "y" * 2)
+    assert _run(_App(_start(), _body(b"x" * 11)), _request(), limit=10) is (
+        Refusal.TOO_BIG
+    )
 
 
 class _NoReply(_App):
@@ -751,6 +814,45 @@ def test_requests_past_the_concurrency_are_refused_with_retry() -> None:
         await _close(port, task)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "tunnel",
+    [_ScriptedTunnel(), _ScriptedTunnel(fail=True), _ScriptedTunnel(hang=True)],
+    ids=["reply", "failure", "timeout"],
+)
+def test_a_finished_request_frees_its_slot(tunnel: _ScriptedTunnel) -> None:
+    ticket = issue_session_ticket()
+    tunnel.release.set()
+
+    async def scenario() -> tuple[list[object], int]:
+        port = MemoryPort()
+        socket = TopicSocket(
+            port,
+            Handshake(ticket.credential, AnonymousUser(), None),
+            broker=MemoryBroker(),
+            heartbeat=60,
+            tunnel=tunnel,
+        )
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        assert (await _frame(port))["type"] == "hello"
+        errors = []
+        for index in range(2):
+            port.push_json(_http(str(index)))
+            errors.append((await _frame(port)).get("error"))
+            for _ in range(5):
+                await asyncio.sleep(0)
+        held = socket._requests
+        await _close(port, task)
+        return errors, held
+
+    settings = {"TUNNEL": {"CONCURRENCY": 1, "TIMEOUT": 0.05}}
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": settings}):
+        errors, held = asyncio.run(scenario())
+    assert "limit" not in errors
+    assert held == 0
 
 
 @pytest.mark.django_db(transaction=True)

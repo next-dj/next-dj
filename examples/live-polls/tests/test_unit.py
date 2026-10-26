@@ -21,7 +21,7 @@ from polls.signals import VOTE_ACTION_NAME, broadcast_vote
 from polls.snapshots import Snapshot, build_snapshot
 
 from next.static import default_kinds
-from next.testing import make_resolution_context, resolve_call
+from next.testing import capture_published, make_resolution_context, resolve_call
 
 
 pytestmark = pytest.mark.django_db
@@ -400,7 +400,9 @@ class TestBroadcastReceiverGuards:
     )
     def test_returns_without_publishing(self, action_name: str, form_factory) -> None:
         """Each unactionable payload exits before reaching `broker.publish`."""
-        broadcast_vote(action_name=action_name, form=form_factory())
+        with capture_published() as published:
+            broadcast_vote(action_name=action_name, form=form_factory())
+        assert len(published) == 0
 
     def test_valid_vote_without_request_does_not_publish(
         self, poll: Poll, monkeypatch: pytest.MonkeyPatch

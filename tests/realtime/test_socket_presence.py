@@ -16,11 +16,11 @@ from next.realtime.frames import Close
 from next.realtime.manager import broker_manager
 from next.realtime.messages import Message
 from next.realtime.roster import EVENT
-from next.realtime.socket import Handshake, TopicSocket
+from next.realtime.socket import Handshake, SocketClock, TopicSocket
 from next.testing.realtime import (
     MemoryPort,
     SocketTicket,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     issue_socket_ticket,
     override_websocket_mount,
 )
@@ -294,6 +294,144 @@ def test_watchdog_drop_leaves_the_roster(
     assert "dropped a client that stopped reading" in caplog.text
 
 
+class _ManualClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+_LIVENESS_HEARTBEAT = 0.05
+
+
+def _live_socket(
+    port: MemoryPort, ticket: SocketTicket, broker: BrokerBackend, clock: _ManualClock
+) -> TopicSocket:
+    handshake = Handshake(ticket.credential, AnonymousUser(), None)
+    return TopicSocket(
+        port,
+        handshake,
+        broker=broker,
+        heartbeat=_LIVENESS_HEARTBEAT,
+        clock=SocketClock(monotonic=clock),
+    )
+
+
+async def _ping(port: MemoryPort) -> None:
+    async with asyncio.timeout(5):
+        while (await port.receive_json())["type"] != "ping":
+            pass
+
+
+def test_a_peer_silent_two_heartbeats_past_a_ping_is_dropped_from_the_roster(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=socket_module.__name__)
+    ticket = issue_session_ticket(presence=True)
+
+    async def scenario() -> None:
+        broker = _broker()
+        clock = _ManualClock()
+        port = MemoryPort()
+        socket = _live_socket(port, ticket, broker, clock)
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        await _ping(port)
+        clock.now = 2 * _LIVENESS_HEARTBEAT
+        await asyncio.sleep(4 * _LIVENESS_HEARTBEAT)
+        assert not task.done()
+        assert broker.presence(_TOPIC).count == 1
+        clock.now += 0.001
+        await _finish(task)
+        assert port.close_code is None
+        assert broker.presence(_TOPIC).count == 0
+
+    asyncio.run(scenario())
+    assert "dropped a client that stopped answering" in caplog.text
+
+
+def test_a_peer_answering_every_ping_stays_in_the_roster() -> None:
+    ticket = issue_session_ticket(presence=True)
+
+    async def scenario() -> None:
+        broker = _broker()
+        clock = _ManualClock()
+        port = MemoryPort()
+        socket = _live_socket(port, ticket, broker, clock)
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        for _ in range(6):
+            await _ping(port)
+            port.push_json({"type": "pong"})
+            clock.now += _LIVENESS_HEARTBEAT
+        assert not task.done()
+        assert broker.presence(_TOPIC).count == 1
+        port.disconnect()
+        await _finish(task)
+
+    asyncio.run(scenario())
+
+
+async def _trickle(broker: BrokerBackend) -> None:
+    while True:
+        await broker.apublish(_TOPIC, refresh_envelope())
+        await asyncio.sleep(_LIVENESS_HEARTBEAT / 5)
+
+
+def test_a_silent_peer_on_a_trickling_topic_is_pinged_and_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=socket_module.__name__)
+    ticket = issue_session_ticket(presence=True)
+
+    async def scenario() -> None:
+        broker = _broker()
+        clock = _ManualClock()
+        port = MemoryPort()
+        socket = _live_socket(port, ticket, broker, clock)
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        assert (await _frame(port))["type"] == "hello"
+        trickle = asyncio.create_task(_trickle(broker))
+        await _ping(port)
+        clock.now = 2 * _LIVENESS_HEARTBEAT
+        await asyncio.sleep(4 * _LIVENESS_HEARTBEAT)
+        assert not task.done()
+        clock.now += 0.001
+        await _finish(task)
+        trickle.cancel()
+        assert port.close_code is None
+        assert broker.presence(_TOPIC).count == 0
+
+    asyncio.run(scenario())
+    assert "dropped a client that stopped answering" in caplog.text
+
+
+def test_a_ponging_peer_on_a_trickling_topic_stays() -> None:
+    ticket = issue_session_ticket(presence=True)
+
+    async def scenario() -> None:
+        broker = _broker()
+        clock = _ManualClock()
+        port = MemoryPort()
+        socket = _live_socket(port, ticket, broker, clock)
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        trickle = asyncio.create_task(_trickle(broker))
+        for _ in range(4):
+            await _ping(port)
+            port.push_json({"type": "pong"})
+            clock.now += 3 * _LIVENESS_HEARTBEAT
+        assert not task.done()
+        assert broker.presence(_TOPIC).count == 1
+        trickle.cancel()
+        port.disconnect()
+        await _finish(task)
+
+    asyncio.run(scenario())
+
+
 def test_idle_heartbeat_touches_the_record_before_its_ping() -> None:
     ticket = issue_session_ticket(presence=True)
 
@@ -371,7 +509,7 @@ def test_app_identifies_the_session_user_by_the_ticket_reference(
 
     async def scenario() -> None:
         with override_websocket_mount():
-            communicator = WebsocketCommunicator(
+            communicator = WebSocketCommunicator(
                 WebSocketApp(),
                 "/_next/ws/",
                 headers=[

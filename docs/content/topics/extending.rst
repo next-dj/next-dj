@@ -336,6 +336,9 @@ A port is the narrow surface one subsystem calls another through.
    * - ``partial_shaper_slot``
      - ``next.partial.ports.PartialShaperImpl``
      - Reads the partial intent off a request and shapes page and form responses into envelopes.
+   * - ``realtime_negotiation_slot``
+     - ``next.realtime.ports.RealtimeNegotiationImpl``
+     - Answers the transports and the partial content types the ``$realtime`` entry of a page carries.
    * - ``router_access_slot``
      - ``next.urls.ports.RouterAccessImpl``
      - Builds router backends and managers and answers the URL pattern parser.
@@ -349,7 +352,7 @@ A port is the narrow surface one subsystem calls another through.
      - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all eight, ahead of every step that imports user code.
+``NextFrameworkConfig.ready()`` binds all nine, ahead of every step that imports user code.
 Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
@@ -466,7 +469,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all eight slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all nine slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

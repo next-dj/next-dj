@@ -5,7 +5,6 @@ import importlib
 import json
 import logging
 import math
-import os
 import secrets
 import threading
 import time
@@ -31,6 +30,7 @@ from weakref import WeakKeyDictionary
 from django.core.exceptions import ImproperlyConfigured
 
 from next.partial.envelope import Envelope
+from next.utils import after_fork
 
 from .backends import BrokerBackend
 from .errors import BrokerConnectionError
@@ -81,6 +81,7 @@ if size > 0 then
   redis.call('LTRIM', KEYS[2], 0, size - 1)
   redis.call('PEXPIRE', KEYS[2], ARGV[5])
 end
+redis.call('PEXPIRE', KEYS[1], ARGV[5])
 redis.call('PUBLISH', ARGV[1], payload)
 return {state[1], epoch}
 """
@@ -153,15 +154,19 @@ _LATEST = """
 local function latest(payload)
   local holders = redis.call(
     'ZRANGEBYLEX', KEYS[6], '[' .. payload .. SEP, '(' .. payload .. string.char(1))
-  local best = 0
+  local count, best = 0, 0
   for _, holder in ipairs(holders) do
-    local deadline = tonumber(
-      redis.call('ZSCORE', KEYS[4], string.sub(holder, #payload + 2)))
-    if deadline > best then
-      best = deadline
+    local connection = string.sub(holder, #payload + 2)
+    local deadline = redis.call('ZSCORE', KEYS[4], connection)
+    if deadline then
+      count = count + 1
+      best = math.max(best, tonumber(deadline))
+    else
+      redis.call('ZREM', KEYS[6], holder)
+      redis.call('HDEL', KEYS[2], connection)
     end
   end
-  return #holders, best
+  return count, best
 end
 """
 _RESCORE = """
@@ -421,7 +426,10 @@ class _Watch:
 
 
 class RedisBroker(BrokerBackend, PresenceWindow):
-    """Deliver messages across processes through Redis Pub/Sub."""
+    """Deliver messages across processes through Redis Pub/Sub.
+
+    A topic's sequence and log expire `REPLAY['TTL']` seconds after its last publish.
+    """
 
     def __init__(
         self,
@@ -1068,11 +1076,7 @@ def _forget_async_clients() -> None:
         broker.forget_clients()
 
 
-def _without_fork(**_hooks: Callable[[], object]) -> None:
-    """Stand in for os.register_at_fork on platforms that cannot fork."""
-
-
-getattr(os, "register_at_fork", _without_fork)(after_in_child=_forget_async_clients)
+after_fork(_forget_async_clients)
 
 
 __all__ = ["RedisBroker"]

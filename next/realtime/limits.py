@@ -1,6 +1,5 @@
 """Per-connection limits on the frames a WebSocket client sends upstream."""
 
-import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
+from next.utils import int_between, positive_number
 
 from .frames import MAX_INBOUND_BYTES
 
@@ -25,49 +25,34 @@ MAX_TIMEOUT: Final = 600
 MAX_REPLY_BYTES: Final = 64 * 1024 * 1024
 
 
-def _number(value: object, ceiling: float) -> bool:
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and 0 < value <= ceiling
-    )
-
-
-def _integer(value: object, ceiling: int) -> bool:
-    return (
-        isinstance(value, int) and not isinstance(value, bool) and 0 < value <= ceiling
-    )
-
-
 def valid_rate(value: object) -> bool:
     """Whether an `UPSTREAM['RATE']` value is a positive number of frames a second."""
-    return _number(value, MAX_RATE)
+    return positive_number(value, MAX_RATE)
 
 
 def valid_burst(value: object) -> bool:
     """Whether an `UPSTREAM['BURST']` value is a positive whole number of frames."""
-    return _integer(value, MAX_BURST)
+    return int_between(value, 1, MAX_BURST)
 
 
 def valid_max_bytes(value: object) -> bool:
     """Whether an `UPSTREAM['MAX_BYTES']` value fits inside one inbound frame."""
-    return _integer(value, MAX_INBOUND_BYTES)
+    return int_between(value, 1, MAX_INBOUND_BYTES)
 
 
 def valid_concurrency(value: object) -> bool:
     """Whether an `UPSTREAM` or `TUNNEL` `CONCURRENCY` is a positive count of tasks."""
-    return _integer(value, MAX_CONCURRENCY)
+    return int_between(value, 1, MAX_CONCURRENCY)
 
 
 def valid_timeout(value: object) -> bool:
     """Whether an `UPSTREAM` or `TUNNEL` `TIMEOUT` is a positive number of seconds."""
-    return _number(value, MAX_TIMEOUT)
+    return positive_number(value, MAX_TIMEOUT)
 
 
 def valid_reply_bytes(value: object) -> bool:
     """Whether a `TUNNEL['MAX_REPLY_BYTES']` value is a positive byte count."""
-    return _integer(value, MAX_REPLY_BYTES)
+    return int_between(value, 1, MAX_REPLY_BYTES)
 
 
 @dataclass(frozen=True, slots=True)

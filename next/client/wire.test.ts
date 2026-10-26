@@ -1086,8 +1086,10 @@ describe("Wire before-request", () => {
 describe("Wire echo request id", () => {
   function withRemember(
     responder: (url: string, init: RequestInit) => Promise<Response>,
+    tunnel?: () => Promise<string>,
   ) {
     const remembered: string[] = [];
+    const forgotten: string[] = [];
     const calls: { init: RequestInit }[] = [];
     const wire = new Wire({
       fetch: (url, init) => {
@@ -1099,8 +1101,10 @@ describe("Wire echo request id", () => {
       onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
       csrf: createCsrf({ mint: chunkModules.csrf }),
       rememberRequestId: (id) => remembered.push(id),
+      forgetRequestId: (id) => forgotten.push(id),
+      ...(tunnel !== undefined ? { tunnel } : {}),
     });
-    return { wire, remembered, calls };
+    return { wire, remembered, forgotten, calls };
   }
 
   function header(calls: { init: RequestInit }[], name: string): string | null {
@@ -1113,6 +1117,51 @@ describe("Wire echo request id", () => {
     const stamped = header(h.calls, HEADER_REQUEST_ID);
     expect(stamped).toBeDefined();
     expect(h.remembered).toEqual([stamped]);
+    expect(h.forgotten).toEqual([]);
+  });
+
+  it("forgets the id of a mutation that failed on the network", async () => {
+    const h = withRemember(() => Promise.reject(new TypeError("offline")));
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(h.forgotten).toEqual([header(h.calls, HEADER_REQUEST_ID)]);
+  });
+
+  it("forgets the id of a tunneled mutation that got no reply", async () => {
+    const h = withRemember(
+      async () => envelopeResponse(ENVELOPE),
+      async () => "closed",
+    );
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      transport: "any",
+    });
+    expect(h.calls).toHaveLength(0);
+    expect(h.remembered).toHaveLength(1);
+    expect(h.forgotten).toEqual(h.remembered);
+  });
+
+  it("leaves a caller's own request id alone when the tunnel gets no reply", async () => {
+    const h = withRemember(
+      async () => envelopeResponse(ENVELOPE),
+      async () => "closed",
+    );
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      transport: "any",
+      headers: { [HEADER_REQUEST_ID]: "mine" },
+    });
+    expect(h.remembered).toEqual([]);
+    expect(h.forgotten).toEqual([]);
+  });
+
+  it("forgets nothing for a safe GET that failed on the network", async () => {
+    const h = withRemember(() => Promise.reject(new TypeError("offline")));
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.forgotten).toEqual([]);
   });
 
   it("does not stamp a request id on a safe GET", async () => {

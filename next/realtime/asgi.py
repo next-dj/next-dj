@@ -29,7 +29,7 @@ from django.http.request import split_domain_port
 from django.utils.http import is_same_domain
 
 from . import frames
-from .checks import tunnel_origin_messages, websocket_deployment_messages
+from .deployment import tunnel_origin_messages, websocket_deployment_messages
 from .frames import Close
 from .limits import SocketLimits
 from .manager import broker_manager

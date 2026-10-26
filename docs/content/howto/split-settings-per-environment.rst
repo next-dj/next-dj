@@ -53,8 +53,8 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
    INSTALLED_APPS = [
        "django.contrib.contenttypes",
        "django.contrib.auth",
-       "django.contrib.staticfiles",
        "next",
+       "django.contrib.staticfiles",
        "notes",
    ]
 
@@ -69,6 +69,8 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
            },
        ],
    }
+
+``next`` stays above ``django.contrib.staticfiles`` so its ``runserver`` wins, as :ref:`the install guide explains <intro-install-app-order>`.
 
 Override for development
 ~~~~~~~~~~~~~~~~~~~~~~~~

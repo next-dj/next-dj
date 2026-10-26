@@ -122,7 +122,7 @@ load: # run the realtime load harness against REDIS_URL or a throwaway Redis con
 		cid=""; \
 		trap 'status=$$?; if [ -n "$$cid" ]; then docker stop "$$cid" > /dev/null 2>&1 || true; fi; exit $$status' EXIT; \
 		trap 'exit 130' INT TERM; \
-		cid=$$(docker run -d --rm --name "$$name" -p 127.0.0.1::6379 redis:7-alpine); \
+		cid=$$(docker run -d --rm --name "$$name" -p 127.0.0.1::6379 redis:8-alpine); \
 		mapping=$$(docker port "$$cid" 6379/tcp); \
 		port=$$(printf '%s\n' "$$mapping" | head -n 1 | sed 's/.*://'); \
 		case "$$port" in ''|*[!0-9]*) echo "ERROR: no host port for Redis in '$$mapping'"; exit 1;; esac; \

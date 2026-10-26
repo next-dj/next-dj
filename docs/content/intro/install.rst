@@ -90,6 +90,14 @@ The same instructions work with any other names if you adapt the imports.
 Add next.dj to INSTALLED_APPS
 -----------------------------
 
+.. _intro-install-app-order:
+
+.. note::
+
+   ``next`` sits above ``django.contrib.staticfiles`` because both apps ship a ``runserver`` command and Django runs the one of the app listed first, as :ref:`django:overriding-commands` describes.
+   The ``runserver`` of ``next`` is the one that serves the project over ASGI with the realtime WebSocket.
+   With ``django.contrib.staticfiles`` listed first the development server stays on WSGI and the pages silently speak SSE, which ``manage.py check`` reports as ``next.W148``.
+
 Open ``config/settings.py`` and register both ``next`` and your application in :doc:`INSTALLED_APPS <django:ref/settings>`.
 
 .. code-block:: python
@@ -100,8 +108,8 @@ Open ``config/settings.py`` and register both ``next`` and your application in :
        "django.contrib.contenttypes",
        "django.contrib.sessions",
        "django.contrib.messages",
-       "django.contrib.staticfiles",
        "next",
+       "django.contrib.staticfiles",
        "notes",
    ]
 

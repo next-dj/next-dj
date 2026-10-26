@@ -14,6 +14,7 @@ from asgiref.sync import iscoroutinefunction
 from django.utils.module_loading import autodiscover_modules
 
 from next.conf import next_framework_settings
+from next.utils import after_fork
 
 from .access import run_pooled
 from .signals import areceived
@@ -93,7 +94,7 @@ def handler_pool() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(workers, thread_name_prefix="next-handler")
 
 
-os.register_at_fork(after_in_child=handler_pool.cache_clear)
+after_fork(handler_pool.cache_clear)
 
 
 def _runner(handler: Handler) -> Callable[[Upstream], Awaitable[None]]:

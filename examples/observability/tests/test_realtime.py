@@ -27,7 +27,7 @@ from next.realtime.signals import UnsubscribeReason, stream_subscribed
 from next.testing import (
     PartialEnvelope,
     SseReader,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     aissue_socket_ticket,
     capture_published,
     envelope_of,
@@ -147,12 +147,12 @@ class TestWebSocket:
         with override_websocket_mount(), memory_broker():
             asyncio.run(scenario())
 
-    async def connected(self, *, presence: bool = False) -> WebsocketCommunicator:
+    async def connected(self, *, presence: bool = False) -> WebSocketCommunicator:
         ticket = await aissue_socket_ticket(
             (PULSE_TOPIC,), authorizer_ref="obs.realtime.can_watch", presence=presence
         )
         app = application(get_asgi_application())
-        communicator = WebsocketCommunicator(
+        communicator = WebSocketCommunicator(
             app, "/_next/ws/", [*WS_HEADERS, ticket.cookie], timeout=5
         )
         connected, _ = await communicator.connect()

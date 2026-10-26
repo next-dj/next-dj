@@ -21,11 +21,9 @@ class Rows(Protocol):
 
     def __getitem__(self, key: slice, /) -> Iterable[Any]:
         """Return the rows between two offsets."""
-        ...
 
     def __len__(self) -> int:
         """Return how many rows there are."""
-        ...
 
 
 def count_rows(rows: Rows) -> int:

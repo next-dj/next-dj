@@ -48,7 +48,7 @@ def _json_object(text: object) -> dict[str, object]:
             raise AssertionError(msg)
 
 
-class WebsocketCommunicator(ApplicationCommunicator):
+class WebSocketCommunicator(ApplicationCommunicator):
     """Drive any ASGI application through one WebSocket connection in a test.
 
     Frames passed over while waiting for a hello, ack or reply stay for later receives.
@@ -654,7 +654,7 @@ __all__ = [
     "SocketTicket",
     "SseEvent",
     "SseReader",
-    "WebsocketCommunicator",
+    "WebSocketCommunicator",
     "aissue_socket_ticket",
     "capture_published",
     "issue_socket_ticket",

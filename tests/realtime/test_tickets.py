@@ -99,7 +99,7 @@ def test_ticket_other_session_or_tampered_token_is_rejected() -> None:
 
 
 @pytest.mark.django_db()
-def test_ticket_expired_or_malformed_signed_claims_are_rejected() -> None:
+def test_ticket_expired_or_malformed_claims_resigned_validly_are_rejected() -> None:
     request = RequestFactory().get("/updates/")
     request.session = SessionStore()
     grant = issue_ticket(
@@ -111,8 +111,6 @@ def test_ticket_expired_or_malformed_signed_claims_are_rejected() -> None:
     ):
         verify_ticket(grant.token, request.session.session_key)
 
-    # Re-sign malformed payloads so structural validation is isolated from signature
-    # failures.
     assert request.session.session_key is not None
     session_digest = salted_hmac(
         _SALT,

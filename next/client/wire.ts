@@ -91,7 +91,6 @@ export interface WireRequest {
   key?: string;
   // The page a mutation was submitted from, which receives the meta op of the reply.
   owner?: string | undefined;
-  // `any` lets a POST ride the open WebSocket, absent or `http` keeps it on fetch.
   transport?: WireTransport;
   wait?: boolean | "latest";
   navigate?: boolean;
@@ -132,6 +131,8 @@ export interface WireDeps {
   // Every mutating request stamps X-Next-Request-Id and reports it here so the
   // SSE echo ring drops the matching stream event. Absent, no id is stamped.
   rememberRequestId?: (id: string) => void;
+  // A mutation with no reply may still have committed, so its echo must refresh.
+  forgetRequestId?: (id: string) => void;
   // A string is why a request the server received got no reply, undefined means fetch.
   tunnel?: (
     target: string,
@@ -156,10 +157,11 @@ export class Wire {
   readonly #csrf: CsrfSource;
   readonly #dirtySnapshot: () => number;
   readonly #rememberRequestId: (id: string) => void;
+  readonly #forgetRequestId: (id: string) => void;
   readonly #tunnel: NonNullable<WireDeps["tunnel"]>;
 
-  // Latest-wins per-target GET queues and the per-uid mutation lock with its waiters. A
-  // queue holds only its in-flight request, so a key goes once it settles or aborts.
+  // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds
+  // only its in-flight request, so a key is removed once it settles or is aborted.
   readonly #queues = new Map<string, AbortController>();
   readonly #busy = new Map<string, ((go: boolean) => void)[]>();
   readonly #parseHooks = new Map<string, ParseHook>();
@@ -175,6 +177,7 @@ export class Wire {
     this.#csrf = deps.csrf;
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
+    this.#forgetRequestId = deps.forgetRequestId ?? (() => undefined);
     this.#tunnel = deps.tunnel ?? (() => undefined);
   }
 
@@ -232,8 +235,7 @@ export class Wire {
     // An abortable POST (inline validation) queues like a safe GET, taking no lock.
     let release: (() => void) | undefined;
     if (!safe && !request.abortable && uid !== undefined) {
-      // A second submit is dropped while busy, so a double click sends one fetch. A
-      // waiting one takes the lock over in turn, and a latest one drops older waiters.
+      // A second submit is dropped while busy, so a double click sends one fetch.
       const busy = this.#busy.get(uid);
       if (busy) {
         if (!request.wait) return none("dropped");
@@ -315,10 +317,21 @@ export class Wire {
       method,
       intent: { zone: request.zone, uid: request.uid },
     });
-    // The headers and the body read run inside the try too, since a caller's header
-    // name can be invalid and an abort can reject the body after the headers arrived.
+    // Inside the try, since a caller's header name can be invalid and an abort or a
+    // dropped connection can reject the body read after the headers arrived.
+    let own: string | undefined;
     try {
       const headers = this.#headers(request, method, csrf);
+      // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
+      if (
+        !SAFE_METHODS.has(method) &&
+        request.abortable !== true &&
+        !headers.has(HEADER_REQUEST_ID)
+      ) {
+        own = newId();
+        headers.set(HEADER_REQUEST_ID, own);
+        this.#rememberRequestId(own);
+      }
       const init: RequestInit = { method, headers, mode: "same-origin" };
       if (request.body !== undefined) init.body = request.body;
       if (entry !== undefined) init.signal = entry.signal;
@@ -327,6 +340,7 @@ export class Wire {
           ? await this.#tunnel(target, init, csrf?.header)
           : undefined;
       if (typeof tunneled === "string" && request.abortable !== true) {
+        if (own !== undefined) this.#forgetRequestId(own);
         const failed = this.#fail({
           kind: "undelivered",
           url: request.url,
@@ -344,6 +358,7 @@ export class Wire {
     } catch (error) {
       // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error) || entry?.signal.aborted === true) return none("dropped");
+      if (own !== undefined) this.#forgetRequestId(own);
       return this.#fail({ kind: "network", error });
     }
   }
@@ -453,15 +468,8 @@ export class Wire {
     const version = this.#version();
     if (version) headers.set(HEADER_VERSION, version);
     if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);
-    if (!SAFE_METHODS.has(method)) {
-      if (csrf?.token !== undefined) headers.set(csrf.header, csrf.token);
-      // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
-      if (request.abortable !== true && !headers.has(HEADER_REQUEST_ID)) {
-        const id = newId();
-        headers.set(HEADER_REQUEST_ID, id);
-        this.#rememberRequestId(id);
-      }
-    }
+    if (!SAFE_METHODS.has(method) && csrf?.token !== undefined)
+      headers.set(csrf.header, csrf.token);
     return headers;
   }
 }

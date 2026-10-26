@@ -18,7 +18,7 @@ from next.realtime.frames import Close
 from next.realtime.socket import Handshake, TopicSocket
 from next.testing.realtime import (
     SocketTicket,
-    WebsocketCommunicator,
+    WebSocketCommunicator,
     issue_socket_ticket,
     override_websocket_mount,
 )
@@ -385,8 +385,8 @@ def test_inbound_yields_text_and_bytes_until_disconnect() -> None:
 
 def _communicator(
     app: object, headers: list[tuple[bytes, bytes]], path: str = "/_next/ws/"
-) -> WebsocketCommunicator:
-    return WebsocketCommunicator(app, path, headers=[_HOST, *headers])
+) -> WebSocketCommunicator:
+    return WebSocketCommunicator(app, path, headers=[_HOST, *headers])
 
 
 @pytest.mark.django_db(transaction=True)
@@ -541,7 +541,7 @@ def test_application_routes_only_the_configured_path(
             calls.append(scope["path"])
 
     async def scenario() -> None:
-        communicator = WebsocketCommunicator(
+        communicator = WebSocketCommunicator(
             application(_http_ok, websocket=Recording()), path
         )
         communicator.scope["root_path"] = root_path
@@ -567,8 +567,8 @@ def test_application_routes_the_configured_websocket_path(route: str) -> None:
 
     async def scenario() -> None:
         router = application(_http_ok, websocket=Recording())
-        await WebsocketCommunicator(router, route).wait()
-        refused = WebsocketCommunicator(router, "/_next/ws/")
+        await WebSocketCommunicator(router, route).wait()
+        refused = WebSocketCommunicator(router, "/_next/ws/")
         assert await refused.connect() == (False, 1000)
         await refused.wait()
 
@@ -598,7 +598,7 @@ def test_a_ticket_under_a_script_prefix_names_the_path_the_router_serves() -> No
 
     async def scenario() -> None:
         router = application(_http_ok, websocket=Recording())
-        await WebsocketCommunicator(router, url).wait()
+        await WebSocketCommunicator(router, url).wait()
 
     asyncio.run(scenario())
     assert url == "/app/_next/ws/"

@@ -172,8 +172,7 @@ def _since_idle(
 class _Roster:
     """The live attendance of one topic and the earliest moment a record can expire.
 
-    Connections sharing an encoded member are one attendee, one without a member alone.
-    Attendees keep the order of their first join, and `version` counts the changes.
+    Connections sharing an encoded member are one attendee, kept in first-join order.
     """
 
     __slots__ = (
@@ -303,7 +302,7 @@ class _Roster:
 class MemoryBroker(BrokerBackend, PresenceWindow):
     """Deliver messages within one process using bounded subscriber queues.
 
-    A replay log expires `REPLAY['TTL']` seconds after its last `published_at` stamp.
+    A replay log and its position expire `REPLAY['TTL']` seconds after the last publish.
     """
 
     def __init__(
@@ -328,7 +327,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         self.clock = clock
         self.replay_size, self.replay_ttl = replay_window(replay)
         self._lock = threading.RLock()
-        self._positions: dict[str, Position] = {}
+        self._positions: dict[str, tuple[Position, float]] = {}
         self._logs: defaultdict[str, deque[Message]] = defaultdict(self._new_log)
         self._sweep_at = -math.inf
         self._subscribers: dict[str, set[_SyncSubscriber | _AsyncSubscriber]] = (
@@ -343,18 +342,18 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         """Assign a topic sequence and notify all local subscribers."""
         envelope = self.validate_publication(topic, envelope)
         with self._lock:
-            current = self._positions.get(topic)
+            now = self.clock()
+            if now >= self._sweep_at:
+                self._sweep(now)
+            current = self._position(topic, now)
             position = (
                 Position(secrets.token_hex(8), 1)
-                if current is None
+                if current is _NEVER_PUBLISHED
                 else Position(current.epoch, current.seq + 1)
             )
-            self._positions[topic] = position
-            now = self.clock()
+            self._positions[topic] = (position, now)
             message = Message(topic, position.seq, envelope, now, position.epoch)
             if self.replay_size:
-                if now >= self._sweep_at:
-                    self._sweep(now)
                 self._logs[topic].append(message)
             self._fan_out(topic, message)
         return message
@@ -378,9 +377,21 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
             elif not subscriber.enqueue(message):
                 self._remove_subscriber(subscriber)
 
+    def _position(self, topic: str, now: float) -> Position:
+        """Return the position of a topic, never published once a TTL passed idle."""
+        entry = self._positions.get(topic)
+        if entry is None or now - entry[1] >= self.replay_ttl:
+            return _NEVER_PUBLISHED
+        return entry[0]
+
     def _sweep(self, now: float) -> None:
-        """Drop the expired logs on the first publish a TTL after the last sweep."""
+        """Drop expired logs and positions at most once a TTL, on a publish."""
         ttl = self.replay_ttl
+        self._positions = {
+            topic: entry
+            for topic, entry in self._positions.items()
+            if now - entry[1] < ttl
+        }
         self._logs = defaultdict(
             self._new_log,
             {
@@ -406,10 +417,10 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         if not self.replay_size:
             return INCOMPLETE
         with self._lock:
-            current = self._positions.get(topic, _NEVER_PUBLISHED)
+            now = self.clock()
+            current = self._position(topic, now)
             log = self._logs.get(topic)
             logged = () if log is None else tuple(log)
-            now = self.clock()
         return replay_after(after, current, _since_idle(logged, now, self.replay_ttl))
 
     async def areplay(self, topic: str, after: Position) -> Replay:
@@ -618,10 +629,8 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         """Return the local topic positions, empty for topics never published."""
         selected = tuple(dict.fromkeys(validate_topic(topic) for topic in topics))
         with self._lock:
-            return {
-                topic: self._positions.get(topic, _NEVER_PUBLISHED)
-                for topic in selected
-            }
+            now = self.clock()
+            return {topic: self._position(topic, now) for topic in selected}
 
     @override
     async def apositions(self, topics: Sequence[str]) -> dict[str, Position]:

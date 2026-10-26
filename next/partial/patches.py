@@ -454,7 +454,6 @@ class Patches:
     def context(self, **names) -> "Patches":
         """Merge named serialize provider values into the client context.
 
-        A reserved init-payload key raises whether or not the origin page registered it.
         Straight after a zone morph it merges into that morph's own context op.
         """
         data = self._wire_context(names)
@@ -834,8 +833,7 @@ class Patches:
     def _served_page(self, zone: str) -> "Path | None":
         """Return the intercept page serving `zone` of the request, else None.
 
-        It picks over the whole zone set, as the zone GET does. A zone that page does
-        not serve renders from the origin.
+        It picks over the whole zone set as the zone GET does, misses render the origin.
         """
         zones = partial_intent(self._require_request()).zones
         if not zones:

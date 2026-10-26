@@ -3,6 +3,7 @@
 Both transports share it, so a revoked session or topic closes SSE and WS alike.
 """
 
+import asyncio
 import enum
 import math
 import time
@@ -105,12 +106,19 @@ class AccessCheck:
         self._authorizer = authorizer
         self._session_key = session_key
         self._user = user
+        self._current = user
         self._interval = interval
         self._expires_at = expires_at
         self._clock = clock
         self._due_at = -math.inf
         self._verdict = Access.GRANTED
         self._bound = False
+        self._rechecking = asyncio.Lock()
+
+    @property
+    def user(self) -> object:
+        """Return the user the last granted recheck loaded, the baseline before one."""
+        return self._current
 
     def bind(self) -> None:
         """Revoke once the session is gone, since a handshake already found it live."""
@@ -123,12 +131,18 @@ class AccessCheck:
         return self._record(self._evaluate())
 
     async def acheck(self) -> Access:
-        """Recheck on the shared thread pool when the interval has elapsed."""
+        """Recheck on the shared thread pool when the interval has elapsed.
+
+        Concurrent callers share one evaluation, the later ones read its verdict.
+        """
         if not self._due():
             return self._verdict
         if self._authorizer is None and self._session_key is None:
             return self._record(Access.GRANTED)
-        return self._record(await run_detached(self._evaluate))
+        async with self._rechecking:
+            if not self._due():
+                return self._verdict
+            return self._record(await run_detached(self._evaluate))
 
     def _due(self) -> bool:
         """Whether to evaluate again, at the interval or at the session's deadline."""
@@ -164,6 +178,7 @@ class AccessCheck:
             for topic in self._topics:
                 if self._authorizer(user, topic) is not True:
                     return Access.TOPIC_DENIED
+        self._current = user
         return Access.GRANTED
 
     def _live_user(self, key: str) -> object | None:

@@ -89,6 +89,8 @@ export interface Stream {
   scan(root: ParentNode): void;
   // Feed an own request id into the echo ring so the matching event is dropped.
   remember(id: string): void;
+  // Drop the id of a mutation that got no reply, re-GETting if its echo was dropped.
+  forget(id: string): void;
   size(): number;
   /** Estimate server epoch time in milliseconds from recent stream frames. */
   now(): number;
@@ -120,6 +122,8 @@ interface Connection {
   bound: Set<string>;
   owners: Set<Element>;
   cursor: Map<string, Cursor>;
+  // Set once this socket's hello lands, so a frame is known to follow the live cursor.
+  live?: boolean;
   resync?: Resync;
 }
 
@@ -157,9 +161,9 @@ export function createStream(deps: StreamDeps): Stream {
   const pageUrl = deps.pageUrl ?? (() => currentUrl(doc));
   // Keyed by url so a re-scan of a re-inserted container opens no second stream.
   const connections = new Map<string, Connection>();
-  // A ring of the last ECHO_LIMIT own ids. A Set answers membership in constant
-  // time and keeps insertion order, so its first value is the oldest.
-  const echo = new Set<string>();
+  // A ring of the last ECHO_LIMIT own ids, each mapped to the connection that
+  // dropped its echo. A Map keeps insertion order, so its first key is the oldest.
+  const echo = new Map<string, Connection | undefined>();
   let paused = false;
   // The clock at the last pause, so resume measures the hidden span.
   let pausedAt = 0;
@@ -257,7 +261,7 @@ export function createStream(deps: StreamDeps): Stream {
     } else if (connection.resync !== undefined) {
       const pending = connection.resync;
       pending.owners.delete(connection);
-      // Existing page peers share a batch; a later peer has no owner yet.
+      // The batch passes to the page peers that have none of their own.
       for (const peer of pagePeers) {
         if (peer.resync === undefined) {
           peer.resync = pending;
@@ -324,10 +328,15 @@ export function createStream(deps: StreamDeps): Stream {
     const previous = connection.cursor.get(topic);
     if (previous?.[0] === epoch && seq <= previous[1]) return false;
     connection.cursor.set(topic, [epoch, seq]);
-    if (
-      previous !== undefined &&
-      (seq > previous[1] + 1 || (previous[0] !== epoch && previous[0] !== ""))
-    )
+    const restarted =
+      previous !== undefined && previous[0] !== epoch && previous[0] !== "";
+    // A topic idle past the replay TTL restarts at seq 1, all of it seen live.
+    const adopted =
+      restarted &&
+      seq === 1 &&
+      connection.live === true &&
+      connection.resync === undefined;
+    if (previous !== undefined && !adopted && (seq > previous[1] + 1 || restarted))
       resyncMany(connection, [{ topic, from: previous[1], to: seq }]);
     return true;
   }
@@ -350,6 +359,7 @@ export function createStream(deps: StreamDeps): Stream {
   function onHello(connection: Connection, data: string): void {
     const raw = control(data);
     if (raw === undefined) return;
+    connection.live = true;
     sampleTime(raw[SERVER_TIME]);
     const topics = raw.topics;
     if (!isRecord(topics)) return;
@@ -379,33 +389,44 @@ export function createStream(deps: StreamDeps): Stream {
   function remember(id: string): void {
     // Re-inserting renews the id, so its newest use decides its age.
     echo.delete(id);
-    echo.add(id);
+    echo.set(id, undefined);
     if (echo.size <= ECHO_LIMIT) return;
-    // The set always holds one entry above the limit, so oldest is never undefined.
-    const [oldest] = echo;
+    // The map always holds one entry above the limit, so oldest is never undefined.
+    const oldest = echo.keys().next().value;
     /* v8 ignore next */
     if (oldest !== undefined) echo.delete(oldest);
   }
 
-  function isEcho(id: string | undefined): boolean {
-    return id !== undefined && echo.has(id);
+  function isEcho(connection: Connection, id: string | undefined): boolean {
+    if (id === undefined || !echo.has(id)) return false;
+    echo.set(id, connection);
+    return true;
   }
 
-  // Parse a text body or take an object frame as is, then apply it unless it is the
-  // client's own echo. A parse error fires partial:error and the stream lives on.
+  // A mutation with no reply may have committed, and an echo already dropped for it
+  // left the page behind, so its page re-GETs. An echo still to come applies itself.
+  function forget(id: string): void {
+    const dropped = echo.get(id);
+    echo.delete(id);
+    if (dropped !== undefined && isCurrent(dropped)) resyncMany(dropped, []);
+  }
+
+  // A frame that fails to parse or apply fires partial:error and the stream lives on.
+  function onFrame(connection: Connection, data: PatchesData): void {
+    try {
+      onMessage(connection, data);
+    } catch (error) {
+      deps.dispatch("partial:error", {
+        kind: "parse",
+        body: typeof data === "string" ? data : JSON.stringify(data),
+        error,
+      } satisfies PartialError);
+    }
+  }
+
   function onMessage(connection: Connection, data: PatchesData): void {
-    let raw: unknown = data;
-    if (typeof data === "string")
-      try {
-        raw = (deps.parse ?? JSON.parse)(data);
-      } catch (error) {
-        deps.dispatch("partial:error", {
-          kind: "parse",
-          body: data,
-          error,
-        } satisfies PartialError);
-        return;
-      }
+    const raw: unknown =
+      typeof data === "string" ? (deps.parse ?? JSON.parse)(data) : data;
     if (isRecord(raw)) {
       sampleTime(raw[SERVER_TIME]);
       const topic = asString(raw[TOPIC]);
@@ -416,7 +437,7 @@ export function createStream(deps: StreamDeps): Stream {
         // The gap check runs first, so an own echo cannot hide a lost frame.
         if (
           (isSeq(seq) && !advance(connection, topic, epoch, seq)) ||
-          isEcho(asString(raw.request_id))
+          isEcho(connection, asString(raw.request_id))
         )
           return;
         currentMeta = {
@@ -446,7 +467,7 @@ export function createStream(deps: StreamDeps): Stream {
           currentMeta = undefined;
         }
         return;
-      } else if (isEcho(asString(raw.request_id))) {
+      } else if (isEcho(connection, asString(raw.request_id))) {
         return;
       }
       recordBound(connection, raw);
@@ -517,12 +538,15 @@ export function createStream(deps: StreamDeps): Stream {
     connection.control = transport.open(
       url,
       {
-        patches: live((data: PatchesData) => onMessage(connection, data)),
+        patches: live((data: PatchesData) => onFrame(connection, data)),
         hello: live((data: string) => onHello(connection, data)),
         skip: live((data: string) => onSkip(connection, data)),
         end: live((data: string) => onError(connection, asString(control(data)?.code))),
         clock: live(sampleTime),
-        opened: live<void>(() => setState(connection, "open")),
+        opened: live<void>(() => {
+          connection.live = false;
+          setState(connection, "open");
+        }),
         closed: live((reason: "fatal" | "transient") => {
           if (reason === "fatal") onError(connection);
           else setState(connection, "connecting");
@@ -602,6 +626,7 @@ export function createStream(deps: StreamDeps): Stream {
   return {
     scan,
     remember,
+    forget,
     size: () => connections.size,
     now: () => now() + offset(),
     offset,

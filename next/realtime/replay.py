@@ -1,6 +1,5 @@
 """Replay contract that lets a reconnecting subscriber catch up from a broker log."""
 
-import math
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
+from next.utils import int_between, positive_number
 
 from .errors import BrokerConnectionError
 from .messages import Message, Position
@@ -41,11 +41,9 @@ class ReplayingBroker(Protocol):
 
     def replay(self, topic: str, after: Position) -> Replay:
         """Return the messages numbered after `after` in ascending order."""
-        ...
 
     async def areplay(self, topic: str, after: Position) -> Replay:
         """Return the messages after `after` through the asynchronous API."""
-        ...
 
 
 def valid_size(value: object) -> bool:
@@ -53,11 +51,7 @@ def valid_size(value: object) -> bool:
 
     A replay reads and copies the whole log of a topic, so the cap bounds that read.
     """
-    return (
-        isinstance(value, int)
-        and not isinstance(value, bool)
-        and 0 <= value <= MAX_SIZE
-    )
+    return int_between(value, 0, MAX_SIZE)
 
 
 def valid_ttl(value: object) -> bool:
@@ -65,12 +59,7 @@ def valid_ttl(value: object) -> bool:
 
     The cap keeps the Redis `PEXPIRE` milliseconds far inside what Redis accepts.
     """
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and 0 < value <= MAX_TTL
-    )
+    return positive_number(value, MAX_TTL)
 
 
 def replay_window(window: Mapping[str, object] | None = None) -> tuple[int, float]:

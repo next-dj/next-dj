@@ -21,7 +21,7 @@ def active_transports() -> tuple[str, ...]:
     selected = realtime.get("TRANSPORTS") if isinstance(realtime, Mapping) else None
     if selected is None:
         return ("ws", "sse") if _websocket_mounted.is_set() else ("sse",)
-    if any(item == "ws" for item in selected):
+    if "ws" in selected:
         return ("ws", "sse")
     return ("sse",)
 

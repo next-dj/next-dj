@@ -3,8 +3,6 @@
 import heapq
 import json
 import logging
-import math
-import os
 import threading
 import time
 import weakref
@@ -20,6 +18,7 @@ from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
 from next.partial.envelope import Envelope, Patch
 from next.partial.manager import asset_version
+from next.utils import after_fork, int_between, positive_number
 
 from .errors import InvalidMemberError
 from .messages import Message
@@ -72,37 +71,29 @@ class PresenceBroker(Protocol):
         self, topic: str, connection: str, member: Member | None, ttl: float
     ) -> None:
         """Record a connection on a topic until `ttl` seconds pass without a touch."""
-        ...
 
     def leave(self, topic: str, connection: str) -> None:
         """Forget a connection on a topic."""
-        ...
 
     def touch(self, topic: str, connection: str, ttl: float) -> bool:
         """Push a connection's deadline out, False when it holds no record to push."""
-        ...
 
     def presence(self, topic: str) -> Presence:
         """Return the attendance snapshot of a topic, never with an expired attendee."""
-        ...
 
     async def ajoin(
         self, topic: str, connection: str, member: Member | None, ttl: float
     ) -> None:
         """Record a connection through the asynchronous API."""
-        ...
 
     async def aleave(self, topic: str, connection: str) -> None:
         """Forget a connection through the asynchronous API."""
-        ...
 
     async def atouch(self, topic: str, connection: str, ttl: float) -> bool:
         """Push a connection's deadline out through the asynchronous API."""
-        ...
 
     async def apresence(self, topic: str) -> Presence:
         """Return the attendance snapshot of a topic through the asynchronous API."""
-        ...
 
 
 def valid_window(value: object) -> bool:
@@ -110,30 +101,17 @@ def valid_window(value: object) -> bool:
 
     The Redis lock rounds it up to whole milliseconds, so any positive value holds one.
     """
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and 0 < value <= MAX_WINDOW
-    )
+    return positive_number(value, MAX_WINDOW)
 
 
 def valid_snapshot_size(value: object) -> bool:
     """Whether a `PRESENCE['SIZE']` value is an integer from 0 up to `MAX_MEMBERS`."""
-    return (
-        isinstance(value, int)
-        and not isinstance(value, bool)
-        and 0 <= value <= MAX_MEMBERS
-    )
+    return int_between(value, 0, MAX_MEMBERS)
 
 
 def valid_member_bytes(value: object) -> bool:
     """Whether a `PRESENCE['MEMBER_BYTES']` value is an integer from 1 up to the cap."""
-    return (
-        isinstance(value, int)
-        and not isinstance(value, bool)
-        and 0 < value <= MAX_MEMBER_BYTES
-    )
+    return int_between(value, 1, MAX_MEMBER_BYTES)
 
 
 def presence_limits(limits: Mapping[str, object] | None = None) -> PresenceLimits:
@@ -451,11 +429,7 @@ def _reset_schedules() -> None:
         schedule.reset()
 
 
-def _without_fork(**_hooks: Callable[[], object]) -> None:
-    """Stand in for os.register_at_fork on platforms that cannot fork."""
-
-
-getattr(os, "register_at_fork", _without_fork)(after_in_child=_reset_schedules)
+after_fork(_reset_schedules)
 
 
 __all__ = [

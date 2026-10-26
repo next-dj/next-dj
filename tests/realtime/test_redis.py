@@ -18,10 +18,11 @@ from next.partial import Patches
 from next.realtime import (
     BrokerConnectionError,
     Position,
+    Presence,
     RedisBroker,
     redis as redis_backend,
 )
-from tests.support.realtime import message_payload, refresh_envelope
+from tests.support.realtime import message_payload, refresh_envelope, silent_schedule
 
 
 class _Clients:
@@ -675,10 +676,9 @@ def test_redis_invalid_url_or_prefix_raises(clients) -> None:
             RedisBroker({"OPTIONS": options})
 
 
-def test_redis_broker_without_redis_package_names_the_optional_extra(
+def test_redis_broker_with_redis_blocked_in_sys_modules_names_the_optional_extra(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A None entry in sys.modules makes the import fail as if redis were absent.
     monkeypatch.setitem(sys.modules, "redis", None)
     monkeypatch.setitem(sys.modules, "redis.asyncio", None)
     with pytest.raises(ImproperlyConfigured, match=r"next\.dj\[broker\]"):
@@ -886,10 +886,6 @@ def test_redis_forked_child_forgets_parent_async_clients(clients) -> None:
     loop.close()
 
 
-def test_redis_fork_hook_stand_in_accepts_hooks() -> None:
-    assert redis_backend._without_fork(after_in_child=lambda: None) is None
-
-
 def test_redis_positions_keep_an_epoch_whose_counter_is_gone(clients) -> None:
     backend = RedisBroker()
     published = backend.publish("poll:1", refresh_envelope())
@@ -919,3 +915,25 @@ def test_redis_subclass_topic_key_lays_out_every_stored_key(clients) -> None:
     assert [
         m.seq for m in backend.replay("poll:1", Position(first.epoch, 0)).messages
     ] == [1]
+
+
+@pytest.mark.parametrize("operation", ["join_again", "join_another", "touch", "leave"])
+def test_redis_presence_heals_an_evicted_identified_set(clients, operation) -> None:
+    backend = RedisBroker(schedule=silent_schedule)
+    backend.join("room", "a", {"id": 1}, 30)
+    backend.join("room", "b", {"id": 1}, 30)
+    clients.sync.delete(backend.topic_key("identified", "room"))
+    if operation == "join_again":
+        backend.join("room", "a", {"id": 2}, 30)
+    elif operation == "join_another":
+        backend.join("room", "c", {"id": 1}, 30)
+    elif operation == "touch":
+        assert backend.touch("room", "a", 30) is True
+    else:
+        backend.leave("room", "a")
+    backend.leave("room", "a")
+    backend.leave("room", "b")
+    backend.leave("room", "c")
+    assert backend.presence("room") == Presence(0)
+    backend.join("room", "d", {"id": 3}, 30)
+    assert backend.presence("room") == Presence(1, ({"id": 3},))

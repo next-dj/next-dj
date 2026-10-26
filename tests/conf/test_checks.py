@@ -25,6 +25,7 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "URL_NAME_TEMPLATE": "page_{name}",
     "URL_RESOLVER": "next.urls.TrieURLResolver",
     "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
+    "DEV_SERVER": "next.server.asgi.UvicornServer",
     "COMPONENT_TEMPLATE_LOADER": "next.components.CachedComponentTemplateLoader",
     "CSRF_DELIVERY": "auto",
     "NEXT_JS_OPTIONS": {},

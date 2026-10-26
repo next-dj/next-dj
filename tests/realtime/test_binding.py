@@ -40,7 +40,7 @@ from next.realtime.frames import Close
 from next.realtime.manager import broker_manager
 from next.realtime.tickets import issue_ticket, verify_ticket
 from next.testing import SseReader, override_next_settings
-from next.testing.realtime import WebsocketCommunicator, override_websocket_mount
+from next.testing.realtime import WebSocketCommunicator, override_websocket_mount
 from tests.support.realtime import ROOM_AUTHORIZER_REF
 
 
@@ -134,7 +134,7 @@ def _stream(request: HttpRequest) -> TopicStream:
 
 
 async def _asubscribe(cookie: str, ticket: str) -> str | int:
-    communicator = WebsocketCommunicator(
+    communicator = WebSocketCommunicator(
         WebSocketApp(),
         "/_next/ws/",
         headers=[

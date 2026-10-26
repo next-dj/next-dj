@@ -22,6 +22,7 @@ from next.realtime import (
     Replay,
     ReplayingBroker,
 )
+from next.realtime.backends import _since_idle
 from next.realtime.replay import (
     INCOMPLETE,
     MAX_SIZE,
@@ -203,18 +204,69 @@ def test_replay_log_expires_after_the_ttl_since_the_last_publish(
     assert _seqs(alive) == [2, 3]
     harness.clock.advance(1.5)
     assert harness.replay(broker, "poll:1", Position(first.epoch, 1)) == INCOMPLETE
-    assert harness.replay(broker, "poll:1", Position(first.epoch, 3)) == Replay(
-        (), complete=True
-    )
+    assert harness.replay(broker, "poll:1", Position(first.epoch, 3)) == INCOMPLETE
 
 
-def test_publish_after_the_ttl_starts_a_fresh_log(harness: _Harness) -> None:
+def test_publish_after_the_ttl_starts_a_fresh_log_in_a_new_epoch(
+    harness: _Harness,
+) -> None:
     broker = harness.broker(size=10, ttl=5)
     first, *_ = _publish(broker, 3)
     harness.clock.advance(6)
+    (fresh,) = _publish(broker, 1)
+    assert fresh.seq == 1
+    assert fresh.epoch != first.epoch
+    assert harness.replay(broker, "poll:1", Position(first.epoch, 3)) == INCOMPLETE
+    assert _seqs(harness.replay(broker, "poll:1", Position(fresh.epoch, 0))) == [1]
+
+
+def test_a_position_expires_a_ttl_after_its_last_publish(harness: _Harness) -> None:
+    broker = harness.broker(size=10, ttl=5)
+    (first,) = _publish(broker, 1)
+    harness.clock.advance(4.9)
+    assert broker.positions(["poll:1"]) == {"poll:1": Position(first.epoch, 1)}
+    harness.clock.advance(0.2)
+    assert broker.positions(["poll:1"]) == {"poll:1": Position("", 0)}
+    assert asyncio.run(broker.apositions(["poll:1"])) == {"poll:1": Position("", 0)}
+
+
+def test_a_position_without_a_log_still_expires(harness: _Harness) -> None:
+    broker = harness.broker(size=0, ttl=5)
+    _publish(broker, 2)
+    harness.clock.advance(5.1)
+    (fresh,) = _publish(broker, 1)
+    assert fresh.seq == 1
+
+
+def test_a_memory_position_idle_for_exactly_the_ttl_is_never_published() -> None:
+    clock = _Clock(0.0)
+    broker = MemoryBroker(clock=clock, replay={"SIZE": 0, "TTL": 5})
+    published = broker.publish("poll:1", refresh_envelope())
+    clock.advance(4.999)
+    assert broker.positions(["poll:1"]) == {
+        "poll:1": Position(published.epoch, published.seq)
+    }
+    clock.advance(0.001)
+    assert broker.positions(["poll:1"]) == {"poll:1": Position("", 0)}
+
+
+def test_memory_publish_sweeps_the_idle_positions() -> None:
+    clock = _Clock(0.0)
+    broker = MemoryBroker(clock=clock, replay={"SIZE": 0, "TTL": 5})
+    for index in range(100):
+        broker.publish(f"card:{index}", refresh_envelope())
+    clock.advance(5)
+    broker.publish("other", refresh_envelope())
+    assert list(broker._positions) == ["other"]
+
+
+def test_redis_sequence_key_carries_the_replay_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness("redis", monkeypatch, asynchronous=False)
+    broker = harness.broker(size=0, ttl=1.5)
     _publish(broker, 1)
-    assert harness.replay(broker, "poll:1", Position(first.epoch, 0)) == INCOMPLETE
-    assert _seqs(harness.replay(broker, "poll:1", Position(first.epoch, 3))) == [4]
+    assert harness.redis.pttl("next:seq:{poll:1}") == 1500
 
 
 def test_memory_publish_sweeps_the_expired_logs_once_per_ttl() -> None:
@@ -246,10 +298,23 @@ def test_memory_publish_between_sweeps_still_restarts_an_expired_log() -> None:
     clock.advance(1)
     broker.publish("poll:b", refresh_envelope())
     clock.advance(4.5)
-    broker.publish("poll:a", refresh_envelope())
+    fresh = broker.publish("poll:a", refresh_envelope())
     assert len(broker._logs["poll:a"]) == 3
-    assert broker.replay("poll:a", Position(first.epoch, 1)) == INCOMPLETE
-    assert _seqs(broker.replay("poll:a", Position(first.epoch, 2))) == [3]
+    assert (fresh.epoch, fresh.seq) != (first.epoch, 3)
+    assert broker.replay("poll:a", Position(first.epoch, 2)) == INCOMPLETE
+    assert _seqs(broker.replay("poll:a", Position(fresh.epoch, 0))) == [1]
+
+
+def test_the_log_restarts_after_a_pause_of_exactly_the_ttl() -> None:
+    def message(seq: int, published_at: float) -> Message:
+        return Message("poll:1", seq, refresh_envelope(), published_at, EPOCH)
+
+    first, second, third = message(1, 0.0), message(2, 5.0), message(3, 9.99)
+    assert _since_idle((first,), 4.99, 5) == (first,)
+    assert _since_idle((first,), 5.0, 5) == ()
+    assert _since_idle((first, third), 9.99, 5) == (third,)
+    assert _since_idle((first, second), 5.0, 5.01) == (first, second)
+    assert _since_idle((first, second), 9.99, 5) == (second,)
 
 
 def test_replay_size_zero_stores_nothing_and_never_replays(harness: _Harness) -> None:

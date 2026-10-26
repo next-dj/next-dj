@@ -382,16 +382,6 @@ def test_check_skips_ws_warnings_when_ws_is_disabled() -> None:
     assert _ids(NEXT_FRAMEWORK=config, MIDDLEWARE=[], SESSION_ENGINE=_SIGNED) == set()
 
 
-def test_websocket_deployment_messages_report_both_session_problems() -> None:
-    with override_settings(MIDDLEWARE=[], SESSION_ENGINE=_SIGNED):
-        messages = checks.websocket_deployment_messages()
-    assert [message.id for message in messages] == ["next.W141", "next.W142"]
-
-
-def test_websocket_deployment_messages_stay_quiet_for_a_sound_deployment() -> None:
-    assert checks.websocket_deployment_messages() == []
-
-
 @pytest.mark.parametrize("interval", [-1, math.inf, True, "10"])
 def test_check_rejects_an_invalid_redis_health_check_interval(interval: object) -> None:
     assert _ids(NEXT_FRAMEWORK=_redis(HEALTH_CHECK_INTERVAL=interval)) == {"next.E186"}

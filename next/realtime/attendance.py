@@ -1,14 +1,14 @@
 """The attendance that keeps one connection counted on its topics."""
 
 import asyncio
-import functools
 import inspect
 import logging
 import math
 import secrets
 import time
+import weakref
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from typing import cast
 
@@ -44,9 +44,11 @@ class Identifier:
         if isinstance(identify, Identifier):
             return identify
         try:
-            takes_subject = _cached_takes_subject(identify)
-        except TypeError:
+            takes_subject = _ARITY[identify]
+        except (KeyError, TypeError):
             takes_subject = _takes_subject(identify)
+            with suppress(TypeError):
+                _ARITY[identify] = takes_subject
         return cls(identify, takes_subject)
 
     def __call__(self, user: object, topic: str, subject: str) -> Member | None:
@@ -56,10 +58,8 @@ class Identifier:
         return cast("UserIdentify", self.function)(user, topic)
 
 
-@functools.lru_cache(maxsize=256)
-def _cached_takes_subject(identify: Identify) -> bool:
-    """Read a hashable callable's signature once for every stream and subscribe."""
-    return _takes_subject(identify)
+_ARITY: weakref.WeakKeyDictionary[Identify, bool] = weakref.WeakKeyDictionary()
+"""Each identify's signature, read once and dropped with the callable itself."""
 
 
 def _takes_subject(identify: Identify) -> bool:

@@ -328,12 +328,6 @@ describe("layer golden fixtures apply through the layer stack", () => {
   });
 });
 
-// The meta fixture comes from the server's golden writer, so the case runs once its
-// fixture exists and reads the expected values out of the envelope.
-function hasCase(name: string): boolean {
-  return existsSync(join(GOLDEN_DIR, `${name}.meta.json`));
-}
-
 function opOf(name: string, op: string): Record<string, unknown> {
   const raw = JSON.parse(readEnvelopeBytes(readMeta(name).envelope_file)) as {
     ops: Record<string, unknown>[];
@@ -348,7 +342,8 @@ describe("head golden fixtures", () => {
       '<meta name="robots" content="stale">';
   });
 
-  it.skipIf(!hasCase("meta_head"))("meta_head syncs the four head tags", () => {
+  it("meta_head syncs the four head tags", () => {
+    expect(existsSync(join(GOLDEN_DIR, "meta_head.meta.json"))).toBe(true);
     const meta = opOf("meta_head", "meta");
     const { applier } = makeApplier();
     applier.apply(JSON.parse(readEnvelopeBytes(readMeta("meta_head").envelope_file)));

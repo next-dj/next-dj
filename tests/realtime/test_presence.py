@@ -426,6 +426,24 @@ def test_connection_that_changes_member_moves_between_attendees(build) -> None:
     assert api.presence() == Presence(1, ({"id": 1},))
 
 
+def test_a_change_exactly_at_the_window_end_claims_the_next_window(
+    clock: ServerClock,
+) -> None:
+    broker = MemoryBroker(
+        clock=clock, presence={"WINDOW": WINDOW}, schedule=manual_schedule(clock)
+    )
+    broker.join(TOPIC, "a", None, 30)
+    first_end = clock() + WINDOW
+    assert broker._windows[TOPIC] == first_end
+
+    clock.advance(WINDOW - 0.25)
+    broker.join(TOPIC, "b", None, 30)
+    assert broker._windows[TOPIC] == first_end
+    clock.advance(0.25)
+    broker.join(TOPIC, "c", None, 30)
+    assert broker._windows[TOPIC] == first_end + WINDOW
+
+
 def _lose_the_schedule(api: _Api, clock: ServerClock) -> None:
     api.broker.presence_schedule = PresenceSchedule(
         api.broker.announce_presence, clock=clock, threaded=False

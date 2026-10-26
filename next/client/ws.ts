@@ -1,5 +1,4 @@
-// The optional WebSocket adapter negotiates a session-bound ticket over the
-// guarded stream URL, then feeds the shared stream protocol used by SSE.
+// The WebSocket transport, a session-bound ticket negotiated over the stream URL.
 
 import { defaultWebSocket } from "./adapters";
 import type { StreamMeta, Transport, TransportControl } from "./stream";
@@ -10,7 +9,7 @@ const NEGOTIATION_HEADER = "X-Next-Transport";
 const MAX_FAILURES = 3;
 const NEGOTIATION_MS = 5000;
 const ACK_MS = 5000;
-// The heartbeat assumed until a hello names one, in seconds as the server sends it.
+// Seconds, assumed until a hello names its own.
 const HEARTBEAT = 25;
 const MAX_FRAME = 65536;
 const MAX_UP = 16384;
@@ -58,7 +57,6 @@ export interface WsTransportDeps {
   socket?: WebSocketAdapter | undefined;
   origin?: string | undefined;
   random?: () => number;
-  // The CSRF token the page holds when the transport is built.
   token?: string | undefined;
 }
 
@@ -86,6 +84,8 @@ export function createWebSocketTransport(
   const origin = deps.origin ?? globalThis.location.origin;
   const random = deps.random ?? Math.random;
   const links = new Set<Link>();
+  // A topic denial outlives the open, so a resume does not take another 4403.
+  const denied = new Set<string>();
   let asked = 0;
   let generation = 0;
   let secret = csrfSecret(deps.token);
@@ -191,6 +191,7 @@ export function createWebSocketTransport(
       links.forEach(drain);
     },
     open(url, sink, cursor = new Map()): TransportControl {
+      if (denied.has(url)) return deps.fallback.open(url, sink);
       let closed = false;
       let fallbackMode = false;
       let failures = 0;
@@ -290,6 +291,7 @@ export function createWebSocketTransport(
               void connect();
               return;
             }
+            if (code === 4403) denied.add(url);
             failed(code === 4401 || code === 4403);
           };
           const opened: TransportControl = socket.open(
@@ -354,8 +356,7 @@ export function createWebSocketTransport(
                   }
                   links.add(link);
                 }
-                // Only a socket that outlives a heartbeat earns back its retries, so a
-                // server that drops it right after hello still ends on SSE.
+                // Only a socket that outlives a heartbeat earns back its retries.
                 healthy = setTimeout(
                   () => (failures = 0),
                   (heartbeat || HEARTBEAT) * 1000,

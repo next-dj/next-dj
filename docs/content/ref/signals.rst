@@ -19,6 +19,7 @@ Receivers connected with a matching ``sender`` only fire for that sender.
 
 Most signals are sent with ``Signal.send``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
 The realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` are sent with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop.
+From an event loop, and from ``apublish`` for ``message_published``, their synchronous receivers run on the shared thread pool wrapped in ``close_old_connections``, so a receiver that queries the database never holds a connection past its call.
 A receiver of theirs that raises is logged at ``ERROR`` on the ``next.realtime.signals`` logger, and the publication, the upstream event, or the stream goes on as `Stream lifecycle`_ describes.
 ``settings_reloaded`` is sent with ``Signal.send_robust`` too, and runs the whole chain before it re-raises the first error.
 A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
@@ -114,6 +115,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - Right after a stream enters its broker subscription.
        ``transport`` is ``"sse"`` or ``"ws"``, ``topics`` the tuple of topics the subscription joined, and ``connection`` the ``TopicStream`` or ``TopicSocket`` itself.
        An SSE stream carries its ``HttpRequest``, the ``user`` of that request, which is ``None`` without ``AuthenticationMiddleware``, and a ``subject`` of ``None``.
+       A lazy user nothing loaded yet is swapped for the user of the stored session on the request too, so a receiver reading ``request.user`` never loads Django's, which may rotate the session key.
        A WebSocket carries the opaque ``subject`` and the ``user`` of its handshake and a ``request`` of ``None``.
        No argument carries the credential, though ``connection`` is the ``TopicSocket``, so server code reaches ``connection.handshake.credential`` only on purpose.
        The request must not be retained past the receiver call.

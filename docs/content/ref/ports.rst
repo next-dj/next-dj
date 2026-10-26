@@ -49,6 +49,10 @@ The forms area imports ``next.pages``, so the body-source check ``next.E012`` re
 ``FormRoutes`` answers the URL patterns of every form backend.
 The forms area imports ``next.pages``, which loads the URL checks, so those checks read ``form_routes_slot`` rather than importing ``next.forms.manager`` back.
 
+``RealtimeNegotiation`` answers the transports and the partial content types the ``$realtime`` entry of every page is built from.
+``next.realtime`` and ``next.partial`` import the static runtime, so the runtime reads ``realtime_negotiation_slot`` rather than importing either back.
+``transports`` answers the enabled transports in preference order, and ``content_types`` answers the content type of the active partial backend next to the stock one.
+
 ``PortSlot.peek`` answers the bound implementation, or ``None`` before the app is ready.
 The lazy urlpatterns read the seo slot through it, so a concat built before ``NextFrameworkConfig.ready()`` leaves the seo routes out and caches nothing, and a URL resolved or reversed from an earlier ``ready()`` still works.
 
@@ -77,6 +81,9 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
    * - ``PartialShaper``
      - ``next.partial.ports.PartialShaperImpl``
      - ``partial_shaper_slot``
+   * - ``RealtimeNegotiation``
+     - ``next.realtime.ports.RealtimeNegotiationImpl``
+     - ``realtime_negotiation_slot``
    * - ``RouterAccess``
      - ``next.urls.ports.RouterAccessImpl``
      - ``router_access_slot``
@@ -90,7 +97,7 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
      - ``next.scripts.ports.PageScriptsImpl``
      - ``page_scripts_slot``
 
-``next.apps`` binds all eight in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
+``next.apps`` binds all nine in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
 A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
 
 Public API

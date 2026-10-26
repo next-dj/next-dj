@@ -9,6 +9,7 @@ from unittest import mock
 import pytest
 from django.test import RequestFactory
 
+from next.partial.manager import partial_backend_manager
 from next.static import NextScriptBuilder, ScriptInjectionPolicy
 from next.static.collector import StaticCollector
 from next.static.runtime import (
@@ -26,6 +27,7 @@ from next.static.runtime import (
 )
 from next.static.serializers import resolve_serializer
 from next.testing import override_next_settings
+from tests.support.codecs import TextStreamCodec
 
 
 if TYPE_CHECKING:
@@ -404,7 +406,7 @@ class TestNextJsStaticPath:
         assert NEXT_JS_STATIC_PATH.endswith(".js")
 
 
-TRANSPORTS = "next.static.runtime._active_transports"
+TRANSPORTS = "next.realtime.ports.active_transports"
 PARTIAL_BACKEND = "next.partial.manager.partial_backend_manager.get"
 TURBO = "text/vnd.turbo-stream.html"
 WEBSOCKET = {"TRANSPORTS": ["ws", "sse"]}
@@ -452,6 +454,26 @@ class TestRealtimePayload:
         with override_next_settings(REALTIME=WEBSOCKET):
             out = NextScriptBuilder(URL).init_script({"user": "alice"})
         assert REALTIME_PAYLOAD_KEY not in out
+
+    @pytest.mark.usefixtures("forgotten_realtime_offer")
+    def test_a_reset_partial_backend_drops_the_memoised_entry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert realtime_offer().entry == ""
+        monkeypatch.setattr(
+            partial_backend_manager,
+            "_select_config",
+            lambda: {"BACKEND": "tests.support.codecs.TextStreamCodec"},
+        )
+        partial_backend_manager.reset()
+        try:
+            entry = realtime_offer().entry
+            assert isinstance(partial_backend_manager.get(), TextStreamCodec)
+        finally:
+            monkeypatch.undo()
+            partial_backend_manager.reset()
+        assert '"content_type":"text/plain"' in entry
+        assert realtime_offer().entry == ""
 
     @pytest.mark.usefixtures("forgotten_realtime_offer")
     def test_the_offer_is_resolved_once_until_it_is_forgotten(self) -> None:

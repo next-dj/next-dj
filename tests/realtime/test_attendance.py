@@ -16,6 +16,7 @@ from next.realtime import (
     PresenceBroker,
     TopicStream,
     apresence,
+    attendance as attendance_module,
     presence,
 )
 from next.realtime.attendance import Attendance
@@ -321,6 +322,44 @@ def test_sync_refresh_touches_once_a_heartbeat_has_passed(memory, clock) -> None
     assert touched > joined
 
 
+def test_sync_refresh_touches_exactly_when_a_heartbeat_is_due(memory, clock) -> None:
+    touches: list[str] = []
+    real_touch = memory.touch
+
+    def touch(topic: str, connection: str, ttl: float) -> bool:
+        touches.append(topic)
+        return real_touch(topic, connection, ttl)
+
+    memory.touch = touch
+    attendance = Attendance(memory, {"room:1": None}, heartbeat=1, clock=clock)
+    attendance.join()
+
+    def items():
+        clock.now += 0.5
+        yield "early"
+        clock.now += 0.5
+        yield "due"
+
+    refreshed = attendance.refreshed(items())
+    assert next(refreshed) == "early"
+    assert touches == []
+    assert next(refreshed) == "due"
+    assert touches == ["room:1"]
+
+
+def test_a_record_lasts_three_heartbeats(memory, clock) -> None:
+    attendance = Attendance(memory, {"room:1": None}, heartbeat=10, clock=clock)
+    attendance.join()
+    joined = clock.now
+
+    assert attendance.ttl == 30
+    assert list(memory._rosters["room:1"].anonymous.values()) == [joined + 30]
+    clock.now = joined + 20.01
+    assert memory.presence("room:1").count == 1
+    clock.now = joined + 30.01
+    assert memory.presence("room:1").count == 0
+
+
 def test_async_touch_rejoins_a_pruned_record(memory, clock) -> None:
     attendance = Attendance(memory, {"room:1": None}, heartbeat=1, clock=clock)
 
@@ -372,6 +411,27 @@ def test_async_leave_gives_up_after_one_heartbeat(caplog) -> None:
 
     assert "did not confirm a leave in time" in caplog.text
     assert broker.presence("room:1").count == 1
+
+
+def test_async_leave_waits_at_most_one_heartbeat(
+    caplog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    delays: list[float | None] = []
+    real_timeout = asyncio.timeout
+
+    def timeout(delay: float | None):
+        delays.append(delay)
+        return real_timeout(0)
+
+    monkeypatch.setattr(attendance_module.asyncio, "timeout", timeout)
+    broker = _HangingBroker(clock=lambda: 0.0, schedule=silent_schedule)
+    attendance = Attendance(broker, {"room:1": None}, heartbeat=0.25)
+    attendance.join()
+    with caplog.at_level(logging.WARNING, logger="next.realtime.attendance"):
+        asyncio.run(attendance.aleave())
+
+    assert delays == [0.25]
+    assert "did not confirm a leave in time" in caplog.text
 
 
 class _LongAttendance(Attendance):

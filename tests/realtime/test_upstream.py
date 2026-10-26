@@ -1,27 +1,31 @@
 import asyncio
+import json
 import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import fields
+from functools import partial
 from unittest.mock import patch
 
 import pytest
-from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth import get_user_model, login
+from django.contrib.auth.models import AnonymousUser, Permission
+from django.contrib.sessions.backends.db import SessionStore
 from django.dispatch import Signal
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 
-from next.realtime import Upstream, checks, handlers
+from next.realtime import Upstream, checks, handlers, socket as socket_module
 from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.frames import Close
 from next.realtime.handlers import HandlerRegistry, on
 from next.realtime.signals import upstream_received, upstream_rejected
-from next.realtime.socket import Handshake, TopicSocket
+from next.realtime.socket import Handshake, SocketClock, TopicSocket
 from next.realtime.tickets import TicketClaims
 from next.testing import SignalRecorder, capture_signals
-from next.testing.realtime import MemoryPort, SocketTicket
+from next.testing.realtime import MemoryPort, SocketTicket, issue_socket_ticket
 from tests.support.realtime import issue_session_ticket
 
 
@@ -86,12 +90,18 @@ def _socket(
     ticket: SocketTicket,
     *,
     recheck: bool = False,
-    clock: Callable[[], float] = time.time,
+    clock: Callable[[], float] = time.monotonic,
     socket_class: type[TopicSocket] = TopicSocket,
 ) -> TopicSocket:
     handshake = Handshake(ticket.credential, AnonymousUser(), None)
     chosen = _Rechecking if recheck else socket_class
-    return chosen(port, handshake, broker=MemoryBroker(), heartbeat=60, clock=clock)
+    return chosen(
+        port,
+        handshake,
+        broker=MemoryBroker(),
+        heartbeat=60,
+        clock=SocketClock(monotonic=clock),
+    )
 
 
 async def _frame(port: MemoryPort) -> dict[str, object]:
@@ -104,7 +114,7 @@ async def _open(
     ticket: SocketTicket,
     *,
     recheck: bool = False,
-    clock: Callable[[], float] = time.time,
+    clock: Callable[[], float] = time.monotonic,
     socket_class: type[TopicSocket] = TopicSocket,
 ) -> tuple[TopicSocket, asyncio.Task[None]]:
     socket = _socket(
@@ -164,6 +174,32 @@ def test_an_event_with_an_id_is_acknowledged(
         await _close(port, task)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(("slack", "error"), [(0, None), (-1, "too_big")])
+def test_a_frame_of_exactly_max_bytes_is_delivered(
+    slack: int, error: str | None
+) -> None:
+    _register()
+    ticket = _ticket()
+    frame = _up("typing", {"on": True}, id="1")
+    max_bytes = len(json.dumps(frame).encode()) + slack
+
+    async def scenario() -> dict[str, object]:
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        port.push_json(frame)
+        ack = await _frame(port)
+        await _close(port, task)
+        return ack
+
+    limits = {"REALTIME": {"UPSTREAM": {"MAX_BYTES": max_bytes}}}
+    with override_settings(NEXT_FRAMEWORK=limits):
+        ack = asyncio.run(scenario())
+    assert ack.get("error") == error
+    assert ack["ok"] is (error is None)
+    assert bool(_SEEN) is (error is None)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -807,3 +843,85 @@ def test_failing_receivers_leave_the_acks_as_they_were(
     assert "upstream_received" in logged[0]
     assert "upstream_rejected" in logged[1]
     assert "topic room:42" in logged[1]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timeout_raised_inside_the_handler_is_internal_not_timeout() -> None:
+    @on("room:{room}", "raises")
+    async def raises(upstream: Upstream) -> None:
+        raise TimeoutError
+
+    ticket = _ticket()
+
+    async def scenario() -> dict[str, object]:
+        port = MemoryPort()
+        _, task = await _open(port, ticket)
+        port.push_json(_up("raises", id="1"))
+        ack = await _frame(port)
+        await _close(port, task)
+        return ack
+
+    with capture_signals(upstream_rejected) as recorder:
+        ack = asyncio.run(scenario())
+    assert ack == {"type": "ack", "id": "1", "ok": False, "error": "internal"}
+    assert _rejections(recorder) == ["internal"]
+
+
+class _AccessClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _signed_in_ticket() -> tuple[object, SocketTicket]:
+    user = get_user_model().objects.create_user(username="writer", password="x")
+    user.user_permissions.add(Permission.objects.get(codename="view_user"))
+    request = RequestFactory().get("/")
+    request.session = SessionStore()
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    request.session.save()
+    ticket = issue_socket_ticket(
+        ("room:42",), authorizer_ref=_AUTHORIZER, session=request.session
+    )
+    return user, ticket
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_handler_sees_the_user_the_last_recheck_loaded() -> None:
+    user, ticket = _signed_in_ticket()
+    allowed: list[bool] = []
+
+    @on("room:{room}", "perm")
+    def perm(upstream: Upstream) -> None:
+        allowed.append(upstream.user.has_perm("auth.view_user"))
+
+    clock = _AccessClock()
+
+    async def scenario() -> None:
+        port = MemoryPort()
+        handshake = Handshake(ticket.credential, user, None)
+        socket = TopicSocket(port, handshake, broker=MemoryBroker(), heartbeat=60)
+        task = asyncio.create_task(socket.serve(port.inbound()))
+        port.push_json(ticket.subscribe_frame())
+        assert (await _frame(port))["type"] == "hello"
+        port.push_json(_up("perm", id="1"))
+        assert (await _frame(port))["ok"] is True
+        await asyncio.to_thread(user.user_permissions.clear)
+        port.push_json(_up("perm", id="2"))
+        assert (await _frame(port))["ok"] is True
+        clock.now = 60
+        port.push_json(_up("perm", id="3"))
+        assert (await _frame(port))["ok"] is True
+        await _close(port, task)
+
+    with (
+        patch.object(
+            socket_module, "SocketAccessCheck", partial(SocketAccessCheck, clock=clock)
+        ),
+        ThreadPoolExecutor(1) as pool,
+        patch.object(handlers, "handler_pool", lambda: pool),
+    ):
+        asyncio.run(scenario())
+    assert allowed == [True, True, False]

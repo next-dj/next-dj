@@ -308,6 +308,50 @@ describe("WebSocket stream transport", () => {
     expect(auth.calls).toHaveLength(1);
   });
 
+  it("keeps a stream URL on SSE after a 4403 when it reopens", async () => {
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    const transport = createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+    });
+    const first = transport.open("/stream/", made.sink);
+    await settle();
+    made.sockets[0]!.open();
+    made.sockets[0]!.refuse(4403, "denied");
+    expect(made.calls.map((call) => call.url)).toEqual(["/stream/"]);
+    first.close();
+    transport.open("/stream/", made.sink);
+    transport.open("/other/", made.sink);
+    await settle();
+    expect(made.calls.map((call) => call.url)).toEqual(["/stream/", "/stream/"]);
+    expect(made.fetch.mock.calls.map(([url]) => url)).toEqual(["/stream/", "/other/"]);
+    expect(made.sink.end).not.toHaveBeenCalled();
+  });
+
+  it("reconnects after a 1013 close and counts it as a failed attempt", async () => {
+    vi.useFakeTimers();
+    const made = harness();
+    made.fetch.mockImplementation(async () => grant());
+    createWebSocketTransport({
+      fallback: made.fallback,
+      fetch: made.fetch,
+      socket: made.socket,
+      origin: "https://example.test",
+      random: () => 0,
+    }).open("/stream/", made.sink);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await vi.advanceTimersByTimeAsync(1000);
+      made.sockets[attempt]!.open();
+      made.sockets[attempt]!.close(1013);
+    }
+    expect(made.sink.closed).toHaveBeenCalledWith("transient");
+    expect(made.fetch).toHaveBeenCalledTimes(3);
+    expect(made.calls).toHaveLength(1);
+  });
+
   it("falls back for malformed grants and invalid URL values", async () => {
     const malformed = harness();
     malformed.fetch.mockResolvedValue(

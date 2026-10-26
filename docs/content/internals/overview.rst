@@ -63,7 +63,7 @@ Subsystems
      - Test client, signal recorder, isolation.
      - ``next.testing``
    * - App
-     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``permissions``, ``forms``, and ``signals``, component bootstrap, and the eight ports during ``ready()``.
+     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``permissions``, ``forms``, and ``signals``, component bootstrap, and the nine ports during ``ready()``.
      - ``next.apps``
 
 Bootstrap
@@ -71,11 +71,11 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs eighteen startup steps in a fixed order.
+It then runs nineteen startup steps in a fixed order.
 The first three connect every signal receiver of the framework, in three ordered tables for ``setting_changed``, ``settings_reloaded``, and ``router_reloaded``, each with a ``dispatch_uid`` of its module and qualified name, so no module connects a receiver at import time.
 ``reset_failure_logs`` runs first on ``settings_reloaded``, and the ``router_reloaded`` table drops every watch, page-root, dependency, object-row, SEO-source, hreflang, and scripts memo a router rebuild leaves stale.
 The fourth, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
-The next nine bind the eight ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
+The next ten bind the nine ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
 The next three install autoreload, template-tag builtins, and staticfiles integration into the Django runtime.
 Then ``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, and ``signals`` modules of every installed application, in that order, so providers, object permissions, shared forms, and receivers register before the first request arrives.

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSse } from "./sse";
-import type { Cursor, TransportSink } from "./stream";
+import { createStream } from "./stream";
+import type { Cursor, Transport, TransportSink } from "./stream";
 import type {
   EventSourceAdapter,
   SourceControl,
@@ -137,7 +138,6 @@ describe("createSse", () => {
       fetch: () => Promise.resolve(),
       dispatch: () => undefined,
       useWebSocket: true,
-      socket: { open: () => ({ close: () => undefined }) },
       websocket: (deps) => {
         passed = deps;
         return {
@@ -153,12 +153,7 @@ describe("createSse", () => {
         };
       },
     });
-    expect(passed).toMatchObject({ fallback: expect.any(Object) });
-    expect(passed).toMatchObject({
-      fetch: undefined,
-      socket: expect.any(Object),
-      origin: undefined,
-    });
+    expect(passed).toEqual({ fallback: expect.any(Object), origin: undefined });
     stream._reset();
   });
 
@@ -194,6 +189,14 @@ describe("createSse", () => {
         detail: { url: "/stream/", transport: "sse", state: "open" },
       },
     ]);
+  });
+
+  it("lets data-next-stream win on an element carrying both attributes", () => {
+    document.body.innerHTML =
+      '<div data-next-sse="/legacy/" data-next-stream="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    makeSse(adapter, manualVisibility()).scan(document);
+    expect(opened.map((source) => source.url)).toEqual(["/stream/"]);
   });
 
   it("opens no stream for a container removed before its scan ran", () => {
@@ -1053,6 +1056,67 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
+  function tunneled(answer: (echo: () => void) => Promise<Response | string>) {
+    document.body.innerHTML =
+      '<div data-next-sse="/stream/"></div><div data-next-zone="poll"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    const wire = new Wire({
+      fetch: () => Promise.reject(new Error("no HTTP fallback")),
+      navigate: () => undefined,
+      dispatch: () => undefined,
+      onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
+      csrf: createCsrf({ mint: chunkModules.csrf }),
+      rememberRequestId: (id) => sse.remember(id),
+      forgetRequestId: (id) => sse.forget(id),
+      tunnel: (_target, init) => {
+        const id = new Headers(init.headers).get(HEADER_REQUEST_ID) ?? "";
+        return answer(() =>
+          opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], id)),
+        );
+      },
+    });
+    return wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      transport: "any",
+    });
+  }
+
+  it("re-GETs once when a refusal follows an echo the ring dropped", async () => {
+    await tunneled(async (echo) => {
+      echo();
+      return "too_big";
+    });
+    expect(applied).toHaveLength(0);
+    expect(fetched).toEqual([{ url: "/", zone: "poll" }]);
+  });
+
+  it("lets an echo after a refusal apply itself without a re-GET", async () => {
+    let echoed = (): void => undefined;
+    await tunneled(async (echo) => {
+      echoed = echo;
+      return "internal";
+    });
+    echoed();
+    expect(applied).toHaveLength(1);
+    expect(fetched).toEqual([]);
+  });
+
+  it("neither re-GETs nor applies the echo of a delivered tunneled mutation", async () => {
+    await tunneled(async (echo) => {
+      echo();
+      return new Response('{"version":"v1","ops":[],"assets":[],"form":null}', {
+        status: 200,
+        headers: { "content-type": CONTENT_TYPE },
+      });
+    });
+    expect(applied).toHaveLength(0);
+    expect(fetched).toEqual([]);
+  });
+
   it("fires partial:error on a malformed event and keeps the stream alive", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
@@ -1506,13 +1570,13 @@ describe("createSse", () => {
     );
     opened[0]!.control(
       "next-skip",
-      JSON.stringify({ topic: "room", epoch: "f", seq: 1 }),
+      JSON.stringify({ topic: "room", epoch: "f", seq: 2 }),
     );
     opened[0]!.control("next-skip", JSON.stringify({ topic: "room", seq: 1 }));
     opened[0]!.control("next-skip", JSON.stringify({ topic: "room", seq: 2 }));
     expect(dispatched.filter((event) => event.event === "next:stream-gap")).toEqual([
-      { event: "next:stream-gap", detail: { topic: "room", from: 0, to: 1 } },
-      { event: "next:stream-gap", detail: { topic: "room", from: 1, to: 1 } },
+      { event: "next:stream-gap", detail: { topic: "room", from: 0, to: 2 } },
+      { event: "next:stream-gap", detail: { topic: "room", from: 2, to: 1 } },
     ]);
   });
 
@@ -1687,5 +1751,57 @@ describe("createSse", () => {
     expect(dispatched.filter((d) => d.event === "partial:error")[1]!.detail.error).toBe(
       null,
     );
+  });
+});
+
+describe("stream frame boundary", () => {
+  it("reports a frame apply rejects and keeps applying later frames", () => {
+    const events: { event: string; detail: Record<string, unknown> }[] = [];
+    const applied: unknown[] = [];
+    let sink: TransportSink | undefined;
+    const transport: Transport = {
+      name: "t",
+      open: (_url, opened) => {
+        sink = opened;
+        return { close: () => undefined };
+      },
+    };
+    document.body.innerHTML = '<div data-next-stream="/s/"></div>';
+    const stream = createStream({
+      apply: (raw) => {
+        if (typeof (raw as Record<string, unknown>).version !== "string")
+          throw new TypeError("missing version");
+        applied.push(raw);
+      },
+      fetch: async () => undefined,
+      dispatch: (event, detail) => events.push({ event, detail }),
+      transport,
+      visibility: manualVisibility(),
+    });
+    stream.scan(document);
+    const bad = { topic: "a", seq: 1, epoch: "e", ops: [] };
+    expect(() => sink!.patches(bad)).not.toThrow();
+    expect(() => sink!.patches('{"topic":"a","seq":2,"epoch":"e"}')).not.toThrow();
+    expect(events.filter((e) => e.event === "partial:error")).toEqual([
+      {
+        event: "partial:error",
+        detail: {
+          kind: "parse",
+          body: JSON.stringify(bad),
+          error: expect.any(TypeError),
+        },
+      },
+      {
+        event: "partial:error",
+        detail: {
+          kind: "parse",
+          body: '{"topic":"a","seq":2,"epoch":"e"}',
+          error: expect.any(TypeError),
+        },
+      },
+    ]);
+    sink!.patches({ version: "v1", topic: "a", seq: 3, epoch: "e", ops: [] });
+    expect(applied).toHaveLength(1);
+    stream._reset();
   });
 });

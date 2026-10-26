@@ -82,6 +82,7 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
             },
             "TUNNEL": {"CONCURRENCY": 4, "TIMEOUT": 30.0, "MAX_REPLY_BYTES": 1048576},
         },
+        "DEV_SERVER": "next.server.asgi.UvicornServer",
         "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
         "NEXT_JS_OPTIONS": {},
         "METADATA": {

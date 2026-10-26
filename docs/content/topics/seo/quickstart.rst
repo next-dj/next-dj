@@ -17,7 +17,7 @@ Three settings give every page an origin, a site name, and a title template.
 .. code-block:: python
    :caption: config/settings.py
 
-   INSTALLED_APPS = ["django.contrib.staticfiles", "django.contrib.sitemaps", "next", "notes"]
+   INSTALLED_APPS = ["next", "django.contrib.staticfiles", "django.contrib.sitemaps", "notes"]
 
    NEXT_FRAMEWORK = {
        "SITE": {"URL": "https://notes.example", "NAME": "Notes"},
