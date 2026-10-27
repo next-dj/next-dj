@@ -9,9 +9,9 @@ import functools
 import importlib.machinery
 import importlib.util
 import logging
-import math
 import os
 import re
+import sys
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
@@ -65,8 +65,7 @@ def positive_number(value: object, ceiling: float) -> TypeGuard[float]:
     return (
         isinstance(value, int | float)
         and not isinstance(value, bool)
-        and math.isfinite(value)
-        and 0 < value <= ceiling
+        and 0 < value <= min(ceiling, sys.float_info.max)
     )
 
 
@@ -75,8 +74,7 @@ def non_negative_number(value: object, ceiling: float) -> TypeGuard[float]:
     return (
         isinstance(value, int | float)
         and not isinstance(value, bool)
-        and math.isfinite(value)
-        and 0 <= value <= ceiling
+        and 0 <= value <= min(ceiling, sys.float_info.max)
     )
 
 

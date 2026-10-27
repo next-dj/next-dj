@@ -249,8 +249,21 @@ class TestTypePredicates:
             (float("nan"), False),
             (True, False),
             ("1", False),
+            (10**400, False),
+            (-(10**400), False),
         ],
-        ids=["zero", "float", "ceiling", "above", "inf", "nan", "bool", "str"],
+        ids=[
+            "zero",
+            "float",
+            "ceiling",
+            "above",
+            "inf",
+            "nan",
+            "bool",
+            "str",
+            "huge-int",
+            "huge-negative",
+        ],
     )
     def test_positive_number_takes_finite_numbers_up_to_the_ceiling(
         self, value: object, *, inside: bool
@@ -259,13 +272,27 @@ class TestTypePredicates:
 
     @pytest.mark.parametrize(
         ("value", "inside"),
-        [(0, True), (2.0, True), (-0.5, False), (2.5, False), (float("nan"), False)],
-        ids=["zero", "ceiling", "negative", "above", "nan"],
+        [
+            (0, True),
+            (2.0, True),
+            (-0.5, False),
+            (2.5, False),
+            (float("nan"), False),
+            (10**400, False),
+        ],
+        ids=["zero", "ceiling", "negative", "above", "nan", "huge-int"],
     )
     def test_non_negative_number_takes_zero_too(
         self, value: object, *, inside: bool
     ) -> None:
         assert non_negative_number(value, 2) is inside
+
+    @pytest.mark.parametrize("check", [positive_number, non_negative_number])
+    def test_an_unbounded_ceiling_takes_a_big_int_but_not_one_past_float(
+        self, check
+    ) -> None:
+        assert check(2**1023, float("inf")) is True
+        assert check(10**400, float("inf")) is False
 
 
 class TestAfterFork:

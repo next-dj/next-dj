@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import logging
-from types import SimpleNamespace
 
 import pytest
 from django.contrib.auth.models import AnonymousUser
@@ -284,14 +283,10 @@ class _PatientSocket(TopicSocket):
 
 
 def test_watchdog_drop_leaves_the_roster(
-    caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
-    clock: ServerClock,
+    caplog: pytest.LogCaptureFixture, clock: ServerClock
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
     ticket = issue_session_ticket(presence=True)
-    # One hand-driven clock times both the stalled send and the liveness pings.
-    monkeypatch.setattr(socket_module, "time", SimpleNamespace(monotonic=clock))
 
     async def scenario() -> None:
         broker = _broker()

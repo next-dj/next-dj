@@ -185,7 +185,7 @@ def test_check_rejects_unusable_ws_path(path: object) -> None:
     assert _ids(NEXT_FRAMEWORK={"REALTIME": {"WS_PATH": path}}) == {"next.E183"}
 
 
-@pytest.mark.parametrize("heartbeat", [0, -1, math.inf, math.nan, True, "25"])
+@pytest.mark.parametrize("heartbeat", [0, -1, math.inf, math.nan, True, "25", 10**400])
 def test_check_rejects_invalid_heartbeat(heartbeat: object) -> None:
     assert _ids(NEXT_FRAMEWORK={"REALTIME": {"HEARTBEAT": heartbeat}}) == {"next.E185"}
 

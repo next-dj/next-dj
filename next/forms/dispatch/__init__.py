@@ -25,6 +25,7 @@ from next.forms.signals import (
 )
 from next.forms.transport import (
     TRANSPORT_HEADER,
+    discard_session,
     http_only,
     mark_dispatched,
     pin_session,
@@ -116,7 +117,7 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Run a tunneled action whose session key may not change.
 
-        A rotation stops it before the store writes, and `ATOMIC_REQUESTS` rolls back.
+        A rotation stops it before the store writes, and the action's writes are undone.
         """
         pin = pin_session(request)
         try:
@@ -128,6 +129,7 @@ class FormActionDispatch:
                 response[TRANSPORT_HEADER] = "any"
                 return response
         roll_back(request)
+        discard_session(request)
         logger.warning(
             "action %r rotated the session over the tunnel and was refused", action_name
         )

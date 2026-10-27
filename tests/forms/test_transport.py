@@ -45,6 +45,7 @@ from next.forms.transport import (
     DispatchMark,
     SessionPin,
     Transport,
+    discard_session,
     http_only,
     mark_dispatched,
     pin_session,
@@ -445,3 +446,27 @@ class TestRollBack:
         with patch.dict(connections.settings["default"], {"ATOMIC_REQUESTS": True}):
             roll_back(RequestFactory().post("/"))
         assert connection.in_atomic_block is False
+
+
+@pytest.mark.django_db()
+class TestDiscardSession:
+    """`discard_session` leaves the request a session nothing has written to."""
+
+    @pytest.mark.parametrize("engine", _ENGINES)
+    def test_a_written_session_gives_way_to_its_stored_copy(self, engine: str) -> None:
+        session = import_module(engine).SessionStore()
+        session["seed"] = "kept"
+        session.save()
+        session["cart"] = ["sku-1"]
+        request = RequestFactory().post("/")
+        request.session = session
+        discard_session(request)
+        assert request.session is not session
+        assert request.session.session_key == session.session_key
+        assert request.session.modified is False
+        assert dict(request.session.items()) == {"seed": "kept"}
+
+    def test_a_request_without_a_session_is_left_alone(self) -> None:
+        request = RequestFactory().post("/")
+        discard_session(request)
+        assert not hasattr(request, "session")

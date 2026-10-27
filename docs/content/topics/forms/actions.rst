@@ -658,7 +658,7 @@ Posting over the WebSocket tunnel
 A page that holds a realtime WebSocket can submit a form through it, see :ref:`topics-realtime`.
 An action answers over plain HTTP unless it opts in with ``transport="any"``.
 The default is ``"http"``, because a socket cannot set a cookie.
-An opted-in action that rotates or flushes the session over the tunnel, such as a login or a logout, raises ``SessionRotationError`` before the store writes, rolls back an ``ATOMIC_REQUESTS`` transaction, and answers ``421`` with ``X-Next-Transport: session``, so the client reloads the page, see :ref:`topics-realtime-tunnel`.
+An opted-in action that rotates or flushes the session over the tunnel, such as a login or a logout, raises ``SessionRotationError`` before the store writes, rolls back an ``ATOMIC_REQUESTS`` transaction, drops what it wrote to the session, and answers ``421`` with ``X-Next-Transport: session``, so the client reloads the page, see :ref:`topics-realtime-tunnel`.
 
 .. code-block:: python
    :caption: rooms/pages/rooms/[slug:code]/page.py

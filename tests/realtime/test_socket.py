@@ -5,7 +5,6 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -995,28 +994,24 @@ def test_peer_gone_mid_send_drops_without_close(
     asyncio.run(scenario())
 
 
-def _monotonic(monkeypatch: pytest.MonkeyPatch, *readings: float) -> list[float]:
-    """Replace the writer's monotonic clock with readings, repeating the last one."""
+def _monotonic(*readings: float) -> Callable[[], float]:
+    """Build a monotonic clock that returns `readings`, repeating the last one."""
     queue = list(readings)
 
     def monotonic() -> float:
         return queue.pop(0) if len(queue) > 1 else queue[0]
 
-    monkeypatch.setattr(socket_module, "time", SimpleNamespace(monotonic=monotonic))
-    return queue
+    return monotonic
 
 
 @pytest.mark.django_db(transaction=True)
 def test_watchdog_drops_a_client_that_stopped_reading(
     caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
     session_ticket: SocketTicket,
     streams: LiveStreams,
     clock: ServerClock,
 ) -> None:
     caplog.set_level(logging.INFO, logger=socket_module.__name__)
-    # One hand-driven clock times both the stalled send and the liveness pings.
-    monkeypatch.setattr(socket_module, "time", SimpleNamespace(monotonic=clock))
 
     async def scenario() -> None:
         broker = MemoryBroker()
@@ -1040,7 +1035,7 @@ def test_watchdog_drops_a_client_that_stopped_reading(
 def test_writer_serializes_concurrent_sends() -> None:
     async def scenario() -> None:
         port = GatedPort()
-        writer = _Writer(port)
+        writer = _Writer(port, time.monotonic)
         first = asyncio.create_task(writer.send("a"))
         second = asyncio.create_task(writer.send("b"))
         closing = asyncio.create_task(writer.close(Close.GOING_AWAY))
@@ -1054,12 +1049,10 @@ def test_writer_serializes_concurrent_sends() -> None:
     asyncio.run(scenario())
 
 
-def test_writer_tracks_a_send_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
-    _monotonic(monkeypatch, 5.0, 5.5, 7.0)
-
+def test_writer_tracks_a_send_in_flight() -> None:
     async def scenario() -> None:
         port = GatedPort()
-        writer = _Writer(port)
+        writer = _Writer(port, _monotonic(5.0, 5.5, 7.0))
         assert not writer.stalled(1)
         sending = asyncio.create_task(writer.send("a"))
         await port.entered.wait()
@@ -1079,7 +1072,7 @@ def test_writer_close_ignores_a_peer_that_left() -> None:
         async def close(self, code: int) -> None:
             raise ConnectionResetError
 
-    asyncio.run(_Writer(BrokenPort()).close(Close.INTERNAL))
+    asyncio.run(_Writer(BrokenPort(), time.monotonic).close(Close.INTERNAL))
 
 
 @pytest.mark.django_db(transaction=True)

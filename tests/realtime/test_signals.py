@@ -246,6 +246,38 @@ class TestLifecycle:
         assert closed.kwargs["reason"] is UnsubscribeReason.SERVER
         assert closed.kwargs["topics"] == ("room:1",)
 
+    def test_a_cancelled_open_finishes_its_subscribe_before_the_unsubscribe(
+        self,
+    ) -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        heard: list[str] = []
+
+        async def slow(**_kwargs: object) -> None:
+            entered.set()
+            await release.wait()
+            heard.append("subscribed")
+
+        async def scenario() -> list[object]:
+            lifecycle = StreamLifecycle(object(), "ws")
+            with capture_signals(stream_subscribed, stream_unsubscribed) as recording:
+                stream_subscribed.connect(slow, weak=False)
+                try:
+                    opening = asyncio.create_task(lifecycle.aopen(("room:1",)))
+                    await entered.wait()
+                    opening.cancel()
+                    await asyncio.sleep(0)
+                    release.set()
+                    with pytest.raises(asyncio.CancelledError):
+                        await opening
+                    await lifecycle.aclose(UnsubscribeReason.CLIENT)
+                finally:
+                    stream_subscribed.disconnect(slow)
+            return [event.signal for event in recording.events]
+
+        assert asyncio.run(scenario()) == [stream_subscribed, stream_unsubscribed]
+        assert heard == ["subscribed"]
+
     def test_a_failing_receiver_is_logged_and_the_others_still_hear(
         self, recorder: SignalRecorder, caplog: pytest.LogCaptureFixture
     ) -> None:

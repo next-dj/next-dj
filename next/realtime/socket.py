@@ -145,17 +145,18 @@ class _ClosedError(Exception):
 class _Writer:
     """The single path to the port, so concurrent frames never interleave a send."""
 
-    __slots__ = ("_lock", "_port", "sending_since")
+    __slots__ = ("_lock", "_monotonic", "_port", "sending_since")
 
-    def __init__(self, port: SocketPort) -> None:
+    def __init__(self, port: SocketPort, monotonic: Callable[[], float]) -> None:
         self._port = port
+        self._monotonic = monotonic
         self._lock = asyncio.Lock()
         self.sending_since: float | None = None
 
     async def send(self, text: str) -> None:
         """Send under the lock, dropping the connection when the peer is gone."""
         async with self._lock:
-            self.sending_since = time.monotonic()
+            self.sending_since = self._monotonic()
             try:
                 await self._port.send(text)
             except OSError as exc:
@@ -166,7 +167,7 @@ class _Writer:
     def stalled(self, limit: float) -> bool:
         """Whether a send has been blocked by the peer for longer than `limit`."""
         since = self.sending_since
-        return since is not None and time.monotonic() - since > limit
+        return since is not None and self._monotonic() - since > limit
 
     async def close(self, code: int) -> None:
         """Close once the senders are done, ignoring a peer that already left."""
@@ -202,7 +203,7 @@ class TopicSocket:
         self.handshake = handshake
         self.connection_id = secrets.token_urlsafe(16)
         self.cursor: Mapping[str, Position | int] = MappingProxyType({})
-        self._writer = _Writer(port)
+        self._writer = _Writer(port, clock.monotonic)
         self._broker = broker
         self._heartbeat = heartbeat if heartbeat is not None else heartbeat_seconds()
         self._clock = clock.wall

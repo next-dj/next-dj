@@ -144,6 +144,13 @@ def roll_back(request: "HttpRequest") -> None:
             connection.set_rollback(True)
 
 
+def discard_session(request: "HttpRequest") -> None:
+    """Swap the session for a fresh copy of its store, so no write of it is saved."""
+    session = getattr(request, "session", None)
+    if isinstance(session, SessionBase):
+        request.session = type(session)(session.session_key)
+
+
 def rotation_refused() -> HttpResponse:
     """Answer a tunneled action that rotated the session, so the browser reloads."""
     response = HttpResponse(status=MISDIRECTED)
@@ -164,6 +171,7 @@ __all__ = [
     "SessionPin",
     "Transport",
     "checked_transport",
+    "discard_session",
     "dispatches_actions",
     "http_only",
     "mark_dispatched",

@@ -137,11 +137,20 @@ def tunnel_logout(request: HttpRequest) -> HttpResponse:
     return HttpResponse("out")
 
 
+@action("tunnel_cart_login", transport="any")
+def tunnel_cart_login(request: HttpRequest) -> HttpResponse:
+    request.session["cart"] = ["sku-1"]
+    user = get_user_model().objects.create_user("tunnel-cart-user")
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    return HttpResponse("in")
+
+
 @action("tunnel_swallow", transport="any")
 def tunnel_swallow(request: HttpRequest) -> HttpResponse:
     try:
         request.session.cycle_key()
     except SessionRotationError:
+        request.session["swallowed"] = True
         return HttpResponse("kept")
     return HttpResponse("rotated")
 
@@ -683,6 +692,25 @@ def test_caught_rotation_still_refuses_the_reply(
     )
     assert answer == _ROTATED
     assert SessionStore().exists(ticket.session.session_key)
+    assert "swallowed" not in SessionStore(ticket.session.session_key).load()
+
+
+@pytest.mark.parametrize("save_every_request", [False, True])
+def test_refused_rotation_drops_what_the_action_wrote_to_the_session(
+    app: ASGI3Application,
+    ticket: SocketTicket,
+    csrf: tuple[str, str],
+    *,
+    save_every_request: bool,
+) -> None:
+    secret, token = csrf
+    data = {"csrfmiddlewaretoken": token}
+    with override_settings(SESSION_SAVE_EVERY_REQUEST=save_every_request):
+        answer = async_to_sync(_tunnel)(
+            app, ticket, _frame(_url("tunnel_cart_login"), data), secret=secret
+        )
+    assert answer == _ROTATED
+    assert "cart" not in SessionStore(ticket.session.session_key).load()
 
 
 @pytest.mark.parametrize("name", ["tunnel_denied", "tunnel_missing"])

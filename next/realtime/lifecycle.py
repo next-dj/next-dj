@@ -1,5 +1,6 @@
 """Robust sends of the realtime signals and the subscribe pair a stream sends once."""
 
+import asyncio
 import logging
 import time
 from collections.abc import Sequence
@@ -70,19 +71,28 @@ class StreamLifecycle:
         subject: str | None = None,
         user: object = None,
     ) -> None:
-        """Send `stream_subscribed` from an event loop, sync receivers off it."""
+        """Send `stream_subscribed` from an event loop, sync receivers off it.
+
+        A cancel waits for the send, so the unsubscribe it owes never comes first.
+        """
         sender = type(self._connection)
         if self._opened(sender, topics):
-            self._log(
-                "stream_subscribed",
-                await stream_subscribed.asend_robust(
+            sending = asyncio.ensure_future(
+                stream_subscribed.asend_robust(
                     sender=sender,
                     **self._identity(),
                     request=request,
                     subject=subject,
                     user=user,
-                ),
+                )
             )
+            try:
+                responses = await asyncio.shield(sending)
+            except asyncio.CancelledError:
+                await asyncio.wait([sending])
+                self._log("stream_subscribed", sending.result())
+                raise
+            self._log("stream_subscribed", responses)
 
     def close(self, reason: UnsubscribeReason) -> None:
         """Send `stream_unsubscribed` once, a reason noted earlier winning."""
