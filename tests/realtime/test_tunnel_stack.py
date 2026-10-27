@@ -540,6 +540,7 @@ def test_sync_view_past_the_timeout_never_blocks_the_loop(
     async def scenario() -> list[dict[str, object]]:
         communicator, _ = await _connect(_QuickSocket(), ticket, secret)
         await communicator.send_json_to({"type": "http", "id": "1", **frame})
+        assert await asyncio.to_thread(_SLOW["started"].wait, 5)
         first = json.loads((await communicator.receive_output(5))["text"])
         await communicator.send_json_to({"type": "http", "id": "2", **frame})
         second = json.loads((await communicator.receive_output(5))["text"])
@@ -548,7 +549,8 @@ def test_sync_view_past_the_timeout_never_blocks_the_loop(
         assert await asyncio.to_thread(_SLOW["finished"].wait, 5)
         return [first, second]
 
-    tunnel = {"TIMEOUT": 0.2, "CONCURRENCY": 1}
+    # The view must start inside the timeout, which a slow runner's thread hops delay.
+    tunnel = {"TIMEOUT": 1.0, "CONCURRENCY": 1}
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": tunnel}}):
         answers = asyncio.run(scenario())
     assert [answer["error"] for answer in answers] == ["timeout", "limit"]

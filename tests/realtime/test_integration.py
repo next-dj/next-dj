@@ -405,20 +405,26 @@ def _presence_broker(prefix: str, window: float = 0.05) -> RedisBroker:
 
 
 def _lasting(admin: redis.Redis, prefix: str) -> dict[str, int]:
-    return {key: admin.pttl(key) for key in admin.scan_iter(match=f"{prefix}:*")}
+    """Map each key under `prefix` to its TTL, leaving out one that expired mid-scan."""
+    lasting = {key: admin.pttl(key) for key in admin.scan_iter(match=f"{prefix}:*")}
+    return {key: left for key, left in lasting.items() if left != -2}
+
+
+# Long enough that a stalled runner still finds the keys, short enough to wait out.
+_VISIT_TTL = 1.0
 
 
 def _assert_expiring(admin: redis.Redis, prefix: str) -> None:
     lasting = _lasting(admin, prefix)
     assert lasting
-    assert all(0 < left <= 600 for left in lasting.values()), lasting
+    assert all(0 <= left <= 2_000 * _VISIT_TTL for left in lasting.values()), lasting
 
 
 @pytest.mark.parametrize("member", [None, {"id": 1}], ids=["unnamed", "named"])
 def test_redis_presence_keys_of_a_short_visit_expire(admin, prefix, member) -> None:
     broker = _presence_broker(prefix)
     try:
-        broker.join(ROOM, "visitor", member, 0.3)
+        broker.join(ROOM, "visitor", member, _VISIT_TTL)
         _assert_expiring(admin, prefix)
         broker.leave(ROOM, "visitor")
         _wait_for(lambda: broker.presence_schedule.run_due() >= 1)
@@ -451,12 +457,15 @@ def test_redis_snapshots_of_two_brokers_end_on_the_latest_change(
     try:
         with watcher.subscribe([ROOM], timeout=0.2) as messages:
             first.announce_presence(ROOM)
+            latest = watcher.presence(ROOM).as_detail()
             details = []
+            deadline = time.monotonic() + 5
+            # A quiet gap ends the read only once the latest change has arrived.
             for message in messages:
-                if message is None:
+                if message is not None:
+                    details.append(message.envelope.ops[0].extras["detail"])
+                elif details[-1:] == [latest] or time.monotonic() > deadline:
                     break
-                details.append(message.envelope.ops[0].extras["detail"])
-        latest = watcher.presence(ROOM).as_detail()
     finally:
         for broker in (first, second, watcher):
             broker.close()

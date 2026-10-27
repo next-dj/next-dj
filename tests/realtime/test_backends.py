@@ -7,7 +7,12 @@ import pytest
 
 from next.realtime import InvalidTopicError, MemoryBroker, Position
 from next.realtime.backends import _AsyncSubscriber, _SyncSubscriber
-from tests.support.realtime import PlainBroker, ServerClock, refresh_envelope
+from tests.support.realtime import (
+    PlainBroker,
+    ServerClock,
+    anext_item,
+    refresh_envelope,
+)
 
 
 def test_memory_publish_per_topic_numbers_sequences_and_epochs() -> None:
@@ -87,9 +92,9 @@ def test_memory_async_subscriber_thread_publish_is_delivered_in_order() -> None:
                 target=backend.publish, args=("poll:1", refresh_envelope())
             )
             publisher.start()
-            message = await anext(messages)
+            async with asyncio.timeout(5):
+                message = await anext_item(messages)
             publisher.join(timeout=1)
-            assert message is not None
             assert message.seq == 1
             assert await backend.apositions(["poll:1"]) == {
                 "poll:1": Position(message.epoch, 1)

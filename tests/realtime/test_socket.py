@@ -319,15 +319,13 @@ def test_tick_runs_on_every_heartbeat_of_the_subscription(
     async def scenario() -> None:
         broker = ScriptedBroker()
         port = MemoryPort()
-        socket = _socket(
-            port, session_ticket, broker, heartbeat=2.5, socket_class=RecordingSocket
-        )
+        socket = _socket(port, session_ticket, broker, socket_class=RecordingSocket)
         task, _ = await _open(socket, port, session_ticket)
         for count in range(1, 4):
             broker.feed.put_nowait(None)
             assert await _frame(port) == {"type": "ping", "server_time": _SERVER_TIME}
             assert socket.ticks == count
-        assert broker.timeouts == [2.5]
+        assert broker.timeouts == [60]
         port.disconnect()
         await _finish(task)
 
@@ -593,9 +591,9 @@ def test_topic_revoked_while_subscribed_closes_topic_denied(
     async def scenario() -> None:
         broker = MemoryBroker()
         port = MemoryPort()
-        task, _ = await _open(_socket(port, ticket, broker, heartbeat=1), port, ticket)
+        task, _ = await _open(_socket(port, ticket, broker), port, ticket)
         _GRANTS["topic"] = False
-        access_clock.now = 1
+        access_clock.now = 60
         await broker.apublish("room:42", _envelope())
         assert await _frame(port) == {"type": "error", "code": "auth"}
         await _finish(task)
@@ -612,12 +610,10 @@ def test_heartbeat_rechecks_access_before_its_ping(
     async def scenario() -> None:
         broker = ScriptedBroker()
         port = MemoryPort()
-        socket = _socket(
-            port, session_ticket, broker, heartbeat=1, socket_class=RecordingSocket
-        )
+        socket = _socket(port, session_ticket, broker, socket_class=RecordingSocket)
         task, _ = await _open(socket, port, session_ticket)
         await asyncio.to_thread(session_ticket.session.cycle_key)
-        access_clock.now = 1
+        access_clock.now = 60
         broker.feed.put_nowait(None)
         assert await _frame(port) == {"type": "error", "code": "auth"}
         await _finish(task)
@@ -664,10 +660,10 @@ def test_user_revoked_while_subscribed_closes_before_delivery(
     async def scenario() -> None:
         broker = MemoryBroker()
         port = MemoryPort()
-        socket = _socket(port, ticket, broker, heartbeat=1, user=user)
+        socket = _socket(port, ticket, broker, user=user)
         task, _ = await _open(socket, port, ticket)
         await asyncio.to_thread(_revoke, user, revocation)
-        access_clock.now = 1
+        access_clock.now = 60
         await broker.apublish("room:42", _envelope())
         assert await _frame(port) == {"type": "error", "code": "auth"}
         await _finish(task)

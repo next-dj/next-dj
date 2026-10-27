@@ -260,6 +260,20 @@ def test_two_sockets_of_one_session_get_distinct_connections() -> None:
     assert first != second
 
 
+class _Unacked(TopicSocket):
+    """Flag the handled event without an id, since no ack tells a test it ran."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.unacked = asyncio.Event()
+
+    async def handle(self, upstream: Upstream) -> bool:
+        served = await super().handle(upstream)
+        if upstream.data == 1:
+            self.unacked.set()
+        return served
+
+
 @pytest.mark.django_db(transaction=True)
 def test_event_without_an_id_gets_no_ack() -> None:
     _register()
@@ -267,12 +281,15 @@ def test_event_without_an_id_gets_no_ack() -> None:
 
     async def scenario() -> None:
         port = MemoryPort()
-        _, task = await _open(port, ticket)
+        socket, task = await _open(port, ticket, socket_class=_Unacked)
         port.push_json(_up("typing", 1))
         port.push_json(_up("nobody", 2))
         port.push_json(_up("typing", 3, topic="room:9"))
         port.push_json(_up("typing", 4, id="last"))
         assert await _frame(port) == {"type": "ack", "id": "last", "ok": True}
+        async with asyncio.timeout(5):
+            assert isinstance(socket, _Unacked)
+            await socket.unacked.wait()
         await _close(port, task)
         assert sorted(entry[1] for entry in _SEEN) == [1, 4]
         assert len(port.sent) == 2
@@ -453,27 +470,34 @@ def test_subclass_routes_events_through_handle() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_slow_handler_times_out_on_its_own_pool() -> None:
+    entered = threading.Event()
     release = threading.Event()
     threads: list[str] = []
 
     @on("room:{room}", "slow")
     def slow(upstream: Upstream) -> None:
         threads.append(threading.current_thread().name)
+        entered.set()
         release.wait(5)
 
     ticket = _ticket()
 
     async def scenario() -> list[dict[str, object]]:
+        loop = asyncio.get_running_loop()
+        clock = _LoopClock(loop)
         port = MemoryPort()
-        _, task = await _open(port, ticket)
-        for index in range(3):
-            port.push_json(_up("slow", id=str(index)))
-        acks = [await _frame(port) for _ in range(3)]
-        release.set()
-        await _close(port, task)
+        with patch.object(loop, "time", clock):
+            _, task = await _open(port, ticket)
+            for index in range(3):
+                port.push_json(_up("slow", id=str(index)))
+            assert await asyncio.to_thread(entered.wait, 5)
+            clock.offset += 31
+            acks = [await _frame(port) for _ in range(3)]
+            release.set()
+            await _close(port, task)
         return acks
 
-    limits = {"REALTIME": {"UPSTREAM": {"TIMEOUT": 0.1}}}
+    limits = {"REALTIME": {"UPSTREAM": {"TIMEOUT": 30}}}
     with (
         override_settings(NEXT_FRAMEWORK=limits),
         ThreadPoolExecutor(1, thread_name_prefix="own") as pool,

@@ -251,10 +251,14 @@ class StalledPort(MemoryPort):
         await asyncio.Event().wait()
 
 
-class _LongLived(Attendance):
-    """Outlive the test however late it runs, and tell it once the join landed."""
+class _Lasting(Attendance):
+    """Outlive the test however late it runs, so only the liveness watch drops it."""
 
     ttl_heartbeats = 60_000
+
+
+class _LongLived(_Lasting):
+    """Tell the test once the join of the lasting record landed."""
 
     def __init__(self, broker, members, *, joined: asyncio.Event, **options) -> None:
         """Keep the event the join sets."""
@@ -319,11 +323,23 @@ def test_watchdog_drop_leaves_the_roster(
 _LIVENESS_HEARTBEAT = 0.05
 
 
+class _LastingSocket(TopicSocket):
+    async def attend(self, broker, claims) -> Attendance | None:
+        attendance = await super().attend(broker, claims)
+        assert attendance is not None
+        return _Lasting(
+            attendance.broker,
+            attendance.members,
+            heartbeat=self._heartbeat,
+            connection=attendance.connection,
+        )
+
+
 def _live_socket(
     port: MemoryPort, ticket: SocketTicket, broker: BrokerBackend, clock: ServerClock
 ) -> TopicSocket:
     handshake = Handshake(ticket.credential, AnonymousUser(), None)
-    return TopicSocket(
+    return _LastingSocket(
         port,
         handshake,
         broker=broker,
