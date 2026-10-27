@@ -16,6 +16,7 @@ from .backends import (
 from .base import Form, _compute_scope, _is_self_registered
 from .manager import form_action_manager
 from .registration import registration_diagnostics
+from .transport import Transport, checked_transport
 
 
 _VALID_SCOPES = ("page", "shared")
@@ -36,6 +37,7 @@ class _HandlerSpec:
     form_class: "type[Form] | Callable[..., Any] | None" = None
     guard: ActionGuard | None = None
     requires_runtime: bool = False
+    transport: Transport = "http"
 
 
 def _register_handler(
@@ -47,6 +49,7 @@ def _register_handler(
             (func.__qualname__, str(spec.scope))
         )
         return
+    transport = checked_transport(spec.transport, f"@action {func.__qualname__!r}")
     form_action_manager.register_action(
         ActionRegistration(
             name=spec.name,
@@ -56,6 +59,7 @@ def _register_handler(
             form_class=spec.form_class,
             guard=spec.guard,
             requires_runtime=spec.requires_runtime,
+            transport=transport,
         )
     )
 
@@ -71,6 +75,7 @@ def action[C: Callable[..., Any]](
     login_required: bool = False,
     permission_required: str | Iterable[str] | None = None,
     requires_runtime: bool = False,
+    transport: Transport = "http",
 ) -> Callable[[C], C]: ...
 def action(
     name: Callable[..., Any] | str | None = None,
@@ -80,8 +85,9 @@ def action(
     login_required: bool = False,
     permission_required: str | Iterable[str] | None = None,
     requires_runtime: bool = False,
+    transport: Transport = "http",
 ) -> Callable[..., Any]:
-    """Register a callable as a named form action.
+    """Register a callable as a named form action, `transport="any"` admits the socket.
 
     The guards run before origin resolution, `get_initial`, and form binding.
     """
@@ -118,6 +124,7 @@ def action(
                 form_class=form_class,
                 guard=guard,
                 requires_runtime=requires_runtime,
+                transport=transport,
             ),
         )
         return func

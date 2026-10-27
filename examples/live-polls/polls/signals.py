@@ -4,10 +4,11 @@ from django.dispatch import receiver
 from django.http import HttpRequest
 
 from next.forms.signals import action_dispatched
-from next.partial.headers import REQUEST_ID
+from next.partial import Patches
+from next.realtime import publish
 from next.static import StaticAsset, StaticCollector
 from next.static.signals import collector_finalized
-from polls.broker import broker, build_snapshot
+from polls.snapshots import build_snapshot
 
 
 VOTE_ACTION_NAME = "vote_form"
@@ -20,18 +21,21 @@ def broadcast_vote(
     request: HttpRequest | None = None,
     **kwargs,
 ) -> None:
-    """Publish a fresh snapshot for the poll that just received a vote.
-
-    The request id is echoed through the stream so the voter's own tab drops it.
-    """
+    """Publish a results-zone refresh after the vote transaction commits."""
     if action_name != VOTE_ACTION_NAME or form is None:
         return
     poll = form.cleaned_data.get("poll")
     if poll is None:
         return
-    request_id = request.headers.get(REQUEST_ID) if request is not None else None
+    if request is None:
+        return
     snapshot = build_snapshot(poll)
-    broker.publish(snapshot, request_id=request_id)
+    topic = f"poll:{poll.pk}"
+    publish(topic, Patches(request).refresh(zone="poll-results"))
+    publish(
+        topic,
+        Patches(request).event("poll:votes", {"total_votes": snapshot.total_votes}),
+    )
 
 
 def _has_module_assets(collector: StaticCollector) -> bool:

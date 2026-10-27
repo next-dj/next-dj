@@ -51,26 +51,7 @@ The rest of this page is the detail behind those three steps.
 Class-bound forms
 -----------------
 
-Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` registers the class automatically.
-No decorator is needed.
-
-.. code-block:: python
-   :caption: notes/pages/note/page.py
-
-   from django.http import HttpRequest
-
-   import next.forms
-   from next.forms import redirect_to_origin
-
-   class NoteForm(next.forms.ModelForm):
-       class Meta:
-           model = Note
-           fields = ["title", "body"]
-
-       def on_valid(self, request: HttpRequest):
-           self.save()
-           return redirect_to_origin(request)
-
+Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` registers the class automatically, with no decorator, as ``NoteForm`` in `Your first form`_ shows.
 The framework derives the action name from the class name and infers the scope from the file where the class is declared.
 
 Name derivation
@@ -145,11 +126,14 @@ The method signature uses the same dependency-injection rules as any other DI-re
 
 .. code-block:: python
 
+   from django.http import HttpRequest, HttpResponse
+
    def on_valid(self, request: HttpRequest):
-       ...
+       return HttpResponse(status=204)
 
 ``self`` is the bound, validated form instance.
-``request`` receives the current ``HttpRequest`` only when the parameter is annotated ``HttpRequest``, an unannotated ``request`` parameter resolves to ``None``.
+``request`` receives the current ``HttpRequest`` only when the parameter is annotated ``HttpRequest``.
+An unannotated ``request`` parameter resolves to ``None``.
 Any additional parameter is resolved through the DI injector, through ``DUrl[...]`` markers, ``Depends`` providers, and similar mechanisms.
 
 The default implementation on ``BaseForm`` redirects to ``Meta.success_url`` when declared, otherwise it returns ``redirect_to_origin(request)``.
@@ -466,7 +450,8 @@ The static guard leaves it out, and once the form binds the dispatcher asks ``us
 A new record is therefore never checked against the row it is created under, and a rule on that parent row goes into ``has_object_permission`` or into the access of the page as ``permission_required(perm, obj=DObject[Model])`` in its ``page.py``, see :ref:`topics-access`.
 The check runs once, before ``has_object_permission`` and validation, and a refusal is HTTP 403 with ``form_access_denied`` sent as ``layer="object"`` and ``reason="denied"``.
 A ``FormWizard`` and a handler-only ``@action`` bind no form at that point, so their guard checks every listed permission up front with no object, registered ones included.
-Without a ``visible_to`` on the model manager and a registered ``scope``, ``Meta.instance_from_url`` looks the row up unscoped and answers a refused user 403 for an existing id and 404 for a missing one, so load the row through ``DObject`` in ``get_form_kwargs`` or give the model both halves, see :ref:`topics-di-dobject`.
+Without a ``visible_to`` on the model manager and a registered ``scope``, ``Meta.instance_from_url`` looks the row up unscoped.
+A refused user then gets 403 for an existing id and 404 for a missing one, which reveals that the row exists, so load the row through ``DObject`` in ``get_form_kwargs`` or give the model both halves, see :ref:`topics-di-dobject`.
 See :ref:`topics-permissions` for the predicates and the backend that answers them.
 
 Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
@@ -482,7 +467,7 @@ Hide the form in the template when the page should not show it to anonymous visi
 
 The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
 The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
-The ``next.W127`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser, once the project declares access through a ``page.py`` or ``component.py`` declaration or ``add_perm``.
+In a project that declares access through a ``page.py`` or ``component.py`` declaration or ``add_perm``, the ``next.W127`` check warns about a ``permission_required`` name that no installed model defines and no ``add_perm()`` registers, since such a guard refuses every user but a superuser.
 It reads the model permissions off the model classes, so a ``Permission`` row created only by a data migration or through the admin draws it, and declaring that permission in ``Meta.permissions`` or silencing the code quiets it.
 
 .. _topics-forms-actions-dynamic-guards:
@@ -664,6 +649,79 @@ A page a CDN caches carries no CSRF token in its HTML, so its forms post only th
 The flag changes no dispatch behaviour.
 It tells ``next.W115`` that a shared page rendering this form has accepted the JavaScript requirement, so the warning stays for a shared page whose other forms must still work without the runtime.
 Like the guard keys, it survives subclassing through the inherited ``Meta``.
+
+.. _topics-forms-actions-transport:
+
+Posting over the WebSocket tunnel
+---------------------------------
+
+A page that holds a realtime WebSocket can submit a form through it, see :ref:`topics-realtime`.
+An action answers over plain HTTP unless it opts in with ``transport="any"``.
+The default is ``"http"``, because a socket cannot set a cookie.
+An opted-in action that rotates or flushes the session over the tunnel, such as a login or a logout, raises ``SessionRotationError`` before the store writes, rolls back an ``ATOMIC_REQUESTS`` transaction, drops what it wrote to the session, and answers ``421`` with ``X-Next-Transport: session``, so the client reloads the page, see :ref:`topics-realtime-tunnel`.
+
+.. code-block:: python
+   :caption: rooms/pages/rooms/[slug:code]/page.py
+
+   from django.http import HttpRequest, HttpResponse
+
+   import next.forms
+   from next import action
+
+   class MessageForm(next.forms.Form):
+       body = next.forms.CharField()
+
+       class Meta:
+           transport = "any"
+
+   @action("clear_draft", transport="any")
+   def clear_draft(request: HttpRequest):
+       return HttpResponse(status=204)
+
+``Meta.transport`` on a ``Form``, ``ModelForm``, or ``FormWizard``, and the ``transport`` keyword of ``@action``, take the same two values.
+Like the guard keys, ``Meta.transport`` survives subclassing through the inherited ``Meta``.
+Any other value registers the action for HTTP alone and is reported as ``next.E200``.
+
+The server enforces the flag.
+A tunneled request to an action that stays on ``"http"`` is answered with ``421`` and an ``X-Next-Transport: http`` header before the guards run, so nothing executes and the client repeats the request over ``fetch``.
+A response of an opted-in action carries ``X-Next-Transport: any``, the server-side mark by which the tunnel tells a reply of the action dispatch from one that middleware or another view produced.
+The tunnel refuses an unmarked reply, so the client never relies on the header itself.
+
+Uploads, wizard steps with files, and every action that sets a cookie belong on HTTP.
+A message flashed in a cookie turns the tunneled reply into an error after the action ran, so ``next.W145`` warns when an opted-in action meets a ``MESSAGE_STORAGE`` that writes cookies, Django's default ``FallbackStorage`` included.
+``SessionStorage`` clears the warning.
+
+The ``{% form %}`` tag writes ``data-next-transport="any"`` on the ``<form>`` of an opted-in action, and the client runtime reads the marker on submit and on inline validation.
+Only a ``<form>`` carries it.
+A hand-written form that posts to ``{% action_url %}`` goes out as a native submission, which the runtime never intercepts, so the WebSocket does not see it at all.
+``{% action_url %}`` is a value tag with no markup to attach a marker to, and it returns the same URL for every action.
+Script that posts through ``Next.partial.fetch`` or ``Next.partial.submit`` opts in per request.
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/clear.js
+
+   Next.partial.fetch({
+     url: document.querySelector("#clear").dataset.url,
+     method: "POST",
+     body: new URLSearchParams({ room: "42" }),
+     transport: "any",
+   });
+
+``Next.partial.submit`` takes the action URL and its fields, and resolves with an ``Outcome``, see :ref:`ref-client-outcome`.
+
+.. code-block:: javascript
+   :caption: rooms/static/rooms/clear.js
+
+   const outcome = await Next.partial.submit({
+     action: document.querySelector("#clear").dataset.url,
+     data: { room: "42" },
+     transport: "any",
+   });
+   if (outcome.status !== "ok") retryLater();
+
+The runtime sends the request through the socket only when the method is ``POST``, the body is a string, ``URLSearchParams``, or ``FormData`` without files, and a socket is open.
+A body with a file, and a request the socket cannot carry, goes over ``fetch`` with no change in the outcome.
+The server stays the source of truth, so a wrong marker on an HTTP action costs one ``421`` and a repeat.
 
 .. _topics-forms-actions-success:
 

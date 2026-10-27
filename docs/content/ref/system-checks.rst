@@ -8,31 +8,32 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Six of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which six and why.
+Seven of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which seven and why.
 
 Check registration
 ------------------
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.server.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
 Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
-Six checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+Seven checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 ``check_asset_version_moves_between_deploys`` (``next.W083``) describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
 ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
+``check_shared_broker`` (``next.W149``) flags the in-process default broker, which a development server runs on by design.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the six deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the seven deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -81,7 +82,19 @@ Pages
 ~~~~~
 
 The package splits by subject, one submodule per group of codes.
-``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them, ``contexts`` covers the ``@context`` callables of a routed ``page.py``, ``layouts`` the page-body placeholder and the root marker of a ``layout.djx``, ``groups`` the parenthesised directory names and the route groups they spell, ``intercepts`` the intercepting routes, whose zone checks live in ``next.partial.checks.intercepts``, ``loaders`` the ``TEMPLATE_LOADERS`` entries, ``metadata`` the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below, ``modules`` what a ``page.py`` declares, ``processors`` the context processors a render runs, ``structure`` the shape of a tree on disk, and ``zones`` a ``@context`` reading a key another callable bound to a zone.
+
+- ``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them.
+- ``contexts`` covers the ``@context`` callables of a routed ``page.py``.
+- ``layouts`` covers the page-body placeholder and the root marker of a ``layout.djx``.
+- ``groups`` covers the parenthesised directory names and the route groups they spell.
+- ``intercepts`` covers the intercepting routes, whose zone checks live in ``next.partial.checks.intercepts``.
+- ``loaders`` covers the ``TEMPLATE_LOADERS`` entries.
+- ``metadata`` covers the ``METADATA`` settings scope and the metadata of every routed ``page.py``, split further under `Metadata and responses`_ below.
+- ``modules`` covers what a ``page.py`` declares.
+- ``processors`` covers the context processors a render runs.
+- ``structure`` covers the shape of a tree on disk.
+- ``zones`` covers a ``@context`` reading a key another callable bound to a zone.
+
 ``composed`` carries no check and holds the one walk of the composed page templates that ``next.W085`` and the partial checks share, a ``RunMemo`` that ``forget_run_memos`` drops.
 
 .. automodule:: next.pages.checks
@@ -186,6 +199,23 @@ It also owns ``next.W130`` and ``next.W131`` for the ``LOGIN_REQUIRED`` setting.
 .. automodule:: next.permissions.checks
    :members:
 
+Development server
+~~~~~~~~~~~~~~~~~~
+
+``next.server.checks`` validates ``DEV_SERVER`` and warns when an app above ``next`` ships the ``runserver`` that runs.
+
+.. automodule:: next.server.checks
+   :members:
+
+Realtime
+~~~~~~~~
+
+``next.realtime.checks`` validates the ``REALTIME`` settings mapping, the ticket binding, the broker capabilities, the ``@on`` handlers that ``REALTIME['HANDLERS']`` imports, and a routed introspection endpoint (``next.E188``), and at deploy it flags a process-local broker (``next.W149``).
+The broker ``OPTIONS`` codes come from the ``check_options`` classmethod of the configured ``BrokerBackend`` class, which the check calls with the ``OPTIONS`` mapping.
+
+.. automodule:: next.realtime.checks
+   :members:
+
 Apps
 ~~~~
 
@@ -203,6 +233,9 @@ Dependency injection
 
 The layer contributes the ``DObject`` checks of ``next.deps.checks``, listed under `Errors`_ and `Warnings`_, and apart from ``next.E157`` for the ``scope`` dependency there is no ``next.ENNN`` code for a missing provider, a bad marker graph, or an unregistered ``Depends`` name.
 
+.. automodule:: next.deps.checks
+   :members:
+
 .. note::
 
    Expect this class of misconfiguration at **runtime**.
@@ -215,11 +248,9 @@ Check code reference
 
 The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NNN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
 One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHECKS`` never takes an unrelated failure down with it.
-The ``Emitted by`` column names the module that builds the message, which for the three check packages is the submodule rather than the package.
+The ``Emitted by`` column names the module that builds the message, which for the four check packages is the submodule rather than the package.
 
-A code that a release dropped is retired and never reused, so a silenced code keeps naming the condition it named.
-The retired errors are ``next.E001``, ``next.E026``, ``next.E066``, ``next.E091``, and ``next.E109``.
-The retired warnings are ``next.W003`` through ``next.W029``, ``next.W032`` through ``next.W041``, ``next.W044``, ``next.W045``, ``next.W047`` through ``next.W053``, ``next.W064`` through ``next.W066``, and ``next.W073``.
+A code is never reused for another condition, so a silenced code keeps naming the condition it named.
 
 Errors
 ~~~~~~
@@ -875,6 +906,157 @@ Errors
        A zone request carries the kwargs of the target URL alone, so the context or the access of the intercept never receives the value.
        Targeting a page whose URL captures the kwarg, or moving the intercept out from under the brackets, clears it.
      - ``next.pages.checks.intercepts``
+   * - ``next.E177``
+     - ``NEXT_FRAMEWORK['REALTIME']['BROKER']`` is set to something other than a mapping, ``None`` included.
+       Leaving the key out keeps the default broker.
+     - ``next.realtime.checks``
+   * - ``next.E178``
+     - ``NEXT_FRAMEWORK['REALTIME']['BROKER']['OPTIONS']['QUEUE_SIZE']`` of ``MemoryBroker`` is not a positive integer.
+     - ``next.realtime.backends``
+   * - ``next.E179``
+     - ``RedisBroker`` is selected without the ``redis`` package installed.
+       Installing the ``broker`` extra clears it.
+     - ``next.realtime.redis.broker``
+   * - ``next.E180``
+     - ``NEXT_FRAMEWORK['REALTIME']['BROKER']['OPTIONS']`` is not a mapping.
+     - ``next.realtime.checks``
+   * - ``next.E181``
+     - ``NEXT_FRAMEWORK['REALTIME']['TRANSPORTS']`` is not a unique non-empty list or tuple of ``'sse'`` and ``'ws'``.
+     - ``next.realtime.checks``
+   * - ``next.E182``
+     - ``NEXT_FRAMEWORK['REALTIME']['TICKET_MAX_AGE']``, the WebSocket ticket lifetime, is not an integer from 1 to 600 seconds.
+     - ``next.realtime.checks``
+   * - ``next.E183``
+     - ``NEXT_FRAMEWORK['REALTIME']['WS_PATH']``, the WebSocket path, is not absolute or includes a query or fragment.
+     - ``next.realtime.checks``
+   * - ``next.E184``
+     - ``NEXT_FRAMEWORK['REALTIME']['BROKER']['BACKEND']`` is not an importable concrete ``BrokerBackend`` subclass.
+     - ``next.realtime.checks``
+   * - ``next.E185``
+     - ``NEXT_FRAMEWORK['REALTIME']['HEARTBEAT']``, the WebSocket ping interval, is not a positive finite number of seconds.
+       An SSE stream takes its heartbeat from the ``HEARTBEAT_SECONDS`` option of the partial backend instead.
+       A boolean, a string, zero, a negative value, ``inf`` and ``nan`` all fail it.
+     - ``next.realtime.checks``
+   * - ``next.E186``
+     - The ``HEALTH_CHECK_INTERVAL`` option of ``RedisBroker`` is negative, infinite or not a number.
+       Zero is accepted and turns the client-side health check off.
+     - ``next.realtime.redis.broker``
+   * - ``next.E187``
+     - The ``CLIENT`` option of ``RedisBroker`` is not a mapping with string keys, or it sets ``decode_responses`` to anything but ``True``.
+       The broker reads text and forces ``decode_responses``, so the option is rejected rather than silently overridden.
+     - ``next.realtime.redis.broker``
+   * - ``next.E188``
+     - The ticket introspection endpoint is routed with its stock caller check, and ``REALTIME['GATEWAY_TOKEN']`` is missing or empty.
+       The endpoint refuses every gateway until a token is set.
+       Setting a long random token, or overriding ``authorize`` in a subclass, clears it.
+     - ``next.realtime.checks``
+   * - ``next.E189``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is not an integer from ``0`` to ``10000``.
+       A boolean, a float, a negative number, and anything above ``10000`` all fail it, and ``0`` is accepted and turns the replay log off.
+       The cap bounds the read of a whole topic log that every replay makes.
+     - ``next.realtime.checks``
+   * - ``next.E190``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['TTL']`` is not a positive number of seconds up to ``31536000``, one year.
+       A boolean, a string, zero, a negative value, ``inf``, ``nan``, and anything above a year all fail it, and the cap keeps the Redis ``PEXPIRE`` milliseconds far inside what Redis accepts.
+     - ``next.realtime.checks``
+   * - ``next.E191``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']`` is set to something other than a mapping.
+       Leaving the key out keeps the default window.
+     - ``next.realtime.checks``
+   * - ``next.E192``
+     - The ``PREFIX`` option of ``RedisBroker`` is not a string with a non-colon character, or it holds ``{`` or ``}``.
+       A brace moves the Redis Cluster hash tag off the topic name, so the two keys of a topic no longer share a slot.
+     - ``next.realtime.redis.broker``
+   * - ``next.E193``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']`` is set to something other than a mapping.
+       Leaving the key out keeps the default limits.
+     - ``next.realtime.checks``
+   * - ``next.E194``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['WINDOW']`` is not a positive number of seconds up to ``60``.
+       The window coalesces every join and leave on a topic into one ``next:presence`` event.
+     - ``next.realtime.checks``
+   * - ``next.E195``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['SIZE']`` is not an integer from ``0`` to ``1000``.
+       It caps the members one ``next:presence`` event lists, the count stays exact, and ``0`` sends the count alone.
+     - ``next.realtime.checks``
+   * - ``next.E196``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']['MEMBER_BYTES']`` is not an integer from ``1`` to ``4096``.
+       It caps the compact JSON of one member, and a larger member fails its join with ``InvalidMemberError``.
+     - ``next.realtime.checks``
+   * - ``next.E197``
+     - ``NEXT_FRAMEWORK['REALTIME']['HANDLERS']`` is neither ``None`` nor a list of dotted module names.
+       ``None`` imports the ``realtime`` module of every installed app, a list imports only the modules it names, and ``[]`` imports none.
+     - ``next.realtime.checks``
+   * - ``next.E198``
+     - An ``@on`` handler names a topic pattern or an event name that can never match.
+       A pattern holds topic characters and distinct ``{name}`` placeholders outside the ``next:`` prefix, and the literal between two placeholders holds a ``:`` or a ``.``, so ``dm:{a}-{b}`` is refused as ambiguous.
+       A pattern is at most 200 characters long.
+       An event name holds 1 to 100 topic characters.
+     - ``next.realtime.checks``
+   * - ``next.E199``
+     - Two different handlers register ``@on`` for the same topic pattern and event name.
+       Only the first one runs.
+       A function counts as itself only at the same file, first line, and qualified name, so a reload that keeps the ``def`` in place replaces the handler without the error, and a reload that moves the ``def`` reports ``next.E199``.
+       A decorator with ``functools.wraps`` is looked through, so two handlers it wraps stay apart, and a wrapper without it is told apart only by identity.
+     - ``next.realtime.checks``
+   * - ``next.E200``
+     - An ``@action`` or a form class ``Meta`` declares a ``transport`` other than ``"http"`` and ``"any"``.
+       The action is registered for HTTP alone until the value is fixed.
+     - ``next.forms.checks.actions``
+   * - ``next.E201``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']`` is not a mapping.
+     - ``next.realtime.checks``
+   * - ``next.E202``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['RATE']`` is not a positive number of frames a second up to ``1000``.
+       The rate refills the token bucket every frame of a connection after ``sub`` draws from, ``pong`` and unsupported frames included.
+     - ``next.realtime.checks``
+   * - ``next.E203``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['BURST']`` is not an integer from ``1`` to ``1000``.
+       The burst is the size of the token bucket, the frames a fresh connection may send at once.
+     - ``next.realtime.checks``
+   * - ``next.E204``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['MAX_BYTES']`` is not an integer from ``1`` to ``65536``.
+       It caps the UTF-8 bytes of one ``up`` frame as it arrives.
+     - ``next.realtime.checks``
+   * - ``next.E205``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']`` is neither ``False`` nor a mapping.
+     - ``next.realtime.checks``
+   * - ``next.E206``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']['CONCURRENCY']`` is not an integer from ``1`` to ``64``.
+     - ``next.realtime.checks``
+   * - ``next.E207``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']['TIMEOUT']`` is not a positive number of seconds up to ``600``.
+     - ``next.realtime.checks``
+   * - ``next.E208``
+     - ``NEXT_FRAMEWORK['REALTIME']['TUNNEL']['MAX_REPLY_BYTES']`` is not an integer from ``1`` to ``67108864``.
+     - ``next.realtime.checks``
+   * - ``next.E209``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['CONCURRENCY']`` is not an integer from ``1`` to ``64``.
+       It caps the ``up`` events of one connection that run at once.
+     - ``next.realtime.checks``
+   * - ``next.E210``
+     - ``NEXT_FRAMEWORK['REALTIME']['UPSTREAM']['TIMEOUT']`` is not a positive number of seconds up to ``600``.
+       It bounds how long one ``up`` event waits for its handler.
+     - ``next.realtime.checks``
+   * - ``next.E211``
+     - ``NEXT_FRAMEWORK['REALTIME']['TICKET_BINDING']`` is not the dotted path of an importable concrete ``TicketBinding`` subclass.
+     - ``next.realtime.checks``
+   * - ``next.E212``
+     - ``NEXT_FRAMEWORK['DEV_SERVER']`` names a path that does not import, or one that is no class with the ``run(app, **options)`` method of ``ASGIServer``.
+     - ``next.server.checks``
+   * - ``next.E213``
+     - The ``URL`` option of ``RedisBroker`` is not a non-empty string.
+       The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
+     - ``next.realtime.redis.broker``
+   * - ``next.E214``
+     - A ``PARTIAL_BACKENDS`` entry sets ``OPTIONS["SSE"]`` to something other than a dict or ``None``, ``SSE.RETRY_MS`` to something other than ``None`` or an integer from ``0`` that is not a bool, or ``SSE.HEARTBEAT_SECONDS`` to something other than ``None`` or a finite number above ``0``.
+       ``None`` takes the default.
+       The stream replaces a wrong value by its default at runtime, so the check is the only report of it.
+     - ``next.partial.checks.backends``
+   * - ``next.E215``
+     - A ``PARTIAL_BACKENDS`` entry names a protocol backend that leaves ``stream_data(envelope, meta)`` abstract or defines an ``sse_event`` method.
+       Such a class cannot be built, or no stream calls its ``sse_event``, so the check names ``stream_data`` as the method to implement.
+     - ``next.partial.checks.backends``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -973,7 +1155,7 @@ Warnings
        Assets of that kind reach the browser only on a full page render, never through a patch envelope.
      - ``next.static.checks``
    * - ``next.W075``
-     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, or ``$consent``.
+     - A page or a component registers a keyed ``serialize=True`` context under a name the ``next.min.js`` init payload reserves, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, or ``$consent``.
        The framework owns those names on every render, so the registered value never reaches ``window.Next.context`` and no ``context`` patch updates it.
        The message names the declaring ``page.py`` or ``component.py`` and asks for a rename.
        A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so the check never sees them.
@@ -1250,6 +1432,55 @@ Warnings
        An anonymous visitor opening the modal gets a login redirect over a public page.
        Declaring ``page.public()`` in the intercept ``page.py`` clears it, or ``page.login_required()`` keeps the login on purpose.
      - ``next.pages.checks.intercepts``
+   * - ``next.W141``
+     - The WebSocket transport is enabled while ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it and ``MIDDLEWARE`` lists no ``SessionMiddleware``, so every negotiation answers ``503``.
+       ``SignedCookieBinding`` binds a visitor without the middleware, and a custom binding answers for its own requirements, so neither raises it.
+       ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
+     - ``next.realtime.deployment``
+   * - ``next.W142``
+     - The WebSocket transport is enabled while ``SESSION_ENGINE`` is the signed-cookie engine and ``TICKET_BINDING`` is ``SessionBinding`` or a subclass of it.
+       That engine has no session key on a first visit and re-signs the key on every session save, so negotiation answers ``503`` or the handshake cookie stops matching the ticket and the socket closes with ``4401``.
+       Setting ``TICKET_BINDING`` to ``next.realtime.SignedCookieBinding``, or switching to the ``db``, ``cache``, ``cached_db`` or ``file`` engine, clears it.
+       A signed cookie still outlives logout until ``SESSION_COOKIE_AGE``, and only a password change or an inactive user revokes it.
+       ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
+     - ``next.realtime.deployment``
+   * - ``next.W143``
+     - ``NEXT_FRAMEWORK['REALTIME']['REPLAY']['SIZE']`` is above zero while the configured broker class is no ``ReplayingBroker``, so every reconnect resynchronises from ``hello``.
+       Implementing ``replay`` and ``areplay`` on the broker, or setting ``SIZE`` to ``0``, clears it.
+     - ``next.realtime.checks``
+   * - ``next.W144``
+     - ``NEXT_FRAMEWORK['REALTIME']['PRESENCE']`` is set while the configured broker class is no ``PresenceBroker``, so every stream that asks for presence fails to start.
+       Implementing ``PresenceBroker`` on the broker, or dropping ``PRESENCE``, clears it.
+     - ``next.realtime.checks``
+   * - ``next.W145``
+     - A form action admits ``transport="any"`` while ``MESSAGE_STORAGE`` keeps messages in a cookie, as ``CookieStorage`` and the default ``FallbackStorage`` do.
+       A message flashed over the WebSocket tunnel sets a cookie the socket cannot deliver, so the reply turns into ``http_only`` after the action ran.
+       It runs only with ``django.contrib.messages`` in ``INSTALLED_APPS``.
+       Setting ``MESSAGE_STORAGE`` to ``django.contrib.messages.storage.session.SessionStorage`` clears it.
+     - ``next.forms.checks.actions``
+   * - ``next.W146``
+     - ``WebSocketApp(origins=[...])`` admits an origin that neither ``CSRF_TRUSTED_ORIGINS`` nor a host ``ALLOWED_HOSTS`` names in full covers while the tunnel is on, so a form action tunneled from it may fail the CSRF check.
+       A ``.example.com`` or ``*`` entry does not count, since the CSRF check compares the origin with the exact ``Host`` of the request.
+       ``WebSocketApp`` logs it when it is created, since ``manage.py check`` never sees the list.
+       Adding the origin to ``CSRF_TRUSTED_ORIGINS``, or setting ``REALTIME['TUNNEL']`` to ``False``, clears it.
+     - ``next.realtime.deployment``
+   * - ``next.W147``
+     - ``TICKET_BINDING`` is ``SignedCookieBinding`` or a subclass of it while ``SESSION_ENGINE`` is a server-side engine.
+       The binding reloads a signed-in user by pk and auth hash, so an open socket outlives logout and the expiry of the stored session.
+       Setting ``TICKET_BINDING`` to ``next.realtime.SessionBinding``, which rechecks the stored session, clears it.
+       ``manage.py check`` raises it only when ``REALTIME['TRANSPORTS']`` lists ``ws``, while a ``WebSocketApp`` always logs it when it is created.
+     - ``next.realtime.deployment``
+   * - ``next.W148``
+     - ``DEV_SERVER`` names an ASGI server, the default one with uvicorn installed or any project class, while an installed app above ``next`` in ``INSTALLED_APPS`` ships the ``runserver`` command that wins, such as ``django.contrib.staticfiles``.
+       Django runs the command of the application listed first, so ``manage.py runserver`` stays that command and never serves the project on the ASGI server with the realtime WebSocket.
+       Moving ``next`` above the named app clears it.
+     - ``next.server.checks``
+   * - ``next.W149``
+     - The configured broker class is ``MemoryBroker`` or a subclass of it, which keeps topics inside one process.
+       With several workers or hosts a publish reaches only the subscribers of the publishing process.
+       The check carries ``deploy=True``.
+       Selecting ``next.realtime.RedisBroker`` or another shared ``BrokerBackend`` clears it, and a single-process deployment lists the code in ``SILENCED_SYSTEM_CHECKS``.
+     - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.
 

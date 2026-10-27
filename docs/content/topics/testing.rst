@@ -3,7 +3,7 @@
 Testing
 =======
 
-next.dj ships ``next.testing`` with a test client, registry isolation, signal capture, action helpers, and HTML utilities.
+next.dj ships ``next.testing`` with a test client, registry isolation, signal capture, action helpers, HTML utilities, metadata and sitemap assertions, and realtime helpers.
 Nothing re-exported from ``next.testing`` imports pytest, so every helper works under Django's ``TestCase``, stdlib ``unittest``, and pytest alike.
 Pytest lives alone in the opt-in ``next.testing.plugin`` module, which a project loads from its ini file when it wants the fixtures described below.
 ``next.testing`` parses a sitemap through ``defusedxml``, which the ``testing`` extra installs, so a test environment adds ``next.dj[testing]`` rather than ``next.dj``.
@@ -50,8 +50,17 @@ Every helper is importable from the ``next.testing`` package as well as from its
      - ``eager_load_pages``, ``eager_load_components``, ``clear_loaded_dirs``
      - Force-importing pages and components in a suite that skips the request cycle.
    * - ``isolation``
-     - ``reset_registries``, ``reset_components``, ``reset_form_actions``, ``reset_form_registration_state``, ``reset_page_cache``, ``reset_component_templates``
+     - ``reset_registries``, ``reset_components``, ``reset_form_actions``, ``reset_form_registration_state``, ``reset_page_cache``, ``reset_component_templates``, ``reset_scripts``, ``reset_seo``, ``reset_failure_logs``
      - Reloading backends and dropping caches after mutating settings, registries, or files on disk.
+   * - ``metadata``
+     - ``assert_metadata``
+     - Asserting the head tags a page renders, with ``None`` for a tag that must be absent.
+   * - ``seo``
+     - ``parse_sitemap``, ``SitemapUrl``
+     - Reading the URLs a sitemap or a sitemap index response lists.
+   * - ``realtime``
+     - ``memory_broker``, ``capture_published``, ``PublishedMessages``, ``SseReader``, ``SseEvent``, ``WebSocketCommunicator``, ``MemoryPort``, ``issue_socket_ticket``, ``aissue_socket_ticket``, ``SocketTicket``, ``override_websocket_mount``
+     - Isolating the broker, recording publications, and driving an SSE stream or a WebSocket, see `Testing realtime`_.
    * - ``plugin``
      - ``next_pages``, ``next_components``, ``next_clear_cache``, ``next_client``
      - The pytest ini options and the client fixture, once the plugin is loaded.
@@ -388,8 +397,8 @@ Partial requests
 ~~~~~~~~~~~~~~~~
 
 The client stamps the partial switch, the zone list, and the client asset version for you.
-Pass ``partial=True`` and ``zones=`` to ``post_action`` to turn the POST into a patch request scoped to a zone.
-``zones`` accepts one name or a tuple of names.
+Pass ``partial=True`` to ``post_action`` to turn the POST into a patch request, or pass the zone names to scope it to them.
+``partial`` accepts one name or a tuple of names.
 
 .. code-block:: python
    :caption: tests/test_partial_action.py
@@ -400,8 +409,7 @@ Pass ``partial=True`` and ``zones=`` to ``post_action`` to turn the POST into a 
        response = NextClient().post_action(
            "create_note",
            {"title": "hi"},
-           partial=True,
-           zones="notes",
+           partial="notes",
        )
        envelope = envelope_of(response)
        assert "notes" in envelope.zone_targets()
@@ -426,6 +434,7 @@ Pass ``HTTP_X_NEXT_VALIDATE="title"`` to drive the validate-only branch, ``HTTP_
 ``envelope_of(response)`` decodes a patch response into a ``PartialEnvelope``.
 It raises ``AssertionError`` when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
 ``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+``zone_targets`` lists the zone of every op that addresses one, the ``zone`` a ``refresh`` names on itself included, so a published ``Patches(None).refresh(zone="results")`` reads as ``["results"]``.
 ``html_for_zone`` raises ``AssertionError`` when no op targets the named zone.
 See :doc:`/content/topics/partial-rendering/index` for the zone and patch model these helpers exercise.
 
@@ -533,6 +542,9 @@ Action helpers
 ``build_form_for`` builds a bound form for an action so a unit test can assert validation without HTTP.
 Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message.
 ``build_form_for`` raises ``LookupError`` for an action registered without a form class, which covers a handler-only action and a wizard alike, and the message points at posting to ``resolve_action_url`` with the test client instead.
+
+It constructs the class with ``data`` and the extra keywords alone, so the dispatcher hooks ``get_initial``, ``get_form_kwargs``, and ``Meta.instance_from_url`` do not run, and an edit test passes ``instance=`` itself.
+Unlike ``resolve_action_url`` it takes no ``page`` keyword and imports no pages, so load the pages first through ``next_pages`` or ``eager_load_pages``.
 
 .. code-block:: python
    :caption: tests/test_action_helpers.py
@@ -760,7 +772,8 @@ The method is mandatory, and a stub that omits it is refused with a ``TypeError`
        assert kwargs == {"limit": 7}
 
 ``override_form_action`` registers a handler under an action name for the block.
-It snapshots the whole action registry on entry and restores it on exit, so an action the project already registered under that name survives the block.
+It snapshots the action registry and the registration diagnostics on entry and restores both on exit, so an action the project already registered under that name survives the block and no false ``next.E041`` collision outlives it.
+The override is a shared action with no guard that answers over HTTP alone, so a guard or a tunnel test registers its action through a page module instead.
 The override claims the name binding, which means it wins name lookup even when such an action exists.
 Pass ``form_class=`` to give the override a form, which is what ``build_form_for`` and a bound dispatch need.
 
@@ -823,6 +836,72 @@ Both accept ``request``, ``form``, ``url_kwargs``, and ``context_data``, and ``m
 Pass ``resolve_call`` a callable whose annotated parameters a provider can fill, then assert on the returned mapping.
 Use these helpers for testing custom providers without booting the router.
 
+Testing realtime
+----------------
+
+``next.testing.realtime`` covers both realtime transports and the broker between them.
+``memory_broker()`` serves realtime from a fresh ``MemoryBroker`` for a block, so wrap every test that publishes in it and no message or sequence number leaks into the next test.
+``capture_published(*topics)`` records what ``publish`` and ``apublish`` send, and ``SseReader`` parses a streaming SSE response into ``SseEvent`` values.
+
+.. code-block:: python
+   :caption: polls/tests/test_stream.py
+
+   import pytest
+   from django.test import Client
+
+   from next.partial import Patches
+   from next.realtime import publish
+   from next.testing import SseReader, capture_published, memory_broker
+
+   @pytest.mark.django_db
+   def test_stream_delivers_a_refresh(client: Client) -> None:
+       with memory_broker(), capture_published("poll:1") as published:
+           response = client.get("/polls/1/stream/")
+           with SseReader(response) as events:
+               assert next(events).event == "next-hello"
+               publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+               patches = next(events)
+       assert patches.event == "next-patches"
+       assert len(published) == 1
+
+``WebSocketCommunicator`` drives an ASGI application through one WebSocket connection.
+``issue_socket_ticket`` issues a ticket through the configured binding, and its ``cookie`` property is the header pair the handshake presents.
+``override_websocket_mount()`` hands back the process-wide ``ws`` flag that building the socket application sets.
+
+.. code-block:: python
+   :caption: rooms/tests/test_socket.py
+
+   import asyncio
+
+   import pytest
+   from django.core.asgi import get_asgi_application
+
+   from next.realtime import application
+   from next.testing import (
+       WebSocketCommunicator,
+       issue_socket_ticket,
+       memory_broker,
+       override_websocket_mount,
+   )
+
+   @pytest.mark.django_db(transaction=True)
+   def test_socket_subscribes_to_the_room() -> None:
+       ticket = issue_socket_ticket(("room:42",), authorizer_ref="rooms.access.can_watch")
+       headers = [(b"origin", b"http://testserver"), (b"host", b"testserver"), ticket.cookie]
+
+       async def scenario() -> None:
+           app = application(get_asgi_application())
+           communicator = WebSocketCommunicator(app, "/_next/ws/", headers, timeout=5)
+           connected, _ = await communicator.connect()
+           assert connected
+           assert (await communicator.subscribe(ticket))["type"] == "hello"
+           await communicator.disconnect()
+
+       with override_websocket_mount(), memory_broker():
+           asyncio.run(scenario())
+
+See :doc:`/content/ref/testing` for ``send_up``, ``request``, ``MemoryPort``, and the async ticket helper.
+
 System checks
 -------------
 
@@ -840,7 +919,7 @@ Pytest can run ``manage.py check`` as part of the suite.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
 
 That run already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
-Six framework checks are registered with ``deploy=True`` and stay out of it, because each describes a deployment rather than a development checkout.
+Seven framework checks are registered with ``deploy=True`` and stay out of it, because each describes a deployment rather than a development checkout.
 A second call turns them on.
 
 .. code-block:: python
@@ -851,7 +930,9 @@ A second call turns them on.
    def test_deploy_checks_pass() -> None:
        call_command("check", deploy=True, fail_level="WARNING", verbosity=0)
 
-That run adds ``next.W083`` and the site checks, ``next.W110``, ``next.W111``, and ``next.W122``, so a suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
+That run adds ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, and ``next.W149``, see :doc:`/content/deployment/checklist` for what each one reports.
+A suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
+The same suite selects a shared realtime broker, or lists ``next.W149`` in ``SILENCED_SYSTEM_CHECKS`` for a single-process deployment, because the default ``MemoryBroker`` keeps topics inside one process.
 See :ref:`ref-system-checks` for the full catalog.
 
 See also

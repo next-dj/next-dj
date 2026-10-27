@@ -60,6 +60,7 @@ def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
         page_singleton.clear_template_caches()
 
 
+@pytest.mark.walltime()
 class TestBenchColdViewGet:
     """The same GETs with the composed layers thrown away before every round.
 
@@ -132,6 +133,7 @@ class TestBenchColdViewGet:
 class TestBenchUnifiedViewGet:
     """Per-GET cost of the unified page view, the path production serves."""
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="pages.view")
     def test_static_warm(self, tmp_path: Path, benchmark) -> None:
         page_file = build_layout_page(tmp_path, layouts=2, template=_STATIC_TEMPLATE)
@@ -140,6 +142,7 @@ class TestBenchUnifiedViewGet:
             view(request)
             benchmark(view, request)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="pages.view")
     def test_dynamic_warm(self, tmp_path: Path, benchmark) -> None:
         page_file = build_layout_page(tmp_path, layouts=2, page_body=_DYNAMIC_PAGE)
@@ -148,6 +151,7 @@ class TestBenchUnifiedViewGet:
             view(request)
             benchmark(view, request)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="pages.view")
     def test_static_warm_debug(self, tmp_path: Path, benchmark) -> None:
         """The same static GET under `DEBUG`, where the caches stat their sources.
@@ -160,6 +164,7 @@ class TestBenchUnifiedViewGet:
             view(request)
             benchmark(view, request)
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("layouts", [0, 2, 8], ids=["flat", "nested", "deep"])
     @pytest.mark.benchmark(group="pages.view")
     def test_static_layout_depth(self, tmp_path: Path, layouts: int, benchmark) -> None:

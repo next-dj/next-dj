@@ -15,7 +15,7 @@ The six mechanisms
 
 Backend.
    Replace or augment a complete subsystem.
-   Used for URL routing, components, forms dispatch, the :doc:`static pipeline <static-assets/index>`, and the :doc:`partial patch protocol <partial-rendering/index>`.
+   Used for URL routing, components, forms dispatch, the :doc:`static pipeline <static-assets/index>`, the :doc:`partial patch protocol <partial-rendering/index>`, the realtime broker, and the ticket binding.
 
 Registry.
    Add new entries to a global list at startup.
@@ -36,7 +36,7 @@ Signal.
 
 Port.
    Replace the implementation one subsystem calls another through.
-   Used for the page-tree scan, the partial response shaping, the router access seam, and the static asset surface a render reaches.
+   Used for the nine slots the table under Ports lists, one wherever a subsystem reaches another.
 
 Backends
 --------
@@ -75,16 +75,26 @@ Subclass the base class listed for its family and register the dotted path in ``
    * - Visitor consent
      - ``CONSENT["BACKEND"]``
      - ``next.consent.ConsentBackend``
+   * - Realtime broker
+     - ``REALTIME["BROKER"]``
+     - ``next.realtime.BrokerBackend``
+   * - Ticket binding
+     - ``REALTIME["TICKET_BINDING"]``
+     - ``next.realtime.TicketBinding``
+   * - Development server
+     - ``DEV_SERVER``
+     - ``next.server.asgi.ASGIServer``
 
 Each base is spelled through the curated package path, which is the import a project writes.
 The class also lives at a deeper module path, and that path carries no stability promise.
 
 A backend always implements the full contract.
 Every family checks the configured class against the base named above, so a class that does not subclass it is rejected with :class:`~django.core.exceptions.ImproperlyConfigured`.
+``ASGIServer`` is a runtime-checkable protocol, so a ``DEV_SERVER`` class passes that check with a ``run(app, **options)`` method and no subclassing.
 A custom backend usually subclasses the default so it inherits every default behaviour.
 
 Every base is an abstract base class that declares the methods a subclass must implement.
-``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``sse_event``, which returns the same envelope as a server-sent-events frame, and ``deserialize_envelope``, which reads a response body back into an ``Envelope`` so a reader such as the test client parses the format its writer produced.
+``PartialProtocolBackend`` requires ``serialize_envelope``, which returns the HTTP response body for one patch envelope, ``stream_data``, which returns a topic frame with its stream metadata as a JSON object or as text, and ``deserialize_envelope``, which reads a response body back into an ``Envelope`` so a reader such as the test client parses the format its writer produced.
 It also expects the ``content_type`` class attribute that names the media type of the body, and it supplies the ``options`` property that reads ``OPTIONS`` out of the settings entry.
 The shipped ``next.partial.JsonPartialProtocolBackend`` implements that contract as compact JSON, and a subclass of it that only changes part of the wire format overrides both public methods rather than reaching through the internal ``_dumps`` helper, which carries no stability promise.
 
@@ -153,6 +163,9 @@ Register entries in ``AppConfig.ready`` or through a settings key.
        Import ``register_patch_op`` from ``next.partial``.
    * - Template loaders
      - The ``TEMPLATE_LOADERS`` settings key.
+   * - Upstream handlers
+     - ``@on(pattern, name)`` in an app's ``realtime.py``, or the modules ``REALTIME["HANDLERS"]`` lists.
+       Import ``on`` from ``next.realtime``.
 
 The registry pattern is the right choice when the framework already knows how to consume the values and only needs to learn about a new entry.
 
@@ -177,7 +190,7 @@ App order in ``INSTALLED_APPS``
 
 Django runs every ``AppConfig.ready`` during application population, in ``INSTALLED_APPS`` order, so an app listed above ``next`` registers before ``NextFrameworkConfig.ready`` runs and an app listed below it registers after.
 For the registries on this page that ordering does not change the outcome.
-``NextFrameworkConfig.ready`` installs the autoreload, template, and staticfiles hooks, imports the ``deps``, ``permissions``, ``forms``, and ``signals`` modules of every app, then installs the component hooks and runs component discovery, and none of those steps read the kind, stem, placeholder, provider, named-dependency, or patch-verb registries.
+``NextFrameworkConfig.ready`` installs the autoreload, template, and staticfiles hooks, imports the ``deps``, ``permissions``, ``forms``, ``realtime``, and ``signals`` modules of every app, so upstream handlers register there, then installs the component hooks and runs component discovery, and none of those steps read the kind, stem, placeholder, provider, named-dependency, or patch-verb registries.
 Each of those registries is read on the first render, the first dispatch, or the first ``manage.py check``, and the watch specs are resolved when the autoreload watcher starts, all of which happen after application population finishes.
 What matters is that the call sits in ``ready`` rather than in request-time code, not where the app sits in the list.
 
@@ -283,7 +296,7 @@ Use a strategy when the customisation is a single algorithm rather than a comple
 
 Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping, and the metadata renderer inside the ``METADATA`` scope.
 ``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``, and ``METADATA["RENDERER"]`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all four against the base class its key declares, the last one through its ``scope`` argument.
-A value that is not a string is dropped by the settings merge for any of the three, which leaves the default in place with no error, and :ref:`next.E076 <ref-system-checks>` reports the dropped value on ``manage.py check``.
+A value that is not a string is dropped by the settings merge for any of the four, which leaves the default in place with no error, and :ref:`next.E076 <ref-system-checks>` reports the dropped value on ``manage.py check``.
 
 ``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
 Swap it to change how a request path is matched against those patterns, for example to trade the default trie for a different index.
@@ -336,6 +349,9 @@ A port is the narrow surface one subsystem calls another through.
    * - ``partial_shaper_slot``
      - ``next.partial.ports.PartialShaperImpl``
      - Reads the partial intent off a request and shapes page and form responses into envelopes.
+   * - ``realtime_negotiation_slot``
+     - ``next.realtime.ports.RealtimeNegotiationImpl``
+     - Answers the transports and the partial content types the ``$realtime`` entry of a page carries.
    * - ``router_access_slot``
      - ``next.urls.ports.RouterAccessImpl``
      - Builds router backends and managers and answers the URL pattern parser.
@@ -349,7 +365,7 @@ A port is the narrow surface one subsystem calls another through.
      - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all eight, ahead of every step that imports user code.
+``NextFrameworkConfig.ready()`` binds all nine, ahead of every step that imports user code.
 Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
@@ -424,6 +440,10 @@ Choosing between mechanisms
 - **Add a custom patch verb.** Call ``register_patch_op``.
   See :doc:`/content/topics/partial-rendering/extending`.
 - **Persist wizard drafts elsewhere.** Subclass ``FormWizardBackend`` and name it under ``FORM_WIZARD_BACKEND``.
+- **Carry topics through another store.** Subclass ``BrokerBackend`` and name it under ``REALTIME["BROKER"]``.
+  See :doc:`/content/howto/write-a-broker-backend`.
+- **Bind tickets to your own identity.** Subclass ``TicketBinding`` and name it under ``REALTIME["TICKET_BINDING"]``.
+  See :doc:`/content/howto/bind-tickets-to-your-own-identity`.
 - **Change how URLs land in HTML.** Customise a static backend.
 - **Vary URLs by request.** Use a request-aware static backend.
 - **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.
@@ -436,7 +456,7 @@ Packaging an extension
 ----------------------
 
 A reusable extension ships as an ordinary Django application.
-The framework imports its ``deps.py``, ``permissions.py``, and ``signals.py`` at startup like those of any installed app, so the providers, named dependencies, predicates, and receivers declared there need no code of their own, see :doc:`/content/ref/settings`.
+The framework imports its ``deps.py``, ``permissions.py``, ``forms.py``, ``realtime.py``, and ``signals.py`` at startup like those of any installed app, so the providers, named dependencies, predicates, shared forms, upstream handlers, and receivers declared there need no code of their own, see :doc:`/content/ref/settings`.
 
 .. code-block:: python
    :caption: next_audit/apps.py
@@ -466,7 +486,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all eight slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all nine slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.

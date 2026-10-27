@@ -3,9 +3,10 @@
 import html
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, overload
 from urllib.parse import urljoin, urlsplit
 
 from django.http import HttpRequest, HttpResponse
@@ -37,6 +38,7 @@ from .errors import (
     DynamicForeignPageError,
     ForeignPageNotAuthorizedError,
     LayerHrefWithoutZoneError,
+    OriginUnavailableError,
     ReservedContextKeyError,
     ReservedEventNameError,
     UnknownContextNameError,
@@ -57,7 +59,7 @@ from .render import render_zone
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
     from django.http import HttpResponseBase
 
@@ -87,10 +89,31 @@ _RESERVED_EVENT_PREFIXES: tuple[str, ...] = ("partial:", "next:")
 DedupeMode = Literal["key", "id"]
 _DEDUPE_MODES: frozenset[str] = frozenset({"key", "id"})
 
-_FOREIGN_ZONE_UNUSED: tuple[str, ...] = ("target", "html", "form", "overrides")
-_ZONE_UNUSED: tuple[str, ...] = ("target", "html", "form", "url_kwargs")
-_FORM_UNUSED: tuple[str, ...] = ("target", "overrides", "page", "url_kwargs")
-_TARGET_UNUSED: tuple[str, ...] = ("overrides", "page", "url_kwargs")
+_FOREIGN_ZONE_ROUTE: frozenset[str] = frozenset({"zone", "page", "url_kwargs"})
+_ZONE_ROUTE: frozenset[str] = frozenset({"zone", "overrides", "context"})
+_FORM_ROUTE: frozenset[str] = frozenset({"form"})
+_TARGET_ROUTE: frozenset[str] = frozenset()
+
+type ZoneContext = Mapping[str, Any] | bool
+
+
+class MorphRoute(TypedDict, total=False):
+    """The keyword selectors of `Patches.morph` and the options each route takes."""
+
+    zone: str
+    overrides: "Mapping[str, Any] | None"
+    page: "Path | str"
+    url_kwargs: "Mapping[str, Any] | None"
+    form: str
+    context: ZoneContext
+
+
+_MORPH_KEYS: frozenset[str] = MorphRoute.__optional_keys__
+
+
+def _given(name: str, value: object) -> bool:
+    """Whether a morph keyword was passed with a value other than its no-op."""
+    return value is not True if name == "context" else bool(value)
 
 
 def _plain(text: "Text | None") -> str | None:
@@ -171,6 +194,7 @@ class Patches:
         self._origin_resolved = False
         self._origin_authorized = False
         self._render_contexts: dict[Path, dict[str, object]] = {}
+        self._zone_context_index: int | None = None
 
     @classmethod
     def versioned(
@@ -191,12 +215,21 @@ class Patches:
         """Return the asset version stamped on the envelope."""
         return self._version
 
+    @property
+    def request(self) -> HttpRequest | None:
+        """Return the request the builder is bound to, or None for a detached one."""
+        return self._request
+
     @overload
     def morph(self, target: "Mapping[str, Any]", html: str = "") -> "Patches": ...
 
     @overload
     def morph(
-        self, *, zone: str, overrides: "Mapping[str, Any] | None" = None
+        self,
+        *,
+        zone: str,
+        overrides: "Mapping[str, Any] | None" = None,
+        context: ZoneContext = True,
     ) -> "Patches": ...
 
     @overload
@@ -215,43 +248,56 @@ class Patches:
         self,
         target: "Mapping[str, Any] | None" = None,
         html: str | None = None,
-        *,
-        zone: str | None = None,
-        overrides: "Mapping[str, Any] | None" = None,
-        page: "Path | str | None" = None,
-        url_kwargs: "Mapping[str, Any] | None" = None,
-        form: str | None = None,
+        **route: Unpack[MorphRoute],
     ) -> "Patches":
         """Morph a target into HTML, the default verb.
 
         A keyword belonging to another route raises rather than being dropped.
         """
+        zone = route.get("zone")
+        page = route.get("page")
+        form = route.get("form")
         if zone is not None and page is not None:
-            self._refuse(_FOREIGN_ZONE_UNUSED, target, html, form, overrides)
-            return self.morph_foreign_zone(zone, page, url_kwargs=url_kwargs)
+            self._refuse(_FOREIGN_ZONE_ROUTE, route, target=target, html=html)
+            return self.morph_foreign_zone(
+                zone, page, url_kwargs=route.get("url_kwargs")
+            )
         if zone is not None:
-            self._refuse(_ZONE_UNUSED, target, html, form, url_kwargs)
-            return self.morph_zone(zone, overrides=overrides)
+            self._refuse(_ZONE_ROUTE, route, target=target, html=html)
+            return self.morph_zone(
+                zone,
+                overrides=route.get("overrides"),
+                context=route.get("context", True),
+            )
         if form is not None:
-            self._refuse(_FORM_UNUSED, target, overrides, page, url_kwargs)
+            self._refuse(_FORM_ROUTE, route, target=target)
             return self.morph_form(form, html or "")
-        self._refuse(_TARGET_UNUSED, overrides, page, url_kwargs)
+        self._refuse(_TARGET_ROUTE, route)
         if not target:
             msg = "morph() needs a target mapping, or a zone or form selector."
             raise TypeError(msg)
         return self._append_morph(target, html or "", extract=False)
 
     @staticmethod
-    def _refuse(names: tuple[str, ...], *unused: object) -> None:
+    def _refuse(owned: frozenset[str], route: MorphRoute, **positional: object) -> None:
         """Raise when a morph route is passed a keyword another route owns.
 
-        The empty case is every morph's hot path, so it returns before naming anything.
+        A falsy value names nothing, and neither does the default `context=True`.
         """
-        if not any(unused):
+        if route.keys() <= owned and not any(positional.values()):
             return
-        named = sorted(name for name, value in zip(names, unused, strict=True) if value)
-        msg = f"morph() got {named}, which the selected route does not accept."
-        raise TypeError(msg)
+        unexpected = sorted(route.keys() - _MORPH_KEYS)
+        if unexpected:
+            msg = f"morph() got an unexpected keyword argument {unexpected[0]!r}"
+            raise TypeError(msg)
+        named = sorted(
+            name
+            for name, value in (*route.items(), *positional.items())
+            if name not in owned and _given(name, value)
+        )
+        if named:
+            msg = f"morph() got {named}, which the selected route does not accept."
+            raise TypeError(msg)
 
     def _append_morph(
         self, target: "Mapping[str, Any]", html: str, *, extract: bool
@@ -264,11 +310,15 @@ class Patches:
         return self
 
     def morph_zone(
-        self, zone: str, *, overrides: "Mapping[str, Any] | None" = None
+        self,
+        zone: str,
+        *,
+        overrides: "Mapping[str, Any] | None" = None,
+        context: ZoneContext = True,
     ) -> "Patches":
         """Render the named zone of the page serving it and morph it in place.
 
-        On a zone request an intercept of the origin serves a zone the origin lacks.
+        Its client context follows as a zone GET's does, a mapping merged over it.
         """
         self._authorize_origin()
         served = self._served_page(zone)
@@ -277,6 +327,14 @@ class Patches:
         result = self._render_zone(zone, overrides, served)
         self._collect_zone_assets(result)
         self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        if context is False:
+            return self
+        data = self._zone_context(result)
+        if context is not True:
+            data.update(self._wire_context(context))
+        if data:
+            self._add_context(data)
+            self._zone_context_index = len(self._ops) - 1
         return self
 
     def morph_foreign_zone(
@@ -396,8 +454,19 @@ class Patches:
     def context(self, **names) -> "Patches":
         """Merge named serialize provider values into the client context.
 
-        A reserved init-payload key raises whether or not the origin page registered it.
+        Straight after a zone morph it merges into that morph's own context op.
         """
+        data = self._wire_context(names)
+        index = self._zone_context_index
+        if index is not None and index == len(self._ops) - 1:
+            data = {**self._ops[index].extras["data"], **data}
+            self._ops[index] = Patch(op="context", extras={"data": data})
+            return self
+        self._ops.append(Patch(op="context", extras={"data": data}))
+        return self
+
+    def _wire_context(self, names: "Mapping[str, Any]") -> dict[str, Any]:
+        """Serialize named provider values of the origin page for a context patch."""
         reserved = RESERVED_PAYLOAD_KEYS & names.keys()
         if reserved:
             raise ReservedContextKeyError(frozenset(reserved))
@@ -408,8 +477,7 @@ class Patches:
             if name not in allowed:
                 raise UnknownContextNameError(name, tuple(sorted(allowed)))
             data[name] = json.loads(serializer.dumps(value))
-        self._ops.append(Patch(op="context", extras={"data": data}))
-        return self
+        return data
 
     def _add_context(self, data: "Mapping[str, Any]") -> "Patches":
         """Record a context patch from already wire-ready provider values.
@@ -465,7 +533,9 @@ class Patches:
         if _is_reserved_event(name):
             raise ReservedEventNameError(name)
         self._ops.append(
-            Patch(op="event", extras={"name": name, "detail": dict(detail or {})})
+            Patch(
+                op="event", extras={keys.EVENT_NAME: name, "detail": dict(detail or {})}
+            )
         )
         return self
 
@@ -710,8 +780,7 @@ class Patches:
     def _require_request(self) -> HttpRequest:
         """Return the bound request or raise when the builder has none."""
         if self._request is None:
-            msg = "This builder operation needs a request-bound Patches(request)."
-            raise RuntimeError(msg)
+            raise OriginUnavailableError
         return self._request
 
     def _queued_url(self) -> str | None:
@@ -737,8 +806,7 @@ class Patches:
         match = self._origin_match()
         page_path = None if match is None else match.page_path
         if page_path is None:
-            msg = "The request origin does not resolve to a page."
-            raise RuntimeError(msg)
+            raise OriginUnavailableError
         return page_path
 
     def _authorize_origin(self) -> None:
@@ -765,8 +833,7 @@ class Patches:
     def _served_page(self, zone: str) -> "Path | None":
         """Return the intercept page serving `zone` of the request, else None.
 
-        It picks over the whole zone set, as the zone GET does. A zone that page does
-        not serve renders from the origin.
+        It picks over the whole zone set as the zone GET does, misses render the origin.
         """
         zones = partial_intent(self._require_request()).zones
         if not zones:
@@ -849,14 +916,19 @@ class Patches:
         A reserved init-payload key is dropped, not raised, as the delta is no handler.
         """
         self._collect_zone_assets(result)
-        delta = {
+        delta = self._zone_context(result)
+        if delta:
+            self._add_context(delta)
+        return self
+
+    @staticmethod
+    def _zone_context(result: "ZoneRenderResult") -> dict[str, Any]:
+        """Return a zone render's js-context delta without the reserved payload keys."""
+        return {
             name: value
             for name, value in result.js_context_delta().items()
             if name not in RESERVED_PAYLOAD_KEYS
         }
-        if delta:
-            self._add_context(delta)
-        return self
 
     def _is_same_site(self, href: str) -> bool:
         """Return True when `href` targets the bound request's host and scheme.

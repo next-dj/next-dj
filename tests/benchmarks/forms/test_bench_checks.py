@@ -25,6 +25,7 @@ class TestBenchFormActionBackendsCheck:
         with override_settings(NEXT_FRAMEWORK=_VALID_TWO_ENTRY):
             benchmark(check_form_action_backends_configuration)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="forms.checks")
     def test_check_e044_unimportable(self, benchmark) -> None:
         """An unimportable dotted path raises ``ImportError``."""

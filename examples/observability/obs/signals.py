@@ -20,6 +20,15 @@ from next.forms.signals import (
 )
 from next.pages.signals import context_registered, page_rendered, template_loaded
 from next.partial.signals import partial_backend_loaded
+from next.realtime import Upstream
+from next.realtime.frames import UpstreamError
+from next.realtime.signals import (
+    message_published,
+    stream_subscribed,
+    stream_unsubscribed,
+    upstream_received,
+    upstream_rejected,
+)
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -29,6 +38,16 @@ from next.static.signals import (
 )
 from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
 
+from .exporter import (
+    MESSAGES_PUBLISHED,
+    PRESENCE_SNAPSHOTS,
+    STREAM_DURATION,
+    STREAM_UNSUBSCRIBES,
+    STREAMS_OPEN,
+    UPSTREAM_EVENTS,
+    UPSTREAM_REJECTED,
+    topic_family,
+)
 from .metrics import incr
 
 
@@ -173,3 +192,41 @@ def on_backend_loaded(instance: object = None, **kwargs) -> None:
     Six settings-driven families share one `config` and `instance` payload.
     """
     incr("backends", type(instance).__name__)
+
+
+@receiver(stream_subscribed)
+def on_stream_subscribed(transport: str, **kwargs) -> None:
+    """Count one more live stream on its transport."""
+    STREAMS_OPEN.labels(transport=transport).inc()
+
+
+@receiver(stream_unsubscribed)
+def on_stream_unsubscribed(
+    transport: str, duration: float, reason: str, **kwargs
+) -> None:
+    """Release the live stream, count why it ended and observe how long it lived."""
+    STREAMS_OPEN.labels(transport=transport).dec()
+    STREAM_UNSUBSCRIBES.labels(transport=transport, reason=str(reason)).inc()
+    STREAM_DURATION.labels(transport=transport).observe(duration)
+
+
+@receiver(message_published)
+def on_message_published(topic: str, *, ephemeral: bool, **kwargs) -> None:
+    """Count a publication by topic family, an ephemeral presence snapshot apart."""
+    metric = PRESENCE_SNAPSHOTS if ephemeral else MESSAGES_PUBLISHED
+    metric.labels(family=topic_family(topic)).inc()
+
+
+@receiver(upstream_received)
+def on_upstream_received(upstream: Upstream, **kwargs) -> None:
+    """Count one upstream event by name, a set bounded by the registered handlers."""
+    UPSTREAM_EVENTS.labels(name=upstream.name).inc()
+
+
+@receiver(upstream_rejected)
+def on_upstream_rejected(reason: UpstreamError, **kwargs) -> None:
+    """Count one undelivered upstream event by reason, a closed enum.
+
+    The topic and name the client sent are unchecked, so neither becomes a label.
+    """
+    UPSTREAM_REJECTED.labels(reason=str(reason)).inc()

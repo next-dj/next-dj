@@ -10,6 +10,7 @@ from next.components import signals as component_signals
 from next.consent import signals as consent_signals
 from next.forms import signals as form_signals
 from next.partial import signals as partial_signals
+from next.realtime import signals as realtime_signals
 from next.seo import signals as seo_signals
 from next.static import signals as static_signals
 from next.static.assets import StaticAsset
@@ -24,6 +25,7 @@ _SIGNAL_AREAS = (
     consent_signals,
     form_signals,
     partial_signals,
+    realtime_signals,
     seo_signals,
     static_signals,
     url_signals,
@@ -53,6 +55,7 @@ BACKEND_LOADED_SIGNALS = frozenset(
         "consent_backend_loaded",
         "form_backend_loaded",
         "partial_backend_loaded",
+        "broker_backend_loaded",
         "router_backend_loaded",
         "sitemap_backend_loaded",
         "static_backend_loaded",

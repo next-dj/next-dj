@@ -13,6 +13,15 @@ export const HEADER_MERGE = "X-Next-Merge";
 export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
+export const ORIGIN_FIELD = "_next_form_origin";
+/** Stream metadata and control-frame event names mirrored by next.partial.keys. */
+export const TOPIC = "topic";
+export const SEQ = "seq";
+export const EPOCH = "epoch";
+export const SERVER_TIME = "server_time";
+export const SSE_HELLO = "next-hello";
+export const SSE_SKIP = "next-skip";
+export const SSE_END = "next-end";
 // The last 25 own request ids, matching the server-side echo window. Overflow is
 // safe, since a dropped id only causes an extra refresh.
 export const ECHO_LIMIT = 25;
@@ -51,8 +60,17 @@ export interface Diagnostics {
 export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
-export const ATTR_SSE = "data-next-sse";
+export const ATTR_STREAM = "data-next-stream";
 export const ATTR_POLL = "data-next-poll";
+export const ATTR_TRANSPORT = "data-next-transport";
+
+/** The transport a request may ride, `any` letting a POST go over the open socket. */
+export type WireTransport = "http" | "any";
+
+/** The tunnel refusals the client acts on beyond reporting them. */
+export const REFUSAL_DISABLED = "disabled";
+export const REFUSAL_STALE = "stale";
+export const REFUSAL_HTTP_ONLY = "http_only";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */
 export type PartialError =
@@ -61,7 +79,8 @@ export type PartialError =
   | { kind: "parse"; body: string; error: unknown }
   | { kind: "op"; op: string; target?: string; error: unknown }
   | { kind: "asset"; url?: string; error: unknown }
-  | { kind: "csrf"; url?: string; error: unknown };
+  | { kind: "csrf"; url?: string; error: unknown }
+  | { kind: "undelivered"; url: string; reason: string };
 
 /** The discriminant of PartialError, aliased for listeners that switch on it. */
 export type PartialErrorKind = PartialError["kind"];

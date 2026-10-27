@@ -202,6 +202,19 @@ describe("trigger delegation", () => {
     expect(requests[0]!.abortable).toBe(true);
   });
 
+  it("carries the form's transport marker on a submit and a validation", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u"' +
+      ' data-next-transport="any"><input name="email" value="a@b.c"></form>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests.map((request) => request.transport)).toEqual(["any", "any"]);
+  });
+
   it("sends the form's declared zone on a validate post, not the queue key", () => {
     document.body.innerHTML =
       '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u"' +

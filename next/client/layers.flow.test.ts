@@ -533,6 +533,22 @@ describe("layer flow through the partial surface", () => {
       expect(headerOf(calls[0]!, "X-Next-Merge")).toBe("append");
       expect(headerOf(calls[0]!, "X-Next-Origin")).toBeNull();
     });
+
+    it("an action submitted from the layer stamps its host origin and layer page", async () => {
+      document.body.insertAdjacentHTML("afterbegin", '<p id="base">base</p>');
+      await openPhoto('<button id="like">like</button>');
+      const submit = (from: Element) =>
+        partial.submit({ action: "/_next/form/like/", data: { n: 1 }, from });
+      const fields = (call: Call) => Object.fromEntries(call.init.body as FormData);
+      await expect(submit(document.querySelector("#like")!)).resolves.toMatchObject({
+        status: "ok",
+      });
+      expect(headerOf(calls[0]!, "X-Next-Origin")).toBe("/feed/");
+      expect(fields(calls[0]!)).toEqual({ n: "1", _next_form_origin: "/photo/7/" });
+      await submit(document.querySelector("#base")!);
+      expect(headerOf(calls[1]!, "X-Next-Origin")).toBeNull();
+      expect(fields(calls[1]!)).toEqual({ n: "1", _next_form_origin: "/feed/" });
+    });
   });
 
   describe("a meta op in the layer body titles the tab while the layer is open", () => {

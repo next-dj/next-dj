@@ -16,8 +16,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.sitemaps",
-    "django.contrib.staticfiles",
     "next",
+    "django.contrib.staticfiles",
     "blog",
 ]
 

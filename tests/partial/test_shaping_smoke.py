@@ -94,8 +94,7 @@ class TestWizardAdvanceMorphsTheNextStepZone:
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
         )
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
@@ -108,8 +107,7 @@ class TestWizardAdvanceMorphsTheNextStepZone:
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
         )
         html = envelope_of(response).html_for_zone("wizard-zone")
         assert 'name="scope"' in html
@@ -120,8 +118,7 @@ class TestWizardAdvanceMorphsTheNextStepZone:
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
         )
         assert "url" not in envelope_of(response).op_verbs()
 
@@ -135,8 +132,7 @@ class TestWizardAdvancePushesHistoryWhenOptedIn:
             "push_step_wizard",
             {"name": "Ada"},
             origin="/wizard_push/identity/",
-            partial=True,
-            zones="push-zone",
+            partial="push-zone",
         )
         ops = envelope_of(response).ops
         url_ops = [op for op in ops if op["op"] == "url"]

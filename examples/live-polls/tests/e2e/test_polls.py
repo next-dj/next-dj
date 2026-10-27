@@ -1,6 +1,9 @@
+import re
 from collections.abc import Iterator
+from datetime import timedelta
 
 import pytest
+from django.utils import timezone
 from e2e_support.browser import (
     CDN_URL_PATTERN,
     PageProbe,
@@ -13,8 +16,11 @@ from e2e_support.browser import (
 )
 from e2e_support.settings import CONTEXT_ARGS
 from playwright.sync_api import Browser, Locator, Page, Response, Route, expect
-from polls.broker import broker, build_snapshot
 from polls.models import Choice, Poll
+from polls.realtime import publish_phase
+
+from next.partial import Patches
+from next.realtime import publish
 
 
 pytestmark = pytest.mark.e2e
@@ -31,11 +37,6 @@ READ_VUE_APP = f"() => document.querySelector('{CHART_APP}').__vue_app__?.kept ?
 
 
 @pytest.fixture()
-def tabs_or_spaces(demo_data: None) -> Poll:
-    return Poll.objects.get(question="Tabs or spaces?")
-
-
-@pytest.fixture()
 def vim_or_emacs(demo_data: None) -> Poll:
     return Poll.objects.get(question="Vim or Emacs?")
 
@@ -49,7 +50,11 @@ def watcher(page: Page, tabs_or_spaces: Poll) -> Iterator[Page]:
     yield second
     probe.detach(second)
     second.close()
-    broker.publish(build_snapshot(tabs_or_spaces))
+    publish(
+        f"poll:{tabs_or_spaces.pk}",
+        Patches(None).refresh(zone="poll-results"),
+        on_commit=False,
+    )
     assert probe.problems() == []
 
 
@@ -89,7 +94,8 @@ def bar_of(page: Page, choice: Choice) -> Locator:
 
 def vote_for(page: Page, choice: Choice) -> None:
     seen = applied_count(page)
-    page.get_by_role("button", name=choice.text, exact=True).click()
+    with page.expect_response(lambda response: response.request.method == "POST"):
+        page.get_by_role("button", name=choice.text, exact=True).click()
     wait_for_apply(page, seen)
 
 
@@ -122,6 +128,32 @@ def test_the_vue_island_mounts_and_draws_the_bars_the_server_never_sizes(
     expect(page.locator(TOTAL)).to_have_text("4")
     assert bar_of(page, tabs).evaluate("element => element.style.width") == "75%"
     assert bar_of(page, spaces).evaluate("element => element.style.width") == "25%"
+    expect_no_partial_request(page, next_probe)
+
+
+def test_poll_deadline_uses_the_stream_clock_and_disables_votes(
+    page: Page, base_url: str, tabs_or_spaces: Poll, next_probe: PageProbe
+) -> None:
+    tabs_or_spaces.closes_at = timezone.now() + timedelta(hours=1)
+    tabs_or_spaces.save(update_fields=("closes_at",))
+
+    open_poll(page, base_url, tabs_or_spaces)
+
+    status = page.locator("[data-poll-status]")
+    countdown = page.locator("[data-poll-countdown]")
+    expect(countdown).to_have_text(re.compile(r"^Voting closes in \d+ seconds$"))
+    remaining = int(re.findall(r"\d+", countdown.inner_text())[0])
+    assert 60 < remaining <= 3600
+    expect(status).to_have_text("Voting is open")
+    expect(page.get_by_role("button", name="Tabs", exact=True)).to_be_enabled()
+
+    tabs_or_spaces.closes_at = timezone.now() + timedelta(seconds=2)
+    tabs_or_spaces.save(update_fields=("closes_at",))
+    publish_phase(tabs_or_spaces, on_commit=False)
+
+    expect(status).to_have_text("Voting is closed")
+    expect(countdown).to_have_text("")
+    expect(page.get_by_role("button", name="Tabs", exact=True)).to_be_disabled()
     expect_no_partial_request(page, next_probe)
 
 

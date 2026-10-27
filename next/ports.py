@@ -62,7 +62,6 @@ class PartialShaper(Protocol):
 
     def intent(self, request: HttpRequest) -> PartialIntent:
         """Return what the request headers ask for."""
-        ...
 
     def zone_response(
         self,
@@ -78,13 +77,11 @@ class PartialShaper(Protocol):
 
         An intercept refusal reuses `dep_cache`, the one the page refusal resolved with.
         """
-        ...
 
     def shape_response(
         self, backend: FormActionBackend, request: HttpRequest, outcome: ActionOutcome
     ) -> HttpResponse:
         """Return the envelope for one form action outcome."""
-        ...
 
     def shape_validate(
         self,
@@ -98,11 +95,9 @@ class PartialShaper(Protocol):
         wizard: FormWizard | None = None,
     ) -> HttpResponse:
         """Return the form morph envelope of a validate-only pass."""
-        ...
 
     def set_vary(self, response: HttpResponse) -> None:
         """Declare the partial request headers `response` was negotiated on."""
-        ...
 
 
 class ActionOwners(Protocol):
@@ -113,7 +108,6 @@ class ActionOwners(Protocol):
 
     def page_files(self) -> Collection[Path]:
         """Return the `page.py` path of each directory whose files declare an action."""
-        ...
 
 
 class PageScan(Protocol):
@@ -126,7 +120,6 @@ class PageScan(Protocol):
         self, router_manager: RouterManager
     ) -> list[tuple[str, Path]]:
         """Execute every routed `page.py`, answering the ones that loaded."""
-        ...
 
 
 class RouterAccess(Protocol):
@@ -137,19 +130,15 @@ class RouterAccess(Protocol):
 
     def create_backend(self, config: dict[str, Any]) -> RouterBackend:
         """Return the router one `PAGE_BACKENDS` entry names."""
-        ...
 
     def create_manager(self) -> RouterManager:
         """Return a fresh manager over every configured router."""
-        ...
 
     def url_parser(self) -> URLPatternParser:
         """Return the parser the file router routes bracket segments through."""
-        ...
 
     def page_kwargs(self, root: PageRoot, trail: str) -> frozenset[str] | None:
         """Return the kwargs a page at `trail` of `root` answers, `None` if refused."""
-        ...
 
 
 class StaticAssets(Protocol):
@@ -160,17 +149,14 @@ class StaticAssets(Protocol):
 
     def create_collector(self) -> StaticCollector:
         """Return a fresh sink for the assets one render references."""
-        ...
 
     def discover_page_assets(self, file_path: Path, collector: StaticCollector) -> None:
         """Collect the assets co-located with one page."""
-        ...
 
     def collect_component_assets(
         self, info: ComponentInfo, collector: StaticCollector | None
     ) -> None:
         """Collect the assets co-located with one composite component."""
-        ...
 
     def inject(
         self,
@@ -181,7 +167,6 @@ class StaticAssets(Protocol):
         request: HttpRequest | None,
     ) -> str:
         """Replace every placeholder token in `html` with rendered tags."""
-        ...
 
 
 class SeoRoutes(Protocol):
@@ -192,7 +177,6 @@ class SeoRoutes(Protocol):
 
     def patterns(self) -> list[URLPattern]:
         """Return the SEO routes whose source exists, placed after every page route."""
-        ...
 
 
 class FormRoutes(Protocol):
@@ -203,7 +187,6 @@ class FormRoutes(Protocol):
 
     def __iter__(self) -> Iterator[URLPattern]:
         """Yield the URL patterns of every form backend."""
-        ...
 
 
 class PageScripts(Protocol):
@@ -224,7 +207,19 @@ class PageScripts(Protocol):
 
         `nonce` mints the request nonce, so it is called only when a tag is written.
         """
-        ...
+
+
+class RealtimeNegotiation(Protocol):
+    """The transports and partial content types every page negotiates its stream on.
+
+    `next.realtime` and `next.partial` import the static runtime, so it reads them here.
+    """
+
+    def transports(self) -> tuple[str, ...]:
+        """Return the enabled realtime transports in preference order."""
+
+    def content_types(self) -> tuple[str, str]:
+        """Return the content type of the active partial backend and the stock one."""
 
 
 action_owners_slot = PortSlot["ActionOwners"]("action owners port")
@@ -233,6 +228,7 @@ page_scan_slot = PortSlot["PageScan"]("page scan port")
 partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
 page_scripts_slot = PortSlot["PageScripts"]("page scripts port")
+realtime_negotiation_slot = PortSlot["RealtimeNegotiation"]("realtime negotiation port")
 seo_routes_slot = PortSlot["SeoRoutes"]("seo routes port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
 
@@ -244,6 +240,7 @@ __all__ = [
     "PageScripts",
     "PartialShaper",
     "PortSlot",
+    "RealtimeNegotiation",
     "RouterAccess",
     "SeoRoutes",
     "StaticAssets",
@@ -252,6 +249,7 @@ __all__ = [
     "page_scan_slot",
     "page_scripts_slot",
     "partial_shaper_slot",
+    "realtime_negotiation_slot",
     "router_access_slot",
     "seo_routes_slot",
     "static_assets_slot",

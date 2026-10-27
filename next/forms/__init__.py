@@ -73,6 +73,7 @@ from .decorators import action
 from .dispatch.responses import ActionOutcome, ActionOutcomeKind
 from .errors import (
     FormActionNotFoundError,
+    SessionRotationError,
     UnregisteredComponentError,
     UnstorableWizardValueError,
 )
@@ -183,6 +184,7 @@ __all__ = [
     "Select",
     "SelectMultiple",
     "SessionFormWizardBackend",
+    "SessionRotationError",
     "SlugField",
     "TextInput",
     "Textarea",

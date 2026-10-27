@@ -26,6 +26,8 @@ export interface CsrfDeps {
   document?: Document;
   // The token fetch, exported by the csrf chunk.
   mint: LazyModule<CsrfMint>;
+  // Told the token a mint brought, since its endpoint may have set a new cookie.
+  rotated?: (token: string) => void;
 }
 
 /** Narrow a wire payload to its token or endpoint form, undefined when incomplete. */
@@ -84,6 +86,7 @@ export function createCsrf(deps: CsrfDeps): Csrf {
       return minted === null ? null : undefined;
     }
     payload = minted;
+    deps.rotated?.(minted.token);
     return minted;
   }
 

@@ -1,11 +1,10 @@
 from django.db.models import QuerySet
 from django.http import HttpRequest
-from django.middleware.csrf import get_token
 from kanban.models import Board, Card, Column
+from kanban.snapshots import board_snapshot
 
 from next import context, page
 from next.deps import DObject
-from next.forms.manager import form_action_manager
 from next.pages import MetadataDict
 
 
@@ -47,35 +46,5 @@ def moved_card(board: DObject[Board], request: HttpRequest) -> Card | None:
 
 @context("board", inherit_context=True, serialize=True)
 def board_payload(board: DObject[Board], request: HttpRequest) -> dict[str, object]:
-    """Expose the full board tree under the merged board JS context key.
-
-    It carries excerpts and wip_limits so client renders match the SSR fallback.
-    """
-    cols = board.columns.prefetch_related("cards").order_by("position")
-    return {
-        "id": board.pk,
-        "title": board.title,
-        "slug": board.slug,
-        "archived": board.archived,
-        "csrf": get_token(request),
-        "move_card_url": form_action_manager.get_action_url("move_card_form"),
-        "create_card_url": form_action_manager.get_action_url("create_card_form"),
-        "columns": [
-            {
-                "id": col.id,
-                "title": col.title,
-                "position": col.position,
-                "wip_limit": col.wip_limit,
-                "cards": [
-                    {
-                        "id": c.id,
-                        "title": c.title,
-                        "position": c.position,
-                        "excerpt": c.excerpt,
-                    }
-                    for c in col.cards.all()
-                ],
-            }
-            for col in cols
-        ],
-    }
+    """Expose the board tree, its topic and action URLs to the React island."""
+    return board_snapshot(board, request)

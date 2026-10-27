@@ -51,10 +51,12 @@ A project that split its settings places this in ``config/settings/base.py`` ins
        "django.contrib.contenttypes",
        "django.contrib.sessions",
        "django.contrib.messages",
-       "django.contrib.staticfiles",
        "next",
+       "django.contrib.staticfiles",
        "notes",
    ]
+
+``next`` stays above ``django.contrib.staticfiles`` so its ``runserver`` wins, as :ref:`the install guide explains <intro-install-app-order>`.
 
 Register models
 ~~~~~~~~~~~~~~~

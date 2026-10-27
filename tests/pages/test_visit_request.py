@@ -136,7 +136,7 @@ class TestShapeGuardedOriginAnswersAsOnAVisit:
 
     def test_the_open_origin_morphs_its_zone(self, shaped_client: NextClient) -> None:
         response = _post_note(
-            shaped_client, "/shaped/?token=open", partial=True, zones="shaped-zone"
+            shaped_client, "/shaped/?token=open", partial="shaped-zone"
         )
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["shaped-zone"]

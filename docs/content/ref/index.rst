@@ -76,6 +76,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`partial`
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
+:doc:`realtime`
+   ``next.realtime`` for topics and publishing, broker backends, topic streams, the WebSocket application, ticket bindings, presence, upstream handlers, the form tunnel, and the wire protocol.
+
 :doc:`metadata`
    ``next.pages.metadata`` for the metadata dicts, value objects, renderer, and ``ld`` nodes.
 
@@ -101,7 +104,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    ``next.conf`` for settings loading and the ``extend_default_backend`` helper.
 
 :doc:`server`
-   ``next.server`` for the autoreload watcher.
+   ``next.server`` for the autoreload watcher and the ASGI development server.
 
 :doc:`signals`
    ``next.signals`` aggregator that re-exports every framework signal.
@@ -141,7 +144,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    Django system checks that the framework contributes.
 
 :doc:`management`
-   The ``routes``, ``permissions``, and ``showmetadata`` management commands.
+   The ``routes``, ``permissions``, ``showmetadata``, ``realtime``, and ``runserver`` management commands.
 
 .. rubric:: Templates and decorators
 
@@ -161,6 +164,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    forms
    static
    partial
+   realtime
    metadata
    seo
    site

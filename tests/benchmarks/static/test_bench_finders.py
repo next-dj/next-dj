@@ -63,6 +63,7 @@ def collected_tree(tmp_path: Path) -> Iterator[Path]:
         yield root
 
 
+@pytest.mark.walltime()
 class TestBenchStaticFilesFinder:
     """What staticfiles pays per referenced asset, warm and cold."""
 

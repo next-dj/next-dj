@@ -6,9 +6,10 @@ Management commands
 Module summary
 --------------
 
-The ``next`` application ships three management commands, and ``manage.py help`` lists them under ``[next]``.
+The ``next`` application ships five management commands, and ``manage.py help`` lists them under ``[next]``.
 ``routes`` prints the page routes, ``permissions`` prints the access rule of every endpoint, and ``showmetadata`` is a thin shell over the metadata of ``next.pages``.
-Like any Django command, each one runs the system checks first, so ``--skip-checks`` prints the table of a project whose checks fail.
+``realtime`` publishes to realtime topics and reads what the broker holds, and ``runserver`` serves the project over ASGI with the realtime WebSocket once the ``DEV_SERVER`` it names is installed, uvicorn by default.
+Every command runs the system checks first like any Django command, so ``--skip-checks`` prints the table of a project whose checks fail.
 
 routes
 ------
@@ -177,6 +178,120 @@ Every file is named by its absolute path.
 The path resolves under the language its prefix names, ``LANGUAGE_CODE`` without one, so a translated path under :func:`~django.conf.urls.i18n.i18n_patterns` reaches its page.
 A path that resolves to no URL, or to a view that is no page, is a ``CommandError``.
 
+realtime
+--------
+
+``manage.py realtime`` takes one action, and every action prints text by default and one JSON document with ``--json``.
+A refused topic, payload, cursor or broker raises ``ConsoleError`` from ``next.realtime.errors``, which the command turns into a ``CommandError``, so it exits with status 1 and prints the reason.
+
+.. code-block:: text
+
+   manage.py realtime publish <topic> (--refresh <zone> [<zone> ...] | --event <name> [--data <json>])
+   manage.py realtime positions <topic> [<topic> ...]
+   manage.py realtime presence <topic>
+   manage.py realtime replay <topic> --after <epoch>:<seq>
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Action
+     - What it does
+   * - ``publish``
+     - Refuses a ``MemoryBroker``, whose topics no running server can see, and otherwise publishes the zone refreshes, or one event whose detail ``--data`` gives as a JSON object, through ``next.realtime.publish`` without waiting for a transaction, and prints the topic and the ``<epoch>:<seq>`` position the broker assigned.
+       ``--refresh`` and ``--event`` exclude each other, ``--data`` needs ``--event``, and a reserved event name or a payload ``publish()`` refuses is an error.
+       The JSON form is the published message as the broker stores it.
+   * - ``positions``
+     - Prints the latest ``<epoch>:<seq>`` of each topic in one batched read, ``-`` for a topic never published.
+       The JSON form maps each topic to its ``epoch`` and ``seq``, or to ``null``.
+   * - ``presence``
+     - Prints the attendee count of the topic and, one JSON object per line, the members the snapshot lists.
+       A broker that is no ``PresenceBroker`` is an error.
+       The JSON form carries ``topic``, ``count`` and ``members``.
+   * - ``replay``
+     - Prints the logged messages after the cursor, each with its position, its publication time in UTC and its patches, or says that nothing follows the cursor or that the log cannot close the gap, which is what makes a subscriber resync.
+       The cursor is the form ``positions`` prints.
+       A broker that is no ``ReplayingBroker`` is an error.
+       The JSON form carries ``topic``, ``after``, ``complete`` and ``messages``.
+
+.. code-block:: text
+   :caption: manage.py realtime positions poll:1 poll:2
+
+   Topic   Position
+   poll:1  3f9c2a71b04d8e65:42
+   poll:2  -
+
+A topic name follows the rules of :doc:`realtime`, so a malformed name or one under ``next:`` is an error before the broker is reached, and a broker that cannot be reached is an error naming the cause.
+``MemoryBroker`` keeps its topics inside one process, so ``publish`` under it is an error that points to a shared broker such as ``RedisBroker``, and the three reads warn on stderr that they read no server's state.
+Code that runs inside the server process calls ``next.realtime.publish`` directly.
+
+runserver
+---------
+
+``manage.py runserver`` takes the arguments of Django's :doc:`runserver <django:ref/django-admin>`, ``addrport``, ``--ipv6``, ``--noreload``, ``--nothreading`` and ``--skip-checks``, and with ``django.contrib.staticfiles`` installed its ``--nostatic`` and ``--insecure``.
+``--wsgi`` serves Django's WSGI handler even with an ASGI server installed.
+The command class extends the staticfiles ``runserver``, so a project command that subclasses ``next.management.commands.runserver.Command`` keeps the static options and the static serving too.
+
+With uvicorn installed it runs the system checks and the migration check as Django does, then serves the project over ASGI on the server ``NEXT_FRAMEWORK['DEV_SERVER']`` names, uvicorn by default.
+The checks run before the command resolves the server, so a ``DEV_SERVER`` that names no server stops it with ``next.E212``, and under ``--skip-checks`` with a ``CommandError`` that names the path and ``next.E212``.
+The banner reads ``Starting ASGI development server with the realtime WebSocket`` only while the app mounts the socket and uvicorn finds a WebSocket library, and Django's development-server warning follows it unless ``DJANGO_RUNSERVER_HIDE_WARNING`` is ``true``.
+A numeric ``addrport`` host shows as the socket reads it, so ``0`` binds every interface and shows as ``0.0.0.0``.
+The app is the one the ``ASGI_APPLICATION`` setting names by dotted path, the key Daphne and Channels read, since Django has no ASGI setting of its own.
+Without the setting it is ``next.realtime.application`` over :func:`~django.core.asgi.get_asgi_application`, which serves the realtime WebSocket at ``REALTIME['WS_PATH']`` and turns ``ws`` on for the process.
+Under ``DEBUG``, or with ``--insecure``, static files under ``STATIC_URL`` come from the staticfiles finders through Django's ``ASGIStaticFilesHandler`` unless ``--nostatic`` is given, and a WebSocket passes through it.
+Django's autoreloader restarts the process, so the watch list of ``next.server`` applies as it does under WSGI and uvicorn runs without a reloader of its own, while ``--nothreading`` has no effect.
+A uvicorn that finds neither ``websockets`` nor ``wsproto`` cannot accept a WebSocket, so the command warns on stderr while the app mounts the socket, and the pages fall back to SSE.
+The command hands the server ``max_frame_bytes`` set to the 64 KiB inbound frame limit and ``ping_interval`` set to ``None``, which ``UvicornServer`` passes to uvicorn as ``ws_max_size`` and ``ws_ping_interval``.
+The socket pings on its own after one ``HEARTBEAT`` without traffic and drops a peer silent for more than two heartbeats after an unanswered ping, so a server-level ping adds nothing.
+It leaves lifespan on uvicorn's ``auto``, since ``next.realtime.application`` answers lifespan itself and an app from ``ASGI_APPLICATION`` may not speak it.
+
+Without uvicorn, or with ``--wsgi``, the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
+
+Django runs the command of the application listed first in ``INSTALLED_APPS``, so ``next`` sits above ``django.contrib.staticfiles``, as Daphne asks of its own ``runserver``.
+Listed below it, ``manage.py runserver`` is the staticfiles command and serves WSGI, where the pages speak SSE, and ``next.W148`` reports the order while an ASGI server is installed.
+A framework CLI that serves the same app calls ``serve_development`` from ``next.server.asgi``, see :doc:`server`.
+
+.. code-block:: python
+   :caption: settings.py
+
+   INSTALLED_APPS = [
+       "django.contrib.auth",
+       "django.contrib.contenttypes",
+       "django.contrib.sessions",
+       "next",
+       "django.contrib.staticfiles",
+   ]
+
+Use your own development server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``NEXT_FRAMEWORK['DEV_SERVER']`` names the class the command serves on, see :doc:`settings`.
+The class is built without arguments, and ``run`` receives the app, ``host``, ``port``, and the server-neutral ``max_frame_bytes`` and ``ping_interval`` options of ``server_options()``, which it maps onto its own server or ignores.
+Hypercorn stands in here as one example, and the framework depends on neither it nor uvicorn.
+
+.. code-block:: python
+   :caption: config/devserver.py
+
+   import asyncio
+
+   from hypercorn.asyncio import serve
+   from hypercorn.config import Config
+
+   class HypercornServer:
+       def run(self, app, *, host, port, **options):
+           config = Config()
+           config.bind = [f"{host}:{port}"]
+           config.websocket_max_message_size = options.get("max_frame_bytes", 65536)
+           asyncio.run(serve(app, config))
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {"DEV_SERVER": "config.devserver.HypercornServer"}
+
+The rest of the command stays the same, from the system checks and Django's autoreloader to the static files and the banner.
+A path that does not import or names no class with a ``run`` method is ``next.E212`` at ``manage.py check`` and at ``manage.py runserver``.
+
 See also
 --------
 
@@ -186,3 +301,4 @@ See also
    :doc:`/content/topics/permissions` for the rules ``manage.py permissions`` lists.
    :doc:`/content/topics/seo/auditing` for where the ``showmetadata`` command fits beside the checks and the tests.
    :doc:`metadata` for the metadata the command reads.
+   :doc:`realtime` for the brokers, positions, presence and replay the ``realtime`` command reads.

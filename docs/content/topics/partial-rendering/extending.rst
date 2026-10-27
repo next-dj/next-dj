@@ -110,7 +110,7 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
        return Patches(request).context(cart_count=cart.count).response()
 
 A name that is not a ``serialize=True`` provider of the origin page raises ``UnknownContextNameError``, so the verb cannot smuggle an arbitrary value past the provider contract.
-The reserved keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent``, raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
+The reserved keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent``, raise ``ReservedContextKeyError`` whether or not the origin page registered them, symmetric to ``event()`` refusing a framework-owned event name.
 The ``$`` namespace therefore stays the framework's on a patch as it is on a full render.
 A page that registers such a name loses that value on the full render too, so no patch has anything to update, see :doc:`/content/topics/static-assets/js-context`.
 
@@ -125,6 +125,29 @@ The event payload carries the whole merged store in ``context`` and the keys of 
      document.querySelector("[data-cart-badge]").textContent =
        String(context.cart_count);
    });
+
+A zone morph carries the context of its render on its own.
+``morph(zone=...)`` in a handler, the re-render of an invalid form in a zone, and the success funnel of a zoned form follow the morph with the same ``context`` op a zone GET sends, the ``serialize=True`` values of the origin page and of the components the zone rendered.
+The client applies it through the same ``context-updated``, so an island next to the zone sees the state the server re-rendered, an error re-render included.
+
+.. code-block:: python
+   :caption: cart/page.py
+
+   @action("remove_from_cart")
+   def remove_from_cart(request: HttpRequest) -> HttpResponse:
+       """Re-render the cart zone, with the badge count riding along."""
+       cart = Cart.for_request(request)
+       cart.remove(request.POST["sku"])
+       return (
+           Patches(request)
+           .morph(zone="cart", context={"cart_count": cart.count})
+           .response()
+       )
+
+``context=`` takes a mapping of ``serialize=True`` provider names, validated as ``context()`` validates them and merged over the zone delta in one op, for a value the handler holds fresher than the provider computed.
+``context=False`` keeps the morph alone.
+The validate pass of a form morphs its zone with ``context=False``, so an island does not re-render on every keystroke.
+A foreign-page morph, ``morph(zone=, page=)``, sends no context op, because the client context belongs to the origin page.
 
 A stream source cannot build a ``context`` patch, because it has no page-render origin to read a provider value from.
 A stream that needs to push fresh context drives a ``refresh`` instead, and the re-fetched zone delivers the new context through its own render, see :doc:`sse`.
@@ -211,9 +234,6 @@ The example below keeps compact JSON and wraps it in an object of its own, which
        def deserialize_envelope(self, body: bytes) -> Envelope:
            return Envelope.from_dict(json.loads(body.decode("utf-8"))["envelope"])
 
-       def sse_event(self, envelope: Envelope) -> str:
-           data = self.serialize_envelope(envelope).decode("utf-8")
-           return f"event: next-patches\ndata: {data}\n\n"
 
 .. code-block:: python
    :caption: settings.py
@@ -224,11 +244,42 @@ The example below keeps compact JSON and wraps it in an object of its own, which
        ],
    }
 
-Those four members are the whole contract.
 ``content_type`` is stamped on every patch response and is the marker the runtime keys on, so the client learns the new type through a ``Next.partial.parseHook`` registered for it, see :doc:`/content/ref/client`.
 ``serialize_envelope`` and ``deserialize_envelope`` are inverses, because a reader such as the test-client helper parses a response through the backend that wrote it.
-``sse_event`` frames one envelope for the stream and keeps the ``next-patches`` event name, which is the name the runtime's ``EventSource`` listens for, while the data line carries whatever the serializer writes.
 The constructor receives the whole ``PARTIAL_BACKENDS`` entry and exposes its ``OPTIONS`` mapping through ``self.options``, so a format of its own reads its own keys there.
+
+A topic stream frames each message through ``stream_data(envelope, meta)``, where ``meta`` is a ``StreamMeta`` of ``server_time``, ``topic``, ``epoch``, and ``seq``.
+The base class builds the SSE frame from it, so a codec overrides this one method for both transports.
+The example overrides ``stream_data`` to put the metadata where its parse hook reads it.
+
+.. code-block:: python
+   :caption: wire/backends.py, carrying stream metadata
+
+   import json
+
+   from wire.backends import WrappedJsonBackend
+
+   from next.partial import Envelope, StreamMeta
+
+   class StreamingWrappedJsonBackend(WrappedJsonBackend):
+       """Carry the stream metadata inside the same wrapper."""
+
+       def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
+           payload = {"wire": 1, "envelope": envelope.as_dict(), "meta": meta.as_dict()}
+           return json.dumps(payload, separators=(",", ":"))
+
+Every SSE frame reaches ``Next.partial.parseHook`` registered for the backend's ``content_type``.
+A WebSocket ``patches`` frame reaches it too when its ``data`` is text.
+The stock ``JsonPartialProtocolBackend`` sends an object instead and skips the hook, but only with the stock ``content_type``.
+A backend whose ``stream_data`` returns text sends that text unchanged, as the ``data:`` lines of the SSE frame and as the ``data`` of the WebSocket frame, so a non-JSON format works on both transports.
+The hook must return the regular patch envelope with ``topic``, ``epoch``, ``seq``, and ``server_time`` beside it, so the runtime can apply the patches, detect gaps and epoch changes, and keep topic listeners informed.
+
+The ``next-hello``, ``next-skip``, and ``next-end`` control frames are a fixed JSON schema that the client parses without the hook.
+``sse_hello``, ``sse_skip``, and ``sse_end`` exist on the backend for completeness, and a backend leaves them alone, since a re-encoded control frame silently disables gap recovery.
+
+A backend that leaves ``stream_data`` unimplemented earns ``next.E215`` at ``manage.py check``, see :doc:`/content/ref/system-checks`.
+Left unfixed, a backend without ``stream_data`` stays abstract, and the first request that reads the protocol backend through ``partial_backend_manager.get()`` raises ``AbstractBackendError`` naming ``stream_data``.
+
 See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
 See also

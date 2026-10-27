@@ -1,21 +1,18 @@
 import json
-import threading
-import time
+from contextlib import ExitStack
+from datetime import timedelta
 
 import pytest
-from polls.broker import (
-    Change,
-    PollBroker,
-    Snapshot,
-    broker,
-    build_snapshot,
-    read_snapshot,
-    store_snapshot,
-)
+from django.contrib.auth import get_user_model
+from django.test import Client, TestCase
+from django.utils import timezone
 from polls.models import Choice, Poll
 
+from next.conf import extend_default_backend
 from next.forms.signals import action_dispatched, form_validation_failed
-from next.partial.headers import REQUEST_ID
+from next.partial import Patches
+from next.realtime import MemoryBroker, presence, publish
+from next.realtime.signals import message_published
 from next.testing import (
     NextClient,
     PartialEnvelope,
@@ -25,6 +22,7 @@ from next.testing import (
     envelope_of,
     find_anchor,
     init_payload,
+    override_next_settings,
     resolve_action_url,
 )
 
@@ -32,36 +30,14 @@ from next.testing import (
 pytestmark = pytest.mark.django_db
 
 
+def _frame_data(frame: bytes) -> dict[str, object]:
+    return json.loads(frame.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
+
+
 def _detail_html(next_client: NextClient, poll: Poll) -> str:
     response = next_client.get(f"/polls/{poll.pk}/")
     assert response.status_code == 200
     return response.content.decode()
-
-
-def _consume_one_change(
-    target: PollBroker,
-    poll_id: int,
-    snapshot: Snapshot,
-    *,
-    request_id: str | None = None,
-) -> Change | None:
-    """Drain one change a worker thread captures after the main thread publishes."""
-    captured: list[Change] = []
-    stream = target.changes(poll_id)
-    worker = threading.Thread(target=lambda: captured.append(next(stream)))
-    worker.start()
-    time.sleep(0.05)
-    target.publish(snapshot, request_id=request_id)
-    worker.join(timeout=2)
-    stream.close()
-    return captured[0] if captured else None
-
-
-@pytest.fixture()
-def primed_broker(poll: Poll) -> PollBroker:
-    """Stand-alone broker with `poll`'s snapshot cached for change tests."""
-    store_snapshot(build_snapshot(poll))
-    return PollBroker()
 
 
 class TestRootRedirect:
@@ -167,7 +143,35 @@ class TestPollDetailPage:
         self, next_client: NextClient, poll: Poll
     ) -> None:
         body = _detail_html(next_client, poll)
-        assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
+        assert f'data-next-stream="/polls/{poll.pk}/stream/"' in body
+
+    def test_page_reserves_a_hidden_watcher_label(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(next_client, poll)
+        assert "data-poll-watchers hidden" in body
+
+
+class TestPollHost:
+    """Django admin provides a staff-only host control for poll state."""
+
+    def test_staff_can_edit_deadline_and_anonymous_visitors_cannot(
+        self, poll: Poll
+    ) -> None:
+        client = Client()
+        change_url = f"/admin/polls/poll/{poll.pk}/change/"
+        assert client.get(change_url).status_code == 302
+
+        user_model = get_user_model()
+        host = user_model.objects.create_superuser(
+            username="poll-host", email="host@example.test", password="test-password"
+        )
+        client.force_login(host)
+        response = client.get(change_url)
+
+        assert response.status_code == 200
+        assert b'name="is_open"' in response.content
+        assert b'name="closes_at_0"' in response.content
 
 
 class TestVoteAction:
@@ -183,6 +187,37 @@ class TestVoteAction:
         assert response.status_code == 302
         choice.refresh_from_db()
         assert choice.votes == 1
+
+    @pytest.mark.parametrize("closed_by", ["host", "deadline"])
+    def test_vote_is_rejected_after_manual_close_or_deadline(
+        self, next_client: NextClient, poll: Poll, closed_by: str
+    ) -> None:
+        poll.is_open = closed_by != "host"
+        poll.closes_at = (
+            timezone.now() - timedelta(seconds=1) if closed_by == "deadline" else None
+        )
+        poll.save(update_fields=("is_open", "closes_at"))
+        choice = poll.choices.get(text="Tabs")
+
+        response = next_client.post_action(
+            "vote_form", {"poll": poll.pk, "choice": choice.pk}
+        )
+
+        assert response.status_code == 400
+        choice.refresh_from_db()
+        assert choice.votes == 0
+
+    def test_future_deadline_is_in_server_rendered_chart_snapshot(
+        self, next_client: NextClient, poll: Poll
+    ) -> None:
+        poll.closes_at = timezone.now() + timedelta(minutes=1)
+        poll.save(update_fields=("closes_at",))
+
+        payload = init_payload(_detail_html(next_client, poll))
+
+        assert payload["results"]["is_open"] is True
+        assert payload["results"]["accepting_votes"] is True
+        assert payload["results"]["deadline"] == int(poll.closes_at.timestamp() * 1000)
 
     @pytest.mark.parametrize("rounds", [1, 3, 7])
     def test_repeated_votes_sum_correctly(
@@ -247,8 +282,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
@@ -265,8 +299,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         envelope = envelope_of(response)
         context_op = next(op for op in envelope.ops if op["op"] == "context")
@@ -293,13 +326,12 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": foreign_choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph"]
+        assert envelope.op_verbs() == ["morph", "context"]
         assert envelope.zone_targets() == ["poll-results"]
         meta = envelope.form_meta()
         assert meta is not None
@@ -320,8 +352,7 @@ class TestPartialVote:
             "vote_form",
             {"poll": poll.pk, "choice": foreign_choice.pk},
             origin=f"/polls/{poll.pk}/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         envelope = envelope_of(response)
         html = envelope.html_for_zone("poll-results")
@@ -341,8 +372,7 @@ class TestZoneAssetsCarryInsertionVerbs:
                 "vote_form",
                 {"poll": poll.pk, "choice": choice.pk},
                 origin=f"/polls/{poll.pk}/",
-                partial=True,
-                zones="poll-results",
+                partial="poll-results",
             )
         )
 
@@ -372,49 +402,61 @@ class TestZoneAssetsCarryInsertionVerbs:
 
 
 class TestBroadcastReceiver:
-    """The action_dispatched listener is the single publish point for the broker."""
+    """A valid vote publishes a request-aware refresh to its poll topic."""
 
-    def test_snapshot_cached_after_vote(
+    def test_vote_publishes_refresh_after_commit(
         self, next_client: NextClient, poll: Poll
     ) -> None:
-        """A vote ends with a fresh snapshot in cache, written by the receiver alone."""
         choice = poll.choices.get(text="Tabs")
-        next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
-        snapshot = read_snapshot(poll.pk)
-        assert snapshot is not None
-        votes_by_text = {row["text"]: row["votes"] for row in snapshot["choices"]}
-        assert votes_by_text["Tabs"] == 1
-        assert votes_by_text["Spaces"] == 0
-        assert snapshot["total_votes"] == 1
+        with (
+            SignalRecorder(message_published) as recorder,
+            TestCase.captureOnCommitCallbacks(execute=True),
+        ):
+            next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
+        events = recorder.events_for(message_published)
+        assert len(events) == 2
+        assert events[0].kwargs["topic"] == f"poll:{poll.pk}"
+        message = events[0].kwargs["message"]
+        assert [patch.op for patch in message.envelope.ops] == ["refresh"]
+        assert message.envelope.ops[0].extras["zone"] == "poll-results"
+        event = events[1].kwargs["message"].envelope.ops[0]
+        assert event.op == "event"
+        assert event.extras["name"] == "poll:votes"
+        assert event.extras["detail"]["total_votes"] == 1
 
-    def test_receiver_invokes_broker_publish_with_new_snapshot(
-        self, next_client: NextClient, poll: Poll, monkeypatch: pytest.MonkeyPatch
+    def test_vote_echoes_the_request_id(
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        """A spy on `broker.publish` confirms the receiver is the publish source."""
-        captured: list[Snapshot] = []
-        real_publish = broker.publish
-
-        def spy(snapshot: Snapshot, request_id: str | None = None) -> None:
-            captured.append(snapshot)
-            real_publish(snapshot, request_id=request_id)
-
-        monkeypatch.setattr(broker, "publish", spy)
         choice = poll.choices.get(text="Tabs")
-        next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
-        assert len(captured) == 1
-        assert captured[0].poll_id == poll.pk
-        votes_by_text = {row.text: row.votes for row in captured[0].choices}
-        assert votes_by_text["Tabs"] == 1
-        assert votes_by_text["Spaces"] == 0
+        with (
+            SignalRecorder(message_published) as recorder,
+            TestCase.captureOnCommitCallbacks(execute=True),
+        ):
+            next_client.post_action(
+                "vote_form",
+                {"poll": poll.pk, "choice": choice.pk},
+                origin=f"/polls/{poll.pk}/",
+                partial="poll-results",
+                headers={"X-Next-Request-Id": "vote-1"},
+            )
+        events = recorder.events_for(message_published)
+        assert len(events) == 2
+        assert all(
+            event.kwargs["message"].envelope.request_id == "vote-1" for event in events
+        )
 
     def test_invalid_vote_does_not_publish_snapshot(
         self, next_client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
         foreign_choice = second_poll.choices.first()
-        next_client.post_action(
-            "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
-        )
-        assert read_snapshot(poll.pk) is None
+        with (
+            SignalRecorder(message_published) as recorder,
+            TestCase.captureOnCommitCallbacks(execute=True),
+        ):
+            next_client.post_action(
+                "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
+            )
+        assert recorder.events_for(message_published) == []
 
 
 class TestStreamEndpoint:
@@ -446,46 +488,33 @@ class TestStreamEndpoint:
         finally:
             response.close()
 
-    def test_change_yields_refresh_with_request_id(
-        self, primed_broker: PollBroker, poll: Poll
+    def test_an_open_stream_counts_as_one_watcher(
+        self, next_client: NextClient, poll: Poll
     ) -> None:
-        Choice.objects.filter(poll=poll, text="Tabs").update(votes=2)
-        change = _consume_one_change(
-            primed_broker, poll.pk, build_snapshot(poll), request_id="r1"
-        )
-        assert change is not None
-        assert change.request_id == "r1"
-        votes_by_text = {
-            row["text"]: row["votes"] for row in change.snapshot["choices"]
-        }
-        assert votes_by_text["Tabs"] == 2
+        topic = f"poll:{poll.pk}"
+        assert presence(topic).count == 0
+        response = next_client.get(f"/polls/{poll.pk}/stream/")
+        try:
+            frames = iter(response.streaming_content)
+            next(frames)
+            next(frames)
+            assert presence(topic).count == 1
+        finally:
+            response.close()
+        assert presence(topic).count == 0
 
-    def test_change_fans_out_to_multiple_subscribers(
-        self, primed_broker: PollBroker, poll: Poll
-    ) -> None:
-        """Every open subscriber wakes on a single publish without losing events."""
-        Choice.objects.filter(poll=poll, text="Tabs").update(votes=3)
-        snapshot = build_snapshot(poll)
-        streams = [primed_broker.changes(poll.pk) for _ in range(2)]
-        captured: list[list[Change]] = [[], []]
-        workers = [
-            threading.Thread(target=lambda s=s, c=c: c.append(next(s)))
-            for s, c in zip(streams, captured, strict=True)
-        ]
-        for worker in workers:
-            worker.start()
-        time.sleep(0.05)
-        primed_broker.publish(snapshot)
-        for worker in workers:
-            worker.join(timeout=2)
-        for stream in streams:
-            stream.close()
-        for bucket in captured:
-            assert bucket
-            votes_by_text = {
-                row["text"]: row["votes"] for row in bucket[0].snapshot["choices"]
-            }
-            assert votes_by_text["Tabs"] == 3
+    def test_memory_broker_fans_out_to_each_subscriber(self) -> None:
+        backend = MemoryBroker()
+        patches = Patches(None).refresh(zone="poll-results").envelope()
+        with ExitStack() as stack:
+            streams = [
+                stack.enter_context(backend.subscribe(["poll:fanout"], timeout=0.1))
+                for _ in range(2)
+            ]
+            backend.publish("poll:fanout", patches)
+            messages = [next(stream) for stream in streams]
+        assert [message.seq for message in messages if message is not None] == [1, 1]
+        assert all(message.envelope == patches for message in messages if message)
 
     def test_unknown_poll_returns_404(self, next_client: NextClient) -> None:
         response = next_client.get("/polls/999/stream/")
@@ -493,33 +522,6 @@ class TestStreamEndpoint:
             assert response.status_code == 404
         finally:
             response.close()
-
-
-class TestEchoThreading:
-    """The vote's request id rides the change so the initiator drops its echo."""
-
-    def test_request_id_header_reaches_the_change(
-        self, next_client: NextClient, poll: Poll
-    ) -> None:
-        choice = poll.choices.get(text="Tabs")
-        captured: list[Change] = []
-        stream = broker.changes(poll.pk)
-
-        def drain() -> None:
-            captured.append(next(stream))
-
-        worker = threading.Thread(target=drain)
-        worker.start()
-        time.sleep(0.05)
-        next_client.post_action(
-            "vote_form",
-            {"poll": poll.pk, "choice": choice.pk},
-            **{f"HTTP_{REQUEST_ID.upper().replace('-', '_')}": "vote-1"},
-        )
-        worker.join(timeout=2)
-        stream.close()
-        assert captured
-        assert captured[0].request_id == "vote-1"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -533,22 +535,27 @@ class TestStreamPatchFrame:
         Choice.objects.create(poll=poll, text="Yes", votes=0)
         try:
             response = next_client.get(f"/polls/{poll.pk}/stream/")
-            frames: list[bytes] = []
             iterator = iter(response.streaming_content)
-
-            def drain() -> None:
-                frames.append(next(iterator))
-                frames.append(next(iterator))
-
-            worker = threading.Thread(target=drain)
-            worker.start()
-            time.sleep(0.05)
-            broker.publish(build_snapshot(poll), request_id="r9")
-            worker.join(timeout=2)
+            retry = next(iterator)
+            hello = next(iterator)
+            assert retry.startswith(b"retry: ")
+            assert b"event: next-hello" in hello
+            position = _frame_data(hello)["topics"][f"poll:{poll.pk}"]
+            assert set(position) == {"epoch", "seq"}
+            assert isinstance(position["epoch"], str)
+            assert isinstance(position["seq"], int)
+            publish(
+                f"poll:{poll.pk}",
+                Patches(None, echo_of="r9").refresh(zone="poll-results"),
+                on_commit=False,
+            )
+            presence_frame = next(iterator)
+            frame = next(iterator)
             response.close()
-            assert frames[0].startswith(b"retry: ")
-            data = frames[1].split(b"data: ", 1)[1].split(b"\n\n", 1)[0]
-            envelope = json.loads(data)
+            presence_ops = _frame_data(presence_frame)["ops"]
+            assert [op["name"] for op in presence_ops] == ["next:presence"]
+            assert b"event: next-patches" in frame
+            envelope = _frame_data(frame)
             assert [op["op"] for op in envelope["ops"]] == ["refresh"]
             assert envelope["ops"][0]["zone"] == "poll-results"
             assert envelope["request_id"] == "r9"
@@ -557,22 +564,30 @@ class TestStreamPatchFrame:
             poll.delete()
 
 
-class TestSnapshotCache:
-    """The module-level broker writes snapshots to the shared cache."""
+@pytest.mark.django_db(transaction=True)
+class TestStreamRevocation:
+    """Removing a poll ends its open streams at the next access recheck."""
 
-    def test_module_level_broker_publishes_snapshot_to_cache(self, poll: Poll) -> None:
-        snapshot = build_snapshot(poll)
-        broker.publish(snapshot)
-        cached = read_snapshot(poll.pk)
-        assert cached is not None
-        assert cached["poll_id"] == poll.pk
-
-    def test_snapshot_payload_shape(self) -> None:
-        snapshot = Snapshot(poll_id=1, total_votes=5, choices=())
-        payload = snapshot.to_payload()
-        assert payload["poll_id"] == 1
-        assert payload["total_votes"] == 5
-        assert payload["choices"] == []
+    def test_deleted_poll_ends_the_stream_with_an_end_frame(
+        self, next_client: NextClient
+    ) -> None:
+        poll = Poll.objects.create(question="Short-lived?")
+        backends = extend_default_backend(
+            "PARTIAL_BACKENDS",
+            OPTIONS={"VERSION": "v1", "SSE": {"HEARTBEAT_SECONDS": 0.05}},
+        )
+        with override_next_settings(
+            REALTIME={"TRANSPORTS": ["sse"]}, PARTIAL_BACKENDS=backends
+        ):
+            response = next_client.get(f"/polls/{poll.pk}/stream/")
+            frames = iter(response.streaming_content)
+            assert next(frames).startswith(b"retry: ")
+            assert b"event: next-hello" in next(frames)
+            poll.delete()
+            remaining = list(frames)
+            response.close()
+        assert b"event: next-end" in remaining[-1]
+        assert _frame_data(remaining[-1]) == {"code": "auth"}
 
 
 class TestProductionStartup:
@@ -630,7 +645,7 @@ class TestEmbedWidget:
         body = self._embed_html(next_client, poll)
         assert poll.question in body
         assert f'data-poll-chart="{poll.pk}"' in body
-        assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
+        assert f'data-next-stream="/polls/{poll.pk}/stream/"' in body
         assert f'href="/polls/{poll.pk}/"' in body
 
     def test_ancestor_metadata_still_applies(
@@ -660,8 +675,7 @@ class TestEmbedWidget:
             "vote_form",
             {"poll": poll.pk, "choice": choice.pk},
             origin=f"/polls/{poll.pk}/embed/",
-            partial=True,
-            zones="poll-results",
+            partial="poll-results",
         )
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["poll-results"]

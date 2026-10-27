@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CHUNK_TIMEOUT, createScriptsLoader, lazyChunk } from "./chunks";
+import {
+  CHUNK_ATTEMPTS,
+  CHUNK_TIMEOUT,
+  createScriptsLoader,
+  lazyChunk,
+} from "./chunks";
 import type {
   ScriptsModule,
   ScriptsFactory,
@@ -354,6 +359,22 @@ describe("a scripts chunk past its moment", () => {
 });
 
 describe("a single-module chunk", () => {
+  it("loads nothing when the payload names only another chunk", async () => {
+    const doc = document.implementation.createHTMLDocument("");
+    const chunk = lazyChunk<string>(
+      {
+        dispatch: () => undefined,
+        document: doc,
+        nonce: undefined,
+        context: () => ({ $chunks: { ws: "/ws.js" } }),
+      },
+      "stream",
+    );
+
+    await expect(chunk.load()).resolves.toBeUndefined();
+    expect(doc.head.querySelector("script")).toBeNull();
+  });
+
   function makeDev() {
     const doc = document.implementation.createHTMLDocument("");
     const errors: Record<string, unknown>[] = [];
@@ -416,6 +437,26 @@ describe("a single-module chunk", () => {
     expect(errors[0]).toMatchObject({ kind: "asset", url: CHUNKS.dev });
     void chunk.load();
     expect(tags()).toHaveLength(1);
+  });
+
+  it("stops appending tags and queueing subscribers once its attempts run out", async () => {
+    const { chunk, errors, tags } = makeDev();
+    const subscriber = vi.fn();
+    for (let attempt = 0; attempt < CHUNK_ATTEMPTS; attempt += 1) {
+      chunk.whenLoaded(subscriber);
+      chunk.whenLoaded(subscriber);
+      expect(tags()).toHaveLength(1);
+      tags()[0]!.dispatchEvent(new Event("error"));
+      await Promise.resolve();
+    }
+    expect(errors).toHaveLength(CHUNK_ATTEMPTS);
+    chunk.whenLoaded(subscriber);
+    expect(await chunk.load()).toBeUndefined();
+    expect(tags()).toEqual([]);
+    expect(errors).toHaveLength(CHUNK_ATTEMPTS);
+    chunk.land("diagnostics");
+    expect(subscriber).toHaveBeenCalledTimes(CHUNK_ATTEMPTS * 2);
+    expect(await chunk.load()).toBe("diagnostics");
   });
 
   it("fails a file that loads without landing, so no need hangs on it", async () => {

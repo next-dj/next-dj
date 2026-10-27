@@ -73,8 +73,12 @@ class TestResetFormActions:
         form_action_manager._backends = [*manager_backends, stub]
         try:
             saved = form_action_manager.snapshot_actions()
+            before = form_action_manager.version
             try:
                 form_action_manager.clear_registries()
+                assert form_action_manager.version != before
+                assert not form_action_manager.default_backend._registry
+                assert stub in form_action_manager._backends
             finally:
                 form_action_manager.restore_actions(saved)
         finally:

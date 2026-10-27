@@ -68,4 +68,29 @@ describe("Card", () => {
     render(<Card id={1} title="Fix login bug" />);
     expect(document.querySelector("[data-kanban-card-excerpt]")).toBeNull();
   });
+
+  it("reports the drag start and end to its board", () => {
+    const onDragChange = vi.fn();
+    render(<Card id={5} title="Fix login bug" onDragChange={onDragChange} />);
+    const el = document.querySelector("[data-kanban-card='5']");
+    fireEvent.dragStart(el, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragEnd(el);
+    expect(onDragChange.mock.calls).toEqual([
+      [5, true],
+      [5, false],
+    ]);
+  });
+
+  it("names the member who is dragging it elsewhere", () => {
+    render(
+      <Card
+        id={5}
+        title="Fix login bug"
+        draggedBy={{ name: "Grace Hopper", initials: "GH" }}
+      />,
+    );
+    const badge = document.querySelector("[data-kanban-dragged-by='Grace Hopper']");
+    expect(badge).toHaveTextContent("GH");
+    expect(badge).toHaveTextContent("Grace Hopper is moving this card");
+  });
 });

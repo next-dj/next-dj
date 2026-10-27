@@ -7,6 +7,17 @@
       <span class="text-sm text-muted-foreground">
         {{ active_boards_count }} active boards
       </span>
+      {% if viewer %}
+        <span class="flex items-center gap-2 text-sm" data-kanban-viewer>
+          {% component "avatar" initials=viewer.initials size=7 %}
+          {{ viewer.name }}
+        </span>
+        {% form "sign_out_form" %}
+          <button type="submit" class="text-sm text-muted-foreground hover:text-foreground">Sign out</button>
+        {% endform %}
+      {% else %}
+        <a href="{% url 'next:page_sign_in' %}" class="text-sm font-medium text-primary hover:underline">Sign in</a>
+      {% endif %}
     {% /slot %}
     {% #slot "content" %}
       {% template %}

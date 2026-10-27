@@ -38,6 +38,14 @@ from next.partial.signals import (
     zone_registered,
     zone_rendered,
 )
+from next.realtime.signals import (
+    broker_backend_loaded,
+    message_published,
+    stream_subscribed,
+    stream_unsubscribed,
+    upstream_received,
+    upstream_rejected,
+)
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
@@ -59,6 +67,7 @@ __all__ = [
     "action_dispatched",
     "action_registered",
     "asset_registered",
+    "broker_backend_loaded",
     "collector_finalized",
     "component_backend_loaded",
     "component_registered",
@@ -73,6 +82,7 @@ __all__ = [
     "html_injected",
     "intercept_access_denied",
     "intercept_registered",
+    "message_published",
     "metadata_registered",
     "page_rendered",
     "partial_backend_loaded",
@@ -87,7 +97,11 @@ __all__ = [
     "sse_stream_closed",
     "sse_stream_opened",
     "static_backend_loaded",
+    "stream_subscribed",
+    "stream_unsubscribed",
     "template_loaded",
+    "upstream_received",
+    "upstream_rejected",
     "watch_specs_ready",
     "wizard_backend_loaded",
     "wizard_completed",

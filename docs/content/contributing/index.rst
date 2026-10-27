@@ -11,7 +11,7 @@ Documentation contributions stay inside this section.
 :doc:`writing-documentation` explains how to author, structure, and build a page, and :doc:`style-guide` states the prose rules a reviewer cites during review.
 
 :doc:`quality-gates`
-   The automated gates every pull request meets, from the coverage threshold to the benchmark comparison.
+   The automated gates every pull request meets, from the coverage threshold to the benchmark report.
 
 :doc:`writing-documentation`
    How to author, structure, and build the documentation.

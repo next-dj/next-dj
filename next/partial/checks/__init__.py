@@ -6,11 +6,14 @@ Importing the package registers every check.
 from .backends import (
     check_asset_version_moves_between_deploys,
     check_manifest_version_has_manifest_storage,
+    check_partial_backend_implements_stream_data,
     check_partial_backend_names_a_path,
+    check_partial_backend_sse_options,
     check_partial_backends_is_a_list,
     check_single_partial_backend,
 )
 from .codes import (
+    E_BACKEND_STALE_CONTRACT,
     E_BACKEND_WITHOUT_PATH,
     E_BACKENDS_NOT_A_LIST,
     E_COMPOSED_TEMPLATE_SYNTAX,
@@ -21,6 +24,7 @@ from .codes import (
     E_LAZY_WITHOUT_PLACEHOLDER,
     E_NON_ASCII_ZONE,
     E_OP_BAD_NAME,
+    E_SSE_OPTION_INVALID,
     E_ZONE_IN_COMPONENT,
     E_ZONE_IN_FOR,
     E_ZONE_IN_HAS_PERM,
@@ -51,6 +55,7 @@ from .zones import (
 
 __all__ = [
     "E_BACKENDS_NOT_A_LIST",
+    "E_BACKEND_STALE_CONTRACT",
     "E_BACKEND_WITHOUT_PATH",
     "E_COMPOSED_TEMPLATE_SYNTAX",
     "E_CONTEXT_ZONE_UNKNOWN",
@@ -60,6 +65,7 @@ __all__ = [
     "E_LAZY_WITHOUT_PLACEHOLDER",
     "E_NON_ASCII_ZONE",
     "E_OP_BAD_NAME",
+    "E_SSE_OPTION_INVALID",
     "E_ZONE_IN_COMPONENT",
     "E_ZONE_IN_FOR",
     "E_ZONE_IN_HAS_PERM",
@@ -81,7 +87,9 @@ __all__ = [
     "check_lazy_zone_has_placeholder",
     "check_manifest_version_has_manifest_storage",
     "check_no_zone_in_component",
+    "check_partial_backend_implements_stream_data",
     "check_partial_backend_names_a_path",
+    "check_partial_backend_sse_options",
     "check_partial_backends_is_a_list",
     "check_repeated_form_has_key",
     "check_single_partial_backend",

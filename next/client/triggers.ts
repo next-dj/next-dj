@@ -16,6 +16,7 @@ import {
   ATTR_ACTION,
   ATTR_POLL,
   ATTR_KEY,
+  ATTR_TRANSPORT,
   ATTR_ZONE,
   HEADER_MERGE,
   HEADER_ORIGIN,
@@ -23,7 +24,7 @@ import {
   currentUrl,
   matching,
 } from "./protocol";
-import type { Diagnostics } from "./protocol";
+import type { Diagnostics, WireTransport } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
@@ -46,21 +47,25 @@ export interface IntersectionAdapter {
 /** The confirm gate, injectable so tests drive accept and cancel without a dialog. */
 export type ConfirmAdapter = (text: string) => boolean;
 
+/** A request the triggers hand to the partial fetch. */
+export interface TriggerRequest {
+  url: string;
+  method?: string;
+  uid?: string;
+  zone?: string;
+  queue?: string;
+  headers?: Record<string, string>;
+  body?: BodyInit;
+  abortable?: boolean;
+  key?: string;
+  owner?: string;
+  transport?: WireTransport;
+}
+
 /** The seams the triggers draw on. */
 export interface TriggerDeps {
   // The partial fetch, named by zone and merge intent, never selectors.
-  fetch: (request: {
-    url: string;
-    method?: string;
-    uid?: string;
-    zone?: string;
-    queue?: string;
-    headers?: Record<string, string>;
-    body?: BodyInit;
-    abortable?: boolean;
-    key?: string;
-    owner?: string;
-  }) => void;
+  fetch: (request: TriggerRequest) => void;
   // Abort the in-flight request on a queue, so a submit cancels its own validation.
   abort: (key: string) => void;
   document?: Document;
@@ -95,7 +100,13 @@ export interface Triggers {
   ready(): void;
   // Activate lazy zones and arm sentinels in a freshly inserted subtree.
   scan(root: ParentNode): void;
+  submission(form: HTMLFormElement, submitter?: Element | null): TriggerRequest;
+  sender(el: Element): Pick<TriggerRequest, "owner" | "headers">;
   _reset(): void;
+}
+
+function transportOf(form: Element): WireTransport {
+  return form.getAttribute(ATTR_TRANSPORT) === "any" ? "any" : "http";
 }
 
 /** Build the trigger handlers over the given seams. */
@@ -244,6 +255,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       abortable: true,
       headers: { [HEADER_VALIDATE]: field },
       body: data,
+      transport: transportOf(form),
     });
   }
 
@@ -274,36 +286,49 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function onSubmit(event: Event): void {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    const uid = form.getAttribute(ATTR_ACTION);
-    if (uid === null) return;
-    // A submit cancels its own validation, the debounce armed on blur as much as the
-    // request already sent, so no late answer morphs the form over this response.
-    cancelValidation(form);
+    if (!form.hasAttribute(ATTR_ACTION)) return;
     // Intercept as a partial mutation under the uid lock. Without the runtime the
     // form posts natively, so this is the enhancement, never the only path.
     event.preventDefault();
+    deps.fetch(submission(form, (event as SubmitEvent).submitter));
+  }
+
+  function submission(
+    form: HTMLFormElement,
+    submitter?: Element | null,
+  ): TriggerRequest {
+    // A submit cancels its own validation, the debounce armed on blur as much as the
+    // request already sent, so no late answer morphs the form over this response.
+    cancelValidation(form);
+    const url = form.getAttribute("action") ?? here();
     const body = new FormData(form);
     // A native submit carries the pressed button, so replay its name onto the body.
-    const submitter = (event as SubmitEvent).submitter;
     const name = submitter?.getAttribute("name") ?? "";
     if (name !== "") body.append(name, submitter?.getAttribute("value") ?? "");
     // The declared zone travels as the morph target, without one the server uses uid.
     const zone = targetZone(form);
     // The form's own key, so the response morphs this instance.
     const key = form.getAttribute(ATTR_KEY);
-    // A mutation fired from inside a layer names the host page, so the server resolves
-    // a foreign zone against the host and not the step page in the modal.
-    const origin = layerHost(form);
-    deps.fetch({
-      url: form.getAttribute("action") ?? here(),
+    return {
+      url,
       method: "POST",
-      uid,
-      owner: pageUrl(form),
+      uid: form.getAttribute(ATTR_ACTION) ?? url,
+      ...sender(form),
       ...(zone !== null ? { zone } : {}),
       ...(key !== null ? { key } : {}),
-      ...(origin !== undefined ? { headers: { [HEADER_ORIGIN]: origin } } : {}),
       body,
-    });
+      transport: transportOf(form),
+    };
+  }
+
+  // A mutation fired from inside a layer names the host page, so the server resolves
+  // a foreign zone against the host and not the step page in the modal.
+  function sender(el: Element): Pick<TriggerRequest, "owner" | "headers"> {
+    const origin = layerHost(el);
+    return {
+      owner: pageUrl(el),
+      ...(origin !== undefined ? { headers: { [HEADER_ORIGIN]: origin } } : {}),
+    };
   }
 
   function onClick(event: Event): void {
@@ -435,6 +460,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       scan(root);
       loadBatch(root);
     },
+    submission,
+    sender,
     _reset() {
       for (const stop of observed.values()) stop();
       observed.clear();

@@ -51,6 +51,16 @@ class TestChunkLists:
         modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(")
         assert modules == set(CHUNK_STATIC_PATHS)
 
+    def test_chunk_keys_name_every_shipped_chunk(self) -> None:
+        assert set(CHUNK_STATIC_PATHS) == {
+            "scripts",
+            "stream",
+            "ws",
+            "csrf",
+            "poll",
+            "dev",
+        }
+
     def test_scripts_chunk_keys_match_the_payload_keys(self) -> None:
         source = (CLIENT / "chunks.ts").read_text(encoding="utf-8")
         assert _ts_strings(source, r"const CHUNK_KEYS =") == CHUNK_PAYLOAD_KEYS

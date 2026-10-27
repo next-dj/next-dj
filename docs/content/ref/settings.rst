@@ -22,7 +22,7 @@ Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
-``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY`` and ``CSP_NONCE`` as single values.
+``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY``, ``CSP_NONCE``, and ``DEV_SERVER`` as single values.
 
 .. _ref-settings-merge:
 
@@ -38,7 +38,7 @@ The rule holds for every key, with no per-key exception.
 This is what Django does with its own configuration mappings.
 Defining :doc:`STORAGES <django:ref/settings>` overrides the default configuration rather than merging with it, and ``TEMPLATES``, ``DATABASES``, and ``CACHES`` each read the whole list or mapping the project wrote.
 Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
-The scopes ``METADATA``, ``SITE``, ``SEO``, and ``CONSENT`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
+The scopes ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
 A nested ``OPTIONS`` inside a scope still comes from the project alone once the project sets it.
 
 A single backend dict follows the rule like any other key.
@@ -48,8 +48,8 @@ Write the whole entry, ``BACKEND`` included.
 Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
-- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
-- The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
+- The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
 - ``URL_NAME_TEMPLATE`` also accepts a string, but a format template such as ``page_{name}`` rather than a dotted path.
@@ -221,9 +221,151 @@ Any other string pins a release tag by hand.
 The resolved string is memoised for the life of the configuration, so a manifest replaced under a running process keeps serving the version resolved before it until a settings reload or a restart.
 A version that never changes leaves the version guard silent at runtime, so a deploy of new assets cannot ask a connected client to reload.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
-``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
+``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds of a ``PatchEventStream`` with an async source and of every ``TopicStream``, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
+``SSE`` is a dict or ``None``, the heartbeat ``None`` or a finite number above ``0``, and the retry hint ``None`` or an integer from ``0`` that is not a bool.
+``None`` takes the default, and a wrong value falls back to the default at runtime while ``next.E214`` reports it.
+``REALTIME['HEARTBEAT']`` times the WebSocket ping and recheck instead, see `REALTIME`_.
 
 See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
+
+REALTIME
+~~~~~~~~
+
+Mapping for broker and stream settings.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "BROKER": {
+           "BACKEND": "next.realtime.MemoryBroker",
+           "OPTIONS": {"QUEUE_SIZE": 256},
+       },
+       "TRANSPORTS": None,
+       "TICKET_MAX_AGE": 60,
+       "TICKET_BINDING": "next.realtime.SessionBinding",
+       "WS_PATH": "/_next/ws/",
+       "HEARTBEAT": 25.0,
+       "GATEWAY_TOKEN": None,
+       "REPLAY": {"SIZE": 100, "TTL": 300},
+       "PRESENCE": {"WINDOW": 1.0, "SIZE": 100, "MEMBER_BYTES": 512},
+       "HANDLERS": None,
+       "UPSTREAM": {
+           "RATE": 10.0,
+           "BURST": 20,
+           "MAX_BYTES": 16384,
+           "CONCURRENCY": 16,
+           "TIMEOUT": 10.0,
+       },
+       "TUNNEL": {"CONCURRENCY": 4, "TIMEOUT": 30.0, "MAX_REPLY_BYTES": 1048576},
+   }
+
+``BROKER.BACKEND`` names a ``BrokerBackend`` subclass, and ``BROKER.OPTIONS`` belongs to that backend.
+
+.. list-table:: Broker options per shipped backend
+   :header-rows: 1
+   :widths: 30 26 44
+
+   * - Backend
+     - Option and default
+     - Meaning
+   * - ``next.realtime.MemoryBroker``
+     - ``QUEUE_SIZE``, ``256``
+     - The bound of each subscriber queue, a positive integer.
+       A full queue drops its oldest message.
+   * - ``next.realtime.RedisBroker``
+     - ``URL``, ``"redis://localhost:6379/0"``
+     - The Redis connection URL, a non-empty string, and ``next.E213`` reports any other value.
+   * - ``next.realtime.RedisBroker``
+     - ``PREFIX``, ``"next"``
+     - The prefix of every counter key, replay log key, and Pub/Sub channel.
+       It needs a non-colon character and no ``{`` or ``}``, since a brace moves the Redis Cluster hash tag off the topic name, and ``next.E192`` reports any other value.
+   * - ``next.realtime.RedisBroker``
+     - ``HEALTH_CHECK_INTERVAL``, ``10.0``
+     - Seconds a Redis connection may stay idle before the client pings it before its next command.
+       Zero turns this client-side check off.
+       Subscriptions run their own liveness ping regardless, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+   * - ``next.realtime.RedisBroker``
+     - ``CLIENT``, ``{}``
+     - A mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
+       Its entries override the ``health_check_interval`` and ``socket_keepalive`` the broker sets, while ``decode_responses`` is always forced on, so a ``CLIENT`` that sets it to anything but ``True`` is ``next.E187``.
+       ``max_connections`` is the usual entry, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+
+``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
+``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.
+``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
+A custom backend validates its own ``OPTIONS`` keys in its ``check_options`` classmethod, which ``manage.py check`` calls, see :doc:`realtime`.
+
+``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` in a process that mounts a ``WebSocketApp``, or ``["sse"]`` otherwise.
+A process that serves pages without mounting the socket, such as a WSGI worker next to a separate ASGI deployment, needs an explicit ``["ws", "sse"]`` to offer it.
+An explicit list that names ``ws`` offers it whether or not the process mounts the socket, so the first negotiation in a process without one logs a warning on the ``next.realtime.transports`` logger, once per process.
+Set it to ``["sse"]`` to disable WebSocket negotiation.
+
+``TICKET_MAX_AGE`` is the lifetime of a WebSocket ticket in seconds and accepts values from 1 to 600, which ``next.E182`` enforces.
+
+``TICKET_BINDING`` is the dotted path of the ``TicketBinding`` subclass that decides what a WebSocket ticket is bound to, and ``next.E211`` reports any other value.
+The default ``next.realtime.SessionBinding`` binds the session key.
+Whatever the binding, the ticket is signed from ``SECRET_KEY`` and stays reusable for every handshake until ``TICKET_MAX_AGE`` elapses.
+
+``next.realtime.SignedCookieBinding`` binds a signed-in user by its pk and session auth hash and an anonymous visitor by a ``next_visitor`` cookie, so it serves the signed-cookie ``SESSION_ENGINE``, a first visit without a session included.
+The negotiation reply sets that cookie with ``HttpOnly`` and the path, domain, ``Secure``, ``SameSite`` and lifetime of the session cookie, and renews it on every negotiation.
+Its socket rechecks the user by pk and auth hash without writing a cookie, so a password change or an inactive user closes it while a logout elsewhere does not, and ``next.W147`` warns when a server-side ``SESSION_ENGINE`` runs next to it.
+A subclass changes ``cookie_name`` or ``salt``, and a project binding implements ``issue``, ``credential``, ``subject`` and ``live``, with ``live_session`` for SSE and ``respond`` for what the negotiation reply carries, see :doc:`realtime` and :doc:`/content/howto/bind-tickets-to-your-own-identity`.
+
+``HANDLERS`` selects the modules that register ``@on`` upstream handlers.
+``None`` imports the ``realtime`` module of every installed app, a list of dotted module names imports only those modules, and ``[]`` imports none.
+Any other value is reported as ``next.E197``.
+
+``WS_PATH`` sets the same-origin WebSocket route and defaults to ``/_next/ws/``, and it is the only place the route is configured.
+
+``GATEWAY_TOKEN`` is the bearer secret of the ticket introspection endpoint, which stays off until a URLconf includes it.
+It defaults to ``None``, and a routed endpoint with no token refuses every caller and is reported as ``next.E188``.
+Read it from the environment rather than committing it.
+
+``HEARTBEAT`` is the WebSocket ping and recheck interval in seconds, a positive finite number that ``next.E185`` enforces.
+It drives every WebSocket served by a ``TopicSocket``, which sends a ``ping`` frame at that interval and rechecks its session and topic grants.
+An SSE stream, a ``TopicStream`` or a manual ``PatchEventStream``, takes its heartbeat from the ``SSE.HEARTBEAT_SECONDS`` option of ``PARTIAL_BACKENDS`` instead.
+``TopicStream(heartbeat_seconds=...)`` overrides that option for one SSE stream.
+Keep both intervals below the shortest idle timeout of every proxy and load balancer in front of the streams.
+
+``REPLAY`` sizes the per-topic log a reconnecting stream catches up from.
+``SIZE`` is the number of newest messages kept per topic, an integer from ``0`` to ``10000`` that ``next.E189`` enforces, and ``0`` turns the log off.
+``TTL`` is the number of seconds the log of a topic lives after its last publication, a positive number up to ``31536000``, one year, that ``next.E190`` enforces.
+A missing key takes its default, any key besides the two is reported as ``next.E035``, and a ``REPLAY`` value that is not a mapping is reported as ``next.E191``.
+A broker reads the window once when it is created, so a settings reload rebuilds the broker with it.
+With a nonzero ``SIZE`` and a ``BACKEND`` that keeps no log, ``next.W143`` warns that every reconnect resynchronises.
+See :doc:`realtime` for the replay order and the guarantees it gives.
+
+``PRESENCE`` limits the attendance a stream reports when it passes ``presence`` to ``TopicStream``.
+``WINDOW`` is the coalescing window in seconds, a positive number up to ``60`` that ``next.E194`` enforces.
+Every change inside an open window joins the one ``next:presence`` event that the broker publishes when the window closes.
+``SIZE`` is the number of members one event lists, an integer from ``0`` to ``1000`` that ``next.E195`` enforces, and ``0`` sends the count alone.
+The ``count`` stays exact beyond ``SIZE``.
+``MEMBER_BYTES`` is the largest compact JSON of one member in bytes, an integer from ``1`` to ``4096`` that ``next.E196`` enforces, and a larger member raises ``InvalidMemberError`` on its join.
+A missing key takes its default, any key besides the three is reported as ``next.E035``, and a ``PRESENCE`` value that is not a mapping is reported as ``next.E193``.
+A broker reads the limits once when it is created.
+With an explicit ``PRESENCE`` and a ``BACKEND`` that keeps no presence, ``next.W144`` warns that every stream asking for presence fails to start.
+See :doc:`realtime` for the snapshot semantics.
+
+``UPSTREAM`` limits the frames a WebSocket client sends after ``sub``, the ``up`` events and the tunneled ``http`` requests alike.
+They draw on one token bucket per connection that holds ``BURST`` tokens and refills at ``RATE`` tokens a second.
+``RATE`` is a positive number up to ``1000`` that ``next.E202`` enforces, and ``BURST`` is an integer from ``1`` to ``1000`` that ``next.E203`` enforces.
+The defaults suit a page that sends small, occasional events and a few form posts in a row, so raise them only for a page that streams input such as a cursor.
+``MAX_BYTES`` caps one ``up`` frame in UTF-8 bytes as it arrives, an integer from ``1`` to ``65536`` that ``next.E204`` enforces, while a tunneled request is bounded by the 64 KiB frame limit alone.
+``CONCURRENCY`` is the number of ``up`` events one connection runs at once, an integer from ``1`` to ``64`` that ``next.E209`` enforces, and an event past it is refused with ``limit`` without counting towards ``4429``.
+``TIMEOUT`` is the seconds one ``up`` event waits for its handler before the ``ack`` answers ``timeout``, a positive number up to ``600`` that ``next.E210`` enforces.
+A missing key takes its default, any key besides the five is reported as ``next.E035``, and an ``UPSTREAM`` value that is not a mapping is reported as ``next.E201``.
+
+``TUNNEL`` configures the request tunnel that runs form actions over an open WebSocket, and ``False`` turns it off.
+``CONCURRENCY`` is the number of requests one connection runs at once, an integer from ``1`` to ``64`` that ``next.E206`` enforces.
+``TIMEOUT`` is the seconds one request may take, a positive number up to ``600`` that ``next.E207`` enforces.
+``MAX_REPLY_BYTES`` caps the body of one reply, an integer from ``1`` to ``67108864`` that ``next.E208`` enforces.
+A missing key takes its default, any key besides the three is reported as ``next.E035``, and a value that is neither ``False`` nor a mapping is reported as ``next.E205``.
+``WebSocketApp`` reads both mappings once when it is created, and the ``hello`` frame tells the client ``MAX_BYTES`` and ``TIMEOUT``.
+See :doc:`realtime` for the frames and the refusals.
+
+See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-websockets` for setup.
 
 Application modules
 -------------------
@@ -299,6 +441,22 @@ The subclass is built like any other object, so its ``__init__`` runs and it is 
 The object the swap replaces takes its state with it, the compiled plans as well as anything registered on it at runtime, so a dependency registered through ``resolver.dependency`` is registered again after a swap.
 
 See :doc:`/content/internals/di-resolver` for the resolution algorithm and :doc:`deps` for the resolver API.
+
+Development server
+------------------
+
+DEV_SERVER
+~~~~~~~~~~
+
+Dotted path to the ``ASGIServer`` class ``manage.py runserver`` serves the project on.
+
+Default value ``"next.server.asgi.UvicornServer"``.
+
+The class is built without arguments, and its ``run(app, **options)`` serves the app until it stops, the way ``uvicorn.run`` does.
+The default runs uvicorn, and without uvicorn installed the command is Django's WSGI ``runserver``.
+A project-named class is imported on every ``runserver`` after the system checks, and a path that fails to import or names no class with a ``run`` method is ``next.E212`` at ``manage.py check`` and at ``runserver``.
+``manage.py runserver --wsgi`` skips the class and serves WSGI whatever the key names.
+See :doc:`management` for the options ``run`` receives and an example server.
 
 Templates
 ---------

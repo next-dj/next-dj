@@ -16,7 +16,7 @@ _FORM_BASES: tuple[type, ...] = (BaseForm, BaseFormSet)
 class DForm[FormT](DDependencyBase[FormT]):
     """Annotation for injecting a form instance by class.
 
-    The string form spares a page an import it needs for nothing else.
+    A string argument resolves only against names the page module defines or imports.
     """
 
     __slots__ = ()

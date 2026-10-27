@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.mark.walltime()
 class TestBenchComponentScanner:
     @pytest.mark.benchmark(group="components.discovery")
     def test_scan_small(self, tmp_path: Path, benchmark) -> None:

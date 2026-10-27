@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 _PY_SRC = "template = 'hello {{ name }}'\n"
 
 
+@pytest.mark.walltime()
 class TestBenchPythonModuleLoader:
     @pytest.mark.benchmark(group="pages.loaders")
     def test_python_load_cold(self, tmp_path: Path, benchmark) -> None:
@@ -50,6 +51,7 @@ class TestBenchPythonModuleLoader:
         benchmark(python_template_loader.can_load, page_path)
 
 
+@pytest.mark.walltime()
 class TestBenchDjxLoader:
     @pytest.mark.benchmark(group="pages.loaders")
     def test_djx_can_load_hit(self, tmp_path: Path, benchmark) -> None:
@@ -100,6 +102,7 @@ class TestBenchLayoutLoader:
         benchmark(loader._find_layout_files, page_path)
 
 
+@pytest.mark.walltime()
 class TestBenchLoaderChain:
     """``TEMPLATE_LOADERS`` resolution and iteration through `can_load`."""
 

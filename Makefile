@@ -1,4 +1,4 @@
-.PHONY: help install test bench bench-codspeed test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench bench-codspeed test-compat lint format type-check clean build docs docs-lint docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples build-examples test-examples-e2e ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -19,6 +19,8 @@ E2E_XDIST ?=
 # their built manifest, so the browser drives those bundles rather than a dev server.
 E2E_ENV ?= VITE_ORIGIN= VITE_DEV_ORIGIN=
 
+E2E_BUILD ?= build-js build-examples
+
 help: # show this help message
 	@echo "Available commands:"
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
@@ -27,6 +29,7 @@ help: # show this help message
 	@echo "  bench-codspeed  - run the benchmarks under pytest-codspeed, as the CodSpeed job does"
 	@echo "  test-compat     - run ecosystem compatibility tests (no coverage)"
 	@echo "  test-examples   - run Python + JS tests for examples with coverage"
+	@echo "  build-examples  - build the bundle of every example with a build script"
 	@echo "  test-examples-e2e - run the browser suites for examples that ship one"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
@@ -100,7 +103,7 @@ BENCH_FLAGS ?= \
 # Example: make bench BENCH_EXTRA="--benchmark-save=before"
 BENCH_EXTRA ?=
 
-bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
+bench: # run performance benchmarks locally (opt-in, no coverage, paired comparisons via BENCH_EXTRA)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
 
 bench-codspeed: # run the benchmarks under pytest-codspeed (walltime off Linux CI)
@@ -148,7 +151,15 @@ test-examples: # run Python, JS tests for examples with coverage
 		fi; \
 	done
 
-test-examples-e2e: # run the browser suites for every example that ships tests/e2e
+build-examples: # build the bundle of every example whose package.json has a build script
+	@set -e; \
+	for example_dir in examples/*/; do \
+		if [ -f "$$example_dir/package.json" ] && node -e "process.exit(require('./$${example_dir}package.json').scripts?.build ? 0 : 1)"; then \
+			(cd "$$example_dir" && npm ci && npm run build); \
+		fi; \
+	done
+
+test-examples-e2e: $(E2E_BUILD) # run the browser suites for every example that ships tests/e2e
 	@set -e; \
 	ran=0; \
 	for example_dir in examples/*/; do \

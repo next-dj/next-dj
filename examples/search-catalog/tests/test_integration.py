@@ -446,8 +446,7 @@ class TestPresetFilterPushUrl:
             "preset_filter_form",
             {"preset": "cheapest"},
             origin="/catalog/",
-            partial=True,
-            zones=LISTING_TARGET,
+            partial=LISTING_TARGET,
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
@@ -469,8 +468,7 @@ class TestPresetFilterPushUrl:
                 "preset_filter_form",
                 {"preset": "in_stock"},
                 origin="/catalog/",
-                partial=True,
-                zones=LISTING_TARGET,
+                partial=LISTING_TARGET,
             )
         )
         assert "products" in envelope.html_for_zone("catalog-count")
@@ -486,8 +484,7 @@ class TestPresetFilterPushUrl:
                 "preset_filter_form",
                 {"preset": "cheapest"},
                 origin="/catalog/",
-                partial=True,
-                zones=LISTING_TARGET,
+                partial=LISTING_TARGET,
             )
         )
         url_op = next(op for op in envelope.ops if op["op"] == "url")
@@ -503,8 +500,7 @@ class TestPresetFilterPushUrl:
                 "preset_filter_form",
                 {"preset": "in_stock"},
                 origin="/catalog/",
-                partial=True,
-                zones=LISTING_TARGET,
+                partial=LISTING_TARGET,
             )
         )
         results = envelope.html_for_zone("catalog-results")
@@ -518,8 +514,7 @@ class TestPresetFilterPushUrl:
                 "preset_filter_form",
                 {"preset": "cheapest"},
                 origin="/catalog/",
-                partial=True,
-                zones=LISTING_TARGET,
+                partial=LISTING_TARGET,
             )
         )
         more = envelope.html_for_zone("catalog-more")
@@ -662,8 +657,7 @@ class TestPageMetadata:
                 "preset_filter_form",
                 {"preset": "cheapest"},
                 origin="/catalog/",
-                partial=True,
-                zones=LISTING_TARGET,
+                partial=LISTING_TARGET,
             )
         )
         meta_op = next(op for op in envelope.ops if op["op"] == "meta")
@@ -897,8 +891,7 @@ class TestLandingSignup:
             "launch_code_form",
             {"email": email},
             origin="/shop/lamps/",
-            partial=partial,
-            zones=LEAD_ZONE,
+            partial=LEAD_ZONE if partial else False,
         )
 
     def test_the_form_renders_without_a_csrf_token(self, next_client, lamps) -> None:

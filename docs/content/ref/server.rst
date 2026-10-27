@@ -6,7 +6,7 @@ Server reference
 Module summary
 --------------
 
-``next.server`` exposes the autoreload watcher, the watch-spec helpers, and the filesystem roots used by the development server.
+``next.server`` exposes the autoreload watcher, the watch-spec helpers, the filesystem roots, and the ASGI development server used by ``manage.py runserver``.
 The Django wiring that activates them lives in ``next.apps`` (see :doc:`apps`).
 
 Public API
@@ -48,6 +48,20 @@ Each root is resolved to an absolute path.
 Tooling that needs to symlink or scan those directories reads them from here instead of recomputing paths.
 
 .. automodule:: next.server.roots
+   :members:
+
+ASGI server
+~~~~~~~~~~~
+
+``serve_development(server, *, host, port, static, announce=None, options=None)`` builds the app that ``ASGI_APPLICATION`` names, or ``next.realtime.application`` over Django's handler, calls ``announce`` once the app is mounted, and runs it on ``server``.
+``server`` is any object with the ``run(app, **options)`` method of ``ASGIServer``, such as ``UvicornServer()``, and it receives the server-neutral socket options alongside ``host`` and ``port``.
+``asgi_server()`` builds the class ``NEXT_FRAMEWORK['DEV_SERVER']`` names, ``UvicornServer`` by default, and answers ``None`` when that default finds no uvicorn.
+``server_class(path)`` returns the class a path names and raises :exc:`~django.core.exceptions.ImproperlyConfigured` for a path that does not import or names no ``ASGIServer`` class.
+``server_options()`` returns the server-neutral ``max_frame_bytes`` and ``ping_interval`` options the realtime socket needs, and the ``options`` argument overrides them.
+``UvicornServer`` maps them onto uvicorn's ``ws_max_size`` and ``ws_ping_interval``, and another ``ASGIServer`` maps them onto its own server or ignores them.
+A CLI of a project uses these to serve the same app as ``manage.py runserver`` without a Django command.
+
+.. automodule:: next.server.asgi
    :members:
 
 Signals

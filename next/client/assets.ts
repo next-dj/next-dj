@@ -165,26 +165,22 @@ export function createAssets(deps: AssetsDeps): Assets {
   }
 
   function scan(): void {
-    for (const link of Array.from(
-      doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href]'),
+    for (const link of doc.querySelectorAll<HTMLLinkElement>(
+      'link[rel="stylesheet"][href]',
     )) {
       loaded.add(urlKey(link.href));
     }
     // A server-rendered module is a <script type="module" src>, so the src
     // attribute seeds it like any other script and it never mounts twice.
-    for (const script of Array.from(
-      doc.querySelectorAll<HTMLScriptElement>("script[src]"),
-    )) {
+    for (const script of doc.querySelectorAll<HTMLScriptElement>("script[src]")) {
       loaded.add(urlKey(script.src));
     }
     // Seed the inline bodies already materialised into the head, keyed by the
     // verb that would have inserted them, so a first zone GET does not re-run.
-    for (const style of Array.from(doc.querySelectorAll<HTMLStyleElement>("style"))) {
+    for (const style of doc.querySelectorAll<HTMLStyleElement>("style")) {
       loaded.add(inlineKey("link", textOf(style)));
     }
-    for (const script of Array.from(
-      doc.querySelectorAll<HTMLScriptElement>("script:not([src])"),
-    )) {
+    for (const script of doc.querySelectorAll<HTMLScriptElement>("script:not([src])")) {
       const load = script.type === "module" ? "module" : "script";
       loaded.add(inlineKey(load, textOf(script)));
     }

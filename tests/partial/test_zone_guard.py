@@ -289,11 +289,7 @@ class TestFormReRender:
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
             assert client.get("/leak/").status_code == 200
             return client.post_action(
-                "guarded_zone_form",
-                {"name": "x"},
-                origin="/leak/",
-                partial=True,
-                zones="secret",
+                "guarded_zone_form", {"name": "x"}, origin="/leak/", partial="secret"
             )
 
     @pytest.mark.parametrize("kind", ["holder", "visitor"])

@@ -60,7 +60,7 @@ Decorators
 @action
 ~~~~~~~
 
-.. py:decorator:: action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None, requires_runtime=False)
+.. py:decorator:: action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None, requires_runtime=False, transport="http")
 
    Registers a plain callable as a named form action.
    The name is optional.
@@ -76,6 +76,7 @@ Decorators
    Any other value is reported as the ``next.E085`` system check and the action is not registered, while the same mistake spelled as ``Meta.scope`` on a form class is reported as ``next.E047``.
    Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
    Pass ``requires_runtime=True`` for an action that posts only through the client runtime, which silences ``next.W115`` for it, see :ref:`topics-forms-actions-requires-runtime`.
+   Pass ``transport="any"`` to let the client send the action through an open WebSocket, see :ref:`topics-forms-actions-transport`.
    Applying ``@action`` to a class registers no action and returns the class unchanged.
    The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 
@@ -133,7 +134,8 @@ DForm
    :no-index:
 
 Type annotation that injects a form instance during action dispatch.
-``DForm[MyForm]`` names the class directly and ``DForm["MyForm"]`` names it as a string, which keeps a page free of an import it needs for nothing else.
+``DForm[MyForm]`` names the class directly.
+A string argument such as ``DForm["MyForm"]`` resolves only when ``MyForm`` is defined or imported in the same module, so it saves no import.
 
 DObject
 ~~~~~~~

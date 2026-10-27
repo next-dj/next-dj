@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
+from django.http import HttpRequest
 from kanban.models import Board
+from kanban.realtime import public_profile
 
 from next import Depends, context
 
@@ -22,3 +24,11 @@ def active_boards_count(
 def archived_count(user: AbstractBaseUser | AnonymousUser = Depends("scope")) -> int:
     """Return the number of archived boards for the empty-state copy."""
     return Board.objects.visible_to(user).archived().count()
+
+
+@context("viewer", inherit_context=True)
+def viewer(request: HttpRequest) -> dict[str, str] | None:
+    """Return the signed-in member as the header shows them, None for a guest."""
+    if not request.user.is_authenticated:
+        return None
+    return public_profile(request.user)

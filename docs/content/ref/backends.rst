@@ -21,14 +21,15 @@ The two loading paths differ in how they treat a misconfigured entry.
 Announcing a load
 ~~~~~~~~~~~~~~~~~
 
-``load_backends`` and ``SingleBackendManager`` both take an optional ``signal=`` keyword, and that parameter is the mechanism behind all eight ``*_backend_loaded`` signals.
+``load_backends`` and ``SingleBackendManager`` both take an optional ``signal=`` keyword, and that parameter is the mechanism behind the shared-loader ``*_backend_loaded`` signals.
+The realtime broker manager sends ``broker_backend_loaded`` with the same payload shape.
 The loader sends the signal once per instance it built, with the resolved backend class as the sender and a copy of the settings entry as ``config`` beside the ``instance`` itself, immediately after the constructor returned and before any caller can reach the instance.
 An entry ``load_backends`` skips announces nothing, because the send sits after the two guards that log and continue.
 
 A family that passes no signal announces nothing at all.
 That is the shape a manager takes when it reloads with ``notify=False``, which builds the list exactly as a notifying reload does and hands the loader ``None`` in place of its signal, so a caller reloading from inside a receiver of that signal does not re-enter it.
 
-See :doc:`signals` for the payload the six signals share and :doc:`/content/topics/signals` for the receiver patterns.
+See :doc:`signals` for the payload the eight shared-loader signals share and :doc:`/content/topics/signals` for the receiver patterns.
 
 Public API
 ----------

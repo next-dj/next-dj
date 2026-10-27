@@ -7,6 +7,7 @@ import functools
 import json
 import logging
 import re
+from dataclasses import dataclass
 from html import escape
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Final
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 from next.caches import DEFAULT_CACHE_SIZE
 from next.csrf import csrf_payload
 from next.diagnostics import FailureLog
+from next.ports import realtime_negotiation_slot
 
 from .serializers import resolve_serializer
 
@@ -38,8 +40,11 @@ SCRIPTS_CHUNK_STATIC_PATH: Final = "next/next.scripts.min.js"
 DEV_CHUNK_STATIC_PATH: Final = "next/next.dev.min.js"
 """The diagnostics chunk the runtime fetches only when the payload carries `$dev`."""
 
-SSE_CHUNK_STATIC_PATH: Final = "next/next.sse.min.js"
-"""The server-sent events bridge, fetched once a page marks an element to stream."""
+STREAM_CHUNK_STATIC_PATH: Final = "next/next.stream.min.js"
+"""The transport-neutral stream state machine, fetched by stream containers."""
+
+WS_CHUNK_STATIC_PATH: Final = "next/next.ws.min.js"
+"""The optional WebSocket adapter, fetched only when WS is enabled."""
 
 CSRF_CHUNK_STATIC_PATH: Final = "next/next.csrf.min.js"
 """The deferred CSRF token loader, fetched on the first post from a page without one."""
@@ -50,10 +55,17 @@ POLL_CHUNK_STATIC_PATH: Final = "next/next.poll.min.js"
 DEV_CHUNK_KEY: Final = "dev"
 """The `$chunks` key of the diagnostics chunk, listed only under `DEBUG`."""
 
+WS_CHUNK_KEY: Final = "ws"
+"""The `$chunks` key of the WebSocket adapter, listed only while `ws` is active."""
+
+DEFAULT_TRANSPORTS: Final = ("sse",)
+"""The transports the runtime assumes when the payload carries no `$realtime`."""
+
 CHUNK_STATIC_PATHS: Final[Mapping[str, str]] = MappingProxyType(
     {
         "scripts": SCRIPTS_CHUNK_STATIC_PATH,
-        "sse": SSE_CHUNK_STATIC_PATH,
+        "stream": STREAM_CHUNK_STATIC_PATH,
+        WS_CHUNK_KEY: WS_CHUNK_STATIC_PATH,
         "csrf": CSRF_CHUNK_STATIC_PATH,
         "poll": POLL_CHUNK_STATIC_PATH,
         DEV_CHUNK_KEY: DEV_CHUNK_STATIC_PATH,
@@ -67,6 +79,7 @@ CSRF_PAYLOAD_KEY: Final = "$csrf"
 DEV_PAYLOAD_KEY: Final = "$dev"
 
 CHUNKS_PAYLOAD_KEY: Final = "$chunks"
+REALTIME_PAYLOAD_KEY: Final = "$realtime"
 SCRIPTS_PAYLOAD_KEY: Final = "$scripts"
 CONSENT_PAYLOAD_KEY: Final = "$consent"
 
@@ -76,7 +89,13 @@ CHUNK_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
 """The payload keys that make the runtime fetch the scripts chunk."""
 
 RESERVED_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
-    {CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY, CHUNKS_PAYLOAD_KEY, *CHUNK_PAYLOAD_KEYS}
+    {
+        CSRF_PAYLOAD_KEY,
+        DEV_PAYLOAD_KEY,
+        CHUNKS_PAYLOAD_KEY,
+        REALTIME_PAYLOAD_KEY,
+        *CHUNK_PAYLOAD_KEYS,
+    }
 )
 
 SCRIPT_ESCAPES: Final[dict[int, str]] = {
@@ -115,6 +134,47 @@ def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
     if request is None or not isinstance(getattr(request, "META", None), dict):
         return None
     return csrf_payload(request)
+
+
+@dataclass(frozen=True, slots=True)
+class RealtimeOffer:
+    """The `$realtime` payload entry and whether the `ws` chunk is listed.
+
+    An empty entry leaves the stock configuration to the runtime defaults.
+    """
+
+    entry: str
+    websocket: bool
+
+
+def realtime_offer() -> RealtimeOffer:
+    """Return the realtime negotiation every page carries, memoised per config.
+
+    The memo is keyed on the content types, so a reset partial backend never lingers.
+    """
+    return _offer(realtime_negotiation_slot.get().content_types())
+
+
+@functools.lru_cache(maxsize=1)
+def _offer(types: tuple[str, str]) -> RealtimeOffer:
+    """Build the offer for the enabled transports and one pair of content types."""
+    transports = realtime_negotiation_slot.get().transports()
+    content_type, stock = types
+    if transports == DEFAULT_TRANSPORTS and content_type == stock:
+        return RealtimeOffer("", websocket=False)
+    payload = json.dumps(
+        {"protocol": 2, "transports": transports, "content_type": content_type},
+        separators=(",", ":"),
+    )
+    return RealtimeOffer(
+        f"{_encoded_key(REALTIME_PAYLOAD_KEY)}:{payload}",
+        websocket=WS_CHUNK_KEY in transports,
+    )
+
+
+def forget_realtime_offer(**kwargs: object) -> None:
+    """Drop the memoised offer when the transports change."""
+    _offer.cache_clear()
 
 
 TAG_FIELDS: Final = ("url", "nonce_attr")
@@ -251,6 +311,8 @@ class NextScriptBuilder:
             if frag is None:
                 frag = serializers.get(k, default).dumps(v)
             fragments.append(f"{_encoded_key(k)}:{frag}")
+        if CHUNKS_PAYLOAD_KEY in js_context and (entry := realtime_offer().entry):
+            fragments.append(entry)
         payload = "{" + ",".join(fragments) + "}"
         if _ESCAPED.search(payload) is not None:
             payload = payload.translate(SCRIPT_ESCAPES)

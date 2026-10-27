@@ -56,10 +56,11 @@ Framework machinery.
    ``render_form_page_with_errors`` and the ``ErrorRenderParams`` bundle it takes live in ``next.forms.rendering``.
    ``FormNode``, the node ``{% form %}`` compiles to, and ``anchor_lookup_from_context`` live in ``next.forms.nodes``, which is where the partial checks reach the node without importing the tag library.
    ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.registration``.
+   ``next.forms.transport`` holds the ``Transport`` alias, the ``TRANSPORTS`` it admits, the ``data-next-transport`` and ``X-Next-Transport`` names, and the tunnel refusals ``http_only`` and ``rotation_refused`` the dispatch answers with.
    The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
    The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
    ``next.forms.ports`` holds ``ActionOwnersImpl``, which binds the ``action_owners`` reader of ``sources`` to the ``ActionOwners`` port of :doc:`ports`.
-   ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
+   ``FormActionNotFoundError``, ``SessionRotationError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
    The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``ORIGIN_FIELD_NAME``, ``FORM_ORIGIN_OVERRIDE_KEY``, ``MAX_ORIGIN_LENGTH``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``, documented under :doc:`/content/ref/testing`.
 
@@ -99,8 +100,11 @@ When ``registry_empty`` is true the message also explains that no actions are re
 .. autoexception:: next.forms.FormActionNotFoundError
    :members:
 
+``SessionRotationError`` is raised by ``cycle_key()`` and ``flush()`` of the session in an action that runs over the WebSocket tunnel, before the store writes, see :ref:`topics-realtime-tunnel`.
 ``UnstorableWizardValueError`` is raised by the session wizard backend for a cleaned value its JSON codec cannot store, and names the backend keys that serve such a value instead.
 ``UnregisteredComponentError`` is a ``LookupError`` raised while a ``ComponentWidget`` renders a component name nothing registered, with the closest visible component names rendered into the message on first read.
+
+.. autoexception:: next.forms.SessionRotationError
 
 .. autoexception:: next.forms.UnstorableWizardValueError
    :members:
@@ -164,7 +168,8 @@ Fields and widgets
 The framework re-exports a curated set of commonly used Django form fields and widgets through ``next.forms`` so a single import covers most form definitions.
 The package surface is a superset of ``django.forms`` by construction.
 Any public ``django.forms`` name resolves through ``next.forms``, with the framework versions winning where next.dj overrides a name such as ``Form`` or ``ModelForm``, and every other name resolving to the Django original.
-The factories ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and ``modelform_factory`` plus ``BoundField`` are re-exported statically so type checkers see them, the rest of the passthrough resolves at runtime through the module ``__getattr__``.
+The factories ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and ``modelform_factory`` plus ``BoundField`` are re-exported statically so type checkers see them.
+The rest of the passthrough resolves at runtime through the module ``__getattr__``.
 The submodules ``next.forms.widgets`` and ``next.forms.formsets`` carry the same passthrough for the public names of ``django.forms.widgets`` and ``django.forms.formsets`` respectively.
 
 .. automodule:: next.forms.base
@@ -243,7 +248,7 @@ Backends
 ~~~~~~~~
 
 ``ActionRegistration`` is the value object passed to ``register_action``.
-It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, the ``claims_name_binding`` flag, and the action target.
+It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, the ``requires_runtime`` and ``transport`` flags, the ``claims_name_binding`` flag, and the action target.
 The target is one of ``handler``, ``form_class``, or ``wizard_class``, which lets a single ``register_action`` call serve the ``@action`` decorator, a class-bound form, and a ``FormWizard``.
 ``claims_name_binding`` defaults to ``False``, which keeps a bare name bound to the registration that claimed it first.
 Setting it rebinds the name to this registration, which is what a test override needs to displace an action that is already registered.
@@ -256,8 +261,20 @@ It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispa
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
 ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, and ``record_possible_collision`` all import from ``next.forms.backends`` directly.
+A custom backend stores ``transport`` under the same key of ``ActionMeta``, because the dispatch and the ``{% form %}`` tag read the transport from there and treat a missing key as ``"http"``.
 
 .. automodule:: next.forms.backends
+   :members:
+
+Transport
+~~~~~~~~~
+
+``next.forms.transport`` holds the transport an action admits and the marks that carry the choice between the tag, the client runtime, and the tunnel.
+``TRANSPORT_ATTR`` is the ``data-next-transport`` attribute the ``{% form %}`` tag writes for an opted-in action, and ``TRANSPORT_HEADER`` is the ``X-Next-Transport`` header the dispatch sets on its replies.
+``http_only`` answers ``421`` with ``X-Next-Transport: http`` to a tunneled request for an action that stays on HTTP.
+``rotation_refused`` answers ``421`` with ``X-Next-Transport: session`` when an opted-in action rotates or flushes the session over the tunnel, see :ref:`topics-forms-actions-transport`.
+
+.. automodule:: next.forms.transport
    :members:
 
 Rendering
@@ -291,7 +308,7 @@ It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``current_origin_path`` names the URL a rendering request should return to, its query string included.
 Its path is percent-encoded the way ``request.get_full_path()`` encodes it, so a ``?`` or a non-ASCII character inside a segment survives the round trip, and resolution decodes it back the way Django builds ``request.path``.
 ``validated_origin_path`` takes the posted value and answers it only when it is a same-site path.
-A value longer than ``MAX_ORIGIN_LENGTH``, 16384 characters and the redirect ``Location`` cap of current Django, is refused before it is stripped, so an oversized value costs no scan.
+A value longer than ``MAX_ORIGIN_LENGTH``, 16384 characters and the value of Django's ``MAX_URL_REDIRECT_LENGTH``, is refused before it is stripped, so an oversized value costs no scan.
 The stripped value then passes ``is_path_only``, which holds when it starts with a single ``/`` followed by neither a second slash nor a backslash, and when it carries no tab, newline, or carriage return anywhere.
 A browser drops those code points and folds a backslash into a slash before resolving a URL, so leaving either in place would hide a protocol-relative target such as ``/\evil.example`` behind a value that reads as a path.
 The rule is path-only, so it refuses any absolute URL, this host's own included, and it reads no request, host, or scheme.

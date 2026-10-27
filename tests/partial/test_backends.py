@@ -1,7 +1,9 @@
 import json
 
 import pytest
+from django.test import override_settings
 
+from next.errors import AbstractBackendError
 from next.partial import (
     Envelope,
     JsonPartialProtocolBackend,
@@ -11,7 +13,10 @@ from next.partial import (
 from next.partial.headers import CONTENT_TYPE
 from next.partial.manager import partial_backend_manager
 from next.partial.signals import partial_backend_loaded
+from next.partial.stream import StreamEnd, StreamHello, StreamMeta, StreamSkip
 from next.testing import capture_signals
+from tests.support.cases.realtime import TEXT_FRAME_CASES, TextFrameCase
+from tests.support.codecs import MimeJsonCodec, sse_data_text
 
 
 def _sample_envelope() -> Envelope:
@@ -69,20 +74,101 @@ class TestDeserializeEnvelope:
 
 
 class TestSseEvent:
-    """The SSE frame wraps the same JSON envelope as a `next-patches` event."""
+    """The SSE frame wraps the JSON envelope and its metadata as `next-patches`."""
 
     def test_event_name_and_data(self) -> None:
-        frame = JsonPartialProtocolBackend().sse_event(_sample_envelope())
-        assert frame.startswith("event: next-patches\n")
+        frame = JsonPartialProtocolBackend().sse_stream_event(
+            _sample_envelope(), StreamMeta(server_time=1)
+        )
+        assert frame.startswith("event: next-patches\ndata: ")
         assert frame.endswith("\n\n")
 
-    def test_event_carries_same_json_as_body(self) -> None:
+    def test_stream_metadata_is_added_only_to_the_sse_copy(self) -> None:
         backend = JsonPartialProtocolBackend()
         envelope = _sample_envelope()
-        body = backend.serialize_envelope(envelope).decode()
-        frame = backend.sse_event(envelope)
-        data_line = frame.splitlines()[1]
-        assert data_line == f"data: {body}"
+        before = backend.serialize_envelope(envelope)
+        frame = backend.sse_stream_event(
+            envelope, StreamMeta(server_time=1700, topic="room:7", seq=3, epoch="e1")
+        )
+        data = json.loads(frame.splitlines()[1][len("data: ") :])
+        assert data["server_time"] == 1700
+        assert data["topic"] == "room:7"
+        assert data["epoch"] == "e1"
+        assert data["seq"] == 3
+        assert backend.serialize_envelope(envelope) == before
+        assert "server_time" not in json.loads(before)
+
+    def test_stream_control_frames_have_protocol_event_names(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        assert backend.sse_hello({"protocol": 2}).splitlines() == [
+            "event: next-hello",
+            'data: {"protocol":2}',
+            "",
+        ]
+        skip = StreamSkip("room:7", 4, "e1")
+        assert backend.sse_skip(skip.as_dict()).splitlines() == [
+            "event: next-skip",
+            'data: {"topic":"room:7","epoch":"e1","seq":4}',
+            "",
+        ]
+
+    def test_end_frame_has_its_protocol_event_name(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        assert backend.sse_end(StreamEnd("auth").as_dict()) == (
+            'event: next-end\ndata: {"code":"auth"}\n\n'
+        )
+
+    def test_stream_event_matches_the_body_plus_metadata(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        envelope = _sample_envelope()
+        frame = backend.sse_stream_event(envelope, StreamMeta(server_time=5))
+        data = json.loads(frame.splitlines()[1][len("data: ") :])
+        assert data == {
+            **json.loads(backend.serialize_envelope(envelope)),
+            "server_time": 5,
+        }
+
+
+class _HttpOnlyJsonBackend(JsonPartialProtocolBackend):
+    def serialize_envelope(self, envelope: Envelope) -> bytes:
+        return json.dumps({"http": envelope.version}).encode()
+
+
+class TestJsonSubclassStreamEvents:
+    """Topic frames follow `stream_data`, whatever else a JSON subclass overrides."""
+
+    def test_http_only_override_keeps_metadata_on_the_stream(self) -> None:
+        backend = _HttpOnlyJsonBackend()
+        envelope = _sample_envelope()
+        frame = backend.sse_stream_event(envelope, StreamMeta(server_time=1, seq=2))
+        data = json.loads(frame.splitlines()[1][len("data: ") :])
+        assert data["seq"] == 2
+        assert data["ops"] == envelope.as_dict()["ops"]
+        assert "http" not in data
+
+
+class TestStreamFrames:
+    """Stream control frames serialize the shared wire schema."""
+
+    def test_meta_omits_absent_fields(self) -> None:
+        assert StreamMeta(server_time=3).as_dict() == {"server_time": 3}
+
+    def test_hello_holds_an_immutable_snapshot_and_returns_copies(self) -> None:
+        topics = {"room:1": ("e1", 4)}
+        hello = StreamHello(server_time=9, topics=topics)
+        topics["room:2"] = ("e2", 1)
+        assert dict(hello.topics) == {"room:1": ("e1", 4)}
+        with pytest.raises(TypeError):
+            hello.topics["room:3"] = ("e3", 0)
+        frame = hello.as_dict()
+        assert frame == {
+            "protocol": 2,
+            "server_time": 9,
+            "topics": {"room:1": {"epoch": "e1", "seq": 4}},
+            "transports": ["sse"],
+        }
+        frame["topics"]["room:1"]["seq"] = 99
+        assert hello.as_dict()["topics"]["room:1"]["seq"] == 4
 
 
 class TestBackendOptions:
@@ -106,8 +192,8 @@ class _TurboProtocolBackend(PartialProtocolBackend):
     def serialize_envelope(self, envelope: Envelope) -> bytes:
         return str(len(envelope.ops)).encode()
 
-    def sse_event(self, envelope: Envelope) -> str:
-        return f"event: turbo\ndata: {len(envelope.ops)}\n\n"
+    def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
+        return f"{len(envelope.ops)}\r\n{meta.seq}"
 
     def deserialize_envelope(self, body: bytes) -> Envelope:
         return Envelope(version=body.decode())
@@ -127,7 +213,6 @@ class TestProtocolContract:
         backend = _TurboProtocolBackend()
         assert backend.content_type == "text/vnd.turbo-stream.html"
         assert backend.serialize_envelope(_sample_envelope()) == b"2"
-        assert backend.sse_event(_sample_envelope()).startswith("event: turbo\n")
 
     def test_replacement_backend_inherits_options(self) -> None:
         backend = _TurboProtocolBackend({"OPTIONS": {"VERSION": "7"}})
@@ -137,6 +222,26 @@ class TestProtocolContract:
         backend = _TurboProtocolBackend()
         assert backend.deserialize_envelope(b"v9").version == "v9"
 
+    def test_text_stream_data_frames_one_data_line_per_line(self) -> None:
+        backend = _TurboProtocolBackend()
+        frame = backend.sse_stream_event(
+            _sample_envelope(), StreamMeta(server_time=1, seq=4)
+        )
+        assert frame == "event: next-patches\ndata: 2\ndata: 4\n\n"
+
+    def test_a_backend_without_stream_data_is_abstract(self) -> None:
+        class _NoStream(PartialProtocolBackend):
+            content_type = "text/plain"
+
+            def serialize_envelope(self, envelope: Envelope) -> bytes:
+                return b""
+
+            def deserialize_envelope(self, body: bytes) -> Envelope:
+                return Envelope(version=body.decode())
+
+        with pytest.raises(TypeError, match="stream_data"):
+            _NoStream()
+
     def test_a_backend_without_a_reader_is_abstract(self) -> None:
         class _WriteOnly(PartialProtocolBackend):
             content_type = "text/plain"
@@ -144,11 +249,52 @@ class TestProtocolContract:
             def serialize_envelope(self, envelope: Envelope) -> bytes:
                 return b""
 
-            def sse_event(self, envelope: Envelope) -> str:
+            def stream_data(self, envelope: Envelope, meta: StreamMeta) -> str:
                 return ""
 
         with pytest.raises(TypeError, match="deserialize_envelope"):
             _WriteOnly()
+
+
+_STREAM_META = StreamMeta(server_time=1700, topic="room:7", seq=3, epoch="e1")
+
+
+class TestStreamData:
+    """The stream data is the frame both transports carry, an object or text."""
+
+    def test_json_backend_returns_the_object_its_sse_frame_encodes(self) -> None:
+        backend = JsonPartialProtocolBackend()
+        envelope = _sample_envelope()
+        frame = backend.sse_stream_event(envelope, _STREAM_META)
+        data = backend.stream_data(envelope, _STREAM_META)
+        assert data == json.loads(frame.splitlines()[1][len("data: ") :])
+        assert data["seq"] == 3
+        assert data["epoch"] == "e1"
+
+    def test_http_only_override_still_returns_the_object(self) -> None:
+        data = _HttpOnlyJsonBackend().stream_data(_sample_envelope(), _STREAM_META)
+        assert isinstance(data, dict)
+        assert data["topic"] == "room:7"
+
+    @pytest.mark.parametrize("case", TEXT_FRAME_CASES, ids=lambda case: case.id)
+    def test_text_frame_codec_frames_its_text(self, case: TextFrameCase) -> None:
+        envelope = _sample_envelope()
+        data = case.backend.stream_data(envelope, _STREAM_META)
+        frame = case.backend.sse_stream_event(envelope, _STREAM_META)
+        assert isinstance(data, str)
+        assert sse_data_text(frame) == data
+
+    def test_custom_mime_type_keeps_the_merged_sse_frame(self) -> None:
+        envelope = _sample_envelope()
+        frame = MimeJsonCodec().sse_stream_event(envelope, _STREAM_META)
+        stock = JsonPartialProtocolBackend()
+        assert frame == stock.sse_stream_event(envelope, _STREAM_META)
+        assert json.loads(sse_data_text(frame)) == stock.stream_data(
+            envelope, _STREAM_META
+        )
+        assert MimeJsonCodec().stream_data(envelope, _STREAM_META) == sse_data_text(
+            frame
+        )
 
 
 @pytest.fixture()
@@ -182,3 +328,28 @@ class TestBackendLoadedSignal:
         with capture_signals(partial_backend_loaded) as recorded:
             partial_backend_manager.get()
         assert len(recorded) == 0
+
+
+class _RetiredContractBackend(PartialProtocolBackend):
+    """A backend written against the retired `sse_event` contract."""
+
+    content_type = "text/plain"
+
+    def serialize_envelope(self, envelope: Envelope) -> bytes:
+        return b""
+
+    def sse_event(self, envelope: Envelope) -> str:
+        return ""
+
+    def deserialize_envelope(self, body: bytes) -> Envelope:
+        return Envelope(version=body.decode())
+
+
+@pytest.mark.usefixtures("uncached_backend_manager")
+def test_a_backend_on_the_retired_contract_fails_naming_stream_data() -> None:
+    entry = {"BACKEND": "tests.partial.test_backends._RetiredContractBackend"}
+    with (
+        override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": [entry]}),
+        pytest.raises(AbstractBackendError, match="does not implement stream_data"),
+    ):
+        partial_backend_manager.get()

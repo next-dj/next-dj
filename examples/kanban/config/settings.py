@@ -18,8 +18,8 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "django.contrib.staticfiles",
     "next",
+    "django.contrib.staticfiles",
     "kanban",
 ]
 
@@ -51,9 +51,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
-    "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+        "OPTIONS": {"transaction_mode": "IMMEDIATE"},
+        "TEST": {"NAME": BASE_DIR / "test.sqlite3"},
+    }
 }
 
 CACHES = {
@@ -62,6 +68,8 @@ CACHES = {
         "LOCATION": "kanban",
     }
 }
+
+MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

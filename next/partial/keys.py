@@ -12,6 +12,14 @@ ASSETS: Final = "assets"
 FORM: Final = "form"
 CSRF: Final = "csrf"
 REQUEST_ID: Final = "request_id"
+TOPIC: Final = "topic"
+SEQ: Final = "seq"
+EPOCH: Final = "epoch"
+SERVER_TIME: Final = "server_time"
+
+SSE_HELLO: Final = "next-hello"
+SSE_SKIP: Final = "next-skip"
+SSE_END: Final = "next-end"
 
 OP: Final = "op"
 TARGET: Final = "target"
@@ -27,6 +35,7 @@ VALID: Final = "valid"
 ERRORS: Final = "errors"
 
 ZONE: Final = "zone"
+EVENT_NAME: Final = "name"
 FORM_SELECTOR: Final = "form"
 
 FORM_ZONE_ATTR: Final = "data-next-target"
@@ -38,7 +47,9 @@ RESERVED_PATCH_KEYS: Final[frozenset[str]] = frozenset({OP, TARGET, HTML})
 __all__ = [
     "ASSETS",
     "CSRF",
+    "EPOCH",
     "ERRORS",
+    "EVENT_NAME",
     "FORM",
     "FORM_KEY_ATTR",
     "FORM_SELECTOR",
@@ -51,7 +62,13 @@ __all__ = [
     "OPS",
     "REQUEST_ID",
     "RESERVED_PATCH_KEYS",
+    "SEQ",
+    "SERVER_TIME",
+    "SSE_END",
+    "SSE_HELLO",
+    "SSE_SKIP",
     "TARGET",
+    "TOPIC",
     "UID",
     "URL",
     "VALID",

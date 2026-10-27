@@ -83,6 +83,7 @@ class TestBenchEnsureBackends:
 
 
 class TestBenchStaticManagerInject:
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="static.manager")
     def test_inject_typical_page(self, benchmark) -> None:
         html = _page_html(_PAGE_SECTIONS)

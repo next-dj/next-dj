@@ -17,12 +17,18 @@ Every signal below is a Django ``Signal``.
 The ``sender`` column lists the value passed to ``Signal.send``.
 Receivers connected with a matching ``sender`` only fire for that sender.
 
-Every signal but ``settings_reloaded`` is sent with ``Signal.send``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
-``settings_reloaded`` alone is sent with ``Signal.send_robust``, which runs the whole chain and re-raises the first error afterwards.
+Most signals are sent with ``Signal.send``, so an exception from a receiver leaves the send and reaches the render, the dispatch, or the startup step that was under way, and the receivers connected behind it never run.
+The realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` are sent with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop.
+From an event loop, and from ``apublish`` for ``message_published``, their synchronous receivers run on the shared thread pool wrapped in ``close_old_connections``, so a receiver that queries the database never holds a connection past its call.
+A receiver of theirs that raises is logged at ``ERROR`` on the ``next.realtime.signals`` logger, and the publication, the upstream event, or the stream goes on as `Stream lifecycle`_ describes.
+``sse_stream_opened`` and ``sse_stream_closed`` are sent with ``Signal.send_robust`` from a sync stream and with ``Signal.asend_robust`` from an async one, where Django runs their synchronous receivers on the request's thread, off the event loop.
+A receiver of theirs that raises is logged at ``ERROR`` on the ``django.dispatch`` logger, and the stream goes on.
+``settings_reloaded`` is sent with ``Signal.send_robust`` too, and runs the whole chain before it re-raises the first error.
 A receiver body therefore guards itself, see :ref:`topics-signals` for the pattern.
 
 Most of the catalog is built with ``use_caching=True``, which makes Django key the receiver lookup on a weak reference to the sender.
 Code that sends one of those signals itself has to pass a weak-referenceable sender, so ``None``, a string, and an instance of a slots class without ``__weakref__`` all raise ``TypeError``.
+The realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` accept a sender without ``__weakref__``, because their receiver cache skips such a sender and looks its receivers up again.
 Four signals stay uncached and accept any sender.
 ``asset_registered`` sends the ``StaticAsset`` itself, which carries no ``__weakref__``, ``collector_finalized`` sends a collector built for a single render, and ``provider_registered`` and ``settings_reloaded`` fire rarely enough that the weak-key bookkeeping buys nothing.
 
@@ -30,8 +36,9 @@ The dispatch-time form signals (``action_dispatched``, ``form_validation_failed`
 ``uid`` is the registry identity of the action, the value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched and must not be retained past the receiver call.
 
-Eight signals announce a backend the shared loader built, one per settings-driven family.
-``component_backend_loaded``, ``consent_backend_loaded``, ``form_backend_loaded``, ``partial_backend_loaded``, ``router_backend_loaded``, ``sitemap_backend_loaded``, ``static_backend_loaded``, and ``wizard_backend_loaded`` all send the resolved backend class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+Signals announce backends the framework builds from settings.
+The shared-loader signals send the resolved class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
+``broker_backend_loaded`` uses the same payload shape for the selected realtime broker.
 Each family owns its own signal rather than sharing one, so a receiver connected with ``sender=`` does not have to sort one family's classes out of another's.
 ``router_backend_loaded`` and ``component_backend_loaded`` are skipped on a reload that asks not to notify, which is what a caller reloading from inside a receiver passes.
 
@@ -82,6 +89,45 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``info``, ``template_path``
      - After a component is rendered to HTML.
        ``template_path`` may be ``None`` for components without a template file.
+   * - ``broker_backend_loaded``
+     - The realtime broker class
+     - ``config``, ``instance``
+     - After the configured broker is created on first use.
+       The manager lock is already released, so a receiver may read the broker again from any thread.
+   * - ``message_published``
+     - The realtime broker class
+     - ``topic``, ``message``, ``ephemeral``
+     - After the broker accepts a publication.
+       ``ephemeral`` is ``True`` for an unnumbered message, a presence snapshot, whose ``message.numbered`` is ``False`` and which never enters the replay log.
+   * - ``upstream_received``
+     - The handler of the matched ``@on``
+     - ``upstream``
+     - Before the handler of an ``up`` frame runs, once the topic grant and the access recheck passed.
+       ``upstream`` is the ``Upstream`` the handler gets, and a raising receiver is logged while the handler still runs.
+   * - ``upstream_rejected``
+     - ``type(socket)``, so ``TopicSocket``
+     - ``topic``, ``name``, ``reason``, ``connection``, ``subject``
+     - When an ``up`` frame is not delivered.
+       Every reason but ``limit`` is reported before the ``ack`` goes out, while a ``limit`` refusal sends its ``ack`` or ``error`` frame first and reports from a task.
+       ``reason`` is the ``UpstreamError`` the ack carries, ``limit``, ``too_big``, ``topic``, ``denied``, ``unknown``, ``timeout``, or ``internal``, and an event without an ``id`` is reported too.
+       ``topic`` and ``name`` are what the client sent, unchecked, so a receiver that labels metrics with them bounds their values first.
+       ``connection`` and ``subject`` are the ``Upstream.connection`` and ``Upstream.subject`` a handler would have seen.
+   * - ``stream_subscribed``
+     - ``type(connection)``, so ``TopicStream`` or ``TopicSocket``
+     - ``transport``, ``topics``, ``connection``, ``request``, ``subject``, ``user``
+     - Right after a stream enters its broker subscription.
+       ``transport`` is ``"sse"`` or ``"ws"``, ``topics`` the tuple of topics the subscription joined, and ``connection`` the ``TopicStream`` or ``TopicSocket`` itself.
+       An SSE stream carries its ``HttpRequest``, the ``user`` of that request, which is ``None`` without ``AuthenticationMiddleware``, and a ``subject`` of ``None``.
+       When the request has a session key and its user is the lazy user of Django's ``AuthenticationMiddleware``, still unloaded, the stream swaps it for the user of the stored session on the request too, so a receiver reading ``request.user`` never loads Django's, which may rotate the session key.
+       A lazy user set by another middleware stays untouched.
+       A WebSocket carries the opaque ``subject`` and the ``user`` of its handshake and a ``request`` of ``None``.
+       No argument carries the credential, though ``connection`` is the ``TopicSocket``, so server code reaches ``connection.handshake.credential`` only on purpose.
+       The request must not be retained past the receiver call.
+   * - ``stream_unsubscribed``
+     - ``type(connection)``, so ``TopicStream`` or ``TopicSocket``
+     - ``transport``, ``topics``, ``connection``, ``duration``, ``reason``
+     - When a stream that opened while a receiver listened to either lifecycle signal leaves its topics, once per stream.
+       ``duration`` is the seconds the subscription stayed open on the monotonic clock and ``reason`` an ``UnsubscribeReason``.
    * - ``components_registered``
      - ``ComponentRegistry``
      - ``infos``
@@ -188,14 +234,15 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``config``, ``instance``
      - After one ``SEO["SITEMAP_BACKENDS"]`` entry is instantiated, once per entry on every manager reload.
    * - ``sse_stream_closed``
-     - ``PatchEventStream``
+     - The concrete stream class
      - ``request``, ``duration_ms``, ``envelopes_sent``
      - When a patch event stream ends, its source exhausted or the client gone.
-       ``envelopes_sent`` counts the envelopes flushed over the connection.
+       ``envelopes_sent`` counts envelope frames yielded to Django's response iterator.
+       It does not confirm network delivery after a disconnect.
    * - ``sse_stream_opened``
-     - ``PatchEventStream``
+     - The concrete stream class
      - ``request``
-     - When a patch event stream starts.
+     - When iteration starts and the first stream frame is about to be sent.
    * - ``static_backend_loaded``
      - The static backend class
      - ``config``, ``instance``
@@ -227,13 +274,88 @@ Each family owns its own signal rather than sharing one, so a receiver connected
    * - ``zone_registered``
      - The compiled page template class
      - ``template``, ``zone_name``, ``lazy``, ``poll``
-     - Once per compiled composed template, when its named zones are first read.
+     - Once per zone of a compiled composed template, when its named zones are first read.
        ``lazy`` is the trigger string or ``None``, ``poll`` the interval in milliseconds or ``None``.
    * - ``zone_rendered``
      - ``ZoneRenderResult``
      - ``zone_name``, ``page_path``, ``request``, ``duration_ms``
      - After a zone body renders for a partial request.
        ``duration_ms`` times the zone render.
+
+.. _ref-signals-stream-lifecycle:
+
+Stream lifecycle
+----------------
+
+A stream announces itself once it holds a broker subscription and again when it lets go, over SSE and over a WebSocket alike.
+The pair brackets the life of one ``TopicStream`` response or one ``TopicSocket``, so a receiver counts live streams, times their length, or tells how they ended.
+A stream sends ``stream_unsubscribed`` at most once, and only if it opened while a receiver listened to ``stream_subscribed`` or ``stream_unsubscribed``.
+A receiver of ``stream_unsubscribed`` alone therefore hears every stream that opened after it connected.
+A receiver connected while a stream is open never sees that stream close, and a counter it keeps never drops below zero when it listens to both signals from the start.
+A stream refused before it subscribes, by a failed ticket or a denied topic, sends neither signal.
+Nothing is sent or timed while no receiver listens.
+
+``reason`` is a member of ``UnsubscribeReason``, a ``StrEnum`` that compares equal to its string.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 42 42
+
+   * - Reason
+     - SSE
+     - WebSocket
+   * - ``client``
+     - The browser disconnected.
+       Django cancels the response on ``http.disconnect``, and a cancellation reads as the client leaving.
+     - The peer closed, stopped reading, or a send failed.
+   * - ``cancelled``
+     - Never used.
+     - The serving task was cancelled.
+   * - ``revoked``
+     - The session or the topic grant failed a recheck.
+     - The socket closed with ``4401`` or ``4403``.
+   * - ``error``
+     - The broker connection failed or a stage raised.
+     - The broker connection or the transport failed, or a stage raised.
+   * - ``server``
+     - The broker subscription ended on its own.
+     - The broker subscription ended, or the socket closed for a protocol violation, a rate limit, or an oversized frame.
+
+The receiver below keeps the number of live streams per transport in each process.
+Connect it from ``AppConfig.ready`` by importing the module there.
+
+.. code-block:: python
+   :caption: observability/streams.py
+
+   import logging
+   import threading
+   from collections import Counter
+
+   from django.dispatch import receiver
+
+   from next.realtime.signals import UnsubscribeReason
+   from next.signals import stream_subscribed, stream_unsubscribed
+
+   logger = logging.getLogger(__name__)
+   live: Counter[str] = Counter()
+   lock = threading.Lock()
+
+   @receiver(stream_subscribed)
+   def stream_opened(sender, transport, topics, **kwargs) -> None:
+       with lock:
+           live[transport] += 1
+
+   @receiver(stream_unsubscribed)
+   def stream_closed(sender, transport, topics, duration, reason, **kwargs) -> None:
+       with lock:
+           live[transport] -= 1
+       if reason is UnsubscribeReason.ERROR:
+           logger.warning("stream on %s failed after %.1fs", topics, duration)
+
+A receiver of a WebSocket or of an async stream runs on the event loop when it is async, and a synchronous one runs on a worker thread, so a receiver shared by both guards its state with a lock as above.
+A receiver that raises an ``Exception`` does not end the stream, because both signals go out with ``send_robust``, as do ``message_published``, ``upstream_received``, and ``upstream_rejected``.
+The error is logged at ``ERROR`` on the ``next.realtime.signals`` logger with the transport and the topics, and Django logs it on ``django.dispatch`` as well.
+A ``CancelledError`` from a receiver is not swallowed.
 
 Subpackage signals
 ------------------
@@ -268,6 +390,12 @@ Static
 ~~~~~~
 
 .. automodule:: next.static.signals
+   :members:
+
+Realtime
+~~~~~~~~
+
+.. automodule:: next.realtime.signals
    :members:
 
 Partial rendering

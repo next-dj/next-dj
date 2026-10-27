@@ -23,14 +23,18 @@ One module graph sits behind the package facade, and the table below names the p
    * - ``backends``
      - The ``PartialProtocolBackend`` contract and the shipped ``JsonPartialProtocolBackend``.
    * - ``checks``
-     - The startup validation of zone placement, custom verbs, repeated forms, and backend configuration.
+     - The startup validation of zone placement, intercept zones, context bindings, custom verbs, repeated forms, and backend configuration.
        A package whose submodules re-export through the package address.
    * - ``envelope``
      - The frozen value objects of the wire contract, ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta``, and their wire forms.
    * - ``errors``
      - Every exception the builder and the zone branch raise when a caller breaks a wire contract.
+   * - ``guards``
+     - The zones a standalone render refuses, read once for checks and the registry.
    * - ``headers``
      - The request and response header names, ``PartialIntent`` parsing, ``MergeMode``, and the ``Vary`` stamping.
+   * - ``intercept``
+     - The selection of the intercept page that serves a zone request over its target.
    * - ``keys``
      - The wire keys of the patch protocol, the one module the TypeScript runtime mirrors.
    * - ``manager``
@@ -50,9 +54,11 @@ One module graph sits behind the package facade, and the table below names the p
      - The pipeline that turns a form action outcome into an envelope, split across submodules behind the package address.
        ``shape_partial`` is its only entry on the curated ``next.partial`` surface.
    * - ``signals``
-     - The seven signals the subsystem emits.
+     - The eight signals the subsystem emits.
    * - ``sse``
      - The ``PatchEventStream`` bridge over the page render escape hatch.
+   * - ``stream``
+     - ``StreamMeta``, the ``StreamPosition`` and ``TopicPosition`` Protocols, and the ``hello``, ``skip``, and ``end`` control frames of a streamed response.
    * - ``view``
      - The zone branch of the unified page view and its status short-circuits.
    * - ``zone``
@@ -66,16 +72,17 @@ The lists below are representative.
 The autodoc blocks under `Public API`_ are the exhaustive surface of every name the tiers list, apart from the ``signals`` and ``checks`` submodules, which are documented on the pages `Signals`_ and `System checks`_ point at.
 
 Stable.
-   ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``, ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``, ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError``.
+   ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``, ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``, ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, ``LayerHrefWithoutZoneError``, and ``OriginUnavailableError``.
    ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects of the wire contract.
    Import all of these from ``next.partial``.
    Use them in page modules, action handlers, and stream sources.
 
 Advanced.
-   ``shape_partial``, ``PartialProtocolBackend``, and ``JsonPartialProtocolBackend`` are imported from ``next.partial``.
+   ``shape_partial``, ``PartialProtocolBackend``, ``JsonPartialProtocolBackend``, and ``StreamMeta`` are imported from ``next.partial``.
    ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to ``morph(zone=, page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
+   The stream control frames and position Protocols live in ``next.partial.stream``.
    The custom-verb exceptions live in ``next.partial.errors``.
 
    The ``signals`` submodule carries the partial telemetry.
@@ -128,6 +135,13 @@ Building patches
 ``Patches`` is the request-bound builder.
 Each method records one operation and returns ``self`` for chaining, and ``response`` finalises a ``PatchResponse`` or falls back to a redirect when the runtime is absent.
 ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects the builder assembles, surfaced for a custom backend that serializes the wire format itself.
+``morph``, ``replace``, ``inner``, ``append``, and ``prepend`` take the markup as an ``html`` string.
+
+.. warning::
+
+   The builder inserts ``html`` into the DOM as given and never escapes it.
+   A caller escapes untrusted text before it reaches ``html``, or renders the markup through a template that escapes.
+
 ``add_asset(kind, url, *, inline=None)`` is the route by which a handler authors an asset reference of its own into the manifest, and the ``url`` it takes passes the same name resolution a full render performs, so a logical name a backend maps to a build output answers alike on both paths, see :doc:`/content/topics/static-assets/name-resolution`.
 
 .. autoclass:: next.partial.Patches
@@ -230,6 +244,49 @@ Protocol backend
 ``JsonPartialProtocolBackend`` is the shipped implementation and the default first entry of ``PARTIAL_BACKENDS``.
 Subclass the root and serialize a different envelope shape to support another wire format, or subclass the JSON backend to keep its serialization and change one part of it.
 
+.. list-table:: The protocol-backend contract
+   :header-rows: 1
+   :widths: 34 16 50
+
+   * - Member
+     - Kind
+     - Role
+   * - ``content_type``
+     - Attribute
+     - The MIME type stamped on every patch response, which the client keys its parse hook on.
+   * - ``serialize_envelope(envelope)``
+     - Abstract
+     - The HTTP response body of one envelope.
+   * - ``deserialize_envelope(body)``
+     - Abstract
+     - The inverse of ``serialize_envelope``, used by readers such as the test-client helper.
+   * - ``stream_data(envelope, meta)``
+     - Abstract
+     - One topic frame with its ``StreamMeta``, either a JSON object or the codec's own text.
+       A WebSocket ``patches`` frame carries it as ``data``, and a text value reaches the parse hook for ``content_type``.
+   * - ``sse_stream_event(envelope, meta)``
+     - Concrete
+     - One ``next-patches`` frame built from ``stream_data``, an object as compact JSON and a text with one ``data:`` line per line.
+   * - ``sse_hello(frame)``, ``sse_skip(frame)``, ``sse_end(frame)``
+     - Concrete
+     - The ``next-hello``, ``next-skip``, and ``next-end`` control frames, compact JSON in a fixed schema.
+   * - ``options``
+     - Property
+     - The ``OPTIONS`` mapping of the ``PARTIAL_BACKENDS`` entry.
+
+``JsonPartialProtocolBackend.stream_data`` merges the ``StreamMeta`` keys into the JSON envelope and returns that object, or the same frame as JSON text once a subclass sets its own ``content_type``.
+A backend with another format overrides ``stream_data`` to carry ``meta`` in its own encoding, or the client loses gap detection and topic listeners.
+
+The control frames are part of the protocol, not of the wire format.
+The client parses ``next-hello``, ``next-skip``, and ``next-end`` as JSON in the schema :doc:`/content/topics/partial-rendering/reference` lists, and WebSocket control frames bypass these hooks entirely, so a backend leaves the three hooks alone.
+``StreamPosition`` and ``TopicPosition`` are the Protocols a broker's own position type satisfies, and ``StreamHello``, ``StreamSkip``, ``StreamEnd``, and ``stream_hello`` build the control frames, all importable from ``next.partial.stream``.
+
+.. autoclass:: next.partial.StreamMeta
+   :members:
+
+.. automodule:: next.partial.stream
+   :members: StreamPosition, TopicPosition, StreamHello, StreamSkip, StreamEnd, stream_hello
+
 .. autoclass:: next.partial.PartialProtocolBackend
    :members:
 
@@ -239,7 +296,7 @@ Subclass the root and serialize a different envelope shape to support another wi
 Exceptions
 ~~~~~~~~~~
 
-``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError`` are curated ``next.partial`` exceptions.
+``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, ``LayerHrefWithoutZoneError``, and ``OriginUnavailableError`` are curated ``next.partial`` exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not declare, or one that may not render on its own, as ``ZoneInfo.standalone`` above describes, under an ``{% if %}``, a ``{% for %}``, or a ``{% has_perm %}`` of the composed page, or in the body of a component that decides whether that part shows, surfacing as a 400 before any render.
 A server-side render of such a zone, ``Patches.morph_zone`` included, raises it as well.
 ``Patches.morph_foreign_zone`` raises it for a zone only an intercepting route serves, while ``morph_zone`` on a zone request renders that zone over the intercept page that serves the request, and a zone that page does not serve over the origin page.
@@ -247,6 +304,8 @@ A server-side render of such a zone, ``Patches.morph_zone`` included, raises it 
 A refused intercepting route raises it from ``morph_zone`` too, and the form and action path turns it into a 403.
 ``meta()`` raises it too when the fold runs an inherited metadata callable of an origin page that denies the request.
 ``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no ``zone=`` to load it into, so the builder refuses the layer instead of opening an empty one on the client.
+``OriginUnavailableError`` is raised when a builder operation needs a page origin but the request has none, as with ``Patches(None)`` or a GET stream request.
+Use ``refresh`` or ``event`` for stream and background messages.
 
 The remaining nine are rarely caught and stay out of the curated surface.
 They guard the custom-verb contract, the event-name, context-key, and dedupe vocabularies, and the foreign-page and href rules, and live in ``next.partial.errors``.
@@ -258,6 +317,9 @@ They guard the custom-verb contract, the event-name, context-key, and dedupe voc
    :members:
 
 .. autoexception:: next.partial.LayerHrefWithoutZoneError
+   :members:
+
+.. autoexception:: next.partial.OriginUnavailableError
    :members:
 
 .. autoexception:: next.partial.errors.UnknownPatchOpError
@@ -290,12 +352,12 @@ They guard the custom-verb contract, the event-name, context-key, and dedupe voc
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``field_validated``, ``sse_stream_opened``, ``sse_stream_closed``, ``partial_backend_loaded``).
+See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (``zone_registered``, ``zone_rendered``, ``patch_op_registered``, ``intercept_access_denied``, ``field_validated``, ``sse_stream_opened``, ``sse_stream_closed``, ``partial_backend_loaded``).
 
 System checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, and ``next.W067`` through ``next.W071``).
+See :doc:`system-checks` for the zone-placement, template-compile, intercept-zone, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.E214``, ``next.E215``, ``next.W067`` through ``next.W071``, and ``next.W083``).
 
 See also
 --------

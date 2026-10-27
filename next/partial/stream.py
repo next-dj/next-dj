@@ -1,0 +1,143 @@
+"""Metadata and control frames used only by streamed partial responses."""
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Protocol, Self
+
+from . import keys
+
+
+class StreamPosition(Protocol):
+    """The `(epoch, seq)` position of one topic, read from any broker's own type."""
+
+    @property
+    def epoch(self) -> str:
+        """Counter epoch that numbered the topic."""
+
+    @property
+    def seq(self) -> int:
+        """Latest sequence within the epoch."""
+
+
+class TopicPosition(StreamPosition, Protocol):
+    """The position of one message together with the topic it was published on."""
+
+    @property
+    def topic(self) -> str:
+        """Topic the message was published on."""
+
+
+@dataclass(frozen=True, slots=True)
+class StreamMeta:
+    """Per-frame metadata kept separate from the ordinary HTTP envelope."""
+
+    server_time: int
+    topic: str | None = None
+    seq: int | None = None
+    epoch: str | None = None
+
+    @classmethod
+    def of(cls, message: TopicPosition, server_time: int) -> Self:
+        """Return a topic message's metadata, an unnumbered one without a position."""
+        if not message.seq:
+            return cls(server_time=server_time, topic=message.topic)
+        return cls(
+            server_time=server_time,
+            topic=message.topic,
+            seq=message.seq,
+            epoch=message.epoch,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return only metadata present on this stream frame."""
+        data: dict[str, Any] = {keys.SERVER_TIME: self.server_time}
+        if self.topic is not None:
+            data[keys.TOPIC] = self.topic
+        if self.epoch is not None:
+            data[keys.EPOCH] = self.epoch
+        if self.seq is not None:
+            data[keys.SEQ] = self.seq
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class StreamHello:
+    """Initial `(epoch, seq)` position per topic, announced once a subscription is live.
+
+    The topics are frozen into a read-only mapping so a hook cannot alter the snapshot.
+    """
+
+    server_time: int
+    topics: Mapping[str, tuple[str, int]]
+    transports: tuple[str, ...] = ("sse",)
+    protocol: int = 2
+
+    def __post_init__(self) -> None:
+        """Freeze the topic positions behind a read-only mapping."""
+        frozen = MappingProxyType(dict(self.topics))
+        object.__setattr__(self, "topics", frozen)
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a fresh copy of the hello control frame's JSON body."""
+        return {
+            "protocol": self.protocol,
+            keys.SERVER_TIME: self.server_time,
+            "topics": {
+                topic: {keys.EPOCH: epoch, keys.SEQ: seq}
+                for topic, (epoch, seq) in self.topics.items()
+            },
+            "transports": list(self.transports),
+        }
+
+
+def stream_hello(
+    topics: Iterable[str],
+    positions: Mapping[str, StreamPosition],
+    *,
+    server_time: int,
+    transports: tuple[str, ...],
+) -> StreamHello:
+    """Build the hello frame both stream transports send once a subscription is live."""
+    return StreamHello(
+        server_time=server_time,
+        topics={
+            topic: (positions[topic].epoch, positions[topic].seq) for topic in topics
+        },
+        transports=transports,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class StreamSkip:
+    """Sequence acknowledgment for a message filtered for this subscriber."""
+
+    topic: str
+    seq: int
+    epoch: str
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the skip control frame's JSON body."""
+        return {keys.TOPIC: self.topic, keys.EPOCH: self.epoch, keys.SEQ: self.seq}
+
+
+@dataclass(frozen=True, slots=True)
+class StreamEnd:
+    """Terminal frame telling the client not to reconnect a closed stream."""
+
+    code: str
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the end control frame's JSON body."""
+        return {"code": self.code}
+
+
+__all__ = [
+    "StreamEnd",
+    "StreamHello",
+    "StreamMeta",
+    "StreamPosition",
+    "StreamSkip",
+    "TopicPosition",
+    "stream_hello",
+]

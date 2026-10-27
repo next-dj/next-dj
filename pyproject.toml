@@ -34,6 +34,9 @@ dependencies = [
 testing = [
     "defusedxml>=0.7",
 ]
+broker = [
+    "redis>=8",
+]
 
 [project.urls]
 Homepage = "https://github.com/next-dj/next-dj"
@@ -43,6 +46,9 @@ Repository = "https://github.com/next-dj/next-dj"
 
 [dependency-groups]
 dev = [
+    "uvicorn>=0.38",
+    "wsproto>=1.2",
+    "websockets>=16",
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "pytest-django==4.14.0",
@@ -57,7 +63,10 @@ dev = [
     "pytest-benchmark==5.3.0",
     "pydantic>=2.0",
     "markdown>=3.7",
+    "prometheus-client>=0.21",
     "time-machine>=2.16",
+    "fakeredis[lua]>=2",
+    "redis>=8",
     "pytest-randomly==5.0.0",
     "defusedxml==0.7.1",
     "types-defusedxml==0.7.0.20260504",
@@ -76,6 +85,9 @@ codspeed = [
 ]
 e2e = [
     "pytest-playwright==0.9.0",
+    "uvicorn>=0.38",
+    "wsproto>=1.2",
+    "websockets>=16",
     "playwright==1.63.0",
 ]
 docs = [
@@ -91,7 +103,6 @@ docs = [
     "sphinxcontrib-mermaid==2.1.1",
     "sphinx-reredirects==1.1.0",
 ]
-
 [tool.hatch.version]
 source = "code"
 path = "next/__init__.py"
@@ -107,7 +118,8 @@ packages = ["next"]
 artifacts = [
     "next/static/next/next.min.js",
     "next/static/next/next.scripts.min.js",
-    "next/static/next/next.sse.min.js",
+    "next/static/next/next.stream.min.js",
+    "next/static/next/next.ws.min.js",
     "next/static/next/next.csrf.min.js",
     "next/static/next/next.poll.min.js",
     "next/static/next/next.dev.min.js",
@@ -131,7 +143,8 @@ include = [
 artifacts = [
     "next/static/next/next.min.js",
     "next/static/next/next.scripts.min.js",
-    "next/static/next/next.sse.min.js",
+    "next/static/next/next.stream.min.js",
+    "next/static/next/next.ws.min.js",
     "next/static/next/next.csrf.min.js",
     "next/static/next/next.poll.min.js",
     "next/static/next/next.dev.min.js",
@@ -154,6 +167,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "perf: performance benchmarks (opt-in, run with -m perf)",
+    "walltime: benchmarks dominated by system calls, also timed by the CodSpeed walltime job",
 ]
 addopts = [
     "--strict-markers",
@@ -177,8 +191,8 @@ omit = [
     "*/migrations/*",
     "*/settings.py",
     "*/manage.py",
-    "*/wsgi.py",
-    "*/asgi.py",
+    "*/config/wsgi.py",
+    "*/config/asgi.py",
     # core
     "*/next/checks/*",
     "*/next/conf/checks.py",
@@ -187,11 +201,13 @@ omit = [
     "*/next/components/checks.py",
     "*/next/forms/checks/*",
     "*/next/partial/checks/*",
+    "*/next/realtime/checks.py",
     "*/next/apps/checks.py",
     "*/next/seo/checks/*",
     "*/next/site/checks.py",
     "*/next/consent/checks.py",
     "*/next/scripts/checks.py",
+    "*/next/server/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and
@@ -216,6 +232,9 @@ exclude_lines = [
     "@(typing\\.)?overload",
     "if TYPE_CHECKING:",
 ]
+
+[tool.typos.default.extend-words]
+asend = "asend"
 
 [tool.ruff]
 target-version = "py312"
@@ -276,7 +295,7 @@ ignore = [
 "tests/pages/*" = ["INP001"]
 "tests/site_pages/*" = ["INP001"]
 "tests/forms/*" = ["INP001"]
-"**/{test*,conftest}.py" = [
+"{tests/**/*,examples/**/test*,examples/**/conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG003",
     "S101", "S105", "S106", "S108",

@@ -8,11 +8,21 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 
 from next.checks import NEXT
 from next.conf import import_class_cached, next_framework_settings
+from next.partial.backends import PartialProtocolBackend
 from next.partial.manager import MANIFEST_VERSION, PARTIAL_BACKENDS_KEY, VERSION_OPTION
+from next.partial.sse import (
+    HEARTBEAT_OPTION,
+    RETRY_OPTION,
+    SSE_OPTION,
+    heartbeat_seconds_valid,
+    retry_ms_valid,
+)
 
 from .codes import (
+    E_BACKEND_STALE_CONTRACT,
     E_BACKEND_WITHOUT_PATH,
     E_BACKENDS_NOT_A_LIST,
+    E_SSE_OPTION_INVALID,
     W_ASSET_VERSION_FROZEN,
     W_MANIFEST_VERSION_NO_STORAGE,
     W_TOO_MANY_BACKENDS,
@@ -20,6 +30,8 @@ from .codes import (
 
 
 _STATICFILES_ALIAS: Final = "staticfiles"
+_RETIRED_HOOK: Final = "sse_event"
+_STREAM_HOOK: Final = "stream_data"
 
 
 def partial_backend_configs() -> list[object]:
@@ -96,6 +108,106 @@ def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
             )
         )
     return messages
+
+
+@register(NEXT)
+def check_partial_backend_sse_options(*args, **kwargs) -> list[CheckMessage]:
+    """Error when a backend's SSE options hold an unusable value (`next.E214`).
+
+    The stream falls back to the default for such a value, so only this reports it.
+    """
+    messages: list[CheckMessage] = []
+    for index, config in enumerate(partial_backend_configs()):
+        if not isinstance(config, dict):
+            continue
+        options = config.get("OPTIONS")
+        sse = options.get(SSE_OPTION) if isinstance(options, dict) else None
+        if sse is None:
+            continue
+        if not isinstance(sse, dict):
+            messages.append(
+                Error(
+                    f"PARTIAL_BACKENDS entry {index} sets OPTIONS[{SSE_OPTION!r}] "
+                    f"to {sse!r}, which is not a dict, so every SSE option falls "
+                    "back to its default.",
+                    hint=f"Set {SSE_OPTION} to a dict of {RETRY_OPTION} and "
+                    f"{HEARTBEAT_OPTION}.",
+                    id=E_SSE_OPTION_INVALID,
+                )
+            )
+            continue
+        messages.extend(_sse_option_errors(index, sse))
+    return messages
+
+
+def _sse_option_errors(index: int, sse: dict[str, object]) -> list[CheckMessage]:
+    """Return one error per SSE option of an entry that the stream cannot use."""
+    rules = (
+        (RETRY_OPTION, retry_ms_valid, "an int of milliseconds from 0"),
+        (HEARTBEAT_OPTION, heartbeat_seconds_valid, "a finite number above 0"),
+    )
+    messages: list[CheckMessage] = []
+    for option, valid, expected in rules:
+        value = sse.get(option)
+        if value is None or valid(value):
+            continue
+        messages.append(
+            Error(
+                f"PARTIAL_BACKENDS entry {index} sets SSE {option} to {value!r}, "
+                "which the stream ignores in favour of the default.",
+                hint=f"Set SSE {option} to {expected}.",
+                id=E_SSE_OPTION_INVALID,
+            )
+        )
+    return messages
+
+
+@register(NEXT)
+def check_partial_backend_implements_stream_data(*args, **kwargs) -> list[CheckMessage]:
+    """Error when a backend keeps the retired `sse_event` contract (`next.E215`).
+
+    Such a class is abstract or has its override ignored, and nothing else says why.
+    """
+    messages: list[CheckMessage] = []
+    for index, config in enumerate(partial_backend_configs()):
+        backend_class = _backend_class(config)
+        if backend_class is None:
+            continue
+        retired = any(_RETIRED_HOOK in vars(klass) for klass in backend_class.__mro__)
+        missing = _STREAM_HOOK in getattr(backend_class, "__abstractmethods__", ())
+        if not (retired or missing):
+            continue
+        problem = (
+            f"defines {_RETIRED_HOOK}(), which no stream calls any more"
+            if retired
+            else f"does not implement {_STREAM_HOOK}()"
+        )
+        messages.append(
+            Error(
+                f"PARTIAL_BACKENDS entry {index} names "
+                f"{backend_class.__qualname__}, which {problem}.",
+                hint=f"Replace {_RETIRED_HOOK}(envelope) with "
+                f"{_STREAM_HOOK}(envelope, meta), which returns the frame as a "
+                "JSON object or as the codec's text.",
+                obj=backend_class,
+                id=E_BACKEND_STALE_CONTRACT,
+            )
+        )
+    return messages
+
+
+def _backend_class(config: object) -> type[PartialProtocolBackend] | None:
+    """Return the protocol backend class an entry names, or None when it names none."""
+    dotted = config.get("BACKEND") if isinstance(config, dict) else None
+    if not isinstance(dotted, str) or not dotted:
+        return None
+    try:
+        klass = import_class_cached(dotted)
+    except ImportError:
+        return None
+    if isinstance(klass, type) and issubclass(klass, PartialProtocolBackend):
+        return klass
+    return None
 
 
 @register(NEXT)
@@ -196,7 +308,9 @@ def _staticfiles_storage_path() -> str | None:
 __all__ = [
     "check_asset_version_moves_between_deploys",
     "check_manifest_version_has_manifest_storage",
+    "check_partial_backend_implements_stream_data",
     "check_partial_backend_names_a_path",
+    "check_partial_backend_sse_options",
     "check_partial_backends_is_a_list",
     "check_single_partial_backend",
     "partial_backend_configs",

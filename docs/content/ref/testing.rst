@@ -6,7 +6,7 @@ Testing reference
 Module summary
 --------------
 
-``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
+``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, dependency context builders, metadata and sitemap assertions, and realtime helpers for the broker, the SSE stream, and the WebSocket.
 ``next.testing.plugin`` sits apart from that surface as an opt-in pytest plugin and is the only module in the package that imports pytest.
 The package imports ``defusedxml`` for ``parse_sitemap``, so it needs the ``testing`` extra, ``next.dj[testing]``.
 
@@ -127,6 +127,136 @@ A robots file is plain text, so a test reads ``response.content`` directly.
 .. automodule:: next.testing.seo
    :members:
    :exclude-members: SitemapUrl
+
+Realtime
+~~~~~~~~
+
+The realtime helpers cover both transports and the broker between them.
+
+``memory_broker(**options)`` serves realtime from a fresh ``MemoryBroker`` for a block and yields it.
+``options`` are its ``OPTIONS``, the other keys of the ``REALTIME`` mapping stay as configured, and the configured broker is built anew on its first use after the block.
+Wrap every test that publishes in it, so no message or sequence number leaks from one test into the next.
+
+``capture_published(*topics)`` records the messages that ``message_published`` reports, in publish order, and returns a ``PublishedMessages``.
+It is a context manager, ``messages`` lists the recorded ``Message`` objects of the requested topics, ``recorder`` is the ``SignalRecorder`` of ``message_published`` underneath, and it is iterable and sized.
+Without topics it records every topic.
+It rides the signal, so it sees what ``publish`` and ``apublish`` send, a deferred ``on_commit`` publication after its commit, and the presence snapshots, on any broker and from sync or async code.
+A direct ``broker.publish()`` does not send the signal and stays invisible to it.
+
+``SseReader(response)`` parses the body of a ``TopicStream`` or any streaming SSE response into ``SseEvent`` values with ``event``, ``data``, ``id``, and ``json()``.
+It iterates with ``for`` and ``next`` over a WSGI response and with ``async for`` and ``anext`` over an ASGI one.
+Heartbeat comments, ``retry:`` lines, and blocks without ``data`` are not events, and the last ``retry:`` value is ``SseReader.retry``.
+``close()`` and ``aclose()`` end the stream the way a disconnecting browser does, so the broker subscription is released and ``stream_unsubscribed`` goes out with the reason ``client``.
+``aclose()`` on a response that was never read starts nothing and sends no signal, and a cancellation of the caller propagates out of it.
+The reader is a context manager of both kinds.
+
+.. code-block:: python
+   :caption: polls/tests/test_stream.py
+
+   import pytest
+   from django.test import Client
+
+   from next.partial import Patches
+   from next.realtime import publish
+   from next.testing import SseReader, capture_published, memory_broker
+
+   @pytest.mark.django_db
+   def test_stream_delivers_a_refresh(client: Client) -> None:
+       with memory_broker(), capture_published("poll:1") as published:
+           response = client.get("/polls/1/stream/")
+           with SseReader(response) as events:
+               assert next(events).event == "next-hello"
+               publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
+               patches = next(events)
+       assert patches.event == "next-patches"
+       assert patches.json()["topic"] == "poll:1"
+       assert len(published) == 1
+
+``WebSocketCommunicator(app, path, headers=(), subprotocols=(), *, timeout=1)`` drives any ASGI application through one WebSocket connection.
+The ``timeout`` in seconds belongs to the constructor and bounds every receive and every wait below, because a receive that times out ends the application.
+``subscribe(ticket, last_seq=None)`` sends the ``sub`` frame of a ``SocketTicket`` and returns the ``hello`` frame as a dict.
+``send_up(topic, name, data=None)`` sends an ``up`` event with a fresh id and returns ``None`` once the handler ran, or the ``UpstreamError`` its ``ack`` names.
+An ``ack`` that names no known error raises ``AssertionError``.
+``request(method, path, *, headers=None, body="")`` tunnels one HTTP request over the socket and returns a ``Reply`` with ``status``, ``headers``, and ``body``, or a ``Refusal``.
+Frames that arrive while a call waits for its own answer are held and handed out by the next ``receive_json_from``, so a ``patches`` frame published before the ``hello`` is not lost.
+A close that arrives during such a wait is held too, a failed call leaves it for ``receive_close()``, and a repeated wait fails at once instead of timing out.
+``disconnect(code=1000)`` closes the socket and waits for the application to exit within the constructor ``timeout``.
+An application still running past it is cancelled, and ``disconnect()`` raises ``AssertionError``.
+An error the application exits with is raised from ``disconnect()``.
+``Reply``, ``Refusal``, and ``UpstreamError`` live in ``next.realtime.frames``.
+
+``issue_socket_ticket(topics, *, authorizer_ref, transform_ref=None, presence=False, session=None, cookies: Mapping[str, str] | None = None)`` issues a ticket through the negotiation path of the configured ``TICKET_BINDING``.
+Without a ``session`` it builds one from ``SESSION_ENGINE``, so a test that signs a user in passes the session it prepared.
+The optional ``cookies`` mapping of names to values is placed on the request before the binding runs and is carried in the cookie header of the returned ticket.
+The returned ``SocketTicket`` holds the ``grant``, the ``session``, the ``cookies`` the browser would present, and the ``credential`` the binding reads from them.
+Its ``cookie`` property is the ready ``cookie`` header pair for the handshake.
+``subscribe_frame()`` builds the ``sub`` frame.
+The ``credential`` is what a ``Handshake`` for the ticket carries.
+``aissue_socket_ticket`` takes the same arguments and awaits the session work on a worker thread, so an async test issues a ticket inside its scenario without ``SynchronousOnlyOperation``, under ``django_db(transaction=True)`` as the socket itself needs.
+Under the default binding the credential is the session key, and under ``SignedCookieBinding`` it is the ``user:`` or ``visitor:`` credential of the binding.
+
+.. code-block:: python
+   :caption: rooms/tests/test_upstream.py
+
+   import asyncio
+
+   import pytest
+   from django.core.asgi import get_asgi_application
+
+   from next.realtime import application
+   from next.testing import (
+       WebSocketCommunicator,
+       capture_published,
+       issue_socket_ticket,
+       memory_broker,
+       override_websocket_mount,
+   )
+
+   @pytest.mark.django_db(transaction=True)
+   def test_typing_event_is_published_to_the_room() -> None:
+       ticket = issue_socket_ticket(("room:42",), authorizer_ref="rooms.access.can_watch")
+       headers = [
+           (b"origin", b"http://testserver"),
+           (b"host", b"testserver"),
+           ticket.cookie,
+       ]
+
+       async def scenario() -> None:
+           app = application(get_asgi_application())
+           communicator = WebSocketCommunicator(app, "/_next/ws/", headers, timeout=5)
+           connected, _ = await communicator.connect()
+           assert connected
+           assert (await communicator.subscribe(ticket))["type"] == "hello"
+           assert await communicator.send_up("room:42", "typing") is None
+           await communicator.disconnect()
+
+       with override_websocket_mount(), memory_broker(), capture_published("room:42") as sent:
+           asyncio.run(scenario())
+       assert len(sent) == 1
+
+The handler under test is the ``typing`` handler of :doc:`/content/topics/realtime`, which publishes through ``apublish`` and so shows up in ``capture_published``.
+A test of the socket without an ASGI application builds a ``TopicSocket`` over a ``MemoryPort``, which records the frames the socket sends in ``sent`` and ``close_code``.
+``push`` and ``push_json`` queue client frames, ``receive`` and ``receive_json`` wait for the next server frame, ``disconnect`` leaves as the client, and ``inbound()`` is the frame source that ``TopicSocket.serve`` reads.
+
+Creating a ``WebSocketApp`` marks the whole process as serving ``ws``, so a test session that starts an ASGI server in process would keep offering ``ws`` to every later WSGI test.
+Wrap such a server in ``override_websocket_mount()``, which hands the flag back on exit, or pass ``mounted=True`` to offer ``ws`` without building the app.
+
+.. code-block:: python
+   :caption: tests/e2e/test_websocket.py
+
+   from collections.abc import Iterator
+
+   import pytest
+
+   from next.testing import override_websocket_mount
+
+   @pytest.fixture()
+   def websocket_mount() -> Iterator[None]:
+       with override_websocket_mount():
+           yield
+
+.. automodule:: next.testing.realtime
+   :members:
 
 Dependencies
 ~~~~~~~~~~~~

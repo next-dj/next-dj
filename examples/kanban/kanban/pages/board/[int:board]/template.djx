@@ -2,10 +2,12 @@
   {% if moved_card %}
     {% component "preview" %}
   {% endif %}
-  <div id="kanban-board" class="flex gap-4 overflow-x-auto pb-4">
-    {# React replaces this on mount, and it is the whole board without JS. #}
-    {% for column in columns %}
-      {% component "column" %}
-    {% endfor %}
-  </div>
+  {% zone "board" %}
+    <div id="kanban-board" data-next-keep class="flex gap-4 overflow-x-auto pb-4">
+      {% for column in columns %}
+        {% component "column" %}
+      {% endfor %}
+    </div>
+  {% endzone %}
+  <div data-next-stream="/board/{{ board_object.pk }}/stream/" hidden></div>
 </div>

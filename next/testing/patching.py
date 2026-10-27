@@ -16,6 +16,7 @@ from next.components.manager import components_manager
 from next.deps.resolver import resolver
 from next.forms.backends import ActionRegistration
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.static.manager import get_static_manager
 
 
@@ -79,9 +80,10 @@ def override_form_action(
 ) -> Iterator[None]:
     """Register `handler` as the named form action for the block.
 
-    The registry is snapshotted on entry so an action it shadows survives the block.
+    Snapshots the registry and diagnostics so no false collision outlives the block.
     """
     saved = form_action_manager.snapshot_actions()
+    diagnostics = registration_diagnostics.snapshot()
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
@@ -96,6 +98,7 @@ def override_form_action(
         yield
     finally:
         form_action_manager.restore_actions(saved)
+        registration_diagnostics.restore(diagnostics)
 
 
 @contextlib.contextmanager

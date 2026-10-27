@@ -4,22 +4,30 @@ import json
 from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
 import pytest
 from django.test import RequestFactory
 
+from next.partial.manager import partial_backend_manager
 from next.static import NextScriptBuilder, ScriptInjectionPolicy
 from next.static.collector import StaticCollector
 from next.static.runtime import (
     CSRF_PAYLOAD_KEY,
     DEV_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
+    REALTIME_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
+    RealtimeOffer,
     _failures as runtime_failures,
     csrf_payload_for,
+    forget_realtime_offer,
     nonce_attr,
+    realtime_offer,
 )
 from next.static.serializers import resolve_serializer
+from next.testing import override_next_settings
+from tests.support.codecs import TextStreamCodec
 
 
 if TYPE_CHECKING:
@@ -32,7 +40,7 @@ URL = "/static/next/next.min.js"
 BREAKOUT_URL = '/static/next.min.js"><script>alert(1)</script>'
 
 
-def _legacy_init_payload(
+def _reference_init_payload(
     js_context: Mapping[str, Any],
     key_serializers: Mapping[str, JsContextSerializer] | None,
 ) -> str:
@@ -288,8 +296,8 @@ class TestInitScriptGoldenParity:
         new = builder.init_script(
             js_context, key_serializers=key_serializers, encoded=encoded
         )
-        legacy = _legacy_init_payload(js_context, key_serializers)
-        assert new == f"<script>Next._init({legacy});</script>"
+        expected = _reference_init_payload(js_context, key_serializers)
+        assert new == f"<script>Next._init({expected});</script>"
         return new
 
     def test_default_serializer_simple_value(self) -> None:
@@ -398,12 +406,91 @@ class TestNextJsStaticPath:
         assert NEXT_JS_STATIC_PATH.endswith(".js")
 
 
+TRANSPORTS = "next.realtime.ports.active_transports"
+PARTIAL_BACKEND = "next.partial.manager.partial_backend_manager.get"
+TURBO = "text/vnd.turbo-stream.html"
+WEBSOCKET = {"TRANSPORTS": ["ws", "sse"]}
+BOTH_TRANSPORTS = f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["ws","sse"],'
+
+
+class TestRealtimePayload:
+    """The `$realtime` entry is sent only where it moves off the runtime defaults."""
+
+    def test_the_stock_configuration_sends_no_entry(self) -> None:
+        out = NextScriptBuilder(URL).init_script({"$chunks": {"stream": "/s.js"}})
+        assert out == '<script>Next._init({"$chunks":{"stream":"/s.js"}});</script>'
+        assert realtime_offer() == RealtimeOffer("", websocket=False)
+
+    def test_an_active_websocket_advertises_both_transports(self) -> None:
+        with override_next_settings(REALTIME=WEBSOCKET):
+            out = NextScriptBuilder(URL).init_script({"$chunks": {}})
+            assert realtime_offer().websocket is True
+        assert (
+            f'{BOTH_TRANSPORTS}"content_type":"application/vnd.next.patches+json"}}'
+        ) in out
+
+    def test_changing_the_transports_drops_the_memoised_entry(self) -> None:
+        builder = NextScriptBuilder(URL)
+        before = builder.init_script({"$chunks": {}})
+        with override_next_settings(REALTIME=WEBSOCKET):
+            during = builder.init_script({"$chunks": {}})
+        after = builder.init_script({"$chunks": {}})
+        assert REALTIME_PAYLOAD_KEY not in before
+        assert BOTH_TRANSPORTS in during
+        assert after == before
+
+    @pytest.mark.usefixtures("forgotten_realtime_offer")
+    def test_another_partial_backend_names_its_content_type(self) -> None:
+        with mock.patch(PARTIAL_BACKEND) as get_backend:
+            get_backend.return_value.content_type = TURBO
+            out = NextScriptBuilder(URL).init_script({"$chunks": {}})
+            assert realtime_offer().websocket is False
+        assert (
+            f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["sse"],'
+            f'"content_type":"{TURBO}"}}'
+        ) in out
+
+    def test_a_payload_without_chunks_carries_no_entry(self) -> None:
+        with override_next_settings(REALTIME=WEBSOCKET):
+            out = NextScriptBuilder(URL).init_script({"user": "alice"})
+        assert REALTIME_PAYLOAD_KEY not in out
+
+    @pytest.mark.usefixtures("forgotten_realtime_offer")
+    def test_a_reset_partial_backend_drops_the_memoised_entry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert realtime_offer().entry == ""
+        monkeypatch.setattr(
+            partial_backend_manager,
+            "_select_config",
+            lambda: {"BACKEND": "tests.support.codecs.TextStreamCodec"},
+        )
+        partial_backend_manager.reset()
+        try:
+            entry = realtime_offer().entry
+            assert isinstance(partial_backend_manager.get(), TextStreamCodec)
+        finally:
+            monkeypatch.undo()
+            partial_backend_manager.reset()
+        assert '"content_type":"text/plain"' in entry
+        assert realtime_offer().entry == ""
+
+    @pytest.mark.usefixtures("forgotten_realtime_offer")
+    def test_the_offer_is_resolved_once_until_it_is_forgotten(self) -> None:
+        with mock.patch(TRANSPORTS, return_value=("sse",)) as transports:
+            first = realtime_offer()
+            assert realtime_offer() is first
+            forget_realtime_offer()
+            realtime_offer()
+        assert transports.call_count == 2
+
+
 class TestReservedPayloadKeys:
     """The reserved set is the single source of truth for framework-owned keys."""
 
     def test_holds_every_framework_wire_name(self) -> None:
         assert (
-            frozenset({"$csrf", "$dev", "$chunks", "$scripts", "$consent"})
+            frozenset({"$csrf", "$dev", "$chunks", "$realtime", "$scripts", "$consent"})
             == RESERVED_PAYLOAD_KEYS
         )
 

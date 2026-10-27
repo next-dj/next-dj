@@ -739,12 +739,7 @@ class TestForms:
         client: NextClient, note: str = "", origin: str = "/photo/3/", **extra: object
     ) -> HttpResponse:
         return client.post_action(
-            "peek_note",
-            {"note": note},
-            origin=origin,
-            partial=True,
-            zones="peek",
-            **extra,
+            "peek_note", {"note": note}, origin=origin, partial="peek", **extra
         )
 
     def _modal(self, root: Path, **kwargs: str) -> None:

@@ -34,10 +34,12 @@ from next.ports import (
     page_scan_slot,
     page_scripts_slot,
     partial_shaper_slot,
+    realtime_negotiation_slot,
     router_access_slot,
     seo_routes_slot,
     static_assets_slot,
 )
+from next.realtime.ports import RealtimeNegotiationImpl
 from next.scripts.ports import PageScriptsImpl
 from next.seo.manager import seo_manager
 from next.seo.ports import SeoRoutesImpl
@@ -68,6 +70,7 @@ _PROCESS_SLOTS = (
     page_scan_slot,
     page_scripts_slot,
     partial_shaper_slot,
+    realtime_negotiation_slot,
     router_access_slot,
     seo_routes_slot,
     static_assets_slot,
@@ -442,6 +445,7 @@ class TestDependencyResolverInstall:
         "apply_resolver_setting",
         "page_scan_slot",
         "partial_shaper_slot",
+        "realtime_negotiation_slot",
         "router_access_slot",
         "page_scripts_slot",
         "seo_routes_slot",
@@ -470,6 +474,7 @@ class TestDependencyResolverInstall:
             "apply_resolver_setting",
             "page_scan_slot.set",
             "partial_shaper_slot.set",
+            "realtime_negotiation_slot.set",
             "router_access_slot.set",
             "page_scripts_slot.set",
             "seo_routes_slot.set",
@@ -488,6 +493,12 @@ class TestDependencyResolverInstall:
             pytest.param("page_scan_slot", "page scan port", PageScanImpl, id="scan"),
             pytest.param(
                 "partial_shaper_slot", "partial shaper", PartialShaperImpl, id="shaper"
+            ),
+            pytest.param(
+                "realtime_negotiation_slot",
+                "realtime negotiation port",
+                RealtimeNegotiationImpl,
+                id="realtime",
             ),
             pytest.param(
                 "router_access_slot",
@@ -533,6 +544,7 @@ class TestDependencyResolverInstall:
             PageScanImpl,
             PageScriptsImpl,
             PartialShaperImpl,
+            RealtimeNegotiationImpl,
             RouterAccessImpl,
             SeoRoutesImpl,
             StaticAssetsImpl,

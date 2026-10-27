@@ -71,13 +71,9 @@ def guard_wizard_client() -> NextClient:
     return NextClient(enforce_csrf_checks=False)
 
 
-def _advance_open_step(client: NextClient, **kwargs) -> object:
+def _advance_open_step(client: NextClient, *, partial: bool | str = True) -> object:
     return client.post_action(
-        "sealed_wizard",
-        {"name": "Ada"},
-        origin="/guardwizard/open/",
-        partial=True,
-        **kwargs,
+        "sealed_wizard", {"name": "Ada"}, origin="/guardwizard/open/", partial=partial
     )
 
 
@@ -88,14 +84,14 @@ class TestWizardStepAuthorization:
     def test_advance_into_a_denying_step_falls_back_to_the_redirect(
         self, guard_wizard_client: NextClient
     ) -> None:
-        response = _advance_open_step(guard_wizard_client, zones="sealed-zone")
+        response = _advance_open_step(guard_wizard_client, partial="sealed-zone")
         assert response.status_code == 302
         assert response["Location"] == "/guardwizard/sealed/"
 
     def test_no_step_zone_content_travels_on_the_denial(
         self, guard_wizard_client: NextClient
     ) -> None:
-        response = _advance_open_step(guard_wizard_client, zones="sealed-zone")
+        response = _advance_open_step(guard_wizard_client, partial="sealed-zone")
         assert b"sealed-note" not in response.content
 
     def test_denial_without_a_named_zone_is_the_same_redirect(
@@ -115,8 +111,7 @@ class TestAuthorizedWizardAdvanceIsUntouched:
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
         )
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["wizard-zone"]

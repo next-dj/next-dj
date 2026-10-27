@@ -42,11 +42,14 @@ class PartialEnvelope:
         return self._parsed
 
     def _addressed(self, selector: str) -> list[str]:
-        return [
-            patch.target[selector]
-            for patch in self._envelope().ops
-            if isinstance(patch.target, dict) and selector in patch.target
-        ]
+        """Return the selector value of each op naming it, a refresh's in its extras."""
+        named: list[str] = []
+        for patch in self._envelope().ops:
+            if isinstance(patch.target, dict) and selector in patch.target:
+                named.append(patch.target[selector])
+            elif patch.op == "refresh" and selector in patch.extras:
+                named.append(patch.extras[selector])
+        return named
 
     @property
     def version(self) -> str:
@@ -75,7 +78,10 @@ class PartialEnvelope:
         ]
 
     def zone_targets(self) -> list[str]:
-        """Return the zone name of every op that addresses a zone, in order."""
+        """Return the zone name of every op that addresses a zone, in order.
+
+        A `refresh` names its zone on the op itself rather than in a target.
+        """
         return self._addressed(keys.ZONE)
 
     def form_targets(self) -> list[str]:
@@ -129,15 +135,14 @@ class NextClient(Client):
         *,
         origin: str | None = None,
         page: str | PathLike[str] | None = None,
-        partial: bool = False,
-        zones: str | tuple[str, ...] | None = None,
+        partial: bool | str | tuple[str, ...] = False,
         version: str | None = None,
         headers: dict[str, str] | None = None,
         **extra,
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
-        `origin` fills the origin field, `page` picks among same-named actions.
+        `partial` takes True for a partial request or the zone names it asks for.
         """
         url = resolve_action_url(action_name, page=page)
         payload: dict[str, Any] = dict(data or {})
@@ -146,8 +151,10 @@ class NextClient(Client):
         sent = dict(headers or {})
         if partial:
             sent[REQUEST_FLAG] = "1"
-        if zones is not None:
-            sent[ZONE] = zones if isinstance(zones, str) else ",".join(zones)
+        if isinstance(partial, str):
+            sent[ZONE] = partial
+        elif isinstance(partial, tuple):
+            sent[ZONE] = ",".join(partial)
         if version is not None:
             sent[VERSION] = version
         return cast("HttpResponse", self.post(url, data=payload, headers=sent, **extra))

@@ -144,7 +144,7 @@ A serializer is any class with a ``dumps`` method.
            )
 
 Point ``JS_CONTEXT_SERIALIZER`` at the dotted path of the class.
-The framework instantiates it once through ``resolve_serializer``, so the instance keeps no state of one render.
+The framework instantiates it once through ``resolve_serializer`` and shares that instance across renders, so it must hold no per-render state.
 
 Key conflict policy
 -------------------
@@ -190,12 +190,43 @@ Pick distinct keys when both registrations live in the same module.
 Reserved payload keys
 ~~~~~~~~~~~~~~~~~~~~~
 
-The framework owns five ``$``-prefixed keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$scripts``, and ``$consent``, and claims them after the conflict policy has run.
+The framework owns six ``$``-prefixed keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent``, and claims them after the conflict policy has run.
 A project key of any of these names is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
 The framework then writes its own value where it has one, ``$csrf`` on a payload whose request can mint a CSRF token and ``$dev`` on a payload built while ``DEBUG`` is on.
 The runtime reads ``$csrf`` at bootstrap and seeds the header it stamps on every unsafe request, so a programmatic ``Next.partial.fetch`` carries a token without a form field.
 On a page whose CSRF token is deferred, ``$csrf`` names the token endpoint instead of a token, see :doc:`/content/security/csrf-and-forms`.
-``$chunks`` is part of every payload and names the scripts chunk ``next.scripts.min.js`` under ``scripts``, the stream bridge ``next.sse.min.js`` under ``sse``, the CSRF mint ``next.csrf.min.js`` under ``csrf``, the zone poller ``next.poll.min.js`` under ``poll``, and, while ``DEBUG`` is on, the diagnostics chunk ``next.dev.min.js`` under ``dev``, which the runtime fetches only when ``$dev`` is true, and ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
+``$chunks`` is part of every payload and maps each lazy chunk key to its URL.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 35 50
+
+   * - Key
+     - File
+     - Listed
+   * - ``scripts``
+     - ``next.scripts.min.js``
+     - On every payload, the consent and third-party scripts chunk.
+   * - ``stream``
+     - ``next.stream.min.js``
+     - On every payload, the stream bridge.
+   * - ``ws``
+     - ``next.ws.min.js``
+     - While the ``ws`` transport is active, the WebSocket transport.
+   * - ``csrf``
+     - ``next.csrf.min.js``
+     - On every payload, the deferred CSRF mint.
+   * - ``poll``
+     - ``next.poll.min.js``
+     - On every payload, the zone poller.
+   * - ``dev``
+     - ``next.dev.min.js``
+     - While ``DEBUG`` is on, the diagnostics chunk.
+
+The runtime fetches the ``dev`` chunk only when ``$dev`` is true.
+``$realtime`` appears only when the enabled transports or the protocol content type differ from the defaults, and carries the protocol version, the transports in preference order, and the content type the stream bridge expects, see :doc:`/content/topics/realtime`.
+``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
+
 A chunk the static files storage cannot serve is left out of ``$chunks`` with a warning, and the render stays shareable since its HTML is complete, while ``next.W090`` reports the chunk at deploy.
 A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
 A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.
@@ -372,7 +403,7 @@ Resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` fr
 
 Emit ``builder.preload_link()`` and ``builder.script_tag()`` from a custom template tag or middleware.
 Read the collector from the template context under the ``_static_collector`` key.
-Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encoded()`` to ``builder.init_script`` so per-key serializers and the already-validated fragments are reused.
+Pass the result of ``collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS)`` to ``builder.init_script``, so per-key serializers and the already-validated fragments are reused and every reserved name is already dropped.
 
 .. code-block:: python
    :caption: notes/templatetags/notes_runtime.py
@@ -383,7 +414,12 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
 
    from next.conf import next_framework_settings
    from next.static.nonce import resolve_nonce
-   from next.static.runtime import NEXT_JS_STATIC_PATH, NextScriptBuilder
+   from next.static.runtime import (
+       CHUNK_STATIC_PATHS,
+       NEXT_JS_STATIC_PATH,
+       RESERVED_PAYLOAD_KEYS,
+       NextScriptBuilder,
+   )
 
    register = Library()
 
@@ -395,24 +431,32 @@ Pass its ``js_context()``, ``js_context_serializers()``, and ``js_context_encode
            url, next_framework_settings.NEXT_JS_OPTIONS
        )
        collector = context["_static_collector"]
+       values, encoded, serializers = collector.js_context_payload(
+           reserved=RESERVED_PAYLOAD_KEYS
+       )
+       chunks = {
+           name: staticfiles_storage.url(path)
+           for name, path in CHUNK_STATIC_PATHS.items()
+       }
        nonce = resolve_nonce(context.get("request"))
        return mark_safe(
            builder.preload_link(nonce=nonce)
            + builder.script_tag(nonce=nonce)
            + builder.init_script(
-               collector.js_context(),
-               key_serializers=collector.js_context_serializers(),
-               encoded=collector.js_context_encoded(),
+               {**values, "$chunks": chunks},
+               key_serializers=serializers,
+               encoded=encoded,
                nonce=nonce,
            )
        )
 
-A payload built this way carries none of the framework's reserved entries, because the static manager both claims and writes those keys only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
-Without ``$chunks`` the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, CSRF, poll, and diagnostics chunks never load.
-Add ``"$chunks": {name: staticfiles_storage.url(path) for name, path in CHUNK_STATIC_PATHS.items()}`` to the payload, with ``CHUNK_STATIC_PATHS`` from ``next.static.runtime``, so every chunk resolves through the storage.
+A payload built this way carries no other reserved entry, because the static manager writes ``$csrf``, ``$dev``, ``$scripts``, and ``$consent`` only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
+A payload built from ``js_context()`` alone also keeps a project key of a reserved name, which is why the example reads ``js_context_payload`` instead.
+
+The example adds ``$chunks`` from ``CHUNK_STATIC_PATHS``, since without it the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, WebSocket, CSRF, poll, and diagnostics chunks never load.
+``init_script`` appends the ``$realtime`` entry of ``realtime_offer()`` from ``next.static.runtime`` whenever the payload carries ``$chunks``.
+A payload without ``$chunks`` therefore leaves the runtime on Server-Sent Events under the stock content type, even when the project enables the ``ws`` transport or a custom protocol backend.
 ``Next.ready`` waits for ``Next._init``, so a layout that never emits the init script leaves every ``Next.ready`` call pending.
-It does carry a project key of a reserved name, because ``js_context()`` is the unfiltered store and the reserved-key drop lives in the automatic path alone.
-Pass ``RESERVED_PAYLOAD_KEYS`` from ``next.static.runtime`` to ``collector.js_context_payload`` instead, which returns the values, the encoded fragments, and the per-key serializers with every reserved name already dropped.
 
 Runtime script templates
 ------------------------

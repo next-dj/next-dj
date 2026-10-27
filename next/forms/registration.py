@@ -11,6 +11,7 @@ class RegistrationDiagnostics:
     outside_base_dir: list[tuple[str, str]] = field(default_factory=list)
     invalid_meta_scope: list[tuple[str, str]] = field(default_factory=list)
     invalid_action_scope: list[tuple[str, str]] = field(default_factory=list)
+    invalid_transport: list[tuple[str, str]] = field(default_factory=list)
     instance_from_url_unknown_field: list[tuple[str, str, str]] = field(
         default_factory=list
     )

@@ -132,11 +132,7 @@ class TestPostActionPartialHeaders:
     def test_zones_header_reaches_the_request(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
         response = client.post_action(
-            "simple_form",
-            {"name": ""},
-            origin="/",
-            partial=True,
-            zones=("alpha", "beta"),
+            "simple_form", {"name": ""}, origin="/", partial=("alpha", "beta")
         )
         assert response.wsgi_request.headers["X-Next-Zone"] == "alpha,beta"
 
@@ -183,6 +179,20 @@ class TestEnvelopeHelpers:
         assert envelope.toasts() == [
             {"op": "toast", "text": "Saved", "variant": "success"}
         ]
+
+    def test_zone_targets_read_the_zone_a_refresh_names_on_itself(self) -> None:
+        envelope = PartialEnvelope(
+            {
+                "version": "v1",
+                "ops": [
+                    {"op": "morph", "target": {"zone": "a"}, "html": "<div></div>"},
+                    {"op": "refresh", "zone": "b"},
+                    {"op": "layer.open", "zone": "c"},
+                    {"op": "refresh"},
+                ],
+            }
+        )
+        assert envelope.zone_targets() == ["a", "b"]
 
     def test_version_op_verbs_and_targets(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", ("alpha", "beta")))

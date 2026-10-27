@@ -69,6 +69,7 @@ class TestBenchPageAssetDiscovery:
         discovery, page_file = _discovery_for(tmp_path, assets=True)
         benchmark(discovery.discover_page_assets, page_file, StaticCollector())
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="static.discovery")
     def test_page_assets_warm_debug(self, tmp_path: Path, benchmark) -> None:
         """The same page under `DEBUG`, where the plan stats its directories."""
@@ -108,6 +109,7 @@ class TestBenchComponentAssetDiscovery:
         discovery.discover_component_assets(info, collector)
         benchmark(discovery.discover_component_assets, info, collector)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="static.discovery")
     def test_component_assets_warm_debug(self, tmp_path: Path, benchmark) -> None:
         """The same component under `DEBUG`, where the plan stats its folder."""
@@ -117,6 +119,7 @@ class TestBenchComponentAssetDiscovery:
             benchmark(discovery.discover_component_assets, info, StaticCollector())
 
 
+@pytest.mark.walltime()
 class TestBenchColdAssetPlan:
     """What building an `_AssetPlan` costs, against the replay of a built one.
 

@@ -77,8 +77,7 @@ class TestInvalidWithZoneMorphsTheZone:
             "zoned_rename_form",
             {"title": ""},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["morph"]
@@ -92,8 +91,7 @@ class TestInvalidWithZoneMorphsTheZone:
             "zoned_rename_form",
             {"title": ""},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         html = envelope_of(response).html_for_zone("rename-board")
         assert "required" in html.lower()
@@ -103,8 +101,7 @@ class TestInvalidWithZoneMorphsTheZone:
             "zoned_rename_form",
             {"title": ""},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         meta = envelope_of(response).form_meta()
         assert meta is not None
@@ -199,8 +196,7 @@ class TestSuccessFunnelMorphsAndDrainsMessages:
             "zoned_rename_form",
             {"title": "Renamed"},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         envelope = envelope_of(response)
         assert envelope.zone_targets() == ["rename-board"]
@@ -212,8 +208,7 @@ class TestSuccessFunnelMorphsAndDrainsMessages:
             "zoned_rename_form",
             {"title": "Renamed"},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         assert "X-Next-Form" not in response
 
@@ -224,16 +219,14 @@ class TestSuccessFunnelMorphsAndDrainsMessages:
             "zoned_rename_form",
             {"title": "Renamed"},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         assert len(envelope_of(first).toasts()) == 2
         second = next_client.post_action(
             "zoned_rename_form",
             {"title": "Again"},
             origin="/board_settings/",
-            partial=True,
-            zones="rename-board",
+            partial="rename-board",
         )
         # the first request's messages are drained, so the second flashes its own two
         assert len(envelope_of(second).toasts()) == 2

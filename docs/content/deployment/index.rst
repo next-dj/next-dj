@@ -21,7 +21,7 @@ They walk through the checklist, the static file pipeline, the server choice, an
    How ``collectstatic`` and the static pipeline behave in production.
 
 :doc:`wsgi-asgi`
-   Choosing a server and wiring next.dj into it.
+   Choosing a server, wiring next.dj into it, and estimating capacity for realtime streams.
 
 .. toctree::
    :hidden:

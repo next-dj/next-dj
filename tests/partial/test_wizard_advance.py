@@ -15,13 +15,11 @@ from next.testing import NextClient, envelope_of
 from tests.support import CountingWizardBackend
 
 
-def _advance_identity(next_client: NextClient, **kwargs) -> HttpResponse:
+def _advance_identity(
+    next_client: NextClient, *, partial: bool | str = True
+) -> HttpResponse:
     return next_client.post_action(
-        "step_wizard",
-        {"name": "Ada"},
-        origin="/wizard/identity/",
-        partial=True,
-        **kwargs,
+        "step_wizard", {"name": "Ada"}, origin="/wizard/identity/", partial=partial
     )
 
 
@@ -35,7 +33,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_partial_advance_is_an_envelope_not_a_redirect(
         self, next_client: NextClient
     ) -> None:
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
         assert envelope_of(response).zone_targets() == ["wizard-zone"]
@@ -43,7 +41,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_partial_advance_swaps_the_step_fields(
         self, next_client: NextClient
     ) -> None:
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         html = envelope_of(response).html_for_zone("wizard-zone")
         assert 'name="scope"' in html
         assert 'name="name"' not in html
@@ -51,7 +49,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_advance_stamps_next_step_origin_in_zone_html(
         self, next_client: NextClient
     ) -> None:
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         html = envelope_of(response).html_for_zone("wizard-zone")
         assert 'value="/wizard/scope/"' in html
         assert 'value="/wizard/identity/"' not in html
@@ -59,13 +57,9 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_draft_lands_in_storage_on_the_partial_advance(
         self, next_client: NextClient
     ) -> None:
-        _advance_identity(next_client, zones="wizard-zone")
+        _advance_identity(next_client, partial="wizard-zone")
         follow = next_client.post_action(
-            "step_wizard",
-            {"scope": ""},
-            origin="/wizard/scope/",
-            partial=True,
-            zones="wizard-zone",
+            "step_wizard", {"scope": ""}, origin="/wizard/scope/", partial="wizard-zone"
         )
         html = envelope_of(follow).html_for_zone("wizard-zone")
         assert 'name="scope"' in html
@@ -116,7 +110,7 @@ class TestWizardAdvanceHonoursTheStepRule:
         self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch, refusal
     ) -> None:
         monkeypatch.setattr(outcomes_module, "refusal", refusal)
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         assert response.status_code == 302
         assert response["Location"] == "/wizard/scope/"
 
@@ -130,7 +124,7 @@ class TestWizardAdvanceHonoursTheStepRule:
             return Path("/elsewhere/page.py"), kwargs
 
         monkeypatch.setattr(outcomes_module, "_resolve_step_target", elsewhere)
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         assert response.status_code == 302
         assert response["Location"] == "/wizard/scope/"
 
@@ -141,7 +135,7 @@ class TestWizardAdvanceHonoursTheStepRule:
             return replace(page_access(page_path), broken=page_path)
 
         monkeypatch.setattr(outcomes_module, "page_access", broken)
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         assert response.status_code == 302
         assert response["Location"] == "/wizard/scope/"
 
@@ -161,7 +155,7 @@ class TestWizardAdvanceRendersZoneNotPageView:
             return original(page_path, zones, request, **kwargs)
 
         monkeypatch.setattr(outcomes_module, "render_zone", _spy)
-        _advance_identity(next_client, zones="wizard-zone")
+        _advance_identity(next_client, partial="wizard-zone")
         assert len(calls) == 1
         _page_path, zones = calls[0]
         assert zones == ("wizard-zone",)
@@ -179,7 +173,7 @@ class TestWizardAdvanceCsrfMeta:
     ) -> None:
         # The submit rotated its token, modelled by forcing the flag the shaper reads.
         monkeypatch.setattr(outcomes_module, "_csrf_rotated", lambda _request: True)
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         envelope = envelope_of(response).data
         assert "csrf" in envelope
         assert envelope["csrf"]["token"]
@@ -187,7 +181,7 @@ class TestWizardAdvanceCsrfMeta:
     def test_no_rotation_leaves_no_csrf_on_advance(
         self, next_client: NextClient
     ) -> None:
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         assert "csrf" not in envelope_of(response).data
 
 
@@ -201,14 +195,13 @@ class TestWizardInvalidStepZoneMorph:
     def test_invalid_step_zone_carries_bound_submitted_value(
         self, next_client: NextClient
     ) -> None:
-        _advance_identity(next_client, zones="wizard-zone")
+        _advance_identity(next_client, partial="wizard-zone")
         too_long = "x" * 101
         response = next_client.post_action(
             "step_wizard",
             {"scope": too_long},
             origin="/wizard/scope/",
-            partial=True,
-            zones="wizard-zone",
+            partial="wizard-zone",
         )
         assert response["X-Next-Form"] == "invalid"
         html = envelope_of(response).html_for_zone("wizard-zone")
@@ -233,7 +226,7 @@ class TestWizardAdvanceShipsZoneAssetsAndContext:
         monkeypatch.setattr(
             outcomes_module, "render_zone", lambda *args, **kwargs: crafted
         )
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         envelope = envelope_of(response)
         assert {
             "kind": "css",
@@ -289,7 +282,7 @@ class TestWizardAdvanceStorageBudget:
     def test_partial_advance_pays_one_save_and_one_load(
         self, next_client: NextClient, counting_wizard_backend: CountingWizardBackend
     ) -> None:
-        response = _advance_identity(next_client, zones="wizard-zone")
+        response = _advance_identity(next_client, partial="wizard-zone")
         assert response.status_code == 200
         assert counting_wizard_backend.saves == 1
         assert counting_wizard_backend.loads == 1

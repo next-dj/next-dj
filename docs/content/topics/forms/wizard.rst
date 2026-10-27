@@ -26,6 +26,7 @@ See :doc:`actions` for the anchor-file rule and the ``NEXT_FRAMEWORK["FORM_ANCHO
 The access guards also match plain forms.
 ``Meta.login_required`` and ``Meta.permission_required`` on the wizard class guard its endpoint, and the guard is enforced on every step submission, not only the final one.
 The keys are read through plain class-attribute lookup, so a wizard subclassing a guarded base while declaring its own ``Meta`` must extend the base ``Meta`` or re-declare the guard keys.
+``Meta.transport = "any"`` lets the wizard post through an open WebSocket like any other action, see :ref:`topics-forms-actions-transport`.
 See :ref:`topics-forms-actions-guards` for the semantics and the inheritance rule.
 
 A wizard also accepts the dynamic ``check_permissions`` classmethod for a per-request decision.
@@ -106,7 +107,8 @@ An empty or missing list triggers the ``next.E050`` system check and the wizard 
 
 Keep ``FileField`` and ``ImageField`` out of step forms.
 Wizard storage persists each step's ``cleaned_data`` between requests, and an uploaded file does not survive that round trip.
-The ``next.W058`` check flags a file field in a static step, collect the upload in a standalone form action instead.
+The ``next.W058`` check flags a file field in a static step.
+Collect the upload in a standalone form action instead.
 
 ``Meta.url_param`` names the URL kwarg that carries the active step.
 It defaults to ``"step"``, so a route segment of ``[step]`` works with no further configuration.
@@ -422,7 +424,7 @@ Add a ``[step]`` route segment or point ``Meta.url_param`` at the captured kwarg
 ``next.W057`` warns when a static ``Meta.steps`` form class is also registered as a standalone action, which the plain-Django-form step pattern avoids.
 ``next.W058`` warns when a static step declares a ``FileField`` or ``ImageField``, whose uploads do not survive the draft round trip.
 ``next.W059`` warns when two static steps declare the same field name, where ``get_all_cleaned_data()`` keeps the last value and ``get_cleaned_data_for_step`` gives per-step access.
-The static-step checks inspect ``Meta.steps`` only, a ``get_steps`` override is not visible to them.
+The static-step checks inspect ``Meta.steps`` only, so a ``get_steps`` override is not visible to them.
 See :doc:`/content/ref/system-checks` for their conditions, and run ``uv run python manage.py check`` after editing a wizard or its backend.
 
 See also

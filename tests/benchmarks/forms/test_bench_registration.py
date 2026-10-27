@@ -92,6 +92,7 @@ class TestBenchFormRegistration:
         backend = form_action_manager.default_backend
         assert backend.get_meta("bench_declared0") is not None
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="forms.registration")
     @pytest.mark.usefixtures("_restore_action_registry")
     def test_define_form_subclasses_in_router_module(
@@ -107,6 +108,7 @@ class TestBenchFormRegistration:
         backend = form_action_manager.default_backend
         assert backend.get_meta("bench_routed0", str(router_page_file)) is not None
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="forms.registration")
     @pytest.mark.usefixtures("_restore_action_registry")
     def test_define_form_subclasses_in_imported_module(

@@ -26,7 +26,7 @@ _PERMISSIONS_PROBE_BODY = (
     "from next.permissions.manager import permission_manager\n\n"
     "SEEN = tuple(name for name, _rule in permission_manager.registry.items())\n"
 )
-_MODULE_NAMES = ("deps", "permissions", "forms", "signals")
+_MODULE_NAMES = ("deps", "permissions", "forms", "realtime", "signals")
 
 
 @pytest.fixture()
@@ -56,7 +56,7 @@ def _loads(app: str) -> list[str]:
 class TestImportOrder:
     """Each module name finishes across every app before the next name starts."""
 
-    def test_deps_then_permissions_then_forms_then_signals(self, make_app) -> None:
+    def test_deps_permissions_forms_realtime_then_signals(self, make_app) -> None:
         first = _full_app(make_app)
         second = _full_app(make_app)
         autodiscover.install()
@@ -67,6 +67,8 @@ class TestImportOrder:
             f"{second}.permissions",
             f"{first}.forms",
             f"{second}.forms",
+            f"{first}.realtime",
+            f"{second}.realtime",
             f"{first}.signals",
             f"{second}.signals",
         ]
@@ -92,7 +94,37 @@ class TestFormSwitch:
         app = _full_app(make_app)
         with override_settings(NEXT_FRAMEWORK={"FORM_AUTODISCOVER": False}):
             autodiscover.install()
-        assert _loads(app) == [f"{app}.deps", f"{app}.permissions", f"{app}.signals"]
+        assert _loads(app) == [
+            f"{app}.deps",
+            f"{app}.permissions",
+            f"{app}.realtime",
+            f"{app}.signals",
+        ]
+
+
+class TestHandlerSwitch:
+    """`REALTIME['HANDLERS']` replaces the realtime discovery with its own list."""
+
+    def test_an_empty_list_skips_every_realtime_module(self, make_app) -> None:
+        app = _full_app(make_app)
+        with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": []}}):
+            autodiscover.install()
+        assert f"{app}.realtime" not in _loads(app)
+
+    def test_a_list_imports_only_the_named_modules(self, make_app) -> None:
+        listed = make_app(realtime=_RECORDING_BODY, live=_RECORDING_BODY)
+        skipped = make_app(realtime=_RECORDING_BODY)
+        handlers = [f"{listed}.live"]
+        with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": handlers}}):
+            autodiscover.install()
+        assert _loads(listed) == [f"{listed}.live"]
+        assert _loads(skipped) == []
+
+    def test_an_invalid_value_imports_no_realtime_module(self, make_app) -> None:
+        app = _full_app(make_app)
+        with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": "x.y"}}):
+            autodiscover.install()
+        assert f"{app}.realtime" not in _loads(app)
 
 
 class TestModuleFailures:

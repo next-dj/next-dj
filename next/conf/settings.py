@@ -5,7 +5,7 @@ The merge runs on first access and caches until `reload()` emits `settings_reloa
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.conf import settings
 
@@ -15,10 +15,14 @@ from .merge import BOOL_KEYS, LIST_KEYS, STR_KEYS, merge_user_settings
 from .signals import dispatch_settings_reloaded
 
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+
 class NextFrameworkSettings:
     """Lazy merged view of top-level keys declared in `DEFAULTS`."""
 
-    DEFAULTS: ClassVar[dict[str, Any]] = DEFAULTS
+    DEFAULTS: ClassVar[Mapping[str, Any]] = DEFAULTS
     LIST_KEYS: ClassVar[frozenset[str]] = LIST_KEYS
     STR_KEYS: ClassVar[frozenset[str]] = STR_KEYS
     BOOL_KEYS: ClassVar[frozenset[str]] = BOOL_KEYS
@@ -54,7 +58,7 @@ class NextFrameworkSettings:
     def __getattr__(self, attr: str) -> Any:
         """Return merged values for keys declared in `DEFAULTS`.
 
-        `DEFAULTS` is open for third-party keys, so only `Any` fits as the return type.
+        The `DEFAULTS` keys are fixed at import and each holds its own type, so `Any`.
         """
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]

@@ -5,6 +5,7 @@ from next.components.manager import components_manager
 from next.deps import Depends, UnknownDependencyError, resolver
 from next.forms import ActionRegistration, FormActionNotFoundError
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.static.collector import StaticCollector
 from next.static.manager import StaticManager, get_static_manager
 from next.testing.patching import (
@@ -169,6 +170,7 @@ class TestOverrideFormAction:
             assert after is not None
             assert after["handler"] is original
             assert after["file_path"] == str(forms_file)
+            assert "_pt_existing" not in registration_diagnostics.shared_name_collisions
         finally:
             backend.restore(saved)
 

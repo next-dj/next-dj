@@ -5,8 +5,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from next.forms import Form
 from next.partial import Patches, is_partial_request
 from next.urls import page_reverse
-from polls.broker import build_snapshot
 from polls.models import Choice, Poll
+from polls.snapshots import build_snapshot
 
 
 class VoteForm(Form):
@@ -28,6 +28,14 @@ class VoteForm(Form):
         poll_pk = self.data.get(self.add_prefix("poll"))
         if poll_pk:
             self.fields["choice"].queryset = Choice.objects.filter(poll_id=poll_pk)
+
+    def clean(self) -> dict[str, object]:
+        """Reject votes against a poll that has closed or reached its deadline."""
+        cleaned_data = super().clean()
+        poll = cleaned_data.get("poll")
+        if poll is not None and not poll.accepts_votes():
+            self.add_error(None, "This poll is closed.")
+        return cleaned_data
 
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Increment the chosen choice, then morph the results zone with new counts."""

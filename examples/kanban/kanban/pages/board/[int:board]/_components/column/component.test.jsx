@@ -34,6 +34,16 @@ describe("Column", () => {
     expect(onDrop).toHaveBeenCalledWith("7", 1, 1);
   });
 
+  it("ignores a drop that carries no card", () => {
+    const onDrop = vi.fn();
+    render(<Column column={makeColumn()} onDrop={onDrop} />);
+    const colEl = document.querySelector("[data-kanban-column='1']");
+    fireEvent.dragOver(colEl);
+    fireEvent.drop(colEl, { dataTransfer: { getData: () => "" } });
+    expect(onDrop).not.toHaveBeenCalled();
+    expect(colEl.className).not.toContain("drop-active");
+  });
+
   it("adds drop-active class on dragover", () => {
     render(<Column column={makeColumn()} onDrop={vi.fn()} />);
     const colEl = document.querySelector("[data-kanban-column='1']");
@@ -124,5 +134,29 @@ describe("Column", () => {
     render(<Column column={col} onDrop={vi.fn()} />);
     const badge = document.querySelector("[data-kanban-wip]");
     expect(badge.className).toContain("rose");
+  });
+
+  it("hands each card who is dragging it and the drag callback", () => {
+    const onDragChange = vi.fn();
+    const col = makeColumn([
+      { id: 10, title: "Task A", position: 0 },
+      { id: 11, title: "Task B", position: 1 },
+    ]);
+    render(
+      <Column
+        column={col}
+        dragging={{ 11: { name: "Ada Lovelace", initials: "AL" } }}
+        onDrop={vi.fn()}
+        onDragChange={onDragChange}
+      />,
+    );
+    expect(document.querySelectorAll("[data-kanban-dragged-by]")).toHaveLength(1);
+    expect(
+      document.querySelector("[data-kanban-card='11'] [data-kanban-dragged-by]"),
+    ).toBeTruthy();
+    fireEvent.dragStart(document.querySelector("[data-kanban-card='10']"), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    expect(onDragChange).toHaveBeenCalledWith(10, true);
   });
 });

@@ -22,13 +22,14 @@ The framework does not bypass any standard :doc:`Django middleware <django:topic
 - Django template engine :doc:`auto escaping <django:ref/templates/language>` is active for every page and component template.
 
 A standard ``MIDDLEWARE`` block in ``settings.py`` inherits the middleware half of that baseline.
-The rest does not travel through middleware at all, template auto escaping being the largest part, and a middleware list can also hold every entry in the wrong order, which is the classic way a standard block still leaves a gap.
+The rest does not travel through middleware at all, template auto escaping being the largest part.
+A middleware list can also hold every entry in the wrong order, which is the classic way a standard block still leaves a gap.
 Follow the ordering Django's :doc:`middleware reference <django:ref/middleware>` prescribes and confirm the result with ``manage.py check --deploy``.
 
 Framework specific surfaces
 ---------------------------
 
-The framework adds four surfaces that warrant attention.
+The framework adds five surfaces that warrant attention.
 
 File router input.
    Captured URL parameters and query values reach Python through the dependency resolver.
@@ -46,6 +47,10 @@ Partial rendering endpoints.
    Zone GET requests and the SSE stream answer partial clients.
    See :doc:`/content/topics/partial-rendering/sse` for the streaming surface and `Access control`_ for the guard model of both.
 
+Realtime socket.
+   The WebSocket serves topic streams, upstream events, and, for actions that opt in, tunneled form requests.
+   See `The WebSocket tunnel`_ and :doc:`/content/topics/realtime`.
+
 Common threats
 --------------
 
@@ -58,6 +63,7 @@ XSS.
    Context functions that return ``mark_safe`` strings or HTML strings bypass escaping.
    Apply ``mark_safe`` only to values you fully control, and never to untrusted input as covered in :doc:`di-and-untrusted-input`.
    The framework escapes ``<``, ``>``, ``&``, U+2028, and U+2029 in the inline init payload, so a serialised value that contains ``</script>`` cannot break out of the tag.
+   The HTML carried by ``morph``, ``replace``, ``inner``, and ``append`` patches is inserted unescaped, so untrusted text must be escaped before it enters a patch, see :doc:`/content/ref/partial`.
    The remaining risk is that serialised values appear in the page source, so never mark a secret ``serialize=True``, see :doc:`static-assets`.
 
 SQL injection.
@@ -76,16 +82,9 @@ File uploads.
    See :doc:`file-uploads`.
 
 Origin spoofing.
-   The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
-   Before it resolves anything a path-only rule refuses every absolute URL, this host's own included, along with a protocol-relative value such as ``//evil.example`` or ``/\evil.example`` and any value carrying a tab, a newline, or a carriage return, see :doc:`csrf-and-forms`.
-   The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
-   A value that does not resolve returns HTTP 400 on the paths that need the origin page, a validation failure, a wizard step, and a handler that returns ``None`` and so re-renders the origin in place.
-   Every POST reads the field all the same, because the page it names authorizes the request, and a handler that answers with a response of its own needs nothing further from it.
-   Substituting the origin of another routed page is contained by that page's own authorization, because the dispatcher resolves the origin and then asks the page it names whether it would serve this request, before any handler runs.
-   A page authorizes the submission when its ``render()`` returns no response, and a page with no ``render()`` at all authorizes every caller, exactly as its own view serves every caller.
-   A page that short-circuits answers the POST with its own response verbatim, so a substituted origin can only ever name a page the requester may already be served.
-   The page is asked against a request restated as a GET of the origin URL, carrying the user, the session and everything else a middleware attached, so a guard keyed on the shape of the request answers the submission as it answers a visit rather than refusing both or neither by accident.
-   A denial at this layer emits ``form_access_denied`` with ``layer="page"``, so an audit receiver sees it alongside the two hook layers.
+   The only page identity a form submission carries is the ``_next_form_origin`` URL path, which a path-only rule checks before the dispatcher resolves it through the URLconf, see :doc:`csrf-and-forms`.
+   A value that does not resolve returns HTTP 400 on the paths that need the origin page.
+   Substituting the origin of another routed page is contained by that page's own authorization, because the dispatcher asks the page the origin names whether it would serve the request before any handler runs, and a denial emits ``form_access_denied`` with ``layer="page"``.
    A guard written inside ``render()`` is therefore the supported page-level check on this path, see `Access control`_, :doc:`/content/topics/pages` and :doc:`/content/topics/forms/validation-rerender`.
 
 Caching and content negotiation.
@@ -150,7 +149,41 @@ It travels the page's own URL through the same routed view, so the page's access
 A zone inside a ``{% has_perm %}`` block of the page, or in the body of a component that decides what it shows, is refused to every partial request as an unknown zone, so the decision about a permission lives inside the zone, see :ref:`topics-permissions-zones`.
 
 An SSE stream is a response the project returns from one of its own pages, not an endpoint the framework adds.
-The authorization of that page is therefore the only gate on the stream, and a stream that fans out rows a visitor may not read needs the filter in the generator that produces them, see :doc:`/content/topics/partial-rendering/sse`.
+The authorization of that page is therefore the first gate on the stream.
+Row-level access that a topic callback does not express belongs in that guarded page.
+
+An importable ``authorize(user, topic)`` callback on ``TopicStream`` keeps protecting the stream after the page guard ran, over SSE and WebSocket alike.
+Each connection rechecks its session and calls the callback at most once per heartbeat interval, so a revocation is noticed within about two heartbeat intervals plus the callback's latency.
+A topic denial ends an SSE stream with a terminal ``next-end`` frame, while a revoked session ends it without one so the reconnect meets the page guard again.
+A denied socket closes with ``4401`` for a session problem or ``4403`` for a topic denial.
+
+Presence puts what a visitor shows into the stream of everyone else.
+With ``presence=True`` the stream stores and sends a number only, and no data about people leaves the server.
+With an ``identify`` callable every subscriber of the topic that identifies its own members receives the whole mapping it returns for every attendee, in the ``members`` list of the ``next:presence`` event, so ``identify`` is the privacy boundary.
+The server cuts ``members`` from the event for a stream with ``presence=True`` or without presence, over SSE and WebSocket alike.
+Return only public fields such as a display name or a handle, and never an e-mail address, a primary key, or a permission.
+Only those who may open the stream see the attendance, because the event passes the page guard and the ``authorize`` callback like any message.
+The mapping is capped at ``REALTIME['PRESENCE']['MEMBER_BYTES']`` bytes and the list at ``REALTIME['PRESENCE']['SIZE']`` members.
+Over WebSocket the ticket carries the dotted path of ``identify`` and the socket calls it with the session user of the handshake, never with a value from the client.
+
+WebSocket negotiation issues a short-lived session-bound ticket through that guarded page.
+The ticket is sent in the first socket frame, never in the URL, and carries the stream's topics, transform, and authorizer reference.
+A ticket is signed from ``SECRET_KEY`` and stays reusable until ``REALTIME['TICKET_MAX_AGE']``, see :doc:`/content/ref/realtime`.
+If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
+The default binding needs a server-side session engine, and ``next.W142`` reports the signed-cookie engine, see :ref:`topics-realtime-signed-cookie`.
+``SignedCookieBinding`` serves the signed-cookie engine, keeps an open socket running after logout, and ``next.W147`` reports it next to a server-side engine.
+A handler sees an opaque ``subject`` digest of the identity and never the session key or another credential.
+Under the default binding the socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.
+The WebSocket Origin check follows Django's CSRF rule, so the Origin has to name the validated ``Host`` or match ``CSRF_TRUSTED_ORIGINS``, and a connection with no Origin is refused, see :doc:`/content/deployment/wsgi-asgi`.
+The SSE GET carries no Origin check, so SSE access rests on the page guard, ``authorize=``, and SameSite cookies.
+
+The ticket introspection endpoint for gateways outside Python is off until a URLconf includes it.
+It accepts only a POST with the ``REALTIME['GATEWAY_TOKEN']`` bearer and compares the token in constant time.
+A malformed body answers ``400`` after the bearer check, and a wrong caller or an invalid ticket gets the same single ``403`` body.
+See :doc:`/content/howto/stream-over-websockets`.
+
+Published topic operations must not carry rendered HTML.
+Publish a ``refresh`` and let each subscriber's guarded HTTP request render the response for that user.
 
 Every zone morph enforces page-level access on its own.
 A ``morph(zone=..., page=...)`` onto a foreign page checks that page's access rule and re-runs its authorization chain, and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
@@ -175,6 +208,30 @@ Production hardening
 Every production setting the framework cares about is a stock Django one, and ``uv run python manage.py check --deploy`` reports each one that is unset or unsafe, so run it and resolve every warning against Django's :doc:`deployment checklist <django:howto/deployment/checklist>`.
 The one entry worth naming here is ``CSRF_TRUSTED_ORIGINS``, because the form dispatch path posts to ``/_next/form/<uid>/`` and a submission from another origin fails the middleware check without it, see :doc:`csrf-and-forms`.
 
+The WebSocket tunnel
+--------------------
+
+A form action that declares ``transport="any"`` can be posted through an open WebSocket, see :ref:`topics-forms-actions-transport` and :doc:`/content/topics/realtime`.
+The tunnel adds no second authorization model.
+Each frame becomes an ordinary ASGI request to the same Django application, so the middleware stack, CSRF check, sessions, authentication, and the action's guards run as they do for HTTP.
+An action that did not opt in answers ``421`` before its guards run, and the tunnel only reaches the form dispatch endpoint.
+
+The request takes its cookies, host, origin, and proxy headers from the WebSocket handshake, and the page cannot replace them.
+Cookies are frozen at the handshake, so a rotated session or CSRF token makes the reply ``stale`` and the client repeats the post over HTTP.
+Every tunneled request runs the access recheck of the stream first, so a revoked session or grant closes the socket with ``4401`` or ``4403`` within one heartbeat.
+
+A WebSocket cannot set a cookie, so the tunnel never applies one.
+A reply that sets a cookie becomes the ``http_only`` refusal after the action has run, and ``cycle_key()`` and ``flush()`` raise ``SessionRotationError`` so ``login()`` and ``logout()`` leave the stored session intact.
+Login, logout, and every action that sets its own cookie therefore keep the default ``transport="http"``.
+``next.W145`` reports the cookie message storage that turns a success message into ``http_only``.
+
+The framework limits each connection and caps no number of open streams per user, address, or process.
+The proxy and the Redis ``maxclients`` and pool limits own that cap, see :ref:`deployment-capacity`.
+One bucket serves every frame after ``sub``, and three refusals in a row close the socket with ``4429``, so the close slows a flood down rather than banning the client.
+Upstream events, tunneled requests, and reply bodies carry their own concurrency, time, and size limits, see :doc:`/content/ref/realtime`.
+Upstream events stay inside the topics of the ticket and the access recheck.
+A handler treats ``data`` as untrusted input.
+
 System checks
 -------------
 
@@ -186,6 +243,8 @@ The framework system checks cover configuration mistakes that affect security.
 - ``next.E046`` reports one shared action name declared by two different modules, where a lookup by bare name resolves to whichever module imported first.
 - ``next.W060`` reports an action that declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, so the guard described under `Access control`_ cannot resolve users or permissions.
 - ``next.W061`` reports an action that declares ``Meta.success_message`` while the messages framework is not fully installed, which makes the submission raise ``MessageFailure``.
+- ``next.W145`` reports an action that opts in to the WebSocket tunnel while messages are stored in a cookie.
+- ``next.W146`` reports an explicit ``WebSocketApp`` origin that ``CSRF_TRUSTED_ORIGINS`` does not cover, whose tunneled posts fail the CSRF check.
 
 Run them with ``uv run python manage.py check``.
 
@@ -195,6 +254,7 @@ See also
 .. seealso::
 
    :doc:`csrf-and-forms` for the form pipeline.
+   :doc:`/content/topics/realtime` for upstream events and form actions over WebSocket.
    :doc:`sessions-and-auth` for the session and the authenticated user.
    :doc:`static-assets` for the static pipeline.
    :doc:`di-and-untrusted-input` for the dependency surface.

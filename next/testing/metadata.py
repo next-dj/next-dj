@@ -188,7 +188,7 @@ def head_tags(html: str) -> HeadTags:
 def _prefixed(tags: HeadTags, block: str, expected: object) -> object:
     """Return the tags of an `og` or `twitter` block, the suffixes `expected` names.
 
-    Without a mapping the whole block is returned, `None` when the head has no tag of it.
+    Without a mapping the whole block returns, `None` when the head has no tag of it.
     """
     attribute, prefix = _PREFIXED[block]
     found = tags.properties if attribute == "property" else tags.names

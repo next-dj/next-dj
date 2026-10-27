@@ -3,7 +3,8 @@ import "./next";
 // The scripts chunk registers on evaluation, as it does once the runtime fetches it.
 import "./entries/scripts";
 // The single-module chunks register the same way.
-import "./entries/sse";
+import "./entries/stream";
+import "./entries/ws";
 import "./entries/csrf";
 import "./entries/poll";
 
@@ -30,7 +31,9 @@ interface NextStatic {
       document?: Document;
       fetch?: (input: string, init: RequestInit) => Promise<Response>;
       navigate?: (url: string) => void;
+      source?: { open(url: string): { close(): void } };
     }): void;
+    stream: { scan(root: ParentNode): void };
     _reset(): void;
   };
   consent: Consent;
@@ -297,6 +300,26 @@ describe("window.Next", () => {
 
   it("exposes a use method", () => {
     expect(typeof win.Next.use).toBe("function");
+  });
+
+  it("opens a stream through the module the stream chunk lands", () => {
+    const opened: string[] = [];
+    win.Next._init({});
+    win.Next.partial._configure({
+      document,
+      source: {
+        open: (url) => {
+          opened.push(url);
+          return { close: () => undefined };
+        },
+      },
+    });
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    win.Next.partial.stream.scan(document);
+    expect(opened).toEqual(["/stream/"]);
+    expect(document.querySelector("script")).toBeNull();
+    document.body.innerHTML = "";
+    win.Next.partial._reset();
   });
 
   it("ignores a chunk handshake naming a module this runtime does not know", () => {

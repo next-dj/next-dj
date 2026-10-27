@@ -8,19 +8,36 @@ import {
   HEADER_REQUEST_ID,
   HEADER_VERSION,
   HEADER_ZONE,
+  REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
   newId,
   pageKey,
   sameOrigin,
 } from "./protocol";
-import type { PartialError } from "./protocol";
+import type { PartialError, WireTransport } from "./protocol";
 import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
+import type { Applied, Envelope } from "./apply";
 import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
 // Kept apart from the version guard's flag in assets.ts, so neither clears the other.
 const NAVIGATED_FLAG = "next:partial:navigated";
+
+/** How one request ended, the value Next.partial.submit and Next.partial.fetch resolve. */
+export interface Outcome {
+  status: "ok" | "invalid" | "error" | "dropped";
+  applied: boolean;
+  errors?: Record<string, string[]> | undefined;
+  envelope?: Envelope;
+  error?: PartialError;
+  location?: string;
+}
+
+export const none = (status: Outcome["status"]): Outcome => ({
+  status,
+  applied: false,
+});
 
 /** Fetch stand-in so vitest can drive requests deterministically. */
 export type FetchAdapter = (input: string, init: RequestInit) => Promise<Response>;
@@ -73,7 +90,10 @@ export interface WireRequest {
   // The initiating form's data-next-key, threaded to apply for a repeated form.
   key?: string;
   // The page a mutation was submitted from, which receives the meta op of the reply.
-  owner?: string;
+  owner?: string | undefined;
+  transport?: WireTransport;
+  wait?: boolean | "latest";
+  navigate?: boolean;
 }
 
 /**
@@ -89,7 +109,7 @@ export type EnvelopeHandler = (
   key: string | undefined,
   page: string | undefined,
   owner: string | undefined,
-) => void;
+) => Promise<Applied>;
 
 /** Turns a foreign content-type body into a JSON-ish envelope before apply. */
 export type ParseHook = (response: Response, body: string) => unknown;
@@ -111,6 +131,14 @@ export interface WireDeps {
   // Every mutating request stamps X-Next-Request-Id and reports it here so the
   // SSE echo ring drops the matching stream event. Absent, no id is stamped.
   rememberRequestId?: (id: string) => void;
+  // A mutation with no reply may still have committed, so its echo must refresh.
+  forgetRequestId?: (id: string) => void;
+  // A string is why a request the server received got no reply, undefined means fetch.
+  tunnel?: (
+    target: string,
+    init: RequestInit,
+    csrf?: string,
+  ) => Promise<Response | string | undefined> | undefined;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -129,11 +157,13 @@ export class Wire {
   readonly #csrf: CsrfSource;
   readonly #dirtySnapshot: () => number;
   readonly #rememberRequestId: (id: string) => void;
+  readonly #forgetRequestId: (id: string) => void;
+  readonly #tunnel: NonNullable<WireDeps["tunnel"]>;
 
   // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds
   // only its in-flight request, so a key is removed once it settles or is aborted.
   readonly #queues = new Map<string, AbortController>();
-  readonly #busy = new Set<string>();
+  readonly #busy = new Map<string, ((go: boolean) => void)[]>();
   readonly #parseHooks = new Map<string, ParseHook>();
 
   constructor(deps: WireDeps) {
@@ -147,6 +177,8 @@ export class Wire {
     this.#csrf = deps.csrf;
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
+    this.#forgetRequestId = deps.forgetRequestId ?? (() => undefined);
+    this.#tunnel = deps.tunnel ?? (() => undefined);
   }
 
   /** Abort every in-flight request and drop all state, for vitest isolation. */
@@ -155,6 +187,9 @@ export class Wire {
       controller.abort();
     }
     this.#queues.clear();
+    for (const waiters of this.#busy.values()) {
+      for (const resume of waiters.splice(0)) resume(false);
+    }
     this.#busy.clear();
     this.#parseHooks.clear();
   }
@@ -167,6 +202,14 @@ export class Wire {
     this.#parseHooks.set(contentType, hook);
   }
 
+  /** Decode an SSE envelope with the hook registered for its protocol content type. */
+  parseStream(contentType: string, body: string): unknown {
+    const baseType = contentType.replace(/;.*$/, "").trim();
+    const hook = this.#parseHooks.get(baseType);
+    const response = new Response(body, { headers: { "content-type": baseType } });
+    return hook === undefined ? JSON.parse(body) : hook(response, body);
+  }
+
   /**
    * Abort the in-flight request on a queue without starting a new one, so a form submit
    * can cancel its own inline validation and a late reply to it is dropped.
@@ -177,25 +220,37 @@ export class Wire {
   }
 
   /** Shape, queue or lock, send, and classify a single request. */
-  async fetch(request: WireRequest): Promise<void> {
+  async fetch(request: WireRequest): Promise<Outcome> {
     const target = sameOrigin(request.url, this.#document);
     if (target === undefined) {
-      this.#dispatch("partial:error", {
+      return this.#fail({
         kind: "network",
         url: request.url,
         error: new Error("cross-origin request refused"),
-      } satisfies PartialError);
-      return;
+      });
     }
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
     const uid = request.uid;
     // An abortable POST (inline validation) queues like a safe GET, taking no lock.
-    const locked = !safe && !request.abortable && uid !== undefined;
-    if (locked) {
+    let release: (() => void) | undefined;
+    if (!safe && !request.abortable && uid !== undefined) {
       // A second submit is dropped while busy, so a double click sends one fetch.
-      if (this.#busy.has(uid)) return;
-      this.#busy.add(uid);
+      const busy = this.#busy.get(uid);
+      if (busy) {
+        if (!request.wait) return none("dropped");
+        if (request.wait === "latest")
+          for (const resume of busy.splice(0)) resume(false);
+        if (!(await new Promise<boolean>((resume) => busy.push(resume))))
+          return none("dropped");
+      }
+      const waiters = busy ?? [];
+      if (!busy) this.#busy.set(uid, waiters);
+      release = () => {
+        const next = waiters.shift();
+        if (next) next(true);
+        else this.#busy.delete(uid);
+      };
     }
     // Queued before a token wait, so a submit can still abort its own validation.
     const queueKey = this.#queueKey(request, safe);
@@ -205,22 +260,19 @@ export class Wire {
       // A deferred token is fetched inside the lock, so a double submit fetches once.
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
         const ensured = await this.#csrf.ensure();
-        if (ensured === null) return;
+        if (ensured === null) return none("error");
         csrf = ensured;
         if (csrf?.token === undefined) {
-          this.#dispatch("partial:error", {
+          return this.#fail({
             kind: "csrf",
             url: request.url,
             error: new Error("no CSRF token for the mutation"),
-          } satisfies PartialError);
-          return;
+          });
         }
       }
-      await this.#run(request, target, method, csrf, queueKey, entry);
+      return await this.#run(request, target, method, csrf, queueKey, entry);
     } finally {
-      if (locked) {
-        this.#busy.delete(uid);
-      }
+      release?.();
       if (queueKey !== undefined && this.#queues.get(queueKey) === entry) {
         this.#queues.delete(queueKey);
       }
@@ -256,11 +308,7 @@ export class Wire {
     csrf: CsrfPayload | undefined,
     queueKey: string | undefined,
     entry: AbortController | undefined,
-  ): Promise<void> {
-    const headers = this.#headers(request, method, csrf);
-    const init: RequestInit = { method, headers, mode: "same-origin" };
-    if (request.body !== undefined) init.body = request.body;
-    if (entry !== undefined) init.signal = entry.signal;
+  ): Promise<Outcome> {
     // Snapshot the dirty counter before the request is sent. A field touched after
     // this point is dirty relative to the response it will receive.
     const snapshot = this.#dirtySnapshot();
@@ -269,21 +317,55 @@ export class Wire {
       method,
       intent: { zone: request.zone, uid: request.uid },
     });
-    // The body read runs inside the try too, since an abort or a dropped connection
-    // can reject it after the headers arrived.
+    // Inside the try, since a caller's header name can be invalid and an abort or a
+    // dropped connection can reject the body read after the headers arrived.
+    let own: string | undefined;
     try {
-      const response = await this.#fetch(target, init);
+      const headers = this.#headers(request, method, csrf);
+      // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
+      if (
+        !SAFE_METHODS.has(method) &&
+        request.abortable !== true &&
+        !headers.has(HEADER_REQUEST_ID)
+      ) {
+        own = newId();
+        headers.set(HEADER_REQUEST_ID, own);
+        this.#rememberRequestId(own);
+      }
+      const init: RequestInit = { method, headers, mode: "same-origin" };
+      if (request.body !== undefined) init.body = request.body;
+      if (entry !== undefined) init.signal = entry.signal;
+      const tunneled =
+        request.transport === "any" && method === "POST"
+          ? await this.#tunnel(target, init, csrf?.header)
+          : undefined;
+      if (typeof tunneled === "string" && request.abortable !== true) {
+        if (own !== undefined) this.#forgetRequestId(own);
+        const failed = this.#fail({
+          kind: "undelivered",
+          url: request.url,
+          reason: tunneled,
+        });
+        if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
+        return failed;
+      }
+      const response =
+        tunneled instanceof Response ? tunneled : await this.#fetch(target, init);
       // A safe-GET response that a newer request superseded is dropped unreported.
-      if (queueKey !== undefined && this.#queues.get(queueKey) !== entry) return;
-      await this.#classify(request, target, method, response, snapshot);
+      if (queueKey !== undefined && this.#queues.get(queueKey) !== entry)
+        return none("dropped");
+      return await this.#classify(request, target, method, response, snapshot);
     } catch (error) {
       // An AbortError means the request was superseded, so nothing is reported.
-      if (isAbortError(error)) return;
-      this.#dispatch("partial:error", {
-        kind: "network",
-        error,
-      } satisfies PartialError);
+      if (isAbortError(error) || entry?.signal.aborted === true) return none("dropped");
+      if (own !== undefined) this.#forgetRequestId(own);
+      return this.#fail({ kind: "network", error });
     }
+  }
+
+  #fail(error: PartialError): Outcome {
+    this.#dispatch("partial:error", error);
+    return { ...none("error"), error };
   }
 
   async #classify(
@@ -292,21 +374,16 @@ export class Wire {
     method: string,
     response: Response,
     snapshot: number,
-  ): Promise<void> {
+  ): Promise<Outcome> {
     // A 409 on a safe method means an asset version mismatch with an empty body. The
     // runtime then does a full visit of the current URL and nothing else.
     if (response.status === 409 && SAFE_METHODS.has(method)) {
       this.#navigate(response.url || target);
-      return;
+      return none("ok");
     }
     if (response.status >= 500) {
       const body = await response.text();
-      this.#dispatch("partial:error", {
-        kind: "http",
-        status: response.status,
-        body,
-      } satisfies PartialError);
-      return;
+      return this.#fail({ kind: "http", status: response.status, body });
     }
     // Only a safe zone GET names a page. Mutations keep the unscoped resolve.
     const page =
@@ -320,16 +397,14 @@ export class Wire {
     if (hook === undefined && (baseType !== CONTENT_TYPE || response.redirected)) {
       const navigates = response.redirected || SAFE_METHODS.has(method);
       const refused = !response.redirected && (response.status >= 400 || !navigates);
-      if (refused) {
-        const body = await response.text();
-        this.#dispatch("partial:error", {
-          kind: "http",
-          status: response.status,
-          body,
-        } satisfies PartialError);
-      }
+      if (!refused)
+        return request.navigate === false
+          ? { ...none("ok"), location: response.url || target }
+          : this.#fallbackNavigate(response.url || target);
+      const body = await response.text();
+      const failed = this.#fail({ kind: "http", status: response.status, body });
       if (navigates) this.#fallbackNavigate(response.url || target);
-      return;
+      return failed;
     }
     const body = await response.text();
     // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
@@ -339,13 +414,23 @@ export class Wire {
       // Cleared once the body parses, so a later non-envelope reply on this page
       // navigates once more.
       this.#session.remove(NAVIGATED_FLAG);
-      this.#onEnvelope(raw, response, snapshot, request.key, page, request.owner);
+      const { envelope, ok } = await this.#onEnvelope(
+        raw,
+        response,
+        snapshot,
+        request.key,
+        page,
+        request.owner,
+      );
+      const invalid = envelope.form?.valid === false;
+      return {
+        status: invalid ? "invalid" : response.status < 400 ? "ok" : "error",
+        applied: ok,
+        envelope,
+        errors: invalid ? envelope.form.errors : undefined,
+      };
     } catch (error) {
-      this.#dispatch("partial:error", {
-        kind: "parse",
-        body,
-        error,
-      } satisfies PartialError);
+      return this.#fail({ kind: "parse", body, error });
     }
   }
 
@@ -353,17 +438,17 @@ export class Wire {
   // stub, maintenance) cannot loop navigation, since a `lazy="load"` zone requests
   // again on every page. The first navigates and sets the flag, and a second while it
   // is set fires a partial:error and leaves the page in place.
-  #fallbackNavigate(url: string): void {
+  #fallbackNavigate(url: string): Outcome {
     if (this.#session.get(NAVIGATED_FLAG) === "1") {
       this.#session.remove(NAVIGATED_FLAG);
-      this.#dispatch("partial:error", {
+      return this.#fail({
         kind: "network",
         error: new Error("zone answered non-envelope after a navigation"),
-      } satisfies PartialError);
-      return;
+      });
     }
     this.#session.set(NAVIGATED_FLAG, "1");
     this.#navigate(url);
+    return none("ok");
   }
 
   // Headers, not a plain record, so a caller writing a name in another case still
@@ -383,15 +468,8 @@ export class Wire {
     const version = this.#version();
     if (version) headers.set(HEADER_VERSION, version);
     if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);
-    if (!SAFE_METHODS.has(method)) {
-      if (csrf?.token !== undefined) headers.set(csrf.header, csrf.token);
-      // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
-      if (request.abortable !== true && !headers.has(HEADER_REQUEST_ID)) {
-        const id = newId();
-        headers.set(HEADER_REQUEST_ID, id);
-        this.#rememberRequestId(id);
-      }
-    }
+    if (!SAFE_METHODS.has(method) && csrf?.token !== undefined)
+      headers.set(csrf.header, csrf.token);
     return headers;
   }
 }

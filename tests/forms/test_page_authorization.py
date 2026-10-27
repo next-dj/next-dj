@@ -68,7 +68,7 @@ class TestAnonymousSubmissionIsRefusedByThePage:
     def test_zone_morph_is_refused_before_the_zone_renders(
         self, next_client: NextClient
     ) -> None:
-        response = _post_note(next_client, "x" * 20, partial=True, zones="guarded-zone")
+        response = _post_note(next_client, "x" * 20, partial="guarded-zone")
         assert response.status_code == 302
         assert b"classified" not in response.content
 
@@ -105,7 +105,7 @@ class TestAuthorizedSubmissionIsUntouched:
     def test_zone_morph_renders_the_guarded_zone(
         self, next_client: NextClient, member: User
     ) -> None:
-        response = _post_note(next_client, "x" * 20, partial=True, zones="guarded-zone")
+        response = _post_note(next_client, "x" * 20, partial="guarded-zone")
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["guarded-zone"]
 

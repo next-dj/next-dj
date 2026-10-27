@@ -11,6 +11,7 @@ from next.static import (
     StaticManager,
     reset_default_manager,
 )
+from next.static.runtime import forget_realtime_offer
 from tests.support import RecordingStaticBackend, component_info
 
 
@@ -21,6 +22,14 @@ if TYPE_CHECKING:
 
 CSS_URL = "https://example.com/a.css"
 JS_URL = "https://example.com/a.js"
+
+
+@pytest.fixture()
+def forgotten_realtime_offer() -> Generator[None]:
+    """Resolve the realtime offer afresh in the test and drop what it memoised."""
+    forget_realtime_offer()
+    yield
+    forget_realtime_offer()
 
 
 @pytest.fixture()

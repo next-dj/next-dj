@@ -35,6 +35,7 @@ Place ``base.py``, ``dev.py``, and ``prod.py`` beside it.
        dev.py
        prod.py
      urls.py
+     asgi.py
      wsgi.py
 
 Define the shared base
@@ -53,8 +54,8 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
    INSTALLED_APPS = [
        "django.contrib.contenttypes",
        "django.contrib.auth",
-       "django.contrib.staticfiles",
        "next",
+       "django.contrib.staticfiles",
        "notes",
    ]
 
@@ -69,6 +70,8 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
            },
        ],
    }
+
+``next`` stays above ``django.contrib.staticfiles`` so its ``runserver`` wins, as :ref:`the install guide explains <intro-install-app-order>`.
 
 Override for development
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -156,7 +159,7 @@ Run the framework system checks under each module.
    uv run python manage.py check
    DJANGO_SETTINGS_MODULE=config.settings.prod uv run python manage.py check --deploy
 
-Both runs report no errors.
+Both runs report no errors, and the production run lists the deployment warnings the base settings still earn, such as ``next.W110`` for a missing ``SITE["URL"]`` and ``next.W149`` for the in-process broker.
 The development run has ``DEBUG`` on and the production run has it off.
 The production run carries the ``STRICT_CONTEXT`` override, the development run keeps the default.
 

@@ -4,6 +4,7 @@ import copy
 import sys
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -26,7 +27,6 @@ if TYPE_CHECKING:
         Mapping,
         Set as AbstractSet,
     )
-    from pathlib import Path
 
     import pytest
 
@@ -148,15 +148,27 @@ def patched_watch_sources(
 
 @contextmanager
 def importable_dir(directory: Path) -> Generator[None, None, None]:
-    """Put `directory` on `sys.path` and drop the modules imported from it."""
+    """Put `directory` on `sys.path` and drop the modules imported from it.
+
+    A library first imported inside the block stays, so its classes keep one identity.
+    """
     before = set(sys.modules)
-    sys.path.insert(0, str(directory))
+    root = str(directory)
+    sys.path.insert(0, root)
     try:
         yield
     finally:
-        sys.path.remove(str(directory))
+        sys.path.remove(root)
         for name in set(sys.modules) - before:
-            del sys.modules[name]
+            if _imported_from(sys.modules[name], root):
+                del sys.modules[name]
+
+
+def _imported_from(module: object, root: str) -> bool:
+    """Whether a module or package was loaded from a file under `root`."""
+    file = getattr(module, "__file__", None)
+    locations = [file] if file else list(getattr(module, "__path__", ()))
+    return any(Path(location).is_relative_to(root) for location in locations)
 
 
 # Every checks submodule binds `get_router_manager` at import, so patch each module.

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card } from "../card/component";
 
-export function Column({ column, onDrop, onCreate }) {
+export function Column({ column, dragging = {}, onDrop, onCreate, onDragChange }) {
   const [dropActive, setDropActive] = useState(false);
   const [draft, setDraft] = useState("");
   const overLimit = column.wip_limit != null && column.cards.length > column.wip_limit;
@@ -18,6 +18,7 @@ export function Column({ column, onDrop, onCreate }) {
         e.preventDefault();
         setDropActive(false);
         const cardId = e.dataTransfer.getData("text/card-id");
+        if (!cardId) return;
         onDrop(cardId, column.id, column.cards.length);
       }}
       className={`kanban-column flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 w-64${dropActive ? " drop-active ring-2 ring-blue-400" : ""}`}
@@ -37,7 +38,12 @@ export function Column({ column, onDrop, onCreate }) {
       </header>
       <div className="flex flex-col gap-2">
         {column.cards.map((card) => (
-          <Card key={card.id} {...card} />
+          <Card
+            key={card.id}
+            {...card}
+            draggedBy={dragging[card.id]}
+            onDragChange={onDragChange}
+          />
         ))}
       </div>
       {/* mt-1 lands on the same gap the server markup gets from mt-3, because

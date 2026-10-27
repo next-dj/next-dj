@@ -157,6 +157,24 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`stream-live-updates-with-sse`
    Push live updates to the browser with server-sent events.
 
+:doc:`stream-over-websockets`
+   Serve topic streams over a WebSocket and run it in development and production.
+
+:doc:`bind-tickets-to-your-own-identity`
+   Bind WebSocket tickets to signed-cookie sessions or an identity of your own.
+
+:doc:`deliver-events-durably`
+   Publish events that must not be lost through an outbox table and a worker.
+
+:doc:`count-down-to-a-server-deadline`
+   Display a countdown using the server's estimated clock.
+
+:doc:`fan-out-across-processes-with-redis`
+   Share realtime publications across workers through Redis.
+
+:doc:`write-a-broker-backend`
+   Carry topics through a custom broker with replay, or reach Redis through Sentinel.
+
 :doc:`split-settings-per-environment`
    Split settings into base, dev, and prod modules.
 
@@ -209,6 +227,12 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    observe-framework-signals
    write-a-vendor-adapter
    stream-live-updates-with-sse
+   stream-over-websockets
+   bind-tickets-to-your-own-identity
+   deliver-events-durably
+   count-down-to-a-server-deadline
+   fan-out-across-processes-with-redis
+   write-a-broker-backend
    split-settings-per-environment
 
 .. seealso::

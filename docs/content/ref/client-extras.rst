@@ -19,7 +19,8 @@ Next.ready("scripts")
 
 ``Next.ready("scripts")`` returns a ``Promise<ScriptsChunk>`` that resolves with ``{consent, scripts}`` once the chunk has loaded and taken the page's init payload.
 It fetches the chunk on a page that did not, and a call made before the init payload arrives waits for it, rejecting when the document finishes parsing with no init payload at all.
-It rejects when the chunk cannot load or has not loaded within 15 seconds, and a failed fetch also fires ``partial:error`` of kind ``asset``, so a banner never records a choice nothing keeps.
+It rejects when the chunk cannot load or has not loaded within 15 seconds, and a failed fetch also fires ``partial:error`` of kind ``asset``.
+A banner that waits on the promise therefore never offers a choice no chunk is there to store.
 A later call after a failure fetches the chunk again.
 The chunk takes the latest payload ``Next._init`` received, even one that arrived while it was still loading.
 
@@ -57,7 +58,7 @@ Next.consent
 
 The cookie the runtime writes is described by the ``cookie`` entry of ``$consent``, its name, ``max_age``, ``samesite``, ``domain``, ``path``, and ``secure``, which follows the page scheme when ``null``.
 A backend whose ``client_config()`` adds no ``cookie`` entry leaves the runtime writing ``next_consent`` with the default age.
-The runtime writes ``2:<a>|<b>:<seconds>`` and reads both that format and ``1:<a>,<b>:<seconds>``.
+The runtime writes the cookie value as ``2:<a>|<b>:<seconds>``, the granted categories other than ``necessary`` and the time of the choice in seconds.
 
 A revoke stops the manifest scripts still waiting on their strategy, which move to ``blocked`` and reject any ``load()`` waiting on them, and a later grant schedules them again.
 A script that already runs keeps running, and the cookies it set stay until a ``next:consent`` listener clears them, see :doc:`/content/howto/write-a-vendor-adapter`.
@@ -142,7 +143,7 @@ A vendor adapter counts the page it loads on from ``Next.navigation.current()``,
 The init payload
 ----------------
 
-The framework reserves three keys of the ``Next._init`` payload for this surface, beside ``$csrf`` and ``$dev``.
+The framework reserves four keys of the ``Next._init`` payload for this surface, beside ``$csrf`` and ``$dev``.
 
 .. list-table::
    :header-rows: 1
@@ -151,7 +152,11 @@ The framework reserves three keys of the ``Next._init`` payload for this surface
    * - Key
      - Value
    * - ``$chunks``
-     - ``{scripts, sse, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.sse.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage, in every payload, and under ``DEBUG`` ``dev`` too, the URL of ``next.dev.min.js``.
+     - ``{scripts, stream, ws, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.stream.min.js``, ``next.ws.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage.
+       The ``ws`` entry is listed only while the ``ws`` transport is active, and under ``DEBUG`` ``dev`` joins them, the URL of ``next.dev.min.js``.
+   * - ``$realtime``
+     - ``{protocol, transports, content_type}``, the stream protocol advertised by the server and the selected partial response content type used by registered stream parse hooks.
+       The key is left out while ``sse`` is the only transport and the partial content type is the stock one, and the runtime then assumes those defaults.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
        The runtime drops an ``attrs`` name outside the set :doc:`/content/topics/scripts/declaring` lists.

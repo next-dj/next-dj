@@ -16,8 +16,7 @@ class TestPlainFormInsideATagRenderedZone:
             "tagged_profile_form",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagzone/",
-            partial=True,
-            zones="profile",
+            partial="profile",
             **{_VALIDATE_HEADER: "email"},
         )
         html = envelope_of(response).html_for_zone("profile")
@@ -31,8 +30,7 @@ class TestPlainFormInsideATagRenderedZone:
             "tagged_profile_form",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagzone/",
-            partial=True,
-            zones="profile",
+            partial="profile",
             **{_VALIDATE_HEADER: "email"},
         )
         html = envelope_of(response).html_for_zone("profile")
@@ -45,8 +43,7 @@ class TestPlainFormInsideATagRenderedZone:
             "tagged_profile_form",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagzone/",
-            partial=True,
-            zones="profile",
+            partial="profile",
         )
         html = envelope_of(response).html_for_zone("profile")
         assert 'value="Ada"' in html
@@ -57,8 +54,7 @@ class TestPlainFormInsideATagRenderedZone:
             "tagged_profile_form",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagzone/",
-            partial=True,
-            zones="profile",
+            partial="profile",
         )
         html = envelope_of(response).html_for_zone("profile")
         assert _EMAIL_ERROR in html
@@ -73,8 +69,7 @@ class TestWizardStepInsideATagRenderedZone:
             "tagged_wizard",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagwizard/identity/",
-            partial=True,
-            zones="signup",
+            partial="signup",
             **{_VALIDATE_HEADER: "email"},
         )
         html = envelope_of(response).html_for_zone("signup")
@@ -88,8 +83,7 @@ class TestWizardStepInsideATagRenderedZone:
             "tagged_wizard",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagwizard/identity/",
-            partial=True,
-            zones="signup",
+            partial="signup",
             **{_VALIDATE_HEADER: "email"},
         )
         html = envelope_of(response).html_for_zone("signup")
@@ -102,8 +96,7 @@ class TestWizardStepInsideATagRenderedZone:
             "tagged_wizard",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagwizard/identity/",
-            partial=True,
-            zones="signup",
+            partial="signup",
             **{_VALIDATE_HEADER: "email"},
         )
         html = envelope_of(response).html_for_zone("signup")
@@ -116,8 +109,7 @@ class TestWizardStepInsideATagRenderedZone:
             "tagged_wizard",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagwizard/identity/",
-            partial=True,
-            zones="signup",
+            partial="signup",
         )
         html = envelope_of(response).html_for_zone("signup")
         assert 'value="Ada"' in html
@@ -128,8 +120,7 @@ class TestWizardStepInsideATagRenderedZone:
             "tagged_wizard",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagwizard/identity/",
-            partial=True,
-            zones="signup",
+            partial="signup",
         )
         html = envelope_of(response).html_for_zone("signup")
         assert _EMAIL_ERROR in html
@@ -141,8 +132,7 @@ class TestWizardStepInsideATagRenderedZone:
             "tagged_wizard",
             {"full_name": "Ada", "email": "bad"},
             origin="/tagwizard/identity/",
-            partial=True,
-            zones="signup",
+            partial="signup",
         )
         html = envelope_of(response).html_for_zone("signup")
         assert 'data-step="identity"' in html

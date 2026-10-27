@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import subprocess
 import sys
-from typing import Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from django.test import override_settings
@@ -10,11 +12,12 @@ from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy
 from pytest_lazy_fixtures import lf
 
-from next.conf import next_framework_settings
+from next.conf import DEFAULTS as PUBLIC_DEFAULTS, next_framework_settings
 from next.conf.frozen import FrozenDict, FrozenList
 from next.conf.merge import (
     BOOL_KEYS,
     DICT_KEYS,
+    FROZEN_DEFAULTS,
     LIST_KEYS,
     OPTIONAL_STR_KEYS,
     STR_KEYS,
@@ -26,7 +29,11 @@ from next.conf.settings import NextFrameworkSettings
 from tests.django_setup import PROJECT_ROOT
 
 
-DEFAULTS: dict[str, Any] = NextFrameworkSettings.DEFAULTS
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+
+DEFAULTS: Mapping[str, Any] = NextFrameworkSettings.DEFAULTS
 
 KEY_CLASSES = (LIST_KEYS, DICT_KEYS, STR_KEYS, OPTIONAL_STR_KEYS, BOOL_KEYS)
 
@@ -89,7 +96,7 @@ class TestAcceptedValue:
         assert isinstance(merged["DEFAULTS"]["site_name"], Promise)
 
     def test_key_outside_every_shape_is_unset(self) -> None:
-        """A third-party key added to `DEFAULTS` keeps the default it declared."""
+        """A key no shape class names merges to nothing."""
         assert accepted_value("THIRD_PARTY_KEY", "value") is UNSET
 
 
@@ -169,6 +176,64 @@ class TestReplacementIsWhole:
             DEFAULTS, {"FORM_WIZARD_BACKEND": {"OPTIONS": {"TIMEOUT": 60}}}
         )
         assert "BACKEND" not in merged["FORM_WIZARD_BACKEND"]
+
+
+class TestDefaultsFrozenOnce:
+    """The framework defaults are frozen on import and every merge copies the result."""
+
+    def test_the_defaults_still_match_their_import_time_freeze(self) -> None:
+        """Nothing that ran since the import, the whole suite included, edits them."""
+        assert dict(FROZEN_DEFAULTS) == DEFAULTS
+        assert FROZEN_DEFAULTS.keys() == DEFAULTS.keys()
+
+    def test_the_frozen_defaults_are_a_read_only_view(self) -> None:
+        assert isinstance(FROZEN_DEFAULTS, MappingProxyType)
+
+    def test_the_framework_defaults_reuse_the_frozen_values(self) -> None:
+        merged = merge_user_settings(DEFAULTS, None)
+        assert merged["PAGE_BACKENDS"] is FROZEN_DEFAULTS["PAGE_BACKENDS"]
+
+    def test_the_merged_mapping_is_a_copy(self) -> None:
+        merged = merge_user_settings(DEFAULTS, {"URL_NAME_TEMPLATE": "route_{name}"})
+        merged["MADE_UP"] = 1
+        assert "MADE_UP" not in FROZEN_DEFAULTS
+        assert FROZEN_DEFAULTS["URL_NAME_TEMPLATE"] == DEFAULTS["URL_NAME_TEMPLATE"]
+
+    def test_another_defaults_mapping_freezes_per_merge(self) -> None:
+        own = copy.deepcopy(dict(DEFAULTS))
+        own["PAGE_BACKENDS"] = [{"BACKEND": "own.Backend"}]
+        merged = merge_user_settings(own, None)
+        assert isinstance(merged["PAGE_BACKENDS"], FrozenList)
+        assert merged["PAGE_BACKENDS"] == [{"BACKEND": "own.Backend"}]
+        assert merged["PAGE_BACKENDS"] is not own["PAGE_BACKENDS"]
+
+
+class TestDefaultsReadOnly:
+    """`DEFAULTS` refuses every change after import, a new key included."""
+
+    def test_the_settings_view_and_the_package_share_one_read_only_mapping(
+        self,
+    ) -> None:
+        assert DEFAULTS is PUBLIC_DEFAULTS
+        assert isinstance(DEFAULTS, MappingProxyType)
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda defaults: defaults.__setitem__("THIRD_PARTY", {}),
+            lambda defaults: defaults.__setitem__("STRICT_LOADING", True),
+            lambda defaults: defaults.__delitem__("STRICT_LOADING"),
+            lambda defaults: defaults.update({"THIRD_PARTY": {}}),
+            lambda defaults: defaults.setdefault("THIRD_PARTY", {}),
+        ],
+        ids=["add", "replace", "delete", "update", "setdefault"],
+    )
+    def test_a_mutation_raises_and_leaves_the_keys_alone(self, mutate) -> None:
+        keys = set(DEFAULTS)
+        with pytest.raises((TypeError, AttributeError)):
+            mutate(DEFAULTS)
+        assert set(DEFAULTS) == keys
+        assert "THIRD_PARTY" not in DEFAULTS
 
 
 class TestSentinelHome:

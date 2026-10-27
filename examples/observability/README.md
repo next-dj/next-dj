@@ -1,6 +1,6 @@
 # Observability dashboard
 
-A self-hosted dashboard that watches the framework from the inside. Signals from nine framework subsystems land in eighteen receivers, accumulate in an in-process counter store, and surface in a table, a Chart.js bar chart, or a React sparkline. Nothing here monkey-patches the framework, every hook is a documented extension point.
+A self-hosted dashboard that watches the framework from the inside. Signals from nine framework subsystems land in eighteen receivers, accumulate in an in-process counter store, and surface in a table, a Chart.js bar chart, or a React sparkline. Five more receivers turn the realtime signals into Prometheus series behind a `/metrics/` endpoint. Nothing here monkey-patches the framework, every hook is a documented extension point.
 
 The page tree is `obs/pages/`. The components live next to the pages that use them. The `JS_CONTEXT_SERIALIZER` setting points at a custom class. Two pages declare their CDN dependencies through page-level `scripts = [...]` lists so the framework collects them, dedupes them, and emits them through `{% collect_scripts %}` ahead of every widget's co-located file. One of those lists also holds a staticfiles name beside a vendor URL, and an opt-in profile runs the project on `ManifestStaticFilesStorage` so the name picks up a content hash the hardcoded path never would. Two co-located widgets read `window.Next.context.<key>`, the sparkline through a per-decorator serializer override that wraps the payload in a versioned envelope, the bar chart flat through the global default. The entire frontend arrives from CDNs, so the dashboard runs without `npm`. The static collector picks up `.css`, `.js`, and `.jsx` files, the last through a custom `BabelJsxBackend` that emits `<script type="text/babel">` tags.
 
@@ -14,6 +14,9 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
+| `/realtime/` | Live streams per transport, publications, upstream nudges, and unsubscribes by reason, read back from the Prometheus registry. The page holds its own topic stream, so opening it moves the numbers it shows. |
+| `/realtime/stream/` | The `TopicStream` of the `obs:pulse` topic the realtime page subscribes to, over a WebSocket under ASGI and over SSE otherwise. |
+| `/metrics/` | The Prometheus exposition. Open under `DEBUG`, a 404 otherwise, and a bearer token once `OBS_METRICS_TOKEN` is set. |
 | `POST` to `window_filter_form` | Re-aggregates under the chosen window. A partial apply from `/stats/` morphs the `live-totals` zone plus the `stats-window` heading label and emits the custom `metric-pulse` verb, otherwise it redirects with `?window=...`. |
 
 The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
@@ -28,6 +31,8 @@ uv run python manage.py migrate
 uv run python manage.py runserver        # http://127.0.0.1:8000/
 uv run pytest
 ```
+
+`next` sits above `django.contrib.staticfiles` in `INSTALLED_APPS`, so `runserver` is the next.dj command that serves `ASGI_APPLICATION` on uvicorn and mounts the WebSocket. Open `/realtime/` in two tabs, press **Nudge** in one, and both tabs count the upstream event. `curl http://127.0.0.1:8000/metrics/` prints the same numbers in the Prometheus text format.
 
 Click around `/`, `/stats/`, the four sub-pages. Apply different windows. Counters move on every render, the overview tiles re-poll on their own every five seconds, and the windowed view actually narrows to the chosen aggregation slice.
 
@@ -67,7 +72,9 @@ obs/
 ├── backends.py               <- CountingComponentsBackend, BabelJsxBackend
 ├── static_policies.py        <- InstrumentedDedup
 ├── serializers.py            <- PydanticJsContextSerializer + WrappedJsContextSerializer
-├── signals.py                <- eighteen receivers across nine signal groups
+├── signals.py                <- eighteen counter receivers, four Prometheus receivers
+├── exporter.py               <- Prometheus series, topic families, the scrape guard
+├── realtime.py               <- obs:pulse topic, its authorizer, the `nudge` upstream handler
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
@@ -79,6 +86,12 @@ obs/
     │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, chart.js cdn via stats/page.py
     │   └── sparkline/        <- React + JSX sparkline, full render only, react/babel cdn via page.py
+    ├── realtime/
+    │   ├── page.py           <- @context realtime, bound to the realtime-totals zone
+    │   ├── template.djx      <- totals zone, pulse form, Nudge button, data-next-stream
+    │   ├── template.js       <- Nudge sends the upstream event, co-located
+    │   └── stream/page.py    <- TopicStream on obs:pulse
+    ├── metrics/page.py       <- generate_latest behind check_scrape
     └── stats/
         ├── layout.djx        <- nested layout, tabs, filter form chrome
         ├── page.py           <- @context live_stats, live_zone, scripts=[chart.js cdn, chart_theme name]
@@ -278,12 +291,104 @@ metadata: MetadataDict = {"robots": {"index": False}}
 
 A dict is inherited by every page below it, so the whole dashboard renders `<meta name="robots" content="noindex">` from that one line. Render counts, dispatch totals and asset statistics describe one running process, and none of it belongs in a search index. The overview renders the settings `default` because the root names no title, and each stats page adds its own with a one-line dict, `Live stats` on `/stats/` and `Page renders`, `Component renders`, `Form actions` and `Static pipeline` below it. One parametrized integration test pins all six titles and the robots tag.
 
+### 11. Realtime streams in Prometheus
+
+The realtime signals describe every stream from the moment it holds a broker subscription to the moment it lets go, so a metrics exporter needs nothing but receivers. [obs/exporter.py](obs/exporter.py) declares seven `prometheus_client` series in the default registry, and [obs/signals.py](obs/signals.py) moves them.
+
+| Series | Type | Labels | Fed by |
+| --- | --- | --- | --- |
+| `next_realtime_streams_open` | Gauge | `transport` | `stream_subscribed` adds one, `stream_unsubscribed` takes it back |
+| `next_realtime_stream_unsubscribes_total` | Counter | `transport`, `reason` | `stream_unsubscribed`, `reason` is the `UnsubscribeReason` value |
+| `next_realtime_stream_duration_seconds` | Histogram | `transport` | `stream_unsubscribed`, its `duration` on the monotonic clock |
+| `next_realtime_messages_published_total` | Counter | `family` | `message_published` for a numbered message |
+| `next_realtime_presence_snapshots_total` | Counter | `family` | `message_published` with `ephemeral=True` |
+| `next_realtime_upstream_events_total` | Counter | `name` | `upstream_received` |
+| `next_realtime_upstream_rejected_total` | Counter | `reason` | `upstream_rejected`, `reason` is the `UpstreamError` value |
+
+```python
+@receiver(stream_unsubscribed)
+def on_stream_unsubscribed(
+    transport: str, duration: float, reason: str, **kwargs
+) -> None:
+    """Release the live stream, count why it ended and observe how long it lived."""
+    STREAMS_OPEN.labels(transport=transport).dec()
+    STREAM_UNSUBSCRIBES.labels(transport=transport, reason=str(reason)).inc()
+    STREAM_DURATION.labels(transport=transport).observe(duration)
+```
+
+`transport` is `sse` or `ws`. `ObsConfig.ready` calls `seed_series`, which creates every child of the bounded labels up front, so each transport and each reason exports a zero before the first stream closes and `rate()` has a series to work on.
+
+The stream signals go out with `send_robust`, so a receiver that raises is logged on `next.realtime.signals` and the stream stays open. `TestSseStream` connects a raising receiver beside these and asserts that the stream still delivers and the gauge still moves. `message_published`, `upstream_received` and `upstream_rejected` go out with `send_robust` too, so a receiver that raises is logged and the publication or the `ack` goes on. These receivers only touch a label and a number, nothing that can fail.
+
+`/realtime/` is the page the numbers are shown on. Its [`stream/page.py`](obs/pages/realtime/stream/page.py) returns `TopicStream(request, "obs:pulse", authorize=can_watch)`, and the importable `can_watch` is what lets the stream negotiate a WebSocket. **Publish a pulse** posts `PulseForm`, which publishes `refresh(zone="realtime-totals")` on the topic and redirects back. **Nudge** sends the `nudge` upstream event through `Next.partial.stream.send`, and the handler in [obs/realtime.py](obs/realtime.py) publishes the same refresh, so every open tab re-reads the totals. Any visitor may nudge, and one `nudge` makes every open tab refetch the zone, an amplification only `REALTIME['UPSTREAM']['RATE']` bounds per connection. Over SSE there is no upstream channel and the button does nothing.
+
+#### Cardinality
+
+Every distinct label value is its own time series in Prometheus, kept and indexed for the whole retention period. A label set by the full topic would grow one series per poll, per board, or per user, and a busy site would take its Prometheus down with it. The `family` label is therefore the part of the topic before the first colon, and only when it is listed in `TOPIC_FAMILIES`. Every other topic counts under `other`. `obs:pulse` and `obs:item-17` both count as `obs`, `poll:17` and a colon-less `user17` count as `other`, so the label carries at most `len(TOPIC_FAMILIES) + 1` values whatever the application publishes. `TestTopicCardinality` publishes ninety topics and finds two series. Add a family to the set when it deserves its own line on a dashboard.
+
+Presence snapshots also go through `message_published`, flagged `ephemeral=True`. They have their own `presence_snapshots` series instead of being dropped, because a crowd that joins and leaves fires one snapshot per change and would otherwise inflate the publication rate, while the snapshot rate is still worth a panel of its own.
+
+The `name` label of the upstream counter stays bounded for a different reason. `upstream_received` fires only for an event that matched a registered `@realtime.on` handler, so the label carries at most one value per handler. An event the page invents gets a failed `ack` and no series there. `upstream_rejected` reports it instead, and its `reason` label is the closed `UpstreamError` enum, so the counter has seven series whatever a client sends. The `topic` and `name` the signal carries are what the client sent, unchecked, so the receiver never turns them into labels.
+
+#### The `/metrics/` endpoint
+
+[`metrics/page.py`](obs/pages/metrics/page.py) answers with `generate_latest(REGISTRY)` and `CONTENT_TYPE_LATEST`, so the output also holds the process and garbage-collector series `prometheus_client` registers by default. `check_scrape` keeps it closed outside development.
+
+- Without `OBS_METRICS_TOKEN` the endpoint answers under `DEBUG` and is a 404 otherwise.
+- With `OBS_METRICS_TOKEN` set in the environment it answers only `Authorization: Bearer <token>`, the scheme matched without regard to case as RFC 9110 asks and the token compared in constant time, and refuses anything else with 403.
+
+```yaml
+scrape_configs:
+  - job_name: observability
+    metrics_path: /metrics/
+    authorization:
+      credentials_file: /etc/prometheus/obs-token
+    static_configs:
+      - targets: ["obs.internal:8000"]
+```
+
+In production the endpoint is better kept off the public internet altogether: a reverse proxy that serves `/metrics/` only to the monitoring network, or a separate internal port, with the token as a second line. The series name no user, but they tell an outsider how many people are connected and when.
+
+#### PromQL
+
+```promql
+# Live streams per transport, across every scraped process
+sum by (transport) (next_realtime_streams_open)
+
+# Unsubscribes per second by reason over five minutes
+sum by (reason) (rate(next_realtime_stream_unsubscribes_total[5m]))
+
+# Share of streams that ended in an error
+sum(rate(next_realtime_stream_unsubscribes_total{reason="error"}[5m]))
+  / sum(rate(next_realtime_stream_unsubscribes_total[5m]))
+
+# Median stream length per transport
+histogram_quantile(0.5, sum by (le, transport) (rate(next_realtime_stream_duration_seconds_bucket[1h])))
+
+# Publications per second by topic family
+sum by (family) (rate(next_realtime_messages_published_total[1m]))
+```
+
+A rising `revoked` rate means sessions or grants are failing their rechecks, a rising `error` rate points at the broker, and `server` covers protocol violations and rate limits on a WebSocket.
+
+#### Several worker processes
+
+The code here is deliberately single-process. Every uvicorn or gunicorn worker keeps its own registry in memory, so a scrape through a load balancer reads whichever worker answered. Two ways out exist.
+
+- Scrape each worker on its own address, which Prometheus sums with `sum by (...)` as above.
+- Run `prometheus_client` in multiprocess mode. Point `PROMETHEUS_MULTIPROC_DIR` at an empty directory before the workers start, wipe it on every deploy, build a fresh `CollectorRegistry` with `multiprocess.MultiProcessCollector` in the view instead of the default `REGISTRY`, and call `multiprocess.mark_process_dead(pid)` from the server's child-exit hook.
+
+Multiprocess mode changes the Gauge. Each worker writes its own file, and the gauge needs a `multiprocess_mode` that says how to fold them, `livesum` for the open-streams gauge. The live modes drop a worker only when `mark_process_dead` removes its file, so a worker that dies past the exit hook keeps its last count in the sum until the directory is wiped. Process and GC metrics are not part of a multiprocess registry.
+
+A receiver connected while a stream is open never sees that stream close, as the signals reference spells out. These receivers connect at startup, before the first stream, so the gauge never drops below zero.
+
 ## Out of scope
 
 The dashboard renders every counter without pagination, so a long-lived process with thousands of distinct page paths will eventually need a top-N filter. The cumulative counters never expire on their own either, they only go away with `flush_metrics`. Fine for an example, worth calling out before adopting the pattern in production.
 
 ## Further reading
 
-- Aggregated signal catalogue at [docs/content/ref/signals.rst](../../docs/content/ref/signals.rst).
+- Aggregated signal catalogue at [docs/content/ref/signals.rst](../../docs/content/ref/signals.rst), with the stream lifecycle and `UnsubscribeReason`.
+- Realtime topics, WebSockets, and upstream events at [docs/content/topics/realtime.rst](../../docs/content/topics/realtime.rst).
 - JS context serialization and the per-decorator serializer override at [docs/content/topics/static-assets/js-context.rst](../../docs/content/topics/static-assets/js-context.rst).
 - The metadata chain that folds the dicts of section 10 at [next/pages/metadata/](../../next/pages/metadata/).

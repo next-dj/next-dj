@@ -1,4 +1,6 @@
 <div data-poll-chart="{{ results.poll_id }}"
+     data-poll-open="{{ results.is_open|yesno:'true,false' }}"
+     data-poll-deadline="{{ results.deadline|default_if_none:'' }}"
      class="poll-chart space-y-4 rounded-md border border-border bg-card p-5 shadow-sm">
   <div data-poll-chart-data data-total-votes="{{ results.total_votes }}" hidden>
     {% for choice in results.choices %}
@@ -30,6 +32,10 @@
 
   <section class="border-t border-border pt-4">
     <h2 class="text-sm font-semibold text-foreground">Cast your vote</h2>
+    <p class="text-sm text-muted-foreground" data-poll-status role="status" aria-live="polite">
+      {% if results.accepting_votes %}Voting is open{% else %}Voting is closed{% endif %}
+    </p>
+    <p class="text-xs text-muted-foreground" data-poll-countdown aria-hidden="true"></p>
     <p class="text-xs text-muted-foreground">
       Pick a choice and the bar above moves for everyone watching.
     </p>
@@ -39,6 +45,7 @@
         <div class="grid gap-2 sm:grid-cols-2">
           {% for choice in results.choices %}
             <button type="submit" name="choice" value="{{ choice.id }}"
+              {% if not results.accepting_votes %}disabled{% endif %}
               class="rounded-md border border-input bg-background px-3 py-2 text-sm font-medium text-foreground hover:border-ring hover:bg-accent">
               {{ choice.text }}
             </button>

@@ -18,9 +18,11 @@ from .runtime import (
     DEV_CHUNK_KEY,
     DEV_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
+    WS_CHUNK_KEY,
     ScriptInjectionPolicy,
     csrf_payload_for,
     nonce_attr,
+    realtime_offer,
 )
 from .serializers import JsContextSerializer, resolve_serializer
 from .signals import collector_finalized, html_injected
@@ -197,10 +199,13 @@ class PlaceholderInjector:
         Only `DEBUG` lists the dev chunk, and a chunk the storage lacks is left out.
         """
         provider = self._provider
+        websocket = realtime_offer().websocket
         stored = tuple(
             (name, url)
             for name in CHUNK_STATIC_PATHS
-            if (dev or name != DEV_CHUNK_KEY) and (url := provider.chunk_url(name))
+            if (dev or name != DEV_CHUNK_KEY)
+            and (websocket or name != WS_CHUNK_KEY)
+            and (url := provider.chunk_url(name))
         )
         serializer = resolve_serializer()
         held = self._chunks

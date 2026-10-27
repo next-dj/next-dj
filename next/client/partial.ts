@@ -2,18 +2,20 @@
 
 import { Applier, mountNodes } from "./apply";
 import type {
+  Applied,
   ApplyDeps,
   Envelope,
   HistoryAdapter,
   MountCallback,
   OpHandler,
 } from "./apply";
-import { Wire } from "./wire";
+import { Wire, none } from "./wire";
 import type {
   Clock,
   CsrfPayload,
   FetchAdapter,
   Navigate,
+  Outcome,
   ParseHook,
   WireRequest,
 } from "./wire";
@@ -25,6 +27,7 @@ import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { EventSourceAdapter, Sse, SseFactory, VisibilityAdapter } from "./sse";
+import type { SocketTransport, WebSocketAdapter, WsTransportFactory } from "./ws";
 import { createCsrf } from "./csrf";
 import type { Csrf, CsrfMint } from "./csrf";
 import type { LazyModule } from "./chunks";
@@ -32,15 +35,26 @@ import type { PollFactory } from "./poll";
 import { createNavigation } from "./navigation";
 import type { NavigationState } from "./navigation";
 import { defaultHistory, defaultNavigate } from "./adapters";
-import { ATTR_SSE, ECHO_LIMIT, currentUrl, fire, matching } from "./protocol";
-import type { Diagnostics } from "./protocol";
+import {
+  ATTR_STREAM,
+  CONTENT_TYPE,
+  ECHO_LIMIT,
+  ORIGIN_FIELD,
+  currentUrl,
+  fire,
+  matching,
+} from "./protocol";
+import type { Diagnostics, WireTransport } from "./protocol";
+import type { StreamMeta } from "./stream";
 
 /** The core seams the applier and the fetch layer read from. */
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
-  // The SSE bridge, the CSRF token fetch and the poller, each in its own lazy chunk.
-  sse: LazyModule<SseFactory>;
+  context: () => Record<string, unknown>;
+  // The stream bridge, the CSRF token fetch and the poller, each in its own lazy chunk.
+  stream: LazyModule<SseFactory>;
+  ws?: LazyModule<WsTransportFactory>;
   csrf: LazyModule<CsrfMint>;
   poll: LazyModule<PollFactory>;
 }
@@ -63,13 +77,37 @@ export interface PartialAdapters {
   confirm?: ConfirmAdapter;
   cssTimeoutMs?: number;
   source?: EventSourceAdapter;
+  websocket?: WebSocketAdapter;
   visibility?: VisibilityAdapter;
+}
+
+export type StreamSurface = Sse & {
+  send(
+    topic: string,
+    name: string,
+    data: unknown,
+    options?: { ack?: boolean },
+  ): Promise<boolean>;
+};
+
+type SubmitValue = string | number | boolean | Blob;
+
+/** An action POST built without a form, the `{% action_url %}` URL and its fields. */
+export interface SubmitAction {
+  action: string;
+  data?: FormData | Record<string, SubmitValue>;
+  zone?: string;
+  transport?: WireTransport;
+  key?: string;
+  navigate?: boolean;
+  from?: Element;
 }
 
 /** The public `Next.partial` surface plus its underscore-prefixed test seams. */
 export interface PartialSurface {
   apply(raw: unknown): Envelope;
-  fetch(request: WireRequest): Promise<void>;
+  fetch(request: WireRequest): Promise<Outcome>;
+  submit(target: HTMLFormElement | SubmitAction): Promise<Outcome>;
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
@@ -80,7 +118,8 @@ export interface PartialSurface {
   /** Register a mount callback, returning a teardown that unregisters it. */
   onMount(selector: string, callback: (el: Element) => void): () => void;
   layers: LayerStack;
-  sse: Sse;
+  /** Transport-neutral API over the live stream bridge. */
+  stream: StreamSurface;
   /** Run the on-`ready` work, called by the core from the inline `_init`. */
   ready(): void;
   /** Configure the adapters and rebuild the wire and applier. */
@@ -117,18 +156,20 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       for (const el of matching(root, entry.selector)) entry.callback(el);
     }
     triggers.scan(root);
-    sse.scan(root);
+    stream.scan(root);
   };
 
   let assets = createAssets(assetsDeps());
   let history: HistoryAdapter = defaultHistory();
   let navigate: Navigate = defaultNavigate();
-  let csrf: Csrf = createCsrf({ mint: deps.csrf });
+  const rotated = (token: string | undefined): void => wsTransport?.renew(token);
+  let csrf: Csrf = createCsrf({ mint: deps.csrf, rotated });
   let navigation = createNavigation(navigationDeps());
   let layers = createLayers(layerDeps());
   let triggers = createTriggers(triggerDeps());
   // The SSE bridge once its chunk has loaded, built with the adapters configured last.
   let bridge: Sse | undefined;
+  let wsTransport: SocketTransport | undefined;
   let sseAdapters: PartialAdapters | undefined;
   // The request ids sent before the bridge is built. A stream that opens once its
   // chunk lands can still carry their echoes, so the bridge takes them over.
@@ -143,12 +184,26 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     }
     return bridge;
   };
+  const realtime = () =>
+    deps.context().$realtime as
+      | { content_type?: string; transports?: unknown[] }
+      | undefined;
+  const socketFirst = (): boolean => realtime()?.transports?.includes("ws") === true;
+  // Fetched together, and the bridge waits on ws since it reads that factory once.
+  const withBridge = (callback: (factory: SseFactory) => void): void => {
+    const ws = socketFirst() ? deps.ws?.load() : undefined;
+    deps.stream.whenLoaded((factory) =>
+      ws === undefined ? callback(factory) : void ws.then(() => callback(factory)),
+    );
+  };
+  const tag = <T extends StreamMeta | undefined>(meta: T): T =>
+    wsTransport?.tag(meta) ?? meta;
   // A page with no stream never fetches the bridge.
-  const sse: Sse = {
+  const stream: StreamSurface = {
     scan(root) {
-      if (matching(root, `[${ATTR_SSE}]`).length === 0) return;
+      if (matching(root, `[${ATTR_STREAM}]`).length === 0) return;
       const started = epoch;
-      deps.sse.whenLoaded((factory) => {
+      withBridge((factory) => {
         if (started === epoch) live(factory).scan(root);
       });
     },
@@ -156,7 +211,33 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       if (bridge !== undefined) bridge.remember(id);
       else unbridged = [...unbridged, id].slice(-ECHO_LIMIT);
     },
+    forget(id) {
+      bridge?.forget(id);
+      unbridged = unbridged.filter((kept) => kept !== id);
+    },
     size: () => bridge?.size() ?? 0,
+    now: () => bridge?.now() ?? Date.now(),
+    offset: () => bridge?.offset() ?? 0,
+    on(topic, name, callback) {
+      const started = epoch;
+      let active = true;
+      let unsubscribe: (() => void) | undefined;
+      withBridge((factory) => {
+        if (active && started === epoch) {
+          unsubscribe = live(factory).on(topic, name, (detail, meta) =>
+            callback(detail, tag(meta)),
+          );
+        }
+      });
+      return () => {
+        active = false;
+        unsubscribe?.();
+      };
+    },
+    meta: () => tag(bridge?.meta()),
+    send: (topic, name, data, options) =>
+      wsTransport?.up(topic, name, data, options?.ack !== false) ??
+      Promise.resolve(false),
     _reset() {
       bridge?._reset();
       unbridged = [];
@@ -241,11 +322,27 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   }
 
   function sseDeps(adapters?: PartialAdapters) {
+    const { websocket: socket, ...streamAdapters } = adapters ?? {};
+    const contentType = realtime()?.content_type ?? CONTENT_TYPE;
+    const wsFactory = deps.ws?.get();
     return {
-      ...adapters,
+      ...streamAdapters,
+      websocket:
+        wsFactory &&
+        ((options: Parameters<WsTransportFactory>[0]) =>
+          (wsTransport = wsFactory({
+            ...options,
+            fetch: adapters?.fetch,
+            socket,
+            token: csrf.current()?.token,
+          }))),
+      useWebSocket: socketFirst(),
       // A stream event carries no dirty snapshot, so the server value wins.
       apply: (raw: unknown, page: string) => void applier.apply(raw, { owner: page }),
-      fetch: (request: WireRequest) => void wire.fetch(request),
+      parse: (body: string) => wire.parseStream(contentType, body),
+      fetch: (request: WireRequest) => wire.fetch(request),
+      cancel: (request: { url: string; zone: string }) =>
+        wire.abort(`${request.url.split("?")[0]} ${request.zone}`),
       dispatch: announce(adapters),
       pageUrl: (el: Element) => layers.urlFor(el),
     };
@@ -263,19 +360,33 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         key: string | undefined,
         page: string | undefined,
         owner: string | undefined,
-      ) => {
-        // A mutation scopes no zones, but its meta op belongs to the submitting page.
-        const envelope = applier.apply(raw, { snapshot, key, page, owner });
-        // A csrf meta rotates the token so the next mutation submits the fresh
-        // one, not just the forms already in the document.
-        if (envelope.csrf) csrf.set(envelope.csrf);
-      },
+      ) =>
+        new Promise<Applied>((done) => {
+          // A mutation scopes no zones, but its meta op belongs to the submitting page.
+          const envelope = applier.apply(raw, { snapshot, key, page, owner, done });
+          // A csrf meta rotates the token so the next mutation submits the fresh
+          // one, not just the forms already in the document.
+          if (envelope.csrf) surface.setCsrf(envelope.csrf);
+        }),
       version: () => assets.version(),
       csrf: { current: () => csrf.current(), ensure: () => csrf.ensure() },
       dirtySnapshot: () => dirty.snapshot(),
       // Feeds the ring id to the SSE bridge so the echo stream event drops.
-      rememberRequestId: (id: string) => sse.remember(id),
+      rememberRequestId: (id: string) => stream.remember(id),
+      forgetRequestId: (id: string) => stream.forget(id),
+      tunnel: (target: string, init: RequestInit, header?: string) =>
+        wsTransport?.http(target, init, header),
     };
+  }
+
+  function fields(data: SubmitAction["data"], origin: string): FormData {
+    const body = new FormData();
+    for (const [name, value] of data instanceof FormData
+      ? data
+      : Object.entries(data ?? {}))
+      body.append(name, value instanceof Blob ? value : String(value));
+    if (!body.has(ORIGIN_FIELD)) body.set(ORIGIN_FIELD, origin);
+    return body;
   }
 
   const surface: PartialSurface = {
@@ -285,6 +396,25 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     fetch(request) {
       return wire.fetch(request);
     },
+    async submit(target) {
+      if (target instanceof HTMLFormElement)
+        return wire.fetch({ ...triggers.submission(target), wait: true });
+      try {
+        const { from, data, ...action } = target;
+        const sender = from ? triggers.sender(from) : {};
+        return await wire.fetch({
+          ...action,
+          ...sender,
+          url: action.action,
+          method: "POST",
+          uid: action.key ?? action.action,
+          body: fields(data, sender.owner ?? currentUrl(document)),
+          wait: action.key === undefined || "latest",
+        });
+      } catch (error) {
+        return { ...none("error"), error: { kind: "network", error } };
+      }
+    },
     defineOp(name, handler) {
       applier.defineOp(name, handler);
     },
@@ -293,6 +423,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     },
     setCsrf(next) {
       csrf.set(next);
+      rotated(next?.token);
     },
     mount(nodes) {
       mountNodes(nodes, { run: runMount });
@@ -303,9 +434,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // A callback registered after `ready` catches up over the present DOM,
       // mirroring `Next.on("ready")` for late subscribers.
       if (mounted) {
-        for (const el of Array.from(document.querySelectorAll(selector))) {
-          callback(el);
-        }
+        for (const el of matching(document, selector)) callback(el);
       }
       return () => {
         const index = mounts.indexOf(entry);
@@ -315,8 +444,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     get layers() {
       return layers;
     },
-    get sse() {
-      return sse;
+    get stream() {
+      return stream;
     },
     _current: () => navigation.current(),
     ready() {
@@ -343,15 +472,16 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       detachCsrf();
       // Stop the old pollers and observers, or they orphan onto the live wire.
       triggers._reset();
-      sse._reset();
+      stream._reset();
       // The token outlives the rebuild, only the fetch seam it mints through changes.
       const token = csrf.current();
-      csrf = createCsrf({ ...adapters, mint: deps.csrf });
+      csrf = createCsrf({ ...adapters, mint: deps.csrf, rotated });
       csrf.set(token);
       navigation = createNavigation(navigationDeps(adapters));
       layers = createLayers(layerDeps(adapters));
       triggers = createTriggers(triggerDeps(adapters));
       bridge = undefined;
+      wsTransport = undefined;
       sseAdapters = adapters;
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
@@ -367,7 +497,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       layers._reset();
       triggers._reset();
       assets._reset();
-      sse._reset();
+      stream._reset();
       mounts.length = 0;
       mounted = false;
       csrf._reset();

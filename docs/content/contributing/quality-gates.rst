@@ -52,8 +52,8 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
      - ``make docs-lint``
      - ``docs`` job, "Check documentation code snippets" step
    * - Benchmarks
-     - ``make bench``
-     - ``bench`` workflow on every pull request
+     - ``make bench``, ``make bench-codspeed``
+     - CodSpeed workflow on every pull request
    * - Supply chain
      - ``make pre-commit-run``
      - ``security`` and ``dependency-review`` jobs
@@ -71,9 +71,10 @@ Test coverage
 The suite runs with ``--cov=next`` and ``--cov-fail-under=100``, so a single uncovered line in ``next/`` fails the run.
 The gate is identical locally and in continuous integration, which runs the suite against the installed wheel rather than the source tree.
 A ``[tool.coverage.paths]`` mapping collapses ``next/`` and ``*/site-packages/next/`` so the two runs report the same numbers.
+The ``test`` job starts a Redis service and sets ``REDIS_URL``, so ``tests/realtime/test_integration.py`` runs against a real server there, and a local run reaches it with ``REDIS_URL=redis://localhost:6379/0 make test``.
 
 Most system check modules are excluded from that gate.
-The ``omit`` list in ``pyproject.toml`` names ``next/checks/``, the ``checks.py`` of ``apps``, ``components``, ``conf``, and ``urls``, and the whole ``checks/`` package of ``forms``, ``pages``, and ``partial``.
+The ``omit`` list in ``pyproject.toml`` names ``next/checks/``, the ``checks.py`` of ``apps``, ``components``, ``conf``, ``consent``, ``realtime``, ``scripts``, ``server``, ``site``, and ``urls``, and the whole ``checks/`` package of ``forms``, ``pages``, ``partial``, and ``seo``.
 ``next/static/checks.py`` is not in that list and stays inside the gate, so a static check still carries its own tests.
 The generic ``*/settings.py`` entry lifts ``next/conf/settings.py`` out of the gate as well, which is why new configuration logic belongs in another module of the ``conf`` area.
 
@@ -99,15 +100,70 @@ Benchmarks
 ----------
 
 Benchmarks live in ``tests/benchmarks/`` and stay out of the default test run through ``--ignore=tests/benchmarks``.
-``make bench`` runs them with the flags continuous integration uses, which are the ``perf`` marker, a warmup of 1000 iterations, a minimum of 10 rounds, garbage collection disabled, and result storage under ``.benchmarks/``.
-Local numbers compare only against other numbers from the same machine, so a pull request cites the workflow comparison rather than a local delta.
+``make bench`` runs them locally under pytest-benchmark with the ``perf`` marker, a warmup of 1000 iterations, a minimum of 10 rounds, garbage collection disabled, and result storage under ``.benchmarks/``.
+Local numbers compare only against other numbers from the same machine, so a pull request cites the CodSpeed report rather than a local delta.
 
-The benchmark workflow runs on every pull request and compares the head commit against the base commit on one runner.
-The hard gate is ``--benchmark-compare-fail=median:99%``, which is roughly twice the base median and the strictest value the flag parser accepts, and tripping it fails the job and blocks the merge.
-A softer tier warns when a median drifts more than 30 percent above the base without failing the job.
-The comparison runs on a single Python and Django combination so matrix noise stays out of the numbers, and ``[skip bench]`` in the pull request title or the commit message bypasses the workflow.
+The CodSpeed workflow runs on every pull request and every push to ``main`` on a single Python version, and CodSpeed posts its report on the pull request.
+The CPU simulation instrument runs the whole suite and counts instructions instead of timing the runner, so the numbers do not depend on the hardware, but it leaves system calls out of the measure.
+The memory instrument runs the whole suite as well and tracks every heap allocation.
+The walltime instrument times only the benchmarks marked ``walltime`` on a CodSpeed bare-metal runner, the ones dominated by filesystem, socket, and Redis calls whose real cost the simulation understates.
+``make bench-codspeed`` runs the suite locally under ``pytest-codspeed`` in walltime mode, since the simulation needs Valgrind on Linux.
 
-On ``main`` the workflow pushes the head numbers to the ``gh-pages`` branch with an informational alert threshold of 200 percent that never blocks.
+The realtime benchmarks live in ``tests/benchmarks/realtime/`` and need no running Redis.
+The ``realtime.publish``, ``realtime.hello``, ``realtime.presence``, and ``realtime.replay`` groups run on ``MemoryBroker`` and on a ``RedisBroker`` backed by ``fakeredis``, ``realtime.fanout`` runs on the memory broker alone, and the other groups touch no broker.
+The ``fakeredis`` rows measure the client and Lua script overhead on an in-process emulator, not the latency of a Redis server.
+Each benchmark checks its own result outside the measured body, so a call that degrades into an early exit fails the test instead of looking fast.
+Each group measures one step of the publish and delivery path.
+
+.. list-table:: Realtime benchmark groups
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Group
+     - What it measures
+   * - ``realtime.publish``
+     - Numbering and storing one envelope on the memory and Redis brokers, and the public ``publish`` call through the configured broker with its validation, snapshot, and signal.
+   * - ``realtime.fanout``
+     - One publish on the memory broker reaching 1, 100, and 1000 synchronous subscribers of the same topic, and the same publish reaching asynchronous subscribers on one event loop.
+       The asynchronous cases measure an enqueue that schedules a loop wakeup per subscriber and one that finds the wakeup already queued.
+       Decoding one small or medium Redis Pub/Sub payload into a message sits in this group too.
+   * - ``realtime.frame``
+     - Serialising one small or medium envelope into an SSE event frame, and delivering one message as a WebSocket patches frame.
+   * - ``realtime.inbound``
+     - Decoding one client text frame with ``frames.parse``, for a heartbeat pong, a subscribe frame with a cursor, and an ``up`` frame.
+   * - ``realtime.upstream``
+     - Resolving the route of one upstream event in a fresh registry of 1 and of 100 routes, where the target event name holds one route and the rest sit under other names, and a miss on an event name no route serves.
+       Dispatching one event to a trivial async handler on the loop and to a trivial sync handler on the handler pool, the ``upstream_received`` signal included.
+   * - ``realtime.transform``
+     - Applying one subscriber's topic transform to a delivered message with ``atransformed``, an async transform awaited on the loop and a sync transform run on the shared pool.
+   * - ``realtime.hello``
+     - Reading the latest position of 1 or 64 topics in one batch, and building and serialising the handshake frame from positions read beforehand, without touching a broker while it measures.
+   * - ``realtime.presence``
+     - Joining one connection to a roster of 1 and of 1000, refreshing the deadline of one connection on a roster of the same sizes, and reading the attendance snapshot of 1 and of 1000 members, on the memory broker and on a Redis broker backed by ``fakeredis``.
+       The joining connection leaves again before each round, so every round measures the same roster size.
+       The windows are not scheduled while it measures, so no background snapshot enters a timing.
+       Cutting the members from a presence message of 1 and of 100 members with ``counted``, and passing a message without a presence event through untouched, need no broker.
+   * - ``realtime.replay``
+     - Reading the log of one topic after a cursor 1 and 64 messages behind, and after a cursor from a stale epoch that reports the gap, on both brokers.
+       ``catch_up`` over 1 and 64 topics that each trail their snapshot by one message, and parsing a valid and a malformed ``Last-Event-ID``, complete the group.
+   * - ``realtime.access``
+     - Rechecking topic grants for one live connection with the synchronous ``check()``, inside the throttle window where the cached verdict answers and outside it where the authorizer runs again.
+       Live connections under ASGI go through ``acheck()``, which this group does not measure.
+   * - ``realtime.ticket``
+     - Signing and verifying a session-bound WebSocket grant over 1 or 64 topics.
+   * - ``realtime.negotiation``
+     - Answering a request for a WebSocket ticket on a saved session over 1 or 64 topics, and the SSE fallback for an authorizer without an import-stable path.
+   * - ``realtime.tunnel``
+     - One ``http`` frame through ``DjangoTunnel``, from the frame checks and the URL routing on the shared pool to a trivial ASGI endpoint and the shaped reply.
+   * - ``realtime.transports``
+     - Resolving the transports a deployment offers, from the warm cache and cold after a cache clear that re-reads the settings and installed apps.
+   * - ``partial.sse``
+     - Draining a finite stream through ``PatchStreamWriter`` to its last byte.
+       The cases are a stream of 50 heartbeat frames, a stream of 20 topic message frames that each carry the topic, sequence, epoch, and server time, and an empty stream that opens and closes.
+       The benchmark lives in ``tests/benchmarks/partial/``.
+   * - ``forms.transport``
+     - Telling a tunneled form action from a plain one on a WSGI request, an ASGI request, and a tunneled request, and pinning the session of a tunneled action, cold on a fresh session and warm on one already pinned.
+       The benchmark lives in ``tests/benchmarks/forms/``.
 
 Documentation build
 -------------------
@@ -139,7 +195,7 @@ That job checks the framework against the ecosystem packages a project is likely
 Client runtime
 --------------
 
-The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the six bundles with esbuild.
+The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the seven bundles with esbuild.
 
 .. list-table::
    :header-rows: 1
@@ -154,9 +210,12 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
    * - ``next.scripts.min.js``
      - ``next/client/entries/scripts.ts``
      - Only when the init payload carries ``$scripts`` or ``$consent``, or page code calls ``Next.ready("scripts")``, for consent and third-party scripts.
-   * - ``next.sse.min.js``
-     - ``next/client/entries/sse.ts``
-     - Only once a scan finds a ``data-next-sse`` container, for the stream bridge.
+   * - ``next.stream.min.js``
+     - ``next/client/entries/stream.ts``
+     - Only once a scan finds a ``data-next-stream`` container.
+   * - ``next.ws.min.js``
+     - ``next/client/entries/ws.ts``
+     - Only while the ``ws`` transport is active, for the WebSocket delivery of a stream.
    * - ``next.csrf.min.js``
      - ``next/client/entries/csrf.ts``
      - Only when a mutation or the first focus in an action form needs a deferred CSRF token, for the fetch that mints it.
@@ -167,15 +226,14 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - ``next/client/entries/dev.ts``
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
 
-The job then enforces a gzip budget on every bundle, 14336 bytes for ``next.min.js``, which ships on every page, and 3584, 1536, 768, 1024, and 2048 bytes for the scripts, sse, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
-The five chunks carry no budget of their own, since a page that never asks for them never downloads them.
-Growth past the budget calls for a lazily loaded chunk rather than a larger single file.
+The job then enforces a gzip budget on every bundle, 16384 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
+Growth past a budget calls for a lazily loaded chunk rather than a larger core file.
 The job finishes with the vitest run and its coverage thresholds.
 
 ``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and each chunk entry point hands itself to it when it evaluates.
 ``make build-js`` runs the same single esbuild call locally, minifying each bundle into ``next/static/next/`` with a source map beside it and targeting ES2022.
 The map is external and the bundle carries no ``sourceMappingURL`` comment, so browser devtools load the map only when a developer points them at it, while manifest storage finds no reference to rewrite at ``collectstatic`` time.
-``build_hooks.py`` reads all six bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
+``build_hooks.py`` reads all seven bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
 The compiled files are build products rather than tracked source files, and the packaging configuration lists them as build artefacts so a distribution carries them.
 
 Supply chain

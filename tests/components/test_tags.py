@@ -32,7 +32,7 @@ class TestComponentTag:
         with pytest.raises(TemplateSyntaxError, match="quoted"):
             Template('{% load components %}{% component "" %}')
 
-    def test_legacy_endcomponent_is_invalid(self) -> None:
+    def test_endcomponent_is_not_a_tag(self) -> None:
         """{% endcomponent %} is not a registered tag."""
         with pytest.raises(TemplateSyntaxError, match="endcomponent"):
             Template("{% load components %}{% endcomponent %}")

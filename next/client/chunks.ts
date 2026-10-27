@@ -15,6 +15,9 @@ const CHUNK_KEYS = ["$scripts", "$consent"];
 // cannot block Next.ready, a deferred CSRF token or a stream indefinitely.
 export const CHUNK_TIMEOUT = 15e3;
 
+// The attempts a chunk gets before its loader stops appending tags for it.
+export const CHUNK_ATTEMPTS = 3;
+
 const NO_PAYLOAD = "[next] the page has no init payload";
 
 /** The runtime functions the scripts chunk factory receives, and nothing more. */
@@ -88,10 +91,10 @@ export interface Lazy<T> extends LazyModule<T> {
  * A loader for a chunk carrying one module, with at most one fetch in flight.
  *
  * The URL is the chunk's `$chunks` entry in the seeded payload, the only source, since
- * a hashing or signing storage serves the chunk under a URL the client cannot derive.
- * A missing entry or a failed fetch resolves undefined, and a failed fetch is retried
- * on the next call. A file that loads without registering its module counts as
- * failed, as does one that has not registered it within CHUNK_TIMEOUT.
+ * a hashing or signing storage serves the chunk under a URL the client cannot derive. A
+ * missing entry or a failed fetch resolves undefined, and a failed fetch is retried on
+ * the next call, CHUNK_ATTEMPTS times in all. A file that loads without registering its
+ * module counts as failed, as does one not registered within CHUNK_TIMEOUT.
  */
 export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   const doc = deps.document ?? document;
@@ -99,6 +102,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   let pending: Promise<T | undefined> | undefined;
   let settle: ((value: T | undefined) => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let attempts = 0;
   // A timed-out tag may still evaluate, so its subscribers outlive the attempt.
   const waiting: ((value: T) => void)[] = [];
 
@@ -107,7 +111,9 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
     if (pending !== undefined) return pending;
     const chunks = deps.context().$chunks;
     const url = isRecord(chunks) ? asString(chunks[key]) : undefined;
-    if (url === undefined) return Promise.resolve(undefined);
+    if (url === undefined || attempts >= CHUNK_ATTEMPTS)
+      return Promise.resolve(undefined);
+    attempts += 1;
     const el = doc.createElement("script");
     if (deps.nonce !== undefined) el.nonce = deps.nonce;
     // Per attempt, since another script may remove the tag before it reports.
@@ -142,7 +148,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
     load,
     whenLoaded(fn) {
       if (value !== undefined) fn(value);
-      else {
+      else if (attempts < CHUNK_ATTEMPTS || pending !== undefined) {
         waiting.push(fn);
         void load();
       }

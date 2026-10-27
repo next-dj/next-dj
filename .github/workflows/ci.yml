@@ -134,7 +134,7 @@ jobs:
     - name: Check the gzip budget of the runtime and each lazy chunk
       run: |
         status=0
-        for entry in next:14336 next.scripts:3584 next.sse:1536 next.csrf:768 next.poll:1024 next.dev:2048; do
+        for entry in next:16384 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048; do
           name="${entry%%:*}.min.js"
           budget="${entry##*:}"
           bytes=$(gzip -nc "next/static/next/${name}" | wc -c)

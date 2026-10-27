@@ -6,15 +6,9 @@ The merge replaces a default scope whole, so a key the user leaves out is read h
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Final, cast
 
-from .defaults import DEFAULTS
-from .frozen import freeze
+from .merge import FROZEN_DEFAULTS
 from .settings import next_framework_settings
-
-
-# Frozen once, so a key the user omits is read without a copy per call.
-_FROZEN_DEFAULTS: Final = cast("Mapping[str, Any]", freeze(DEFAULTS))
 
 
 def scope_value(name: str, key: str) -> object:
@@ -22,7 +16,7 @@ def scope_value(name: str, key: str) -> object:
     held = getattr(next_framework_settings, name)
     if isinstance(held, Mapping) and key in held:
         return held[key]
-    return _FROZEN_DEFAULTS[name].get(key)
+    return FROZEN_DEFAULTS[name].get(key)
 
 
 __all__ = ["scope_value"]
