@@ -22,18 +22,19 @@ Each of these modules registers checks.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
-Seven checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 ``check_asset_version_moves_between_deploys`` (``next.W083``) describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
 ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 ``check_shared_broker`` (``next.W149``) flags the in-process default broker, which a development server runs on by design.
+``check_redis_connection_limit`` (``next.W151``) flags a ``RedisBroker`` left at the redis-py pool default, which a development server never reaches.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the seven deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -210,7 +211,7 @@ Development server
 Realtime
 ~~~~~~~~
 
-``next.realtime.checks`` validates the ``REALTIME`` settings mapping, the ticket binding, the broker capabilities, the ``@on`` handlers that ``REALTIME['HANDLERS']`` imports, and a routed introspection endpoint (``next.E188``), and at deploy it flags a process-local broker (``next.W149``).
+``next.realtime.checks`` validates the ``REALTIME`` settings mapping, the ticket binding, the broker capabilities, the ``@on`` handlers that ``REALTIME['HANDLERS']`` imports, and a routed introspection endpoint (``next.E188``), and at deploy it flags a process-local broker (``next.W149``) and a ``RedisBroker`` without a connection limit (``next.W151``).
 The broker ``OPTIONS`` codes come from the ``check_options`` classmethod of the configured ``BrokerBackend`` class, which the check calls with the ``OPTIONS`` mapping.
 
 .. automodule:: next.realtime.checks
@@ -1057,6 +1058,10 @@ Errors
      - A ``PARTIAL_BACKENDS`` entry names a protocol backend that leaves ``stream_data(envelope, meta)`` abstract or defines an ``sse_event`` method.
        Such a class cannot be built, or no stream calls its ``sse_event``, so the check names ``stream_data`` as the method to implement.
      - ``next.partial.checks.backends``
+   * - ``next.E216``
+     - The ``SUBSCRIBE_MAX_CONNECTIONS`` option of ``RedisBroker`` is not a positive integer.
+       The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
+     - ``next.realtime.redis.broker``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1487,6 +1492,12 @@ Warnings
        Silent while the default login is on, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``.
        Declaring ``page.login_required()``, ``permission_required()``, or ``page.public()`` for the page, or setting ``login_required`` on the action ``Meta``, clears it.
      - ``next.forms.checks.actions``
+   * - ``next.W151``
+     - The configured broker class is ``RedisBroker`` or a subclass of it, and its ``OPTIONS`` set neither ``SUBSCRIBE_MAX_CONNECTIONS`` nor ``max_connections`` in ``CLIENT``.
+       Every open stream holds one connection of the subscription pool, so the redis-py default of 100 caps the open streams of each process and refuses the next one.
+       The check carries ``deploy=True``.
+       Setting ``SUBSCRIBE_MAX_CONNECTIONS`` to the open streams one process serves clears it.
+     - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.
 

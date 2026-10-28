@@ -137,13 +137,15 @@ Realtime
            "OPTIONS": {
                "URL": os.environ["REDIS_URL"],
                "CLIENT": {"max_connections": 200},
+               "SUBSCRIBE_MAX_CONNECTIONS": 1000,
            },
        },
    }
 
 Set ``BROKER`` to ``RedisBroker``, because the default ``MemoryBroker`` reaches subscribers of one process only.
 Until it does, ``manage.py check --deploy`` reports ``next.W149``.
-The ``max_connections`` value is a placeholder, and the pool needs one connection per open stream of the process, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
+The ``max_connections`` and ``SUBSCRIBE_MAX_CONNECTIONS`` values are placeholders.
+The subscription pool needs one connection per open stream of the process, and the command pool one per Redis call the process runs at once, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
 
 A project that routes the ticket introspection endpoint for a gateway outside Python adds ``"GATEWAY_TOKEN": os.environ["GATEWAY_TOKEN"]``, read from the environment rather than committed.
 ``HEARTBEAT`` is the WebSocket ping interval, and an SSE stream takes its heartbeat from the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend.

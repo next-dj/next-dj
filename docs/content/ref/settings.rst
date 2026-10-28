@@ -291,6 +291,11 @@ Default value.
      - A mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
        Its entries override the ``health_check_interval`` and ``socket_keepalive`` the broker sets, while ``decode_responses`` is always forced on, so a ``CLIENT`` that sets it to anything but ``True`` is ``next.E187``.
        ``max_connections`` is the usual entry, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+   * - ``next.realtime.RedisBroker``
+     - ``SUBSCRIBE_MAX_CONNECTIONS``, unset
+     - The cap of the subscription pool, a positive integer, and ``next.E216`` reports any other value.
+       Every open stream holds one connection of this pool, which stays apart from the command pool that publishing uses.
+       Unset, the pool takes ``max_connections`` from ``CLIENT``, or the redis-py default of 100, and ``manage.py check --deploy`` reports ``next.W151`` when neither is set.
 
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
 ``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.

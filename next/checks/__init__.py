@@ -159,6 +159,7 @@ if TYPE_CHECKING:
     )
     from next.realtime.checks import (
         check_realtime_settings,
+        check_redis_connection_limit,
         check_shared_broker,
         check_ticket_introspection,
         check_upstream_handlers,
@@ -367,6 +368,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     "next.realtime.checks": (
         "check_realtime_settings",
+        "check_redis_connection_limit",
         "check_shared_broker",
         "check_ticket_introspection",
         "check_upstream_handlers",
@@ -556,6 +558,7 @@ __all__ = [
     "check_public_actions",
     "check_public_beside_requirements",
     "check_realtime_settings",
+    "check_redis_connection_limit",
     "check_render_guarded_actions",
     "check_repeated_form_has_key",
     "check_request_in_context",

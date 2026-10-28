@@ -12,12 +12,14 @@ from django.urls import URLPattern, include, path
 
 from next.realtime import (
     MemoryBroker,
+    RedisBroker,
     SessionBinding,
     SignedCookieBinding,
     TicketBinding,
 )
 from next.realtime.checks import (
     check_realtime_settings,
+    check_redis_connection_limit,
     check_shared_broker,
     check_ticket_introspection,
 )
@@ -509,6 +511,72 @@ def test_check_w149_stays_quiet_without_a_memory_broker(backend: str) -> None:
 def test_check_w149_leaves_a_non_mapping_broker_to_e177() -> None:
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": None}}):
         assert check_shared_broker() == []
+
+
+class SentinelBroker(RedisBroker):
+    pass
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 2.5, "10", None])
+def test_check_rejects_an_unusable_stream_connection_limit(limit: object) -> None:
+    assert _ids(NEXT_FRAMEWORK=_redis(SUBSCRIBE_MAX_CONNECTIONS=limit)) == {"next.E216"}
+
+
+def test_check_accepts_a_stream_connection_limit() -> None:
+    assert _ids(NEXT_FRAMEWORK=_redis(SUBSCRIBE_MAX_CONNECTIONS=1000)) == set()
+
+
+def _connection_limit_ids(broker: object) -> set[str]:
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": broker}}):
+        return {message.id for message in check_redis_connection_limit()}
+
+
+def test_check_w151_is_a_deployment_check() -> None:
+    assert check_redis_connection_limit in check_registry.get_checks(
+        include_deployment_checks=True
+    )
+    assert check_redis_connection_limit not in check_registry.get_checks()
+
+
+def test_check_w151_warns_a_redis_broker_without_a_connection_limit() -> None:
+    with override_settings(NEXT_FRAMEWORK=_redis(CLIENT={"ssl": True})):
+        [warning] = check_redis_connection_limit()
+    assert warning.id == "next.W151"
+    assert warning.msg.startswith("RedisBroker sets no connection limit")
+    assert "SUBSCRIBE_MAX_CONNECTIONS" in str(warning.hint)
+
+
+@pytest.mark.parametrize(
+    "broker",
+    [
+        {"BACKEND": "next.realtime.RedisBroker"},
+        {"BACKEND": "next.realtime.RedisBroker", "OPTIONS": None},
+        {"BACKEND": "next.realtime.RedisBroker", "OPTIONS": {"CLIENT": None}},
+        {"BACKEND": "tests.realtime.test_checks.SentinelBroker"},
+    ],
+)
+def test_check_w151_warns_every_unlimited_redis_broker(broker: object) -> None:
+    assert _connection_limit_ids(broker) == {"next.W151"}
+
+
+@pytest.mark.parametrize(
+    "broker",
+    [
+        {
+            "BACKEND": "next.realtime.RedisBroker",
+            "OPTIONS": {"SUBSCRIBE_MAX_CONNECTIONS": 1000},
+        },
+        {
+            "BACKEND": "next.realtime.RedisBroker",
+            "OPTIONS": {"CLIENT": {"max_connections": 200}},
+        },
+        {"BACKEND": "next.realtime.MemoryBroker"},
+        {"BACKEND": "x.Y"},
+        None,
+    ],
+)
+def test_check_w151_stays_quiet_with_a_limit_or_another_broker(broker: object) -> None:
+    assert _connection_limit_ids(broker) == set()
 
 
 class HeaderTokenView(TicketIntrospectionView):

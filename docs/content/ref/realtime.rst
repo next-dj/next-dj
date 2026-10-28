@@ -58,8 +58,9 @@ A multi-process production deployment must use a shared backend such as Redis, b
 
 ``OPTIONS.CLIENT`` is a mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client.
 It overrides the defaults ``health_check_interval`` and ``socket_keepalive``, while ``decode_responses`` is always ``True``.
-A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` reaches Redis through Sentinel or Cluster.
-A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis.broker`` logger.
+``OPTIONS.SUBSCRIBE_MAX_CONNECTIONS`` caps the subscription pool, a client of its own that streams hold connections of, apart from the command pool that publishing uses.
+A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` reaches Redis through Sentinel or Cluster, and the broker calls it once for each pool.
+A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis.broker`` logger, and the warning of the subscription pool names ``SUBSCRIBE_MAX_CONNECTIONS``.
 The ``next.realtime.redis.broker`` and ``next.realtime.redis.pubsub`` loggers are children of ``next.realtime.redis``, so one handler on the parent catches both.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 Every ``RedisBroker`` operation raises ``BrokerConnectionError`` for a connection or timeout error and for the replies of a server that cannot serve now, ``READONLY``, ``OOM``, ``CLUSTERDOWN``, and ``TRYAGAIN``, so a stream ends as it does on a lost connection and the client retries.
