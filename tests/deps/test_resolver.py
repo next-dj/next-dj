@@ -6,7 +6,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from typing import NamedTuple
-from unittest.mock import ANY
+from unittest.mock import ANY, patch
 
 import pytest
 from django.http import HttpRequest
@@ -35,6 +35,8 @@ from next.deps.introspect import (
     introspect_key,
 )
 from next.deps.resolver import _CLAIMED_RESERVED, _UNCLAIMED_RESERVED, forget_dep_caches
+from next.errors import AsyncCallableError
+from next.introspect import refuse_async as refuse_async_original
 from next.testing import make_resolution_context
 from next.urls import HttpRequestProvider, UrlKwargsProvider
 from tests.support import (
@@ -1258,3 +1260,36 @@ class TestLeafDependencies:
         instance.register_dependency("theme", themed)
         assert instance.resolve_dependencies(fn, pk=3) == {"theme": "light-3"}
         assert instance._leaf_dependencies == {}
+
+
+async def _async_render(request: HttpRequest) -> str:
+    return "ok"
+
+
+def _sync_render(request: HttpRequest) -> str:
+    return "ok"
+
+
+class TestAsyncRefusal:
+    """An async callable is refused once per compiled plan, never per call."""
+
+    def test_resolving_an_async_callable_raises(self) -> None:
+        instance = _minimal_resolver()
+        with pytest.raises(AsyncCallableError, match="_async_render"):
+            instance.resolve_dependencies(_async_render)
+        assert introspect_key(_async_render) not in instance._plan_cache
+
+    def test_a_cached_plan_skips_the_refusal(self) -> None:
+        instance = _minimal_resolver()
+        with patch(
+            "next.deps.resolver.refuse_async", wraps=refuse_async_original
+        ) as refusal:
+            instance.resolve_dependencies(_sync_render)
+            instance.resolve_dependencies(_sync_render)
+        assert refusal.call_count == 1
+
+    def test_registering_an_async_dependency_raises(self) -> None:
+        instance = _minimal_resolver()
+        with pytest.raises(AsyncCallableError, match="dependency 'feed'"):
+            instance.register_dependency("feed", _async_render)
+        assert instance.get_dependency("feed") is None

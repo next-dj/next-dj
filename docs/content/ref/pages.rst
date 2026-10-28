@@ -269,6 +269,7 @@ Its ``faulty(file_path, loaded)`` tells whether ``next.E012``, ``next.E013``, or
 
 The package exports thirty-four check callables.
 
+- ``check_async_callables``.
 - ``check_conditional_get_order``.
 - ``check_context_functions``.
 - ``check_context_processor_signature``.

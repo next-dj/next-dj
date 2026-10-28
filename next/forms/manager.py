@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, override
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import BackendListManager, backend_entries, load_backends
+from next.introspect import refuse_async
 
 from .backends import FormActionBackend, declaring_files
 from .dispatch.build import _form_action_context_callable
@@ -30,6 +31,46 @@ type ActionsSnapshot = tuple[tuple[FormActionBackend, object], ...]
 
 _version_counter = itertools.count(1)
 """Process-wide source of form-action versions, so no two managers share one."""
+
+_FORM_HOOKS: tuple[str, ...] = (
+    "get_initial",
+    "get_form_kwargs",
+    "check_permissions",
+    "has_object_permission",
+    "on_valid",
+    "get_success_message",
+)
+"""Form methods the dispatcher calls, each refused at registration when async."""
+
+_WIZARD_HOOKS: tuple[str, ...] = (
+    "check_permissions",
+    "get_steps",
+    "get_form_kwargs",
+    "done",
+    "get_success_message",
+)
+"""Wizard methods the dispatcher calls, each refused at registration when async."""
+
+
+def _refuse_async_hooks(target: type, hooks: tuple[str, ...]) -> None:
+    """Refuse every hook of `target` among `hooks` that is declared `async def`."""
+    for hook in hooks:
+        method = getattr(target, hook, None)
+        if callable(method):
+            refuse_async(method, f"{target.__name__} hook")
+
+
+def _refuse_async_registration(registration: "ActionRegistration") -> None:
+    """Refuse an async handler, form hook or wizard hook before it is registered."""
+    if registration.handler is not None:
+        refuse_async(registration.handler, "@action handler")
+    form_class = registration.form_class
+    if isinstance(form_class, type):
+        _refuse_async_hooks(form_class, _FORM_HOOKS)
+    elif form_class is not None:
+        refuse_async(form_class, "@action form_class factory")
+    if registration.wizard_class is not None:
+        _refuse_async_hooks(registration.wizard_class, _WIZARD_HOOKS)
 
 
 class FormActionManager(BackendListManager[FormActionBackend]):
@@ -103,7 +144,8 @@ class FormActionManager(BackendListManager[FormActionBackend]):
         )
 
     def register_action(self, registration: "ActionRegistration") -> None:
-        """Forward registration to the first backend."""
+        """Refuse async callables, then forward registration to the first backend."""
+        _refuse_async_registration(registration)
         self._first_backend().register_action(registration)
         self._bump()
 

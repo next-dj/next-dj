@@ -113,8 +113,23 @@ class AbstractBackendError(ImproperlyConfigured):
         )
 
 
+class AsyncCallableError(ImproperlyConfigured):
+    """Raised when a page, context, action or form hook callable is `async def`."""
+
+    def __init__(self, role: str, subject: str) -> None:
+        """Store the role and the described callable, naming the sync bridge."""
+        self.role = role
+        self.subject = subject
+        super().__init__(
+            f"The {role} {subject} is async. next.dj pages, context and actions "
+            "are sync, so a call would hand back a coroutine nobody awaits. Declare "
+            "it with 'def' and reach async code through asgiref.sync.async_to_sync."
+        )
+
+
 __all__ = [
     "AbstractBackendError",
+    "AsyncCallableError",
     "BackendImportError",
     "BackendNotSubclassError",
     "BackendPathError",

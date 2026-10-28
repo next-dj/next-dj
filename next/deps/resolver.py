@@ -13,7 +13,7 @@ from django.utils.functional import SimpleLazyObject, empty
 
 from next.backends import resolve_setting_class
 from next.caches import LruCache
-from next.introspect import describe_callable
+from next.introspect import describe_callable, refuse_async
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
 from .context import RESERVED_KEYS, ResolutionContext
@@ -212,8 +212,9 @@ class DependencyResolver:
     def _compile_plan(self, func: Callable[..., Any]) -> tuple[InjectionPlan, bool]:
         """Compile the plan for `func` and say whether it is settled enough to cache.
 
-        Unresolved hints mark the plan provisional, so a later import is retried.
+        Unresolved hints mark the plan provisional, and an async `func` is refused.
         """
+        refuse_async(func, "dependency-injected callable")
         try:
             sig = cached_signature(func)
         except (ValueError, TypeError):
@@ -275,6 +276,7 @@ class DependencyResolver:
 
         Drops any leaf note for the name, so the new callable is looked at afresh.
         """
+        refuse_async(callable_dep, f"dependency {name!r}")
         self._dependency_callables[name] = callable_dep
         self._leaf_dependencies.pop(name, None)
         return callable_dep

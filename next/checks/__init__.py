@@ -79,6 +79,7 @@ if TYPE_CHECKING:
         check_wizard_url_param_route,
     )
     from next.pages.checks import (
+        check_async_callables,
         check_conditional_get_order,
         check_context_functions,
         check_context_processor_signature,
@@ -289,6 +290,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_wizard_url_param_route",
     ),
     "next.pages.checks": (
+        "check_async_callables",
         "check_conditional_get_order",
         "check_context_functions",
         "check_context_processor_signature",
@@ -450,6 +452,7 @@ __all__ = [
     "check_asset_kinds_are_loadable",
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",
+    "check_async_callables",
     "check_builtin_tag_libraries_complete",
     "check_colocated_name_collisions",
     "check_component_action_objects",

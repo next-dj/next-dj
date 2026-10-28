@@ -326,6 +326,7 @@ Errors
        A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they answer 404 or raise under ``next.conf.fail_loudly``.
        The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
        The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
+       An import stopped by an ``async def`` callable reports as ``next.E218`` instead.
      - ``next.pages.checks.modules``
    * - ``next.E018``
      - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
@@ -555,6 +556,7 @@ Errors
    * - ``next.E084``
      - A ``component.py`` raises while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
        The message names the recorded exception type and text, which is what tells a missing import path apart from a typo in the module.
+       An import stopped by an ``async def`` callable reports as ``next.E218`` instead.
      - ``next.components.checks``
    * - ``next.E085``
      - An ``@action`` declares a ``scope`` keyword other than ``"page"`` or ``"shared"``.
@@ -1066,6 +1068,14 @@ Errors
      - A bracket segment such as ``[form]``, ``[request]`` or ``[file_path]`` takes a name the framework passes to page, form and component callables itself.
        The router refuses the route with ``ReservedURLParameterError`` and leaves the page unrouted, and the hint lists every reserved name to rename the directory away from.
      - ``next.urls.checks``
+   * - ``next.E218``
+     - A ``page.py`` or ``component.py`` declares an ``async def`` callable that next.dj calls synchronously, so the module did not load.
+       It covers a module ``render``, an ``@context`` or ``@component.context`` callable, an ``@action`` handler, and the form and wizard hooks the dispatcher calls, like ``on_valid``, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``done``.
+       The refusal is an ``AsyncCallableError``, a subclass of ``ImproperlyConfigured`` raised at registration or module load, and the message names the callable and its file.
+       The dependency resolver refuses an async callable the same way when it first compiles the injection plan of one.
+       ``next.E017`` and ``next.E084`` stay silent for that module, so the failure surfaces once.
+       Realtime handlers are not affected, since they run async by design.
+     - ``next.pages.checks.modules``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 

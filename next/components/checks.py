@@ -18,6 +18,7 @@ from next.checks.common import (
     registration_file_errors,
 )
 from next.conf import next_framework_settings
+from next.errors import AsyncCallableError
 
 from .backends import ComponentsBackend
 from .context import component
@@ -345,7 +346,8 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
     for backend in _checked_backends():
         for module_path in backend.import_component_modules():
             error = last_load_error(module_path)
-            if error is None:
+            # An async callable refused at import is left to next.E218, which names it.
+            if error is None or isinstance(error, AsyncCallableError):
                 continue
             errors.append(
                 Error(

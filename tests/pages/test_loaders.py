@@ -12,6 +12,7 @@ from django.test import override_settings
 import next.pages.loaders as loaders_module
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
+from next.errors import AsyncCallableError
 from next.pages.loaders import (
     AncestorStamps,
     DjxTemplateLoader,
@@ -1744,6 +1745,28 @@ class TestPageModuleImportErrors:
         assert isinstance(second, PageModuleImportError)
         assert first is not second
         assert first.__cause__ is second.__cause__
+
+
+class TestAsyncRenderRefusal:
+    """An `async def render` stops the `page.py` from loading, refused at load time."""
+
+    def test_async_render_records_the_refusal(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("async def render():\n    return 'hi'\n")
+
+        assert load_python_module_memo(page_file) is None
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert isinstance(error.__cause__, AsyncCallableError)
+        assert f'page.py render "render" ({page_file})' in str(error.__cause__)
+
+    def test_sync_render_loads(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render():\n    return 'hi'\n")
+
+        module = load_python_module_memo(page_file)
+        assert module is not None
+        assert module.render() == "hi"
 
 
 class TestTheModuleMemoIsBounded:

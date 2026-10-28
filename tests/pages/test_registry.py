@@ -7,6 +7,7 @@ from django.http import HttpRequest
 
 import next.pages.registry as registry_module
 from next.deps import DependencyResolver
+from next.errors import AsyncCallableError
 from next.pages import Context, Page, PageContextShapeError
 from next.pages.context import ContextByDefaultProvider
 from next.pages.registry import PageContextEntry, PageContextRegistry, ZoneBinding
@@ -1202,3 +1203,17 @@ class TestInheritedResolution:
 
         assert result.context_data == {"brand": "keyed", "tagline": "t"}
         assert result.js_context == {"brand": "keyed", "tagline": "t"}
+
+
+class TestAsyncContextRefusal:
+    """An async `@context` callable is refused before it is registered."""
+
+    def test_register_context_refuses_async(
+        self, context_manager, test_file_path
+    ) -> None:
+        async def rows() -> list[int]:
+            return [1]
+
+        with pytest.raises(AsyncCallableError, match='@context callable "rows"'):
+            context_manager.register_context(test_file_path, "rows", rows)
+        assert context_manager._context_registry == {}
