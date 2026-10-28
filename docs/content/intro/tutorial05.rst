@@ -85,7 +85,7 @@ Create ``tests/test_notes_e2e.py``.
        assert "Second" in response.content.decode()
 
 ``NextClient`` extends Django's test client with three shortcuts, two for form actions and one for zone requests.
-``post_action`` resolves an action name to its URL and POSTs in one call, and its ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
+``post_action`` resolves an action name to its URL and POSTs in one call, and its required ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
 ``get_action_url`` returns that URL without dispatching.
 ``get_zones`` sends a GET as a partial request for the named zones, which :doc:`tutorial06` puts to work.
 
@@ -110,14 +110,17 @@ The framework gives each action a stable URL.
    from notes.models import Note
 
    def test_create_note_action(next_client, db) -> None:
-       response = next_client.post_action("create_note_form", {"title": "From test", "body": "body"})
+       response = next_client.post_action(
+           "create_note_form", {"title": "From test", "body": "body"}, origin="/"
+       )
        assert response.status_code == 302
        assert Note.objects.filter(title="From test").exists()
        assert response["Location"] == "/"
 
 ``post_action`` looks the action name up through ``resolve_action_url`` and posts the data to the dispatch endpoint.
+Its ``origin`` keyword is required and names the page that renders the form, here the index page at ``"/"``.
 The action name ``create_note_form`` is derived automatically from the class name ``CreateNoteForm``.
-The redirect target is ``"/"`` because ``on_valid`` calls ``redirect_to_origin``, which sends the visitor back to the page that rendered the form and falls back to ``"/"``.
+The redirect target is ``"/"`` because ``on_valid`` calls ``redirect_to_origin``, which sends the visitor back to the page that rendered the form.
 
 Capture action signals
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -134,7 +137,9 @@ A validation failure fires ``form_validation_failed`` instead and never reaches 
 
    def test_create_emits_action_dispatched(next_client, db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           next_client.post_action("create_note_form", {"title": "Signal", "body": ""})
+           next_client.post_action(
+               "create_note_form", {"title": "Signal", "body": ""}, origin="/"
+           )
 
        assert len(recorder) == 1
        event = recorder.first_for(action_dispatched)
@@ -152,7 +157,7 @@ Test validation failure
 
 A failed validation does not produce a redirect.
 The pipeline re-renders the origin page with the bound form and a non-zero error count.
-The test passes ``origin="/"``, which fills the hidden ``_next_form_origin`` field a browser submission carries, so the dispatcher knows which page to re-render.
+The ``origin="/"`` the test passes fills the hidden ``_next_form_origin`` field a browser submission carries, so the dispatcher knows which page to re-render.
 Append the failure test to ``tests/test_notes_actions.py``.
 
 .. code-block:: python

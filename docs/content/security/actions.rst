@@ -54,11 +54,12 @@ A forged origin lifts nothing
 -----------------------------
 
 The submission names its origin page in the hidden ``_next_form_origin`` field, and a client can replace it with the path of any routed page.
+A POST without the field, or with a value that does not resolve through the URLconf, answers HTTP 400 before any access check, guard, or handler runs.
 The rule of the origin page joins the owner rule for that request and removes none of its requirements.
 Posting ``delete_note`` with the origin of a public page therefore still meets the login of ``notes/page.py`` and the permission of the note page.
 
 A guard written inside the ``render()`` of the owner page holds as well.
-When the ``page.py`` that declares an action has a ``render()``, the dispatcher refuses a POST without an origin with HTTP 400 and a POST whose origin lies outside the directory of that page with HTTP 403, both before the handler runs.
+When the ``page.py`` that declares an action has a ``render()``, the dispatcher refuses a POST whose origin lies outside the directory of that page with HTTP 403 before the handler runs.
 An origin below that directory runs the owner ``render()`` with the URL kwargs of the origin, and a response it returns answers the POST.
 ``manage.py check`` reports such an action with ``next.W150`` while the page declares no access, because a declaration holds for every origin.
 

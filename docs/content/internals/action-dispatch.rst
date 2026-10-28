@@ -238,8 +238,9 @@ The resolved match yields two things.
 The typed URL kwargs come through the real URL converters, and the origin page source comes from the ``next_page_path`` attribute that the file router sets on every routed view, including the synthesised ``page.py`` location of virtual ``template.djx`` routes.
 The result is memoised on the request, because the invalid re-render reads it from the dispatcher and from every ``{% form %}`` tag on the page.
 
-A missing field, an off-site value, a path that does not resolve, or a resolved view without ``next_page_path`` all yield no origin match.
-The invalid branch then returns ``HTTP 400 Missing or invalid _next_form_origin``.
+A missing field, an off-site value, or a path that does not resolve yields no origin match.
+The dispatcher then returns ``HTTP 400 Missing or invalid _next_form_origin`` before any access check, guard, or handler runs.
+A resolved view without ``next_page_path`` yields a match with no page, which the handler still receives, while the invalid branch returns the same HTTP 400.
 A hand-written view opts into re-rendering by carrying its own ``next_page_path`` attribute, see :ref:`topics-forms-templates-handwritten-views`.
 
 Backends

@@ -359,7 +359,7 @@ def _held_owner_page(file_path: object) -> Path | None:
 def _check_owner_page_access(
     request: "HttpRequest",
     file_path: object,
-    origin_match: "OriginMatch | None",
+    origin_match: "OriginMatch",
     *,
     action_name: str,
     uid: str | None,
@@ -372,8 +372,8 @@ def _check_owner_page_access(
     owner = _held_owner_page(file_path)
     if owner is None:
         return None
-    origin_page = origin_match.page_path if origin_match is not None else None
-    if origin_match is None or origin_page is None:
+    origin_page = origin_match.page_path
+    if origin_page is None:
         _emit_form_access_denied(
             request, action_name, uid, layer="page", reason="denied", sender=sender
         )

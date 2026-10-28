@@ -167,6 +167,8 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Route the action once the page tree, its guard and the origin admit it."""
         origin_match = resolve_origin(request)
+        if origin_match is None:
+            return HttpResponseBadRequest("Missing or invalid _next_form_origin")
         dep_cache: dict[str, Any] = {}
         guard = guard_rule(meta)
         refusal = FormActionDispatch._refuse_access(
@@ -175,7 +177,7 @@ class FormActionDispatch:
         if refusal is not None:
             return refusal
         state = _DispatchState(
-            url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
+            url_kwargs=dict(origin_match.url_kwargs),
             dep_cache=dep_cache,
             dep_stack=[],
             uid=meta.get("uid"),
@@ -222,7 +224,7 @@ class FormActionDispatch:
     def _refuse_access(
         request: "HttpRequest",
         meta: "ActionMeta",
-        origin_match: "OriginMatch | None",
+        origin_match: "OriginMatch",
         action_name: str,
         dep_cache: dict[str, Any],
         *,
@@ -460,19 +462,19 @@ class _DispatchState:
     url_kwargs: dict[str, object]
     dep_cache: dict[str, Any]
     dep_stack: list[str]
+    origin_match: "OriginMatch"
     uid: str | None = None
-    origin_match: "OriginMatch | None" = None
     guard: "AccessRule" = OPEN
 
     @property
     def page_path(self) -> "Path | None":
-        """Return the origin page source path, if the origin resolved."""
-        return self.origin_match.page_path if self.origin_match else None
+        """Return the origin page source path, `None` for a route with no page."""
+        return self.origin_match.page_path
 
     @property
-    def origin(self) -> str | None:
-        """Return the validated origin URL path, if the origin resolved."""
-        return self.origin_match.origin if self.origin_match else None
+    def origin(self) -> str:
+        """Return the validated origin URL path."""
+        return self.origin_match.origin
 
     def forget_row(self, row: object) -> None:
         """Drop every cache entry holding `row`, so the re-render loads it afresh.

@@ -133,21 +133,20 @@ class NextClient(Client):
         action_name: str,
         data: dict[str, Any] | None = None,
         *,
-        origin: str | None = None,
+        origin: str,
         page: str | PathLike[str] | None = None,
         partial: bool | str | tuple[str, ...] = False,
         version: str | None = None,
         headers: dict[str, str] | None = None,
         **extra,
     ) -> HttpResponse:
-        """Resolve `action_name` and POST `data` to the resulting URL.
+        """Resolve `action_name` and POST `data` from the `origin` page to its URL.
 
         `partial` takes True for a partial request or the zone names it asks for.
         """
         url = resolve_action_url(action_name, page=page)
         payload: dict[str, Any] = dict(data or {})
-        if origin is not None:
-            payload.setdefault(ORIGIN_FIELD_NAME, origin)
+        payload.setdefault(ORIGIN_FIELD_NAME, origin)
         sent = dict(headers or {})
         if partial:
             sent[REQUEST_FLAG] = "1"

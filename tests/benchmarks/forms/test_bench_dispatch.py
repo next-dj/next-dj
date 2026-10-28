@@ -115,6 +115,18 @@ def _ok_handler(**kwargs) -> HttpResponseRedirect:
     return HttpResponseRedirect("/")
 
 
+def _action_request(origin: str, **fields: str) -> object:
+    """Return an action POST from `origin`, resolved against the fixed bench urlconf."""
+    post = QueryDict(mutable=True)
+    post.update({**fields, ORIGIN_FIELD_NAME: origin})
+    return build_mock_http_request(
+        method="POST",
+        POST=post,
+        FILES=None,
+        urlconf="tests.benchmarks.forms.urls_bench",
+    )
+
+
 class TestBenchDispatchEndToEnd:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_valid_form(self, benchmark) -> None:
@@ -131,8 +143,7 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        post = QueryDict("name=bench")
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/items/42/", name="bench")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
@@ -154,8 +165,7 @@ class TestBenchDispatchEndToEnd:
         meta = backend.get_meta("bench_action")
         assert meta is not None
         # The required name is missing, so the dispatch takes the error path.
-        post = QueryDict()
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/plain/")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
@@ -181,8 +191,7 @@ class TestBenchDispatchEndToEnd:
         assert meta is not None
         assert _BenchForm._has_check_permissions is False
         assert _BenchForm._has_object_permission is False
-        post = QueryDict("name=bench")
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/items/42/", name="bench")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
@@ -211,8 +220,7 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        post = QueryDict("name=bench")
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/items/42/", name="bench")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )

@@ -35,6 +35,13 @@ def _post_note(client: NextClient, note: str, **kwargs) -> HttpResponse:
     )
 
 
+def _post_guarded(client: NextClient, origin: str | None) -> HttpResponse:
+    if origin is None:
+        url = client.get_action_url("guarded_note_form")
+        return client.post(url, {"note": "ok"})
+    return client.post_action("guarded_note_form", {"note": "ok"}, origin=origin)
+
+
 @pytest.mark.django_db()
 class TestAnonymousSubmissionIsRefusedByThePage:
     """The origin page's own short-circuit answers a submission it would refuse."""
@@ -123,15 +130,14 @@ class TestOwnerRenderGuardsTheAction:
     """The owner page's `render()` answers its action whatever origin is posted."""
 
     @pytest.mark.parametrize(
-        ("origin", "status"), [("/guarded/", 302), ("/", 403), (None, 400)]
+        ("origin", "status"),
+        [("/guarded/", 302), ("/", 403), ("/_next/csrf/", 400), (None, 400)],
     )
     def test_anonymous_submission_never_runs_the_action(
         self, next_client: NextClient, origin: str | None, status: int
     ) -> None:
         with capture_signals(action_dispatched) as recorder:
-            response = next_client.post_action(
-                "guarded_note_form", {"note": "ok"}, origin=origin
-            )
+            response = _post_guarded(next_client, origin)
         assert response.status_code == status
         assert recorder.events == []
 
@@ -141,15 +147,13 @@ class TestOwnerRenderGuardsTheAction:
     ) -> None:
         next_client.force_login(User.objects.create_user("member", password="pw"))
         with capture_signals(action_dispatched) as recorder:
-            response = next_client.post_action(
-                "guarded_note_form", {"note": "ok"}, origin=origin
-            )
-        assert response.status_code in {400, 403}
+            response = _post_guarded(next_client, origin)
+        assert response.status_code == (403 if origin else 400)
         assert recorder.events == []
 
     def test_the_refusal_is_audited(self, next_client: NextClient) -> None:
         with capture_signals(form_access_denied) as recorder:
-            next_client.post_action("guarded_note_form", {"note": "ok"})
+            _post_guarded(next_client, "/")
         assert [event.kwargs["reason"] for event in recorder.events] == ["denied"]
 
     def test_an_origin_below_the_owner_runs_its_render(self, rf) -> None:

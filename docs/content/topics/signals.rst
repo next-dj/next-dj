@@ -325,7 +325,7 @@ Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwar
 
    def test_emits_action(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           NextClient().post_action("create_note", {"title": "Hello"})
+           NextClient().post_action("create_note", {"title": "Hello"}, origin="/")
 
        assert len(recorder.events) == 1
        assert recorder.first_for(action_dispatched).kwargs["action_name"] == "create_note"

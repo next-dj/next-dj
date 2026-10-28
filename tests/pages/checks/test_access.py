@@ -16,6 +16,7 @@ from next.forms.checks.actions import (
     check_render_guarded_actions,
 )
 from next.forms.manager import form_action_manager
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.pages.checks.access import (
     check_declaring_modules,
     check_public_beside_requirements,
@@ -925,7 +926,7 @@ class TestActionPages:
         with routed(root):
             Client().get("/")
             url = form_action_manager.get_action_url("ping", page_path=str(lone))
-            response = Client().post(url, {})
+            response = Client().post(url, {ORIGIN_FIELD_NAME: "/"})
 
         assert response.status_code == 204
 

@@ -18,7 +18,7 @@ from next.forms.dispatch.permissions import (
     _tree,
     owner_rule,
 )
-from next.forms.signals import form_access_denied
+from next.forms.signals import action_dispatched, form_access_denied
 from next.pages.errors import PageModuleImportError
 from next.pages.loaders import _load_python_module, load_page_module
 from next.permissions import add_perm
@@ -109,6 +109,15 @@ def _post(root: Path, kind: str, action: str, origin: str, **framework: object):
         return client.post_action(action, {"name": "x"}, origin=origin)
 
 
+def _post_without_origin(root: Path, kind: str, action: str, **framework: object):
+    with routed(root, **framework):
+        client = client_as(kind)
+        with capture_signals(action_dispatched) as recorder:
+            response = client.post(client.get_action_url(action), {"name": "x"})
+    assert recorder.events == []
+    return response
+
+
 def _assert_status(response, status: int, origin: str) -> None:
     assert response.status_code == status
     if status == 302:
@@ -173,20 +182,26 @@ class TestOwnerRule:
             write_guard(root, "page.login_required(inherit=True)\n")
             _assert_status(_post(root, "anonymous", "note", "/notes/"), 302, "/notes/")
 
-    @pytest.mark.parametrize("origin", ["/open/", None])
+    @pytest.mark.parametrize("origin", ["/open/", "/notes/"])
     def test_a_file_beside_a_page_answers_its_rule_from_any_origin(
-        self, tmp_path: Path, origin: str | None
+        self, tmp_path: Path, origin: str
     ) -> None:
         tree = _Tree(
             {"open": _plain(), "notes": _plain(_LOGIN)},
             beside={"notes": _action("note")},
         )
         root = tree.write(tmp_path / "pages")
-        with routed(root):
-            response = client_as("anonymous").post_action(
-                "note", {"name": "x"}, origin=origin
-            )
-        _assert_status(response, 302, origin or "/")
+        _assert_status(_post(root, "anonymous", "note", origin), 302, origin)
+
+    def test_a_file_beside_a_page_refuses_a_post_without_an_origin(
+        self, tmp_path: Path
+    ) -> None:
+        tree = _Tree(
+            {"open": _plain(), "notes": _plain(_LOGIN)},
+            beside={"notes": _action("note")},
+        )
+        root = tree.write(tmp_path / "pages")
+        assert _post_without_origin(root, "anonymous", "note").status_code == 400
 
     @pytest.mark.parametrize(("kind", "status"), _LOGIN_STATUS)
     def test_a_guard_in_a_skipped_folder_binds_its_files(
@@ -366,22 +381,19 @@ class TestLoginByDefault:
         _outside(tmp_path)
         _assert_status(_closed(root, kind, action, origin, by), status, origin)
 
-    @pytest.mark.parametrize(
-        ("action", "status"),
-        [("public_note", 200), ("beside_note", 200), ("hidden_note", 302)],
-    )
+    @pytest.mark.parametrize("action", ["public_note", "beside_note", "hidden_note"])
     @pytest.mark.parametrize(
         ("framing", "framework"),
         [(login_required_middleware, {}), (nullcontext, {"LOGIN_REQUIRED": True})],
         ids=["middleware", "setting"],
     )
-    def test_a_post_without_an_origin(
-        self, tmp_path: Path, action: str, status: int, framing, framework
+    def test_a_post_without_an_origin_is_a_400(
+        self, tmp_path: Path, action: str, framing, framework
     ) -> None:
         root = _DEFAULTS.write(tmp_path / "pages")
-        with framing(), routed(root, **framework):
-            response = client_as("anonymous").post_action(action, {"name": "x"})
-        _assert_status(response, status, "/")
+        with framing():
+            response = _post_without_origin(root, "anonymous", action, **framework)
+        assert response.status_code == 400
 
     def test_without_the_middleware_an_open_action_stays_open(
         self, tmp_path: Path
@@ -487,17 +499,15 @@ class TestObjectRule:
         response = _post(root, "visitor", "owner_note", f"/owner/{group.pk}/")
         assert response.status_code == 404
 
-    @pytest.mark.parametrize("origin", ["/bare/", None], ids=["bare", "missing"])
-    def test_an_origin_without_the_kwarg_is_a_400(
-        self, tmp_path: Path, origin: str | None
-    ) -> None:
+    def test_an_origin_without_the_kwarg_is_a_400(self, tmp_path: Path) -> None:
         add_perm(_READ, lambda _user, _obj: True)
         root = _OBJECTS.write(tmp_path / "pages")
-        with routed(root):
-            response = client_as("visitor").post_action(
-                "owner_note", {"name": "x"}, origin=origin
-            )
-        assert response.status_code == 400
+        assert _post(root, "visitor", "owner_note", "/bare/").status_code == 400
+
+    def test_a_missing_origin_is_a_400(self, tmp_path: Path) -> None:
+        add_perm(_READ, lambda _user, _obj: True)
+        root = _OBJECTS.write(tmp_path / "pages")
+        assert _post_without_origin(root, "visitor", "owner_note").status_code == 400
 
     def test_the_check_and_the_handler_read_one_row(self, tmp_path: Path) -> None:
         add_perm(_READ, lambda _user, _obj: True)

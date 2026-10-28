@@ -78,8 +78,6 @@ def _bind_wizard_step(
 
     Permission layers and validate-only run before any storage write.
     """
-    if state.origin_match is None:
-        return HttpResponseBadRequest("Missing or invalid _next_form_origin")
     denial = _enforce_view_permissions(wizard_class, request, action_name, state)
     if denial is not None:
         return denial

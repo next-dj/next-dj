@@ -521,7 +521,7 @@ Where DObject applies
 
 Page context callables, ``@page.metadata`` callables, form handlers and form hooks, and named dependencies resolve a ``DObject``.
 A form handler or hook reads the URL kwargs of the page the submission came from, but it resolves with no page context, so a ``DObject`` with a parent there is ``next.E155``.
-A submission whose origin is missing or names a page without the kwarg comes from the client rather than from the wiring, so the dispatcher answers it with 400 Bad Request and logs a warning instead of raising.
+A submission whose origin names a page without the kwarg comes from the client rather than from the wiring, so the dispatcher answers it with 400 Bad Request and logs a warning instead of raising.
 A ``@component.context`` callable receives no URL kwargs at all, so any ``DObject`` there is ``next.E156``, and the component reads the row from the page context by name instead.
 An access declaration of a ``page.py`` names its row as ``permission_required(perm, obj=DObject[Model])``, which loads by the URL kwarg named after the ``model_name`` of the model and shares the cached row with a ``DObject`` parameter of the same model and primary key, see :ref:`topics-access`.
 

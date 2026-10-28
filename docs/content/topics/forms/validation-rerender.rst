@@ -22,12 +22,13 @@ On the re-render branch the dispatcher resolves that path against the URLconf wi
 The file router stamps every routed view with a ``next_page_path`` attribute, so the match yields the origin page module, and the URL kwargs come through the real URL converters.
 An ``[int:id]`` capture therefore arrives as ``int`` on the re-render exactly as on the canonical GET, and a ``uuid`` capture arrives as ``UUID``.
 
-On a validation failure the dispatcher rejects the submission and returns ``HTTP 400 Missing or invalid _next_form_origin`` when any of the following holds.
+The dispatcher rejects every action POST with ``HTTP 400 Missing or invalid _next_form_origin`` before any access check, guard, or handler runs when any of the following holds.
 
 - The field is missing or blank.
 - The value is not a same-site path, one that starts with a single ``/``.
 - The path does not resolve against the URLconf.
-- The resolved view carries no ``next_page_path`` attribute, which is the case for a hand-written view that has not opted in (see :ref:`topics-forms-templates-handwritten-views`).
+
+On a validation failure the same HTTP 400 also answers when the resolved view carries no ``next_page_path`` attribute, which is the case for a hand-written view that has not opted in (see :ref:`topics-forms-templates-handwritten-views`).
 
 The resolution respects the deployment context.
 A script prefix is stripped through :func:`django.urls.get_script_prefix` before the lookup, and a per-request URLconf set on ``request.urlconf`` is passed to ``resolve``, so projects mounted under a prefix and multi-tenant URLconfs both work.
@@ -224,12 +225,11 @@ See :doc:`signals` for the full list and payload shapes.
 Edge cases
 ----------
 
-- A missing or unresolvable ``_next_form_origin`` field returns HTTP 400 on the invalid branch.
+- A missing or unresolvable ``_next_form_origin`` field returns HTTP 400 before the form is bound.
   A plain HTML form must set the field to the URL path of its page, the value the tag emits.
-- A route removed in a deploy between the render and the POST no longer resolves, so the invalid branch returns HTTP 400.
+- A route removed in a deploy between the render and the POST no longer resolves, so the POST returns HTTP 400.
 - Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the active language of the POST.
-  A user who switches the language between the render and the submit posts an origin whose language prefix no longer resolves, and the invalid branch returns HTTP 400.
-  The success path never resolves the origin and is unaffected.
+  A user who switches the language between the render and the submit posts an origin whose language prefix no longer resolves, and the POST returns HTTP 400.
 - The UID is hashed from the scope key and the action name, not the name alone.
   For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID.
   For a shared form the scope key is the dotted module, so moving the module changes the UID.

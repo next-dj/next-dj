@@ -1483,7 +1483,7 @@ Warnings
      - ``next.realtime.checks``
    * - ``next.W150``
      - A file of a page tree declares actions beside a ``page.py`` with a ``render()``, and no declaration of that page, no ``inherit=True`` declaration above it, and no ``Meta`` guard covers them, so only that ``render()`` guards them.
-       The dispatcher runs that ``render()`` for an origin inside the directory of the page and refuses any other origin, so the actions cannot be posted from a page outside it.
+       The dispatcher runs that ``render()`` for an origin inside the directory of the page and answers HTTP 403 for an origin outside it, after the HTTP 400 every action POST gets without a resolvable origin.
        Silent while the default login is on, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``.
        Declaring ``page.login_required()``, ``permission_required()``, or ``page.public()`` for the page, or setting ``login_required`` on the action ``Meta``, clears it.
      - ``next.forms.checks.actions``

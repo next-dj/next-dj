@@ -523,7 +523,9 @@ class TestPresetFilterPushUrl:
     def test_non_partial_apply_falls_back_to_a_redirect(
         self, next_client, demo_data
     ) -> None:
-        response = next_client.post_action("preset_filter_form", {"preset": "newest"})
+        response = next_client.post_action(
+            "preset_filter_form", {"preset": "newest"}, origin="/catalog/"
+        )
         assert response.status_code == 302
         assert response["Location"] == "/catalog/?sort=newest"
 

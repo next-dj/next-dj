@@ -29,12 +29,12 @@ _TWIN = (
 
 
 def write_twin_pages(root: Path) -> Path:
-    """Write `create` and `edit` pages that each declare an action named `twin`.
+    """Write routed `create` and `edit` pages that each declare an action named `twin`.
 
     Each handler answers with the name of its page, so a test sees which one ran.
     """
     for label in ("create", "edit"):
-        write_page(root, label, _TWIN.format(label=label))
+        write_page(root, label, _TWIN.format(label=label), body=label)
     return root
 
 

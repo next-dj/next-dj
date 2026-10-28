@@ -441,7 +441,7 @@ The semantics mirror Django's :class:`~django.contrib.auth.mixins.PermissionRequ
 ``permission_required`` accepts a single permission string or an iterable of them, the user must hold every listed permission, and declaring a permission implicitly requires authentication.
 The static guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access, so a request denied by the static guard runs no application code.
 An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
-A submission whose ``_next_form_origin`` is missing or not a same-site path gets ``next=/`` instead, so a hand-crafted form should always carry the field.
+A submission whose ``_next_form_origin`` is missing or does not resolve answers HTTP 400 before the guard runs, so a hand-crafted form always carries the field.
 An origin so long that the login URL would exceed the length Django allows in a redirect ``Location`` sends the user to plain ``LOGIN_URL`` with no ``next``.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 

@@ -150,7 +150,9 @@ A test walks the flow with ``NextClient``.
        owner = User.objects.create_user("owner")
        client = NextClient()
        client.force_login(owner)
-       client.post_action("note_create_form", {"title": "Intro", "body": ""})
+       client.post_action(
+           "note_create_form", {"title": "Intro", "body": ""}, origin="/notes/new/"
+       )
        note = Note.objects.get(owner=owner)
        client.post_action(
            "note_edit_form",
@@ -171,8 +173,9 @@ A test walks the flow with ``NextClient``.
        assert response.status_code == 404
        assert Note.objects.get(pk=note.pk).title == "Mine"
 
-The first ``post_action`` mimics the create page and inserts a row owned by the signed-in user.
-The second passes ``origin``, which fills the ``_next_form_origin`` field the ``{% form %}`` tag emits, and resolving that path yields the ``note`` kwarg ``DObject`` reads.
+Each ``post_action`` passes ``origin``, which fills the ``_next_form_origin`` field the ``{% form %}`` tag emits.
+The first names the create page and inserts a row owned by the signed-in user.
+The second names the edit page, and resolving that path yields the ``note`` kwarg ``DObject`` reads.
 The recovered kwargs pass through the URL converters of the resolved route, so ``[int:note]`` arrives as an integer.
 
 See also

@@ -34,6 +34,7 @@ from django.urls import path
 
 from next.forms import Form, SessionRotationError, action
 from next.forms.manager import form_action_manager
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.realtime import WebSocketApp, application
 from next.realtime.tunnel import DjangoTunnel, Tunnel
 from next.testing.realtime import (
@@ -50,6 +51,7 @@ from tests.support.realtime import (
 
 
 _ORIGIN = "http://testserver"
+_PAGE = "/"
 
 
 @action("tunnel_echo", transport="any")
@@ -243,7 +245,7 @@ def _frame(
             "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
             **(headers or {}),
         },
-        "body": urlencode(data),
+        "body": urlencode({ORIGIN_FIELD_NAME: _PAGE, **data}),
     }
 
 
@@ -258,7 +260,9 @@ def _http(
     client = AsyncClient(enforce_csrf_checks=True)
     client.cookies.load(_cookie(ticket, secret))
     return async_to_sync(client.post)(
-        path, data, headers={"Origin": _ORIGIN, **(headers or {})}
+        path,
+        {ORIGIN_FIELD_NAME: _PAGE, **data},
+        headers={"Origin": _ORIGIN, **(headers or {})},
     )
 
 
@@ -551,7 +555,8 @@ def test_sync_view_past_the_timeout_never_blocks_the_loop(
 
     # The view must start inside the timeout, which a slow runner's thread hops delay.
     tunnel = {"TIMEOUT": 1.0, "CONCURRENCY": 1}
-    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"TUNNEL": tunnel}}):
+    framework = {**settings.NEXT_FRAMEWORK, "REALTIME": {"TUNNEL": tunnel}}
+    with override_settings(NEXT_FRAMEWORK=framework):
         answers = asyncio.run(scenario())
     assert [answer["error"] for answer in answers] == ["timeout", "limit"]
     assert _SLOW["released"] is True
