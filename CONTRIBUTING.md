@@ -97,7 +97,7 @@ Tests mirror this layout:
 | Command | Purpose |
 | --- | --- |
 | `make build-js` | Bundle `next/client/next.ts` → `next/static/next/next.min.js` via esbuild. |
-| `make build` | `uv build`, wheel and sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to skip npm when the bundles are already built, as CI and the release workflow do; the build still fails when any bundle is missing. |
+| `make build` | `uv build`, wheel and sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to skip npm when the bundles are already built, as CI does; the build still fails when any bundle is missing. |
 
 ### Docs and hooks
 
@@ -122,7 +122,6 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additional
 - On pull requests: dependency review (`dependency-review` job).
 - In CI, `lint` runs on **`next/` only**. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs the latest patch of a Django series with `uv pip install "django~=X.Y.0"` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- Pushing a `v*` tag runs [.github/workflows/release.yml](.github/workflows/release.yml). It checks that the tag equals `next.__version__`, waits for a green CI run on the same commit of `main`, builds and checks the distributions, and publishes through PyPI Trusted Publishing from the `pypi` environment.
 - A dedicated **CodSpeed** workflow ([.github/workflows/codspeed.yml](.github/workflows/codspeed.yml)) runs the benchmarks on every PR and every push to `main`, and CodSpeed posts a performance report on the PR. See [Benchmarks](#benchmarks).
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [pyproject.toml](pyproject.toml) (line length 88, isort with `known-first-party = ["next"]`, relaxed rules for `examples/`, `tests/`, and `conftest.py`).

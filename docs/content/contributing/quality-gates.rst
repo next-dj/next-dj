@@ -244,9 +244,6 @@ The ``security`` job runs the ``typos`` and ``uv-lock`` pre-commit hooks over al
 On a pull request, a ``dependency-review`` job inspects dependency changes and fails on a vulnerability of moderate severity or higher.
 Every third-party action is pinned by commit SHA, with its release tag in a comment.
 
-A ``v*`` tag starts the release workflow, which publishes nothing until the tag equals ``next.__version__`` and the CI run on the tagged commit of ``main`` has passed.
-It then builds the distributions, fails if either lacks one of the seven bundles, and publishes them to PyPI through Trusted Publishing from the ``pypi`` environment, with no stored token.
-
 See also
 --------
 
