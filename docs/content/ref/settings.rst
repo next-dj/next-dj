@@ -154,7 +154,7 @@ FORM_ANCHOR_FILES
 ~~~~~~~~~~~~~~~~~
 
 List of file basenames that receive ``page`` scope during auto-registration.
-A form class declared in a file whose basename appears in this list is keyed to the absolute path of that file.
+A form class declared in a file whose basename appears in this list is keyed to the path of that file inside its app or below ``BASE_DIR``.
 All other files produce ``shared`` scope.
 
 Default value ``None``, which uses the built-in set ``["page.py", "component.py"]``.

@@ -268,7 +268,7 @@ Terms used throughout the next.dj documentation.
 
    scope
       The keying rule for an action name, ``page`` or ``shared``.
-      A page-scoped action is keyed to the absolute path of its declaring ``page.py`` or ``component.py``, while a shared action is keyed to its dotted module name and is reachable project-wide.
+      A page-scoped action is keyed to the path of its declaring ``page.py`` or ``component.py`` inside its app or below ``BASE_DIR``, while a shared action is keyed to its dotted module name and is reachable project-wide.
       The resulting key is the scope key that the UID hashes together with the action name.
       See :doc:`/content/topics/forms/actions`.
 

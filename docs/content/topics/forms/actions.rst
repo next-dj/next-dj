@@ -92,7 +92,7 @@ The scope of a form class depends on the file it is declared in.
 
 Page scope.
    A class declared in ``page.py`` or ``component.py`` receives ``page`` scope.
-   The framework keys it to the absolute path of that file.
+   The framework keys it to the path of that file inside its installed app or below ``BASE_DIR``.
    A page-scoped name is local to its directory, the way a name is local to a Python module.
    Two pages may each declare a ``NoteForm`` with no coordination, and a form opts into a project-wide name by moving to a shared file.
 
@@ -602,8 +602,9 @@ Each action gets a stable URL at ``/_next/form/<uid>/``.
 The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name}")``, where ``name`` is the derived action name and ``scope_key`` depends on the scope.
 
 Page scope.
-   ``scope_key`` is the absolute filesystem path of the declaring ``page.py`` or ``component.py``.
-   The UID is therefore stable only as long as the file stays where it is.
+   ``scope_key`` is ``<app label>:<path>`` with the path of the declaring ``page.py`` or ``component.py`` inside the deepest installed app that holds it.
+   A file in no installed app gives ``:<path>`` with its path below ``BASE_DIR``, and a file outside both keeps its absolute path.
+   The UID therefore survives a deploy into another directory, such as a blue/green switch or a new ``releases/<timestamp>`` checkout, and changes only when the file moves inside the project.
 
 Shared scope.
    ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.
