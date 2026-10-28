@@ -325,6 +325,10 @@ Checks
    Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
    Reports :ref:`next.E014 <ref-system-checks>` when the conflict comparison itself raises.
 
+``check_reserved_url_parameters``.
+   Fails with :ref:`next.E217 <ref-system-checks>` when a bracket segment takes a name the framework passes to page, form and component callables itself, such as ``form``, ``request`` or ``file_path``.
+   ``check_url_patterns`` leaves that refusal to this check, so it surfaces once.
+
 ``check_reverse_name_collisions``.
    Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name within one namespace.
    It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so :ref:`next.E016 <ref-system-checks>` surfaces only once.

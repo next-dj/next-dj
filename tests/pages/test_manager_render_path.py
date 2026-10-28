@@ -201,6 +201,23 @@ class TestComposedTemplateCache:
         assert b"dynamic" in response.content
         assert page_file not in page_instance._templates.compiled
 
+    def test_url_kwargs_named_after_internal_positionals_reach_the_render(
+        self, page_instance, tmp_path
+    ) -> None:
+        """The body helpers take their own arguments positionally, so no kwarg clashes."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "def render(request, module, body, template, start):\n"
+            "    return f'<p>{module} {body} {template} {start}</p>'\n"
+        )
+        view = unified_view(page_instance, page_file)
+
+        response = view(
+            build_page_request(), module="m", body="b", template="t", start="s"
+        )
+
+        assert b"<p>m b t s</p>" in response.content
+
 
 class TestStaticFastPathView:
     """A page without ``render()`` serves the cached composed template."""

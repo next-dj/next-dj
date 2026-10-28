@@ -10,6 +10,7 @@ from .backends import FileRouterBackend, RouterBackend, RouterFactory
 from .errors import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
+    ReservedURLParameterError,
     URLParameterError,
 )
 from .manager import RouterManager, app_name, router_manager, urlpatterns
@@ -37,6 +38,7 @@ __all__ = [
     "InvalidURLParameterError",
     "PageRoot",
     "QueryParamProvider",
+    "ReservedURLParameterError",
     "RouterBackend",
     "RouterFactory",
     "RouterManager",

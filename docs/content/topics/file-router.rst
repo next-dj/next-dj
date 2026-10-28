@@ -118,6 +118,7 @@ A ``pages/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, 
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
 A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, is refused with ``InvalidURLParameterError``.
 ``manage.py check`` reports it twice, as :ref:`next.E008 <ref-system-checks>` from the structural walk that reads the directory name and as :ref:`next.E082 <ref-system-checks>` from the pattern walk that tries to turn the route into a Django path.
+A directory named after an argument the framework passes to page, form and component callables itself, such as ``[form]``, ``[request]`` or ``[file_path]``, is refused with ``ReservedURLParameterError`` and reported as :ref:`next.E217 <ref-system-checks>`.
 
 The router does not abort on a refused route.
 It logs a warning through the ``next.urls.backends`` logger that names the route and the offending ``page.py``, leaves that one page unrouted so it answers 404, and routes every other page.

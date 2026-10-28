@@ -1062,6 +1062,10 @@ Errors
      - The ``SUBSCRIBE_MAX_CONNECTIONS`` option of ``RedisBroker`` is not a positive integer.
        The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
      - ``next.realtime.redis.broker``
+   * - ``next.E217``
+     - A bracket segment such as ``[form]``, ``[request]`` or ``[file_path]`` takes a name the framework passes to page, form and component callables itself.
+       The router refuses the route with ``ReservedURLParameterError`` and leaves the page unrouted, and the hint lists every reserved name to rename the directory away from.
+     - ``next.urls.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 

@@ -219,6 +219,7 @@ if TYPE_CHECKING:
     from next.urls.checks import (
         check_framework_routes_reachable,
         check_next_pages_configuration,
+        check_reserved_url_parameters,
         check_reverse_name_collisions,
         check_router_manager,
         check_url_patterns,
@@ -428,6 +429,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.urls.checks": (
         "check_framework_routes_reachable",
         "check_next_pages_configuration",
+        "check_reserved_url_parameters",
         "check_reverse_name_collisions",
         "check_router_manager",
         "check_url_patterns",
@@ -563,6 +565,7 @@ __all__ = [
     "check_repeated_form_has_key",
     "check_request_in_context",
     "check_reserved_js_context_keys",
+    "check_reserved_url_parameters",
     "check_reverse_name_collisions",
     "check_robots_disallow",
     "check_root_marker_outside_layouts",

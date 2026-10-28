@@ -6,12 +6,15 @@ from django.core.exceptions import ImproperlyConfigured
 from django.urls import path
 
 import next.urls
+from next.deps import RESERVED_KEYS
 from next.urls import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
+    ReservedURLParameterError,
     URLParameterError,
     URLPatternParser,
 )
+from next.urls.parser import RESERVED_ROUTE_NAMES
 
 
 def _noop_view(request):
@@ -187,7 +190,12 @@ class TestPublicExports:
 
     @pytest.mark.parametrize(
         "name",
-        ["DuplicateURLParameterError", "InvalidURLParameterError", "URLParameterError"],
+        [
+            "DuplicateURLParameterError",
+            "InvalidURLParameterError",
+            "ReservedURLParameterError",
+            "URLParameterError",
+        ],
     )
     def test_name_is_exported(self, name) -> None:
         """A caller catching one refusal can catch the other the same way."""
@@ -213,6 +221,33 @@ class TestDuplicateURLParameterError:
     def test_classvar_points_at_the_shared_base(self) -> None:
         """Parser exposes one error class for import-cycle-free callers."""
         assert URLPatternParser.parameter_error is URLParameterError
+
+
+class TestReservedNames:
+    """A bracket name the framework passes beside the URL kwargs is refused."""
+
+    @pytest.mark.parametrize("name", sorted(RESERVED_ROUTE_NAMES))
+    @pytest.mark.parametrize("shape", ["x/[{}]", "x/[int:{}]", "x/[[{}]]"])
+    def test_a_reserved_name_raises(self, url_parser, name, shape) -> None:
+        """Every bracket form answers with the reserved refusal."""
+        url_path = shape.format(name)
+        with pytest.raises(ReservedURLParameterError) as excinfo:
+            url_parser.parse_url_pattern(url_path)
+        assert excinfo.value.param_name == name
+        assert "the framework passes" in str(excinfo.value)
+
+    def test_the_name_is_read_after_normalisation(self, url_parser) -> None:
+        """A hyphenated directory reaches the page as the reserved underscore name."""
+        with pytest.raises(ReservedURLParameterError):
+            url_parser.parse_url_pattern("x/[file-path]")
+
+    def test_the_resolver_keys_are_reserved(self) -> None:
+        """The names the DI resolver strips from the URL kwargs are all refused."""
+        assert RESERVED_KEYS <= RESERVED_ROUTE_NAMES
+
+    def test_is_an_invalid_parameter(self) -> None:
+        """A caller catching the invalid refusal catches the reserved one too."""
+        assert issubclass(ReservedURLParameterError, InvalidURLParameterError)
 
 
 class TestNamesDjangoRefuses:
