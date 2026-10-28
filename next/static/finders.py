@@ -23,7 +23,7 @@ from next.pages.watch import (
     get_page_root_keys_for_watch,
     get_template_djx_paths_for_watch,
 )
-from next.utils import stat_mtime_ns, template_edits_watched
+from next.utils import settled_mtime_ns, stat_mtime_ns, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
 from .discovery import PageRootKeys, PathResolver, default_stems, find_role_files
@@ -328,7 +328,7 @@ def _scan_directories(roots: _ScanRoots) -> tuple[tuple[Path, int | None], ...]:
         if directory in out:
             continue
         info = _stat_directory(directory)
-        out[directory] = None if info is None else info.st_mtime_ns
+        out[directory] = None if info is None else settled_mtime_ns(info.st_mtime_ns)
         if info is None:
             continue
         key = (info.st_dev, info.st_ino)

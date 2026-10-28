@@ -15,6 +15,7 @@ from django.contrib.staticfiles.finders import AppDirectoriesFinder, get_finders
 from django.core.management import call_command
 from django.test import override_settings
 
+from next import utils as next_utils
 from next.conf.signals import settings_reloaded
 from next.static import (
     AssetDiscovery,
@@ -32,6 +33,7 @@ from next.static.finders import (
     scan_page_tree_assets,
 )
 from next.static.runtime import NEXT_JS_STATIC_PATH
+from next.utils import RACY_MTIME_WINDOW_NS, UNSETTLED_MTIME_NS
 from tests.support import (
     NESTED_ROOT_CASES,
     TEMPLATE_AND_COMPONENT_SOURCES,
@@ -213,6 +215,9 @@ class TestNextStaticFilesFinderList:
         }
 
 
+_TICK_NS = 1_700_000_000 * 10**9
+
+
 class TestScanDirectorySnapshot:
     """What the snapshot records, tree by tree."""
 
@@ -224,6 +229,22 @@ class TestScanDirectorySnapshot:
         assert _scan_directories(_ScanRoots(((missing, None),), ())) == (
             (missing, None),
         )
+
+    @pytest.mark.parametrize(
+        ("lead_ns", "recorded_ns"),
+        [(0, UNSETTLED_MTIME_NS), (RACY_MTIME_WINDOW_NS, _TICK_NS)],
+        ids=["same-tick", "settled"],
+    )
+    def test_a_tree_in_the_tick_of_the_snapshot_is_not_trusted(
+        self, tmp_path: Path, monkeypatch, lead_ns: int, recorded_ns: int
+    ) -> None:
+        """A folder written in the tick the scan shares rebuilds the next lookup."""
+        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
+        monkeypatch.setattr(next_utils, "time_ns", lambda: _TICK_NS + lead_ns)
+
+        recorded = _scan_directories(_ScanRoots(((tmp_path, None),), ()))
+
+        assert recorded == ((tmp_path, recorded_ns),)
 
     def test_a_root_that_holds_no_directory_ends_the_walk(self, tmp_path: Path) -> None:
         leaf = tmp_path / "notes.txt"

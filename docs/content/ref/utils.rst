@@ -65,7 +65,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
+   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, stat_mtime_ns, settled_mtime_ns, snapshot_mtime_ns, RACY_MTIME_WINDOW_NS, UNSETTLED_MTIME_NS, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
 
 See also
 --------

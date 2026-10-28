@@ -21,6 +21,7 @@ from next.utils import (
     MAX_ANCESTOR_WALK_DEPTH,
     is_within,
     resolved_tree,
+    snapshot_mtime_ns,
     stat_mtime_ns,
     template_edits_watched,
 )
@@ -93,7 +94,7 @@ def _directory_mtimes(
 
     A missing directory records as `None`, so one appearing later rebuilds.
     """
-    return tuple((directory, stat_mtime_ns(directory)) for directory in directories)
+    return tuple((directory, snapshot_mtime_ns(directory)) for directory in directories)
 
 
 def _unwatched_layout_directories(
@@ -511,7 +512,7 @@ class AssetDiscovery:
         outer_root = self._outer_page_root(current_dir)
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
-            mtime = stat_mtime_ns(current_dir)
+            mtime = snapshot_mtime_ns(current_dir)
             if (
                 outer_root is not None
                 or depth == 0

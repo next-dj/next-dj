@@ -1,3 +1,4 @@
+import time
 from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
@@ -88,6 +89,18 @@ def scoped_models(monkeypatch: pytest.MonkeyPatch) -> None:
 def mock_http_request():
     """Return the ``build_mock_http_request`` callable for injecting mock requests."""
     return build_mock_http_request
+
+
+_SETTLED_LEAD_NS = 3600 * 10**9
+
+
+@pytest.fixture(autouse=True)
+def _settled_mtimes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read the snapshot clock an hour ahead, so no mtime a test writes counts as racy.
+
+    A test about the racy window pins `next.utils.time_ns` to a value of its own.
+    """
+    monkeypatch.setattr(utils, "time_ns", lambda: time.time_ns() + _SETTLED_LEAD_NS)
 
 
 @pytest.fixture(autouse=True)
