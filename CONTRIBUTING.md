@@ -4,7 +4,7 @@ Guidelines for code, tests, and pull requests. Read this before opening a PR.
 
 ## Prerequisites
 
-- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.15 against Django 5.2, 6.0, and 6.1 (with matrix exclusions, 3.14 skips 5.2).
+- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.15 against Django 5.2, 6.0, and 6.1 on the latest patch of each series (`django~=X.Y.0`), and 3.15 runs only against 6.1 as Django's support table allows.
 - [uv](https://docs.astral.sh/uv/) for Python dependencies.
 - Node.js 24 + npm for the TypeScript bundle. The client runtime sources live in [next/client/](next/client/) and esbuild emits the bundle to `next/static/next/next.min.js`. CI uses Node 24.
 - Git.
@@ -97,7 +97,7 @@ Tests mirror this layout:
 | Command | Purpose |
 | --- | --- |
 | `make build-js` | Bundle `next/client/next.ts` → `next/static/next/next.min.js` via esbuild. |
-| `make build` | `uv build`, wheel and sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to bypass (only when the bundle is already present, as CI does between the dedicated build job and the matrix jobs). |
+| `make build` | `uv build`, wheel and sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to skip npm when the bundles are already built, as CI and the release workflow do; the build still fails when any bundle is missing. |
 
 ### Docs and hooks
 
@@ -117,10 +117,12 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additional
 
 - Builds the wheel in a dedicated `build` job, then runs the test matrix against the installed wheel (not `uv run`). See [.github/workflows/test-matrix.yml](.github/workflows/test-matrix.yml). Python 3.12–3.15 × Django 5.2–6.1 with matrix exclusions.
 - Builds docs with warnings as errors (`sphinx-build -W --keep-going`) and runs linkcheck.
+- Runs `test-source` on a full checkout: the tests that compare the core with `next/client/` and `docs/` skip in the sparse matrix checkout, and this job fails if any of them skips.
 - Runs the `security` job: typos and `uv-lock` via pre-commit.
 - On pull requests: dependency review (`dependency-review` job).
 - In CI, `lint` runs on **`next/` only**. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
-- The test matrix installs a specific Django with `uv pip install "django==…"` **after** installing the wheel. That override is intentional, not a broken lockfile.
+- The test matrix installs the latest patch of a Django series with `uv pip install "django~=X.Y.0"` **after** installing the wheel. That override is intentional, not a broken lockfile.
+- Pushing a `v*` tag runs [.github/workflows/release.yml](.github/workflows/release.yml). It checks that the tag equals `next.__version__`, waits for a green CI run on the same commit of `main`, builds and checks the distributions, and publishes through PyPI Trusted Publishing from the `pypi` environment.
 - A dedicated **CodSpeed** workflow ([.github/workflows/codspeed.yml](.github/workflows/codspeed.yml)) runs the benchmarks on every PR and every push to `main`, and CodSpeed posts a performance report on the PR. See [Benchmarks](#benchmarks).
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [pyproject.toml](pyproject.toml) (line length 88, isort with `known-first-party = ["next"]`, relaxed rules for `examples/`, `tests/`, and `conftest.py`).

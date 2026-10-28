@@ -7,35 +7,147 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  verify-version:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-python-uv
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Check the tag matches next.__version__
+        run: |
+          # `import next` loads no dependency, so the bare interpreter reads the version.
+          version="$(python -c 'import next; print(next.__version__)')"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match next.__version__ ${version}."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches next.__version__ ${version}."
+
+  # The release runs on the tag push and asks the API for the CI run of the same commit on
+  # main, waiting while it is still in progress. Unlike `workflow_run`, this keeps the tag
+  # context (environment rules match the tag) and works whichever finishes first.
+  verify-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Wait for a green CI run on this commit
+        run: |
+          deadline=$(( $(date +%s) + 90 * 60 ))
+          missing_deadline=$(( $(date +%s) + 10 * 60 ))
+          while :; do
+            run="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+              -f head_sha="${GITHUB_SHA}" -f branch=main -f event=push -f per_page=1 \
+              --jq '.workflow_runs[0] | select(.) | "\(.status) \(.conclusion) \(.html_url)"')"
+            now=$(date +%s)
+            if [ -z "$run" ]; then
+              if [ "$now" -ge "$missing_deadline" ]; then
+                echo "::error::No CI run on main for ${GITHUB_SHA}. Tag a commit that is on main."
+                exit 1
+              fi
+              echo "No CI run on main for ${GITHUB_SHA} yet."
+            else
+              read -r status conclusion url <<<"$run"
+              if [ "$status" = "completed" ]; then
+                if [ "$conclusion" = "success" ]; then
+                  echo "CI passed on ${GITHUB_SHA}: ${url}"
+                  exit 0
+                fi
+                echo "::error::CI on ${GITHUB_SHA} finished with '${conclusion}': ${url}"
+                exit 1
+              fi
+              echo "CI on ${GITHUB_SHA} is ${status}: ${url}"
+            fi
+            if [ "$now" -ge "$deadline" ]; then
+              echo "::error::CI on ${GITHUB_SHA} did not finish within 90 minutes."
+              exit 1
+            fi
+            sleep 30
+          done
+
+  build:
+    needs: [verify-version, verify-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
           cache: 'npm'
       - name: Install Node dependencies
         run: npm ci
-      - name: Build next.min.js
+      - name: Build the runtime and its lazy chunks
         run: npm run build:next
-      - name: Run tests
-        run: |
-          make test
+      - uses: ./.github/actions/setup-python-uv
       - name: Build source and wheel distributions
         env:
           NEXT_DJ_SKIP_JS_BUILD: "1"
+        run: uv build
+      - name: Check the distributions ship every bundle
         run: |
-          make build
+          unzip -l dist/*.whl | grep 'next/static/next/.*\.min\.js'
+          uv run --no-sync python - <<'EOF'
+          import pathlib
+          import tarfile
+          import tomllib
+          import zipfile
+
+          targets = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["tool"]["hatch"]["build"]["targets"]
+          status = 0
+          for wheel in pathlib.Path("dist").glob("*.whl"):
+              names = set(zipfile.ZipFile(wheel).namelist())
+              for path in targets["wheel"]["artifacts"]:
+                  if path not in names:
+                      print(f"::error::{wheel.name} is missing {path}")
+                      status = 1
+          for sdist in pathlib.Path("dist").glob("*.tar.gz"):
+              names = {name.split("/", 1)[1] for name in tarfile.open(sdist).getnames() if "/" in name}
+              for path in targets["sdist"]["artifacts"]:
+                  if path not in names:
+                      print(f"::error::{sdist.name} is missing {path}")
+                      status = 1
+          raise SystemExit(status)
+          EOF
       - name: Check distributions
-        run: |
-          uv run twine check --strict dist/*
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        run: uv run --no-sync twine check --strict dist/*
+      - name: Upload distributions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          name: next-dj-release-dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/next.dj/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: next-dj-release-dist
+          path: dist
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

@@ -23,10 +23,14 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14", "3.15"]
+        # Each cell installs the latest patch of the series (`django~=X.Y.0`). The cells
+        # follow Django's own support table: Python 3.15 needs Django 6.1.
         django-version: ["5.2", "6.0", "6.1"]
         exclude:
-          - python-version: "3.14"
+          - python-version: "3.15"
             django-version: "5.2"
+          - python-version: "3.15"
+            django-version: "6.0"
 
     services:
       redis:
@@ -40,7 +44,7 @@ jobs:
           --health-retries 10
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         sparse-checkout: |
           pyproject.toml
@@ -48,16 +52,16 @@ jobs:
           .github
         sparse-checkout-cone-mode: false
     - name: Download prebuilt wheel and requirements
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: next-dj-dist
         path: dist
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       with:
         version: "0.11.2"
     - name: Create venv and install wheel + dev requirements
@@ -66,7 +70,7 @@ jobs:
         uv pip install -r dist/requirements-dev.txt
         uv pip install --no-deps --force-reinstall dist/*.whl
     - name: Install Django ${{ matrix.django-version }}
-      run: uv pip install "django==${{ matrix.django-version }}"
+      run: uv pip install "django~=${{ matrix.django-version }}.0"
     - name: Verify Django version
       run: |
         uv run --no-project python -c 'import django; print(f"Django version: {django.get_version()}")'
@@ -76,11 +80,11 @@ jobs:
       run: ${{ inputs.test-command }}
     - name: Upload coverage to Codecov
       if: inputs.upload-codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
     - name: Upload test results to Codecov
       if: inputs.upload-codecov && !cancelled()
-      uses: codecov/test-results-action@v1
+      uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

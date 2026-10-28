@@ -17,3 +17,19 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+  # Actions are pinned by commit SHA, so Dependabot is what moves them to new releases.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
