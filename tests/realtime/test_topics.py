@@ -44,7 +44,7 @@ from next.realtime import (
 from next.realtime.backends import BrokerBackend
 from next.realtime.errors import BrokerConnectionError, InvalidTicketError
 from next.realtime.messages import Position
-from next.realtime.signals import stream_subscribed
+from next.realtime.signals import stream_subscribed, stream_unsubscribed
 from next.realtime.tickets import verify_ticket
 from next.testing import SseEvent, SseReader, capture_signals
 from next.testing.realtime import override_websocket_mount
@@ -54,6 +54,7 @@ from tests.support.realtime import (
     anext_item,
     signed_in_session,
 )
+from tests.support.sse import StalledSend, serve_stream
 
 
 def _suppress_message(message):
@@ -449,6 +450,25 @@ def test_async_message_source_passes_timeout_and_untransformed_messages(
     assert streams.live() == 0
 
 
+def test_async_topic_stream_drops_a_client_that_stopped_reading(
+    memory_broker: MemoryBroker, streams: LiveStreams
+) -> None:
+    async def scenario() -> None:
+        request = AsyncRequestFactory().get("/polls/1/stream/")
+        stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
+        send = StalledSend(delivered=1)
+        task = await serve_stream(stream, send, within=0.5)
+        assert task.cancelled()
+        assert send.bodies == [b"retry: 3000\n\n"]
+        assert [event.signal for event in streams.events] == [
+            stream_subscribed,
+            stream_unsubscribed,
+        ]
+        assert streams.events[-1].kwargs["reason"] == "client"
+
+    asyncio.run(scenario())
+
+
 def test_sync_message_source_exits_when_broker_iterator_finishes(
     memory_broker: MemoryBroker,
 ) -> None:
@@ -764,7 +784,7 @@ def test_async_topic_stream_closes_after_logout(
 
     async def scenario() -> None:
         stream = TopicStream(
-            request, "poll:1", authorize=_allow_topic, heartbeat_seconds=0.01
+            request, "poll:1", authorize=_allow_topic, heartbeat_seconds=0.25
         )
         events = SseReader(stream)
         assert (await anext(events)).event == "next-hello"
@@ -928,7 +948,7 @@ def test_async_anonymous_session_rotation_ends_without_an_end_frame(
     request = _anonymous_session_request(AsyncRequestFactory())
 
     async def scenario() -> None:
-        stream = TopicStream(request, "poll:1", heartbeat_seconds=0.001)
+        stream = TopicStream(request, "poll:1", heartbeat_seconds=0.25)
         events = SseReader(stream)
         assert (await anext(events)).event == "next-hello"
         store = SessionStore(session_key=request.session.session_key)

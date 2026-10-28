@@ -158,6 +158,9 @@ An async source yields ``None`` the same way, and under ASGI it also receives he
 The stream interleaves a heartbeat during a quiet period through :func:`asyncio.wait`, so a buffering proxy keeps the connection.
 The heartbeat period is ``SSE.HEARTBEAT_SECONDS`` in ``PARTIAL_BACKENDS``.
 One stream overrides the period with ``PatchEventStream(request, source, heartbeat_seconds=10)``, which leaves the backend default in place for every other stream.
+A watchdog wakes once per heartbeat and drops an async stream whose write to the client has been blocked for longer than a heartbeat.
+A client that stops reading is therefore dropped one to two heartbeats after a write to it blocks, and its source is closed, which releases a broker subscription.
+A sync stream under WSGI has no such watchdog, so a blocked write holds its worker until the WSGI server gives up on the socket.
 
 .. list-table::
    :header-rows: 1

@@ -13,6 +13,7 @@ from next.partial.signals import sse_stream_closed, sse_stream_opened
 from next.partial.sse import _retry_ms, sse_heartbeat_seconds
 from next.partial.stream import StreamEnd, StreamMeta
 from next.testing import capture_signals
+from tests.support.sse import StalledSend, serve_stream
 
 
 @contextmanager
@@ -716,3 +717,69 @@ class TestEndFrame:
             frames = _consume(PatchEventStream(request_obj, source))
         assert frames[-1] == b'event: next-end\ndata: {"code":"auth"}\n\n'
         assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+
+
+class _EndlessSource:
+    """Async source that yields one item, then waits for good until it is closed."""
+
+    def __init__(self) -> None:
+        """Start unfinalized."""
+        self.finalized = False
+
+    def __aiter__(self) -> AsyncIterator[Patches]:
+        """Return the async iterator over the one item and the endless wait."""
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[Patches]:
+        """Yield one item, block forever, and mark finalized in the closing finally."""
+        try:
+            yield _patches()
+            await asyncio.Event().wait()
+        finally:
+            self.finalized = True
+
+
+class TestStalledWriter:
+    """A client that stops reading is dropped once a write blocks past a heartbeat."""
+
+    def test_a_blocked_send_drops_the_stream_and_closes_the_source(
+        self, async_request_obj: object
+    ) -> None:
+        source = _EndlessSource()
+
+        async def scenario() -> tuple[asyncio.Task[None], StalledSend]:
+            response = PatchEventStream(
+                async_request_obj, source, heartbeat_seconds=0.01
+            )
+            send = StalledSend(delivered=1)
+            task = await serve_stream(response, send, within=0.5)
+            assert task.done()
+            assert source.finalized
+            return task, send
+
+        with capture_signals(sse_stream_closed) as recorder:
+            task, send = asyncio.run(scenario())
+        assert task.cancelled()
+        assert send.blocked.is_set()
+        assert send.bodies == [b"retry: 3000\n\n"]
+        assert source.finalized
+        assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+
+    def test_a_reading_client_outlives_many_heartbeats(
+        self, async_request_obj: object
+    ) -> None:
+        async def source() -> AsyncIterator[Patches]:
+            await asyncio.sleep(0.05)
+            yield _patches()
+
+        async def scenario() -> asyncio.Task[None]:
+            response = PatchEventStream(
+                async_request_obj, source(), heartbeat_seconds=0.005
+            )
+            task = await serve_stream(response)
+            assert task.done()
+            return task
+
+        task = asyncio.run(scenario())
+        assert not task.cancelled()
+        assert task.result() is None

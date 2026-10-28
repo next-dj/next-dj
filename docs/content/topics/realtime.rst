@@ -185,6 +185,7 @@ The backend subscription is selected from the request's WSGI or ASGI type.
 The broker wait timeout is the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
 A WebSocket times its pings, access rechecks, and presence refreshes by ``REALTIME['HEARTBEAT']`` instead, 25 seconds by default, and every later mention of the heartbeat interval means the one of the stream's transport.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
+Under ASGI, a client that stops reading is dropped one to two heartbeats after a write to it blocks.
 Closing the stream releases the broker subscription.
 
 An optional ``transform(message)`` runs for each subscriber and can return a safe ``Patches`` builder or ``Envelope``.
