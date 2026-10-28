@@ -1,3 +1,5 @@
+import importlib.util
+import sys
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -5,6 +7,7 @@ from defusedxml import EntitiesForbidden
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import Client
 
+import next.testing.seo as seo_module
 from next.seo.manager import seo_manager
 from next.seo.registry import sitemap_items_registry
 from next.testing import SitemapUrl, assert_metadata, parse_sitemap, reset_seo
@@ -99,3 +102,18 @@ class TestResetSeo:
             assert seo_manager.version != version
             assert sitemap_items_registry.entries_for(root / "sitemap.py") == ()
             assert seo_manager.roots() is not roots
+
+
+class TestMissingDefusedxml:
+    """Without defusedxml the import names the extra that provides it."""
+
+    def test_import_error_names_the_testing_extra(self, monkeypatch) -> None:
+        monkeypatch.setitem(sys.modules, "defusedxml.ElementTree", None)
+        # A fresh copy under another name keeps the real module and its classes intact.
+        spec = importlib.util.spec_from_file_location(
+            "next.testing._seo_probe", seo_module.__file__
+        )
+        module = importlib.util.module_from_spec(spec)
+        with pytest.raises(ImportError, match=r"next\.dj\[testing\]") as caught:
+            spec.loader.exec_module(module)
+        assert isinstance(caught.value.__cause__, ImportError)

@@ -273,7 +273,7 @@ A component can compute a URL through ``@component.context``.
 
    @component.context("href")
    def href(note: Note) -> str:
-       return page_reverse("notes/[id]", id=note.id)
+       return page_reverse("notes/[int:id]", id=note.id)
 
 Pagination
 ~~~~~~~~~~

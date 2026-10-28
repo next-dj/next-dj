@@ -259,7 +259,7 @@ Terms used throughout the next.dj documentation.
    route name
       The Django URL name string inside the ``next`` namespace (``app_name`` on ``next.urls``).
       Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
-      Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
+      Reverse from templates as ``{% url 'next:page_notes_int_id' id=note.id %}`` for a ``notes/[int:id]`` directory or from Python through :doc:`/content/topics/url-reversing`.
 
    route group
       A directory named with an identifier in parentheses, such as ``(auth)``.

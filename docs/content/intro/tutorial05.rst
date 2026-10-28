@@ -26,11 +26,12 @@ Install test dependencies
 
 next.dj ships the ``next.testing`` package, and its helpers work with Django ``TestCase``, stdlib ``unittest``, and pytest alike.
 This tutorial drives it with pytest and pytest-django, which you install separately.
+The ``testing`` extra pulls in ``defusedxml``, which ``next.testing`` needs to import.
 
 .. code-block:: bash
    :caption: shell
 
-   uv add --dev pytest pytest-django
+   uv add --dev pytest pytest-django "next.dj[testing]"
 
 Add the pytest configuration.
 It names ``next.testing.plugin`` in ``addopts``, which loads the framework plugin for this suite, and points ``next_pages`` at the page root so the actions declared there register before the tests run.
