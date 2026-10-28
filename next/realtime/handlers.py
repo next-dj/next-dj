@@ -1,15 +1,19 @@
 """Registry of the upstream handlers a client event on a granted topic reaches."""
 
+import asyncio
 import functools
 import inspect
 import os
 import re
+import threading
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, replace
 from importlib import import_module
-from types import CodeType, MappingProxyType
-from typing import Final, TypeGuard, cast
+from types import CodeType, MappingProxyType, TracebackType
+from typing import Final, Self, TypeGuard, cast
 
 from asgiref.sync import iscoroutinefunction
 from django.utils.module_loading import autodiscover_modules
@@ -85,33 +89,157 @@ def valid_name(name: object) -> bool:
     return isinstance(name, str) and _NAME.fullmatch(name) is not None
 
 
+def handler_workers() -> int:
+    """Return how many threads the handler pool runs, sized like Django's default."""
+    return min(32, (os.cpu_count() or 1) + 4)
+
+
 @functools.cache
 def handler_pool() -> ThreadPoolExecutor:
     """Return the pool sync handlers run on, apart from the one Django shares.
 
     A slow handler then fills only its own threads, sized like the default pool.
     """
-    workers = min(32, (os.cpu_count() or 1) + 4)
-    return ThreadPoolExecutor(workers, thread_name_prefix="next-handler")
+    return ThreadPoolExecutor(handler_workers(), thread_name_prefix="next-handler")
+
+
+@functools.cache
+def handler_threads() -> threading.BoundedSemaphore:
+    """Return the process-wide permits for handler pool threads, one per worker.
+
+    A permit stays taken until its handler returns, past a timeout too.
+    """
+    return threading.BoundedSemaphore(handler_workers())
 
 
 after_fork(handler_pool.cache_clear)
+after_fork(handler_threads.cache_clear)
+
+_LEASE: ContextVar["Lease | None"] = ContextVar("next_realtime_lease", default=None)
+_RUNNING: set[asyncio.Task[Awaitable[None] | None]] = set()
 
 
-def _runner(handler: Handler) -> Callable[[Upstream], Awaitable[None]]:
-    """Return an awaitable call of the handler, a sync one on the handler pool.
+class PoolFullError(Exception):
+    """Raised when no handler pool thread is free for a sync handler, never queued."""
 
-    A sync-looking handler that returns an awaitable is awaited, so `ok` means done.
+
+class ThreadShare:
+    """The handler pool threads one connection holds, half the pool by default."""
+
+    __slots__ = ("busy", "limit")
+
+    def __init__(self, limit: int | None = None) -> None:
+        """Start with no thread busy, the limit leaving the rest to other clients."""
+        self.limit = max(1, handler_workers() // 2) if limit is None else limit
+        self.busy = 0
+
+
+class Lease:
+    """One event's hold on its connection slot, kept until its pool threads return.
+
+    `release` runs once on the event loop, after the `with` block and the last thread.
     """
-    if iscoroutinefunction(handler) or iscoroutinefunction(type(handler).__call__):
-        return cast("Callable[[Upstream], Awaitable[None]]", handler)
 
-    async def run(upstream: Upstream) -> None:
-        outcome = await run_pooled(handler_pool(), handler, upstream)
+    __slots__ = ("_closed", "_release", "_share", "_threads", "_token")
+    _token: Token["Lease | None"]
+
+    def __init__(self, share: ThreadShare, release: Callable[[], None]) -> None:
+        """Bind the lease to its connection's share and the slot it frees."""
+        self._share = share
+        self._release: Callable[[], None] | None = release
+        self._threads = 0
+        self._closed = False
+
+    def __enter__(self) -> Self:
+        """Make the lease the one sync handlers of this task claim threads under."""
+        self._token = _LEASE.set(self)
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """End the event, freeing the slot now unless a thread still runs."""
+        _LEASE.reset(self._token)
+        self._closed = True
+        self._settle()
+
+    def take(self) -> bool:
+        """Count one more thread for the event, False once the share is used up."""
+        if self._share.busy >= self._share.limit:
+            return False
+        self._share.busy += 1
+        self._threads += 1
+        return True
+
+    def give(self) -> None:
+        """Count a thread of the event as returned."""
+        self._share.busy -= 1
+        self._threads -= 1
+        self._settle()
+
+    def _settle(self) -> None:
+        release = self._release
+        if self._closed and not self._threads and release is not None:
+            self._release = None
+            release()
+
+
+class PoolThread:
+    """A claimed handler pool thread, given back when the handler on it returns."""
+
+    __slots__ = ("_lease", "_permit")
+
+    def __init__(self, permit: threading.BoundedSemaphore, lease: Lease | None) -> None:
+        """Hold a taken permit and the lease it counts against, if any."""
+        self._permit = permit
+        self._lease = lease
+
+    @classmethod
+    def claim(cls) -> Self:
+        """Take a free pool thread under the current lease, else `PoolFullError`."""
+        permit = handler_threads()
+        if not permit.acquire(blocking=False):
+            raise PoolFullError
+        lease = _LEASE.get()
+        if lease is not None and not lease.take():
+            permit.release()
+            raise PoolFullError
+        return cls(permit, lease)
+
+    def give(self) -> None:
+        """Return the thread to the pool and to the lease."""
+        self._permit.release()
+        if self._lease is not None:
+            self._lease.give()
+
+    async def run(self, handler: Handler, upstream: Upstream) -> None:
+        """Run a sync handler on the thread, a cancel leaving it to finish alone.
+
+        A sync-looking handler that returns an awaitable is awaited, so `ok` means done.
+        """
+        task = asyncio.create_task(run_pooled(handler_pool(), handler, upstream))
+        _RUNNING.add(task)
+        task.add_done_callback(self._returned)
+        outcome = await asyncio.shield(task)
         if inspect.isawaitable(outcome):
             await outcome
 
-    return run
+    def _returned(self, task: asyncio.Task[Awaitable[None] | None]) -> None:
+        """Give the thread back once the handler returned and retrieve its outcome."""
+        _RUNNING.discard(task)
+        self.give()
+        with suppress(asyncio.CancelledError):
+            task.exception()
+
+
+def _pooled(handler: Handler) -> bool:
+    """Whether a handler is sync, so it runs on a handler pool thread."""
+    return not (
+        iscoroutinefunction(handler) or iscoroutinefunction(type(handler).__call__)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,13 +250,13 @@ class Route:
     name: str
     handler: Handler
     matcher: re.Pattern[str] | None
-    run: Callable[[Upstream], Awaitable[None]]
+    pooled: bool
 
     @classmethod
     def bind(cls, pattern: str, name: str, handler: Handler) -> "Route":
         """Bind a handler, with no matcher when the pattern or the name is invalid."""
         matcher = compile_pattern(pattern) if valid_name(name) else None
-        return cls(pattern, name, handler, matcher, _runner(handler))
+        return cls(pattern, name, handler, matcher, _pooled(handler))
 
     @property
     def valid(self) -> bool:
@@ -151,9 +279,18 @@ class Route:
             return _NO_PARAMS
         return MappingProxyType(found.groupdict())
 
-    async def __call__(self, upstream: Upstream) -> None:
-        """Run the handler, a sync one on the handler pool."""
-        await self.run(upstream)
+    def claim(self) -> PoolThread | None:
+        """Claim a pool thread for a sync handler, None for an async one."""
+        return PoolThread.claim() if self.pooled else None
+
+    async def __call__(
+        self, upstream: Upstream, thread: PoolThread | None = None
+    ) -> None:
+        """Run the handler, a sync one on `thread` or on a thread it claims."""
+        if not self.pooled:
+            await cast("Callable[[Upstream], Awaitable[None]]", self.handler)(upstream)
+            return
+        await (thread or PoolThread.claim()).run(self.handler, upstream)
 
 
 def _origin(handler: Handler) -> tuple[str, int, str] | None:
@@ -269,6 +406,7 @@ def on[H: Handler](pattern: str, name: str) -> Callable[[H], H]:
 async def dispatch(upstream: Upstream) -> bool:
     """Run the handler of one upstream event, False when no handler serves it.
 
+    A sync handler claims its thread before `upstream_received`, else `PoolFullError`.
     The caller checks the topic grant first, and a handler error propagates to it.
     """
     found = handler_registry.resolve(upstream.topic, upstream.name)
@@ -277,8 +415,14 @@ async def dispatch(upstream: Upstream) -> bool:
     bound, params = found
     if params:
         upstream = replace(upstream, params=params)
-    await areceived(bound.handler, upstream)
-    await bound(upstream)
+    thread = bound.claim()
+    try:
+        await areceived(bound.handler, upstream)
+    except BaseException:
+        if thread is not None:
+            thread.give()
+        raise
+    await bound(upstream, thread)
     return True
 
 
@@ -318,7 +462,11 @@ __all__ = [
     "MAX_PATTERN_LENGTH",
     "Handler",
     "HandlerRegistry",
+    "Lease",
+    "PoolFullError",
+    "PoolThread",
     "Route",
+    "ThreadShare",
     "Upstream",
     "autodiscover_handlers",
     "compile_pattern",
@@ -326,6 +474,8 @@ __all__ = [
     "handler_modules",
     "handler_pool",
     "handler_registry",
+    "handler_threads",
+    "handler_workers",
     "on",
     "valid_modules",
     "valid_name",

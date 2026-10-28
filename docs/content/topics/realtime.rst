@@ -583,6 +583,11 @@ The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per 
 The same bucket serves the tunneled requests of `Form actions over WebSocket`_.
 A frame over the budget is refused with ``limit``, and three refusals in a row close the socket with ``4429``.
 An event past ``CONCURRENCY`` is refused with ``limit`` as well and never counts toward ``4429``.
+A timeout does not interrupt a synchronous handler, its thread runs on until the handler returns.
+Its ``CONCURRENCY`` slot and its pool thread stay busy for that time, so the side effects of a handler acknowledged as ``timeout`` may still land.
+The handler pool holds ``min(32, os.cpu_count() + 4)`` threads for the whole process, and one connection runs synchronous handlers on at most half of them.
+An event for a synchronous handler that finds no free thread in either bound is refused with ``limit`` instead of waiting in a queue, and never counts toward ``4429``.
+Long work belongs in an asynchronous handler, whose timeout cancels it, or in a task queue the handler hands the work to.
 A client that throttles its own sends, a typing indicator at most every few hundred milliseconds, never reaches that code.
 
 What the framework does not cap

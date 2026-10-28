@@ -30,7 +30,13 @@ from .frames import (
     Up,
     UpstreamError,
 )
-from .handlers import Upstream, dispatch as dispatch_upstream
+from .handlers import (
+    Lease,
+    PoolFullError,
+    ThreadShare,
+    Upstream,
+    dispatch as dispatch_upstream,
+)
 from .lifecycle import StreamLifecycle, arejected
 from .limits import SocketLimits, TokenBucket, TunnelLimits, heartbeat_seconds
 from .manager import broker_manager
@@ -216,6 +222,7 @@ class TopicSocket:
         self._bucket = TokenBucket(upstream.rate, upstream.burst, clock=clock.monotonic)
         self._strikes = 0
         self._events = 0
+        self._threads = ThreadShare()
         self._requests = 0
         self._topics: frozenset[str] = frozenset()
         self._pinged_at: float | None = None
@@ -379,20 +386,26 @@ class TopicSocket:
     async def _up(self, frame: Up) -> None:
         """Hand an event to its handler within the connection's concurrency, then ack.
 
-        An event past `UPSTREAM['CONCURRENCY']` is refused but never counts to 4429.
+        An event past `CONCURRENCY` or the pool threads is refused, never a 4429 strike.
+        A sync handler keeps its slot until it returns, past its timeout too.
         """
         if self._events >= self._limits.upstream.concurrency:
             await self._refuse_up(frame)
             return
         self._events += 1
-        try:
-            error = await self._deliver_up(frame)
+        with Lease(self._threads, self._free_event):
+            try:
+                error = await self._deliver_up(frame)
+            except PoolFullError:
+                await self._refuse_up(frame)
+                return
             if error is not None:
                 await self._rejected(frame, error)
             if frame.id is not None:
                 await self._writer.send(frames.ack(frame.id, error))
-        finally:
-            self._events -= 1
+
+    def _free_event(self) -> None:
+        self._events -= 1
 
     async def _deliver_up(self, frame: Up) -> UpstreamError | None:
         if frame.size > self._limits.upstream.max_bytes:
@@ -659,11 +672,14 @@ async def _bounded[T, E](
     """Await a handler within `limit` seconds, returning the outcome of a failure.
 
     Only an expired deadline is a timeout, a `TimeoutError` the call raised fails.
+    A `PoolFullError` reaches the caller, who refuses the event.
     """
     deadline = asyncio.timeout(limit)
     try:
         async with deadline:
             return await call
+    except PoolFullError:
+        raise
     except TimeoutError:
         if not deadline.expired():
             logger.exception("Realtime %s failed", what)

@@ -14,7 +14,9 @@ from next.realtime import Upstream, checks, handlers
 from next.realtime.checks import check_realtime_settings, check_upstream_handlers
 from next.realtime.handlers import (
     MAX_PATTERN_LENGTH,
+    Handler,
     HandlerRegistry,
+    PoolFullError,
     Route,
     compile_pattern,
     dispatch,
@@ -442,6 +444,110 @@ class TestDispatch:
 
         with pytest.raises(LookupError, match="boom"):
             _send("lobby", "boom")
+
+
+async def _quiet(upstream: Upstream) -> None:
+    del upstream
+
+
+@pytest.fixture()
+def permits() -> Iterator[threading.BoundedSemaphore]:
+    """Swap in a one-thread bound for the handler pool."""
+    held = threading.BoundedSemaphore(1)
+    with patch.object(handlers, "handler_threads", lambda: held):
+        yield held
+
+
+def _upstream() -> Upstream:
+    return Upstream("lobby", "typing", None, "alice", "subject", "c1")
+
+
+class TestPoolThreads:
+    """A sync handler holds a handler pool thread until it returns."""
+
+    def test_a_sync_route_claims_a_thread_when_called_without_one(
+        self, permits: threading.BoundedSemaphore
+    ) -> None:
+        threads: list[str] = []
+
+        def typing(event: Upstream) -> None:
+            threads.append(threading.current_thread().name)
+
+        asyncio.run(Route.bind("lobby", "typing", typing)(_upstream()))
+        assert threads[0].startswith("next-handler")
+        assert permits.acquire(blocking=False)
+
+    def test_a_full_pool_refuses_before_the_signal(
+        self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
+    ) -> None:
+        realtime.on("lobby", "typing")(_first)
+        assert permits.acquire(blocking=False)
+        with (
+            capture_signals(upstream_received) as recorder,
+            pytest.raises(PoolFullError),
+        ):
+            _send("lobby", "typing")
+        assert len(recorder) == 0
+
+    def test_an_async_handler_takes_no_thread(
+        self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
+    ) -> None:
+        realtime.on("lobby", "typing")(_quiet)
+        assert permits.acquire(blocking=False)
+        assert _send("lobby", "typing") is True
+
+    @pytest.mark.parametrize("handler", [_first, _quiet], ids=["sync", "async"])
+    def test_a_cancel_during_the_signal_gives_the_thread_back(
+        self,
+        registry: HandlerRegistry,
+        permits: threading.BoundedSemaphore,
+        handler: Handler,
+    ) -> None:
+        realtime.on("lobby", "typing")(handler)
+
+        async def scenario() -> None:
+            heard = asyncio.Event()
+
+            async def stall(**kwargs: object) -> None:
+                heard.set()
+                await asyncio.Event().wait()
+
+            upstream_received.connect(stall, sender=handler, weak=False)
+            try:
+                task = asyncio.create_task(dispatch(_upstream()))
+                await heard.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            finally:
+                upstream_received.disconnect(stall, sender=handler)
+
+        asyncio.run(scenario())
+        assert permits.acquire(blocking=False)
+
+    def test_a_cancelled_handler_keeps_its_thread_until_it_returns(
+        self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
+    ) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        @realtime.on("lobby", "typing")
+        def typing(event: Upstream) -> None:
+            entered.set()
+            release.wait(5)
+            raise LookupError(event.name)
+
+        async def scenario() -> None:
+            task = asyncio.create_task(dispatch(_upstream()))
+            assert await asyncio.to_thread(entered.wait, 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not permits.acquire(blocking=False)
+            release.set()
+            assert await asyncio.to_thread(permits.acquire, timeout=5)
+
+        asyncio.run(scenario())
 
 
 class TestModules:
