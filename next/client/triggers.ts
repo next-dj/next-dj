@@ -22,6 +22,8 @@ import {
   HEADER_ORIGIN,
   addZone,
   currentUrl,
+  inPlace,
+  isPlainActivation,
   matching,
 } from "./protocol";
 import type { Diagnostics, WireTransport } from "./protocol";
@@ -283,14 +285,23 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     afterDelay(debounceMs(form), armValidation(form), () => validateField(form, name));
   }
 
+  // Bound in the bubble phase, so the form's own handlers have run and one that
+  // cancelled the submit keeps it cancelled. Constraint validation and formnovalidate
+  // are settled before the event fires, so neither needs a check here.
   function onSubmit(event: Event): void {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    if (!form.hasAttribute(ATTR_ACTION)) return;
+    if (!form.hasAttribute(ATTR_ACTION) || event.defaultPrevented) return;
+    const submitter = (event as SubmitEvent).submitter;
+    // A submitter asking for another method or browsing context posts natively.
+    const method = submitter?.getAttribute("formmethod")?.toLowerCase() ?? "";
+    if (method !== "" && method !== "post") return;
+    if (!inPlace(submitter?.getAttribute("formtarget") ?? form.getAttribute("target")))
+      return;
     // Intercept as a partial mutation under the uid lock. Without the runtime the
     // form posts natively, so this is the enhancement, never the only path.
     event.preventDefault();
-    deps.fetch(submission(form, (event as SubmitEvent).submitter));
+    deps.fetch(submission(form, submitter));
   }
 
   function submission(
@@ -300,7 +311,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     // A submit cancels its own validation, the debounce armed on blur as much as the
     // request already sent, so no late answer morphs the form over this response.
     cancelValidation(form);
-    const url = form.getAttribute("action") ?? here();
+    // The pressed button's formaction overrides the form's, as on a native submit.
+    const url =
+      submitter?.getAttribute("formaction") ?? form.getAttribute("action") ?? here();
     const body = new FormData(form);
     // A native submit carries the pressed button, so replay its name onto the body.
     const name = submitter?.getAttribute("name") ?? "";
@@ -331,30 +344,31 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     };
   }
 
-  function onClick(event: Event): void {
+  // Bound in the capture phase, so a cancelled confirm stops every later handler.
+  function onConfirm(event: Event): void {
     const el = event.target;
     if (!(el instanceof Element)) return;
     const confirmer = el.closest(`[${CONFIRM_ATTR}]`);
-    if (confirmer !== null) {
-      // closest matched the attribute, so getAttribute returns a string.
-      /* v8 ignore next */
-      const text = confirmer.getAttribute(CONFIRM_ATTR) ?? "";
-      if (!confirm(text)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        return;
-      }
-    }
-    const link = el.closest(`a[${MERGE_ATTR}][${TARGET_ATTR}]`);
-    // The selector restricts the match to <a>, so the false branch never runs. The
-    // instanceof stays for the narrowing the closure relies on.
+    if (confirmer === null) return;
+    // closest matched the attribute, so getAttribute returns a string.
     /* v8 ignore next */
-    if (link instanceof HTMLAnchorElement) {
-      const zone = link.getAttribute(TARGET_ATTR);
-      if (zone !== null && zone !== "") {
-        event.preventDefault();
-        paginate(link, zone);
-      }
+    const text = confirmer.getAttribute(CONFIRM_ATTR) ?? "";
+    if (!confirm(text)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }
+
+  // Bound in the bubble phase, so a handler on the link that cancelled the click wins.
+  function onClick(event: Event): void {
+    const el = event.target;
+    if (!(el instanceof Element)) return;
+    const link = el.closest(`a[${MERGE_ATTR}][${TARGET_ATTR}]`);
+    if (link === null || !isPlainActivation(event, link)) return;
+    const zone = link.getAttribute(TARGET_ATTR);
+    if (zone !== null && zone !== "") {
+      event.preventDefault();
+      paginate(link, zone);
     }
   }
 
@@ -441,8 +455,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.addEventListener("change", onInput, { signal });
     // Capture for blur, which does not bubble.
     target.addEventListener("blur", onBlur, { capture: true, signal });
-    target.addEventListener("submit", onSubmit, { capture: true, signal });
-    target.addEventListener("click", onClick, { capture: true, signal });
+    target.addEventListener("submit", onSubmit, { signal });
+    target.addEventListener("click", onConfirm, { capture: true, signal });
+    target.addEventListener("click", onClick, { signal });
     // The visibility subscription pauses and resumes the poll timers. Its teardown
     // runs on the signal, so a second detach stays a no-op.
     const stopVisibility = visibility.onChange(() => poller?.wake());

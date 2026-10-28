@@ -399,6 +399,50 @@ describe("layer stack", () => {
     detach();
   });
 
+  it.each([
+    { metaKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+    { altKey: true },
+    { button: 1 },
+  ])("leaves a layer link clicked with %o to the browser", (init) => {
+    const detach = layers.install(document);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "z");
+    document.body.append(opener);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, ...init });
+    opener.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(layers.size()).toBe(0);
+    detach();
+  });
+
+  it.each([['target="_blank"'], ["download"]])(
+    "leaves a layer link carrying %s to the browser",
+    (attr) => {
+      const detach = layers.install(document);
+      document.body.innerHTML = `<a href="/wizard/" data-next-layer="z" ${attr}>go</a>`;
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      document.querySelector("a")!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(layers.size()).toBe(0);
+      detach();
+    },
+  );
+
+  it("opens no layer for a click a handler on the link already cancelled", () => {
+    const detach = layers.install(document);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "z");
+    opener.addEventListener("click", (e) => e.preventDefault());
+    document.body.append(opener);
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(layers.size()).toBe(0);
+    detach();
+  });
+
   it("install replaces a prior delegated handler", () => {
     const first = layers.install(document);
     const second = layers.install(document);

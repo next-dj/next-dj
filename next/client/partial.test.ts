@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPartial } from "./partial";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPartial as buildPartial } from "./partial";
 import { createDiagnostics } from "./diagnostics";
 import type { PartialAdapters, PartialDeps, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
@@ -13,6 +13,20 @@ import {
   landed,
   unloaded,
 } from "./test-doubles";
+
+// Every surface a test builds, reset after it so its document listeners do not see a
+// later test's events. The submit handler skips a cancelled event, so a stale surface
+// that cancelled first would take the submit away from the one under test.
+const built: PartialSurface[] = [];
+function createPartial(deps: PartialDeps): PartialSurface {
+  const surface = buildPartial(deps);
+  built.push(surface);
+  return surface;
+}
+
+afterEach(() => {
+  for (const surface of built.splice(0)) surface._reset();
+});
 
 // A patches response the fetch returns so the wire resolves without a server.
 function patchesResponse(body = '{"version":"v1","ops":[],"assets":[],"form":null}') {
@@ -1672,6 +1686,27 @@ describe("Next.partial.submit", () => {
     expect(navigate).toHaveBeenCalledWith(`${location.origin}/board/?created=9`);
   });
 
+  it("times a stalled submit out on the $timeout of the payload", async () => {
+    vi.useFakeTimers();
+    try {
+      const made = makeSurface({ $timeout: 1000 });
+      made.partial._configure({
+        document,
+        navigate: () => undefined,
+        fetch: () => new Promise<Response>(() => undefined),
+      });
+      const outcome = made.partial.submit(document.querySelector("form")!);
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(outcome).resolves.toMatchObject({
+        status: "error",
+        error: { kind: "network" },
+      });
+      expect(made.dispatched.map((d) => d.event)).toContain("partial:error");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still drops a declarative double submit while the form is busy", async () => {
     const s = answering();
     const form = document.querySelector("form")!;
@@ -1692,6 +1727,12 @@ describe("Next.partial.submit", () => {
 describe("Next.partial integration", () => {
   beforeEach(async () => {
     await import("./next");
+  });
+
+  afterEach(() => {
+    (
+      globalThis as unknown as { Next: { partial: PartialSurface } }
+    ).Next.partial._reset();
   });
 
   it("exposes the partial surface on the global Next", async () => {

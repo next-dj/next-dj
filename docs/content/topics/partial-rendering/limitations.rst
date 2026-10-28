@@ -89,6 +89,16 @@ A dynamic body answers 400 on a zone request
 A page whose body resolves dynamically, through a ``render()`` that builds its own response, has no template for a standalone zone render.
 A zone request for such a page answers 400 when no intercept serves it, so a zone belongs on a page that renders from a template.
 
+Back and Forward reload instead of restoring zones
+--------------------------------------------------
+
+A ``url`` patch writes a history entry, but the runtime keeps no copy of the zones each entry showed.
+Back or Forward onto an entry whose content is not on screen therefore reloads that page from the server, and ``next:navigated`` does not fire for it.
+The page load that follows is a full render, so the reader sees the right content at the cost of a round trip and of any client state the old page held.
+A Back that only closes modal layers stays in place and fires ``next:navigated`` with ``action: "pop"``, and a Back or Forward that changes the fragment alone does nothing.
+Forward onto the URL of a layer that Back closed reloads that URL as a full page rather than opening the layer again.
+The runtime compares the address with the last URL it rendered, so Forward onto an entry that a page script pushed with ``history.pushState`` reloads as well.
+
 Intercepts are selected on GET and HEAD only
 --------------------------------------------
 

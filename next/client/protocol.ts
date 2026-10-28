@@ -39,6 +39,43 @@ export function pollInterval(raw: string | null): number | null {
   return ms >= MIN_POLL_MS && ms <= MAX_POLL_MS ? ms : null;
 }
 
+/** The request deadline when the payload names none, long enough for a slow upload. */
+export const REQUEST_TIMEOUT_MS = 30000;
+
+// Read the $timeout payload value in milliseconds. Zero turns the deadline off, and
+// anything else outside the timer range falls back to the default.
+export function requestTimeout(raw: unknown): number {
+  return typeof raw === "number" && raw >= 0 && raw <= MAX_POLL_MS
+    ? raw
+    : REQUEST_TIMEOUT_MS;
+}
+
+/**
+ * Whether a click on a link is the plain activation the runtime may take over.
+ *
+ * A modifier, a middle click, a handler that cancelled it, a foreign target and a
+ * download all ask the browser for its own behaviour, so the link stays a link.
+ */
+export function isPlainActivation(event: Event, link: Element): boolean {
+  if (event.defaultPrevented) return false;
+  if (
+    event instanceof MouseEvent &&
+    (event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey)
+  )
+    return false;
+  return inPlace(link.getAttribute("target")) && !link.hasAttribute("download");
+}
+
+/** Whether a browsing-context name keeps the navigation in the current page. */
+export function inPlace(target: string | null): boolean {
+  const name = target?.toLowerCase() ?? "";
+  return name === "" || name === "_self";
+}
+
 /** The dev diagnostics, provided by next.dev.min.js once it loads for a $dev page. */
 export interface Diagnostics {
   /** Report what the envelope boundary dropped from a raw wire envelope. */

@@ -2,7 +2,7 @@
 // so Back closes it while the body loads, and the push is announced once the body
 // envelope is applied. All writes inside one commit produce a single event.
 
-import { defaultHistory } from "./adapters";
+import { defaultHistory, defaultReload } from "./adapters";
 import type { HistoryAdapter } from "./apply";
 import { normTitle } from "./head";
 import { currentUrl, fire } from "./protocol";
@@ -50,14 +50,22 @@ export interface Navigation {
   begin(): Commit;
   /** A HistoryAdapter whose writes are announced like any other. */
   asHistory(): HistoryAdapter;
-  /** Run the popstate handling in during, then announce the change as a pop. */
-  popped(during: () => void): void;
+  /**
+   * Run the popstate handling in during, then announce the change as a pop.
+   *
+   * during answers the page whose content is on screen, undefined for the one last
+   * announced. A bar showing another page reloads it unannounced, since nothing
+   * restores the content of a history entry.
+   */
+  popped(during: () => string | undefined): void;
 }
 
 export interface NavigationDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
   history?: HistoryAdapter;
+  // The full reload a Back or Forward onto unrendered content falls back to.
+  reload?: () => void;
 }
 
 interface Move {
@@ -68,6 +76,7 @@ interface Move {
 export function createNavigation(deps: NavigationDeps): Navigation {
   const doc = deps.document ?? document;
   const history = deps.history ?? defaultHistory();
+  const reload = deps.reload ?? defaultReload();
   const held = new Map<
     string,
     { from: NavigationState; back: string; onCommit: () => void }
@@ -172,10 +181,16 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     }),
     popped(during) {
       const commit = frame({ action: "pop", from: { ...current(), path: known } });
+      let shown = known;
       try {
-        during();
+        shown = during() ?? known;
       } finally {
-        commit.end();
+        if (shown === currentUrl(doc)) commit.end();
+        else {
+          // A popstate is never nested, so dropping the frame drops the whole commit.
+          open = undefined;
+          reload();
+        }
       }
     },
   };

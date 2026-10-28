@@ -52,6 +52,7 @@ function makeWire(
     applied?: boolean;
     tunnel?: WireDeps["tunnel"];
     document?: Document;
+    timeout?: number;
   } = {},
 ) {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
@@ -75,6 +76,7 @@ function makeWire(
     },
     ...(opts.tunnel === undefined ? {} : { tunnel: opts.tunnel }),
     ...(opts.document === undefined ? {} : { document: opts.document }),
+    ...(opts.timeout === undefined ? {} : { timeout: () => opts.timeout! }),
     version: () => opts.version ?? "v1",
     csrf: {
       current: () => opts.csrf,
@@ -921,9 +923,14 @@ describe("Wire abortable validation", () => {
   });
 
   it("a named queue on a locked mutation joins no queue", async () => {
-    const h = makeWire(async () => envelopeResponse(ENVELOPE));
-    await h.wire.fetch({ url: "/f/", method: "POST", uid: "u", queue: "q" });
-    expect(h.calls[0]!.init.signal).toBeUndefined();
+    let release: (r: Response) => void = () => undefined;
+    const h = makeWire(() => new Promise<Response>((resolve) => (release = resolve)));
+    const sent = h.wire.fetch({ url: "/f/", method: "POST", uid: "u", queue: "q" });
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    h.wire.abort("q");
+    expect(h.calls[0]!.init.signal?.aborted).toBe(false);
+    release(envelopeResponse(ENVELOPE));
+    await expect(sent).resolves.toMatchObject({ status: "ok" });
   });
 
   it("a mutation needing a deferred token that never comes is held back", async () => {
@@ -1529,5 +1536,144 @@ describe("Wire WebSocket tunnel", () => {
     refuse(new Error("tunnel refused the request: http_only"));
     await first;
     expect(h.dispatched.filter((d) => d.event === "partial:error")).toEqual([]);
+  });
+});
+
+describe("Wire request deadline", () => {
+  const mutation: WireRequest = { url: "/_next/form/u/", method: "POST", uid: "u" };
+  // A transport that never answers and ignores the abort signal, the worst case.
+  const stalled = (): Promise<Response> => new Promise<Response>(() => undefined);
+  const errors = (h: Harness) =>
+    h.dispatched.filter((d) => d.event === "partial:error");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fails a stalled mutation as a network error after 30 seconds", async () => {
+    const h = makeWire(stalled);
+    const sent = h.wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(errors(h)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    const outcome = await sent;
+    expect(outcome).toMatchObject({
+      status: "error",
+      error: { kind: "network", url: "/_next/form/u/" },
+    });
+    expect((outcome.error as { error: Error }).error.name).toBe("TimeoutError");
+    expect(errors(h)).toHaveLength(1);
+  });
+
+  it("releases the uid lock on a timeout, so the next submit is sent", async () => {
+    const h = makeWire(stalled);
+    void h.wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(h.wire.fetch(mutation)).resolves.toMatchObject({ status: "dropped" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    void h.wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it("aborts the signal handed to the transport", async () => {
+    const h = makeWire(stalled);
+    void h.wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.calls[0]!.init.signal?.aborted).toBe(true);
+  });
+
+  it("runs on the deadline the payload configures", async () => {
+    const h = makeWire(stalled, { timeout: 5000 });
+    const sent = h.wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(sent).resolves.toMatchObject({ status: "error" });
+  });
+
+  it("arms no deadline when the payload turns it off", async () => {
+    const h = makeWire(stalled, { timeout: 0 });
+    void h.wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.calls).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("settles a request with no deadline on its reply", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), { timeout: 0 });
+    await expect(h.wire.fetch(mutation)).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("clears the deadline once the reply has been read", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch(mutation);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("times out a stalled zone GET as well", async () => {
+    const h = makeWire(stalled);
+    const sent = h.wire.fetch({ url: "/feed/", zone: "list" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(sent).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "network", url: "/feed/" },
+    });
+  });
+
+  it("times out a socket tunnel that never answers", async () => {
+    const h = makeWire(stalled, {
+      tunnel: () => new Promise<Response>(() => undefined),
+      csrf: { header: "X-CSRFToken", token: "tok" },
+    });
+    const sent = h.wire.fetch({ ...mutation, transport: "any", body: "a=1" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(sent).resolves.toMatchObject({ status: "error" });
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it("drops a request superseded before its deadline without a report", async () => {
+    const h = makeWire(stalled);
+    const first = h.wire.fetch({ url: "/feed/", zone: "list" });
+    await vi.advanceTimersByTimeAsync(0);
+    void h.wire.fetch({ url: "/feed/", zone: "list" });
+    await expect(first).resolves.toMatchObject({ status: "dropped" });
+    expect(errors(h)).toEqual([]);
+  });
+
+  it("drops a validation aborted while its token was fetched", async () => {
+    let grant: (csrf: CsrfPayload) => void = () => undefined;
+    const h = makeWire(stalled, {
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: () => new Promise((resolve) => (grant = resolve)),
+    });
+    const sent = h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      queue: "v",
+      abortable: true,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    h.wire.abort("v");
+    grant({ header: "X-CSRFToken", token: "tok" });
+    await expect(sent).resolves.toMatchObject({ status: "dropped" });
+    expect(errors(h)).toEqual([]);
+  });
+
+  it("forgets the echo id of a mutation that timed out, as it may have committed", async () => {
+    const forgotten: string[] = [];
+    const wire = new Wire({
+      fetch: stalled,
+      dispatch: () => undefined,
+      onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
+      csrf: { current: () => undefined, ensure: async () => undefined },
+      forgetRequestId: (id) => forgotten.push(id),
+    });
+    const sent = wire.fetch(mutation);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await sent;
+    expect(forgotten).toHaveLength(1);
   });
 });

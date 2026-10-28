@@ -43,6 +43,7 @@ import {
   currentUrl,
   fire,
   matching,
+  requestTimeout,
 } from "./protocol";
 import type { Diagnostics, WireTransport } from "./protocol";
 import type { StreamMeta } from "./stream";
@@ -71,6 +72,7 @@ export interface PartialAdapters {
   dialog?: DialogAdapter;
   history?: HistoryAdapter;
   popstate?: PopStateAdapter;
+  reload?: () => void;
   loadLink?: LinkLoader;
   observer?: IntersectionAdapter;
   session?: SessionStore;
@@ -369,6 +371,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
           if (envelope.csrf) surface.setCsrf(envelope.csrf);
         }),
       version: () => assets.version(),
+      // Read per request, so the $timeout of the _init payload applies once it lands.
+      timeout: () => requestTimeout(deps.context().$timeout),
       csrf: { current: () => csrf.current(), ensure: () => csrf.ensure() },
       dirtySnapshot: () => dirty.snapshot(),
       // Feeds the ring id to the SSE bridge so the echo stream event drops.
