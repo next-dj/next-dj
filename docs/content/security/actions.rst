@@ -47,7 +47,7 @@ An action in a ``component.py``, in a page tree or outside every tree, also answ
        return HttpResponseRedirect("/notes/")
 
 ``delete_note`` needs no guard of its own, because it answers to the login ``notes/page.py`` passes down and to the permission of its page.
-The dispatcher checks that rule before the ``Meta`` guard, the ``render()`` of the origin page, and any form hook, with the same order and the same answers the page view gives, see :ref:`topics-permissions-tree`.
+The dispatcher checks that rule before the ``Meta`` guard, the ``render()`` of the origin page and of the owner page, and any form hook, with the same order and the same answers the page view gives, see :ref:`topics-permissions-tree`.
 An anonymous POST is redirected to ``LOGIN_URL`` with the origin path as ``next``, a refusal answers 403 and sends ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``, and a broken ``page.py`` over the owner refuses the action as it closes the pages.
 
 A forged origin lifts nothing
@@ -56,6 +56,11 @@ A forged origin lifts nothing
 The submission names its origin page in the hidden ``_next_form_origin`` field, and a client can replace it with the path of any routed page.
 The rule of the origin page joins the owner rule for that request and removes none of its requirements.
 Posting ``delete_note`` with the origin of a public page therefore still meets the login of ``notes/page.py`` and the permission of the note page.
+
+A guard written inside the ``render()`` of the owner page holds as well.
+When the ``page.py`` that declares an action has a ``render()``, the dispatcher refuses a POST without an origin with HTTP 400 and a POST whose origin lies outside the directory of that page with HTTP 403, both before the handler runs.
+An origin below that directory runs the owner ``render()`` with the URL kwargs of the origin, and a response it returns answers the POST.
+``manage.py check`` reports such an action with ``next.W150`` while the page declares no access, because a declaration holds for every origin.
 
 The owner rule binds only an action declared inside a page tree.
 An action declared elsewhere, such as a shared form in an ``app/forms.py``, has no owner and answers to the rule of its origin page alone, so without the default login a client that names a public page as the origin reaches it.

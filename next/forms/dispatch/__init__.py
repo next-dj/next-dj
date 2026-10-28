@@ -39,6 +39,7 @@ from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
     _branch,
     _check_access,
+    _check_owner_page_access,
     _check_page_access,
     _check_tree_access,
     _enforce_object_permissions,
@@ -227,11 +228,11 @@ class FormActionDispatch:
         *,
         guard: "AccessRule",
     ) -> "HttpResponseBase | None":
-        """Return the denial of the page tree, the action guard or the origin page.
+        """Return the denial of the page tree, the guard, the origin or the owner page.
 
         The rule of the owner and of the origin page answers before the guard of `Meta`.
         """
-        denial = _check_tree_access(
+        denial: HttpResponseBase | None = _check_tree_access(
             request,
             meta.get("file_path"),
             origin_match,
@@ -245,8 +246,18 @@ class FormActionDispatch:
         denial = _check_access(request, guard)
         if denial is not None:
             return denial
-        return _check_page_access(
+        denial = _check_page_access(
             request,
+            origin_match,
+            action_name=action_name,
+            uid=meta.get("uid"),
+            sender=_DispatchState.signal_sender,
+        )
+        if denial is not None:
+            return denial
+        return _check_owner_page_access(
+            request,
+            meta.get("file_path"),
             origin_match,
             action_name=action_name,
             uid=meta.get("uid"),

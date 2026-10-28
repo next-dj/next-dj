@@ -194,7 +194,7 @@ Permissions
 
 ``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every permission name the project writes, the literal name of a ``{% has_perm %}`` tag in a composed page or a component template, the ``permission_required()`` declarations of every ``page.py`` and ``component.py``, and the guard of every form action.
 It also owns ``next.W130`` and ``next.W131`` for the ``LOGIN_REQUIRED`` setting.
-``next.W129`` for an action nothing guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
+``next.W129`` for an action nothing guards, ``next.W150`` for an action only the ``render()`` of its page guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
 
 .. automodule:: next.permissions.checks
    :members:
@@ -1481,6 +1481,12 @@ Warnings
        The check carries ``deploy=True``.
        Selecting ``next.realtime.RedisBroker`` or another shared ``BrokerBackend`` clears it, and a single-process deployment lists the code in ``SILENCED_SYSTEM_CHECKS``.
      - ``next.realtime.checks``
+   * - ``next.W150``
+     - A file of a page tree declares actions beside a ``page.py`` with a ``render()``, and no declaration of that page, no ``inherit=True`` declaration above it, and no ``Meta`` guard covers them, so only that ``render()`` guards them.
+       The dispatcher runs that ``render()`` for an origin inside the directory of the page and refuses any other origin, so the actions cannot be posted from a page outside it.
+       Silent while the default login is on, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``.
+       Declaring ``page.login_required()``, ``permission_required()``, or ``page.public()`` for the page, or setting ``login_required`` on the action ``Meta``, clears it.
+     - ``next.forms.checks.actions``
 
 Codes are assigned per check and are not contiguous.
 

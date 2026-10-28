@@ -84,8 +84,10 @@ File uploads.
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which a path-only rule checks before the dispatcher resolves it through the URLconf, see :doc:`csrf-and-forms`.
    A value that does not resolve returns HTTP 400 on the paths that need the origin page.
-   Substituting the origin of another routed page is contained by that page's own authorization, because the dispatcher asks the page the origin names whether it would serve the request before any handler runs, and a denial emits ``form_access_denied`` with ``layer="page"``.
-   A guard written inside ``render()`` is therefore the supported page-level check on this path, see `Access control`_, :doc:`/content/topics/pages` and :doc:`/content/topics/forms/validation-rerender`.
+   Before any handler runs, the dispatcher asks the page the origin names whether it would serve the request, and a denial emits ``form_access_denied`` with ``layer="page"``.
+   The ``render()`` of the page that owns the action answers too, so an action of a ``page.py`` with a ``render()`` is refused with HTTP 400 without an origin and with HTTP 403 for an origin outside the directory of that page, and an origin below it runs that ``render()`` before the handler.
+   Substituting a public origin therefore lifts neither the declared rules nor the ``render()`` guard of the owner page.
+   A declaration such as ``page.login_required()`` remains the preferred guard, because it holds for every origin and ``manage.py check`` reports an action guarded only by ``render()`` with ``next.W150``, see `Access control`_, :doc:`/content/topics/pages` and :doc:`/content/topics/forms/validation-rerender`.
 
 Caching and content negotiation.
    A full page response and a partial response can answer the same URL with different bodies, so the framework declares what it negotiated on.

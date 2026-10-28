@@ -13,6 +13,7 @@ from next.forms.checks.actions import (
     check_declarations_without_page,
     check_empty_branches,
     check_public_actions,
+    check_render_guarded_actions,
 )
 from next.forms.manager import form_action_manager
 from next.pages.checks.access import (
@@ -683,6 +684,50 @@ class TestPublicActionsBeforeAccess:
         with routed(root, COMPONENT_BACKENDS=COMPONENTS):
             [warning] = check_public_actions()
         assert warning.id == "next.W129"
+
+
+_RENDER = "\ndef render(request):\n    return 'ok'\n"
+
+
+@pytest.mark.usefixtures("form_registries")
+class TestRenderGuardedActions:
+    """next.W150 warns about actions whose page guards them only in `render()`."""
+
+    def test_actions_beside_a_render_warn_once_per_file(self, root) -> None:
+        page_path = write_page(root, "a", _open_actions() + _RENDER)
+
+        with routed(root):
+            [warning] = check_render_guarded_actions()
+
+        assert (warning.id, warning.obj) == ("next.W150", str(page_path))
+        assert "'first_open', 'second_open'" in warning.msg
+
+    def test_a_meta_guard_leaves_the_other_action(self, root) -> None:
+        write_page(root, "a", _open_actions(guard=", login_required=True") + _RENDER)
+
+        with routed(root):
+            [warning] = check_render_guarded_actions()
+
+        assert "'second_open'" not in warning.msg
+
+    @pytest.mark.parametrize(
+        ("declared", "render"),
+        [("page.login_required()\n", _RENDER), ("page.public()\n", _RENDER), ("", "")],
+        ids=["declared", "public", "no-render"],
+    )
+    def test_a_declaration_or_no_render_is_silent(
+        self, root, declared: str, render: str
+    ) -> None:
+        write_page(root, "a", _open_actions(declared) + render)
+
+        with routed(root):
+            assert check_render_guarded_actions() == []
+
+    def test_the_setting_is_silent(self, root) -> None:
+        write_page(root, "a", _open_actions() + _RENDER)
+
+        with routed(root, LOGIN_REQUIRED=True):
+            assert check_render_guarded_actions() == []
 
 
 class TestGuardImports:
