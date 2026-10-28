@@ -528,11 +528,25 @@ class TestBrokenGuard:
     """A `page.py` above that fails to import refuses every action below it."""
 
     @pytest.mark.parametrize("kind", ["anonymous", "holder"])
-    def test_status(self, tmp_path: Path, kind: str) -> None:
+    @override_settings(DEBUG=False)
+    def test_status(
+        self, tmp_path: Path, kind: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
         root = tmp_path / "pages"
         _Tree({"notes": _action("note")}).write(root)
-        write_guard(root, 'raise RuntimeError("broken guard")\n')
-        assert _post(root, kind, "note", "/notes/").status_code == 404
+        guard = write_guard(root, 'raise RuntimeError("broken guard")\n')
+        with routed(root):
+            client = client_as(kind)
+            client.raise_request_exception = False
+            response = client.post_action("note", {"name": "x"}, origin="/notes/")
+
+        assert response.status_code == 500
+        assert b"broken guard" not in response.content
+        [record] = [r for r in caplog.records if r.name == "django.request"]
+        assert record.exc_info is not None
+        error = record.exc_info[1]
+        assert isinstance(error, PageModuleImportError)
+        assert error.file_path == guard
 
     def test_failing_loudly_raises_the_import_error(self, tmp_path: Path) -> None:
         root = tmp_path / "pages"

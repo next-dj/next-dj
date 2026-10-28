@@ -3,13 +3,14 @@ from pathlib import Path
 import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
-from django.http import Http404
 from django.test import RequestFactory
 from django.urls import resolve
 
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.intercept import Intercept, intercepts
+from next.pages.errors import PageModuleImportError
 from next.partial import Patches
+from next.partial.errors import ForeignPageNotAuthorizedError
 from next.partial.shaping.targets import _served_target
 from next.partial.signals import intercept_access_denied
 from next.testing import NextClient, capture_signals, envelope_of
@@ -84,10 +85,9 @@ class TestDenialAnnounced:
         ("rule", "user", "status", "reason"),
         [
             ("page.permission_required('auth.add_user')\n", "visitor", 403, "raised"),
-            ("raise RuntimeError('boom')\n", "visitor", 404, "raised"),
             ("page.login_required()\n", None, 302, "redirect"),
         ],
-        ids=["denied", "broken", "login"],
+        ids=["denied", "login"],
     )
     def test_the_signal_names_the_pages_and_the_answer(
         self, root: Path, rule: str, user: str | None, status: int, reason: str
@@ -173,10 +173,10 @@ class TestMorphPicksOverTheRequestZones:
 
 
 class TestRefusingInterceptOnTheActionPath:
-    """A refusal of the intercept is a 403 of the action path whatever it raised."""
+    """A refusal of the intercept is a 403 of the action path, a broken one a 500."""
 
-    def test_a_broken_intercept_chain_is_a_403(self, root: Path) -> None:
-        _site(root, intercept_source="raise RuntimeError('boom')\n")
+    def test_a_refusing_intercept_is_a_403(self, root: Path) -> None:
+        _site(root, intercept_source="page.login_required()\n")
         target = root / "photo" / "[int:pk]" / "page.py"
         request = RequestFactory().post("/x/", **partial_meta(zones="peek"))
         request.user = AnonymousUser()
@@ -186,4 +186,17 @@ class TestRefusingInterceptOnTheActionPath:
             with pytest.raises(PermissionDenied) as caught:
                 _served_target(request, target, {"pk": 3})
 
-        assert isinstance(caught.value.__cause__, Http404)
+        assert isinstance(caught.value.__cause__, ForeignPageNotAuthorizedError)
+
+    def test_a_broken_intercept_chain_raises_its_import_failure(
+        self, root: Path
+    ) -> None:
+        _site(root, intercept_source="raise RuntimeError('boom')\n")
+        target = root / "photo" / "[int:pk]" / "page.py"
+        request = RequestFactory().post("/x/", **partial_meta(zones="peek"))
+        request.user = AnonymousUser()
+
+        with routed(root):
+            resolve("/photo/3/")
+            with pytest.raises(PageModuleImportError):
+                _served_target(request, target, {"pk": 3})

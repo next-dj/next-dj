@@ -275,9 +275,9 @@ A broken page.py
 ~~~~~~~~~~~~~~~~
 
 A ``page.py`` that raises while importing closes its own page and every page below it, since what it would have declared with ``inherit=True`` is unknown.
-Their views answer 404, or raise ``PageModuleImportError`` when ``next.conf.fail_loudly`` holds, and the actions of that part of the tree are refused the same way.
+Their views raise ``PageModuleImportError`` and answer 500, and the actions of that part of the tree are refused the same way.
 Under the default login an anonymous request meets the login redirect first, the answer ``LoginRequiredMiddleware`` gives before any view runs, so the key and the middleware answer alike and the redirect tells nothing about the broken file.
-A ``Patches.morph`` onto a page under a broken ``page.py`` raises ``PageModuleImportError`` in production too, since a 404 would name the URL of the request in flight rather than the page.
+A ``Patches.morph`` onto a page under a broken ``page.py`` raises ``PageModuleImportError`` too.
 An intercept page under a broken ``page.py`` is refused as a routed page is, on a zone request and inside ``Patches.morph_zone`` or a form outcome alike.
 The chain is read again on every request while a file in it is broken, so a fixed ``page.py`` serves on the next request.
 ``manage.py check`` reports the failure as ``next.E017``.

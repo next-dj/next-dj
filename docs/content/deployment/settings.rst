@@ -31,9 +31,10 @@ Strict loading
 
    NEXT_FRAMEWORK["STRICT_LOADING"] = True
 
-Set ``STRICT_LOADING`` to ``True`` in production so a ``page.py`` that fails to import or a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
-With ``DEBUG=False`` the client sees the generic 500 page, and the traceback appears only in the server log through ``logger.exception``.
-Without the flag a broken ``page.py`` answers a generic 404 and a missed component renders as an empty string, which monitoring rarely catches.
+Set ``STRICT_LOADING`` to ``True`` in production so a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
+With ``DEBUG=False`` the client sees the generic 500 page, and the traceback appears only in the server log.
+Without the flag a missed component renders as an empty string, which monitoring rarely catches.
+A ``page.py`` that fails to import answers 500 with or without the flag, so monitoring on 5xx sees a broken deploy.
 See :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 
 Component module loading

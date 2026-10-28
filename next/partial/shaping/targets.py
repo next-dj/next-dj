@@ -43,7 +43,7 @@ def _served_target(
 ) -> "Path | None":
     """Return the page serving the zones the request names over the origin page.
 
-    A refusing intercept is a 403 whatever its rule raises, as the action may have run.
+    A refusing intercept is a 403, as the action may have run, and a broken one a 500.
     """
     if page_path is None:
         return None

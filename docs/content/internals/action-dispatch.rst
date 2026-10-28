@@ -157,7 +157,7 @@ The page tree access check runs first, right after origin resolution.
 It joins the rule of the owner, the page of the directory the action is declared in, with the rule of the resolved origin page, so a forged origin adds requirements and lifts none, see :doc:`/content/security/actions`.
 It runs through ``enforce`` of ``next.pages.access``, the check a page view runs.
 An anonymous user is redirected to the login page with the posted origin as ``next``.
-A chain holding a broken file answers 404 or raises under ``fail_loudly``, and under the default login the redirect comes before that judgement.
+A chain holding a broken file raises its ``PageModuleImportError``, a 500, and under the default login the redirect comes before that judgement.
 A refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
 Each ``obj=DObject[Model]`` loads its row through ``url_lookup`` from the URL kwargs of the posted origin, through the same dependency cache the handler reads, so the check and the handler see one row.
 An origin whose route does not capture the kwarg of the model raises ``UnboundObjectError``, and a row the scope does not see answers 404 before any permission is asked.

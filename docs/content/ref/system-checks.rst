@@ -323,7 +323,7 @@ Errors
      - ``next.urls.checks``
    * - ``next.E017``
      - A ``page.py`` raises while importing.
-       A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they answer 404 or raise under ``next.conf.fail_loudly``.
+       A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they raise ``PageModuleImportError`` and answer 500.
        The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
        The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
        An import stopped by an ``async def`` callable reports as ``next.E218`` instead.

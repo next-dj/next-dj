@@ -937,23 +937,23 @@ class TestBrokenPageImportView:
             pattern.callback(build_page_request())
 
     @_broken_sources
-    def test_broken_page_returns_404_in_prod(
+    def test_broken_page_raises_in_prod(
         self, page_instance, tmp_path, url_parser, broken_source
     ) -> None:
-        """With both flags off the broken page returns 404, never a sibling body."""
+        """With both flags off the broken page raises, never a 404 or a sibling body."""
         (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
         )
 
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
 
     def test_broken_page_recovers_after_fix_without_restart(
         self, page_instance, tmp_path, url_parser
     ) -> None:
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
 
         stamp = page_file.stat().st_mtime + 10
@@ -1054,11 +1054,11 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The build probes once, and every later request returns 404 from the memo.
-        with pytest.raises(Http404):
+        # The build probes once, and every later request raises from the memo.
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
         first_pass = calls.count(page_file)
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
 
         assert calls.count(page_file) == first_pass

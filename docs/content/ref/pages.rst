@@ -43,7 +43,7 @@ Access declarations
 Any other ``perm``, and an ``obj`` that is a string, a bare model, or a ``DObject`` with a parent, raises ``TypeError`` at the call.
 ``public()`` lifts what every ``page.py`` above requires and the default login, for its own page or under ``inherit=True`` for the pages below, and a requirement declared below binds again.
 A public rule sets the ``login_required`` attribute of the page view to ``False``, which ``LoginRequiredMiddleware`` reads.
-A view answers a refusal with a redirect to the login page for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and a 404 or the import failure for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
+A view answers a refusal with a redirect to the login page for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and the import failure, a 500, for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
 
 ``next.pages.access`` reads the rule of each page once per reload of a file in its chain.
 ``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
@@ -179,8 +179,8 @@ Import failures
 
 A ``page.py`` whose body raises while importing is a broken module, as distinct from a file the loader cannot read at all.
 The recorded failure re-raises on the request path as ``PageModuleImportError``, which carries the original exception as ``__cause__`` and the offending path as ``file_path``.
-``settings.DEBUG`` and ``NEXT_FRAMEWORK["STRICT_LOADING"]`` decide how loudly that failure reaches the client.
-See *Broken page modules* in :doc:`/content/topics/pages` for the loudness table and the blast radius.
+The request answers 500 on every setting, and ``settings.DEBUG`` decides between the technical and the generic error page.
+See *Broken page modules* in :doc:`/content/topics/pages` for the blast radius.
 
 .. autoclass:: next.pages.PageModuleImportError
    :members:

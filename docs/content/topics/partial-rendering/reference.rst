@@ -371,7 +371,7 @@ Status codes
        On a mutation the runtime stays in place and fires ``partial:error`` with the status and body.
        On a safe method it fires the same ``partial:error`` and then navigates fully.
    * - 404
-     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope or a broken ``page.py`` over the page.
+     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope.
        On a safe method the runtime fires ``partial:error`` and then navigates fully, and on a mutation it stays in place after the event.
    * - 409
      - A version mismatch on a safe method, with an empty body.
