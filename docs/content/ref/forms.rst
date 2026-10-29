@@ -257,7 +257,7 @@ Setting it rebinds the name to this registration, which is what a test override 
 It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispatch pipeline before the form is built, so custom backends see the declared requirements without extra wiring.
 ``iter_actions`` yields every stored ``ActionMeta``, including its ``name`` key, which is how the forms system checks inspect any configured backend.
 ``FormActionManager`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
-``scope_key_for`` derives the registry scope key from a declaration file path and a scope, the same key that partitions actions and wizard storage.
+``scope_key_for`` derives the key the action uid and wizard storage hash from a declaration file path and a scope, tree-relative for a page so it holds across hosts.
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
 ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, and ``record_possible_collision`` all import from ``next.forms.backends`` directly.

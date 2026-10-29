@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.urls import reverse
@@ -13,13 +14,24 @@ from .manager import app_name
 from .parser import default_url_parser
 
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+
 def page_reverse(
-    path_template: str = "", *, namespace: str = app_name, **kwargs
+    path_template: str = "", /, *, namespace: str = app_name, **kwargs
 ) -> str:
     """Reverse a file-router page URL from its directory-tree template."""
+    return page_reverse_in(namespace, path_template, kwargs)
+
+
+def page_reverse_in(
+    namespace: str, path_template: str, kwargs: Mapping[str, Any]
+) -> str:
+    """Reverse a page URL in `namespace`, a URL kwarg named `namespace` included."""
     clean_name = default_url_parser.prepare_url_name(path_template)
     full_name = next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name)
-    return reverse(f"{namespace}:{full_name}", kwargs=kwargs or None)
+    return reverse(f"{namespace}:{full_name}", kwargs=dict(kwargs) or None)
 
 
 # Lazy variant for values read before the URLconf is ready, like `Meta.success_url`.
@@ -49,4 +61,4 @@ def with_query(base: str, **overrides) -> str:
     )
 
 
-__all__ = ["page_reverse", "page_reverse_lazy", "with_query"]
+__all__ = ["page_reverse", "page_reverse_in", "page_reverse_lazy", "with_query"]

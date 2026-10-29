@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from django import forms as django_forms
+    from django.apps import AppConfig
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse, HttpResponseBase
     from django.urls import URLPattern
@@ -81,15 +82,33 @@ def _relative_under(resolved: str, root: str) -> str | None:
     return Path(resolved[len(prefix) :]).as_posix()
 
 
+_tree_key_cache: BoundedCache[str, str | None] = BoundedCache()
+
+
 def _tree_relative_key(resolved: str) -> str | None:
     """Return `<app label>:<path>` or `:<path>` under BASE_DIR, None outside both.
 
     The deepest installed app wins, as its label survives a move of the whole checkout.
     """
+    if resolved in _tree_key_cache:
+        return _tree_key_cache[resolved]
     try:
         configs = apps.get_app_configs()
     except AppRegistryNotReady:
-        configs = ()
+        return _tree_key_under(resolved, ())
+    key = _tree_key_under(resolved, configs)
+    _tree_key_cache[resolved] = key
+    return key
+
+
+def forget_tree_keys(*, setting: str, **kwargs) -> None:
+    """Drop the memoised tree keys when the app list or BASE_DIR behind them moves."""
+    if setting in {"INSTALLED_APPS", "BASE_DIR"}:
+        _tree_key_cache.clear()
+
+
+def _tree_key_under(resolved: str, configs: "Iterable[AppConfig]") -> str | None:
+    """Return the tree key of `resolved` among `configs`, else under BASE_DIR."""
     best: tuple[int, str] | None = None
     for config in configs:
         root = _resolved_path_str(config.path)

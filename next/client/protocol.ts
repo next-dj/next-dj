@@ -42,8 +42,7 @@ export function pollInterval(raw: string | null): number | null {
 /** The request deadline when the payload names none, long enough for a slow upload. */
 export const REQUEST_TIMEOUT_MS = 30000;
 
-// Read the $timeout payload value in milliseconds. Zero turns the deadline off, and
-// anything else outside the timer range falls back to the default.
+// Read the $timeout value in ms, zero turning it off and out of range the default.
 export function requestTimeout(raw: unknown): number {
   return typeof raw === "number" && raw >= 0 && raw <= MAX_POLL_MS
     ? raw

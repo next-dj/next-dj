@@ -84,6 +84,10 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   // The path last announced. A popstate is measured from it, since the browser has
   // already changed the location.
   let known = currentUrl(doc);
+  // The path last written or announced, ahead of known inside an open commit.
+  let here = known;
+  // Whether the runtime wrote history, the only content a Back cannot restore.
+  let wrote = false;
   let open: Move | undefined;
 
   function current(): NavigationState {
@@ -98,6 +102,8 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   function record(intent: Intent): boolean {
     try {
       history[intent.action](intent.href);
+      here = currentUrl(doc);
+      wrote = true;
       return true;
     } catch (error) {
       fire(doc, deps.dispatch, "partial:error", {
@@ -137,6 +143,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         const from = move.from;
         const to = current();
         known = to.path;
+        here = known;
         const urlChanged = to.path !== from.path;
         if (!urlChanged && to.title === from.title) return;
         fire(doc, deps.dispatch, "next:navigated", {
@@ -181,13 +188,16 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     }),
     popped(during) {
       const commit = frame({ action: "pop", from: { ...current(), path: known } });
-      let shown = known;
+      let answered: string | undefined;
       try {
-        shown = during() ?? known;
+        answered = during();
       } finally {
-        if (shown === currentUrl(doc)) commit.end();
+        const shown = answered ?? here;
+        // With no write and no layer, the entry is the page's own, made by its scripts.
+        if (shown === currentUrl(doc) || (!wrote && answered === undefined))
+          commit.end();
         else {
-          // A popstate is never nested, so dropping the frame drops the whole commit.
+          // The reload drops the page, so an open commit goes with it.
           open = undefined;
           reload();
         }

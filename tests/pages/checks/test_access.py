@@ -730,6 +730,21 @@ class TestRenderGuardedActions:
         with routed(root, LOGIN_REQUIRED=True):
             assert check_render_guarded_actions() == []
 
+    def test_a_shared_action_is_left_to_w129(self, root) -> None:
+        source = _open_actions().replace(
+            '@action("first_open")', '@action("first_open", scope="shared")'
+        )
+        write_page(root, "a", source + _RENDER)
+        write_guard(root / "elsewhere", _LOGIN_INHERIT)
+
+        with routed(root):
+            [warning] = check_render_guarded_actions()
+            assert "'first_open'" not in warning.msg
+            [public] = check_public_actions()
+
+        assert "'first_open'" in public.msg
+        assert "'second_open'" not in public.msg
+
 
 class TestGuardImports:
     """next.E017 reports a guarding `page.py` that raises while importing."""

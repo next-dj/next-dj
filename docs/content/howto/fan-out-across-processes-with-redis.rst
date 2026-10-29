@@ -187,8 +187,8 @@ A ping left unanswered until the next interval ends the stream, so a half-open T
 When the Redis client reconnects a subscription on its own, messages may have been lost in between, so the broker ends the stream rather than resuming it silently.
 The browser then reconnects, receives a fresh ``hello``, and requests its zones again.
 
-Under ASGI the broker keeps one asynchronous Redis client per running event loop, so a client never crosses loops.
-Synchronous publishers and WSGI streams share one blocking client pool.
+Under ASGI the broker keeps an asynchronous command client and stream client per running event loop, so a client never crosses loops.
+Synchronous publishers use a blocking command pool and WSGI streams a blocking stream pool of their own.
 A reconnecting stream replays what it missed from the log when the log still covers the gap.
 Otherwise the client recovers current state by refreshing the affected zones through its own page view.
 See :doc:`/content/topics/realtime` for delivery semantics and topic payload rules.

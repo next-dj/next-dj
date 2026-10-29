@@ -210,7 +210,7 @@ Watch these signals during a run and in production.
 - The Redis subscription pool, because every open WebSocket and SSE stream holds one connection of it, and a full pool refuses the next stream and makes the browser reconnect, while publishing runs on a separate command pool.
 - The Redis ``maxclients`` limit, which all processes share.
 - The session cache, which closes sockets with ``4401`` when it evicts live sessions.
-- The handler thread pool, which runs sync upstream handlers and tunneled views and queues work when handlers are slow.
+- The handler thread pool, which runs sync upstream handlers and refuses an event with ``limit`` when no thread of it is free.
 - File descriptor limits of the process and connection limits of the proxy and load balancer.
 - Presence cost, which grows with the attendee count and the ``REALTIME['PRESENCE']['SIZE']`` member cap.
 - Replay cost, which grows with ``REALTIME['REPLAY']['SIZE']`` and the size of each message.

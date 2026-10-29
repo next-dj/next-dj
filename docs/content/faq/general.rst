@@ -27,7 +27,7 @@ Which Django and Python versions are supported
 ----------------------------------------------
 
 Python 3.12, 3.13, 3.14, and 3.15, with Django 5.2, 6.0, and 6.1.
-Python 3.15 needs Django 6.1, because Django 5.2 and 6.0 support 3.12 to 3.14 only.
+Python 3.15 needs Django 6.1.3 or newer, because Django 5.2 and 6.0 support 3.12 to 3.14 only.
 See the *Requirements* list in :doc:`/content/intro/install` for the combinations continuous integration tests.
 
 Is next.dj production ready

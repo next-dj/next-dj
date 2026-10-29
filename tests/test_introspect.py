@@ -223,6 +223,18 @@ class _AsyncMethods:
         return "ok"
 
 
+class _AsyncDescriptor:
+    def __get__(self, obj: object, owner: type | None = None) -> object:
+        return self
+
+    async def __call__(self) -> str:
+        return "ok"
+
+
+class _StaticAsyncCall:
+    __call__ = staticmethod(_async_view)
+
+
 class _WrappedCycle:
     def __init__(self) -> None:
         self.__wrapped__ = self
@@ -243,6 +255,8 @@ class TestIsAsyncCallable:
             pytest.param(wraps_decorator(_async_view), id="wraps-decorator"),
             pytest.param(_AsyncCallable(), id="async-call-instance"),
             pytest.param(_AsyncMethods().on_valid, id="bound-method"),
+            pytest.param(_AsyncDescriptor(), id="descriptor-instance"),
+            pytest.param(_StaticAsyncCall(), id="staticmethod-call"),
         ],
     )
     def test_async_callables_are_detected(self, func: object) -> None:
@@ -256,6 +270,7 @@ class TestIsAsyncCallable:
             pytest.param(_AsyncCallable, id="class"),
             pytest.param(async_to_sync(_async_view), id="async-to-sync"),
             pytest.param(_WrappedCycle(), id="wrapped-cycle"),
+            pytest.param(len, id="builtin"),
         ],
     )
     def test_sync_callables_pass(self, func: object) -> None:

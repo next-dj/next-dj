@@ -28,6 +28,7 @@ from next.pages.registry import PageContextRegistry
 from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
 from next.ports import partial_shaper_slot
+from next.realtime.handlers import handler_threads
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
 from tests.support import (
@@ -129,6 +130,14 @@ def _reset_access_memos() -> Generator[None, None, None]:
     yield
     login_by_default.cache_clear()
     _listed_middleware.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_handler_permits() -> Generator[None, None, None]:
+    """Drop the handler permits, since a test that patches the pool size caches its own."""
+    handler_threads.cache_clear()
+    yield
+    handler_threads.cache_clear()
 
 
 @pytest.fixture(autouse=True)

@@ -127,8 +127,7 @@ export interface WireDeps {
   navigate?: Navigate;
   // The timer the request deadline runs on.
   clock?: Clock;
-  // The request deadline in milliseconds, read per request so a payload sets it after
-  // the wire is built. Zero waits forever. Absent, the default applies.
+  // The deadline in ms, read per request, zero waiting forever and absent the default.
   timeout?: () => number;
   // The navigate-once store of the non-envelope fallback. Absent, the default
   // wraps sessionStorage, the same store the version guard writes to.
@@ -156,8 +155,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-// Settle with work or reject once the signal aborts, whichever comes first, so a
-// transport that ignores the signal still lets the deadline release the lock.
+// Settle with work or reject on abort, so a transport ignoring the signal still ends.
 function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const stop = (): void => reject(signal.reason as Error);
@@ -294,8 +292,11 @@ export class Wire {
       let csrf = this.#csrf.current();
       // A deferred token is fetched inside the lock, so a double submit fetches once.
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
-        const ensured = await this.#csrf.ensure();
+        const ensured = await this.#ensureCsrf();
         if (ensured === null) return none("error");
+        if (ensured instanceof DOMException) {
+          return this.#fail({ kind: "csrf", url: request.url, error: ensured });
+        }
         csrf = ensured;
         if (csrf?.token === undefined) {
           return this.#fail({
@@ -311,6 +312,24 @@ export class Wire {
       if (queueKey !== undefined && this.#queues.get(queueKey) === entry) {
         this.#queues.delete(queueKey);
       }
+    }
+  }
+
+  // A token fetch that never answers fails on the deadline, so it frees the uid lock.
+  async #ensureCsrf(): Promise<CsrfPayload | undefined | null | DOMException> {
+    const ms = this.#timeout();
+    if (ms <= 0) return this.#csrf.ensure();
+    let timer = 0;
+    const expired = new Promise<DOMException>((resolve) => {
+      timer = this.#clock.setTimeout(
+        () => resolve(new DOMException("token fetch timed out", "TimeoutError")),
+        ms,
+      );
+    });
+    try {
+      return await Promise.race([this.#csrf.ensure(), expired]);
+    } finally {
+      this.#clock.clearTimeout(timer);
     }
   }
 
@@ -352,13 +371,11 @@ export class Wire {
       method,
       intent: { zone: request.zone, uid: request.uid },
     });
-    // One signal ends the request on the deadline or on a superseding request. The
-    // timer runs until the body is read, so a stalled reply times out too.
+    // One signal ends the request on its deadline or a supersede, armed after a tunnel.
     const deadline = new AbortController();
     const expiry = new DOMException("request timed out", "TimeoutError");
     const ms = this.#timeout();
-    const timer =
-      ms > 0 ? this.#clock.setTimeout(() => deadline.abort(expiry), ms) : undefined;
+    let timer: number | undefined;
     // The queue may have been aborted while the token was fetched.
     if (entry?.signal.aborted === true) deadline.abort();
     entry?.signal.addEventListener("abort", () => deadline.abort(), { once: true });
@@ -397,6 +414,7 @@ export class Wire {
         if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
         return failed;
       }
+      if (ms > 0) timer = this.#clock.setTimeout(() => deadline.abort(expiry), ms);
       const response =
         tunneled instanceof Response
           ? tunneled

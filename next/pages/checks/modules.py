@@ -284,7 +284,7 @@ def _async_error(path: Path, refusal: AsyncCallableError) -> CheckMessage:
     )
 
 
-@register(NEXT)
+@register(Tags.templates, NEXT)
 def check_async_callables(*args, **kwargs) -> list[CheckMessage]:
     """Report a `page.py` or `component.py` whose async callable was refused.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import uuid
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
@@ -42,6 +43,8 @@ def throwaway_apps(
         (package / "__init__.py").write_text("LOADS = []\n")
         for module, body in bodies.items():
             (package / f"{module}.py").write_text(body)
+        # The finder caches a listing by mtime, which a same-tick write leaves as is.
+        importlib.invalidate_caches()
         made.append(AppConfig.create(name))
         return name
 

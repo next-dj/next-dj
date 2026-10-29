@@ -407,7 +407,6 @@ async def dispatch(upstream: Upstream) -> bool:
     """Run the handler of one upstream event, False when no handler serves it.
 
     A sync handler claims its thread before `upstream_received`, else `PoolFullError`.
-    The caller checks the topic grant first, and a handler error propagates to it.
     """
     found = handler_registry.resolve(upstream.topic, upstream.name)
     if found is None:

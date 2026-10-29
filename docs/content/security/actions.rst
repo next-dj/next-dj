@@ -59,7 +59,8 @@ The rule of the origin page joins the owner rule for that request and removes no
 Posting ``delete_note`` with the origin of a public page therefore still meets the login of ``notes/page.py`` and the permission of the note page.
 
 A guard written inside the ``render()`` of the owner page holds as well.
-When the ``page.py`` that declares an action has a ``render()``, the dispatcher refuses a POST whose origin lies outside the directory of that page with HTTP 403 before the handler runs.
+When the ``page.py`` that declares a page-scoped action has a ``render()``, the dispatcher refuses a POST whose origin lies outside the directory of that page with HTTP 403 before the handler runs.
+A ``scope="shared"`` action posts from any page, so no owner ``render()`` guards it.
 An origin below that directory runs the owner ``render()`` with the URL kwargs of the origin, and a response it returns answers the POST.
 ``manage.py check`` reports such an action with ``next.W150`` while the page declares no access, because a declaration holds for every origin.
 

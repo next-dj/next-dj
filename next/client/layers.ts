@@ -382,12 +382,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return page === basePage() ? 0 : -1;
   }
 
-  // Back past the URL of the topmost layer with a history entry closes that layer and
-  // the layers above it that have none. The pass repeats while the bar is off the next
-  // such URL, so a jump back over several entries closes every layer it skipped. Zones
-  // and history stay as they are. The handler answers the page now on screen, the
-  // anchor it stopped at or the host under the stack, so the navigation can reload a
-  // pop that landed anywhere else.
+  // Back closes every layer above the bar's URL and answers the page left on screen.
   function onPopstate(): void {
     const base = stack[0]?.host;
     deps.navigation.popped(() => {

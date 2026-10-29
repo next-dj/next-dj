@@ -9,7 +9,13 @@ import functools
 import inspect
 import sys
 from pathlib import Path
-from types import CodeType, FunctionType, MethodType
+from types import (
+    BuiltinFunctionType,
+    CodeType,
+    FunctionType,
+    MethodType,
+    MethodWrapperType,
+)
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.errors import AsyncCallableError
@@ -120,13 +126,19 @@ def describe_callable(func: Callable[..., Any]) -> str:
     return f'"{name}"' if filename is None else f'"{name}" ({filename})'
 
 
+# Built-in routines, so an instance that only defines `__get__` still has its call read.
+_ROUTINE_TYPES = (FunctionType, MethodType, BuiltinFunctionType, MethodWrapperType)
+
+
 def _declares_async(target: object) -> bool:
     """Return whether `target` itself is an async function or an async `__call__`."""
     if inspect.iscoroutinefunction(target) or inspect.isasyncgenfunction(target):
         return True
-    if inspect.isroutine(target) or inspect.isclass(target):
+    if isinstance(target, _ROUTINE_TYPES) or inspect.isclass(target):
         return False
     call = inspect.getattr_static(type(target), "__call__", None)
+    # A staticmethod or classmethod `__call__` is read raw, so its function decides.
+    call = getattr(call, "__func__", call)
     return inspect.iscoroutinefunction(call) or inspect.isasyncgenfunction(call)
 
 

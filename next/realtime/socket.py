@@ -387,7 +387,6 @@ class TopicSocket:
         """Hand an event to its handler within the connection's concurrency, then ack.
 
         An event past `CONCURRENCY` or the pool threads is refused, never a 4429 strike.
-        A sync handler keeps its slot until it returns, past its timeout too.
         """
         if self._events >= self._limits.upstream.concurrency:
             await self._refuse_up(frame)
@@ -671,8 +670,7 @@ async def _bounded[T, E](
 ) -> T | E:
     """Await a handler within `limit` seconds, returning the outcome of a failure.
 
-    Only an expired deadline is a timeout, a `TimeoutError` the call raised fails.
-    A `PoolFullError` reaches the caller, who refuses the event.
+    Only an expired deadline is a timeout, a `PoolFullError` reaches the caller.
     """
     deadline = asyncio.timeout(limit)
     try:

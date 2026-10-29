@@ -1623,15 +1623,45 @@ describe("Wire request deadline", () => {
     });
   });
 
-  it("times out a socket tunnel that never answers", async () => {
+  it("waits on a deferred token with no deadline", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      timeout: 0,
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: async () => ({ header: "X-CSRFToken", token: "tok" }),
+    });
+    await expect(h.wire.fetch(mutation)).resolves.toMatchObject({ status: "ok" });
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it("leaves a socket tunnel to its own timeout", async () => {
+    let answer: (reason: string) => void = () => undefined;
     const h = makeWire(stalled, {
-      tunnel: () => new Promise<Response>(() => undefined),
+      tunnel: () => new Promise<string>((resolve) => (answer = resolve)),
       csrf: { header: "X-CSRFToken", token: "tok" },
     });
     const sent = h.wire.fetch({ ...mutation, transport: "any", body: "a=1" });
-    await vi.advanceTimersByTimeAsync(30_000);
-    await expect(sent).resolves.toMatchObject({ status: "error" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    answer("timeout");
+    await expect(sent).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "undelivered", reason: "timeout" },
+    });
     expect(h.calls).toHaveLength(0);
+  });
+
+  it("fails a token fetch that never answers on the deadline", async () => {
+    const h = makeWire(stalled, {
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: () => new Promise(() => undefined),
+    });
+    const sent = h.wire.fetch({ ...mutation, uid: "u1" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(sent).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "csrf", url: mutation.url },
+    });
+    expect(h.calls).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("drops a request superseded before its deadline without a report", async () => {

@@ -319,6 +319,25 @@ describe("the commit phase", () => {
     expect(navigated()).toEqual([]);
   });
 
+  it("a pop on a page only its scripts wrote history for keeps the page", () => {
+    window.history.replaceState(null, "", "/feed/?tab=new");
+    window.history.replaceState(null, "", "/feed/?tab=new#comments");
+    back();
+    expect(reloads).toBe(0);
+  });
+
+  it("a fragment pop inside an open commit keeps the page", () => {
+    const commit = navigation.begin();
+    commit.write({ href: "/feed/?page=2", action: "push" });
+    window.history.replaceState(null, "", "/feed/?page=2#c2");
+    back();
+    commit.end();
+    expect(reloads).toBe(0);
+    expect(navigated()).toEqual([
+      expect.objectContaining({ path: "/feed/?page=2", action: "push" }),
+    ]);
+  });
+
   it("a throwing push reports the url op and announces nothing", () => {
     const failing = createNavigation({
       dispatch: (event, detail) => dispatched.push({ event, detail }),

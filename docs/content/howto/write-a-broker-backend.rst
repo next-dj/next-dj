@@ -220,7 +220,7 @@ Reach Redis another way
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
-It builds every client through ``create_client(url, options, *, asynchronous)``, once for the synchronous pool and once per running event loop for the asynchronous client.
+It builds every client through ``create_client(url, options, *, asynchronous)``.
 ``options`` holds the merged ``CLIENT`` keywords, ``decode_responses`` forced on, and an override passes them on to whatever it builds.
 ``topic_key(kind, topic)`` names every key of a topic.
 The kinds are ``seq`` for the counter and ``log`` for the replay log, and the presence kinds are listed in `Add presence`_.
@@ -283,7 +283,8 @@ Register the backend
                        ["sentinel-2.internal", 26379],
                    ],
                    "SERVICE": "realtime",
-                   "CLIENT": {"max_connections": 200},
+                   "CLIENT": {"max_connections": 50},
+                   "SUBSCRIBE_MAX_CONNECTIONS": 200,
                },
            },
            "REPLAY": {"SIZE": 100, "TTL": 300},

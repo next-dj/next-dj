@@ -10,7 +10,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from django.utils.module_loading import import_string
 
 from next.checks import NEXT
-from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_page, owner_rule
+from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule, render_guard
 from next.pages.checks.access import access_in_use, load_declarations, tree_pages
 from next.pages.checks.branches import EmptyBranch, empty_branches
 from next.pages.checks.modules import declares_without_page, load_page
@@ -179,6 +179,8 @@ def _open_actions() -> dict[Path, list[str]]:
     for meta in iter_registered_actions():
         if meta.get("guard") is not None:
             continue
+        if render_guard(meta["file_path"], meta.get("scope")) is not None:
+            continue
         source = Path(meta["file_path"])
         owner = owner_rule(source)
         if owner is None or owner.broken is not None:
@@ -220,7 +222,9 @@ def _render_guarded_actions() -> dict[Path, list[str]]:
     """Return the actions whose owner page has a `render()` and declares no rule."""
     found: dict[Path, list[str]] = {}
     for meta in iter_registered_actions():
-        if meta.get("guard") is not None or owner_page(meta["file_path"]) is None:
+        if meta.get("guard") is not None:
+            continue
+        if render_guard(meta["file_path"], meta.get("scope")) is None:
             continue
         source = Path(meta["file_path"])
         owner = owner_rule(source)

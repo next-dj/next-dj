@@ -433,7 +433,7 @@ class DependencyResolver:
         return result
 
     def resolve_dependencies(
-        self, func: Callable[..., Any], **context
+        self, func: Callable[..., Any], /, **context
     ) -> dict[str, Any]:
         """Resolve `func` from a loose kwargs mapping and build a context object.
 

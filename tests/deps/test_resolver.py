@@ -422,6 +422,12 @@ class TestResolverResolveDependencies:
         result = resolver.resolve_dependencies(fn, pk=5)
         assert result == {"pk": 5}
 
+    def test_a_url_kwarg_named_func_is_not_the_callable(self) -> None:
+        def fn(func: str) -> None:
+            pass
+
+        assert resolver.resolve_dependencies(fn, func="deploy") == {"func": "deploy"}
+
     def test_resolve_dependencies_with_form(self) -> None:
         """Resolver passes form in context."""
 

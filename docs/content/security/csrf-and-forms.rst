@@ -199,7 +199,6 @@ Form post without ``_next_form_origin``.
 Language switch between render and submit.
    Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the language active on the POST.
    A user who changes the language in between posts an origin whose prefix no longer resolves, so the POST answers HTTP 400.
-   The success path is unaffected, because an origin that does not resolve names no page to re-render and none to authorize.
 
 Stale token in a cached page.
    A page served from a cache with the token in its HTML posts a token that may no longer match the visitor's cookie.

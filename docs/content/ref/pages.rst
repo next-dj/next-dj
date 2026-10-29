@@ -267,7 +267,7 @@ Its ``faulty(file_path, loaded)`` tells whether ``next.E012``, ``next.E013``, or
 ``next.E012``, ``next.E166``, and ``next.W128`` read the directories that declare actions through the one ``ActionOwners`` port of :doc:`ports`.
 ``branches`` finds the directories with no page and no action for ``next.W128``, which ``next.forms.checks.actions`` registers, since only the forms area knows the actions.
 
-The package exports thirty-four check callables.
+The package exports forty-seven check callables.
 
 - ``check_async_callables``.
 - ``check_conditional_get_order``.
@@ -279,6 +279,13 @@ The package exports thirty-four check callables.
 - ``check_csrf_endpoint_reversible``.
 - ``check_csrf_in_session``.
 - ``check_declaring_modules``.
+- ``check_intercept_default_login``.
+- ``check_intercept_inert_declarations``.
+- ``check_intercept_layouts``.
+- ``check_intercept_render``.
+- ``check_intercept_scope``.
+- ``check_intercept_targets``.
+- ``check_intercept_url_kwargs``.
 - ``check_layout_templates``.
 - ``check_metadata_callable_returns_mapping``.
 - ``check_metadata_enum_values``.
@@ -293,13 +300,18 @@ The package exports thirty-four check callables.
 - ``check_metadata_social_folds``.
 - ``check_metadata_tag_rendered``.
 - ``check_metadata_title_templates``.
+- ``check_nested_intercepts``.
 - ``check_page_functions``.
 - ``check_page_metadata_shape``.
 - ``check_page_module_imports``.
 - ``check_page_response_declarations``.
 - ``check_pages_structure``.
+- ``check_parenthesised_directory_names``.
+- ``check_pointless_route_groups``.
 - ``check_public_beside_requirements``.
 - ``check_request_in_context``.
+- ``check_root_marker_outside_layouts``.
+- ``check_route_group_breadcrumbs``.
 - ``check_shared_page_responses``.
 - ``check_single_keyless_context``.
 - ``check_template_loaders``.

@@ -285,9 +285,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     afterDelay(debounceMs(form), armValidation(form), () => validateField(form, name));
   }
 
-  // Bound in the bubble phase, so the form's own handlers have run and one that
-  // cancelled the submit keeps it cancelled. Constraint validation and formnovalidate
-  // are settled before the event fires, so neither needs a check here.
+  // Bound in the bubble phase, so a submit the form's own handlers cancelled stays so.
   function onSubmit(event: Event): void {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;

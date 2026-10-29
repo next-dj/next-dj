@@ -21,7 +21,7 @@ from next.seo.sitemaps import SitemapOptions, listed_trails, static_trails
 from next.site.config import indexable_without_request
 from next.urls.errors import URLParameterError
 from next.urls.parser import default_url_parser
-from next.urls.reverse import page_reverse
+from next.urls.reverse import page_reverse_in
 from next.utils import UNMOUNTED, PageRoot
 
 from .roots import (
@@ -127,7 +127,7 @@ def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
 
 def _reverse(root: PageRoot, trail: str, kwargs: dict[str, Any]) -> str | None:
     try:
-        return page_reverse(trail, namespace=root.namespace, **kwargs)
+        return page_reverse_in(root.namespace, trail, kwargs)
     except NoReverseMatch:
         return None
 

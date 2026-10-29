@@ -9,9 +9,9 @@ Module summary
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
 It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
-The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError`` and ``InvalidURLParameterError`` refusals.
+The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError``, ``InvalidURLParameterError``, and ``ReservedURLParameterError`` refusals.
 
-It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, and ``pages``, which places one application page tree from a ``urls.py``.
+It also exposes the ``page_reverse``, ``page_reverse_in``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, and ``pages``, which places one application page tree from a ``urls.py``.
 The ``TrieURLResolver`` that dispatches URL resolution through a route trie completes the routing surface.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
@@ -148,9 +148,10 @@ Errors
 ``URLParameterError`` is the base of every bracket-segment refusal, and it carries the refused ``param_name``, the ``url_path`` it sat in, and the ``file_path`` that ``with_file`` fills in.
 ``DuplicateURLParameterError`` covers a normalised parameter name repeated within one route and a second ``[[wildcard]]`` segment.
 ``InvalidURLParameterError`` covers a name that is no Python identifier once a hyphen is read as an underscore, which :func:`~django.urls.path` refuses while it compiles the route.
+``ReservedURLParameterError`` subclasses it for a name the page, form, and component calls pass beside the URL kwargs themselves.
 
-All three names are exported from ``next.urls``.
-The two refusals share the ``URLParameterError`` base, so a caller catches either one on its own or both through the base, and ``with_file`` clones the refusal past its constructor so a parser subclass is free to declare one of its own shape.
+All four names are exported from ``next.urls``.
+The refusals share the ``URLParameterError`` base, so a caller catches one on its own or every one through the base, and ``with_file`` clones the refusal past its constructor so a parser subclass is free to declare one of its own shape.
 
 .. automodule:: next.urls.errors
    :members:
@@ -170,7 +171,9 @@ Reverse helpers
 
 .. autofunction:: next.urls.reverse.page_reverse
 
-.. py:function:: next.urls.reverse.page_reverse_lazy(path_template="", *, namespace=app_name, **kwargs)
+.. autofunction:: next.urls.reverse.page_reverse_in
+
+.. py:function:: next.urls.reverse.page_reverse_lazy(path_template="", /, *, namespace=app_name, **kwargs)
 
    Lazy variant of ``page_reverse``, the way :func:`~django.urls.reverse_lazy` pairs with :func:`~django.urls.reverse`.
    The URL resolves when the value is first coerced to ``str``, which makes it safe in positions evaluated at class-definition time, before the URLconf is ready, such as ``Meta.success_url`` on a form class.

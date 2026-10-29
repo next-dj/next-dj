@@ -261,6 +261,7 @@ class FormActionDispatch:
             request,
             meta.get("file_path"),
             origin_match,
+            scope=meta.get("scope"),
             action_name=action_name,
             uid=meta.get("uid"),
             sender=_DispatchState.signal_sender,

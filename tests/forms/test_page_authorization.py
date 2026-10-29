@@ -169,6 +169,7 @@ class TestOwnerRenderGuardsTheAction:
                 request,
                 str(_GUARDED_PAGE),
                 match,
+                scope="page",
                 action_name="a",
                 uid=None,
                 sender=object,
@@ -186,7 +187,13 @@ class TestOwnerRenderGuardsTheAction:
         request = rf.post("/_next/form/x/")
         request.user = User(username="member")
         denial = _check_owner_page_access(
-            request, str(_GUARDED_PAGE), match, action_name="a", uid=None, sender=object
+            request,
+            str(_GUARDED_PAGE),
+            match,
+            scope="page",
+            action_name="a",
+            uid=None,
+            sender=object,
         )
         assert denial is None
 
@@ -198,11 +205,45 @@ class TestOwnerRenderGuardsTheAction:
             mock_http_request(),
             file_path,
             None,
+            scope="page",
             action_name="a",
             uid=None,
             sender=object,
         )
         assert denial is None
+
+    def test_a_shared_action_answers_to_no_render(self, mock_http_request) -> None:
+        match = OriginMatch(page_path=_OPEN_PAGE, url_kwargs={}, origin="/board/")
+        denial = _check_owner_page_access(
+            mock_http_request(),
+            str(_GUARDED_PAGE),
+            match,
+            scope="shared",
+            action_name="a",
+            uid=None,
+            sender=object,
+        )
+        assert denial is None
+
+    def test_an_origin_through_a_symlink_runs_the_render(self, rf, tmp_path) -> None:
+        alias = tmp_path / "alias"
+        alias.symlink_to(_GUARDED_PAGE.parent, target_is_directory=True)
+        match = OriginMatch(
+            page_path=alias / "child" / "page.py", url_kwargs={}, origin="/alias/child/"
+        )
+        request = rf.post("/_next/form/x/")
+        request.user = AnonymousUser()
+        denial = _check_owner_page_access(
+            request,
+            str(_GUARDED_PAGE),
+            match,
+            scope="page",
+            action_name="a",
+            uid=None,
+            sender=object,
+        )
+        assert denial is not None
+        assert denial["Location"] == "/login/"
 
 
 class TestPageAccessSkipsWhatItCannotAddress:

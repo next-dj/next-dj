@@ -213,7 +213,6 @@ class _TransportFailures:
 class RedisBroker(BrokerBackend, PresenceWindow):
     """Deliver messages across processes through Redis Pub/Sub.
 
-    A topic's sequence and log expire `REPLAY['TTL']` seconds after its last publish.
     Streams hold connections of their own pool, so open streams never starve publish.
     """
 
@@ -374,7 +373,6 @@ class RedisBroker(BrokerBackend, PresenceWindow):
     ) -> object:
         """Build a sync or a per-loop async client from the URL and client options.
 
-        Commands and streams each get a client, the stream one with its own pool limit.
         A subclass overrides it to reach Redis through Sentinel or Cluster instead.
         """
         module = self._modules[1] if asynchronous else self._modules[0]

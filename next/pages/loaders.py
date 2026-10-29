@@ -174,7 +174,7 @@ class AncestorStamps:
 def has_load_errors() -> bool:
     """Whether the latest load of any `page.py` failed.
 
-    The per-request fail-loud check calls it first, so a site without one runs no stat.
+    The page access chain calls it first, so a site without one runs no stat.
     """
     return bool(_FAILED_PATHS)
 

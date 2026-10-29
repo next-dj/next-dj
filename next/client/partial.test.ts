@@ -14,9 +14,7 @@ import {
   unloaded,
 } from "./test-doubles";
 
-// Every surface a test builds, reset after it so its document listeners do not see a
-// later test's events. The submit handler skips a cancelled event, so a stale surface
-// that cancelled first would take the submit away from the one under test.
+// Every surface a test builds, reset after it so no stale listener takes its submit.
 const built: PartialSurface[] = [];
 function createPartial(deps: PartialDeps): PartialSurface {
   const surface = buildPartial(deps);

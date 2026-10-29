@@ -342,6 +342,11 @@ def owner_page(file_path: object) -> Path | None:
     return owner if callable(getattr(module, "render", None)) else None
 
 
+def render_guard(file_path: object, scope: object) -> Path | None:
+    """Return the `owner_page` guarding a page-scoped action, None for a shared one."""
+    return owner_page(file_path) if scope == "page" else None
+
+
 _owner_pages: PageCache[str, tuple[AccessStamp, Path | None]] = PageCache()
 
 
@@ -361,15 +366,16 @@ def _check_owner_page_access(
     file_path: object,
     origin_match: "OriginMatch",
     *,
+    scope: object,
     action_name: str,
     uid: str | None,
     sender: type,
 ) -> "HttpResponseBase | None":
     """Return the owner page's own refusal of this action POST, or None.
 
-    Its `render()` guards the action, so an origin outside its subtree is refused.
+    Its `render()` guards a page-scoped action, refusing an origin outside its subtree.
     """
-    owner = _held_owner_page(file_path)
+    owner = _held_owner_page(file_path) if scope == "page" else None
     if owner is None:
         return None
     origin_page = origin_match.page_path
@@ -378,6 +384,9 @@ def _check_owner_page_access(
             request, action_name, uid, layer="page", reason="denied", sender=sender
         )
         return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+    if not origin_page.parent.is_relative_to(owner.parent):
+        # The origin walks the tree as served, a symlinked directory included.
+        origin_page = origin_page.resolve()
     if not origin_page.parent.is_relative_to(owner.parent):
         _emit_form_access_denied(
             request, action_name, uid, layer="page", reason="denied", sender=sender
