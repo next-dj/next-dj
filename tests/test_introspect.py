@@ -2,11 +2,15 @@ import functools
 from pathlib import Path
 
 import pytest
+from asgiref.sync import async_to_sync
 
+from next.errors import AsyncCallableError
 from next.introspect import (
     callable_name,
     declared_file,
     defining_file,
+    is_async_callable,
+    refuse_async,
     registering_file,
 )
 from next.pages.loaders import _load_python_module
@@ -190,3 +194,101 @@ class TestCallableName:
                 pass
 
         assert callable_name(Handler()) == "Handler"
+
+
+def _sync_view() -> str:
+    return "ok"
+
+
+async def _async_view() -> str:
+    return "ok"
+
+
+async def _async_stream():
+    yield "ok"
+
+
+class _AsyncCallable:
+    async def __call__(self) -> str:
+        return "ok"
+
+
+class _SyncCallable:
+    def __call__(self) -> str:
+        return "ok"
+
+
+class _AsyncMethods:
+    async def on_valid(self) -> str:
+        return "ok"
+
+
+class _AsyncDescriptor:
+    def __get__(self, obj: object, owner: type | None = None) -> object:
+        return self
+
+    async def __call__(self) -> str:
+        return "ok"
+
+
+class _StaticAsyncCall:
+    __call__ = staticmethod(_async_view)
+
+
+class _WrappedCycle:
+    def __init__(self) -> None:
+        self.__wrapped__ = self
+
+    def __call__(self) -> str:
+        return "ok"
+
+
+class TestIsAsyncCallable:
+    """``is_async_callable`` sees through partials, wrappers and callable instances."""
+
+    @pytest.mark.parametrize(
+        "func",
+        [
+            pytest.param(_async_view, id="async-function"),
+            pytest.param(_async_stream, id="async-generator"),
+            pytest.param(functools.partial(_async_view), id="partial"),
+            pytest.param(wraps_decorator(_async_view), id="wraps-decorator"),
+            pytest.param(_AsyncCallable(), id="async-call-instance"),
+            pytest.param(_AsyncMethods().on_valid, id="bound-method"),
+            pytest.param(_AsyncDescriptor(), id="descriptor-instance"),
+            pytest.param(_StaticAsyncCall(), id="staticmethod-call"),
+        ],
+    )
+    def test_async_callables_are_detected(self, func: object) -> None:
+        assert is_async_callable(func)
+
+    @pytest.mark.parametrize(
+        "func",
+        [
+            pytest.param(_sync_view, id="sync-function"),
+            pytest.param(_SyncCallable(), id="sync-call-instance"),
+            pytest.param(_AsyncCallable, id="class"),
+            pytest.param(async_to_sync(_async_view), id="async-to-sync"),
+            pytest.param(_WrappedCycle(), id="wrapped-cycle"),
+            pytest.param(len, id="builtin"),
+        ],
+    )
+    def test_sync_callables_pass(self, func: object) -> None:
+        assert not is_async_callable(func)
+
+
+class TestRefuseAsync:
+    """``refuse_async`` names the role, the callable and its file."""
+
+    def test_sync_callable_passes(self) -> None:
+        refuse_async(_sync_view, "page.py render")
+
+    def test_async_callable_raises_naming_role_and_file(self) -> None:
+        with pytest.raises(AsyncCallableError) as caught:
+            refuse_async(_async_view, "page.py render")
+
+        message = str(caught.value)
+        assert message.startswith('The page.py render "_async_view"')
+        assert __file__ in message
+        assert "next.dj pages, context and actions are sync" in message
+        assert caught.value.role == "page.py render"

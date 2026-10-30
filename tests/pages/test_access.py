@@ -27,6 +27,7 @@ from next.pages.loaders import load_python_module_memo
 from next.permissions import add_perm
 from next.permissions.access import declarations
 from next.permissions.markers import OPEN, AccessRule, Requirement
+from next.testing import NextClient
 from tests.support import (
     PermissionHolder,
     bound_dependency,
@@ -45,6 +46,7 @@ from tests.support.access import (
     sign_in,
     write_guard,
 )
+from tests.support.cases.intercepts import zone_body
 
 
 pytestmark = pytest.mark.django_db
@@ -696,26 +698,18 @@ class TestRefusal:
         with routed(root), pytest.raises(PermissionDenied):
             refusal(page_path, request, {}, {})
 
-    def test_a_broken_page_above_is_a_404(self, root, client) -> None:
-        write_guard(root, "raise RuntimeError('boom')\n")
-        write_page(root, "a", page_source())
-
-        with routed(root):
-            response = client.get("/a/")
-
-        assert response.status_code == 404
-
-    def test_a_broken_page_above_raises_when_failing_loudly(self, root) -> None:
+    def test_a_broken_page_above_raises_its_import_failure(self, root) -> None:
         write_guard(root, "raise RuntimeError('boom')\n")
         page_path = write_page(root, "a", page_source())
         request = RequestFactory().get("/a/")
 
-        with routed(root, STRICT_LOADING=True), pytest.raises(PageModuleImportError):
+        with routed(root), pytest.raises(PageModuleImportError):
             refusal(page_path, request, {}, {})
 
-    def test_a_fixed_page_above_applies_on_the_next_request(self, root, client) -> None:
+    def test_a_fixed_page_above_applies_on_the_next_request(self, root) -> None:
         declaring = write_guard(root, "raise RuntimeError('boom')\n")
         write_page(root, "a", page_source())
+        client = Client(raise_request_exception=False)
 
         with routed(root):
             broken = client.get("/a/")
@@ -723,14 +717,51 @@ class TestRefusal:
             touch_later(declaring)
             fixed = client.get("/a/")
 
-        assert (broken.status_code, fixed.status_code) == (404, 302)
+        assert (broken.status_code, fixed.status_code) == (500, 302)
 
     def test_refuse_broken_without_a_recorded_error_is_a_404(self, tmp_path) -> None:
-        with (
-            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
-            pytest.raises(Http404),
-        ):
+        with pytest.raises(Http404):
             refuse_broken(tmp_path / "page.py")
+
+
+class TestBrokenPageAnswers500:
+    """A `page.py` that fails to import answers 500 with its traceback in the log."""
+
+    @pytest.fixture()
+    def broken(self, root: Path) -> Path:
+        write_page(root, "a", page_source(template=zone_body("feed")))
+        return write_guard(root, "raise RuntimeError('boom')\n")
+
+    @staticmethod
+    def _assert_logged(caplog: pytest.LogCaptureFixture, broken: Path) -> None:
+        [record] = [r for r in caplog.records if r.name == "django.request"]
+        assert record.exc_info is not None
+        error = record.exc_info[1]
+        assert isinstance(error, PageModuleImportError)
+        assert error.file_path == broken
+        assert isinstance(error.__cause__, RuntimeError)
+
+    @override_settings(DEBUG=False)
+    def test_a_page_get(self, root, broken, caplog) -> None:
+        client = NextClient(raise_request_exception=False)
+
+        with routed(root):
+            response = client.get("/a/")
+
+        assert response.status_code == 500
+        assert b"boom" not in response.content
+        self._assert_logged(caplog, broken)
+
+    @override_settings(DEBUG=False)
+    def test_a_partial_get(self, root, broken, caplog) -> None:
+        client = NextClient(raise_request_exception=False)
+
+        with routed(root):
+            response = client.get_zones("/a/", "feed")
+
+        assert response.status_code == 500
+        assert b"boom" not in response.content
+        self._assert_logged(caplog, broken)
 
 
 class TestAccessMemo:

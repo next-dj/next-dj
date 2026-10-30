@@ -55,14 +55,15 @@ A ``page.py`` raised while importing, so the framework loads it as nothing.
 Its ``render``, ``template``, and ``@context`` declarations never take effect, and a sibling ``template.djx`` can otherwise hide the failure.
 The report names the exception type and message, so fix the named error and the module loads.
 The check imports every routed ``page.py`` and runs on a plain ``manage.py check``.
-At request time the same failure raises under ``DEBUG`` or ``STRICT_LOADING``, see :doc:`/content/ref/pages`.
+At request time the same failure raises ``PageModuleImportError`` and answers 500, see :doc:`/content/ref/pages`.
 
-Page answers 404 although its files exist
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Page answers 500 with PageModuleImportError
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``page.py`` behind the URL raised while importing.
-With ``DEBUG`` and ``STRICT_LOADING`` both off the framework answers 404 for the broken page while ``logger.exception`` records the traceback.
-Read the server log for the ``Could not import page module`` record, or turn on ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` so the request raises with the real cause.
+The view raises ``PageModuleImportError`` with the original exception as its ``__cause__``, whatever ``DEBUG`` and ``STRICT_LOADING`` hold.
+Under ``DEBUG`` the technical 500 page points at the failing line.
+Without ``DEBUG`` the client sees the generic 500 page, and the server log holds the ``Could not import page module`` record and the ``django.request`` record with the full traceback.
 ``uv run python manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
 See :doc:`/content/ref/pages` for the full import-failure contract.
 
@@ -91,6 +92,7 @@ HTTP 400 from form submission
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The dispatcher rejected the request because ``_next_form_origin`` is missing or does not resolve against the URLconf.
+Every action POST needs the field, and the 400 answers before any access check, guard, or handler runs.
 Always render the form through ``{% form "name" %}`` or include both ``csrf_token`` and the ``_next_form_origin`` field by hand, set to the URL path of the page.
 A form rendered by a hand-written view re-renders only when that view carries a ``next_page_path`` attribute, see :ref:`topics-forms-templates-handwritten-views`.
 Under :func:`django.conf.urls.i18n.i18n_patterns` the same 400 appears when the user switches the language between the render and the submit, because the posted origin keeps the old language prefix and no longer resolves.

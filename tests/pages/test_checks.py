@@ -7,6 +7,7 @@ from django.urls.converters import get_converters
 
 import next.pages.loaders as loaders_module
 from next.checks import (
+    check_async_callables,
     check_context_functions,
     check_layout_templates,
     check_page_functions,
@@ -517,8 +518,8 @@ def get_context_data() -> str:
         assert len(errors) == 1
         assert errors[0].id == "next.E029"
 
-    def test_e029_on_async_keyless_context(self, tmp_path) -> None:
-        """E029 fires on an `async def` keyless `@context` callable."""
+    def test_async_keyless_context_is_e218_not_e029(self, tmp_path) -> None:
+        """An `async def` keyless `@context` stops the import, so E218 names it."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
@@ -529,9 +530,9 @@ async def get_context_data() -> str:
         """)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
-            errors = check_context_functions(None)
-        assert len(errors) == 1
-        assert errors[0].id == "next.E029"
+            assert check_context_functions(None) == []
+            refused = [m for m in check_async_callables() if m.obj == str(page_file)]
+        assert [m.id for m in refused] == ["next.E218"]
 
     def test_e029_on_aliased_context_decorator(self, tmp_path) -> None:
         """E029 fires when the decorator is imported under an alias."""

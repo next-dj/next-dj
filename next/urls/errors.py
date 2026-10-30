@@ -84,8 +84,22 @@ class InvalidURLParameterError(URLParameterError):
         )
 
 
+class ReservedURLParameterError(InvalidURLParameterError):
+    """Raised when a bracket segment takes a name the framework passes beside it."""
+
+    @override
+    def _reason(self) -> str:
+        """Name the refused parameter and why the page call would break on it."""
+        return (
+            f"URL parameter '{self.param_name}' in URL pattern "
+            f"'{self.url_path}' is a name the framework passes to the page, form "
+            "and component callables itself, so the URL value would collide with it."
+        )
+
+
 __all__ = [
     "DuplicateURLParameterError",
     "InvalidURLParameterError",
+    "ReservedURLParameterError",
     "URLParameterError",
 ]

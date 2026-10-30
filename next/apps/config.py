@@ -22,7 +22,7 @@ from next.deps.resolver import (
 )
 from next.diagnostics import reset_failure_logs
 from next.discovery import reset_router_manager_cache
-from next.forms.backends import forget_action_urls
+from next.forms.backends import forget_action_urls, forget_tree_keys
 from next.forms.manager import form_action_manager
 from next.forms.ports import ActionOwnersImpl
 from next.forms.wizard import forget_wizard_backend
@@ -102,6 +102,7 @@ _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     forget_template_processors,
     forget_render_pipeline,
     forget_action_urls,
+    forget_tree_keys,
     forget_asset_version,
     forget_storage_state,
     reload_app_routers,

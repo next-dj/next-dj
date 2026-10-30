@@ -2,7 +2,7 @@
 // so Back closes it while the body loads, and the push is announced once the body
 // envelope is applied. All writes inside one commit produce a single event.
 
-import { defaultHistory } from "./adapters";
+import { defaultHistory, defaultReload } from "./adapters";
 import type { HistoryAdapter } from "./apply";
 import { normTitle } from "./head";
 import { currentUrl, fire } from "./protocol";
@@ -50,14 +50,22 @@ export interface Navigation {
   begin(): Commit;
   /** A HistoryAdapter whose writes are announced like any other. */
   asHistory(): HistoryAdapter;
-  /** Run the popstate handling in during, then announce the change as a pop. */
-  popped(during: () => void): void;
+  /**
+   * Run the popstate handling in during, then announce the change as a pop.
+   *
+   * during answers the page whose content is on screen, undefined for the one last
+   * announced. A bar showing another page reloads it unannounced, since nothing
+   * restores the content of a history entry.
+   */
+  popped(during: () => string | undefined): void;
 }
 
 export interface NavigationDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
   history?: HistoryAdapter;
+  // The full reload a Back or Forward onto unrendered content falls back to.
+  reload?: () => void;
 }
 
 interface Move {
@@ -68,6 +76,7 @@ interface Move {
 export function createNavigation(deps: NavigationDeps): Navigation {
   const doc = deps.document ?? document;
   const history = deps.history ?? defaultHistory();
+  const reload = deps.reload ?? defaultReload();
   const held = new Map<
     string,
     { from: NavigationState; back: string; onCommit: () => void }
@@ -75,6 +84,10 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   // The path last announced. A popstate is measured from it, since the browser has
   // already changed the location.
   let known = currentUrl(doc);
+  // The path last written or announced, ahead of known inside an open commit.
+  let here = known;
+  // Whether the runtime wrote history, the only content a Back cannot restore.
+  let wrote = false;
   let open: Move | undefined;
 
   function current(): NavigationState {
@@ -89,6 +102,8 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   function record(intent: Intent): boolean {
     try {
       history[intent.action](intent.href);
+      here = currentUrl(doc);
+      wrote = true;
       return true;
     } catch (error) {
       fire(doc, deps.dispatch, "partial:error", {
@@ -128,6 +143,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         const from = move.from;
         const to = current();
         known = to.path;
+        here = known;
         const urlChanged = to.path !== from.path;
         if (!urlChanged && to.title === from.title) return;
         fire(doc, deps.dispatch, "next:navigated", {
@@ -172,10 +188,19 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     }),
     popped(during) {
       const commit = frame({ action: "pop", from: { ...current(), path: known } });
+      let answered: string | undefined;
       try {
-        during();
+        answered = during();
       } finally {
-        commit.end();
+        const shown = answered ?? here;
+        // With no write and no layer, the entry is the page's own, made by its scripts.
+        if (shown === currentUrl(doc) || (!wrote && answered === undefined))
+          commit.end();
+        else {
+          // The reload drops the page, so an open commit goes with it.
+          open = undefined;
+          reload();
+        }
       }
     },
   };

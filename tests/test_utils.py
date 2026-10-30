@@ -11,11 +11,14 @@ from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
 
+from next import utils
 from next.errors import InvalidDirsError
 from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
     INTERCEPT_PATTERN,
+    RACY_MTIME_WINDOW_NS,
     ROUTE_GROUP_PATTERN,
+    UNSETTLED_MTIME_NS,
     InterceptPage,
     PageRoot,
     TreeSource,
@@ -42,6 +45,8 @@ from next.utils import (
     regex_trail,
     resolve_base_dir,
     resolve_intercept,
+    settled_mtime_ns,
+    snapshot_mtime_ns,
     stat_mtime_ns,
     strip_route_groups,
     template_edits_watched,
@@ -71,6 +76,52 @@ class TestStatMtimeNs:
     def test_a_path_that_does_not_stat_reports_nothing(self, tmp_path) -> None:
         """Nothing rather than a sentinel, because no real mtime equals nothing."""
         assert stat_mtime_ns(tmp_path / "never-written") is None
+
+
+_TICK_NS = 1_700_000_000 * 10**9
+
+
+class TestSettledMtimeNs:
+    """Tests for ``settled_mtime_ns`` and ``snapshot_mtime_ns``."""
+
+    @pytest.mark.parametrize(
+        "now_ns",
+        [
+            _TICK_NS,
+            _TICK_NS + RACY_MTIME_WINDOW_NS - 1,
+            _TICK_NS - RACY_MTIME_WINDOW_NS + 1,
+        ],
+        ids=["same-tick", "just-before-settling", "slightly-in-the-future"],
+    )
+    def test_an_mtime_inside_the_window_is_unsettled(self, monkeypatch, now_ns) -> None:
+        monkeypatch.setattr(utils, "time_ns", lambda: now_ns)
+        assert settled_mtime_ns(_TICK_NS) == UNSETTLED_MTIME_NS
+
+    @pytest.mark.parametrize(
+        "now_ns",
+        [_TICK_NS + RACY_MTIME_WINDOW_NS, _TICK_NS - RACY_MTIME_WINDOW_NS],
+        ids=["aged", "far-in-the-future"],
+    )
+    def test_an_mtime_outside_the_window_is_kept(self, monkeypatch, now_ns) -> None:
+        monkeypatch.setattr(utils, "time_ns", lambda: now_ns)
+        assert settled_mtime_ns(_TICK_NS) == _TICK_NS
+
+    def test_a_snapshot_in_the_tick_of_the_path_is_unsettled(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
+        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS)
+        assert snapshot_mtime_ns(tmp_path) == UNSETTLED_MTIME_NS
+
+    def test_a_snapshot_after_the_window_keeps_the_mtime(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
+        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS + RACY_MTIME_WINDOW_NS)
+        assert snapshot_mtime_ns(tmp_path) == _TICK_NS
+
+    def test_a_snapshot_of_a_path_that_does_not_stat_is_nothing(self, tmp_path) -> None:
+        assert snapshot_mtime_ns(tmp_path / "never-written") is None
 
 
 class TestIsWithin:

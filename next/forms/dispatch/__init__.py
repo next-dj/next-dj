@@ -39,6 +39,7 @@ from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
     _branch,
     _check_access,
+    _check_owner_page_access,
     _check_page_access,
     _check_tree_access,
     _enforce_object_permissions,
@@ -166,6 +167,8 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Route the action once the page tree, its guard and the origin admit it."""
         origin_match = resolve_origin(request)
+        if origin_match is None:
+            return HttpResponseBadRequest("Missing or invalid _next_form_origin")
         dep_cache: dict[str, Any] = {}
         guard = guard_rule(meta)
         refusal = FormActionDispatch._refuse_access(
@@ -174,7 +177,7 @@ class FormActionDispatch:
         if refusal is not None:
             return refusal
         state = _DispatchState(
-            url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
+            url_kwargs=dict(origin_match.url_kwargs),
             dep_cache=dep_cache,
             dep_stack=[],
             uid=meta.get("uid"),
@@ -221,17 +224,17 @@ class FormActionDispatch:
     def _refuse_access(
         request: "HttpRequest",
         meta: "ActionMeta",
-        origin_match: "OriginMatch | None",
+        origin_match: "OriginMatch",
         action_name: str,
         dep_cache: dict[str, Any],
         *,
         guard: "AccessRule",
     ) -> "HttpResponseBase | None":
-        """Return the denial of the page tree, the action guard or the origin page.
+        """Return the denial of the page tree, the guard, the origin or the owner page.
 
         The rule of the owner and of the origin page answers before the guard of `Meta`.
         """
-        denial = _check_tree_access(
+        denial: HttpResponseBase | None = _check_tree_access(
             request,
             meta.get("file_path"),
             origin_match,
@@ -245,9 +248,20 @@ class FormActionDispatch:
         denial = _check_access(request, guard)
         if denial is not None:
             return denial
-        return _check_page_access(
+        denial = _check_page_access(
             request,
             origin_match,
+            action_name=action_name,
+            uid=meta.get("uid"),
+            sender=_DispatchState.signal_sender,
+        )
+        if denial is not None:
+            return denial
+        return _check_owner_page_access(
+            request,
+            meta.get("file_path"),
+            origin_match,
+            scope=meta.get("scope"),
             action_name=action_name,
             uid=meta.get("uid"),
             sender=_DispatchState.signal_sender,
@@ -449,19 +463,19 @@ class _DispatchState:
     url_kwargs: dict[str, object]
     dep_cache: dict[str, Any]
     dep_stack: list[str]
+    origin_match: "OriginMatch"
     uid: str | None = None
-    origin_match: "OriginMatch | None" = None
     guard: "AccessRule" = OPEN
 
     @property
     def page_path(self) -> "Path | None":
-        """Return the origin page source path, if the origin resolved."""
-        return self.origin_match.page_path if self.origin_match else None
+        """Return the origin page source path, `None` for a route with no page."""
+        return self.origin_match.page_path
 
     @property
-    def origin(self) -> str | None:
-        """Return the validated origin URL path, if the origin resolved."""
-        return self.origin_match.origin if self.origin_match else None
+    def origin(self) -> str:
+        """Return the validated origin URL path."""
+        return self.origin_match.origin
 
     def forget_row(self, row: object) -> None:
         """Drop every cache entry holding `row`, so the re-render loads it afresh.

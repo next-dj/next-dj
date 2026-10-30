@@ -50,7 +50,7 @@ from next.realtime.roster import (
     presence_event,
     snapshot_message,
 )
-from next.utils import after_fork, non_negative_number
+from next.utils import after_fork, is_int, non_negative_number
 
 from .pubsub import (
     AsyncPubSub,
@@ -69,11 +69,17 @@ logger = logging.getLogger(__name__)
 _DEFAULT_URL = "redis://localhost:6379/0"
 _DEFAULT_PREFIX = "next"
 _DEFAULT_HEALTH_CHECK_INTERVAL = 10.0
-_OPTIONS: Final = frozenset({"URL", "PREFIX", "HEALTH_CHECK_INTERVAL", "CLIENT"})
+_OPTIONS: Final = frozenset(
+    {"URL", "PREFIX", "HEALTH_CHECK_INTERVAL", "CLIENT", "SUBSCRIBE_MAX_CONNECTIONS"}
+)
 _BRACES = frozenset("{}")
 _POOL_EXHAUSTED = (
     "The Redis connection pool is exhausted, raise max_connections in "
     "REALTIME.BROKER.OPTIONS.CLIENT."
+)
+_SUBSCRIPTIONS_EXHAUSTED = (
+    "The Redis subscription pool is exhausted, so a new stream is refused. Raise "
+    "REALTIME.BROKER.OPTIONS.SUBSCRIBE_MAX_CONNECTIONS to serve more open streams."
 )
 _HOLE = "\x00detail\x00"
 
@@ -113,10 +119,18 @@ class _AsyncClient(ScriptClient[Awaitable[object]], Protocol):
 
 
 class _LoopClient(NamedTuple):
-    """The async client of one event loop and the scripts bound to it."""
+    """The async command client of one event loop, its scripts and its stream client."""
 
     client: _AsyncClient
     scripts: AsyncScripts
+    subscriber: _AsyncClient
+
+    async def aclose(self) -> None:
+        """Close the command pool and the subscription pool of the loop."""
+        try:
+            await self.client.aclose()
+        finally:
+            await self.subscriber.aclose()
 
 
 def valid_url(value: object) -> TypeGuard[str]:
@@ -145,6 +159,11 @@ def valid_client(value: object) -> TypeGuard[Mapping[str, object]]:
     )
 
 
+def valid_connection_limit(value: object) -> TypeGuard[int]:
+    """Whether `SUBSCRIBE_MAX_CONNECTIONS` is a positive int that is not a bool."""
+    return is_int(value) and value >= 1
+
+
 def _transport_errors(exceptions: ModuleType) -> tuple[type[Exception], ...]:
     """Return the Redis errors that mean the server cannot serve now, not a bad call.
 
@@ -164,10 +183,14 @@ class _TransportFailures:
     """Re-raise a Redis transport or server availability error as a broker error."""
 
     def __init__(
-        self, errors: tuple[type[Exception], ...], exhausted: type[Exception]
+        self,
+        errors: tuple[type[Exception], ...],
+        exhausted: type[Exception],
+        warning: str,
     ) -> None:
         self.errors = errors
         self.exhausted = exhausted
+        self.warning = warning
 
     def __enter__(self) -> None:
         """Enter a guarded Redis call."""
@@ -181,7 +204,8 @@ class _TransportFailures:
         """Translate a transport failure so callers catch one broker error type."""
         if isinstance(error, self.errors):
             if isinstance(error, self.exhausted):
-                logger.warning(_POOL_EXHAUSTED)
+                logger.warning(self.warning)
+                raise BrokerConnectionError(self.warning) from error
             msg = f"The Redis broker connection failed: {error}"
             raise BrokerConnectionError(msg) from error
 
@@ -189,7 +213,7 @@ class _TransportFailures:
 class RedisBroker(BrokerBackend, PresenceWindow):
     """Deliver messages across processes through Redis Pub/Sub.
 
-    A topic's sequence and log expire `REPLAY['TTL']` seconds after its last publish.
+    Streams hold connections of their own pool, so open streams never starve publish.
     """
 
     def __init__(
@@ -201,7 +225,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         clock: Callable[[], float] = time.monotonic,
         schedule: Scheduler | None = None,
     ) -> None:
-        """Create the sync Redis client and prepare per-loop async clients.
+        """Create the sync Redis clients and prepare per-loop async clients.
 
         `clock` and `schedule` time and build the presence schedule, not the deadlines.
         """
@@ -242,15 +266,23 @@ class RedisBroker(BrokerBackend, PresenceWindow):
             str(math.ceil(self.replay_ttl * 1000)),
         )
         self._client_options = self._merged_client_options(interval)
+        self._subscriber_options = self._merged_subscriber_options()
         self._modules: tuple[ModuleType, ModuleType] = (redis, redis_asyncio)
-        self._failures = _TransportFailures(
-            _transport_errors(redis.exceptions), redis.exceptions.MaxConnectionsError
+        errors = _transport_errors(redis.exceptions)
+        exhausted = redis.exceptions.MaxConnectionsError
+        self._failures = _TransportFailures(errors, exhausted, _POOL_EXHAUSTED)
+        self._subscribe_failures = _TransportFailures(
+            errors, exhausted, _SUBSCRIPTIONS_EXHAUSTED
         )
         client = cast(
             "_SyncClient",
             self.create_client(url, dict(self._client_options), asynchronous=False),
         )
         self._redis = client
+        self._subscriber = cast(
+            "_SyncClient",
+            self.create_client(url, dict(self._subscriber_options), asynchronous=False),
+        )
         self._scripts: SyncScripts = Scripts.bind(client)
         self.keep_presence(presence, schedule, clock)
         self._window_ms = _milliseconds(self.presence_limits.window)
@@ -263,7 +295,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
     @classmethod
     @override
     def check_options(cls, options: Mapping[str, object]) -> list[CheckMessage]:
-        """Check the dependency, URL, prefix, interval and client keywords it reads.
+        """Check the dependency, URL, prefix, interval, client and stream pool limit.
 
         A subclass may read keys of its own, so only this class reports unknown keys.
         """
@@ -322,12 +354,24 @@ class RedisBroker(BrokerBackend, PresenceWindow):
                     id="next.E187",
                 )
             )
+        if "SUBSCRIBE_MAX_CONNECTIONS" in options and not valid_connection_limit(
+            options["SUBSCRIBE_MAX_CONNECTIONS"]
+        ):
+            errors.append(
+                Error(
+                    f"{BROKER_OPTIONS}['SUBSCRIBE_MAX_CONNECTIONS'] must be a positive "
+                    "integer.",
+                    hint="It caps the Redis connections open streams hold at once.",
+                    obj=settings,
+                    id="next.E216",
+                )
+            )
         return errors
 
     def create_client(
         self, url: str, options: Mapping[str, object], *, asynchronous: bool
     ) -> object:
-        """Build the sync or the per-loop async client from the URL and client options.
+        """Build a sync or a per-loop async client from the URL and client options.
 
         A subclass overrides it to reach Redis through Sentinel or Cluster instead.
         """
@@ -349,6 +393,19 @@ class RedisBroker(BrokerBackend, PresenceWindow):
             **client,
             "decode_responses": True,
         }
+
+    def _merged_subscriber_options(self) -> dict[str, object]:
+        """Return the client options capped by `SUBSCRIBE_MAX_CONNECTIONS` when set."""
+        if "SUBSCRIBE_MAX_CONNECTIONS" not in self.options:
+            return dict(self._client_options)
+        limit = self.options["SUBSCRIBE_MAX_CONNECTIONS"]
+        if not valid_connection_limit(limit):
+            msg = (
+                "REALTIME.BROKER.OPTIONS.SUBSCRIBE_MAX_CONNECTIONS must be a positive "
+                "integer."
+            )
+            raise ImproperlyConfigured(msg)
+        return {**self._client_options, "max_connections": limit}
 
     @override
     def publish(self, topic: str, envelope: Envelope) -> Message:
@@ -396,12 +453,12 @@ class RedisBroker(BrokerBackend, PresenceWindow):
 
         @contextmanager
         def subscription() -> Iterator[Iterator[Message | None]]:
-            pubsub = self._redis.pubsub()
+            pubsub = self._subscriber.pubsub()
             try:
-                with self._failures:
+                with self._subscribe_failures:
                     pubsub.subscribe(*channels)
                     buffered = confirm(pubsub, channels)
-                yield messages(pubsub, buffered, timeout, self._failures)
+                yield messages(pubsub, buffered, timeout, self._subscribe_failures)
             finally:
                 pubsub.close()
 
@@ -416,12 +473,12 @@ class RedisBroker(BrokerBackend, PresenceWindow):
 
         @asynccontextmanager
         async def subscription() -> AsyncIterator[AsyncIterator[Message | None]]:
-            pubsub = self._loop_client().client.pubsub()
+            pubsub = self._loop_client().subscriber.pubsub()
             try:
-                with self._failures:
+                with self._subscribe_failures:
                     await pubsub.subscribe(*channels)
                     buffered = await aconfirm(pubsub, channels)
-                yield amessages(pubsub, buffered, timeout, self._failures)
+                yield amessages(pubsub, buffered, timeout, self._subscribe_failures)
             finally:
                 await pubsub.aclose()
 
@@ -668,28 +725,35 @@ class RedisBroker(BrokerBackend, PresenceWindow):
 
     @override
     def close(self) -> None:
-        """Close the sync pool and schedule the close of clients on live loops."""
+        """Close the sync pools and schedule the close of clients on live loops."""
         self.presence_schedule.close()
         self._release()
 
     @override
     async def aclose(self) -> None:
-        """Announce the pending snapshots and close this loop's client on the loop.
+        """Announce the pending snapshots and close this loop's clients on the loop.
 
-        The clients of other loops close on theirs, the sync pool in a worker thread.
+        The clients of other loops close on theirs, the sync pools in a worker thread.
         """
         await self.presence_schedule.aclose(self.aannounce_presence)
         with self._async_lock:
             entry = self._async_clients.pop(asyncio.get_running_loop(), None)
         if entry is not None:
-            await entry.client.aclose()
+            await entry.aclose()
         self._release_loops()
-        await asyncio.to_thread(self._redis.close)
+        await asyncio.to_thread(self._close_sync)
 
     def _release(self) -> None:
-        """Schedule the close of the clients on live loops and close the sync pool."""
+        """Schedule the close of the clients on live loops and close the sync pools."""
         self._release_loops()
-        self._redis.close()
+        self._close_sync()
+
+    def _close_sync(self) -> None:
+        """Close the sync command pool and the sync subscription pool."""
+        try:
+            self._redis.close()
+        finally:
+            self._subscriber.close()
 
     def _release_loops(self) -> None:
         """Schedule the close of every async client on its loop, if it still runs."""
@@ -698,7 +762,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
             self._async_clients.clear()
         for loop, entry in clients:
             if loop.is_running():
-                asyncio.run_coroutine_threadsafe(entry.client.aclose(), loop)
+                asyncio.run_coroutine_threadsafe(entry.aclose(), loop)
 
     def forget_clients(self) -> None:
         """Drop the async clients a forked child inherits from its parent's loops."""
@@ -706,7 +770,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         self._async_clients = WeakKeyDictionary()
 
     def _loop_client(self) -> _LoopClient:
-        """Return the async client and the scripts bound to the running event loop."""
+        """Return the async clients and the scripts bound to the running event loop."""
         loop = asyncio.get_running_loop()
         with self._async_lock:
             for stale in [known for known in self._async_clients if known.is_closed()]:
@@ -719,7 +783,13 @@ class RedisBroker(BrokerBackend, PresenceWindow):
                         self._url, dict(self._client_options), asynchronous=True
                     ),
                 )
-                entry = _LoopClient(client, Scripts.bind(client))
+                subscriber = cast(
+                    "_AsyncClient",
+                    self.create_client(
+                        self._url, dict(self._subscriber_options), asynchronous=True
+                    ),
+                )
+                entry = _LoopClient(client, Scripts.bind(client), subscriber)
                 self._async_clients[loop] = entry
         return entry
 
@@ -809,4 +879,11 @@ def _forget_async_clients() -> None:
 after_fork(_forget_async_clients)
 
 
-__all__ = ["RedisBroker", "valid_client", "valid_interval", "valid_prefix", "valid_url"]
+__all__ = [
+    "RedisBroker",
+    "valid_client",
+    "valid_connection_limit",
+    "valid_interval",
+    "valid_prefix",
+    "valid_url",
+]

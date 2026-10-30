@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 from django.http import Http404
 
 from next.caches import PageCache
-from next.conf import fail_loudly
 from next.deps.objects import object_target, url_row
 from next.introspect import registering_site
 from next.permissions.access import (
@@ -221,9 +220,9 @@ def routed_pages(pages: Iterable[tuple[str, Path]]) -> Iterator[tuple[str, Path]
 
 
 def refuse_broken(broken: Path) -> None:
-    """Raise the import failure of `broken` when failing loudly, otherwise a 404."""
+    """Raise the import failure of `broken`, a 500, or a 404 once the file has none."""
     error = last_load_error(broken)
-    if error is not None and fail_loudly():
+    if error is not None:
         raise error
     raise Http404
 

@@ -157,7 +157,7 @@ The page tree access check runs first, right after origin resolution.
 It joins the rule of the owner, the page of the directory the action is declared in, with the rule of the resolved origin page, so a forged origin adds requirements and lifts none, see :doc:`/content/security/actions`.
 It runs through ``enforce`` of ``next.pages.access``, the check a page view runs.
 An anonymous user is redirected to the login page with the posted origin as ``next``.
-A chain holding a broken file answers 404 or raises under ``fail_loudly``, and under the default login the redirect comes before that judgement.
+A chain holding a broken file raises its ``PageModuleImportError``, a 500, and under the default login the redirect comes before that judgement.
 A refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``.
 Each ``obj=DObject[Model]`` loads its row through ``url_lookup`` from the URL kwargs of the posted origin, through the same dependency cache the handler reads, so the check and the handler see one row.
 An origin whose route does not capture the kwarg of the model raises ``UnboundObjectError``, and a row the scope does not see answers 404 before any permission is asked.
@@ -238,8 +238,9 @@ The resolved match yields two things.
 The typed URL kwargs come through the real URL converters, and the origin page source comes from the ``next_page_path`` attribute that the file router sets on every routed view, including the synthesised ``page.py`` location of virtual ``template.djx`` routes.
 The result is memoised on the request, because the invalid re-render reads it from the dispatcher and from every ``{% form %}`` tag on the page.
 
-A missing field, an off-site value, a path that does not resolve, or a resolved view without ``next_page_path`` all yield no origin match.
-The invalid branch then returns ``HTTP 400 Missing or invalid _next_form_origin``.
+A missing field, an off-site value, or a path that does not resolve yields no origin match.
+The dispatcher then returns ``HTTP 400 Missing or invalid _next_form_origin`` before any access check, guard, or handler runs.
+A resolved view without ``next_page_path`` yields a match with no page, which the handler still receives, while the invalid branch returns the same HTTP 400.
 A hand-written view opts into re-rendering by carrying its own ``next_page_path`` attribute, see :ref:`topics-forms-templates-handwritten-views`.
 
 Backends

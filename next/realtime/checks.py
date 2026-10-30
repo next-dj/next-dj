@@ -47,6 +47,7 @@ from .limits import (
     valid_timeout,
 )
 from .manager import broker_class
+from .redis import RedisBroker
 from .replay import (
     MAX_SIZE,
     MAX_TTL,
@@ -534,6 +535,38 @@ def check_shared_broker(*args, **kwargs) -> list[CheckMessage]:
             ),
             obj=settings,
             id="next.W149",
+        )
+    ]
+
+
+@register(NEXT, deploy=True)
+def check_redis_connection_limit(*args, **kwargs) -> list[CheckMessage]:
+    """Warn when `RedisBroker` leaves its stream pool at the default (`next.W151`)."""
+    broker = scope_value("REALTIME", "BROKER")
+    if not isinstance(broker, Mapping):
+        return []
+    backend_class = _broker_class(broker)
+    if backend_class is None or not issubclass(backend_class, RedisBroker):
+        return []
+    options = broker.get("OPTIONS")
+    options = options if isinstance(options, Mapping) else {}
+    client = options.get("CLIENT")
+    if "SUBSCRIBE_MAX_CONNECTIONS" in options or (
+        isinstance(client, Mapping) and "max_connections" in client
+    ):
+        return []
+    return [
+        DjangoWarning(
+            f"{backend_class.__qualname__} sets no connection limit, so each process "
+            "serves at most 100 open streams, the redis-py pool default, and refuses "
+            "the next one.",
+            hint=(
+                f"Set {_PREFIX}['BROKER']['OPTIONS']['SUBSCRIBE_MAX_CONNECTIONS'] to "
+                "the open streams one process serves, which caps the subscription "
+                "pool apart from the command pool."
+            ),
+            obj=settings,
+            id="next.W151",
         )
     ]
 

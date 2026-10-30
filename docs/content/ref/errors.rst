@@ -12,6 +12,7 @@ An exception that belongs to one subsystem lives in that subsystem's ``errors`` 
 None of the six is a configuration error, so they subclass ``Exception``, ``TypeError``, and ``ValueError`` rather than the Django one, and :doc:`pages` documents all of them.
 
 ``InvalidDirsError`` is raised by ``classify_dirs_entries`` for a ``DIRS`` value that is no sequence of trees, which covers a bare string, because iterating a string would split it into one entry per character.
+``AsyncCallableError`` is raised when a page, context, action, or form hook callable is ``async def``, and carries the ``role`` and the described ``subject``.
 The remaining six report a backend the shared loader cannot turn into a class.
 Each class carries the attributes of its own failure and nothing else, so a handler reads ``root_name`` and ``config`` off a ``BackendPathError`` and ``setting``, ``dotted``, and ``base_name`` off a ``SettingNotSubclassError``, and one class always carries its own set whichever loader raised it.
 ``BackendPathError`` names an entry whose ``BACKEND`` is no dotted path, ``BackendImportError`` an entry whose path does not import, ``BackendNotSubclassError`` a class outside the family root, and ``AbstractBackendError`` an entry that names the abstract root itself or a subclass that still leaves an abstract method open.

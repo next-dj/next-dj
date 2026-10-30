@@ -10,12 +10,18 @@ import {
   HEADER_ZONE,
   REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
+  REQUEST_TIMEOUT_MS,
   newId,
   pageKey,
   sameOrigin,
 } from "./protocol";
 import type { PartialError, WireTransport } from "./protocol";
-import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
+import {
+  defaultClock,
+  defaultFetch,
+  defaultNavigate,
+  defaultSession,
+} from "./adapters";
 import type { Applied, Envelope } from "./apply";
 import type { SessionStore } from "./assets";
 
@@ -119,6 +125,10 @@ export interface WireDeps {
   fetch?: FetchAdapter;
   document?: Document;
   navigate?: Navigate;
+  // The timer the request deadline runs on.
+  clock?: Clock;
+  // The deadline in ms, read per request, zero waiting forever and absent the default.
+  timeout?: () => number;
   // The navigate-once store of the non-envelope fallback. Absent, the default
   // wraps sessionStorage, the same store the version guard writes to.
   session?: SessionStore;
@@ -145,11 +155,32 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+// Settle with work or reject on abort, so a transport ignoring the signal still ends.
+function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const stop = (): void => reject(signal.reason as Error);
+    if (signal.aborted) stop();
+    signal.addEventListener("abort", stop, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", stop);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", stop);
+        reject(error as Error);
+      },
+    );
+  });
+}
+
 /** Shapes requests, classifies responses, and queues them per target. */
 export class Wire {
   readonly #fetch: FetchAdapter;
   readonly #document: Document;
   readonly #navigate: Navigate;
+  readonly #clock: Clock;
+  readonly #timeout: () => number;
   readonly #session: SessionStore;
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #onEnvelope: EnvelopeHandler;
@@ -170,6 +201,8 @@ export class Wire {
     this.#fetch = deps.fetch ?? defaultFetch();
     this.#document = deps.document ?? document;
     this.#navigate = deps.navigate ?? defaultNavigate();
+    this.#clock = deps.clock ?? defaultClock();
+    this.#timeout = deps.timeout ?? (() => REQUEST_TIMEOUT_MS);
     this.#session = deps.session ?? defaultSession();
     this.#dispatch = deps.dispatch;
     this.#onEnvelope = deps.onEnvelope;
@@ -259,8 +292,11 @@ export class Wire {
       let csrf = this.#csrf.current();
       // A deferred token is fetched inside the lock, so a double submit fetches once.
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
-        const ensured = await this.#csrf.ensure();
+        const ensured = await this.#ensureCsrf();
         if (ensured === null) return none("error");
+        if (ensured instanceof DOMException) {
+          return this.#fail({ kind: "csrf", url: request.url, error: ensured });
+        }
         csrf = ensured;
         if (csrf?.token === undefined) {
           return this.#fail({
@@ -276,6 +312,24 @@ export class Wire {
       if (queueKey !== undefined && this.#queues.get(queueKey) === entry) {
         this.#queues.delete(queueKey);
       }
+    }
+  }
+
+  // A token fetch that never answers fails on the deadline, so it frees the uid lock.
+  async #ensureCsrf(): Promise<CsrfPayload | undefined | null | DOMException> {
+    const ms = this.#timeout();
+    if (ms <= 0) return this.#csrf.ensure();
+    let timer = 0;
+    const expired = new Promise<DOMException>((resolve) => {
+      timer = this.#clock.setTimeout(
+        () => resolve(new DOMException("token fetch timed out", "TimeoutError")),
+        ms,
+      );
+    });
+    try {
+      return await Promise.race([this.#csrf.ensure(), expired]);
+    } finally {
+      this.#clock.clearTimeout(timer);
     }
   }
 
@@ -317,6 +371,14 @@ export class Wire {
       method,
       intent: { zone: request.zone, uid: request.uid },
     });
+    // One signal ends the request on its deadline or a supersede, armed after a tunnel.
+    const deadline = new AbortController();
+    const expiry = new DOMException("request timed out", "TimeoutError");
+    const ms = this.#timeout();
+    let timer: number | undefined;
+    // The queue may have been aborted while the token was fetched.
+    if (entry?.signal.aborted === true) deadline.abort();
+    entry?.signal.addEventListener("abort", () => deadline.abort(), { once: true });
     // Inside the try, since a caller's header name can be invalid and an abort or a
     // dropped connection can reject the body read after the headers arrived.
     let own: string | undefined;
@@ -334,10 +396,13 @@ export class Wire {
       }
       const init: RequestInit = { method, headers, mode: "same-origin" };
       if (request.body !== undefined) init.body = request.body;
-      if (entry !== undefined) init.signal = entry.signal;
+      init.signal = deadline.signal;
       const tunneled =
         request.transport === "any" && method === "POST"
-          ? await this.#tunnel(target, init, csrf?.header)
+          ? await bounded(
+              Promise.resolve(this.#tunnel(target, init, csrf?.header)),
+              deadline.signal,
+            )
           : undefined;
       if (typeof tunneled === "string" && request.abortable !== true) {
         if (own !== undefined) this.#forgetRequestId(own);
@@ -349,17 +414,27 @@ export class Wire {
         if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
         return failed;
       }
+      if (ms > 0) timer = this.#clock.setTimeout(() => deadline.abort(expiry), ms);
       const response =
-        tunneled instanceof Response ? tunneled : await this.#fetch(target, init);
+        tunneled instanceof Response
+          ? tunneled
+          : await bounded(this.#fetch(target, init), deadline.signal);
       // A safe-GET response that a newer request superseded is dropped unreported.
       if (queueKey !== undefined && this.#queues.get(queueKey) !== entry)
         return none("dropped");
       return await this.#classify(request, target, method, response, snapshot);
     } catch (error) {
+      // A request past its deadline may have committed, so its echo must refresh too.
+      if (deadline.signal.reason === expiry) {
+        if (own !== undefined) this.#forgetRequestId(own);
+        return this.#fail({ kind: "network", url: request.url, error: expiry });
+      }
       // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error) || entry?.signal.aborted === true) return none("dropped");
       if (own !== undefined) this.#forgetRequestId(own);
       return this.#fail({ kind: "network", error });
+    } finally {
+      if (timer !== undefined) this.#clock.clearTimeout(timer);
     }
   }
 

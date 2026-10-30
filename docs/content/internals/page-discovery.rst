@@ -162,8 +162,14 @@ On each cache read ``composed_is_stale`` or ``skeleton_is_stale`` compares the c
 A change to any contributing path evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
 A tracked path that no longer stats counts as a change, so a deleted ``layout.djx`` evicts the entry exactly like an edited one.
 
+A filesystem stamps mtimes from a coarse clock, so a write landing in the tick a snapshot shares leaves the mtime it recorded unchanged.
+The snapshot therefore treats a recent mtime as unsure, the way Git treats a racily clean index entry, through ``next.utils.snapshot_mtime_ns``.
+An mtime within ``RACY_MTIME_WINDOW_NS``, ten milliseconds, of the moment it is read is recorded as ``UNSETTLED_MTIME_NS``, a value no later stat matches.
+The next read finds the entry stale and composes again, and once the sources age past the window the new snapshot holds their real mtimes.
+A ``layout.djx`` created in the same tick as the snapshot thus reaches the next request, and the check on a warm read stays one ``stat`` per tracked path.
+
 ``Page.clear_template_caches`` drops all of them in one call.
-A rewrite landing on the same mtime tick is invisible to the staleness check, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
+The layout texts and the page module memo are keyed by the mtime of the file alone, so a rewrite that keeps that mtime is invisible to them, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
 The same call runs ``forget_layout_texts``, which drops two memos that ``layout_chain`` and composition share.
 One keeps the source of each layout and the other the answer to whether it is a root, both under the mtime of the file.
 A layout is therefore read and lexed once for the root check, the composition, and the snapshot, until its mtime moves.

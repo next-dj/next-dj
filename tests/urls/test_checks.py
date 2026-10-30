@@ -21,10 +21,12 @@ from next.urls.checks import (
     _collect_url_patterns,
     check_framework_routes_reachable,
     check_next_pages_configuration,
+    check_reserved_url_parameters,
     check_reverse_name_collisions,
     check_router_manager,
     check_url_patterns,
 )
+from next.urls.parser import RESERVED_ROUTE_NAMES
 from tests.support import (
     check_ids,
     file_router,
@@ -395,6 +397,34 @@ class TestCheckReverseNameCollisions:
 
         assert path_messages == []
         assert name_messages == []
+
+
+class TestReservedUrlParameters:
+    """A segment named after an injected argument is reported and left unrouted."""
+
+    @pytest.mark.parametrize("name", sorted(RESERVED_ROUTE_NAMES))
+    def test_the_check_reports_e217_and_the_router_skips_the_route(
+        self, tmp_path, name
+    ) -> None:
+        write_page(tmp_path, f"items/[{name}]")
+        write_page(tmp_path, "ok")
+        router = file_router(app_dirs=False, dirs=[tmp_path])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            reserved = check_reserved_url_parameters(None)
+            patterns = check_url_patterns(None)
+        routes = [str(pattern.pattern) for pattern in router.generate_urls()]
+
+        [error] = reserved
+        assert error.id == "next.E217"
+        assert f"'{name}'" in error.msg
+        assert "Rename the bracket directory" in error.hint
+        assert [m.id for m in patterns] == []
+        assert routes == ["ok/"]
+
+    def test_no_router_manager_reports_nothing(self) -> None:
+        with patch("next.urls.checks.get_router_manager", return_value=(None, [])):
+            assert check_reserved_url_parameters(None) == []
 
 
 class TestCollectUrlPatterns:

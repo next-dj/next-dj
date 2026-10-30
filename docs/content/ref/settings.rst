@@ -154,7 +154,7 @@ FORM_ANCHOR_FILES
 ~~~~~~~~~~~~~~~~~
 
 List of file basenames that receive ``page`` scope during auto-registration.
-A form class declared in a file whose basename appears in this list is keyed to the absolute path of that file.
+A form class declared in a file whose basename appears in this list is keyed to the path of that file inside its app or below ``BASE_DIR``.
 All other files produce ``shared`` scope.
 
 Default value ``None``, which uses the built-in set ``["page.py", "component.py"]``.
@@ -291,6 +291,11 @@ Default value.
      - A mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client alike.
        Its entries override the ``health_check_interval`` and ``socket_keepalive`` the broker sets, while ``decode_responses`` is always forced on, so a ``CLIENT`` that sets it to anything but ``True`` is ``next.E187``.
        ``max_connections`` is the usual entry, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+   * - ``next.realtime.RedisBroker``
+     - ``SUBSCRIBE_MAX_CONNECTIONS``, unset
+     - The cap of the subscription pool, a positive integer, and ``next.E216`` reports any other value.
+       Every open stream holds one connection of this pool, which stays apart from the command pool that publishing uses.
+       Unset, the pool takes ``max_connections`` from ``CLIENT``, or the redis-py default of 100, and ``manage.py check --deploy`` reports ``next.W151`` when neither is set.
 
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
 ``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.
@@ -540,14 +545,13 @@ STRICT_LOADING
 ~~~~~~~~~~~~~~
 
 When ``True``, a broken body source fails the request instead of degrading silently.
-A ``page.py`` that raised while importing re-raises the recorded ``PageModuleImportError`` on every request to that page.
 A ``{% component %}`` name that does not resolve raises ``TemplateSyntaxError`` with a did-you-mean hint.
-When ``False``, the default, the framework logs and keeps rendering.
-A broken ``page.py`` answers 404 while ``logger.exception`` records the full traceback, and a missed component renders as an empty string with a warning log.
-``settings.DEBUG`` raises the same page-load error without this flag, so the flag matters for a ``DEBUG=False`` deployment.
-In every mode the failure is scoped to the broken page and the pages below it, which answer to what it would have declared with ``inherit=True``, and sibling pages keep serving.
+When ``False``, the default, the framework logs and keeps rendering, so a missed component renders as an empty string with a warning log.
+A ``page.py`` that raised while importing is outside this flag.
+Every request to that page re-raises the recorded ``PageModuleImportError``, so it answers 500 on either setting of the flag and of ``DEBUG``, and Django's request logger records the traceback.
+The failure is scoped to the broken page and the pages below it, which answer to what it would have declared with ``inherit=True``, and sibling pages keep serving.
 
-Every fail-loud path reads the flag through the ``next.conf.fail_loudly`` predicate, which combines it with ``settings.DEBUG`` so the page loader and the component tag cannot drift apart.
+Every fail-loud path reads the flag through the ``next.conf.fail_loudly`` predicate, which combines it with ``settings.DEBUG`` so the component tag and the other fail-loud paths cannot drift apart.
 The same predicate lets a failure of any other user callable propagate, see :ref:`topics-failure-containment`.
 
 Default value ``False``.
@@ -567,9 +571,9 @@ Several independent switches decide how loudly a broken piece fails.
      - When loud
    * - ``settings.DEBUG``
      - Django development mode as a whole
-     - A broken ``page.py`` raises with the standard technical 500 page, and a component miss renders a visible HTML comment.
+     - A broken ``page.py`` shows the technical 500 page instead of the generic one, and a component miss renders a visible HTML comment.
    * - ``STRICT_LOADING``
-     - ``page.py`` import failures and ``{% component %}`` misses
+     - ``{% component %}`` misses and the failures of other user callables
      - Raises regardless of ``DEBUG``.
    * - ``STRICT_CONTEXT``
      - Django context processor exceptions
@@ -585,7 +589,7 @@ Several independent switches decide how loudly a broken piece fails.
      - Always, on ``manage.py check``, as a warning rather than an error.
 
 ``DEBUG=True`` turned on temporarily, for serving static files or profiling, also changes the error semantics of pages.
-A broken ``page.py`` that answered 404 starts raising, so the switch flips more than the error page and the toolbar.
+A missed component that rendered as an empty string starts rendering an HTML comment, so the switch flips more than the error page and the toolbar.
 The configuration checks stay independent of every flag above, so ``manage.py check`` reports ``next.E076``, ``next.E077``, and ``next.W072`` in any combination of ``DEBUG`` and the strict flags.
 See :doc:`system-checks` for each check condition.
 

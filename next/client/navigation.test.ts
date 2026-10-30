@@ -55,6 +55,7 @@ describe("the commit phase", () => {
   let applier: Applier;
   let back: () => void;
   let order: string[];
+  let reloads: number;
 
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -62,13 +63,19 @@ describe("the commit phase", () => {
     window.history.replaceState(null, "", "/feed/");
     dispatched = [];
     order = [];
+    reloads = 0;
     const recording = recordingHistory();
     writes = recording.writes;
     const dispatch = (event: string, detail: Record<string, unknown>): void => {
       dispatched.push({ event, detail });
       order.push(event);
     };
-    navigation = createNavigation({ dispatch, document, history: recording.history });
+    navigation = createNavigation({
+      dispatch,
+      document,
+      history: recording.history,
+      reload: () => void (reloads += 1),
+    });
     const manual = manualPopstate();
     back = manual.back;
     layers = createLayers({
@@ -247,16 +254,88 @@ describe("the commit phase", () => {
     ]);
   });
 
-  it("a Back gesture with no layer open is announced as a pop", () => {
+  it("a Back past a url op reloads the page the bar shows, announcing nothing", () => {
     applier.apply(envelope([{ op: "url", href: "/feed/?page=2" }]));
+    dispatched.length = 0;
     window.history.replaceState(null, "", "/feed/");
     back();
-    expect(navigated().at(-1)).toEqual(
-      expect.objectContaining({
-        path: "/feed/",
-        action: "pop",
-      }),
-    );
+    expect(reloads).toBe(1);
+    expect(navigated()).toEqual([]);
+  });
+
+  it("a Back that closes a layer is announced as a pop with no reload", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    dispatched.length = 0;
+    window.history.replaceState(null, "", "/feed/");
+    back();
+    expect(layers.size()).toBe(0);
+    expect(reloads).toBe(0);
+    expect(navigated()).toEqual([
+      expect.objectContaining({ path: "/feed/", action: "pop" }),
+    ]);
+  });
+
+  it("a Forward onto a layer that Back closed reloads its page", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    window.history.replaceState(null, "", "/feed/");
+    back();
+    dispatched.length = 0;
+    window.history.replaceState(null, "", "/photos/1/");
+    back();
+    expect(reloads).toBe(1);
+    expect(navigated()).toEqual([]);
+  });
+
+  it("a Back past the host of an open layer reloads the page it landed on", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    dispatched.length = 0;
+    window.history.replaceState(null, "", "/inbox/");
+    back();
+    expect(layers.size()).toBe(0);
+    expect(reloads).toBe(1);
+    expect(navigated()).toEqual([]);
+  });
+
+  it("a Back that stops on an open layer leaves it and the page in place", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    window.history.replaceState(null, "", "/photos/1/#c2");
+    back();
+    expect(layers.size()).toBe(1);
+    expect(reloads).toBe(0);
+  });
+
+  it("a Back away from a layer that pushed nothing reloads the page", async () => {
+    await layers.open(null);
+    window.history.replaceState(null, "", "/inbox/");
+    back();
+    expect(layers.size()).toBe(1);
+    expect(reloads).toBe(1);
+  });
+
+  it("a fragment-only pop neither reloads nor announces", () => {
+    window.history.replaceState(null, "", "/feed/#top");
+    back();
+    expect(reloads).toBe(0);
+    expect(navigated()).toEqual([]);
+  });
+
+  it("a pop on a page only its scripts wrote history for keeps the page", () => {
+    window.history.replaceState(null, "", "/feed/?tab=new");
+    window.history.replaceState(null, "", "/feed/?tab=new#comments");
+    back();
+    expect(reloads).toBe(0);
+  });
+
+  it("a fragment pop inside an open commit keeps the page", () => {
+    const commit = navigation.begin();
+    commit.write({ href: "/feed/?page=2", action: "push" });
+    window.history.replaceState(null, "", "/feed/?page=2#c2");
+    back();
+    commit.end();
+    expect(reloads).toBe(0);
+    expect(navigated()).toEqual([
+      expect.objectContaining({ path: "/feed/?page=2", action: "push" }),
+    ]);
   });
 
   it("a throwing push reports the url op and announces nothing", () => {

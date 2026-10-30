@@ -22,18 +22,19 @@ Each of these modules registers checks.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
-Seven checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 ``check_asset_version_moves_between_deploys`` (``next.W083``) describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
 ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 ``check_shared_broker`` (``next.W149``) flags the in-process default broker, which a development server runs on by design.
+``check_redis_connection_limit`` (``next.W151``) flags a ``RedisBroker`` left at the redis-py pool default, which a development server never reaches.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the seven deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -194,7 +195,7 @@ Permissions
 
 ``next.permissions.checks`` reads the registered predicates, ``AUTHENTICATION_BACKENDS``, and every permission name the project writes, the literal name of a ``{% has_perm %}`` tag in a composed page or a component template, the ``permission_required()`` declarations of every ``page.py`` and ``component.py``, and the guard of every form action.
 It also owns ``next.W130`` and ``next.W131`` for the ``LOGIN_REQUIRED`` setting.
-``next.W129`` for an action nothing guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
+``next.W129`` for an action nothing guards, ``next.W150`` for an action only the ``render()`` of its page guards, ``next.E165`` for an action of a ``component.py`` whose permission names a context, ``next.E166`` for a ``page.py`` without a body whose declaration binds neither a page nor an action, and ``next.W128`` for a directory with no page and no action live in ``next.forms.checks.actions``, and ``next.E161`` for a zone under a ``{% has_perm %}`` or in the body of a component that decides what it shows lives in ``next.partial.checks.zones``, beside the other zone placement checks.
 
 .. automodule:: next.permissions.checks
    :members:
@@ -210,7 +211,7 @@ Development server
 Realtime
 ~~~~~~~~
 
-``next.realtime.checks`` validates the ``REALTIME`` settings mapping, the ticket binding, the broker capabilities, the ``@on`` handlers that ``REALTIME['HANDLERS']`` imports, and a routed introspection endpoint (``next.E188``), and at deploy it flags a process-local broker (``next.W149``).
+``next.realtime.checks`` validates the ``REALTIME`` settings mapping, the ticket binding, the broker capabilities, the ``@on`` handlers that ``REALTIME['HANDLERS']`` imports, and a routed introspection endpoint (``next.E188``), and at deploy it flags a process-local broker (``next.W149``) and a ``RedisBroker`` without a connection limit (``next.W151``).
 The broker ``OPTIONS`` codes come from the ``check_options`` classmethod of the configured ``BrokerBackend`` class, which the check calls with the ``OPTIONS`` mapping.
 
 .. automodule:: next.realtime.checks
@@ -322,9 +323,10 @@ Errors
      - ``next.urls.checks``
    * - ``next.E017``
      - A ``page.py`` raises while importing.
-       A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they answer 404 or raise under ``next.conf.fail_loudly``.
+       A broken ``page.py`` closes its own page and every page below it, since what it declares with ``inherit=True`` is unknown, so they raise ``PageModuleImportError`` and answer 500.
        The message names the recorded exception type and text, so an ``ImportError`` raised by the module body reads as such instead of masking as a missing body source.
        The body-source checks ``next.E012``, ``next.E013``, and ``next.W043`` stay silent for that file, so the import failure surfaces once.
+       An import stopped by an ``async def`` callable reports as ``next.E218`` instead.
      - ``next.pages.checks.modules``
    * - ``next.E018``
      - A ``page.py`` registers more than one keyless ``@context`` callable, and only the last one runs.
@@ -554,6 +556,7 @@ Errors
    * - ``next.E084``
      - A ``component.py`` raises while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
        The message names the recorded exception type and text, which is what tells a missing import path apart from a typo in the module.
+       An import stopped by an ``async def`` callable reports as ``next.E218`` instead.
      - ``next.components.checks``
    * - ``next.E085``
      - An ``@action`` declares a ``scope`` keyword other than ``"page"`` or ``"shared"``.
@@ -1057,6 +1060,22 @@ Errors
      - A ``PARTIAL_BACKENDS`` entry names a protocol backend that leaves ``stream_data(envelope, meta)`` abstract or defines an ``sse_event`` method.
        Such a class cannot be built, or no stream calls its ``sse_event``, so the check names ``stream_data`` as the method to implement.
      - ``next.partial.checks.backends``
+   * - ``next.E216``
+     - The ``SUBSCRIBE_MAX_CONNECTIONS`` option of ``RedisBroker`` is not a positive integer.
+       The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
+     - ``next.realtime.redis.broker``
+   * - ``next.E217``
+     - A bracket segment such as ``[form]``, ``[request]`` or ``[file_path]`` takes a name the framework passes to page, form and component callables itself.
+       The router refuses the route with ``ReservedURLParameterError`` and leaves the page unrouted, and the hint lists every reserved name to rename the directory away from.
+     - ``next.urls.checks``
+   * - ``next.E218``
+     - A ``page.py`` or ``component.py`` declares an ``async def`` callable that next.dj calls synchronously, so the module did not load.
+       It covers a module ``render``, an ``@context`` or ``@component.context`` callable, an ``@action`` handler, and the form and wizard hooks the dispatcher calls, like ``on_valid``, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``done``.
+       The refusal is an ``AsyncCallableError``, a subclass of ``ImproperlyConfigured`` raised at registration or module load, and the message names the callable and its file.
+       The dependency resolver refuses an async callable the same way when it first compiles the injection plan of one.
+       ``next.E017`` and ``next.E084`` stay silent for that module, so the failure surfaces once.
+       Realtime handlers are not affected, since they run async by design.
+     - ``next.pages.checks.modules``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1480,6 +1499,18 @@ Warnings
        With several workers or hosts a publish reaches only the subscribers of the publishing process.
        The check carries ``deploy=True``.
        Selecting ``next.realtime.RedisBroker`` or another shared ``BrokerBackend`` clears it, and a single-process deployment lists the code in ``SILENCED_SYSTEM_CHECKS``.
+     - ``next.realtime.checks``
+   * - ``next.W150``
+     - A file of a page tree declares actions beside a ``page.py`` with a ``render()``, and no declaration of that page, no ``inherit=True`` declaration above it, and no ``Meta`` guard covers them, so only that ``render()`` guards them.
+       The dispatcher runs that ``render()`` for an origin inside the directory of the page and answers HTTP 403 for an origin outside it, after the HTTP 400 every action POST gets without a resolvable origin.
+       Silent while the default login is on, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``.
+       Declaring ``page.login_required()``, ``permission_required()``, or ``page.public()`` for the page, or setting ``login_required`` on the action ``Meta``, clears it.
+     - ``next.forms.checks.actions``
+   * - ``next.W151``
+     - The configured broker class is ``RedisBroker`` or a subclass of it, and its ``OPTIONS`` set neither ``SUBSCRIBE_MAX_CONNECTIONS`` nor ``max_connections`` in ``CLIENT``.
+       Every open stream holds one connection of the subscription pool, so the redis-py default of 100 caps the open streams of each process and refuses the next one.
+       The check carries ``deploy=True``.
+       Setting ``SUBSCRIBE_MAX_CONNECTIONS`` to the open streams one process serves clears it.
      - ``next.realtime.checks``
 
 Codes are assigned per check and are not contiguous.

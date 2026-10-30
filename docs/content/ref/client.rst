@@ -277,6 +277,8 @@ The partial surface
      - Send one partial request through the queues and the per-uid lock, and resolve with its `Outcome`_ once the reply is applied.
        Network, HTTP, and parse failures surface as ``partial:error`` and as an outcome rather than as a rejection.
        A mutation sent while its uid is locked is not sent and resolves as ``dropped``.
+       A request still unanswered after 30 seconds is aborted, fires ``partial:error`` of kind ``network`` with its ``url``, resolves as ``error``, and frees its lock.
+       A ``$timeout`` key of the init payload sets that deadline in milliseconds for every request of the page, and ``0`` turns it off, while the framework writes no such key itself.
        ``navigate: false`` keeps the page on a redirect, or on a non-envelope reply to a GET, and resolves its URL in ``location`` instead of navigating there.
        A zone GET refused with 403 or 404 publishes ``partial:error`` of kind ``http`` with the status and the body before the runtime navigates to the page, and a redirect to the login page navigates without the event.
        The request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, and a URL off that origin is refused unsent with a ``partial:error`` of kind ``network``.
@@ -589,6 +591,8 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
    * - ``data-next-action``
      - ``{% form %}``
      - The triggers intercept a submit and lock on the uid, and the applier resolves a ``form`` target by it.
+       The triggers listen in the bubble phase, so a submit a handler of the form cancelled stays cancelled, and one that a handler stops from propagating posts natively.
+       A submitter's ``formaction`` replaces the URL, and a ``formmethod`` other than ``post`` or a ``formtarget`` or form ``target`` naming another browsing context leaves the submit to the browser.
    * - ``data-next-transport``
      - ``{% form %}``, from the transport of the action
      - The triggers, which let the submit and the inline validation of the form ride the open WebSocket when the action is declared ``transport="any"``, see :ref:`topics-forms-actions-transport`.
@@ -611,6 +615,7 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
    * - ``data-next-merge``
      - Hand-written on a pagination link or sentinel
      - The triggers, which GET the link with an ``append`` or ``prepend`` intent so the server authors the merge patch.
+       A click with a modifier key or a button other than the primary one, a click a handler cancelled, and a link with ``download`` or a ``target`` other than ``_self`` stay with the browser.
    * - ``data-next-confirm``
      - Hand-written on a link or a submit control
      - The triggers, which run the confirm gate on the nearest ancestor carrying it and cancel the interaction on a refusal.
@@ -624,6 +629,7 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
      - Hand-written on an ``<a>``
      - The layer stack, which opens the href in a modal and names the zone the dialog hosts.
        A link missing either the zone or the href stays a plain navigation.
+       So does a click the pagination rule of ``data-next-merge`` leaves to the browser, such as a Ctrl-click that opens the URL in a new tab.
    * - ``data-next-accepted``
      - Hand-written on the opening ``<a>``
      - The layer stack, which re-fetches the named zone of the host page once the layer closes with a result.

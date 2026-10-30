@@ -186,8 +186,9 @@ Support matrix
 --------------
 
 A dedicated ``build`` job produces the wheel and the source distribution once, and the matrix jobs install that wheel rather than running from the source tree.
-Each matrix job then pins its Django with ``uv pip install "django==<version>"`` after the wheel is installed, which is deliberate and not a broken lockfile.
+Each matrix job then installs the latest patch of its Django series with ``uv pip install "django~=<series>.0"`` after the wheel is installed, which is deliberate and not a broken lockfile.
 The matrix covers every combination the *Requirements* list in :doc:`/content/intro/install` names.
+The matrix checkout leaves out ``next/client/`` and ``docs/``, so a ``test-source`` job runs the tests that compare the core with those trees on a full checkout and fails if any of them skips.
 
 A separate ``test-compat`` job runs ``pytest tests/compat`` with the ``compat`` dependency group, which declares a minimum for django-crispy-forms, crispy-bootstrap5, django-widget-tweaks, django-htmx, and django-allauth.
 That job checks the framework against the ecosystem packages a project is likely to have installed already.
@@ -241,6 +242,7 @@ Supply chain
 
 The ``security`` job runs the ``typos`` and ``uv-lock`` pre-commit hooks over all files, so a lockfile that drifts from ``pyproject.toml`` fails.
 On a pull request, a ``dependency-review`` job inspects dependency changes and fails on a vulnerability of moderate severity or higher.
+Every third-party action is pinned by commit SHA, with its release tag in a comment.
 
 See also
 --------

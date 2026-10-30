@@ -1,19 +1,20 @@
 from pathlib import Path
 
 import pytest
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpResponse
 
 from next.forms.dispatch import FormActionDispatch
-from next.forms.dispatch.permissions import _check_page_access
+from next.forms.dispatch.permissions import _check_owner_page_access, _check_page_access
 from next.forms.origin import OriginMatch
-from next.forms.signals import form_access_denied
+from next.forms.signals import action_dispatched, form_access_denied
 from next.pages.loaders import _load_python_module
 from next.testing import NextClient, capture_signals, envelope_of
 
 
 _SITE_PAGES = Path(__file__).resolve().parent.parent / "site_pages"
 _GUARDED_PAGE = _SITE_PAGES / "guarded" / "page.py"
+_OPEN_PAGE = _SITE_PAGES / "board_forms" / "page.py"
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,13 @@ def _post_note(client: NextClient, note: str, **kwargs) -> HttpResponse:
     return client.post_action(
         "guarded_note_form", {"note": note}, origin="/guarded/", **kwargs
     )
+
+
+def _post_guarded(client: NextClient, origin: str | None) -> HttpResponse:
+    if origin is None:
+        url = client.get_action_url("guarded_note_form")
+        return client.post(url, {"note": "ok"})
+    return client.post_action("guarded_note_form", {"note": "ok"}, origin=origin)
 
 
 @pytest.mark.django_db()
@@ -117,10 +125,133 @@ class TestAuthorizedSubmissionIsUntouched:
         assert b"classified" in response.content
 
 
-class TestPageAccessSkipsWhatItCannotAddress:
-    """An origin that names no page leaves the page check with nothing to run."""
+@pytest.mark.django_db()
+class TestOwnerRenderGuardsTheAction:
+    """The owner page's `render()` answers its action whatever origin is posted."""
 
-    def test_missing_origin_match_allows(self, mock_http_request) -> None:
+    @pytest.mark.parametrize(
+        ("origin", "status"),
+        [("/guarded/", 302), ("/", 403), ("/_next/csrf/", 400), (None, 400)],
+    )
+    def test_anonymous_submission_never_runs_the_action(
+        self, next_client: NextClient, origin: str | None, status: int
+    ) -> None:
+        with capture_signals(action_dispatched) as recorder:
+            response = _post_guarded(next_client, origin)
+        assert response.status_code == status
+        assert recorder.events == []
+
+    @pytest.mark.parametrize("origin", ["/", None])
+    def test_a_member_still_needs_an_origin_in_the_subtree(
+        self, next_client: NextClient, origin: str | None
+    ) -> None:
+        next_client.force_login(User.objects.create_user("member", password="pw"))
+        with capture_signals(action_dispatched) as recorder:
+            response = _post_guarded(next_client, origin)
+        assert response.status_code == (403 if origin else 400)
+        assert recorder.events == []
+
+    def test_the_refusal_is_audited(self, next_client: NextClient) -> None:
+        with capture_signals(form_access_denied) as recorder:
+            _post_guarded(next_client, "/")
+        assert [event.kwargs["reason"] for event in recorder.events] == ["denied"]
+
+    def test_an_origin_below_the_owner_runs_its_render(self, rf) -> None:
+        match = OriginMatch(
+            page_path=_GUARDED_PAGE.parent / "child" / "page.py",
+            url_kwargs={},
+            origin="/guarded/child/",
+        )
+        request = rf.post("/_next/form/x/")
+        request.user = AnonymousUser()
+        with capture_signals(form_access_denied) as recorder:
+            denial = _check_owner_page_access(
+                request,
+                str(_GUARDED_PAGE),
+                match,
+                scope="page",
+                action_name="a",
+                uid=None,
+                sender=object,
+            )
+        assert denial is not None
+        assert denial["Location"] == "/login/"
+        assert [event.kwargs["reason"] for event in recorder.events] == ["response"]
+
+    def test_a_member_below_the_owner_is_admitted(self, rf) -> None:
+        match = OriginMatch(
+            page_path=_GUARDED_PAGE.parent / "child" / "page.py",
+            url_kwargs={},
+            origin="/guarded/child/",
+        )
+        request = rf.post("/_next/form/x/")
+        request.user = User(username="member")
+        denial = _check_owner_page_access(
+            request,
+            str(_GUARDED_PAGE),
+            match,
+            scope="page",
+            action_name="a",
+            uid=None,
+            sender=object,
+        )
+        assert denial is None
+
+    @pytest.mark.parametrize("file_path", [None, str(_OPEN_PAGE), "/elsewhere/x.py"])
+    def test_an_owner_without_render_adds_nothing(
+        self, mock_http_request, file_path: str | None
+    ) -> None:
+        denial = _check_owner_page_access(
+            mock_http_request(),
+            file_path,
+            None,
+            scope="page",
+            action_name="a",
+            uid=None,
+            sender=object,
+        )
+        assert denial is None
+
+    def test_a_shared_action_answers_to_no_render(self, mock_http_request) -> None:
+        match = OriginMatch(page_path=_OPEN_PAGE, url_kwargs={}, origin="/board/")
+        denial = _check_owner_page_access(
+            mock_http_request(),
+            str(_GUARDED_PAGE),
+            match,
+            scope="shared",
+            action_name="a",
+            uid=None,
+            sender=object,
+        )
+        assert denial is None
+
+    def test_an_origin_through_a_symlink_runs_the_render(self, rf, tmp_path) -> None:
+        alias = tmp_path / "alias"
+        alias.symlink_to(_GUARDED_PAGE.parent, target_is_directory=True)
+        match = OriginMatch(
+            page_path=alias / "child" / "page.py", url_kwargs={}, origin="/alias/child/"
+        )
+        request = rf.post("/_next/form/x/")
+        request.user = AnonymousUser()
+        denial = _check_owner_page_access(
+            request,
+            str(_GUARDED_PAGE),
+            match,
+            scope="page",
+            action_name="a",
+            uid=None,
+            sender=object,
+        )
+        assert denial is not None
+        assert denial["Location"] == "/login/"
+
+
+class TestPageAccessSkipsWhatItCannotAddress:
+    """An origin that names no page leaves the origin check with nothing to run."""
+
+    def test_missing_origin_match_leaves_the_owner_check(
+        self, mock_http_request
+    ) -> None:
         denial = _check_page_access(
             mock_http_request(), None, action_name="a", uid=None, sender=object
         )

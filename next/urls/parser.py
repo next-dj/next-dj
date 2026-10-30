@@ -8,20 +8,28 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Final
 from uuid import UUID
 
+from next.deps import RESERVED_KEYS
 from next.utils import ROUTE_BRACKET_PATTERN, normalise_route_name
 
 from .errors import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
+    ReservedURLParameterError,
     URLParameterError,
 )
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+# Names the page, form and component call paths pass by keyword beside the URL kwargs.
+RESERVED_ROUTE_NAMES: Final[frozenset[str]] = RESERVED_KEYS | frozenset(
+    {"cls", "dep_cache", "file_path", "self", "_dep_cache", "_requested_zones"}
+)
 
 
 def _coerce_bool(text: str) -> bool:
@@ -124,6 +132,8 @@ class URLPatternParser:
         name = normalise_route_name(raw_name)
         if not name.isidentifier():
             raise InvalidURLParameterError(name, url_path)
+        if name in RESERVED_ROUTE_NAMES:
+            raise ReservedURLParameterError(name, url_path)
         return name
 
     def _parse_param_name_and_type(self, param_str: str) -> tuple[str, str]:
@@ -144,8 +154,10 @@ default_url_parser: URLPatternParser = URLPatternParser()
 
 
 __all__ = [
+    "RESERVED_ROUTE_NAMES",
     "DuplicateURLParameterError",
     "InvalidURLParameterError",
+    "ReservedURLParameterError",
     "URLParameterError",
     "URLPatternParser",
     "default_url_parser",

@@ -10,7 +10,7 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from django.utils.module_loading import import_string
 
 from next.checks import NEXT
-from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
+from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule, render_guard
 from next.pages.checks.access import access_in_use, load_declarations, tree_pages
 from next.pages.checks.branches import EmptyBranch, empty_branches
 from next.pages.checks.modules import declares_without_page, load_page
@@ -179,6 +179,8 @@ def _open_actions() -> dict[Path, list[str]]:
     for meta in iter_registered_actions():
         if meta.get("guard") is not None:
             continue
+        if render_guard(meta["file_path"], meta.get("scope")) is not None:
+            continue
         source = Path(meta["file_path"])
         owner = owner_rule(source)
         if owner is None or owner.broken is not None:
@@ -213,6 +215,44 @@ def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
             id="next.W129",
         )
         for source, names in _open_actions().items()
+    ]
+
+
+def _render_guarded_actions() -> dict[Path, list[str]]:
+    """Return the actions whose owner page has a `render()` and declares no rule."""
+    found: dict[Path, list[str]] = {}
+    for meta in iter_registered_actions():
+        if meta.get("guard") is not None:
+            continue
+        if render_guard(meta["file_path"], meta.get("scope")) is None:
+            continue
+        source = Path(meta["file_path"])
+        owner = owner_rule(source)
+        if owner is not None and (owner.rule.requirements or owner.rule.public):
+            continue
+        found.setdefault(source, []).append(meta["name"])
+    return found
+
+
+@register(NEXT)
+def check_render_guarded_actions(*args, **kwargs) -> list[CheckMessage]:
+    """Warn about actions a page `render()` guards with no declaration (`next.W150`)."""
+    if login_by_default():
+        return []
+    return [
+        DjangoWarning(
+            f"{source} declares the actions {', '.join(map(repr, names))} beside a "
+            "render() and no access declaration, so only that render() guards them "
+            "and each post needs an origin inside the page's directory.",
+            hint=(
+                "Declare page.login_required() or permission_required() for the "
+                "page, set login_required on the action Meta, or declare "
+                "page.public() if the actions are meant for everyone."
+            ),
+            obj=str(source),
+            id="next.W150",
+        )
+        for source, names in _render_guarded_actions().items()
     ]
 
 

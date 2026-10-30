@@ -428,10 +428,14 @@ class TestDispatchInstanceFromUrlEndToEnd:
     def test_post_without_origin_kwargs_creates_new_row(
         self, mock_http_request
     ) -> None:
-        """With no origin URL kwargs the spec is dormant and dispatch creates a new row."""
+        """An origin without URL kwargs leaves the spec dormant, so a new row lands."""
         Group.objects.create(name="existing")
 
-        response = self._dispatch(mock_http_request, GroupByNameForm, {"name": "fresh"})
+        response = self._dispatch(
+            mock_http_request,
+            GroupByNameForm,
+            {"_next_form_origin": "/", "name": "fresh"},
+        )
 
         assert response.status_code == 302
         assert Group.objects.count() == 2

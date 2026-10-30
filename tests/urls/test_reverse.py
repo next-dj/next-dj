@@ -3,7 +3,7 @@ from django.test import override_settings
 from django.urls import NoReverseMatch
 
 from next.testing import override_next_settings
-from next.urls import page_reverse, page_reverse_lazy, with_query
+from next.urls import page_reverse, page_reverse_in, page_reverse_lazy, with_query
 from tests.support import NAMESPACED_URLCONF, default_page_router_config, write_page
 
 
@@ -68,6 +68,28 @@ class TestPageReverse:
             override_settings(ROOT_URLCONF=NAMESPACED_URLCONF),
         ):
             assert page_reverse("login") == "/login/"
+
+
+class TestPageReverseIn:
+    """`page_reverse_in` takes the URL kwargs as a mapping, so none shadows an argument."""
+
+    @pytest.fixture(autouse=True)
+    def clashing_tree(self, tmp_path):
+        write_page(tmp_path, "k8s/[namespace]/[path_template]")
+        write_page(tmp_path, "docs/[path_template]")
+        with override_next_settings(PAGE_BACKENDS=default_page_router_config(tmp_path)):
+            yield
+
+    def test_kwargs_named_after_its_arguments_reach_the_url(self) -> None:
+        kwargs = {"namespace": "prod", "path_template": "pods"}
+        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
+            url = page_reverse_in("next", "k8s/[namespace]/[path_template]", kwargs)
+        assert url == "/k8s/prod/pods/"
+
+    def test_page_reverse_takes_a_path_template_kwarg(self) -> None:
+        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
+            url = page_reverse("docs/[path_template]", path_template="intro")
+        assert url == "/docs/intro/"
 
 
 class TestWithQuery:

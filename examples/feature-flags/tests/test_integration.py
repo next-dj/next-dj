@@ -55,7 +55,9 @@ class TestSeededDatabase:
         self, next_client, demo_data
     ) -> None:
         response = next_client.post_action(
-            "bulk_toggle_form", {"enabled_names": [WRITE_GATE_FLAG, "dark_sidebar"]}
+            "bulk_toggle_form",
+            {"enabled_names": [WRITE_GATE_FLAG, "dark_sidebar"]},
+            origin="/admin/",
         )
 
         assert response.status_code == 302
@@ -144,7 +146,7 @@ class TestAdminBulkToggle:
         make_flag("alpha", label="Alpha", enabled=True)
 
         response = next_client.post_action(
-            "bulk_toggle_form", {"enabled_names": ["beta"]}
+            "bulk_toggle_form", {"enabled_names": ["beta"]}, origin="/admin/"
         )
 
         assert response.status_code == 302
@@ -159,7 +161,10 @@ class TestAdminBulkToggle:
         make_flag("beta", label="Beta")
 
         response = next_client.post_action(
-            "bulk_toggle_form", {"enabled_names": ["beta"]}, follow=True
+            "bulk_toggle_form",
+            {"enabled_names": ["beta"]},
+            follow=True,
+            origin="/admin/",
         )
 
         assert "Flag toggles saved." in response.content.decode()
@@ -170,7 +175,9 @@ class TestAdminBulkToggle:
         assert get_cached_flag("beta").enabled is True
         assert cache.get(f"{FLAG_PREFIX}beta") is not None
 
-        next_client.post_action("bulk_toggle_form", {"enabled_names": []})
+        next_client.post_action(
+            "bulk_toggle_form", {"enabled_names": []}, origin="/admin/"
+        )
 
         assert cache.get(f"{FLAG_PREFIX}beta") is None
         assert get_cached_flag("beta").enabled is False
@@ -187,7 +194,9 @@ class TestAdminBulkToggle:
         flag = make_flag("beta", label="Beta", enabled=True)
         original_updated = flag.updated_at
 
-        next_client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
+        next_client.post_action(
+            "bulk_toggle_form", {"enabled_names": ["beta"]}, origin="/admin/"
+        )
 
         flag.refresh_from_db()
         assert flag.updated_at == original_updated
@@ -208,7 +217,7 @@ class TestWriteGate:
         make_flag("beta", label="Beta")
 
         response = next_client.post_action(
-            "bulk_toggle_form", {"enabled_names": ["beta"]}
+            "bulk_toggle_form", {"enabled_names": ["beta"]}, origin="/admin/"
         )
 
         assert response.status_code == status
@@ -217,7 +226,9 @@ class TestWriteGate:
     def test_gate_absent_denies_toggle(self, next_client, make_flag) -> None:
         make_flag("beta", label="Beta", enabled=True)
 
-        response = next_client.post_action("bulk_toggle_form", {"enabled_names": []})
+        response = next_client.post_action(
+            "bulk_toggle_form", {"enabled_names": []}, origin="/admin/"
+        )
 
         assert response.status_code == 403
         assert Flag.objects.get(name="beta").enabled is True
@@ -227,7 +238,9 @@ class TestWriteGate:
     ) -> None:
         write_gate(enabled=False)
         make_flag("beta", label="Beta")
-        next_client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
+        next_client.post_action(
+            "bulk_toggle_form", {"enabled_names": ["beta"]}, origin="/admin/"
+        )
 
         body = next_client.get("/admin/metrics/").content.decode()
         assert "form permission denials" in body

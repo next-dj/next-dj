@@ -28,8 +28,12 @@ from next.utils import UNMOUNTED, PageRoot, is_route_group
 
 from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
 from .dispatcher import scan_pages_tree
-from .errors import DuplicateURLParameterError, URLParameterError
-from .parser import default_url_parser
+from .errors import (
+    DuplicateURLParameterError,
+    ReservedURLParameterError,
+    URLParameterError,
+)
+from .parser import RESERVED_ROUTE_NAMES, default_url_parser
 from .urlconf import NO_MOUNTS, UrlconfMounts, outer_kwargs, tree_route, urlconf_mounts
 
 
@@ -63,6 +67,13 @@ _GROUP_CLASH_HINT = (
     "A route group leaves the URL, so two groups, or a group page and the page of "
     "its parent, serve one URL. Keep one page there, or move the other under a "
     "segment of its own."
+)
+
+_RESERVED_SEGMENT_ID = "next.E217"
+
+_RESERVED_SEGMENT_HINT = (
+    "Rename the bracket directory. The framework passes these names to page, form "
+    f"and component callables itself: {', '.join(sorted(RESERVED_ROUTE_NAMES))}."
 )
 
 type _TreeKey = tuple[Path, str, str]
@@ -326,7 +337,8 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return []
 
-    all_patterns, errors = _collect_all_patterns(router_manager)
+    all_patterns, collected = _collect_all_patterns(router_manager)
+    errors = [error for error in collected if error.id != _RESERVED_SEGMENT_ID]
 
     try:
         _check_url_conflicts(all_patterns, errors)
@@ -344,6 +356,16 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
         )
 
     return errors
+
+
+@register(Tags.urls, NEXT)
+def check_reserved_url_parameters(*args, **kwargs) -> list[CheckMessage]:
+    """Report a bracket segment named after an argument the framework passes itself."""
+    router_manager, _init_errors = get_router_manager()
+    if router_manager is None:
+        return []
+    _patterns, collected = _collect_all_patterns(router_manager)
+    return [error for error in collected if error.id == _RESERVED_SEGMENT_ID]
 
 
 @register(Tags.urls, NEXT)
@@ -645,11 +667,19 @@ def _parameter_refusal_error(
             obj=str(page_file),
             id="next.E028",
         )
+    if isinstance(exc, ReservedURLParameterError):
+        return Error(
+            str(exc),
+            hint=_RESERVED_SEGMENT_HINT,
+            obj=str(page_file),
+            id=_RESERVED_SEGMENT_ID,
+        )
     return Error(str(exc), obj=str(page_file), id="next.E082")
 
 
 __all__ = [
     "check_next_pages_configuration",
+    "check_reserved_url_parameters",
     "check_reverse_name_collisions",
     "check_url_patterns",
     "reset_collected_patterns_cache",

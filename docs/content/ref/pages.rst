@@ -43,7 +43,7 @@ Access declarations
 Any other ``perm``, and an ``obj`` that is a string, a bare model, or a ``DObject`` with a parent, raises ``TypeError`` at the call.
 ``public()`` lifts what every ``page.py`` above requires and the default login, for its own page or under ``inherit=True`` for the pages below, and a requirement declared below binds again.
 A public rule sets the ``login_required`` attribute of the page view to ``False``, which ``LoginRequiredMiddleware`` reads.
-A view answers a refusal with a redirect to the login page for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and a 404 or the import failure for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
+A view answers a refusal with a redirect to the login page for an anonymous user, :exc:`~django.core.exceptions.PermissionDenied` for a missing permission, a 404 for a row the scope does not see, and the import failure, a 500, for a chain that holds a broken file, see :ref:`topics-permissions-tree`.
 
 ``next.pages.access`` reads the rule of each page once per reload of a file in its chain.
 ``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
@@ -179,8 +179,8 @@ Import failures
 
 A ``page.py`` whose body raises while importing is a broken module, as distinct from a file the loader cannot read at all.
 The recorded failure re-raises on the request path as ``PageModuleImportError``, which carries the original exception as ``__cause__`` and the offending path as ``file_path``.
-``settings.DEBUG`` and ``NEXT_FRAMEWORK["STRICT_LOADING"]`` decide how loudly that failure reaches the client.
-See *Broken page modules* in :doc:`/content/topics/pages` for the loudness table and the blast radius.
+The request answers 500 on every setting, and ``settings.DEBUG`` decides between the technical and the generic error page.
+See *Broken page modules* in :doc:`/content/topics/pages` for the blast radius.
 
 .. autoclass:: next.pages.PageModuleImportError
    :members:
@@ -267,8 +267,9 @@ Its ``faulty(file_path, loaded)`` tells whether ``next.E012``, ``next.E013``, or
 ``next.E012``, ``next.E166``, and ``next.W128`` read the directories that declare actions through the one ``ActionOwners`` port of :doc:`ports`.
 ``branches`` finds the directories with no page and no action for ``next.W128``, which ``next.forms.checks.actions`` registers, since only the forms area knows the actions.
 
-The package exports thirty-four check callables.
+The package exports forty-seven check callables.
 
+- ``check_async_callables``.
 - ``check_conditional_get_order``.
 - ``check_context_functions``.
 - ``check_context_processor_signature``.
@@ -278,6 +279,13 @@ The package exports thirty-four check callables.
 - ``check_csrf_endpoint_reversible``.
 - ``check_csrf_in_session``.
 - ``check_declaring_modules``.
+- ``check_intercept_default_login``.
+- ``check_intercept_inert_declarations``.
+- ``check_intercept_layouts``.
+- ``check_intercept_render``.
+- ``check_intercept_scope``.
+- ``check_intercept_targets``.
+- ``check_intercept_url_kwargs``.
 - ``check_layout_templates``.
 - ``check_metadata_callable_returns_mapping``.
 - ``check_metadata_enum_values``.
@@ -292,13 +300,18 @@ The package exports thirty-four check callables.
 - ``check_metadata_social_folds``.
 - ``check_metadata_tag_rendered``.
 - ``check_metadata_title_templates``.
+- ``check_nested_intercepts``.
 - ``check_page_functions``.
 - ``check_page_metadata_shape``.
 - ``check_page_module_imports``.
 - ``check_page_response_declarations``.
 - ``check_pages_structure``.
+- ``check_parenthesised_directory_names``.
+- ``check_pointless_route_groups``.
 - ``check_public_beside_requirements``.
 - ``check_request_in_context``.
+- ``check_root_marker_outside_layouts``.
+- ``check_route_group_breadcrumbs``.
 - ``check_shared_page_responses``.
 - ``check_single_keyless_context``.
 - ``check_template_loaders``.

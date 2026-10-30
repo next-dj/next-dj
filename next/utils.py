@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import groupby
 from pathlib import Path
+from time import time_ns
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypeGuard, override
 from urllib.parse import unquote_to_bytes
 
@@ -240,6 +241,29 @@ def stat_mtime_ns(path: Path) -> int | None:
         return path.stat().st_mtime_ns
     except OSError:
         return None
+
+
+RACY_MTIME_WINDOW_NS: Final = 10_000_000
+"""The age an mtime reaches before a snapshot trusts it, past one coarse clock tick."""
+
+UNSETTLED_MTIME_NS: Final = -1
+"""The stamp a snapshot keeps for a racy mtime, which no later stat matches."""
+
+
+def settled_mtime_ns(mtime_ns: int) -> int:
+    """Return `mtime_ns`, or `UNSETTLED_MTIME_NS` while a write may share its tick.
+
+    Such a write leaves the mtime as it was, so a snapshot holding it would miss it.
+    """
+    if abs(time_ns() - mtime_ns) < RACY_MTIME_WINDOW_NS:
+        return UNSETTLED_MTIME_NS
+    return mtime_ns
+
+
+def snapshot_mtime_ns(path: Path) -> int | None:
+    """Return the mtime a snapshot of `path` keeps, `None` when it does not stat."""
+    mtime_ns = stat_mtime_ns(path)
+    return None if mtime_ns is None else settled_mtime_ns(mtime_ns)
 
 
 def is_within(path: Path, root: Path) -> bool:

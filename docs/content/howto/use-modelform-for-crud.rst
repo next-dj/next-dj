@@ -130,7 +130,8 @@ The edit page lives under a route that captures the primary key under the name o
 The ``{% form %}`` tag emits a hidden ``_next_form_origin`` field with the page URL, so the dispatcher recovers the captured ``note`` on the POST and ``DObject`` loads the same row again through ``visible_to``.
 A note of another user answers 404 on the GET render and on the POST alike, since ``visible_to`` never returns it.
 
-URL names follow the ``page_{name}`` convention where path segments are joined with underscores and captured-parameter brackets are dropped.
+URL names follow the ``page_{name}`` convention, with the directory path joined by underscores and the converter kept, so the edit page registers as ``page_notes_int_note_edit``.
+A ``page_reverse`` call names the directory as written, ``page_reverse("notes/[int:note]/edit", note=note.pk)``.
 See :doc:`/content/topics/file-router` for the full naming rules.
 
 Verification
@@ -150,7 +151,9 @@ A test walks the flow with ``NextClient``.
        owner = User.objects.create_user("owner")
        client = NextClient()
        client.force_login(owner)
-       client.post_action("note_create_form", {"title": "Intro", "body": ""})
+       client.post_action(
+           "note_create_form", {"title": "Intro", "body": ""}, origin="/notes/new/"
+       )
        note = Note.objects.get(owner=owner)
        client.post_action(
            "note_edit_form",
@@ -171,8 +174,9 @@ A test walks the flow with ``NextClient``.
        assert response.status_code == 404
        assert Note.objects.get(pk=note.pk).title == "Mine"
 
-The first ``post_action`` mimics the create page and inserts a row owned by the signed-in user.
-The second passes ``origin``, which fills the ``_next_form_origin`` field the ``{% form %}`` tag emits, and resolving that path yields the ``note`` kwarg ``DObject`` reads.
+Each ``post_action`` passes ``origin``, which fills the ``_next_form_origin`` field the ``{% form %}`` tag emits.
+The first names the create page and inserts a row owned by the signed-in user.
+The second names the edit page, and resolving that path yields the ``note`` kwarg ``DObject`` reads.
 The recovered kwargs pass through the URL converters of the resolved route, so ``[int:note]`` arrives as an integer.
 
 See also

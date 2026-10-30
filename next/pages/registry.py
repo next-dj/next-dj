@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from next.caches import PageCache
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
-from next.introspect import MisattributedContext, MisattributionLog, callable_name
+from next.introspect import (
+    MisattributedContext,
+    MisattributionLog,
+    callable_name,
+    refuse_async,
+)
 
 from .context import ContextResult
 from .errors import PageContextShapeError
@@ -227,6 +232,7 @@ class PageContextRegistry:
 
         A `zone` name scopes the callable, so a GET for any other zone skips it.
         """
+        refuse_async(func, "@context callable")
         if zone is not None and inherit_context:
             msg = (
                 "`@context` cannot combine `zone=` with `inherit_context=True`, "

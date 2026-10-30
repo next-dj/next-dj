@@ -52,6 +52,7 @@ from next.forms.transport import (
     roll_back,
     tunneled,
 )
+from next.forms.uid import ORIGIN_FIELD_NAME
 from tests.support import check_ids
 
 
@@ -109,7 +110,7 @@ def _meta(name: str) -> dict[str, Any]:
 
 
 def _post(url: str, **kwargs: object) -> HttpResponse:
-    return async_to_sync(AsyncClient().post)(url, **kwargs)
+    return async_to_sync(AsyncClient().post)(url, {ORIGIN_FIELD_NAME: "/"}, **kwargs)
 
 
 def _render(body: str) -> str:
@@ -220,7 +221,7 @@ class TestTunneled:
 
 
 def _dispatch(name: str, transport: str | None = None) -> HttpResponseBase:
-    request = RequestFactory().post("/")
+    request = RequestFactory().post("/", {ORIGIN_FIELD_NAME: "/"})
     if transport is not None:
         request.scope = {TRANSPORT_SCOPE_KEY: transport}
     return form_action_manager.default_backend.dispatch(request, _meta(name)["uid"])

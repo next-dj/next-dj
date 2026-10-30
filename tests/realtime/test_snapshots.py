@@ -194,7 +194,8 @@ def test_redis_async_scripts_are_bound_once_per_loop(server, clock) -> None:
         first = broker._loop_client().scripts
         await broker.ajoin(TOPIC, "a", None, 30)
         assert broker._loop_client().scripts is first
-        (_, scripts), *_ = broker._async_clients.values()
+        entry, *_ = broker._async_clients.values()
+        scripts = entry.scripts
         bound = [getattr(scripts, field.name) for field in fields(scripts)]
         assert len(bound) == 6
         assert len({id(script) for script in bound}) == 6

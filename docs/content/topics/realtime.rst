@@ -185,6 +185,7 @@ The backend subscription is selected from the request's WSGI or ASGI type.
 The broker wait timeout is the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
 A WebSocket times its pings, access rechecks, and presence refreshes by ``REALTIME['HEARTBEAT']`` instead, 25 seconds by default, and every later mention of the heartbeat interval means the one of the stream's transport.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
+Under ASGI, a client that stops reading is dropped one to two heartbeats after a write to it blocks.
 Closing the stream releases the broker subscription.
 
 An optional ``transform(message)`` runs for each subscriber and can return a safe ``Patches`` builder or ``Envelope``.
@@ -582,6 +583,11 @@ The defaults are ``10`` frames a second, a burst of ``20``, ``16384`` bytes per 
 The same bucket serves the tunneled requests of `Form actions over WebSocket`_.
 A frame over the budget is refused with ``limit``, and three refusals in a row close the socket with ``4429``.
 An event past ``CONCURRENCY`` is refused with ``limit`` as well and never counts toward ``4429``.
+A timeout does not interrupt a synchronous handler, its thread runs on until the handler returns.
+Its ``CONCURRENCY`` slot and its pool thread stay busy for that time, so the side effects of a handler acknowledged as ``timeout`` may still land.
+The handler pool holds ``min(32, os.cpu_count() + 4)`` threads for the whole process, and one connection runs synchronous handlers on at most half of them.
+An event for a synchronous handler that finds no free thread in either bound is refused with ``limit`` instead of waiting in a queue, and never counts toward ``4429``.
+Long work belongs in an asynchronous handler, whose timeout cancels it, or in a task queue the handler hands the work to.
 A client that throttles its own sends, a typing indicator at most every few hundred milliseconds, never reaches that code.
 
 What the framework does not cap

@@ -2,11 +2,13 @@ import copy
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
-from django.core.exceptions import ImproperlyConfigured
+from django.apps import apps
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from django.http import Http404, HttpRequest, HttpResponse
 from django.test import override_settings
 from django.urls import (
@@ -35,6 +37,9 @@ from next.forms.manager import (
     resolve_component_anchor,
 )
 from next.forms.registration import registration_diagnostics
+from next.pages.loaders import load_page_module
+from tests.support import isolated_form_registries
+from tests.support.pages import write_page
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -1320,14 +1325,67 @@ class TestFileToDottedModule:
         assert result == "a.b.forms"
 
 
-class TestScopeKeyFor:
-    """scope_key_for partitions page scope by path and shared scope by module."""
+_DEPLOYED_PAGE = """
+from django import forms as django_forms
 
-    def test_page_scope_uses_resolved_path(self, tmp_path) -> None:
-        """Page scope keys are the resolved file path."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("")
+from next.forms import Form, action
+
+
+class ContactForm(Form):
+    email = django_forms.EmailField()
+
+
+@action
+def subscribe() -> None:
+    pass
+"""
+
+
+def _fake_app(label: str, path: Path) -> SimpleNamespace:
+    return SimpleNamespace(label=label, path=str(path))
+
+
+class TestScopeKeyFor:
+    """scope_key_for keys page scope by tree-relative path and shared by module."""
+
+    def test_page_under_base_dir_is_keyed_by_its_relative_path(
+        self, settings, tmp_path
+    ) -> None:
+        """A page below BASE_DIR outside every app keys as `:<relative path>`."""
+        settings.BASE_DIR = tmp_path
+        page_file = write_page(tmp_path, "pages/contact")
+        assert scope_key_for(str(page_file), "page") == ":pages/contact/page.py"
+
+    def test_page_inside_an_app_is_keyed_by_the_app_label(
+        self, settings, tmp_path
+    ) -> None:
+        """The deepest app holding the page names it, ahead of BASE_DIR."""
+        settings.BASE_DIR = tmp_path
+        outer = tmp_path / "shop"
+        inner = outer / "billing"
+        page_file = write_page(inner, "pages/pay")
+        configs = [_fake_app("shop", outer), _fake_app("billing", inner)]
+        with patch.object(apps, "get_app_configs", return_value=configs):
+            assert scope_key_for(str(page_file), "page") == "billing:pages/pay/page.py"
+
+    def test_page_outside_apps_and_base_dir_keeps_its_resolved_path(
+        self, settings, tmp_path
+    ) -> None:
+        """Without a stable root the absolute path is the only identity left."""
+        settings.BASE_DIR = tmp_path / "project"
+        page_file = write_page(tmp_path, "elsewhere")
         assert scope_key_for(str(page_file), "page") == str(page_file.resolve())
+
+    def test_page_without_base_dir_or_ready_apps_keeps_its_resolved_path(
+        self, settings, tmp_path
+    ) -> None:
+        """An unready app registry and an unset BASE_DIR leave the absolute path."""
+        settings.BASE_DIR = None
+        page_file = write_page(tmp_path, "early")
+        with patch.object(
+            apps, "get_app_configs", side_effect=AppRegistryNotReady("not yet")
+        ):
+            assert scope_key_for(str(page_file), "page") == str(page_file.resolve())
 
     def test_shared_scope_uses_dotted_module(self, tmp_path) -> None:
         """Shared scope keys are the dotted module of the declaring file."""
@@ -1337,6 +1395,32 @@ class TestScopeKeyFor:
         forms_file = pkg / "forms.py"
         forms_file.write_text("")
         assert scope_key_for(str(forms_file), "shared") == "myapp.forms"
+
+
+class TestPageUidAcrossDeploys:
+    """A page action keeps its uid when the same tree is deployed elsewhere."""
+
+    @staticmethod
+    def _deploy(settings, release: Path) -> list[str]:
+        """Load the tree under `release` in a registry of its own, like a new process."""
+        settings.BASE_DIR = release
+        page_file = write_page(release, "pages/contact", _DEPLOYED_PAGE)
+        with isolated_form_registries():
+            _module, error = load_page_module(page_file)
+            assert error is None
+            backend = form_action_manager.default_backend
+            metas = [
+                backend.get_meta(name, page_path=str(page_file))
+                for name in ("contact_form", "subscribe")
+            ]
+        assert all(meta is not None for meta in metas)
+        return [meta["uid"] for meta in metas if meta is not None]
+
+    def test_two_base_dirs_give_identical_uids(self, settings, tmp_path) -> None:
+        """Blue and green releases of one tree answer the same dispatch URLs."""
+        blue = self._deploy(settings, tmp_path / "releases" / "blue")
+        green = self._deploy(settings, tmp_path / "srv" / "green")
+        assert blue == green
 
 
 class TestSharedScopeKeysAcrossApps:

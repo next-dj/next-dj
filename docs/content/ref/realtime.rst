@@ -58,8 +58,9 @@ A multi-process production deployment must use a shared backend such as Redis, b
 
 ``OPTIONS.CLIENT`` is a mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client.
 It overrides the defaults ``health_check_interval`` and ``socket_keepalive``, while ``decode_responses`` is always ``True``.
-A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` reaches Redis through Sentinel or Cluster.
-A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis.broker`` logger.
+``OPTIONS.SUBSCRIBE_MAX_CONNECTIONS`` caps the subscription pool, a client of its own that streams hold connections of, apart from the command pool that publishing uses.
+A subclass that overrides ``RedisBroker.create_client(url, options, *, asynchronous)`` reaches Redis through Sentinel or Cluster, and the broker calls it once for each pool.
+A pool that raises ``redis.exceptions.MaxConnectionsError`` logs a warning on the ``next.realtime.redis.broker`` logger, and the warning of the subscription pool names ``SUBSCRIBE_MAX_CONNECTIONS``.
 The ``next.realtime.redis.broker`` and ``next.realtime.redis.pubsub`` loggers are children of ``next.realtime.redis``, so one handler on the parent catches both.
 A ``BlockingConnectionPool`` raises a plain ``ConnectionError`` on timeout instead, so its exhaustion ends the stream with ``BrokerConnectionError`` and logs no warning.
 Every ``RedisBroker`` operation raises ``BrokerConnectionError`` for a connection or timeout error and for the replies of a server that cannot serve now, ``READONLY``, ``OOM``, ``CLUSTERDOWN``, and ``TRYAGAIN``, so a stream ends as it does on a lost connection and the client retries.
@@ -903,7 +904,8 @@ An admitted ``up`` frame is checked in this order, and the first failure is the 
    * - ``internal``
      - The handler raised, which is logged on ``next.realtime.socket``.
    * - ``limit``
-     - The bucket was empty, or ``UPSTREAM['CONCURRENCY']`` events of the connection are still running.
+     - The bucket was empty, or ``UPSTREAM['CONCURRENCY']`` events of the connection are still running, or a sync handler found no free thread in the handler pool or in the connection's half of it.
+       A timed out sync handler counts as running until it returns.
        Only the bucket counts towards ``4429``.
 
 Every refusal in the table, and the frame that closes the socket with ``4429``, fires ``upstream_rejected`` with the ``error`` as ``reason``, see :doc:`signals`.
@@ -912,6 +914,7 @@ Each admitted frame runs as its own task, so acks may arrive in another order th
 The recheck runs at most once per heartbeat, so an ``up`` frame may still reach its handler up to one heartbeat after the session or the grant is revoked.
 ``TopicSocket.access_check(claims, authorizer)`` builds that recheck, and an override with a shorter interval tightens it.
 A sync handler runs on a thread pool of its own, sized like the default executor, so a slow handler never queues the session loads and transforms of other sockets.
+A sync handler that finds every thread of that pool taken is refused with ``limit`` instead of waiting in a queue, and one connection runs sync handlers on at most half of the threads.
 An object whose ``__call__`` is a coroutine function runs on the event loop, and an awaitable a sync handler returns, as a sync decorator over an ``async def`` does, is awaited before the ``ack``.
 ``TopicSocket.handle(upstream)`` routes a granted event and returns whether anything served it, and an override replaces the ``@on`` registry with routing of its own.
 ``Upstream.user`` is the user the last access recheck loaded, not the one of the handshake, so a revoked permission reaches the handler after the next recheck.

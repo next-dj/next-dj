@@ -28,7 +28,7 @@ The same declaration in a ``component.py`` hides the component from a refused us
 ``manage.py check`` reports ``next.W060`` when an action declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, because the guard cannot resolve a permission without it.
 
 Beyond those checks the framework runs project code that reads the user on its behalf.
-A submission is authorized by the page its origin names, which means that page's ``render()`` runs on the POST and whatever identity check it performs decides the answer, see :doc:`/content/topics/pages`.
+A submission is authorized by the page its origin names and by the page that owns the action, which means the ``render()`` of each runs on the POST and whatever identity check it performs decides the answer, see :doc:`/content/topics/pages`.
 The dynamic ``check_permissions`` and ``has_object_permission`` hooks read the user the same way, from application code the dispatcher calls.
 A permission registered in a ``permissions.py`` runs its predicate on the user and the bound row, through ``ObjectPermissionBackend`` in ``AUTHENTICATION_BACKENDS``, see :doc:`/content/topics/permissions`.
 

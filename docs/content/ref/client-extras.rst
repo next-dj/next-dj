@@ -111,6 +111,7 @@ None of them is replayed, so a listener receives only the events that follow its
      - ``{url, path, title, action}``, where ``action`` is ``push``, ``replace``, ``pop``, or ``none``.
        It fires once per commit that changes the address or the title, after the history write, the head sync, the asset loads, and the mount pass.
        A change of the title alone fires with ``action: "none"``, and the page load fires nothing.
+       ``pop`` marks a Back or Forward the runtime settles in place, and one that lands on content it cannot restore reloads the page and fires nothing, see :doc:`/content/topics/partial-rendering/limitations`.
    * - ``next:consent``
      - ``{granted, denied, changed, initial}``, category lists.
        ``initial: true`` marks the state the page starts from, fired once after the chunk takes the payload.

@@ -13,6 +13,7 @@ import {
   HEADER_ZONE,
   cssEscape,
   fire,
+  isPlainActivation,
   pageKey,
   currentUrl as pageUrl,
 } from "./protocol";
@@ -381,16 +382,15 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return page === basePage() ? 0 : -1;
   }
 
-  // Back past the URL of the topmost layer with a history entry closes that layer and
-  // the layers above it that have none. The pass repeats while the bar is off the next
-  // such URL, so a jump back over several entries closes every layer it skipped. Zones
-  // and history stay as they are.
+  // Back closes every layer above the bar's URL and answers the page left on screen.
   function onPopstate(): void {
+    const base = stack[0]?.host;
     deps.navigation.popped(() => {
       for (;;) {
         const layers = topDown();
         const anchor = layers.find((layer) => layer.drop !== undefined);
-        if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
+        if (anchor === undefined) return base;
+        if (anchor.pushedUrl === currentUrl()) return anchor.pushedUrl;
         for (const layer of layers) {
           dismissFrom(layer.dialog, "popstate");
           if (layer === anchor) break;
@@ -432,6 +432,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const href = opener.getAttribute("href");
     // No zone or no href is a plain navigation, the no-JS path is untouched.
     if (zone === null || zone === "" || href === null || href === "") return;
+    if (!isPlainActivation(event, opener)) return;
     event.preventDefault();
     // A second click while the first is in flight is dropped, no double dialog.
     if (opener.hasAttribute(BUSY_ATTR)) return;

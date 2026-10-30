@@ -220,7 +220,7 @@ Reach Redis another way
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
-It builds every client through ``create_client(url, options, *, asynchronous)``, once for the synchronous pool and once per running event loop for the asynchronous client.
+It builds every client through ``create_client(url, options, *, asynchronous)``.
 ``options`` holds the merged ``CLIENT`` keywords, ``decode_responses`` forced on, and an override passes them on to whatever it builds.
 ``topic_key(kind, topic)`` names every key of a topic.
 The kinds are ``seq`` for the counter and ``log`` for the replay log, and the presence kinds are listed in `Add presence`_.
@@ -261,7 +261,8 @@ That suits a single primary behind Sentinel and breaks the script on Cluster.
 An override for Cluster keeps ``{<topic>}`` in both keys and returns a distinct key per ``kind``.
 The broker refuses a ``PREFIX`` with ``{`` or ``}`` when it is created, since a brace would move the tag off the topic name.
 
-Every stream holds one pooled Redis connection, so size ``CLIENT['max_connections']`` for the open streams.
+The broker calls ``create_client`` twice per process and per event loop, once for commands and once for streams, and the stream call carries ``SUBSCRIBE_MAX_CONNECTIONS`` as ``max_connections`` when it is set.
+Every stream holds one connection of the stream pool, so size ``SUBSCRIBE_MAX_CONNECTIONS`` for the open streams.
 The ``200`` in the registration below is an example value to size from measurement, see :ref:`deployment-capacity`.
 An exhausted pool ends the stream with ``BrokerConnectionError``, see :ref:`ref-realtime` for the warning it logs.
 
@@ -282,7 +283,8 @@ Register the backend
                        ["sentinel-2.internal", 26379],
                    ],
                    "SERVICE": "realtime",
-                   "CLIENT": {"max_connections": 200},
+                   "CLIENT": {"max_connections": 50},
+                   "SUBSCRIBE_MAX_CONNECTIONS": 200,
                },
            },
            "REPLAY": {"SIZE": 100, "TTL": 300},

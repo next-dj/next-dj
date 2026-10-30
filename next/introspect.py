@@ -9,8 +9,16 @@ import functools
 import inspect
 import sys
 from pathlib import Path
-from types import CodeType
+from types import (
+    BuiltinFunctionType,
+    CodeType,
+    FunctionType,
+    MethodType,
+    MethodWrapperType,
+)
 from typing import TYPE_CHECKING, Any, NamedTuple
+
+from next.errors import AsyncCallableError
 
 
 if TYPE_CHECKING:
@@ -118,6 +126,53 @@ def describe_callable(func: Callable[..., Any]) -> str:
     return f'"{name}"' if filename is None else f'"{name}" ({filename})'
 
 
+# Built-in routines, so an instance that only defines `__get__` still has its call read.
+_ROUTINE_TYPES = (FunctionType, MethodType, BuiltinFunctionType, MethodWrapperType)
+
+
+def _declares_async(target: object) -> bool:
+    """Return whether `target` itself is an async function or an async `__call__`."""
+    if inspect.iscoroutinefunction(target) or inspect.isasyncgenfunction(target):
+        return True
+    if isinstance(target, _ROUTINE_TYPES) or inspect.isclass(target):
+        return False
+    call = inspect.getattr_static(type(target), "__call__", None)
+    # A staticmethod or classmethod `__call__` is read raw, so its function decides.
+    call = getattr(call, "__func__", call)
+    return inspect.iscoroutinefunction(call) or inspect.isasyncgenfunction(call)
+
+
+_ASYNC_CODE_FLAGS = inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR
+
+
+def is_async_callable(func: object) -> bool:
+    """Return whether calling `func` hands back a coroutine or an async generator.
+
+    It walks partials and `__wrapped__` layers, a sync wrapper passes a coroutine on.
+    """
+    plain = func.__func__ if type(func) is MethodType else func
+    if type(plain) is FunctionType and not plain.__dict__:
+        # A bare function carries no marker and no wrapped layer, its code flags decide.
+        return bool(plain.__code__.co_flags & _ASYNC_CODE_FLAGS)
+    seen: set[int] = set()
+    target: object = func
+    while target is not None and id(target) not in seen:
+        seen.add(id(target))
+        if _declares_async(target):
+            return True
+        if isinstance(target, functools.partial):
+            target = target.func
+        else:
+            target = getattr(target, "__wrapped__", None)
+    return False
+
+
+def refuse_async(func: Callable[..., Any], role: str) -> None:
+    """Raise `AsyncCallableError` naming `role` and `func` when `func` is async."""
+    if is_async_callable(func):
+        raise AsyncCallableError(role, describe_callable(func))
+
+
 class MisattributedContext(NamedTuple):
     """One registration whose callable was declared outside the file running it."""
 
@@ -162,6 +217,8 @@ __all__ = [
     "declared_file",
     "defining_file",
     "describe_callable",
+    "is_async_callable",
+    "refuse_async",
     "registering_file",
     "registering_site",
 ]

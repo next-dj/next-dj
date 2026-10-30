@@ -13,8 +13,10 @@ from next.forms.checks.actions import (
     check_declarations_without_page,
     check_empty_branches,
     check_public_actions,
+    check_render_guarded_actions,
 )
 from next.forms.manager import form_action_manager
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.pages.checks.access import (
     check_declaring_modules,
     check_public_beside_requirements,
@@ -685,6 +687,65 @@ class TestPublicActionsBeforeAccess:
         assert warning.id == "next.W129"
 
 
+_RENDER = "\ndef render(request):\n    return 'ok'\n"
+
+
+@pytest.mark.usefixtures("form_registries")
+class TestRenderGuardedActions:
+    """next.W150 warns about actions whose page guards them only in `render()`."""
+
+    def test_actions_beside_a_render_warn_once_per_file(self, root) -> None:
+        page_path = write_page(root, "a", _open_actions() + _RENDER)
+
+        with routed(root):
+            [warning] = check_render_guarded_actions()
+
+        assert (warning.id, warning.obj) == ("next.W150", str(page_path))
+        assert "'first_open', 'second_open'" in warning.msg
+
+    def test_a_meta_guard_leaves_the_other_action(self, root) -> None:
+        write_page(root, "a", _open_actions(guard=", login_required=True") + _RENDER)
+
+        with routed(root):
+            [warning] = check_render_guarded_actions()
+
+        assert "'second_open'" not in warning.msg
+
+    @pytest.mark.parametrize(
+        ("declared", "render"),
+        [("page.login_required()\n", _RENDER), ("page.public()\n", _RENDER), ("", "")],
+        ids=["declared", "public", "no-render"],
+    )
+    def test_a_declaration_or_no_render_is_silent(
+        self, root, declared: str, render: str
+    ) -> None:
+        write_page(root, "a", _open_actions(declared) + render)
+
+        with routed(root):
+            assert check_render_guarded_actions() == []
+
+    def test_the_setting_is_silent(self, root) -> None:
+        write_page(root, "a", _open_actions() + _RENDER)
+
+        with routed(root, LOGIN_REQUIRED=True):
+            assert check_render_guarded_actions() == []
+
+    def test_a_shared_action_is_left_to_w129(self, root) -> None:
+        source = _open_actions().replace(
+            '@action("first_open")', '@action("first_open", scope="shared")'
+        )
+        write_page(root, "a", source + _RENDER)
+        write_guard(root / "elsewhere", _LOGIN_INHERIT)
+
+        with routed(root):
+            [warning] = check_render_guarded_actions()
+            assert "'first_open'" not in warning.msg
+            [public] = check_public_actions()
+
+        assert "'first_open'" in public.msg
+        assert "'second_open'" not in public.msg
+
+
 class TestGuardImports:
     """next.E017 reports a guarding `page.py` that raises while importing."""
 
@@ -880,7 +941,7 @@ class TestActionPages:
         with routed(root):
             Client().get("/")
             url = form_action_manager.get_action_url("ping", page_path=str(lone))
-            response = Client().post(url, {})
+            response = Client().post(url, {ORIGIN_FIELD_NAME: "/"})
 
         assert response.status_code == 204
 

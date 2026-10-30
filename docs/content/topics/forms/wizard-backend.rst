@@ -16,7 +16,7 @@ The backend contract
 
 ``next.forms.FormWizardBackend`` is an abstract base class with three methods.
 Each method receives the ``HttpRequest`` and the wizard storage id.
-The storage id is the ``snake_case`` of the wizard class name prefixed with a short hash of the declaring scope, the same page path or dotted module the registration uses, so equally named wizards in different apps never share a draft.
+The storage id is the ``snake_case`` of the wizard class name prefixed with a short hash of the declaring scope, the same tree-relative page path or dotted module the registration uses, so equally named wizards in different apps never share a draft.
 Backends treat the id as an opaque string.
 
 ``load(request, storage_id) -> dict``.

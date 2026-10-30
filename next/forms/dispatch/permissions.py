@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from django.core.exceptions import PermissionDenied
 from django.forms import BaseModelForm
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
 
 from next.caches import PageCache
 from next.forms.signals import form_access_denied
@@ -22,6 +22,7 @@ from next.pages.access import (
     page_access,
     url_lookup,
 )
+from next.pages.loaders import PAGE_MODULE, in_page_tree, load_page_module
 from next.permissions.access import declared, login_redirect, signed_in
 from next.permissions.manager import permission_manager
 from next.permissions.markers import OPEN, AccessRule, Requirement, joined
@@ -318,6 +319,84 @@ def _check_page_access(
         return None
     denial, _dynamic = page.authorization_outcome(
         origin_match.page_path, request, origin_match.origin, origin_match.url_kwargs
+    )
+    if denial is not None:
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="response", sender=sender
+        )
+    return denial
+
+
+def owner_page(file_path: object) -> Path | None:
+    """Return the `page.py` whose `render()` an action answers to, `None` without one.
+
+    A file of a page tree answers to the page of its directory, as for its rules.
+    """
+    if not isinstance(file_path, str):
+        return None
+    directory = Path(file_path).parent
+    if not in_page_tree(directory):
+        return None
+    owner = directory / PAGE_MODULE
+    module, _error = load_page_module(owner)
+    return owner if callable(getattr(module, "render", None)) else None
+
+
+def render_guard(file_path: object, scope: object) -> Path | None:
+    """Return the `owner_page` guarding a page-scoped action, None for a shared one."""
+    return owner_page(file_path) if scope == "page" else None
+
+
+_owner_pages: PageCache[str, tuple[AccessStamp, Path | None]] = PageCache()
+
+
+def _held_owner_page(file_path: object) -> Path | None:
+    """Return `owner_page`, one memo read while no page module has loaded again."""
+    stamp = access_stamp()
+    if stamp is None or not isinstance(file_path, str):
+        return owner_page(file_path)
+    held = _owner_pages.get(file_path)
+    if held is None or held[0] != stamp:
+        held = _owner_pages[file_path] = (stamp, owner_page(file_path))
+    return held[1]
+
+
+def _check_owner_page_access(
+    request: "HttpRequest",
+    file_path: object,
+    origin_match: "OriginMatch",
+    *,
+    scope: object,
+    action_name: str,
+    uid: str | None,
+    sender: type,
+) -> "HttpResponseBase | None":
+    """Return the owner page's own refusal of this action POST, or None.
+
+    Its `render()` guards a page-scoped action, refusing an origin outside its subtree.
+    """
+    owner = _held_owner_page(file_path) if scope == "page" else None
+    if owner is None:
+        return None
+    origin_page = origin_match.page_path
+    if origin_page is None:
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="denied", sender=sender
+        )
+        return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+    if not origin_page.parent.is_relative_to(owner.parent):
+        # The origin walks the tree as served, a symlinked directory included.
+        origin_page = origin_page.resolve()
+    if not origin_page.parent.is_relative_to(owner.parent):
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="denied", sender=sender
+        )
+        raise PermissionDenied
+    if origin_page == owner:
+        # The origin check already ran this page's `render()`.
+        return None
+    denial, _dynamic = page.authorization_outcome(
+        owner, request, origin_match.origin, origin_match.url_kwargs
     )
     if denial is not None:
         _emit_form_access_denied(

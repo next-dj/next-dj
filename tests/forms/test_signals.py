@@ -21,6 +21,7 @@ from next.forms.signals import (
     wizard_completed,
     wizard_step_submitted,
 )
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import (
     FormWizard,
     SessionFormWizardBackend,
@@ -410,7 +411,7 @@ class TestActionDispatchedWiring:
     ) -> None:
         """A handler without form_class fires the signal with response_status."""
         url = form_action_manager.get_action_url("test_no_form")
-        resp = client_no_csrf.post(url, data={})
+        resp = client_no_csrf.post(url, data={ORIGIN_FIELD_NAME: "/"})
         assert resp.status_code == 200
         assert len(capture_action_dispatched) == 1
         event = capture_action_dispatched.events[0]
@@ -429,7 +430,9 @@ class TestActionDispatchedWiring:
     ) -> None:
         """A valid bound form fires the signal after on_valid runs."""
         url = form_action_manager.get_action_url("simple_form_redirect")
-        resp = client_no_csrf.post(url, data={"name": "Alice"}, follow=False)
+        resp = client_no_csrf.post(
+            url, data={"name": "Alice", ORIGIN_FIELD_NAME: "/"}, follow=False
+        )
         assert resp.status_code == 302
         assert len(capture_action_dispatched) == 1
         event = capture_action_dispatched.events[0]
@@ -627,6 +630,12 @@ def _dispatch_probe(
     return FormActionDispatch.dispatch(backend, request, name, meta)
 
 
+def _probe_post() -> QueryDict:
+    post = QueryDict(mutable=True)
+    post[ORIGIN_FIELD_NAME] = "/"
+    return post
+
+
 class TestDispatchSignalSender:
     """Receivers filtering on `sender=FormActionDispatch` still get every signal.
 
@@ -649,7 +658,7 @@ class TestDispatchSignalSender:
                 handler=handler,
             )
         )
-        request = mock_http_request(method="POST", POST=QueryDict(mutable=True))
+        request = mock_http_request(method="POST", POST=_probe_post())
         with _dispatch_receiver(action_dispatched) as events:
             _dispatch_probe(backend, request, "sender_handler")
         assert len(events) == 1
@@ -668,10 +677,10 @@ class TestDispatchSignalSender:
                 form_class=SenderProbeForm,
             )
         )
-        request = mock_http_request(method="POST", POST=QueryDict(mutable=True))
+        request = mock_http_request(method="POST", POST=_probe_post())
         with _dispatch_receiver(form_validation_failed) as events:
             response = _dispatch_probe(backend, request, "sender_invalid")
-        assert response.status_code == 400
+        assert response.status_code == 200
         assert len(events) == 1
         assert events[0]["sender"] is FormActionDispatch
         assert events[0]["field_names"] == ("name",)
@@ -688,7 +697,7 @@ class TestDispatchSignalSender:
                 form_class=SenderDeniedForm,
             )
         )
-        request = mock_http_request(method="POST", POST=QueryDict(mutable=True))
+        request = mock_http_request(method="POST", POST=_probe_post())
         with _dispatch_receiver(form_access_denied) as events:
             response = _dispatch_probe(backend, request, "sender_denied")
         assert response.status_code == 403

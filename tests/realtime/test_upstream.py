@@ -502,6 +502,7 @@ def test_slow_handler_times_out_on_its_own_pool() -> None:
         override_settings(NEXT_FRAMEWORK=limits),
         ThreadPoolExecutor(1, thread_name_prefix="own") as pool,
         patch.object(handlers, "handler_pool", lambda: pool),
+        patch.object(handlers, "handler_workers", lambda: 8),
     ):
         acks = asyncio.run(scenario())
     assert sorted(ack["id"] for ack in acks) == ["0", "1", "2"]
@@ -551,6 +552,154 @@ def test_events_past_the_concurrency_are_refused_without_a_strike() -> None:
     limits = {"REALTIME": {"UPSTREAM": {"CONCURRENCY": 2}}}
     with override_settings(NEXT_FRAMEWORK=limits):
         asyncio.run(scenario())
+
+
+@contextmanager
+def _blocking() -> Iterator[tuple[threading.Event, threading.Event]]:
+    """Register a sync `block` handler that holds its thread until released."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    @on("room:{room}", "block")
+    def block(upstream: Upstream) -> None:
+        entered.set()
+        release.wait(5)
+
+    _register()
+    try:
+        yield entered, release
+    finally:
+        release.set()
+
+
+async def _until_ok(port: MemoryPort, name: str) -> dict[str, object]:
+    """Send `name` until its ack is no longer refused, the way a client retries."""
+    async with asyncio.timeout(5):
+        while True:
+            port.push_json(_up(name, id="retry"))
+            ack = await _frame(port)
+            if ack["ok"]:
+                return ack
+            assert ack["error"] == "limit"
+            await asyncio.sleep(0.01)
+
+
+_FAST = {"RATE": 1000, "BURST": 1000}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_timed_out_sync_handler_keeps_its_slot_until_it_returns() -> None:
+    first, second = _ticket(), _ticket()
+
+    async def scenario(entered: threading.Event, release: threading.Event) -> None:
+        loop = asyncio.get_running_loop()
+        clock = _LoopClock(loop)
+        port, other = MemoryPort(), MemoryPort()
+        with patch.object(loop, "time", clock):
+            _, task = await _open(port, first)
+            _, other_task = await _open(other, second)
+            port.push_json(_up("block", id="1"))
+            assert await asyncio.to_thread(entered.wait, 5)
+            clock.offset += 31
+            assert await _frame(port) == {
+                "type": "ack",
+                "id": "1",
+                "ok": False,
+                "error": "timeout",
+            }
+            for index, name in enumerate(["cursor", "typing", "cursor"], start=2):
+                port.push_json(_up(name, id=str(index)))
+                assert (await _frame(port))["error"] == "limit"
+            other.push_json(_up("typing", id="1"))
+            assert await _frame(other) == {"type": "ack", "id": "1", "ok": True}
+            release.set()
+            assert (await _until_ok(port, "cursor"))["ok"] is True
+            await _close(port, task)
+            await _close(other, other_task)
+        assert port.close_code is None
+
+    limits = {"REALTIME": {"UPSTREAM": {"TIMEOUT": 30, "CONCURRENCY": 1, **_FAST}}}
+    with override_settings(NEXT_FRAMEWORK=limits), _blocking() as (entered, release):
+        asyncio.run(scenario(entered, release))
+
+
+@pytest.mark.django_db(transaction=True)
+def test_one_connection_runs_sync_handlers_on_its_share_of_the_pool() -> None:
+    first, second = _ticket(), _ticket()
+
+    async def scenario(entered: threading.Event, release: threading.Event) -> None:
+        port, other = MemoryPort(), MemoryPort()
+        _, task = await _open(port, first)
+        _, other_task = await _open(other, second)
+        port.push_json(_up("block", id="1"))
+        assert await asyncio.to_thread(entered.wait, 5)
+        port.push_json(_up("typing", id="2"))
+        assert (await _frame(port))["error"] == "limit"
+        port.push_json(_up("cursor", id="3"))
+        assert await _frame(port) == {"type": "ack", "id": "3", "ok": True}
+        other.push_json(_up("typing", id="1"))
+        assert await _frame(other) == {"type": "ack", "id": "1", "ok": True}
+        release.set()
+        assert await _frame(port) == {"type": "ack", "id": "1", "ok": True}
+        port.push_json(_up("typing", id="4"))
+        assert await _frame(port) == {"type": "ack", "id": "4", "ok": True}
+        await _close(port, task)
+        await _close(other, other_task)
+        assert port.close_code is None
+
+    limits = {"REALTIME": {"UPSTREAM": _FAST}}
+    with (
+        override_settings(NEXT_FRAMEWORK=limits),
+        patch.object(handlers, "handler_workers", lambda: 2),
+        capture_signals(upstream_received, upstream_rejected) as recorder,
+        _blocking() as (entered, release),
+    ):
+        asyncio.run(scenario(entered, release))
+    assert _rejections(recorder) == ["limit"]
+    received = recorder.events_for(upstream_received)
+    assert [event.kwargs["upstream"].name for event in received].count("typing") == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_full_pool_refuses_sync_events_of_every_connection() -> None:
+    first, second = _ticket(), _ticket()
+    permits = threading.BoundedSemaphore(1)
+
+    async def scenario(entered: threading.Event, release: threading.Event) -> None:
+        port, other = MemoryPort(), MemoryPort()
+        _, task = await _open(port, first)
+        _, other_task = await _open(other, second)
+        port.push_json(_up("block", id="1"))
+        assert await asyncio.to_thread(entered.wait, 5)
+        other.push_json(_up("typing", id="1"))
+        assert await _frame(other) == {
+            "type": "ack",
+            "id": "1",
+            "ok": False,
+            "error": "limit",
+        }
+        other.push_json(_up("typing"))
+        assert await _frame(other) == {"type": "error", "code": "limit"}
+        other.push_json(_up("cursor", id="2"))
+        assert await _frame(other) == {"type": "ack", "id": "2", "ok": True}
+        release.set()
+        assert await _frame(port) == {"type": "ack", "id": "1", "ok": True}
+        other.push_json(_up("typing", id="3"))
+        assert await _frame(other) == {"type": "ack", "id": "3", "ok": True}
+        await _close(port, task)
+        await _close(other, other_task)
+        assert other.close_code is None
+
+    limits = {"REALTIME": {"UPSTREAM": _FAST}}
+    with (
+        override_settings(NEXT_FRAMEWORK=limits),
+        patch.object(handlers, "handler_threads", lambda: permits),
+        capture_signals(upstream_rejected) as recorder,
+        _blocking() as (entered, release),
+    ):
+        asyncio.run(scenario(entered, release))
+    assert _rejections(recorder) == ["limit", "limit"]
+    assert permits.acquire(blocking=False)
 
 
 @pytest.mark.django_db(transaction=True)

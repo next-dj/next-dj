@@ -1,6 +1,7 @@
 """Backend abstractions and in-memory registry for form actions."""
 
 import hashlib
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property
@@ -8,14 +9,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast, override
 from weakref import WeakSet
 
+from django.apps import apps
 from django.contrib.auth.decorators import login_not_required
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 from django.http import Http404
 from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
 
 from next.caches import BoundedCache
 from next.ports import partial_shaper_slot
+from next.utils import resolve_base_dir
 
 from .dispatch import FormActionDispatch
 from .dispatch.responses import ActionOutcome
@@ -31,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from django import forms as django_forms
+    from django.apps import AppConfig
     from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse, HttpResponseBase
     from django.urls import URLPattern
@@ -70,8 +74,69 @@ def file_to_dotted_module(file_path: str) -> str:
     return dotted
 
 
+def _relative_under(resolved: str, root: str) -> str | None:
+    """Return the posix path of `resolved` below the resolved `root`, or None."""
+    prefix = root if root.endswith(os.sep) else root + os.sep
+    if not resolved.startswith(prefix):
+        return None
+    return Path(resolved[len(prefix) :]).as_posix()
+
+
+_tree_key_cache: BoundedCache[str, str | None] = BoundedCache()
+
+
+def _tree_relative_key(resolved: str) -> str | None:
+    """Return `<app label>:<path>` or `:<path>` under BASE_DIR, None outside both.
+
+    The deepest installed app wins, as its label survives a move of the whole checkout.
+    """
+    if resolved in _tree_key_cache:
+        return _tree_key_cache[resolved]
+    try:
+        configs = apps.get_app_configs()
+    except AppRegistryNotReady:
+        return _tree_key_under(resolved, ())
+    key = _tree_key_under(resolved, configs)
+    _tree_key_cache[resolved] = key
+    return key
+
+
+def forget_tree_keys(*, setting: str, **kwargs) -> None:
+    """Drop the memoised tree keys when the app list or BASE_DIR behind them moves."""
+    if setting in {"INSTALLED_APPS", "BASE_DIR"}:
+        _tree_key_cache.clear()
+
+
+def _tree_key_under(resolved: str, configs: "Iterable[AppConfig]") -> str | None:
+    """Return the tree key of `resolved` among `configs`, else under BASE_DIR."""
+    best: tuple[int, str] | None = None
+    for config in configs:
+        root = _resolved_path_str(config.path)
+        relative = _relative_under(resolved, root)
+        if relative is not None and (best is None or len(root) > best[0]):
+            best = (len(root), f"{config.label}:{relative}")
+    if best is not None:
+        return best[1]
+    base_dir = resolve_base_dir()
+    if base_dir is None:
+        return None
+    relative = _relative_under(resolved, _resolved_path_str(str(base_dir)))
+    return None if relative is None else f":{relative}"
+
+
 def scope_key_for(file_path: str, scope: str) -> str:
-    """Return the registry scope key partitioning actions and wizard storage."""
+    """Return the scope key the action uid and wizard storage hash, stable across hosts.
+
+    A page file outside every app and BASE_DIR keeps its absolute path.
+    """
+    if scope == "page":
+        resolved = _resolved_path_str(file_path)
+        return _tree_relative_key(resolved) or resolved
+    return file_to_dotted_module(file_path)
+
+
+def _registry_key_for(file_path: str, scope: str) -> str:
+    """Return the in-process registry key, the absolute path a page lookup carries."""
     if scope == "page":
         return _resolved_path_str(file_path)
     return file_to_dotted_module(file_path)
@@ -393,9 +458,9 @@ class RegistryFormActionBackend(FormActionBackend):
         handler = registration.handler
         form_class = registration.form_class
         wizard_class = registration.wizard_class
-        scope_key = scope_key_for(file_path, scope)
+        scope_key = _registry_key_for(file_path, scope)
 
-        uid = _make_uid_for_action(scope_key, name)
+        uid = _make_uid_for_action(scope_key_for(file_path, scope), name)
         existing_key = self._uid_to_name.get(uid)
         if existing_key is not None and existing_key != (scope_key, name):
             msg = (

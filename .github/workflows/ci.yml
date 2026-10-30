@@ -18,8 +18,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-node@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
       with:
         node-version: 24
         cache: 'npm'
@@ -37,7 +37,7 @@ jobs:
     - name: Export locked e2e requirements
       run: uv export --no-hashes --only-group e2e --format requirements-txt --no-emit-project --output-file dist/requirements-e2e.txt
     - name: Upload dist artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: next-dj-dist
         path: dist/
@@ -60,17 +60,38 @@ jobs:
   test-compat:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - uses: ./.github/actions/setup-python-uv
     - name: Install compat dependencies
       run: uv sync --locked --group compat
     - name: Run ecosystem compatibility tests
       run: uv run pytest tests/compat -q --no-cov
 
+  # The matrix tests the wheel on a sparse checkout without next/client and docs/, so the
+  # tests that compare the core with those trees skip there and run here instead.
+  test-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+    - uses: ./.github/actions/setup-python-uv
+    - name: Run the tests that read the source checkout
+      run: uv run pytest tests/static/test_chunk_sync.py tests/checks/test_init.py --no-cov -rs --junitxml=source.xml
+    - name: Fail on a skipped test
+      run: |
+        uv run --no-sync python - <<'EOF'
+        import xml.etree.ElementTree as ET
+
+        root = ET.parse("source.xml").getroot()
+        skipped = sum(int(suite.get("skipped", 0)) for suite in root.iter("testsuite"))
+        if skipped:
+            raise SystemExit(f"::error::{skipped} source checkout test(s) skipped")
+        EOF
+
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - uses: ./.github/actions/setup-python-uv
     - name: Lint with ruff
       run: uv run ruff check next/
@@ -80,7 +101,7 @@ jobs:
   type-check:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - uses: ./.github/actions/setup-python-uv
     - name: Type check with mypy
       run: uv run mypy next/
@@ -88,7 +109,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
     - uses: ./.github/actions/setup-python-uv
     - name: Check for typos
       run: uv run pre-commit run typos --all-files
@@ -100,7 +121,7 @@ jobs:
     env:
       DJANGO_SETTINGS_MODULE: django.conf.global_settings
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: ./.github/actions/setup-python-uv
       - name: Check prose semantic newlines
         run: uv run python docs/prose_lint.py docs/content
@@ -116,8 +137,8 @@ jobs:
   test-js:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-node@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
       with:
         node-version: 24
         cache: 'npm'
@@ -152,7 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-    - uses: actions/checkout@v6
-    - uses: actions/dependency-review-action@v4
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+    - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
       with:
         fail-on-severity: moderate

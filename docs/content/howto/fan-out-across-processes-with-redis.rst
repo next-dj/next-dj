@@ -31,18 +31,21 @@ Install the optional broker dependency, which needs ``redis`` 8 or newer, and se
                    "PREFIX": "myapp:realtime",
                    "HEALTH_CHECK_INTERVAL": 10.0,
                    "CLIENT": {"max_connections": 200},
+                   "SUBSCRIBE_MAX_CONNECTIONS": 1000,
                },
            },
        },
    }
 
-The ``max_connections`` value is an example to size from measurement, see :ref:`deployment-capacity`.
+The ``max_connections`` and ``SUBSCRIBE_MAX_CONNECTIONS`` values are examples to size from measurement, see :ref:`deployment-capacity`.
 
 Run ``manage.py check`` in each deployment environment before serving requests.
 The check validates the configured backend and its options.
 It reports a missing Redis library as ``next.E179`` and a negative, infinite, or non-numeric ``HEALTH_CHECK_INTERVAL`` as ``next.E186``.
 It reports a ``CLIENT`` option that is not a mapping of keyword names, or that turns ``decode_responses`` off, as ``next.E187``.
 It reports an empty or non-string ``URL`` as ``next.E213``.
+It reports a ``SUBSCRIBE_MAX_CONNECTIONS`` that is not a positive integer as ``next.E216``.
+``manage.py check --deploy`` reports a broker with neither ``SUBSCRIBE_MAX_CONNECTIONS`` nor ``CLIENT['max_connections']`` as ``next.W151``.
 
 .. _howto-realtime-several-workers:
 
@@ -142,10 +145,14 @@ The broker builds the options in three layers.
 ``health_check_interval`` from ``HEALTH_CHECK_INTERVAL`` and ``socket_keepalive`` set to ``True`` come first, then ``CLIENT`` overrides them, and ``decode_responses`` stays ``True``, since a ``CLIENT`` that turns it off is refused as ``next.E187``.
 Use it for ``max_connections``, timeouts, or TLS settings.
 
-Every open WebSocket and SSE stream holds one Redis connection for its subscription.
-The default pool size is the one redis-py picks.
-A process with many open streams raises ``max_connections`` before it runs out.
-An exhausted pool ends the stream with ``BrokerConnectionError``, see :ref:`ref-realtime` for the warning it logs.
+The broker keeps two connection pools per process and per event loop.
+The command pool serves publish, positions, replay, and presence, and each call returns its connection when it finishes.
+The subscription pool serves streams, and every open WebSocket and SSE stream holds one of its connections for as long as it stays open.
+Open streams therefore never take a connection from publishing, however many of them a process holds.
+``SUBSCRIBE_MAX_CONNECTIONS`` caps the subscription pool, and without it the subscription pool takes ``CLIENT['max_connections']``, or the redis-py default of 100 when that is unset too.
+Size it to the open streams one process serves at its peak, with headroom for reconnects, since a stream that reconnects opens its new subscription before Redis drops the old one.
+A full subscription pool refuses the new stream with ``BrokerConnectionError``, so the WebSocket closes with ``1013`` and the SSE stream ends, and the browser reconnects later while the open streams keep running.
+The broker logs a warning that names ``SUBSCRIBE_MAX_CONNECTIONS`` each time, see :ref:`ref-realtime`.
 
 Secure the broker
 -----------------
@@ -180,8 +187,8 @@ A ping left unanswered until the next interval ends the stream, so a half-open T
 When the Redis client reconnects a subscription on its own, messages may have been lost in between, so the broker ends the stream rather than resuming it silently.
 The browser then reconnects, receives a fresh ``hello``, and requests its zones again.
 
-Under ASGI the broker keeps one asynchronous Redis client per running event loop, so a client never crosses loops.
-Synchronous publishers and WSGI streams share one blocking client pool.
+Under ASGI the broker keeps an asynchronous command client and stream client per running event loop, so a client never crosses loops.
+Synchronous publishers use a blocking command pool and WSGI streams a blocking stream pool of their own.
 A reconnecting stream replays what it missed from the log when the log still covers the gap.
 Otherwise the client recovers current state by refreshing the affected zones through its own page view.
 See :doc:`/content/topics/realtime` for delivery semantics and topic payload rules.

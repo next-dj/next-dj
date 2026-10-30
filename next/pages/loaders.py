@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, ClassVar, Final, override
 from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
+from next.introspect import refuse_async
 from next.pages.errors import PageModuleImportError
 from next.permissions.access import declarations
 from next.utils import (
@@ -173,7 +174,7 @@ class AncestorStamps:
 def has_load_errors() -> bool:
     """Whether the latest load of any `page.py` failed.
 
-    The per-request fail-loud check calls it first, so a site without one runs no stat.
+    The page access chain calls it first, so a site without one runs no stat.
     """
     return bool(_FAILED_PATHS)
 
@@ -202,8 +203,15 @@ def load_page_module(
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Execute `file_path` as a fresh page module, raising whatever its body raises."""
-    return exec_module_file(file_path, "page_module")
+    """Execute `file_path` as a fresh page module, raising whatever its body raises.
+
+    An async `render` raises here too, so the refusal runs once per load.
+    """
+    module = exec_module_file(file_path, "page_module")
+    render = getattr(module, "render", None)
+    if callable(render):
+        refuse_async(render, "page.py render")
+    return module
 
 
 def _remember(file_path: Path, load: _PageLoad) -> None:
