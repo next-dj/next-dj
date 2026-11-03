@@ -32,45 +32,28 @@ type ActionsSnapshot = tuple[tuple[FormActionBackend, object], ...]
 _version_counter = itertools.count(1)
 """Process-wide source of form-action versions, so no two managers share one."""
 
-_FORM_HOOKS: tuple[str, ...] = (
-    "get_initial",
-    "get_form_kwargs",
-    "check_permissions",
-    "has_object_permission",
-    "on_valid",
-    "get_success_message",
-)
-"""Form methods the dispatcher calls, each refused at registration when async."""
 
-_WIZARD_HOOKS: tuple[str, ...] = (
-    "check_permissions",
-    "get_steps",
-    "get_form_kwargs",
-    "done",
-    "get_success_message",
-)
-"""Wizard methods the dispatcher calls, each refused at registration when async."""
-
-
-def _refuse_async_hooks(target: type, hooks: tuple[str, ...]) -> None:
-    """Refuse every hook of `target` among `hooks` that is declared `async def`."""
-    for hook in hooks:
-        method = getattr(target, hook, None)
-        if callable(method):
-            refuse_async(method, f"{target.__name__} hook")
+_DUCK_TYPED_HOOKS: tuple[str, ...] = ("get_initial", "get_success_message")
+"""Hooks dispatch calls on any form class, a plain Django form included."""
 
 
 def _refuse_async_registration(registration: "ActionRegistration") -> None:
-    """Refuse an async handler, form hook or wizard hook before it is registered."""
+    """Refuse an async handler, form class factory or duck-typed form hook.
+
+    The next form bases refuse their own hooks earlier, when their class is created.
+    """
     if registration.handler is not None:
         refuse_async(registration.handler, "@action handler")
     form_class = registration.form_class
-    if isinstance(form_class, type):
-        _refuse_async_hooks(form_class, _FORM_HOOKS)
-    elif form_class is not None:
+    if form_class is None:
+        return
+    if not isinstance(form_class, type):
         refuse_async(form_class, "@action form_class factory")
-    if registration.wizard_class is not None:
-        _refuse_async_hooks(registration.wizard_class, _WIZARD_HOOKS)
+        return
+    for hook in _DUCK_TYPED_HOOKS:
+        method = getattr(form_class, hook, None)
+        if callable(method):
+            refuse_async(method, f"{form_class.__name__} hook")
 
 
 class FormActionManager(BackendListManager[FormActionBackend]):

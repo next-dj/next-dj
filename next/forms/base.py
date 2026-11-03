@@ -21,7 +21,7 @@ from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.deps import render_dep_cache
 from next.deps.objects import scoped_model, scoped_row
-from next.introspect import defining_file
+from next.introspect import defining_file, refuse_async
 
 from .backends import (
     ActionGuard,
@@ -310,6 +310,16 @@ def _stamp_hook_flag(base_hook: object, override_hook: object) -> bool:
     return _hook_func(override_hook) is not _hook_func(base_hook)
 
 
+def _refuse_async_hooks(cls: type, hooks: tuple[str, ...]) -> None:
+    """Refuse every hook among `hooks` that `cls` declares as `async def`."""
+    for hook in hooks:
+        refuse_async(getattr(cls, hook), f"{cls.__name__} hook")
+
+
+_FORM_HOOKS: Final = ("get_initial", "get_success_message", "on_valid")
+"""Hooks both form bases declare, each refused at class creation when async."""
+
+
 class _PermissionHooks:
     """Opt-in DI-resolved permission gates layered over the static ActionGuard.
 
@@ -323,6 +333,7 @@ class _PermissionHooks:
     def __init_subclass__(cls, **kwargs) -> None:
         """Stamp the per-subclass hook-presence flags via __func__ identity."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(cls, ("check_permissions", "has_object_permission"))
         cls._has_check_permissions = _stamp_hook_flag(
             _PermissionHooks.check_permissions, cls.check_permissions
         )
@@ -359,6 +370,7 @@ class _FormKwargsHook:
     def __init_subclass__(cls, **kwargs) -> None:
         """Stamp the per-subclass hook-presence flag via __func__ identity."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(cls, ("get_form_kwargs",))
         cls._has_get_form_kwargs = _stamp_hook_flag(
             _FormKwargsHook.get_form_kwargs, cls.get_form_kwargs
         )
@@ -387,6 +399,7 @@ class BaseForm(_FormKwargsHook, _PermissionHooks, DjangoBaseForm):
     def __init_subclass__(cls, **kwargs) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(cls, _FORM_HOOKS)
         _auto_register_form_class(cls)
         _validate_instance_from_url(cls, is_model_form=False)
 
@@ -416,6 +429,7 @@ class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
     def __init_subclass__(cls, **kwargs) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(cls, _FORM_HOOKS)
         _auto_register_form_class(cls)
         _validate_instance_from_url(cls, is_model_form=True)
 

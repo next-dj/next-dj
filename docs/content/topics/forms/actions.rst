@@ -604,7 +604,9 @@ The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name
 Page scope.
    ``scope_key`` is ``<app label>:<path>`` with the path of the declaring ``page.py`` or ``component.py`` inside the deepest installed app that holds it.
    A file in no installed app gives ``:<path>`` with its path below ``BASE_DIR``, and a file outside both keeps its absolute path.
-   The UID therefore survives a deploy into another directory, such as a blue/green switch or a new ``releases/<timestamp>`` checkout, and changes only when the file moves inside the project.
+   For a file inside an installed app or ``BASE_DIR``, the UID survives a deploy into another directory, such as a blue/green switch or a new ``releases/<timestamp>`` checkout.
+   For a file outside both, moving its checkout can change the UID.
+   Moving a file inside the project or changing its derived action name changes the UID.
 
 Shared scope.
    ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.

@@ -16,7 +16,7 @@ from next.caches import LruCache
 from next.introspect import describe_callable, refuse_async
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
-from .context import RESERVED_KEYS, ResolutionContext
+from .context import RECEIVER_NAMES, RESERVED_KEYS, ResolutionContext
 from .errors import DependencyCycleError, UnknownDependencyError
 from .introspect import (
     HINT_ERRORS,
@@ -204,7 +204,7 @@ class DependencyResolver:
 
         Public as the `compile_plan` predicate, which a subclass may widen.
         """
-        return param.name in ("self", "cls") or param.kind in (
+        return param.name in RECEIVER_NAMES or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
         )

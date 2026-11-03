@@ -43,7 +43,7 @@ class TestZoneScopedContext:
             page_path, "a", counting_provider(calls, "a"), zone="a"
         )
 
-        result = registry.collect_context(page_path, _requested_zones=frozenset({"b"}))
+        result = registry.collect_context(page_path, requested_zones=frozenset({"b"}))
 
         assert calls == []
         assert "a" not in result.context_data
@@ -57,24 +57,24 @@ class TestZoneScopedContext:
             page_path, "a", counting_provider(calls, "a"), zone="a"
         )
 
-        result = registry.collect_context(page_path, _requested_zones=frozenset({"a"}))
+        result = registry.collect_context(page_path, requested_zones=frozenset({"a"}))
 
         assert calls == ["a"]
         assert result.context_data["a"] == "a-value"
 
     @pytest.mark.parametrize(
-        "_requested_zones",
+        "requested_zones",
         [None, frozenset(), frozenset({"a"}), frozenset({"a", "b"})],
         ids=["full_render", "empty_batch", "single_zone", "batch"],
     )
     def test_zone_less_provider_runs_for_every_batch(
-        self, registry, page_path, _requested_zones
+        self, registry, page_path, requested_zones
     ) -> None:
         """An untagged provider stays unconditional, an empty batch included."""
         calls: list[str] = []
         registry.register_context(page_path, "plain", counting_provider(calls, "plain"))
 
-        result = registry.collect_context(page_path, _requested_zones=_requested_zones)
+        result = registry.collect_context(page_path, requested_zones=requested_zones)
 
         assert calls == ["plain"]
         assert result.context_data["plain"] == "plain-value"
@@ -93,7 +93,7 @@ class TestZoneScopedContext:
         )
 
         result = registry.collect_context(
-            page_path, _requested_zones=frozenset({"a", "b"})
+            page_path, requested_zones=frozenset({"a", "b"})
         )
 
         assert sorted(calls) == ["a", "b"]
@@ -128,10 +128,10 @@ class TestZoneScopedContext:
 
         declaring_file = defining_file(scoped)
         own = page_instance.build_render_context(
-            declaring_file, _requested_zones=frozenset({"a"})
+            declaring_file, requested_zones=frozenset({"a"})
         )
         foreign = page_instance.build_render_context(
-            declaring_file, _requested_zones=frozenset({"b"})
+            declaring_file, requested_zones=frozenset({"b"})
         )
 
         assert own["scoped"] == "scoped-value"
@@ -147,7 +147,7 @@ class TestZoneScopedContext:
             return "plain-value"
 
         context_data = page_instance.build_render_context(
-            defining_file(plain), _requested_zones=frozenset({"b"})
+            defining_file(plain), requested_zones=frozenset({"b"})
         )
 
         assert context_data["plain"] == "plain-value"
@@ -164,10 +164,10 @@ class TestRequestedZonesStaysOutOfTheContext:
             page_path, "a", lambda: "a-value", serialize=True, zone="a"
         )
 
-        result = registry.collect_context(page_path, _requested_zones=frozenset({"a"}))
+        result = registry.collect_context(page_path, requested_zones=frozenset({"a"}))
 
-        assert "_requested_zones" not in result.context_data
-        assert "_requested_zones" not in result.js_context
+        assert "requested_zones" not in result.context_data
+        assert "requested_zones" not in result.js_context
 
     def test_render_context_never_exposes_the_batch(
         self, page_instance, tmp_path
@@ -179,11 +179,11 @@ class TestRequestedZonesStaysOutOfTheContext:
         )
 
         context_data = page_instance.build_render_context(
-            page_path, _requested_zones=frozenset({"a"})
+            page_path, requested_zones=frozenset({"a"})
         )
 
-        assert "_requested_zones" not in context_data
-        assert "_requested_zones" not in context_data["_next_js_context"]
+        assert "requested_zones" not in context_data
+        assert "requested_zones" not in context_data["_next_js_context"]
 
 
 class TestUrlKwargNamedLikeTheBatch:
@@ -200,7 +200,7 @@ class TestUrlKwargNamedLikeTheBatch:
             page_path, "a", counting_provider(calls, "a"), zone="a"
         )
 
-        result = registry.collect_context(page_path, requested_zones="abc")
+        result = registry.collect_context(page_path, {"requested_zones": "abc"})
 
         assert calls == ["a"]
         assert result.context_data["a"] == "a-value"
@@ -218,7 +218,9 @@ class TestUrlKwargNamedLikeTheBatch:
         )
 
         context_data = page_instance.build_render_context(
-            page_path, _requested_zones=frozenset({"a"}), requested_zones="abc"
+            page_path,
+            url_kwargs={"requested_zones": "abc"},
+            requested_zones=frozenset({"a"}),
         )
 
         assert context_data["requested_zones"] == "abc"

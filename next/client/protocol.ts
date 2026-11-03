@@ -49,6 +49,21 @@ export function requestTimeout(raw: unknown): number {
     : REQUEST_TIMEOUT_MS;
 }
 
+// Settle with work or reject on abort, so even a transport ignoring the signal ends.
+export function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const stop = (): void =>
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("aborted", "AbortError"),
+      );
+    if (signal.aborted) stop();
+    signal.addEventListener("abort", stop, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 /**
  * Whether a click on a link is the plain activation the runtime may take over.
  *

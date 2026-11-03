@@ -157,9 +157,9 @@ class TestComposedTemplateCache:
         page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
         (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
-        page_instance.render(page_file, title="One")
+        page_instance.render(page_file, url_kwargs={"title": "One"})
         compiled = page_instance._templates.compiled[page_file]
-        result = page_instance.render(page_file, title="Two")
+        result = page_instance.render(page_file, url_kwargs={"title": "Two"})
         assert page_instance._templates.compiled[page_file] is compiled
         assert "<h1>Two</h1>" in result
 
@@ -171,10 +171,10 @@ class TestComposedTemplateCache:
         page_file.write_text("x = 1")
         djx = tmp_path / "template.djx"
         djx.write_text("<h1>{{ title }}</h1>")
-        page_instance.render(page_file, title="One")
+        page_instance.render(page_file, url_kwargs={"title": "One"})
         compiled = page_instance._templates.compiled[page_file]
         djx.write_text("<h2>{{ title }}</h2>")
-        result = page_instance.render(page_file, title="Two")
+        result = page_instance.render(page_file, url_kwargs={"title": "Two"})
         assert page_instance._templates.compiled[page_file] is not compiled
         assert "<h2>Two</h2>" in result
 
@@ -280,7 +280,7 @@ class TestStaticFastPathView:
         reference = Page()
         body = reference._load_static_body(page_file, module)
         slow = reference._render_composed(
-            page_file, body, request, _dep_cache={}, title="Hi"
+            page_file, body, request, {"title": "Hi"}, dep_cache={}
         )
         assert fast == slow
         assert fast == "<html><main><h1>Hi</h1></main></html>"
@@ -632,7 +632,7 @@ class TestTemplateStalenessGate:
         """The snapshot is taken without the watch, so a later watch can compare."""
         page_file = build_nested_page(tmp_path)
 
-        page_instance.render(page_file, title="One")
+        page_instance.render(page_file, url_kwargs={"title": "One"})
 
         assert page_file in page_instance._templates.composed_sources
 
@@ -642,12 +642,12 @@ class TestTemplateStalenessGate:
         """An entry composed with the watch off goes stale once the watch comes on."""
         page_file = build_nested_page(tmp_path)
         template_file = page_file.parent / "template.djx"
-        page_instance.render(page_file, title="One")
+        page_instance.render(page_file, url_kwargs={"title": "One"})
 
         template_file.write_text("TWO")
         os.utime(template_file, (time.time() + 1, time.time() + 1))
         with override_settings(DEBUG=True):
-            rendered = page_instance.render(page_file, title="One")
+            rendered = page_instance.render(page_file, url_kwargs={"title": "One"})
 
         assert "TWO" in rendered
 
@@ -657,7 +657,7 @@ class TestTemplateStalenessGate:
         """The dev loop keeps the snapshot the staleness check reads."""
         page_file = build_nested_page(tmp_path)
 
-        page_instance.render(page_file, title="One")
+        page_instance.render(page_file, url_kwargs={"title": "One"})
 
         assert page_file in page_instance._templates.composed_sources
 
@@ -667,12 +667,12 @@ class TestTemplateStalenessGate:
         """A checkout moving a layout mtime backwards drops the composed caches."""
         page_file = build_nested_page(tmp_path)
         layout_file = tmp_path / "layout.djx"
-        page_instance.render(page_file, title="One")
+        page_instance.render(page_file, url_kwargs={"title": "One"})
 
         layout_file.write_text("<html data-old>{% template %}</html>")
         older = time.time() - 60
         os.utime(layout_file, (older, older))
-        rendered = page_instance.render(page_file, title="One")
+        rendered = page_instance.render(page_file, url_kwargs={"title": "One"})
 
         assert "data-old" in rendered
 
@@ -852,3 +852,53 @@ class TestFullPageResponseDeclaresItsNegotiation:
 
         varied = {value.strip() for value in response.headers["Vary"].split(",")}
         assert set(VARY_HEADERS) <= varied
+
+
+_RENDER_ARGUMENT_NAMES = (
+    "dep_cache",
+    "file_path",
+    "namespace",
+    "requested_zones",
+    "url_kwargs",
+)
+
+
+class TestRenderArgumentNamesAsUrlKwargs:
+    """A URL kwarg named after a render pipeline argument reaches the page intact."""
+
+    @pytest.mark.parametrize("name", _RENDER_ARGUMENT_NAMES)
+    def test_a_static_page_renders_the_value(
+        self, page_instance, tmp_path, name
+    ) -> None:
+        page_file = build_nested_page(tmp_path, body=f"<h1>{{{{ {name} }}}}</h1>")
+        view = unified_view(page_instance, page_file)
+
+        response = view(build_page_request(), **{name: "v"})
+
+        assert response.content.decode() == "<html><main><h1>v</h1></main></html>"
+
+    @pytest.mark.parametrize("name", _RENDER_ARGUMENT_NAMES)
+    def test_a_dynamic_page_receives_the_value(
+        self, page_instance, tmp_path, name
+    ) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            f"def render({name}: str) -> str:\n    return '<p>' + {name}\n"
+        )
+        view = unified_view(page_instance, page_file)
+
+        response = view(build_page_request(), **{name: "v"})
+
+        assert response.content.decode() == "<p>v"
+
+    @pytest.mark.parametrize("name", _RENDER_ARGUMENT_NAMES)
+    def test_a_zone_tick_renders_the_value(self, page_instance, tmp_path, name) -> None:
+        body = f'{{% zone "z" %}}<p>{{{{ {name} }}}}</p>{{% endzone %}}'
+        page_file = build_nested_page(tmp_path, body=body)
+        view = unified_view(page_instance, page_file)
+
+        response = view(build_zone_request("z"), **{name: "v"})
+
+        assert envelope_of(response).html_for_zone("z") == (
+            '<div data-next-zone="z"><p>v</p></div>'
+        )

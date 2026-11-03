@@ -165,11 +165,19 @@ A tracked path that no longer stats counts as a change, so a deleted ``layout.dj
 A filesystem stamps mtimes from a coarse clock, so a write landing in the tick a snapshot shares leaves the mtime it recorded unchanged.
 The snapshot therefore treats a recent mtime as unsure, the way Git treats a racily clean index entry, through ``next.utils.snapshot_mtime_ns``.
 An mtime within ``RACY_MTIME_WINDOW_NS``, ten milliseconds, of the moment it is read is recorded as ``UNSETTLED_MTIME_NS``, a value no later stat matches.
+A cache holding such a snapshot compares through ``next.utils.stamp_fresh``, which reads the current mtime raw and never accepts an unsettled snapshot, so two unsettled reads never pass as equal.
+The composed and skeleton snapshots, the layout stamps of a static asset plan, and the layouts held above a page tree all compare this way.
 The next read finds the entry stale and composes again, and once the sources age past the window the new snapshot holds their real mtimes.
 A ``layout.djx`` created in the same tick as the snapshot thus reaches the next request, and the check on a warm read stays one ``stat`` per tracked path.
 
+The memos keyed by the mtime of a single file keep the raw mtime as the key and record beside it, through ``next.utils.mtime_settled``, whether that mtime had left the window before the read.
+The layout texts, the layout root scans, and the page module memo serve an entry only when its key matches and that flag is set.
+An unsure entry is read, lexed, or executed again on every call and stored again, until its mtime ages past the window and the stored entry is trusted.
+A ``page.py`` still in that window also compiles from its source, bypassing ``__pycache__``, since a same-size rewrite in one tick keeps both fields a ``.pyc`` is validated by.
+A layout rewritten as a root in the tick of its last read therefore cuts the chain on the next request, and a warm hit costs one ``stat`` and no clock read.
+
 ``Page.clear_template_caches`` drops all of them in one call.
-The layout texts and the page module memo are keyed by the mtime of the file alone, so a rewrite that keeps that mtime is invisible to them, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
+A rewrite whose mtime is set back to a settled value stays invisible to these memos, which is why ``next.testing.reset_page_cache`` calls it between renders of a file rewritten in place.
 The same call runs ``forget_layout_texts``, which drops two memos that ``layout_chain`` and composition share.
 One keeps the source of each layout and the other the answer to whether it is a root, both under the mtime of the file.
 A layout is therefore read and lexed once for the root check, the composition, and the snapshot, until its mtime moves.
@@ -200,6 +208,7 @@ Context resolution
 ``Page.build_render_context`` assembles the template scope in this order.
 
 1. URL kwargs from the matched route are seeded into the context dict.
+   They travel the render pipeline as one ``url_kwargs`` mapping beside the framework arguments, so no route name collides with ``file_path``, ``dep_cache`` or ``requested_zones``.
 2. ``PageContextRegistry.collect_context`` runs in two sub-steps.
 
    a. Inherited context.

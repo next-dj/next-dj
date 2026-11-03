@@ -26,6 +26,7 @@ from .base import (
     _meta_guard,
     _meta_requires_runtime,
     _meta_transport,
+    _refuse_async_hooks,
     _registration_gate,
     _stamp_hook_flag,
     _to_snake_case,
@@ -330,6 +331,16 @@ class FormWizard:
     def __init_subclass__(cls, **kwargs) -> None:
         """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(
+            cls,
+            (
+                "check_permissions",
+                "get_steps",
+                "get_form_kwargs",
+                "done",
+                "get_success_message",
+            ),
+        )
         cls._has_check_permissions = _stamp_hook_flag(
             FormWizard.check_permissions, cls.check_permissions
         )

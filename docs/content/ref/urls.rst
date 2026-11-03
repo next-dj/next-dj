@@ -148,7 +148,8 @@ Errors
 ``URLParameterError`` is the base of every bracket-segment refusal, and it carries the refused ``param_name``, the ``url_path`` it sat in, and the ``file_path`` that ``with_file`` fills in.
 ``DuplicateURLParameterError`` covers a normalised parameter name repeated within one route and a second ``[[wildcard]]`` segment.
 ``InvalidURLParameterError`` covers a name that is no Python identifier once a hyphen is read as an underscore, which :func:`~django.urls.path` refuses while it compiles the route.
-``ReservedURLParameterError`` subclasses it for a name the page, form, and component calls pass beside the URL kwargs themselves.
+``ReservedURLParameterError`` subclasses it for a name dependency injection reserves, the ``RESERVED_KEYS`` of :doc:`deps` and the receiver names ``self`` and ``cls``.
+The render pipeline carries the URL kwargs as one mapping, so a name such as ``file_path`` or ``namespace`` stays free for a route.
 
 All four names are exported from ``next.urls``.
 The refusals share the ``URLParameterError`` base, so a caller catches one on its own or every one through the base, and ``with_file`` clones the refusal past its constructor so a parser subclass is free to declare one of its own shape.
@@ -329,7 +330,7 @@ Checks
    Reports :ref:`next.E014 <ref-system-checks>` when the conflict comparison itself raises.
 
 ``check_reserved_url_parameters``.
-   Fails with :ref:`next.E217 <ref-system-checks>` when a bracket segment takes a name the framework passes to page, form and component callables itself, such as ``form``, ``request`` or ``file_path``.
+   Fails with :ref:`next.E217 <ref-system-checks>` when a bracket segment takes a name dependency injection reserves, such as ``form``, ``request`` or ``self``.
    ``check_url_patterns`` leaves that refusal to this check, so it surfaces once.
 
 ``check_reverse_name_collisions``.

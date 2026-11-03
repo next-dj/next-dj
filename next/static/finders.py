@@ -23,7 +23,7 @@ from next.pages.watch import (
     get_page_root_keys_for_watch,
     get_template_djx_paths_for_watch,
 )
-from next.utils import settled_mtime_ns, stat_mtime_ns, template_edits_watched
+from next.utils import settled_mtime_ns, stamps_fresh, template_edits_watched
 
 from .assets import StaticNamespace, default_kinds
 from .discovery import PageRootKeys, PathResolver, default_stems, find_role_files
@@ -367,9 +367,7 @@ def _scan_stale(scan: _Scan, roots: _ScanRoots) -> bool:
         return True
     if not watched:
         return False
-    return any(
-        stat_mtime_ns(directory) != mtime for directory, mtime in scan.directories
-    )
+    return not stamps_fresh(scan.directories)
 
 
 class NextStaticFilesFinder(BaseFinder):

@@ -28,7 +28,7 @@ from next.seeding import (
     REQUEST_KEY,
     TEMPLATE_PATH_KEY,
 )
-from next.utils import stat_mtime_ns, template_edits_watched
+from next.utils import snapshot_mtime_ns, stamp_fresh, template_edits_watched
 
 from .context import component
 from .errors import ComponentModuleImportError
@@ -142,7 +142,7 @@ def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
     for candidate in (info.template_path, info.module_path):
         if candidate is None or candidate in mtimes:
             continue
-        mtime_ns = stat_mtime_ns(candidate)
+        mtime_ns = snapshot_mtime_ns(candidate)
         if mtime_ns is not None:
             mtimes[candidate] = mtime_ns
     return mtimes
@@ -182,9 +182,9 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
             self._compiled.clear()
 
     def _is_fresh(self, entry: _CompiledTemplate) -> bool:
-        if not template_edits_watched():
-            return True
-        return stat_mtime_ns(entry.source_path) == entry.mtime_ns
+        return not template_edits_watched() or stamp_fresh(
+            entry.mtime_ns, entry.source_path
+        )
 
     def _compile(self, key: _SourceKey, info: ComponentInfo) -> Template | None:
         mtimes = _source_mtimes(info)
@@ -197,7 +197,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         # A subclass may read a file `ComponentInfo` does not name, so stat it here.
         mtime_ns = mtimes.get(source.path)
         if mtime_ns is None:
-            mtime_ns = stat_mtime_ns(source.path)
+            mtime_ns = snapshot_mtime_ns(source.path)
         if mtime_ns is None:
             # Without an mtime the entry could never expire, so it is not kept.
             self._drop(key)

@@ -1,12 +1,13 @@
 import errno
 import logging
+import os
 import types
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from django.http import HttpRequest
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 from next.pages.responses import NO_STORE, cache_control
 from next.seo import RobotsRule
@@ -160,6 +161,22 @@ class TestTextFile:
         path.write_bytes(b"two\n")
         touch_later(path)
         assert source.read() == b"two\n"
+
+    def test_a_same_tick_rewrite_is_read_while_edits_are_watched(
+        self, tmp_path
+    ) -> None:
+        path = tmp_path / "robots.txt"
+        path.write_bytes(b"one\n")
+        stamp = path.stat().st_mtime_ns
+        source = TextFile(path)
+        with (
+            patch("next.utils.time_ns", return_value=stamp + 1),
+            override_settings(DEBUG=True),
+        ):
+            assert source.read() == b"one\n"
+            path.write_bytes(b"two\n")
+            os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+            assert source.read() == b"two\n"
 
     def test_the_memo_answers_while_the_mtime_stands(self, tmp_path) -> None:
         path = tmp_path / "robots.txt"

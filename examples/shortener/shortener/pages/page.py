@@ -2,7 +2,7 @@ from pathlib import Path
 
 from django import forms
 from django.http import HttpRequest, HttpResponse
-from fragments import render_fragment
+from next_dj_examples_shared.fragments import render_fragment
 from shortener.cache import pending_clicks
 from shortener.models import Link
 from shortener.services import create_link, latest_links

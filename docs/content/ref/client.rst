@@ -138,9 +138,10 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
      - ``{envelope}``, the parsed envelope with a mutable op list.
        The veto lives on the document event of the same name, not here.
    * - ``partial:applied``
-     - ``{envelope, ok, nodes}``.
+     - ``{envelope, ok, nodes, stale?}``.
        ``ok`` is ``false`` when any op threw or named an unknown verb, so a listener tells a clean apply from a degraded one that still mounted what did change.
        ``nodes`` are the elements the ops inserted or morphed, the roots the mount pass ran over.
+       ``stale`` is ``true`` when a newer request superseded the envelope while its stylesheets loaded, so no op ran, ``ok`` is ``false``, and ``nodes`` is empty.
    * - ``partial:error``
      - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered``.
        ``csrf`` means a deferred token could not be fetched, so the mutation never left.
@@ -277,8 +278,10 @@ The partial surface
      - Send one partial request through the queues and the per-uid lock, and resolve with its `Outcome`_ once the reply is applied.
        Network, HTTP, and parse failures surface as ``partial:error`` and as an outcome rather than as a rejection.
        A mutation sent while its uid is locked is not sent and resolves as ``dropped``.
-       A request still unanswered after 30 seconds is aborted, fires ``partial:error`` of kind ``network`` with its ``url``, resolves as ``error``, and frees its lock.
-       A ``$timeout`` key of the init payload sets that deadline in milliseconds for every request of the page, and ``0`` turns it off, while the framework writes no such key itself.
+       An HTTP request still unanswered after its deadline is aborted, fires ``partial:error`` of kind ``network`` with its ``url``, resolves as ``error``, and frees its lock.
+       The default deadline is 30 seconds.
+       A ``$timeout`` key of the init payload sets it in milliseconds for every HTTP request of the page, and ``0`` turns it off, while the framework writes no such key itself.
+       A WebSocket tunnel has its own timeout, and the HTTP deadline starts after the tunnel step.
        ``navigate: false`` keeps the page on a redirect, or on a non-envelope reply to a GET, and resolves its URL in ``location`` instead of navigating there.
        A zone GET refused with 403 or 404 publishes ``partial:error`` of kind ``http`` with the status and the body before the runtime navigates to the page, and a redirect to the login page navigates without the event.
        The request goes to an absolute URL on the page's own origin with ``mode: "same-origin"``, and a URL off that origin is refused unsent with a ``partial:error`` of kind ``network``.
@@ -686,7 +689,12 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
        intent: { zone?: string; uid?: string };
      };
      "partial:before-apply": { envelope: Envelope };
-     "partial:applied": { envelope: Envelope; ok: boolean; nodes: readonly Element[] };
+     "partial:applied": {
+       envelope: Envelope;
+       ok: boolean;
+       nodes: readonly Element[];
+       stale?: true;
+     };
      "partial:error": PartialError;
      "partial:layer-opened": { opener: HTMLElement | null };
      "partial:layer-accepted": { result: unknown };

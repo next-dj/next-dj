@@ -25,7 +25,10 @@ from next.utils import (
     classify_dirs_entries,
     exec_module_file,
     is_within,
+    mtime_settled,
     resolve_base_dir,
+    settled_mtime_ns,
+    stamps_fresh,
     stat_mtime_ns,
     template_edits_watched,
 )
@@ -64,6 +67,7 @@ class _PageLoad:
     """
 
     mtime_ns: int
+    sure: bool
     module: types.ModuleType | None
     error: Exception | None
 
@@ -128,6 +132,7 @@ class AncestorStamps:
     watched: bool
     generation: int = -1
     stamps: tuple[int | None, ...] = ()
+    sure: bool = False
 
     @classmethod
     def begin(cls, file_path: Path) -> AncestorStamps:
@@ -150,7 +155,9 @@ class AncestorStamps:
         if module_stamps(self.paths) != stamps:
             generation = -1
         modules = tuple(None if load is None else load.module for load in loads)
-        return replace(self, generation=generation, stamps=stamps), modules
+        sure = all(load is None or load.sure for load in loads)
+        held = replace(self, generation=generation, stamps=stamps, sure=sure)
+        return held, modules
 
     def revalidated(self) -> AncestorStamps | None:
         """Return the stamps while no ancestor has reloaded, otherwise `None`.
@@ -158,7 +165,11 @@ class AncestorStamps:
         Watched template edits reload each ancestor, so an edit takes effect at once.
         """
         watched = template_edits_watched()
-        if self.version != _version.value or self.watched is not watched:
+        if (
+            not self.sure
+            or self.version != _version.value
+            or self.watched is not watched
+        ):
             return None
         if watched:
             loads = tuple(map(_page_load, self.paths))
@@ -260,10 +271,11 @@ def _page_load(file_path: Path) -> _PageLoad | None:
         return None
 
     cached = _MODULE_MEMO.get(file_path)
-    if cached is not None and cached.mtime_ns == mtime_ns:
+    if cached is not None and cached.mtime_ns == mtime_ns and cached.sure:
         # Not reordered, since it runs up to three times per dispatch.
         return cached
 
+    sure = mtime_settled(mtime_ns)
     try:
         with declarations.collecting(file_path):
             module = _load_python_module(file_path)
@@ -273,9 +285,9 @@ def _page_load(file_path: Path) -> _PageLoad | None:
             _forget(file_path)
             return None
         logger.exception("Could not import page module %s", file_path)
-        load = _PageLoad(mtime_ns, None, exc)
+        load = _PageLoad(mtime_ns, sure, None, exc)
     else:
-        load = _PageLoad(mtime_ns, module, None)
+        load = _PageLoad(mtime_ns, sure, module, None)
     _remember(file_path, load)
     return load
 
@@ -548,12 +560,9 @@ def _above_tree(tree_root: Path, room: int) -> tuple[tuple[Path, int], ...]:
     A process watching template edits walks again, so a layout added later shows.
     """
     key = (tree_root, room)
+    watched = template_edits_watched()
     held = _ABOVE_TREE.get(key)
-    if (
-        held is not None
-        and not template_edits_watched()
-        and all(stat_mtime_ns(path) == mtime for path, mtime in held)
-    ):
+    if held is not None and not watched and stamps_fresh(held):
         return held
     found: list[tuple[Path, int]] = []
     # The filesystem root is the last ancestor and holds no layout.
@@ -562,7 +571,9 @@ def _above_tree(tree_root: Path, room: int) -> tuple[tuple[Path, int], ...]:
         if layout is not None:
             found.append(layout)
     layouts = tuple(found)
-    _ABOVE_TREE[key] = layouts
+    # A raw mtime a later write may share would pass `stamps_fresh`, so it is not held.
+    if not watched and all(mtime_settled(mtime_ns) for _, mtime_ns in layouts):
+        _ABOVE_TREE[key] = layouts
     return layouts
 
 
@@ -675,12 +686,15 @@ def layout_chain(
 def layout_stamps(
     file_path: Path, tree_root: Path | None = None
 ) -> tuple[tuple[Path, int | None], ...]:
-    """Return the cut layouts of `file_path` with their stat'd mtimes.
+    """Return the cut layouts of `file_path` with the mtimes a snapshot keeps.
 
     A `tree_root` only says where to hold the tail, so any ancestor yields one chain.
     """
     layouts, _, mtimes = _walk(file_path, 0, tree_root=tree_root)
-    return tuple(zip(layouts, mtimes, strict=True))
+    stamps = (
+        None if mtime_ns is None else settled_mtime_ns(mtime_ns) for mtime_ns in mtimes
+    )
+    return tuple(zip(layouts, stamps, strict=True))
 
 
 def _as_placeholder_fallback(body: str) -> str:
@@ -691,8 +705,20 @@ def _as_placeholder_fallback(body: str) -> str:
     return f"{PLACEHOLDER_OPEN}{body}{PLACEHOLDER_CLOSE}"
 
 
-_LAYOUT_TEXTS: PageCache[Path, tuple[int, str]] = PageCache()
-_LAYOUT_ROOTS: PageCache[Path, tuple[int, RootScan]] = PageCache()
+@dataclass(frozen=True, slots=True)
+class _Held[T]:
+    """A value read from a file under its raw mtime, and whether that mtime had settled.
+
+    The raw mtime stays the key, so an unsure entry is replaced and never shared.
+    """
+
+    mtime_ns: int
+    sure: bool
+    value: T
+
+
+_LAYOUT_TEXTS: PageCache[Path, _Held[str]] = PageCache()
+_LAYOUT_ROOTS: PageCache[Path, _Held[RootScan]] = PageCache()
 
 
 def template_source(source: Path) -> str | None:
@@ -703,23 +729,25 @@ def template_source(source: Path) -> str | None:
     mtime_ns = stat_mtime_ns(source)
     if mtime_ns is None:
         return None
-    return _text_at(source, mtime_ns)
+    held = _held_text(source, mtime_ns)
+    return None if held is None else held.value
 
 
-def _text_at(source: Path, mtime_ns: int) -> str | None:
-    """Return the text of `source` held for `mtime_ns`, reading it on a miss.
+def _held_text(source: Path, mtime_ns: int) -> _Held[str] | None:
+    """Return the text of `source` held for `mtime_ns`, reading an unsure one again.
 
     The BOM a Windows editor writes is dropped, so it never lands inside a page.
     """
     held = _LAYOUT_TEXTS.get(source)
-    if held is not None and held[0] == mtime_ns:
-        return held[1]
+    if held is not None and held.mtime_ns == mtime_ns and held.sure:
+        return held
+    sure = mtime_settled(mtime_ns)
     try:
         text = source.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None
-    _LAYOUT_TEXTS[source] = (mtime_ns, text)
-    return text
+    held = _LAYOUT_TEXTS[source] = _Held(mtime_ns, sure, text)
+    return held
 
 
 def forget_layout_texts() -> None:
@@ -741,13 +769,13 @@ def layout_root_scan(layout_file: Path) -> RootScan | None:
 def _scan_at(layout_file: Path, mtime_ns: int) -> RootScan | None:
     """Return the root scan of `layout_file` read at `mtime_ns`, lexing it on a miss."""
     held = _LAYOUT_ROOTS.get(layout_file)
-    if held is not None and held[0] == mtime_ns:
-        return held[1]
-    content = _text_at(layout_file, mtime_ns)
+    if held is not None and held.mtime_ns == mtime_ns and held.sure:
+        return held.value
+    content = _held_text(layout_file, mtime_ns)
     if content is None:
         return None
-    scan = scan_root(content)
-    _LAYOUT_ROOTS[layout_file] = (mtime_ns, scan)
+    scan = scan_root(content.value)
+    _LAYOUT_ROOTS[layout_file] = _Held(mtime_ns, content.sure, scan)
     return scan
 
 

@@ -314,6 +314,8 @@ interface ApplyState {
 export interface ApplyOptions {
   snapshot?: number | undefined;
   key?: string | undefined;
+  // A safe GET may be superseded while its CSS loads, before its ops run.
+  isCurrent?: (() => boolean) | undefined;
   // The page a safe zone GET fetched, scoping its zone patches to that page.
   page?: string | undefined;
   // The page a meta op belongs to, apart from page so a stream never scopes zones.
@@ -325,6 +327,8 @@ export interface ApplyOptions {
 export interface Applied {
   envelope: Envelope;
   ok: boolean;
+  // Set when isCurrent refused the ops, so the caller reports a drop, not a result.
+  stale?: boolean;
 }
 
 export interface ApplyDeps {
@@ -505,7 +509,16 @@ export class Applier {
       head: undefined,
       intents: [],
     };
-    const runOps = (): void => this.#runOps(envelope, state, done);
+    const runOps = (): void => {
+      if (options.isCurrent?.() === false) {
+        // partial:before-apply has fired, so a partial:applied still closes the pair.
+        const stale = { envelope, ok: false, nodes: [], stale: true };
+        this.#emit("partial:applied", stale, false);
+        done?.(stale);
+        return;
+      }
+      this.#runOps(envelope, state, done);
+    };
     const assets = this.#assets();
     if (assets !== undefined) {
       assets.loadCss(envelope.assets, runOps);

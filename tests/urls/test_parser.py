@@ -7,6 +7,7 @@ from django.urls import path
 
 import next.urls
 from next.deps import RESERVED_KEYS
+from next.deps.context import RECEIVER_NAMES
 from next.urls import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
@@ -14,7 +15,6 @@ from next.urls import (
     URLParameterError,
     URLPatternParser,
 )
-from next.urls.parser import RESERVED_ROUTE_NAMES
 
 
 def _noop_view(request):
@@ -224,9 +224,9 @@ class TestDuplicateURLParameterError:
 
 
 class TestReservedNames:
-    """A bracket name the framework passes beside the URL kwargs is refused."""
+    """A bracket name dependency injection reserves is refused."""
 
-    @pytest.mark.parametrize("name", sorted(RESERVED_ROUTE_NAMES))
+    @pytest.mark.parametrize("name", sorted(RESERVED_KEYS | RECEIVER_NAMES))
     @pytest.mark.parametrize("shape", ["x/[{}]", "x/[int:{}]", "x/[[{}]]"])
     def test_a_reserved_name_raises(self, url_parser, name, shape) -> None:
         """Every bracket form answers with the reserved refusal."""
@@ -234,16 +234,23 @@ class TestReservedNames:
         with pytest.raises(ReservedURLParameterError) as excinfo:
             url_parser.parse_url_pattern(url_path)
         assert excinfo.value.param_name == name
-        assert "the framework passes" in str(excinfo.value)
+        assert "dependency injection reserves" in str(excinfo.value)
 
     def test_the_name_is_read_after_normalisation(self, url_parser) -> None:
         """A hyphenated directory reaches the page as the reserved underscore name."""
         with pytest.raises(ReservedURLParameterError):
-            url_parser.parse_url_pattern("x/[file-path]")
+            url_parser.parse_url_pattern("x/[cleaned-data]")
 
-    def test_the_resolver_keys_are_reserved(self) -> None:
-        """The names the DI resolver strips from the URL kwargs are all refused."""
-        assert RESERVED_KEYS <= RESERVED_ROUTE_NAMES
+    @pytest.mark.parametrize(
+        "name", ["dep_cache", "file_path", "namespace", "requested_zones", "url_kwargs"]
+    )
+    def test_a_render_pipeline_argument_name_is_routable(
+        self, url_parser, name
+    ) -> None:
+        """URL kwargs travel as one mapping, so a render argument name is free."""
+        pattern, params = url_parser.parse_url_pattern(f"x/[{name}]")
+        assert pattern == f"x/<str:{name}>/"
+        assert params == {name: name}
 
     def test_is_an_invalid_parameter(self) -> None:
         """A caller catching the invalid refusal catches the reserved one too."""

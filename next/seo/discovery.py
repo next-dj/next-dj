@@ -8,17 +8,22 @@ from __future__ import annotations
 import re
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from django.apps import apps
 from django.utils.text import slugify
 
 from next.discovery import routed_page_trees
 from next.pages.access import routed_pages
 from next.pages.responses import cache_control
 from next.urls.manager import router_manager, seo_routes_version
-from next.utils import TreeSource, load_tree_source, stat_mtime_ns, walk_page_tree
+from next.utils import (
+    TreeSource,
+    app_holding,
+    load_tree_source,
+    snapshot_mtime_ns,
+    stamps_fresh,
+    walk_page_tree,
+)
 
 from .errors import SeoSourceImportError
 from .registry import sitemap_items_registry
@@ -27,6 +32,7 @@ from .registry import sitemap_items_registry
 if TYPE_CHECKING:
     import types
     from collections.abc import Iterable, Mapping
+    from pathlib import Path
 
     from next.pages.responses import CacheControl
     from next.urls import RouterManager
@@ -71,7 +77,7 @@ class SeoRoot:
     robots: SeoSource | None = None
     robots_file: Path | None = None
     skip_names: frozenset[str] = frozenset()
-    stamps: tuple[int | None, ...] = ()
+    stamps: tuple[tuple[Path, int | None], ...] = ()
 
     @property
     def path(self) -> Path:
@@ -99,12 +105,12 @@ class SeoRoot:
 
     def stale(self) -> bool:
         """Whether a source file was created, deleted or modified since discovery."""
-        return source_stamps(self.path) != self.stamps
+        return not stamps_fresh(self.stamps)
 
 
-def source_stamps(tree: Path) -> tuple[int | None, ...]:
-    """Return the mtime of each SEO source at the top of `tree`, `None` where absent."""
-    return tuple(stat_mtime_ns(tree / name) for name in SOURCE_NAMES)
+def source_stamps(tree: Path) -> tuple[tuple[Path, int | None], ...]:
+    """Snapshot each SEO source at the top of `tree`, `None` where it is absent."""
+    return tuple((tree / name, snapshot_mtime_ns(tree / name)) for name in SOURCE_NAMES)
 
 
 def load_source(path: Path) -> SeoSource | None:
@@ -132,23 +138,10 @@ def declared_cache(module: types.ModuleType) -> CacheControl | None:
     return None if callable(value) else cache_control(value)
 
 
-def _app_label_for(path: Path) -> str | None:
-    """Return the label of the innermost installed app whose directory holds `path`."""
-    resolved = path.resolve()
-    holding = [
-        (len(app_path.parts), str(config.label))
-        for config in apps.get_app_configs()
-        if resolved.is_relative_to(app_path := Path(config.path).resolve())
-    ]
-    return max(holding)[1] if holding else None
-
-
 def tree_label(path: Path) -> str:
     """Return the stable name of a page tree, its app label or else its directory."""
-    label = _app_label_for(path)
-    if label is None:
-        label = slugify(path.name) or "root"
-    return label
+    held = app_holding(path)
+    return (slugify(path.name) or "root") if held is None else held[0]
 
 
 def unique_labels(labels: Iterable[str]) -> list[str]:

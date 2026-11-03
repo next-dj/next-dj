@@ -452,6 +452,21 @@ class TestAsyncDisconnectCleanup:
         assert source.finalized is True
         assert closed.events[0]["envelopes_sent"] == 0
 
+    def test_a_failed_pull_does_not_strand_the_stall_watch(
+        self, async_request_obj: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        async def scenario() -> asyncio.Task[None]:
+            loop = asyncio.get_running_loop()
+            pull: asyncio.Future[Patches] = loop.create_future()
+            pull.set_exception(ConnectionError("broker gone"))
+            watch = asyncio.create_task(asyncio.sleep(3600))
+            stream = PatchEventStream(async_request_obj, _PlainAsyncSource(0))
+            await stream._cleanup_async((pull, watch), _PlainAsyncSource(0))
+            return watch
+
+        assert asyncio.run(scenario()).cancelled() is True
+        assert "SSE source failed on disconnect" in caplog.text
+
 
 class _PlainAsyncSource:
     """Async source whose iterator is a plain object, not a generator."""
@@ -739,6 +754,20 @@ class _EndlessSource:
             self.finalized = True
 
 
+class _FailingCloseEndlessSource(_EndlessSource):
+    """Endless source whose close fails while a client is stalled."""
+
+    async def _iterate(self) -> AsyncIterator[Patches]:
+        """Yield one patch, then raise while the stream is being closed."""
+        try:
+            yield _patches()
+            await asyncio.Event().wait()
+        finally:
+            self.finalized = True
+            msg = "broker gone"
+            raise ConnectionError(msg)
+
+
 class TestStalledWriter:
     """A client that stops reading is dropped once a write blocks past a heartbeat."""
 
@@ -764,6 +793,25 @@ class TestStalledWriter:
         assert send.bodies == [b"retry: 3000\n\n"]
         assert source.finalized
         assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+
+    def test_a_failing_source_close_still_cancels_a_blocked_send(
+        self, async_request_obj: object
+    ) -> None:
+        source = _FailingCloseEndlessSource()
+
+        async def scenario() -> tuple[asyncio.Task[None], StalledSend]:
+            response = PatchEventStream(
+                async_request_obj, source, heartbeat_seconds=0.01
+            )
+            send = StalledSend(delivered=1)
+            task = await serve_stream(response, send, within=0.5)
+            assert task.done()
+            assert source.finalized
+            return task, send
+
+        task, send = asyncio.run(scenario())
+        assert send.blocked.is_set()
+        assert task.cancelled() or isinstance(task.exception(), ConnectionError)
 
     def test_a_reading_client_outlives_many_heartbeats(
         self, async_request_obj: object

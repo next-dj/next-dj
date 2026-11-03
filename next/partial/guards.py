@@ -31,7 +31,12 @@ from next.components.sources import Position, TemplateWalk
 from next.interpolation import Interpolation
 from next.pages.paths import page_template_path
 from next.permissions.nodes import HasPermNode
-from next.utils import child_nodelists, template_edits_watched
+from next.utils import (
+    child_nodelists,
+    snapshot_mtime_ns,
+    stamps_fresh,
+    template_edits_watched,
+)
 
 from .zone import ZoneNode, zones_under
 
@@ -41,10 +46,10 @@ if TYPE_CHECKING:
     from next.components.renderers import TemplateSource
 
 
-type Stamps = frozenset[tuple[Path, float]]
+type Stamps = frozenset[tuple[Path, int | None]]
 """The files an answer read, each with the modification time it was read at."""
 
-type _Read = set[tuple[Path, float]]
+type _Read = set[tuple[Path, int | None]]
 type _Placed = list[tuple[Node, bool]]
 
 _CONDITIONS: Final = (IfNode, ForNode, HasPermNode)
@@ -71,18 +76,6 @@ class _Verdict:
 
 
 _verdicts: BoundedCache[tuple[Path, Path, str, str], _Verdict] = BoundedCache()
-
-
-def fresh(stamps: Stamps) -> bool:
-    """Return whether every file an answer read is unchanged since it was read."""
-    return all(_mtime(path) == mtime for path, mtime in stamps)
-
-
-def _mtime(path: Path) -> float:
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return -1.0
 
 
 def _root(value: object) -> str | None:
@@ -251,7 +244,7 @@ class _Closure(TemplateWalk):
 
     @override
     def read(self, path: Path) -> None:
-        self.stamps.add((path, _mtime(path)))
+        self.stamps.add((path, snapshot_mtime_ns(path)))
 
 
 def _template_source(
@@ -292,7 +285,9 @@ class Components:
             return True
         key = (self._anchor, source.path, source.text, part)
         verdict = _verdicts.get(key)
-        if verdict is None or (template_edits_watched() and not fresh(verdict.stamps)):
+        if verdict is None or (
+            template_edits_watched() and not stamps_fresh(verdict.stamps)
+        ):
             closure = _Closure(self._manager, self._anchor)
             guarding = closure.component(source, Position())
             if not guarding:
@@ -365,11 +360,4 @@ def bound_zones(nodelist: NodeList, components: Components) -> frozenset[str]:
     return frozenset(guarded.union(zones_under(nodelist, _CONDITIONS)))
 
 
-__all__ = [
-    "Components",
-    "Stamps",
-    "bound_zones",
-    "fresh",
-    "guarded_zones",
-    "opaque_zones",
-]
+__all__ = ["Components", "Stamps", "bound_zones", "guarded_zones", "opaque_zones"]

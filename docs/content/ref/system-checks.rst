@@ -361,7 +361,8 @@ Errors
      - ``next.urls.checks``
    * - ``next.E029``
      - A keyless ``@context`` callable is not annotated as returning a dict.
-       The check reads the context registry, so it catches ``@context``, ``@page.context``, an aliased import, and ``async def`` alike.
+       The check reads the context registry, so it catches ``@context``, ``@page.context``, and an aliased import.
+       An async context callable is rejected at registration with ``next.E218``.
      - ``next.pages.checks.contexts``
    * - ``next.E030``
      - A router cannot report its page trees, because ``page_roots`` raised or answered something other than ``PageRoot`` entries.
@@ -1065,7 +1066,8 @@ Errors
        The broker refuses it with ``ImproperlyConfigured`` when it is built, so the check reports it before the first request.
      - ``next.realtime.redis.broker``
    * - ``next.E217``
-     - A bracket segment such as ``[form]``, ``[request]`` or ``[file_path]`` takes a name the framework passes to page, form and component callables itself.
+     - A bracket segment such as ``[form]``, ``[request]`` or ``[self]`` takes a name dependency injection reserves, so no callable parameter of that name receives the URL value.
+       The reserved names are the ``RESERVED_KEYS`` of ``next.deps`` and the receiver names ``self`` and ``cls`` the resolver never injects.
        The router refuses the route with ``ReservedURLParameterError`` and leaves the page unrouted, and the hint lists every reserved name to rename the directory away from.
      - ``next.urls.checks``
    * - ``next.E218``

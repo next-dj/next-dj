@@ -105,7 +105,7 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
         )
         prepare_page_render(policy, request)
         response = HttpResponse(
-            page.render(file_path, request, _dep_cache=dep_cache, **kwargs)
+            page.render(file_path, request, kwargs, dep_cache=dep_cache)
         )
         finish_response(response, policy, request, file_path)
         shaper.set_vary(response)
@@ -140,7 +140,7 @@ def _resolving_view(
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
         resolution = page._resolve_page_body(
-            file_path, active_module, request, _dep_cache=dep_cache, **kwargs
+            file_path, active_module, request, kwargs, dep_cache=dep_cache
         )
         built = resolution.http_response
         if intent.zones:
@@ -168,9 +168,7 @@ def _resolving_view(
             return _finish_render_response(built, policy, request, file_path, shaper)
         body = resolution.body if resolution.body is not None else ""
         response = HttpResponse(
-            page._render_composed(
-                file_path, body, request, _dep_cache=dep_cache, **kwargs
-            )
+            page._render_composed(file_path, body, request, kwargs, dep_cache=dep_cache)
         )
         finish_response(response, policy, request, file_path)
         shaper.set_vary(response)

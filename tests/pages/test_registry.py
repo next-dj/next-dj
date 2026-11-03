@@ -936,7 +936,7 @@ class TestZoneBatchWithInheritedChain:
         context_manager.register_context(child, "table", lambda: "rows", zone="table")
 
         result = context_manager.collect_context(
-            child, _requested_zones=frozenset({"other"})
+            child, requested_zones=frozenset({"other"})
         )
 
         assert result.context_data == {"shared": "inherited", "always": "own"}
@@ -953,10 +953,10 @@ class TestZoneBatchWithInheritedChain:
         builds = _count_chain_builds(monkeypatch)
 
         first = context_manager.collect_context(
-            child, _requested_zones=frozenset({"table"})
+            child, requested_zones=frozenset({"table"})
         )
         second = context_manager.collect_context(
-            child, _requested_zones=frozenset({"other"})
+            child, requested_zones=frozenset({"other"})
         )
 
         assert builds == [child]
@@ -1003,7 +1003,9 @@ class TestInheritedResolution:
         )
         context_manager.register_context(shop, "offers", offers, inherit_context=True)
 
-        result = context_manager.collect_context(offer, category="shoes")
+        result = context_manager.collect_context(
+            offer, url_kwargs={"category": "shoes"}
+        )
 
         assert [type(value) for value in seen] == [_Category]
         assert result.context_data["offers"] == ["shoes-1"]
@@ -1043,7 +1045,7 @@ class TestInheritedResolution:
             shop, "category", category, inherit_context=True
         )
 
-        result = context_manager.collect_context(shop, category="shoes")
+        result = context_manager.collect_context(shop, url_kwargs={"category": "shoes"})
 
         assert received == ["shoes"]
         assert result.context_data["category"].slug == "shoes"
@@ -1063,7 +1065,7 @@ class TestInheritedResolution:
             shop, "category", category, inherit_context=True
         )
 
-        context_manager.collect_context(offer, category="shoes")
+        context_manager.collect_context(offer, url_kwargs={"category": "shoes"})
 
         assert calls == ["shoes"]
 
@@ -1182,7 +1184,7 @@ class TestInheritedResolution:
         context_manager.register_context(polls, "poll", poll, inherit_context=True)
         context_manager.register_context(polls, "live_results", live_results)
 
-        result = context_manager.collect_context(polls, pk="7")
+        result = context_manager.collect_context(polls, url_kwargs={"pk": "7"})
 
         assert calls == ["7"]
         assert result.context_data["live_results"] == "results of 7"

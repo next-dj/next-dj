@@ -35,7 +35,7 @@ def render_page(
     """
     target = Path(file_path) if not isinstance(file_path, Path) else file_path
     req = request if request is not None else RequestFactory().get("/")
-    return page.render(target, req, **url_kwargs)
+    return page.render(target, req, url_kwargs)
 
 
 def render_component_by_name(

@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 from pathlib import Path
 from types import ModuleType
@@ -224,10 +225,10 @@ class TestSourceStamps:
 
     def test_the_stamps_follow_the_source_names(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", robots="")
-        stamps = source_stamps(root)
-        assert len(stamps) == len(SOURCE_NAMES)
-        assert stamps[SOURCE_NAMES.index("robots.py")] is not None
-        assert stamps[SOURCE_NAMES.index("sitemap.py")] is None
+        stamps = dict(source_stamps(root))
+        assert list(stamps) == [root / name for name in SOURCE_NAMES]
+        assert stamps[root / "robots.py"] is not None
+        assert stamps[root / "sitemap.py"] is None
 
     def test_a_new_file_makes_the_tree_stale(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages")
@@ -236,6 +237,22 @@ class TestSourceStamps:
         assert not seo_root.stale()
         (root / "robots.txt").write_bytes(b"User-agent: *\n")
         assert seo_root.stale()
+
+    def test_a_same_tick_rewrite_is_stale_while_edits_are_watched(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="section = 'old'\n")
+        path = root / "sitemap.py"
+        stamp = path.stat().st_mtime_ns
+        with (
+            patch("next.utils.time_ns", return_value=stamp + 1),
+            override_settings(DEBUG=True),
+            routed(root),
+        ):
+            [seo_root] = _roots()
+            path.write_text("section = 'new'\n")
+            os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+            assert seo_root.stale()
 
 
 class TestPageTreeRoots:

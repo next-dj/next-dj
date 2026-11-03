@@ -72,8 +72,8 @@ _GROUP_CLASH_HINT = (
 _RESERVED_SEGMENT_ID = "next.E217"
 
 _RESERVED_SEGMENT_HINT = (
-    "Rename the bracket directory. The framework passes these names to page, form "
-    f"and component callables itself: {', '.join(sorted(RESERVED_ROUTE_NAMES))}."
+    "Rename the bracket directory. Dependency injection reserves these names: "
+    f"{', '.join(sorted(RESERVED_ROUTE_NAMES))}."
 )
 
 type _TreeKey = tuple[Path, str, str]

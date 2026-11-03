@@ -161,7 +161,7 @@ class TestPageRenderedSignal:
         page_file = tmp_path / "page.py"
         page_inst.register_template(page_file, "<p>{{ x }}</p>")
         capture_page_rendered.clear()  # clear the template_loaded-induced events
-        page_inst.render(page_file, x="hello")
+        page_inst.render(page_file, url_kwargs={"x": "hello"})
         assert len(capture_page_rendered) == 1
 
     def test_sender_is_page_class(
@@ -207,7 +207,7 @@ class TestPageRenderedSignal:
         page_file = tmp_path / "page.py"
         page_inst.register_template(page_file, "<p>{{ greeting }}</p>")
         capture_page_rendered.clear()
-        page_inst.render(page_file, greeting="hi")
+        page_inst.render(page_file, url_kwargs={"greeting": "hi"})
         event = capture_page_rendered.events[0]
         assert isinstance(event.kwargs["duration_ms"], float)
         assert event.kwargs["duration_ms"] >= 0

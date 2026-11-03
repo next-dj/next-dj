@@ -1,6 +1,6 @@
 import copy
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -38,6 +38,7 @@ from next.forms.manager import (
 )
 from next.forms.registration import registration_diagnostics
 from next.pages.loaders import load_page_module
+from next.utils import forget_app_holdings
 from tests.support import isolated_form_registries
 from tests.support.pages import write_page
 
@@ -1347,6 +1348,12 @@ def _fake_app(label: str, path: Path) -> SimpleNamespace:
 
 class TestScopeKeyFor:
     """scope_key_for keys page scope by tree-relative path and shared by module."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_app_roots(self) -> Iterator[None]:
+        forget_app_holdings(setting="INSTALLED_APPS")
+        yield
+        forget_app_holdings(setting="INSTALLED_APPS")
 
     def test_page_under_base_dir_is_keyed_by_its_relative_path(
         self, settings, tmp_path

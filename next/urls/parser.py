@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar, Final
 from uuid import UUID
 
 from next.deps import RESERVED_KEYS
+from next.deps.context import RECEIVER_NAMES
 from next.utils import ROUTE_BRACKET_PATTERN, normalise_route_name
 
 from .errors import (
@@ -26,10 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-# Names the page, form and component call paths pass by keyword beside the URL kwargs.
-RESERVED_ROUTE_NAMES: Final[frozenset[str]] = RESERVED_KEYS | frozenset(
-    {"cls", "dep_cache", "file_path", "self", "_dep_cache", "_requested_zones"}
-)
+# A callable parameter of one of these names never receives a URL value of that name.
+RESERVED_ROUTE_NAMES: Final[frozenset[str]] = RESERVED_KEYS | RECEIVER_NAMES
 
 
 def _coerce_bool(text: str) -> bool:

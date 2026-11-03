@@ -1,7 +1,10 @@
 import logging
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 
 from next.scripts import Script, ScriptsSourceImportError
 from next.scripts.discovery import SCRIPTS_MODULE, load_scripts, source_stale
@@ -101,3 +104,17 @@ class TestSourceStale:
         assert source_stale(None, tmp_path)
         path.unlink()
         assert source_stale(source, tmp_path)
+
+    def test_a_same_tick_rewrite_is_stale_while_edits_are_watched(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path, "scripts = ()\n")
+        stamp = path.stat().st_mtime_ns
+        with (
+            patch("next.utils.time_ns", return_value=stamp + 1),
+            override_settings(DEBUG=True),
+        ):
+            source = load_scripts(tmp_path)
+            path.write_text("scripts = ('new',)\n")
+            os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+            assert source_stale(source, tmp_path)

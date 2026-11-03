@@ -52,19 +52,27 @@ class TestAsyncActionRefusal:
         with pytest.raises(AsyncCallableError, match='Form hook "body"'):
             type(f"Async{hook.title()}Form", (Form,), {hook: method})
 
-    def test_async_hook_of_an_action_form_class_is_refused(self) -> None:
-        class DraftForm(Form):
-            class Meta:
-                abstract = True
+    def test_async_hook_of_an_unregistered_form_is_refused(self) -> None:
+        with pytest.raises(AsyncCallableError, match='DraftForm hook "on_valid"'):
 
-            async def on_valid(self, request: HttpRequest) -> None:
-                return None
+            class DraftForm(Form):
+                class Meta:
+                    abstract = True
+
+                async def on_valid(self, request: HttpRequest) -> None:
+                    return None
+
+    def test_async_hook_of_a_plain_django_form_is_refused(self) -> None:
+        class PlainForm(django_forms.Form):
+            @classmethod
+            async def get_initial(cls) -> dict[str, object]:
+                return {}
 
         def save(request: HttpRequest) -> HttpResponse:
             return HttpResponse()
 
-        with pytest.raises(AsyncCallableError, match='DraftForm hook "on_valid"'):
-            action("save_draft", form_class=DraftForm)(save)
+        with pytest.raises(AsyncCallableError, match='PlainForm hook "get_initial"'):
+            action("save_plain", form_class=PlainForm)(save)
 
     def test_async_form_class_factory_is_refused(self) -> None:
         async def build_form(request: HttpRequest) -> type[Form]:

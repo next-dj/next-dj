@@ -99,8 +99,11 @@ class _Stall:
             pending, consumer = self._pending, self._consumer
             if pending is not None and pending == seen and consumer is not None:
                 logger.info("SSE stream dropped a client that stopped reading")
-                await drop()
-                consumer.cancel()
+                try:
+                    await drop()
+                finally:
+                    # A broken source close must not leave the send blocked forever.
+                    consumer.cancel()
                 return
             seen = pending
 
@@ -261,13 +264,18 @@ class PatchStreamWriter(StreamingHttpResponse):
     ) -> None:
         """Cancel an in-flight pull and the stall watch, then close the source.
 
-        A disconnect throws mid-pull, so both tasks are cancelled and `aclose` run.
+        All tasks are cancelled before any is awaited, so a failed pull strands none.
         """
-        for future in pending:
-            if future is not None:
-                future.cancel()
-                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
-                    await future
+        futures = [future for future in pending if future is not None]
+        for future in futures:
+            future.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            outcomes = await asyncio.gather(*futures, return_exceptions=True)
+            for outcome in outcomes:
+                if isinstance(outcome, Exception) and not isinstance(
+                    outcome, StopAsyncIteration
+                ):
+                    logger.warning("SSE source failed on disconnect", exc_info=outcome)
         aclose = getattr(iterator, "aclose", None)
         if callable(aclose):
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):

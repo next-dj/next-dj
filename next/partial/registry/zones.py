@@ -9,11 +9,11 @@ from django.template import Template, TemplateDoesNotExist, TemplateSyntaxError
 from next.components.manager import components_manager
 from next.pages import page
 from next.pages.loaders import LayoutTemplateLoader
-from next.partial.guards import Components, Stamps, bound_zones, fresh
+from next.partial.guards import Components, Stamps, bound_zones
 from next.partial.headers import partial_intent
 from next.partial.signals import zone_registered
 from next.partial.zone import ZoneNode
-from next.utils import template_edits_watched
+from next.utils import stamps_fresh, template_edits_watched
 
 
 if TYPE_CHECKING:
@@ -102,7 +102,11 @@ def zones_of(template: "Template", page_path: "Path") -> "Mapping[str, ZoneInfo]
     """
     cached = _zone_cache.get(template)
     if cached is not None:
-        if not cached.stamps or not template_edits_watched() or fresh(cached.stamps):
+        if (
+            not cached.stamps
+            or not template_edits_watched()
+            or stamps_fresh(cached.stamps)
+        ):
             return cached.zones
         bound, stamps = _bound(template, page_path)
         rebuilt = {

@@ -47,6 +47,7 @@ function makeWire(
   opts: {
     version?: string;
     csrf?: CsrfPayload;
+    csrfSource?: CsrfSource;
     ensure?: CsrfSource["ensure"];
     session?: SessionStore;
     applied?: boolean;
@@ -78,7 +79,7 @@ function makeWire(
     ...(opts.document === undefined ? {} : { document: opts.document }),
     ...(opts.timeout === undefined ? {} : { timeout: () => opts.timeout! }),
     version: () => opts.version ?? "v1",
-    csrf: {
+    csrf: opts.csrfSource ?? {
       current: () => opts.csrf,
       ensure: opts.ensure ?? (async () => opts.csrf),
     },
@@ -552,6 +553,38 @@ describe("Wire outcomes", () => {
     };
     return { h, answer };
   }
+
+  function applying(applied: { ok: boolean; stale?: boolean }) {
+    let active = true;
+    const wire = new Wire({
+      fetch: async () => envelopeResponse(ENVELOPE),
+      navigate: () => undefined,
+      session: memorySession(),
+      dispatch: () => undefined,
+      active: () => active,
+      onEnvelope: async (raw) => {
+        active = false;
+        return { envelope: raw as Envelope, ...applied };
+      },
+      version: () => "v1",
+      csrf: { current: () => undefined, ensure: async () => undefined },
+    });
+    return wire.fetch(POST);
+  }
+
+  it("reports an envelope applied while the runtime was replaced", async () => {
+    await expect(applying({ ok: true })).resolves.toMatchObject({
+      status: "ok",
+      applied: true,
+    });
+  });
+
+  it("reports an envelope the applier refused as stale as dropped", async () => {
+    await expect(applying({ ok: false, stale: true })).resolves.toEqual({
+      status: "dropped",
+      applied: false,
+    });
+  });
 
   it("resolves an applied envelope as ok with the envelope", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));
@@ -1569,6 +1602,17 @@ describe("Wire request deadline", () => {
     expect(errors(h)).toHaveLength(1);
   });
 
+  it("passes on a token fetch failure that is not the deadline", async () => {
+    const failure = new Error("chunk exploded");
+    const h = makeWire(stalled, {
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: () => Promise.reject(failure),
+    });
+    const sent = h.wire.fetch(mutation);
+    await expect(sent).rejects.toBe(failure);
+    expect(h.calls).toHaveLength(0);
+  });
+
   it("releases the uid lock on a timeout, so the next submit is sent", async () => {
     const h = makeWire(stalled);
     void h.wire.fetch(mutation);
@@ -1664,6 +1708,79 @@ describe("Wire request deadline", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("retries a deferred token mint after the previous one times out", async () => {
+    let mints = 0;
+    const csrf = createCsrf({
+      mint: chunkModules.csrf,
+      fetch: () => {
+        mints += 1;
+        return new Promise<Response>(() => undefined);
+      },
+    });
+    csrf.set({ header: "X-CSRFToken", url: "/_next/csrf/" });
+    const h = makeWire(stalled, { csrfSource: csrf });
+
+    const first = h.wire.fetch({ ...mutation, uid: "u1" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(first).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "csrf", url: mutation.url },
+    });
+
+    const second = h.wire.fetch({ ...mutation, uid: "u1" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(second).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "csrf", url: mutation.url },
+    });
+    expect(mints).toBe(2);
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it("does not cancel a shared token mint while another POST still waits", async () => {
+    let tokenSignal: AbortSignal | undefined;
+    let grant: (() => void) | undefined;
+    const csrf = createCsrf({
+      mint: chunkModules.csrf,
+      fetch: (_url, init) =>
+        new Promise<Response>((resolve, reject) => {
+          tokenSignal = init.signal ?? undefined;
+          grant = () =>
+            resolve(
+              new Response(JSON.stringify({ header: "X-CSRFToken", token: "minted" }), {
+                headers: { "content-type": "application/json" },
+              }),
+            );
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    });
+    csrf.set({ header: "X-CSRFToken", url: "/_next/csrf/" });
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrfSource: csrf,
+      timeout: 1000,
+    });
+
+    const first = h.wire.fetch({ url: "/first/", method: "POST", uid: "first" });
+    await vi.advanceTimersByTimeAsync(500);
+    const second = h.wire.fetch({ url: "/second/", method: "POST", uid: "second" });
+    await vi.advanceTimersByTimeAsync(500);
+
+    await expect(first).resolves.toMatchObject({
+      status: "error",
+      error: { kind: "csrf", url: "/first/" },
+    });
+    expect(tokenSignal?.aborted).toBe(false);
+
+    grant?.();
+    await expect(second).resolves.toMatchObject({ status: "ok" });
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]?.url).toContain("/second/");
+  });
+
   it("drops a request superseded before its deadline without a report", async () => {
     const h = makeWire(stalled);
     const first = h.wire.fetch({ url: "/feed/", zone: "list" });
@@ -1675,20 +1792,27 @@ describe("Wire request deadline", () => {
 
   it("drops a validation aborted while its token was fetched", async () => {
     let grant: (csrf: CsrfPayload) => void = () => undefined;
+    let tunnels = 0;
     const h = makeWire(stalled, {
       csrf: { header: "X-CSRFToken", url: "/csrf/" },
       ensure: () => new Promise((resolve) => (grant = resolve)),
+      tunnel: () => {
+        tunnels += 1;
+        return Promise.resolve("closed");
+      },
     });
     const sent = h.wire.fetch({
       url: "/f/",
       method: "POST",
       queue: "v",
       abortable: true,
+      transport: "any",
     });
     await vi.advanceTimersByTimeAsync(0);
     h.wire.abort("v");
     grant({ header: "X-CSRFToken", token: "tok" });
     await expect(sent).resolves.toMatchObject({ status: "dropped" });
+    expect(tunnels).toBe(0);
     expect(errors(h)).toEqual([]);
   });
 
@@ -1705,5 +1829,103 @@ describe("Wire request deadline", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await sent;
     expect(forgotten).toHaveLength(1);
+  });
+});
+
+describe("Wire race guards", () => {
+  const POST = { url: "/_next/form/u1/", method: "POST", uid: "u1" } as const;
+
+  function guarded(
+    responder: () => Promise<Response>,
+    hooks: { dispatch?: (event: string) => void } = {},
+  ) {
+    const state = { active: true };
+    const dispatched: string[] = [];
+    const envelopes: unknown[] = [];
+    const wire = new Wire({
+      fetch: responder,
+      navigate: () => undefined,
+      session: memorySession(),
+      dispatch: (event) => {
+        dispatched.push(event);
+        hooks.dispatch?.(event);
+      },
+      active: () => state.active,
+      onEnvelope: async (raw) => {
+        envelopes.push(raw);
+        return { envelope: raw as Envelope, ok: true };
+      },
+      version: () => "v1",
+      csrf: { current: () => undefined, ensure: async () => undefined },
+    });
+    return { wire, state, dispatched, envelopes };
+  }
+
+  it("drops a fetch started on an inactive runtime", async () => {
+    const calls: number[] = [];
+    const g = guarded(async () => (calls.push(1), envelopeResponse(ENVELOPE)));
+    g.state.active = false;
+    await expect(g.wire.fetch(POST)).resolves.toEqual({
+      status: "dropped",
+      applied: false,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("drops a queued submit when the runtime goes inactive while it waits", async () => {
+    let release!: (r: Response) => void;
+    const g = guarded(() => new Promise<Response>((r) => (release = r)));
+    const first = g.wire.fetch(POST);
+    const second = g.wire.fetch({ ...POST, wait: true });
+    g.state.active = false;
+    release(envelopeResponse(ENVELOPE));
+    await first;
+    await expect(second).resolves.toMatchObject({ status: "dropped" });
+    expect(g.dispatched).not.toContain("partial:error");
+  });
+
+  it("drops a request its queue was aborted from the before-request listener", async () => {
+    const fetched: AbortSignal[] = [];
+    const ref: { wire?: Wire } = {};
+    const g = guarded(
+      (...args: unknown[]) => (
+        fetched.push((args as [string, RequestInit])[1].signal!),
+        new Promise<Response>(() => undefined)
+      ),
+      {
+        dispatch: (event) => event === "partial:before-request" && ref.wire?.abort("q"),
+      },
+    );
+    ref.wire = g.wire;
+    await expect(g.wire.fetch({ url: "/f/", zone: "z", queue: "q" })).resolves.toEqual({
+      status: "dropped",
+      applied: false,
+    });
+    expect(g.dispatched).not.toContain("partial:error");
+  });
+
+  function slowBody(init: { status?: number; type?: string; redirected?: boolean }) {
+    let finish!: (body: string) => void;
+    const response = envelopeResponse("", init);
+    response.text = () => new Promise<string>((r) => (finish = r));
+    return { response, finish: (body: string) => finish(body) };
+  }
+
+  const cases = [
+    ["a server error", { status: 500 }],
+    ["a refused non-envelope reply", { status: 403, type: "text/html" }],
+    ["an envelope", {}],
+  ] as const;
+
+  it.each(cases)("drops %s superseded while its body is read", async (_name, init) => {
+    const slow = slowBody(init);
+    const g = guarded(async () => slow.response);
+    const sent = g.wire.fetch({ url: "/f/", zone: "z", queue: "q" });
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    g.wire.abort("q");
+    slow.finish(ENVELOPE);
+    await expect(sent).resolves.toEqual({ status: "dropped", applied: false });
+    expect(g.dispatched).not.toContain("partial:error");
+    expect(g.envelopes).toHaveLength(0);
   });
 });

@@ -4,9 +4,13 @@ import importlib
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
+from django.apps import apps
+from django.core.exceptions import AppRegistryNotReady
 from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
@@ -23,9 +27,11 @@ from next.utils import (
     PageRoot,
     TreeSource,
     after_fork,
+    app_holding,
     child_nodelists,
     classify_dirs_entries,
     exec_module_file,
+    forget_app_holdings,
     int_between,
     is_dynamic_trail,
     is_int,
@@ -36,6 +42,7 @@ from next.utils import (
     join_trail,
     load_tree_source,
     middleware_listed,
+    mtime_settled,
     non_negative_number,
     page_roots_shape_error,
     parse_intercept,
@@ -47,6 +54,8 @@ from next.utils import (
     resolve_intercept,
     settled_mtime_ns,
     snapshot_mtime_ns,
+    stamp_fresh,
+    stamps_fresh,
     stat_mtime_ns,
     strip_route_groups,
     template_edits_watched,
@@ -59,6 +68,10 @@ from tests.support.cases.grammar import (
     InterceptNameCase,
     InterceptResolveCase,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 _OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
@@ -112,6 +125,57 @@ class TestSettledMtimeNs:
         os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
         monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS)
         assert snapshot_mtime_ns(tmp_path) == UNSETTLED_MTIME_NS
+
+    @pytest.mark.parametrize(
+        ("now_ns", "expected"),
+        [(_TICK_NS, False), (_TICK_NS + RACY_MTIME_WINDOW_NS, True)],
+        ids=["same-tick", "aged"],
+    )
+    def test_a_read_is_held_only_once_its_mtime_settled(
+        self, monkeypatch, now_ns, expected
+    ) -> None:
+        monkeypatch.setattr(utils, "time_ns", lambda: now_ns)
+        assert mtime_settled(_TICK_NS) is expected
+
+
+class TestStampFresh:
+    """Tests for ``stamp_fresh`` and ``stamps_fresh``."""
+
+    def test_an_unmoved_path_matches_its_snapshot(self, tmp_path) -> None:
+        assert stamp_fresh(snapshot_mtime_ns(tmp_path), tmp_path)
+
+    def test_a_moved_mtime_is_stale(self, tmp_path) -> None:
+        held = snapshot_mtime_ns(tmp_path)
+        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
+        assert not stamp_fresh(held, tmp_path)
+
+    def test_a_path_absent_on_both_reads_is_fresh(self, tmp_path) -> None:
+        assert stamp_fresh(None, tmp_path / "never-written")
+
+    def test_a_deleted_path_is_stale(self, tmp_path) -> None:
+        path = tmp_path / "x.txt"
+        path.write_text("")
+        held = snapshot_mtime_ns(path)
+        path.unlink()
+        assert not stamp_fresh(held, path)
+
+    def test_an_unsettled_snapshot_is_stale_against_another(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
+        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS)
+        held = snapshot_mtime_ns(tmp_path)
+        assert held == snapshot_mtime_ns(tmp_path) == UNSETTLED_MTIME_NS
+        assert not stamp_fresh(held, tmp_path)
+
+    def test_every_pair_must_match(self, tmp_path) -> None:
+        first, second = tmp_path / "a", tmp_path / "b"
+        first.mkdir()
+        second.mkdir()
+        held = [(first, snapshot_mtime_ns(first)), (second, snapshot_mtime_ns(second))]
+        assert stamps_fresh(held)
+        os.utime(second, ns=(_TICK_NS, _TICK_NS))
+        assert not stamps_fresh(held)
 
     def test_a_snapshot_after_the_window_keeps_the_mtime(
         self, tmp_path, monkeypatch
@@ -1101,6 +1165,21 @@ class TestExecModuleFile:
                 assert module is not None
                 assert module.value == value
 
+    def test_a_same_size_rewrite_in_one_tick_runs_the_new_source(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "x.py"
+        stamp = path.parent.stat().st_mtime_ns
+        monkeypatch.setattr(utils, "time_ns", lambda: stamp)
+        with patch.object(sys, "dont_write_bytecode", False):
+            for value in (1, 2):
+                path.write_text(f"value = {value}\n")
+                os.utime(path, ns=(stamp, stamp))
+                module = exec_module_file(path, "probe")
+                assert module is not None
+                assert module.value == value
+        assert not list(tmp_path.glob("__pycache__/*.pyc"))
+
     def test_a_suffix_without_a_loader_answers_none(self, tmp_path) -> None:
         path = tmp_path / "x.unknown"
         path.write_text("value = 1\n")
@@ -1200,3 +1279,68 @@ class TestChildNodelists:
         (node,) = Template('{% has_perm "a.b" %}x{% endhas_perm %}').nodelist
         node.nodelist_false = None
         assert list(child_nodelists(node)) == [node.nodelist_true]
+
+
+class TestAppHolding:
+    """The deepest installed app holding a path names it, memoised until it moves."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_app_roots(self) -> Iterator[None]:
+        forget_app_holdings(setting="INSTALLED_APPS")
+        yield
+        forget_app_holdings(setting="INSTALLED_APPS")
+
+    @staticmethod
+    def _config(label: str, path: Path) -> SimpleNamespace:
+        return SimpleNamespace(label=label, path=str(path))
+
+    def test_the_deepest_app_wins_in_either_order(self, tmp_path) -> None:
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        (inner / "pages").mkdir(parents=True)
+        configs = [self._config("outer", outer), self._config("inner", inner)]
+        for order in (configs, configs[::-1]):
+            forget_app_holdings(setting="INSTALLED_APPS")
+            with patch.object(apps, "get_app_configs", return_value=order):
+                assert app_holding(inner / "pages") == ("inner", "pages")
+                assert app_holding(outer / "x.py") == ("outer", "x.py")
+
+    def test_a_symlinked_path_resolves_into_its_app(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        (app / "pages").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(app)
+        with patch.object(
+            apps, "get_app_configs", return_value=[self._config("app", app)]
+        ):
+            assert app_holding(link / "pages") == ("app", "pages")
+
+    def test_a_path_outside_every_app_is_none(self, tmp_path) -> None:
+        with patch.object(apps, "get_app_configs", return_value=[]):
+            assert app_holding(tmp_path) is None
+
+    def test_an_unready_registry_answers_none_without_caching(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        app.mkdir()
+        with patch.object(
+            apps, "get_app_configs", side_effect=AppRegistryNotReady("early")
+        ):
+            assert app_holding(app) is None
+        with patch.object(
+            apps, "get_app_configs", return_value=[self._config("app", app)]
+        ):
+            assert app_holding(app) == ("app", ".")
+
+    def test_the_answer_is_memoised_until_the_app_list_changes(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        app.mkdir()
+        with patch.object(
+            apps, "get_app_configs", return_value=[self._config("app", app)]
+        ):
+            assert app_holding(app) == ("app", ".")
+        with patch.object(apps, "get_app_configs", return_value=[]):
+            assert app_holding(app) == ("app", ".")
+            forget_app_holdings(setting="ROOT_URLCONF")
+            assert app_holding(app) == ("app", ".")
+            forget_app_holdings(setting="INSTALLED_APPS")
+            assert app_holding(app) is None

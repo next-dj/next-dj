@@ -341,6 +341,29 @@ describe("createPartial surface", () => {
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
   });
 
+  it("accepts requests after reset invalidates the previous wire", async () => {
+    const fetch = vi.fn(async () => patchesResponse());
+    partial._configure({ document, fetch });
+    partial._reset();
+    partial._configure({ document, fetch });
+
+    await expect(partial.fetch({ url: "/feed/", zone: "z" })).resolves.toMatchObject({
+      status: "ok",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the configured fetch on the wire a reset rebuilds", async () => {
+    const fetch = vi.fn(async () => patchesResponse());
+    partial._configure({ document, fetch });
+    partial._reset();
+
+    await expect(partial.fetch({ url: "/feed/", zone: "z" })).resolves.toMatchObject({
+      status: "ok",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("emits partial:before-request before the fetch resolves", async () => {
     partial._configure({
       document,
@@ -498,6 +521,32 @@ describe("createPartial surface", () => {
     clock.tick();
     await Promise.resolve();
     expect(calls).toHaveLength(1);
+  });
+
+  it("drops a response from a Wire replaced while its request is in flight", async () => {
+    document.body.innerHTML = '<div data-next-zone="z">current</div>';
+    const { partial: configured } = makeSurface();
+    let resolveOld: ((response: Response) => void) | undefined;
+    configured._configure({
+      document,
+      fetch: () => new Promise((resolve) => (resolveOld = resolve)),
+    });
+
+    const pending = configured.fetch({ url: "/feed/", zone: "z" });
+    configured._configure({ document, fetch: async () => patchesResponse() });
+    resolveOld?.(
+      patchesResponse(
+        JSON.stringify({
+          version: "v1",
+          ops: [{ op: "inner", target: { zone: "z" }, html: "stale" }],
+          assets: [],
+          form: null,
+        }),
+      ),
+    );
+
+    await expect(pending).resolves.toMatchObject({ status: "dropped" });
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("current");
   });
 
   it("_configure drops the asset watch the previous configuration armed", () => {
@@ -1700,6 +1749,105 @@ describe("Next.partial.submit", () => {
         error: { kind: "network" },
       });
       expect(made.dispatched.map((d) => d.event)).toContain("partial:error");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a superseded envelope whose stylesheet finishes late", async () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const made = makeSurface();
+    const links: ((ok: boolean) => void)[] = [];
+    let sent = 0;
+    made.partial._configure({
+      document,
+      navigate: () => undefined,
+      loadLink: (_url, _nonce, done) => links.push(done),
+      fetch: async () => {
+        sent += 1;
+        return patchesResponse(
+          JSON.stringify({
+            version: "v1",
+            assets: [{ kind: "css", url: `/sheet-${sent}.css` }],
+            ops: [
+              {
+                op: "inner",
+                target: { zone: "z" },
+                html: `<p>${sent === 1 ? "old" : "new"}</p>`,
+              },
+            ],
+          }),
+        );
+      },
+    });
+
+    const first = made.partial.fetch({ url: "/page/", zone: "z" });
+    await flush();
+    expect(links).toHaveLength(1);
+    const second = made.partial.fetch({ url: "/page/", zone: "z" });
+    await flush();
+    expect(links).toHaveLength(2);
+
+    links[1]!(true);
+    await expect(second).resolves.toMatchObject({ status: "ok", applied: true });
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+
+    links[0]!(true);
+    await expect(first).resolves.toEqual({ status: "dropped", applied: false });
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("retries the deferred token through the production wire adapter", async () => {
+    vi.useFakeTimers();
+    try {
+      const made = makeSurface({ $timeout: 1000 });
+      let tokenCalls = 0;
+      let mutationCalls = 0;
+      made.partial._configure({
+        document,
+        navigate: () => undefined,
+        fetch: (url, init) => {
+          if (url.endsWith("/_next/csrf/")) {
+            tokenCalls += 1;
+            if (tokenCalls === 1) {
+              return new Promise<Response>((_resolve, reject) => {
+                init.signal?.addEventListener("abort", () => {
+                  reject(new DOMException("aborted", "AbortError"));
+                });
+              });
+            }
+            return Promise.resolve(
+              new Response(JSON.stringify({ header: "X-CSRFToken", token: "minted" }), {
+                headers: { "content-type": "application/json" },
+              }),
+            );
+          }
+          mutationCalls += 1;
+          return Promise.resolve(patchesResponse());
+        },
+      });
+      made.partial.setCsrf({ header: "X-CSRFToken", url: "/_next/csrf/" });
+
+      const first = made.partial.fetch({
+        url: "/_next/form/u1/",
+        method: "POST",
+        uid: "u1",
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(first).resolves.toMatchObject({
+        status: "error",
+        error: { kind: "csrf" },
+      });
+
+      await expect(
+        made.partial.fetch({
+          url: "/_next/form/u1/",
+          method: "POST",
+          uid: "u1",
+        }),
+      ).resolves.toMatchObject({ status: "ok" });
+      expect(tokenCalls).toBe(2);
+      expect(mutationCalls).toBe(1);
     } finally {
       vi.useRealTimers();
     }

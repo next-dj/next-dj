@@ -97,7 +97,8 @@ Back or Forward onto an entry whose content is not on screen therefore reloads t
 The page load that follows is a full render, so the reader sees the right content at the cost of a round trip and of any client state the old page held.
 A Back that only closes modal layers stays in place and fires ``next:navigated`` with ``action: "pop"``, and a Back or Forward that changes the fragment alone does nothing.
 Forward onto the URL of a layer that Back closed reloads that URL as a full page rather than opening the layer again.
-The runtime compares the address with the last URL it rendered, so Forward onto an entry that a page script pushed with ``history.pushState`` reloads as well.
+When the runtime has written history, it compares the address with its last URL and reloads onto an entry whose content it cannot restore.
+If a page script alone wrote ``history.pushState`` and the runtime has no open layer or history write to answer the pop, that entry stays in place.
 
 Intercepts are selected on GET and HEAD only
 --------------------------------------------

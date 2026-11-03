@@ -11,6 +11,7 @@ import {
   REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
   REQUEST_TIMEOUT_MS,
+  bounded,
   newId,
   pageKey,
   sameOrigin,
@@ -73,7 +74,8 @@ export interface CsrfPayload {
 export interface CsrfSource {
   current(): CsrfPayload | undefined;
   // null when the csrf chunk failed to load, a failure its loader already reported.
-  ensure(): Promise<CsrfPayload | undefined | null>;
+  // An abort ends only this caller's wait, a mint another caller waits on goes on.
+  ensure(signal?: AbortSignal): Promise<CsrfPayload | undefined | null>;
 }
 
 /** A single wire request with its queueing and locking intent. */
@@ -115,6 +117,7 @@ export type EnvelopeHandler = (
   key: string | undefined,
   page: string | undefined,
   owner: string | undefined,
+  isCurrent?: () => boolean,
 ) => Promise<Applied>;
 
 /** Turns a foreign content-type body into a JSON-ish envelope before apply. */
@@ -138,6 +141,8 @@ export interface WireDeps {
   csrf: CsrfSource;
   // The dirty counter read at fetch time, threaded to apply with the response.
   dirtySnapshot?: () => number;
+  // Invalidates in-flight work when the owning partial runtime is rebuilt.
+  active?: () => boolean;
   // Every mutating request stamps X-Next-Request-Id and reports it here so the
   // SSE echo ring drops the matching stream event. Absent, no id is stamped.
   rememberRequestId?: (id: string) => void;
@@ -155,25 +160,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-// Settle with work or reject on abort, so a transport ignoring the signal still ends.
-function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const stop = (): void => reject(signal.reason as Error);
-    if (signal.aborted) stop();
-    signal.addEventListener("abort", stop, { once: true });
-    work.then(
-      (value) => {
-        signal.removeEventListener("abort", stop);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", stop);
-        reject(error as Error);
-      },
-    );
-  });
-}
-
 /** Shapes requests, classifies responses, and queues them per target. */
 export class Wire {
   readonly #fetch: FetchAdapter;
@@ -187,6 +173,7 @@ export class Wire {
   readonly #version: () => string;
   readonly #csrf: CsrfSource;
   readonly #dirtySnapshot: () => number;
+  readonly #active: () => boolean;
   readonly #rememberRequestId: (id: string) => void;
   readonly #forgetRequestId: (id: string) => void;
   readonly #tunnel: NonNullable<WireDeps["tunnel"]>;
@@ -209,6 +196,7 @@ export class Wire {
     this.#version = deps.version ?? (() => "");
     this.#csrf = deps.csrf;
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
+    this.#active = deps.active ?? (() => true);
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
     this.#forgetRequestId = deps.forgetRequestId ?? (() => undefined);
     this.#tunnel = deps.tunnel ?? (() => undefined);
@@ -254,6 +242,7 @@ export class Wire {
 
   /** Shape, queue or lock, send, and classify a single request. */
   async fetch(request: WireRequest): Promise<Outcome> {
+    if (!this.#active()) return none("dropped");
     const target = sameOrigin(request.url, this.#document);
     if (target === undefined) {
       return this.#fail({
@@ -277,6 +266,7 @@ export class Wire {
         if (!(await new Promise<boolean>((resume) => busy.push(resume))))
           return none("dropped");
       }
+      if (!this.#active()) return none("dropped");
       const waiters = busy ?? [];
       if (!busy) this.#busy.set(uid, waiters);
       release = () => {
@@ -294,17 +284,10 @@ export class Wire {
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
         const ensured = await this.#ensureCsrf();
         if (ensured === null) return none("error");
-        if (ensured instanceof DOMException) {
+        // Told apart by the header, as a DOMException is not an Error in every realm.
+        if (!("header" in ensured))
           return this.#fail({ kind: "csrf", url: request.url, error: ensured });
-        }
         csrf = ensured;
-        if (csrf?.token === undefined) {
-          return this.#fail({
-            kind: "csrf",
-            url: request.url,
-            error: new Error("no CSRF token for the mutation"),
-          });
-        }
       }
       return await this.#run(request, target, method, csrf, queueKey, entry);
     } finally {
@@ -316,21 +299,37 @@ export class Wire {
   }
 
   // A token fetch that never answers fails on the deadline, so it frees the uid lock.
-  async #ensureCsrf(): Promise<CsrfPayload | undefined | null | DOMException> {
-    const ms = this.#timeout();
-    if (ms <= 0) return this.#csrf.ensure();
-    let timer = 0;
-    const expired = new Promise<DOMException>((resolve) => {
-      timer = this.#clock.setTimeout(
-        () => resolve(new DOMException("token fetch timed out", "TimeoutError")),
-        ms,
-      );
-    });
+  // A missing token or the deadline answers the Error the csrf failure carries.
+  async #ensureCsrf(): Promise<CsrfPayload | null | Error> {
+    const controller = new AbortController();
+    const disarm = this.#arm(controller);
     try {
-      return await Promise.race([this.#csrf.ensure(), expired]);
+      const ensured = await bounded(
+        this.#csrf.ensure(controller.signal),
+        controller.signal,
+      );
+      return ensured === null || ensured?.token !== undefined
+        ? ensured
+        : new Error("no CSRF token for the mutation");
+    } catch (error) {
+      if (controller.signal.aborted) return controller.signal.reason as Error;
+      throw error;
     } finally {
-      this.#clock.clearTimeout(timer);
+      disarm();
     }
+  }
+
+  // Abort the controller with a TimeoutError once the deadline passes, zero never.
+  #arm(controller: AbortController): () => void {
+    const ms = this.#timeout();
+    const timer =
+      ms > 0
+        ? this.#clock.setTimeout(
+            () => controller.abort(new DOMException("timed out", "TimeoutError")),
+            ms,
+          )
+        : 0;
+    return () => this.#clock.clearTimeout(timer);
   }
 
   // A zone GET queues per path+zone so two pages sharing a zone name run
@@ -363,6 +362,11 @@ export class Wire {
     queueKey: string | undefined,
     entry: AbortController | undefined,
   ): Promise<Outcome> {
+    const isCurrent = (): boolean =>
+      this.#active() &&
+      entry?.signal.aborted !== true &&
+      (queueKey === undefined || this.#queues.get(queueKey) === entry);
+    if (!isCurrent()) return none("dropped");
     // Snapshot the dirty counter before the request is sent. A field touched after
     // this point is dirty relative to the response it will receive.
     const snapshot = this.#dirtySnapshot();
@@ -373,10 +377,8 @@ export class Wire {
     });
     // One signal ends the request on its deadline or a supersede, armed after a tunnel.
     const deadline = new AbortController();
-    const expiry = new DOMException("request timed out", "TimeoutError");
-    const ms = this.#timeout();
-    let timer: number | undefined;
-    // The queue may have been aborted while the token was fetched.
+    let disarm: (() => void) | undefined;
+    // A before-request listener may already have aborted the queue.
     if (entry?.signal.aborted === true) deadline.abort();
     entry?.signal.addEventListener("abort", () => deadline.abort(), { once: true });
     // Inside the try, since a caller's header name can be invalid and an abort or a
@@ -414,27 +416,34 @@ export class Wire {
         if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
         return failed;
       }
-      if (ms > 0) timer = this.#clock.setTimeout(() => deadline.abort(expiry), ms);
+      disarm = this.#arm(deadline);
       const response =
         tunneled instanceof Response
           ? tunneled
           : await bounded(this.#fetch(target, init), deadline.signal);
       // A safe-GET response that a newer request superseded is dropped unreported.
-      if (queueKey !== undefined && this.#queues.get(queueKey) !== entry)
-        return none("dropped");
-      return await this.#classify(request, target, method, response, snapshot);
+      if (!isCurrent()) return none("dropped");
+      return await this.#classify(
+        request,
+        target,
+        method,
+        response,
+        snapshot,
+        isCurrent,
+      );
     } catch (error) {
       // A request past its deadline may have committed, so its echo must refresh too.
-      if (deadline.signal.reason === expiry) {
+      const reason = deadline.signal.reason as Error | undefined;
+      if (reason?.name === "TimeoutError") {
         if (own !== undefined) this.#forgetRequestId(own);
-        return this.#fail({ kind: "network", url: request.url, error: expiry });
+        return this.#fail({ kind: "network", url: request.url, error: reason });
       }
       // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error) || entry?.signal.aborted === true) return none("dropped");
       if (own !== undefined) this.#forgetRequestId(own);
       return this.#fail({ kind: "network", error });
     } finally {
-      if (timer !== undefined) this.#clock.clearTimeout(timer);
+      disarm?.();
     }
   }
 
@@ -449,6 +458,7 @@ export class Wire {
     method: string,
     response: Response,
     snapshot: number,
+    isCurrent: () => boolean,
   ): Promise<Outcome> {
     // A 409 on a safe method means an asset version mismatch with an empty body. The
     // runtime then does a full visit of the current URL and nothing else.
@@ -456,10 +466,7 @@ export class Wire {
       this.#navigate(response.url || target);
       return none("ok");
     }
-    if (response.status >= 500) {
-      const body = await response.text();
-      return this.#fail({ kind: "http", status: response.status, body });
-    }
+    const crashed = response.status >= 500;
     // Only a safe zone GET names a page. Mutations keep the unscoped resolve.
     const page =
       SAFE_METHODS.has(method) && request.zone !== undefined
@@ -469,19 +476,22 @@ export class Wire {
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
     // A mutation never navigates to its own endpoint, that would answer 405
-    if (hook === undefined && (baseType !== CONTENT_TYPE || response.redirected)) {
-      const navigates = response.redirected || SAFE_METHODS.has(method);
-      const refused = !response.redirected && (response.status >= 400 || !navigates);
-      if (!refused)
-        return request.navigate === false
-          ? { ...none("ok"), location: response.url || target }
-          : this.#fallbackNavigate(response.url || target);
-      const body = await response.text();
+    const foreign =
+      !crashed &&
+      hook === undefined &&
+      (baseType !== CONTENT_TYPE || response.redirected);
+    const navigates = response.redirected || SAFE_METHODS.has(method);
+    if (foreign && (response.redirected || (response.status < 400 && navigates)))
+      return request.navigate === false
+        ? { ...none("ok"), location: response.url || target }
+        : this.#fallbackNavigate(response.url || target);
+    const body = await response.text();
+    if (!isCurrent()) return none("dropped");
+    if (crashed || foreign) {
       const failed = this.#fail({ kind: "http", status: response.status, body });
-      if (navigates) this.#fallbackNavigate(response.url || target);
+      if (foreign && navigates) this.#fallbackNavigate(response.url || target);
       return failed;
     }
-    const body = await response.text();
     // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
     // is a parse error rather than an unhandled rejection of a fire-and-forget fetch.
     try {
@@ -489,14 +499,16 @@ export class Wire {
       // Cleared once the body parses, so a later non-envelope reply on this page
       // navigates once more.
       this.#session.remove(NAVIGATED_FLAG);
-      const { envelope, ok } = await this.#onEnvelope(
+      const { envelope, ok, stale } = await this.#onEnvelope(
         raw,
         response,
         snapshot,
         request.key,
         page,
         request.owner,
+        isCurrent,
       );
+      if (stale === true) return none("dropped");
       const invalid = envelope.form?.valid === false;
       return {
         status: invalid ? "invalid" : response.status < 400 ? "ok" : "error",

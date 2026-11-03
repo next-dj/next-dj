@@ -236,6 +236,15 @@ export function createLayers(deps: LayerDeps): LayerStack {
   ): Promise<void> {
     // A second open for a busy opener is dropped here, so neither path stacks a modal.
     if (opener?.hasAttribute(BUSY_ATTR) === true) return;
+    const seed =
+      href !== undefined && zone !== undefined
+        ? { href, zone, owner: pageKey(href, doc) }
+        : undefined;
+    // A layer for the page the top layer shows shares its history entry, since popstate
+    // cannot tell two identical pushes apart. While that page is pending it is dropped.
+    const top = topLayer();
+    const sharesOwner = seed !== undefined && top?.pushedUrl === seed.owner;
+    if (sharesOwner && !top.committed) return;
     const dialog = doc.createElement("dialog");
     dialog.setAttribute("data-next-dialog", "");
     const root = doc.createElement("div");
@@ -272,24 +281,26 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const release = busy(opener, root);
     // A body fetch needs both the URL and the zone. A zone-only or empty open
     // shows a bare modal for a later patch to seed, with no history entry.
-    const seeded = href !== undefined && zone !== undefined;
     try {
-      if (seeded) {
-        // The layer's own URL makes the modal shareable, and pushing it now lets Back
-        // close the layer while the body loads. The body envelope announces it, and a
-        // layer closed before that reverts it unannounced.
-        const owner = pageKey(href, doc);
-        layer.pushedUrl = owner;
-        layer.drop = deps.navigation.hold(owner, href, () => (layer.committed = true));
+      if (seed !== undefined) {
+        // The pushed URL makes the modal shareable, and Back closes it while it loads.
+        layer.pushedUrl = seed.owner;
+        if (!sharesOwner)
+          layer.drop = deps.navigation.hold(
+            seed.owner,
+            seed.href,
+            () => (layer.committed = true),
+          );
       }
       emit("partial:layer-opened", { opener });
-      if (seeded) {
+      if (seed !== undefined) {
         await deps.fetch({
-          url: href,
-          zone,
+          url: seed.href,
+          zone: seed.zone,
           queue: layer.key,
-          headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
+          headers: { [HEADER_ZONE]: seed.zone, [HEADER_ORIGIN]: host },
         });
+        if (sharesOwner) layer.committed = true;
       }
     } catch (e) {
       remove(layer);
@@ -345,11 +356,14 @@ export function createLayers(deps: LayerDeps): LayerStack {
       fireRemoved(layer.dialog);
       layer.dialog.remove();
       if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
-      // After a programmatic close the URL is still the pushed one, so it is replaced
-      // with the host. After Back the browser has already changed it.
-      if (layer.committed && currentUrl() === layer.pushedUrl) {
+      // After a programmatic close the URL is still the pushed one, so the owner of the
+      // entry replaces it with the host. After Back the browser has already changed it.
+      if (
+        layer.drop !== undefined &&
+        layer.committed &&
+        currentUrl() === layer.pushedUrl
+      )
         commit.write({ href: layer.back, action: "replace" });
-      }
       // The saved head passes to the layer above, or is written when none is above.
       const above = stack[index];
       if (above !== undefined) above.head = layer.head;

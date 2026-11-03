@@ -231,7 +231,7 @@ Edge cases
 - Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the active language of the POST.
   A user who switches the language between the render and the submit posts an origin whose language prefix no longer resolves, and the POST returns HTTP 400.
 - The UID is hashed from the scope key and the action name, not the name alone.
-  For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID.
+  For a page-scoped form the scope key uses the file's tree-relative path, so moving the file or changing the derived action name changes the UID.
   For a shared form the scope key is the dotted module, so moving the module changes the UID.
   See :ref:`UID stability <topics-forms-actions-uid>` in :doc:`actions`.
 - A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely.

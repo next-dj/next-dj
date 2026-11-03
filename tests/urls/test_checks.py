@@ -12,6 +12,8 @@ from django.urls import NoReverseMatch, include, path, re_path
 from django.views import View
 
 from next.checks import reset_check_caches
+from next.deps import RESERVED_KEYS
+from next.deps.context import RECEIVER_NAMES
 from next.forms import RegistryFormActionBackend
 from next.forms.manager import form_action_manager
 from next.forms.uid import reverse_form_action
@@ -26,7 +28,6 @@ from next.urls.checks import (
     check_router_manager,
     check_url_patterns,
 )
-from next.urls.parser import RESERVED_ROUTE_NAMES
 from tests.support import (
     check_ids,
     file_router,
@@ -402,7 +403,7 @@ class TestCheckReverseNameCollisions:
 class TestReservedUrlParameters:
     """A segment named after an injected argument is reported and left unrouted."""
 
-    @pytest.mark.parametrize("name", sorted(RESERVED_ROUTE_NAMES))
+    @pytest.mark.parametrize("name", sorted(RESERVED_KEYS | RECEIVER_NAMES))
     def test_the_check_reports_e217_and_the_router_skips_the_route(
         self, tmp_path, name
     ) -> None:
@@ -419,6 +420,8 @@ class TestReservedUrlParameters:
         assert error.id == "next.E217"
         assert f"'{name}'" in error.msg
         assert "Rename the bracket directory" in error.hint
+        assert "file_path" not in error.hint
+        assert "dep_cache" not in error.hint
         assert [m.id for m in patterns] == []
         assert routes == ["ok/"]
 

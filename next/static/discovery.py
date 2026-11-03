@@ -22,7 +22,7 @@ from next.utils import (
     is_within,
     resolved_tree,
     snapshot_mtime_ns,
-    stat_mtime_ns,
+    stamps_fresh,
     template_edits_watched,
 )
 
@@ -378,10 +378,7 @@ class AssetDiscovery:
             return True
         if not template_edits_watched():
             return False
-        return any(
-            stat_mtime_ns(path) != mtime
-            for path, mtime in chain(plan.directory_mtimes, plan.file_mtimes)
-        )
+        return not stamps_fresh(chain(plan.directory_mtimes, plan.file_mtimes))
 
     def discover_component_assets(
         self, info: ComponentInfo, collector: StaticCollector
