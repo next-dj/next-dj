@@ -6,9 +6,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Literal, cast, overload
 
-from asgiref.sync import async_to_sync, iscoroutinefunction
+from asgiref.sync import async_to_sync
 from django.db import transaction
 
+from next.introspect import is_async_callable
 from next.partial.envelope import Envelope
 from next.partial.headers import partial_intent
 from next.partial.patches import Patches
@@ -74,13 +75,6 @@ type _Transform = Callable[[Message], object]
 type _AsyncTransform = Callable[[Message], Awaitable[object]]
 
 
-def _awaited(transform: _Transform) -> bool:
-    """Whether a transform is an `async def` function or an object with one."""
-    return iscoroutinefunction(transform) or iscoroutinefunction(
-        type(transform).__call__
-    )
-
-
 def _applied(message: Message, result: object) -> Message | None:
     """Return the message carrying a transform result, None for a skip."""
     return None if result is None else replace(message, envelope=_prepare(result))
@@ -92,7 +86,7 @@ def transformed(message: Message, transform: _Transform) -> Message | None:
     A transform that raises or returns an unsafe payload skips the message it failed on.
     """
     try:
-        if _awaited(transform):
+        if is_async_callable(transform):
             result = async_to_sync(cast("_AsyncTransform", transform))(message)
         else:
             result = transform(message)
@@ -107,7 +101,7 @@ async def atransformed(message: Message, transform: _Transform) -> Message | Non
 
     A sync transform runs on the shared pool, so it never blocks the loop.
     """
-    if not _awaited(transform):
+    if not is_async_callable(transform):
         return await run_detached(transformed, message, transform)
     try:
         result = await cast("_AsyncTransform", transform)(message)

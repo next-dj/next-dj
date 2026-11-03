@@ -1,11 +1,7 @@
-from __future__ import annotations
-
 import importlib
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -15,14 +11,11 @@ from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
 
-from next import utils
 from next.errors import InvalidDirsError
 from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
     INTERCEPT_PATTERN,
-    RACY_MTIME_WINDOW_NS,
     ROUTE_GROUP_PATTERN,
-    UNSETTLED_MTIME_NS,
     InterceptPage,
     PageRoot,
     TreeSource,
@@ -42,7 +35,6 @@ from next.utils import (
     join_trail,
     load_tree_source,
     middleware_listed,
-    mtime_settled,
     non_negative_number,
     page_roots_shape_error,
     parse_intercept,
@@ -52,16 +44,12 @@ from next.utils import (
     regex_trail,
     resolve_base_dir,
     resolve_intercept,
-    settled_mtime_ns,
-    snapshot_mtime_ns,
-    stamp_fresh,
-    stamps_fresh,
-    stat_mtime_ns,
     strip_route_groups,
     template_edits_watched,
     walk_page_tree,
 )
-from tests.support import write_page
+from tests.support import rewrite_in_tick, write_page
+from tests.support.apps import fake_app_configs
 from tests.support.cases.grammar import (
     INTERCEPT_NAME_CASES,
     INTERCEPT_RESOLVE_CASES,
@@ -70,122 +58,7 @@ from tests.support.cases.grammar import (
 )
 
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-
 _OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
-
-
-class TestStatMtimeNs:
-    """Tests for ``stat_mtime_ns``."""
-
-    def test_a_file_reports_the_nanoseconds_its_stat_carries(self, tmp_path) -> None:
-        """The value is the one a caller comparing snapshots would take itself."""
-        target = tmp_path / "page.py"
-        target.write_text("")
-        assert stat_mtime_ns(target) == target.stat().st_mtime_ns
-
-    def test_a_path_that_does_not_stat_reports_nothing(self, tmp_path) -> None:
-        """Nothing rather than a sentinel, because no real mtime equals nothing."""
-        assert stat_mtime_ns(tmp_path / "never-written") is None
-
-
-_TICK_NS = 1_700_000_000 * 10**9
-
-
-class TestSettledMtimeNs:
-    """Tests for ``settled_mtime_ns`` and ``snapshot_mtime_ns``."""
-
-    @pytest.mark.parametrize(
-        "now_ns",
-        [
-            _TICK_NS,
-            _TICK_NS + RACY_MTIME_WINDOW_NS - 1,
-            _TICK_NS - RACY_MTIME_WINDOW_NS + 1,
-        ],
-        ids=["same-tick", "just-before-settling", "slightly-in-the-future"],
-    )
-    def test_an_mtime_inside_the_window_is_unsettled(self, monkeypatch, now_ns) -> None:
-        monkeypatch.setattr(utils, "time_ns", lambda: now_ns)
-        assert settled_mtime_ns(_TICK_NS) == UNSETTLED_MTIME_NS
-
-    @pytest.mark.parametrize(
-        "now_ns",
-        [_TICK_NS + RACY_MTIME_WINDOW_NS, _TICK_NS - RACY_MTIME_WINDOW_NS],
-        ids=["aged", "far-in-the-future"],
-    )
-    def test_an_mtime_outside_the_window_is_kept(self, monkeypatch, now_ns) -> None:
-        monkeypatch.setattr(utils, "time_ns", lambda: now_ns)
-        assert settled_mtime_ns(_TICK_NS) == _TICK_NS
-
-    def test_a_snapshot_in_the_tick_of_the_path_is_unsettled(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
-        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS)
-        assert snapshot_mtime_ns(tmp_path) == UNSETTLED_MTIME_NS
-
-    @pytest.mark.parametrize(
-        ("now_ns", "expected"),
-        [(_TICK_NS, False), (_TICK_NS + RACY_MTIME_WINDOW_NS, True)],
-        ids=["same-tick", "aged"],
-    )
-    def test_a_read_is_held_only_once_its_mtime_settled(
-        self, monkeypatch, now_ns, expected
-    ) -> None:
-        monkeypatch.setattr(utils, "time_ns", lambda: now_ns)
-        assert mtime_settled(_TICK_NS) is expected
-
-
-class TestStampFresh:
-    """Tests for ``stamp_fresh`` and ``stamps_fresh``."""
-
-    def test_an_unmoved_path_matches_its_snapshot(self, tmp_path) -> None:
-        assert stamp_fresh(snapshot_mtime_ns(tmp_path), tmp_path)
-
-    def test_a_moved_mtime_is_stale(self, tmp_path) -> None:
-        held = snapshot_mtime_ns(tmp_path)
-        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
-        assert not stamp_fresh(held, tmp_path)
-
-    def test_a_path_absent_on_both_reads_is_fresh(self, tmp_path) -> None:
-        assert stamp_fresh(None, tmp_path / "never-written")
-
-    def test_a_deleted_path_is_stale(self, tmp_path) -> None:
-        path = tmp_path / "x.txt"
-        path.write_text("")
-        held = snapshot_mtime_ns(path)
-        path.unlink()
-        assert not stamp_fresh(held, path)
-
-    def test_an_unsettled_snapshot_is_stale_against_another(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
-        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS)
-        held = snapshot_mtime_ns(tmp_path)
-        assert held == snapshot_mtime_ns(tmp_path) == UNSETTLED_MTIME_NS
-        assert not stamp_fresh(held, tmp_path)
-
-    def test_every_pair_must_match(self, tmp_path) -> None:
-        first, second = tmp_path / "a", tmp_path / "b"
-        first.mkdir()
-        second.mkdir()
-        held = [(first, snapshot_mtime_ns(first)), (second, snapshot_mtime_ns(second))]
-        assert stamps_fresh(held)
-        os.utime(second, ns=(_TICK_NS, _TICK_NS))
-        assert not stamps_fresh(held)
-
-    def test_a_snapshot_after_the_window_keeps_the_mtime(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
-        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS + RACY_MTIME_WINDOW_NS)
-        assert snapshot_mtime_ns(tmp_path) == _TICK_NS
-
-    def test_a_snapshot_of_a_path_that_does_not_stat_is_nothing(self, tmp_path) -> None:
-        assert snapshot_mtime_ns(tmp_path / "never-written") is None
 
 
 class TestIsWithin:
@@ -1165,16 +1038,14 @@ class TestExecModuleFile:
                 assert module is not None
                 assert module.value == value
 
+    @pytest.mark.usefixtures("tick")
     def test_a_same_size_rewrite_in_one_tick_runs_the_new_source(
-        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path
     ) -> None:
         path = tmp_path / "x.py"
-        stamp = path.parent.stat().st_mtime_ns
-        monkeypatch.setattr(utils, "time_ns", lambda: stamp)
         with patch.object(sys, "dont_write_bytecode", False):
             for value in (1, 2):
-                path.write_text(f"value = {value}\n")
-                os.utime(path, ns=(stamp, stamp))
+                rewrite_in_tick(path, f"value = {value}\n")
                 module = exec_module_file(path, "probe")
                 assert module is not None
                 assert module.value == value
@@ -1284,26 +1155,19 @@ class TestChildNodelists:
 class TestAppHolding:
     """The deepest installed app holding a path names it, memoised until it moves."""
 
-    @pytest.fixture(autouse=True)
-    def _fresh_app_roots(self) -> Iterator[None]:
-        forget_app_holdings(setting="INSTALLED_APPS")
-        yield
-        forget_app_holdings(setting="INSTALLED_APPS")
-
-    @staticmethod
-    def _config(label: str, path: Path) -> SimpleNamespace:
-        return SimpleNamespace(label=label, path=str(path))
-
-    def test_the_deepest_app_wins_in_either_order(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "folders",
+        [("outer", "outer/inner"), ("outer/inner", "outer")],
+        ids=["outer-first", "inner-first"],
+    )
+    def test_the_deepest_app_wins_in_either_order(self, tmp_path, folders) -> None:
         outer = tmp_path / "outer"
         inner = outer / "inner"
         (inner / "pages").mkdir(parents=True)
-        configs = [self._config("outer", outer), self._config("inner", inner)]
-        for order in (configs, configs[::-1]):
-            forget_app_holdings(setting="INSTALLED_APPS")
-            with patch.object(apps, "get_app_configs", return_value=order):
-                assert app_holding(inner / "pages") == ("inner", "pages")
-                assert app_holding(outer / "x.py") == ("outer", "x.py")
+        configs = fake_app_configs(*((Path(at).name, tmp_path / at) for at in folders))
+        with patch.object(apps, "get_app_configs", return_value=configs):
+            assert app_holding(inner / "pages") == ("inner", "pages")
+            assert app_holding(outer / "x.py") == ("outer", "x.py")
 
     def test_a_symlinked_path_resolves_into_its_app(self, tmp_path) -> None:
         app = tmp_path / "app"
@@ -1311,7 +1175,7 @@ class TestAppHolding:
         link = tmp_path / "link"
         link.symlink_to(app)
         with patch.object(
-            apps, "get_app_configs", return_value=[self._config("app", app)]
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
         ):
             assert app_holding(link / "pages") == ("app", "pages")
 
@@ -1327,7 +1191,7 @@ class TestAppHolding:
         ):
             assert app_holding(app) is None
         with patch.object(
-            apps, "get_app_configs", return_value=[self._config("app", app)]
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
         ):
             assert app_holding(app) == ("app", ".")
 
@@ -1335,7 +1199,7 @@ class TestAppHolding:
         app = tmp_path / "app"
         app.mkdir()
         with patch.object(
-            apps, "get_app_configs", return_value=[self._config("app", app)]
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
         ):
             assert app_holding(app) == ("app", ".")
         with patch.object(apps, "get_app_configs", return_value=[]):

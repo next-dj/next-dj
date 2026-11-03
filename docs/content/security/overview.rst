@@ -83,9 +83,9 @@ File uploads.
 
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which a path-only rule checks before the dispatcher resolves it through the URLconf, see :doc:`csrf-and-forms`.
-   A POST without the field, or with a value that does not resolve, returns HTTP 400 before any access check, guard, or handler runs.
+   A POST without the field, or with a value that does not resolve, raises :exc:`~django.core.exceptions.BadRequest` before any access check, guard, or handler runs, which the project :data:`~django.conf.urls.handler400` answers with HTTP 400.
    Before any handler runs, the dispatcher asks the page the origin names whether it would serve the request, and a denial emits ``form_access_denied`` with ``layer="page"``.
-   The ``render()`` of the page that owns the action answers too, so an action of a ``page.py`` with a ``render()`` is refused with HTTP 403 for an origin outside the directory of that page, and an origin below it runs that ``render()`` before the handler.
+   The ``render()`` of the page that owns the action answers too, so an action of a ``page.py`` with a ``render()`` is refused with HTTP 403 for an origin outside the directory of that page, a route with no page included, and an origin below it runs that ``render()`` before the handler.
    Substituting a public origin therefore lifts neither the declared rules nor the ``render()`` guard of the owner page.
    A declaration such as ``page.login_required()`` remains the preferred guard, because it holds for every origin and ``manage.py check`` reports an action guarded only by ``render()`` with ``next.W150``, see `Access control`_, :doc:`/content/topics/pages` and :doc:`/content/topics/forms/validation-rerender`.
 

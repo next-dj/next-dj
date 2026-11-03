@@ -3,6 +3,7 @@
 // page zone underneath. The native modality lives behind an injectable adapter.
 
 import { defaultPopState } from "./adapters";
+import { isPlainActivation } from "./events";
 import { readHead, writeHead } from "./head";
 import type { Head, HeadPatch } from "./head";
 import { fireRemoved } from "./morph";
@@ -13,7 +14,6 @@ import {
   HEADER_ZONE,
   cssEscape,
   fire,
-  isPlainActivation,
   pageKey,
   currentUrl as pageUrl,
 } from "./protocol";

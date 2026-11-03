@@ -5,7 +5,7 @@ import threading
 import time
 from contextlib import AsyncExitStack, ExitStack
 from dataclasses import replace
-from unittest.mock import AsyncMock, Mock, create_autospec
+from unittest.mock import AsyncMock, Mock, call, create_autospec
 
 import fakeredis
 import fakeredis.aioredis
@@ -18,6 +18,7 @@ from redis.crc import key_slot
 from next.partial import Patches
 from next.realtime import BrokerConnectionError, Position, Presence, RedisBroker
 from next.realtime.redis import broker as broker_module, pubsub as pubsub_module
+from tests.support.cases.realtime import INVALID_CONNECTION_LIMITS
 from tests.support.realtime import message_payload, refresh_envelope, silent_schedule
 
 
@@ -601,7 +602,7 @@ def test_redis_aclose_releases_sync_and_async_clients(clients, monkeypatch) -> N
 
     asyncio.run(use_and_close())
     assert backend._async_clients == {}
-    assert closed.call_count == 2
+    closed.assert_has_calls([call(), call()])
 
 
 def test_redis_close_with_running_loop_schedules_async_close(
@@ -713,7 +714,7 @@ def test_redis_aclose_without_async_client_closes_sync_pool(
     closed = create_autospec(clients.sync.close)
     monkeypatch.setattr(clients.sync, "close", closed)
     asyncio.run(backend.aclose())
-    assert closed.call_count == 2
+    closed.assert_has_calls([call(), call()])
     assert clients.created == []
 
 
@@ -1021,7 +1022,7 @@ def test_redis_stream_pool_inherits_the_client_connection_limit(clients) -> None
     assert [options["max_connections"] for options in clients.options] == [50, 50]
 
 
-@pytest.mark.parametrize("limit", [0, -1, True, 2.5, "10", None])
+@pytest.mark.parametrize("limit", INVALID_CONNECTION_LIMITS)
 def test_redis_invalid_stream_connection_limit_raises(clients, limit) -> None:
     with pytest.raises(ImproperlyConfigured, match="SUBSCRIBE_MAX_CONNECTIONS"):
         RedisBroker({"OPTIONS": {"SUBSCRIBE_MAX_CONNECTIONS": limit}})
@@ -1033,14 +1034,13 @@ def test_redis_loop_client_closes_the_stream_pool_after_a_failed_close(clients) 
 
     async def scenario() -> None:
         entry = backend._loop_client()
-        failing = AsyncMock(side_effect=OSError("closed"))
-        closing = AsyncMock()
-        broken = entry._replace(
-            client=Mock(aclose=failing), subscriber=Mock(aclose=closing)
-        )
+        failing = create_autospec(redis.asyncio.Redis, instance=True)
+        failing.aclose.side_effect = OSError("closed")
+        closing = create_autospec(redis.asyncio.Redis, instance=True)
+        broken = entry._replace(client=failing, subscriber=closing)
         with pytest.raises(OSError, match="closed"):
             await broken.aclose()
-        closing.assert_awaited_once_with()
+        closing.aclose.assert_awaited_once_with()
         await backend.aclose()
 
     asyncio.run(scenario())

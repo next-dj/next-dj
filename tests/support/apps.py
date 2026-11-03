@@ -5,7 +5,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
-from unittest.mock import patch
+from unittest.mock import create_autospec, patch
 
 from django.apps import AppConfig, apps as django_apps
 from django.conf import settings
@@ -55,6 +55,17 @@ def throwaway_apps(
         ),
     ):
         yield make
+
+
+def fake_app_configs(*pairs: tuple[str, Path]) -> list[AppConfig]:
+    """Return app configs carrying each `(label, path)` pair and nothing else real."""
+    configs: list[AppConfig] = []
+    for label, path in pairs:
+        config = create_autospec(AppConfig, instance=True)
+        config.label = label
+        config.path = str(path)
+        configs.append(config)
+    return configs
 
 
 _URLCONF_HEAD = (

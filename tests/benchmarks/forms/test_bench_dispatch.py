@@ -115,7 +115,7 @@ def _ok_handler(**kwargs) -> HttpResponseRedirect:
     return HttpResponseRedirect("/")
 
 
-def _action_request(origin: str, **fields: str) -> object:
+def _action_request(origin: str, **fields: str) -> HttpRequest:
     """Return an action POST from `origin`, resolved against the fixed bench urlconf."""
     post = QueryDict(mutable=True)
     post.update({**fields, ORIGIN_FIELD_NAME: origin})

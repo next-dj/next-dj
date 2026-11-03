@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Final, Literal
 
 from next.caches import BoundedCache, LruCache
-from next.introspect import refuse_async
+from next.introspect import refuse_async_render
 from next.permissions.access import declarations
 from next.utils import exec_module_file
 
@@ -107,9 +107,7 @@ class ModuleLoader:
         try:
             with declarations.collecting(path):
                 module = exec_module_file(path, f"component_module_{path.stem}")
-                render = getattr(module, "render", None)
-                if callable(render):
-                    refuse_async(render, "component.py render")
+                refuse_async_render(module, "component.py render")
         except Exception as exc:
             logger.exception("Could not import component module %s", path)
             _load_errors[path] = _detached(exc)

@@ -293,6 +293,16 @@ def _storage_scope_hash(scope_key: str) -> str:
     return hashlib.sha256(scope_key.encode()).hexdigest()[:16]
 
 
+WIZARD_HOOKS: Final = (
+    "check_permissions",
+    "get_steps",
+    "get_form_kwargs",
+    "done",
+    "get_success_message",
+)
+"""Hooks a wizard declares, each refused at class creation when async."""
+
+
 def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
     """Register a FormWizard subclass with form_action_manager."""
     gate = _registration_gate(cls)
@@ -331,16 +341,7 @@ class FormWizard:
     def __init_subclass__(cls, **kwargs) -> None:
         """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
-        _refuse_async_hooks(
-            cls,
-            (
-                "check_permissions",
-                "get_steps",
-                "get_form_kwargs",
-                "done",
-                "get_success_message",
-            ),
-        )
+        _refuse_async_hooks(cls, WIZARD_HOOKS)
         cls._has_check_permissions = _stamp_hook_flag(
             FormWizard.check_permissions, cls.check_permissions
         )

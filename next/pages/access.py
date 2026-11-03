@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from operator import methodcaller
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from django.http import Http404
@@ -44,7 +45,6 @@ from .loaders import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
-    from pathlib import Path
 
     from django.db.models import Model
     from django.http import HttpRequest, HttpResponseRedirect
@@ -196,6 +196,35 @@ def owner_access(file_path: Path) -> PageAccess | None:
     return page_access(directory / PAGE_MODULE)
 
 
+def _owner_page(file_path: str) -> Path | None:
+    """Return the `page.py` beside a file of a page tree when it defines `render()`."""
+    directory = Path(file_path).parent
+    if not in_page_tree(directory):
+        return None
+    owner = directory / PAGE_MODULE
+    module, _error = load_page_module(owner)
+    return owner if callable(getattr(module, "render", None)) else None
+
+
+_OWNER_PAGES: PageCache[str, tuple[AccessStamp, Path | None]] = PageCache()
+
+
+def render_guard(file_path: str, scope: str) -> Path | None:
+    """Return the `page.py` whose `render()` guards a page-scoped action, else `None`.
+
+    The answer is held while no page module loads again, like the rules of the tree.
+    """
+    if scope != "page":
+        return None
+    stamp = access_stamp()
+    if stamp is None:
+        return _owner_page(file_path)
+    held = _OWNER_PAGES.get(file_path)
+    if held is None or held[0] != stamp:
+        held = _OWNER_PAGES[file_path] = (stamp, _owner_page(file_path))
+    return held[1]
+
+
 def default_login(rule: AccessRule) -> bool:
     """Return whether a rule asking nothing and not public asks the default login."""
     return rule.undeclared and login_by_default()
@@ -317,6 +346,7 @@ def refusal(
 def forget_page_access(**kwargs: object) -> None:
     """Drop every memoised rule, so a settings reload reads the chains again."""
     _PAGES.clear()
+    _OWNER_PAGES.clear()
 
 
 __all__ = [
@@ -333,6 +363,7 @@ __all__ = [
     "page_access",
     "refusal",
     "refuse_broken",
+    "render_guard",
     "routed",
     "routed_pages",
     "url_lookup",

@@ -18,7 +18,7 @@ from next.forms.dispatch.permissions import (
     _tree,
     owner_rule,
 )
-from next.forms.signals import action_dispatched, form_access_denied
+from next.forms.signals import form_access_denied
 from next.pages.errors import PageModuleImportError
 from next.pages.loaders import _load_python_module, load_page_module
 from next.permissions import add_perm
@@ -32,6 +32,7 @@ from tests.support.access import (
     login_required_middleware,
     write_guard,
 )
+from tests.support.forms import logged_request_error, post_without_origin
 
 
 _PERM = "auth.view_user"
@@ -111,11 +112,7 @@ def _post(root: Path, kind: str, action: str, origin: str, **framework: object):
 
 def _post_without_origin(root: Path, kind: str, action: str, **framework: object):
     with routed(root, **framework):
-        client = client_as(kind)
-        with capture_signals(action_dispatched) as recorder:
-            response = client.post(client.get_action_url(action), {"name": "x"})
-    assert recorder.events == []
-    return response
+        return post_without_origin(client_as(kind), action, {"name": "x"})
 
 
 def _assert_status(response, status: int, origin: str) -> None:
@@ -282,8 +279,8 @@ class TestActionOutsideTheTree:
         _outside(tmp_path)
         _assert_status(_post(root, kind, "loose_note", origin), status, origin)
 
-    def test_an_action_without_a_file_answers_an_open_rule(self) -> None:
-        held = _tree(None, None)
+    def test_an_action_outside_every_tree_answers_an_open_rule(self) -> None:
+        held = _tree("/elsewhere/forms.py", None)
 
         assert (held.rule, held.broken, held.deferred) == (OPEN, None, True)
 
@@ -542,9 +539,7 @@ class TestBrokenGuard:
 
         assert response.status_code == 500
         assert b"broken guard" not in response.content
-        [record] = [r for r in caplog.records if r.name == "django.request"]
-        assert record.exc_info is not None
-        error = record.exc_info[1]
+        error = logged_request_error(caplog)
         assert isinstance(error, PageModuleImportError)
         assert error.file_path == guard
 

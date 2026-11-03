@@ -15,8 +15,8 @@ from django.contrib.staticfiles.finders import AppDirectoriesFinder, get_finders
 from django.core.management import call_command
 from django.test import override_settings
 
-from next import utils as next_utils
 from next.conf.signals import settings_reloaded
+from next.stamps import RACY_MTIME_WINDOW_NS, trusted
 from next.static import (
     AssetDiscovery,
     NextAppDirectoriesFinder,
@@ -33,11 +33,11 @@ from next.static.finders import (
     scan_page_tree_assets,
 )
 from next.static.runtime import NEXT_JS_STATIC_PATH
-from next.utils import RACY_MTIME_WINDOW_NS, UNSETTLED_MTIME_NS
 from tests.support import (
     NESTED_ROOT_CASES,
     TEMPLATE_AND_COMPONENT_SOURCES,
     TEST_ROOT_KEY,
+    TICK_NS,
     MalformedRootsRouter,
     NestedRootCase,
     StaticAssetProvider,
@@ -45,6 +45,7 @@ from tests.support import (
     file_router_config_entry,
     patched_watch_sources,
     restored_static_registries,
+    rewrite_in_tick,
 )
 
 
@@ -215,9 +216,6 @@ class TestNextStaticFilesFinderList:
         }
 
 
-_TICK_NS = 1_700_000_000 * 10**9
-
-
 class TestScanDirectorySnapshot:
     """What the snapshot records, tree by tree."""
 
@@ -231,20 +229,22 @@ class TestScanDirectorySnapshot:
         )
 
     @pytest.mark.parametrize(
-        ("lead_ns", "recorded_ns"),
-        [(0, UNSETTLED_MTIME_NS), (RACY_MTIME_WINDOW_NS, _TICK_NS)],
+        ("tick", "settled"),
+        [(0, False), (RACY_MTIME_WINDOW_NS, True)],
         ids=["same-tick", "settled"],
+        indirect=["tick"],
     )
     def test_a_tree_in_the_tick_of_the_snapshot_is_not_trusted(
-        self, tmp_path: Path, monkeypatch, lead_ns: int, recorded_ns: int
+        self, tmp_path: Path, tick: list[int], *, settled: bool
     ) -> None:
         """A folder written in the tick the scan shares rebuilds the next lookup."""
-        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
-        monkeypatch.setattr(next_utils, "time_ns", lambda: _TICK_NS + lead_ns)
+        rewrite_in_tick(tmp_path)
 
-        recorded = _scan_directories(_ScanRoots(((tmp_path, None),), ()))
+        ((path, recorded),) = _scan_directories(_ScanRoots(((tmp_path, None),), ()))
 
-        assert recorded == ((tmp_path, recorded_ns),)
+        assert path == tmp_path
+        assert trusted(recorded) is settled
+        assert (recorded == TICK_NS) is settled
 
     def test_a_root_that_holds_no_directory_ends_the_walk(self, tmp_path: Path) -> None:
         leaf = tmp_path / "notes.txt"

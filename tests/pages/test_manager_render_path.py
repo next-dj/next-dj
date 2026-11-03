@@ -7,26 +7,26 @@ import pytest
 from django.core.exceptions import PermissionDenied
 from django.test import override_settings
 
-from next import utils
 from next.caches import BoundedCache
 from next.pages import Page
 from next.pages.loaders import load_python_module_memo
 from next.partial.headers import VARY_HEADERS
+from next.stamps import RACY_MTIME_WINDOW_NS, stat_mtime_ns, trusted
 from next.testing import envelope_of
-from next.utils import RACY_MTIME_WINDOW_NS, UNSETTLED_MTIME_NS, stat_mtime_ns
 from tests.support import (
+    TICK_NS,
     assert_bounded_by_insert_age,
     build_nested_page,
     build_page_request,
     build_zone_request,
     path_under,
     record_path_calls,
+    rewrite_in_tick,
     touch_later,
     unified_view,
 )
 
 
-_TICK_NS = 1_700_000_000 * 10**9
 _ZONED_BODY = 'a {% zone "z" %}<p>zoned</p>{% endzone %} b'
 _ZONE_HTML = '<div data-next-zone="z"><p>zoned</p></div>'
 
@@ -80,29 +80,24 @@ class TestTemplateSourceSnapshot:
         assert tmp_path in templates.composed_sources[page_file]
 
     @pytest.mark.parametrize(
-        ("lead_ns", "recorded_ns", "stale"),
-        [(0, UNSETTLED_MTIME_NS, True), (RACY_MTIME_WINDOW_NS, _TICK_NS, False)],
+        ("tick", "stale"),
+        [(0, True), (RACY_MTIME_WINDOW_NS, False)],
         ids=["same-tick", "settled"],
+        indirect=["tick"],
     )
     def test_a_directory_in_the_tick_of_the_snapshot_is_not_trusted(
-        self,
-        page_instance,
-        tmp_path,
-        watched_template_edits,
-        monkeypatch,
-        lead_ns,
-        recorded_ns,
-        stale,
+        self, page_instance, tmp_path, watched_template_edits, tick, *, stale
     ) -> None:
         """A layout created in the tick the snapshot shares still evicts the entry."""
         page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
-        os.utime(tmp_path, ns=(_TICK_NS, _TICK_NS))
-        monkeypatch.setattr(utils, "time_ns", lambda: _TICK_NS + lead_ns)
+        rewrite_in_tick(tmp_path)
         templates = page_instance._templates
         templates.record_composed(page_file)
 
-        assert templates.composed_sources[page_file][tmp_path] == recorded_ns
+        recorded = templates.composed_sources[page_file][tmp_path]
+        assert trusted(recorded) is not stale
+        assert (recorded == TICK_NS) is not stale
         assert templates.composed_is_stale(page_file) is stale
 
     def test_record_skeleton_drops_a_snapshot_it_cannot_retake(

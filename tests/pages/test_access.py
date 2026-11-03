@@ -20,6 +20,7 @@ from next.pages.access import (
     page_access,
     refusal,
     refuse_broken,
+    render_guard,
     url_lookup,
 )
 from next.pages.errors import PageModuleImportError
@@ -47,6 +48,7 @@ from tests.support.access import (
     write_guard,
 )
 from tests.support.cases.intercepts import zone_body
+from tests.support.forms import logged_request_error
 
 
 pytestmark = pytest.mark.django_db
@@ -732,36 +734,26 @@ class TestBrokenPageAnswers500:
         write_page(root, "a", page_source(template=zone_body("feed")))
         return write_guard(root, "raise RuntimeError('boom')\n")
 
-    @staticmethod
-    def _assert_logged(caplog: pytest.LogCaptureFixture, broken: Path) -> None:
-        [record] = [r for r in caplog.records if r.name == "django.request"]
-        assert record.exc_info is not None
-        error = record.exc_info[1]
+    @pytest.mark.parametrize(
+        "get",
+        [
+            pytest.param(lambda client: client.get("/a/"), id="page"),
+            pytest.param(lambda client: client.get_zones("/a/", "feed"), id="partial"),
+        ],
+    )
+    @override_settings(DEBUG=False)
+    def test_a_get(self, root, broken, caplog, get) -> None:
+        client = NextClient(raise_request_exception=False)
+
+        with routed(root):
+            response = get(client)
+
+        assert response.status_code == 500
+        assert b"boom" not in response.content
+        error = logged_request_error(caplog)
         assert isinstance(error, PageModuleImportError)
         assert error.file_path == broken
         assert isinstance(error.__cause__, RuntimeError)
-
-    @override_settings(DEBUG=False)
-    def test_a_page_get(self, root, broken, caplog) -> None:
-        client = NextClient(raise_request_exception=False)
-
-        with routed(root):
-            response = client.get("/a/")
-
-        assert response.status_code == 500
-        assert b"boom" not in response.content
-        self._assert_logged(caplog, broken)
-
-    @override_settings(DEBUG=False)
-    def test_a_partial_get(self, root, broken, caplog) -> None:
-        client = NextClient(raise_request_exception=False)
-
-        with routed(root):
-            response = client.get_zones("/a/", "feed")
-
-        assert response.status_code == 500
-        assert b"boom" not in response.content
-        self._assert_logged(caplog, broken)
 
 
 class TestAccessMemo:
@@ -865,3 +857,48 @@ class TestOwnerAccess:
     def test_a_file_outside_every_tree_has_no_owner(self, root, tmp_path) -> None:
         with routed(root):
             assert owner_access(tmp_path / "elsewhere" / "forms.py") is None
+
+
+_RENDERS = "def render(request):\n    return 'ok'\n"
+
+
+class TestRenderGuard:
+    """A page-scoped action answers to the `render()` of the page in its directory."""
+
+    @pytest.mark.parametrize("debug", [False, True])
+    def test_a_page_with_render_guards_the_files_beside_it(self, root, debug) -> None:
+        page_path = write_page(root, "a", _RENDERS)
+        beside = str(root / "a" / "forms.py")
+
+        with routed(root), override_settings(DEBUG=debug):
+            first = render_guard(beside, "page")
+            second = render_guard(beside, "page")
+
+        assert (first, second) == (page_path, page_path)
+
+    @pytest.mark.parametrize(
+        ("source", "scope"), [(_RENDERS, "shared"), ('template = "ok"\n', "page")]
+    )
+    def test_nothing_guards_without_a_page_render(self, root, source, scope) -> None:
+        page_path = write_page(root, "a", source)
+
+        with routed(root):
+            assert render_guard(str(page_path), scope) is None
+
+    def test_a_file_outside_every_tree_has_no_guard(self, root, tmp_path) -> None:
+        with routed(root):
+            assert (
+                render_guard(str(tmp_path / "elsewhere" / "forms.py"), "page") is None
+            )
+
+    def test_a_page_loaded_again_is_read_again(self, root) -> None:
+        page_path = write_page(root, "a", 'template = "ok"\n')
+
+        with routed(root):
+            before = render_guard(str(page_path), "page")
+            page_path.write_text(_RENDERS)
+            touch_later(page_path)
+            load_python_module_memo(page_path)
+            after = render_guard(str(page_path), "page")
+
+        assert (before, after) == (None, page_path)

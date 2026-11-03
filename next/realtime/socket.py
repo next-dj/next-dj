@@ -18,7 +18,7 @@ from .attendance import Attendance, Identifier, aattend, aattending
 from .backends import BrokerBackend
 from .binding import opaque_subject, ticket_binding
 from .delivery import atransformed
-from .errors import BrokerConnectionError, InvalidTicketError
+from .errors import BrokerConnectionError, InvalidTicketError, PoolFullError
 from .frames import (
     Close,
     FrameError,
@@ -30,18 +30,12 @@ from .frames import (
     Up,
     UpstreamError,
 )
-from .handlers import (
-    Lease,
-    PoolFullError,
-    ThreadShare,
-    Upstream,
-    dispatch as dispatch_upstream,
-)
+from .handlers import Upstream, dispatch as dispatch_upstream
 from .lifecycle import StreamLifecycle, arejected
 from .limits import SocketLimits, TokenBucket, TunnelLimits, heartbeat_seconds
 from .manager import broker_manager
 from .messages import Message, Position
-from .pool import run_detached
+from .pool import Lease, handler_pool, run_detached
 from .replay import acatch_up
 from .roster import counted, subscriber_snapshot
 from .signals import UnsubscribeReason
@@ -222,7 +216,7 @@ class TopicSocket:
         self._bucket = TokenBucket(upstream.rate, upstream.burst, clock=clock.monotonic)
         self._strikes = 0
         self._events = 0
-        self._threads = ThreadShare()
+        self._threads = handler_pool.share()
         self._requests = 0
         self._topics: frozenset[str] = frozenset()
         self._pinged_at: float | None = None

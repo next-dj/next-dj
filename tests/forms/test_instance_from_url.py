@@ -24,6 +24,7 @@ from next.forms.dispatch.build import (
     _form_action_context_callable,
 )
 from next.forms.registration import registration_diagnostics
+from next.forms.uid import ORIGIN_FIELD_NAME
 from tests.support import bound_dependency, routed, write_page
 
 
@@ -434,7 +435,7 @@ class TestDispatchInstanceFromUrlEndToEnd:
         response = self._dispatch(
             mock_http_request,
             GroupByNameForm,
-            {"_next_form_origin": "/", "name": "fresh"},
+            {ORIGIN_FIELD_NAME: "/", "name": "fresh"},
         )
 
         assert response.status_code == 302

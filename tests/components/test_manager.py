@@ -1,5 +1,4 @@
 import logging
-import os
 from collections.abc import Generator
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,15 +52,10 @@ from tests.support import (
     RootPagesRouter,
     failing_watch_components_entry,
     next_framework_settings_stand_in as _stand_in,
+    rewrite_in_tick,
+    touch_later,
     watching_components_entry,
 )
-
-
-def _bump_mtime(path: Path, seconds: int = 2) -> None:
-    """Move the file mtime forward so a same-second rewrite is still a change."""
-    shift = seconds * 1_000_000_000
-    stat = path.stat()
-    os.utime(path, ns=(stat.st_atime_ns + shift, stat.st_mtime_ns + shift))
 
 
 def _key(info: ComponentInfo) -> tuple[Path | None, Path | None]:
@@ -125,8 +119,7 @@ class RewritingSourceLoader(CachedComponentTemplateLoader):
     def load_source(self, info: ComponentInfo) -> TemplateSource | None:
         source = super().load_source(info)
         if self.pending_save is not None and info.template_path is not None:
-            info.template_path.write_text(self.pending_save)
-            _bump_mtime(info.template_path)
+            touch_later(info.template_path, self.pending_save)
             self.pending_save = None
         return source
 
@@ -822,7 +815,7 @@ class TestCachedComponentTemplateLoader:
         """Two renders of one component read and compile the source once."""
         path = tmp_path / "card.djx"
         path.write_text("<h3>{{ title }}</h3>")
-        _bump_mtime(path)
+        touch_later(path)
         info = ComponentInfo("card", tmp_path, "", path, None, True)
         loader = CountingCachedLoader(ModuleLoader())
         renderer = SimpleComponentRenderer(loader)
@@ -835,22 +828,17 @@ class TestCachedComponentTemplateLoader:
         assert loader.reads == 1
         assert compile_calls.call_count == 1
 
-    @pytest.mark.usefixtures("watched_template_edits")
-    def test_same_tick_rewrite_reloads_the_template(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @pytest.mark.usefixtures("watched_template_edits", "tick")
+    def test_same_tick_rewrite_reloads_the_template(self, tmp_path: Path) -> None:
         """A rewrite sharing a recent mtime tick cannot keep the old compilation."""
         path = tmp_path / "card.djx"
-        path.write_text("<h3>one</h3>")
-        stamp = path.stat().st_mtime_ns
-        monkeypatch.setattr("next.utils.time_ns", lambda: stamp + 1)
+        rewrite_in_tick(path, "<h3>one</h3>")
         info = ComponentInfo("card", tmp_path, "", path, None, True)
         loader = CountingCachedLoader(ModuleLoader())
         renderer = SimpleComponentRenderer(loader)
 
         assert renderer.render(info, {}, None) == "<h3>one</h3>"
-        path.write_text("<h3>two</h3>")
-        os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+        rewrite_in_tick(path, "<h3>two</h3>")
 
         assert renderer.render(info, {}, None) == "<h3>two</h3>"
         assert loader.reads == 2
@@ -865,10 +853,10 @@ class TestCachedComponentTemplateLoader:
         renderer = SimpleComponentRenderer(loader)
         assert renderer.render(info, {}, None) == "<h3>one</h3>"
         path.write_text("<h3>two</h3>")
-        _bump_mtime(path)
+        touch_later(path)
         assert renderer.render(info, {}, None) == "<h3>two</h3>"
         assert loader.reads == 2
-        assert loader._compiled[_key(info)].mtime_ns == path.stat().st_mtime_ns
+        assert loader._compiled[_key(info)].stamp == path.stat().st_mtime_ns
 
     @pytest.mark.usefixtures("watched_template_edits")
     def test_a_module_string_follows_its_module(self, tmp_path: Path) -> None:
@@ -884,7 +872,7 @@ class TestCachedComponentTemplateLoader:
         loader = CountingCachedLoader(ModuleLoader())
         assert _render_body(loader, info) == "<i>one</i>"
         module.write_text('component = "<b>two</b>"\n')
-        _bump_mtime(module)
+        touch_later(module)
         assert _render_body(loader, info) == "<i>one</i>"
         assert loader.reads == 2
         restarted = CachedComponentTemplateLoader(ModuleLoader())
@@ -901,13 +889,13 @@ class TestCachedComponentTemplateLoader:
         djx.write_bytes(b"\xff\xfe not utf-8")
         module = module_dir / "component.py"
         module.write_text('component = "<b>one</b>"\n')
-        _bump_mtime(module)
+        touch_later(module)
         info = ComponentInfo("mod", tmp_path, "", djx, module, False)
         loader = CountingCachedLoader(ModuleLoader())
         assert _render_body(loader, info) == "<b>one</b>"
         assert loader._compiled[_key(info)].source_path == module
         module.write_text('component = "<b>two</b>"\n')
-        _bump_mtime(module)
+        touch_later(module)
         assert _render_body(loader, info) == "<b>one</b>"
         assert loader.reads == 2
         restarted = CachedComponentTemplateLoader(ModuleLoader())
@@ -920,7 +908,7 @@ class TestCachedComponentTemplateLoader:
         module_dir.mkdir()
         module = module_dir / "component.py"
         module.write_text('component = "<i>from module</i>"\n')
-        _bump_mtime(module)
+        touch_later(module)
         info = ComponentInfo(
             "mod", tmp_path, "", module_dir / "component.djx", module, False
         )
@@ -968,7 +956,7 @@ class TestCachedComponentTemplateLoader:
         loader = CachedComponentTemplateLoader(ModuleLoader())
         assert loader.load_template(info) is not None
         path.write_bytes(b"\xff\xfe broken")
-        _bump_mtime(path)
+        touch_later(path)
         assert loader.load_template(info) is None
         assert not loader._compiled
 
@@ -1094,7 +1082,7 @@ class TestRevalidationFollowsWatchedEdits:
         with override_settings(DEBUG=False):
             assert _render_body(loader, info) == "<h3>one</h3>"
             path.write_text("<h3>two</h3>")
-            _bump_mtime(path)
+            touch_later(path)
             assert _render_body(loader, info) == "<h3>one</h3>"
             assert loader.reads == 1
         assert _render_body(loader, info) == "<h3>two</h3>"
@@ -1112,7 +1100,7 @@ class TestRenderPipelineCaching:
         path = tmp_path / "card.djx"
         path.write_text("<h3>{{ title }}</h3>")
         if debug:
-            _bump_mtime(path)
+            touch_later(path)
         info = ComponentInfo("card", tmp_path, "", path, None, True)
         with override_settings(DEBUG=debug):
             assert render_component(info, {"title": "one"}) == "<h3>one</h3>"
@@ -1141,7 +1129,7 @@ class TestRenderPipelineCaching:
         info = ComponentInfo("card", tmp_path, "", path, None, True)
         assert render_component(info, {}) == "<h3>one</h3>"
         path.write_text("<h3>two</h3>")
-        _bump_mtime(path)
+        touch_later(path)
         assert render_component(info, {}) == "<h3>two</h3>"
 
 
@@ -1330,10 +1318,10 @@ class TestBothShippedLoadersAgree:
         cached, plain = SHIPPED_LOADER_PATHS
         for loader_path in (cached, plain):
             path.write_text("<h3>one</h3>")
-            _bump_mtime(path)
+            touch_later(path)
             assert self._render_under(loader_path, info, {}) == "<h3>one</h3>"
             path.write_text("<h3>two</h3>")
-            _bump_mtime(path)
+            touch_later(path)
             assert self._render_under(loader_path, info, {}) == "<h3>two</h3>"
 
     def test_only_the_cached_loader_reuses_a_compiled_template(

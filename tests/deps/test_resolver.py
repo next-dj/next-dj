@@ -6,7 +6,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from typing import NamedTuple
-from unittest.mock import ANY, patch
+from unittest.mock import ANY
 
 import pytest
 from django.http import HttpRequest
@@ -36,7 +36,6 @@ from next.deps.introspect import (
 )
 from next.deps.resolver import _CLAIMED_RESERVED, _UNCLAIMED_RESERVED, forget_dep_caches
 from next.errors import AsyncCallableError
-from next.introspect import refuse_async as refuse_async_original
 from next.testing import make_resolution_context
 from next.urls import HttpRequestProvider, UrlKwargsProvider
 from tests.support import (
@@ -1285,14 +1284,14 @@ class TestAsyncRefusal:
             instance.resolve_dependencies(_async_render)
         assert introspect_key(_async_render) not in instance._plan_cache
 
-    def test_a_cached_plan_skips_the_refusal(self) -> None:
+    def test_a_second_resolve_reuses_the_cached_plan(self) -> None:
         instance = _minimal_resolver()
-        with patch(
-            "next.deps.resolver.refuse_async", wraps=refuse_async_original
-        ) as refusal:
-            instance.resolve_dependencies(_sync_render)
-            instance.resolve_dependencies(_sync_render)
-        assert refusal.call_count == 1
+        key = introspect_key(_sync_render)
+        instance.resolve_dependencies(_sync_render)
+        cached = instance._plan_cache.get(key)
+        assert cached is not None
+        instance.resolve_dependencies(_sync_render)
+        assert instance._plan_cache.get(key) is cached
 
     def test_registering_an_async_dependency_raises(self) -> None:
         instance = _minimal_resolver()

@@ -53,6 +53,7 @@ function makeWire(
     applied?: boolean;
     tunnel?: WireDeps["tunnel"];
     document?: Document;
+    reload?: () => void;
     timeout?: number;
   } = {},
 ) {
@@ -70,13 +71,14 @@ function makeWire(
     navigate: (url) => navigated.push(url),
     session,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
-    onEnvelope: async (raw, _response, _snapshot, _key, page) => {
+    onEnvelope: async (raw, { page }) => {
       envelopes.push(raw);
       pages.push(page);
       return { envelope: raw as Envelope, ok: opts.applied ?? true };
     },
     ...(opts.tunnel === undefined ? {} : { tunnel: opts.tunnel }),
     ...(opts.document === undefined ? {} : { document: opts.document }),
+    ...(opts.reload === undefined ? {} : { reload: opts.reload }),
     ...(opts.timeout === undefined ? {} : { timeout: () => opts.timeout! }),
     version: () => opts.version ?? "v1",
     csrf: opts.csrfSource ?? {
@@ -1485,13 +1487,9 @@ describe("Wire WebSocket tunnel", () => {
   it("reloads the page after reporting a reply the server kept to HTTP", async () => {
     const seen: string[][] = [];
     const reload = vi.fn(() => seen.push(h.dispatched.map((d) => d.event)));
-    const page = {
-      location: { origin: document.location.origin, reload },
-      baseURI: document.baseURI,
-    } as unknown as Document;
     const h = makeWire(async () => envelopeResponse(ENVELOPE), {
       tunnel: async () => "http_only",
-      document: page,
+      reload,
     });
     await h.wire.fetch(post);
     expect(h.calls).toHaveLength(0);
@@ -1507,14 +1505,10 @@ describe("Wire WebSocket tunnel", () => {
 
   it("keeps the page for a reply lost with the socket or to its timeout", async () => {
     const reload = vi.fn();
-    const page = {
-      location: { origin: document.location.origin, reload },
-      baseURI: document.baseURI,
-    } as unknown as Document;
     for (const reason of ["closed", "timeout", "limit"]) {
       const h = makeWire(async () => envelopeResponse(ENVELOPE), {
         tunnel: async () => reason,
-        document: page,
+        reload,
       });
       await h.wire.fetch(post);
       expect(h.calls).toHaveLength(0);

@@ -13,7 +13,8 @@ from next.partial.guards import Components, Stamps, bound_zones
 from next.partial.headers import partial_intent
 from next.partial.signals import zone_registered
 from next.partial.zone import ZoneNode
-from next.utils import stamps_fresh, template_edits_watched
+from next.stamps import all_fresh
+from next.utils import template_edits_watched
 
 
 if TYPE_CHECKING:
@@ -105,7 +106,7 @@ def zones_of(template: "Template", page_path: "Path") -> "Mapping[str, ZoneInfo]
         if (
             not cached.stamps
             or not template_edits_watched()
-            or stamps_fresh(cached.stamps)
+            or all_fresh(cached.stamps)
         ):
             return cached.zones
         bound, stamps = _bound(template, page_path)

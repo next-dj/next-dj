@@ -7,7 +7,6 @@ from django.urls.converters import get_converters
 
 import next.pages.loaders as loaders_module
 from next.checks import (
-    check_async_callables,
     check_context_functions,
     check_layout_templates,
     check_page_functions,
@@ -531,7 +530,9 @@ async def get_context_data() -> str:
 
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
-            refused = [m for m in check_async_callables() if m.obj == str(page_file)]
+            refused = [
+                m for m in check_page_module_imports(None) if m.obj == str(page_file)
+            ]
         assert [m.id for m in refused] == ["next.E218"]
 
     def test_e029_on_aliased_context_decorator(self, tmp_path) -> None:

@@ -13,12 +13,13 @@ from django.core.checks import CheckMessage, Error, register
 from next.checks import NEXT
 from next.checks.common import (
     RegistrationSubject,
+    async_callable_error,
+    async_refusal,
     errors_for_unknown_keys,
     import_backend_class,
     registration_file_errors,
 )
 from next.conf import next_framework_settings
-from next.errors import AsyncCallableError
 
 from .backends import ComponentsBackend
 from .context import component
@@ -337,7 +338,10 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report a `component.py` that raises while importing (`next.E084`)."""
+    """Report a `component.py` that raises while importing (`next.E084`).
+
+    An async callable refused at import reports as `next.E218`, which names it.
+    """
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return []
@@ -346,8 +350,11 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
     for backend in _checked_backends():
         for module_path in backend.import_component_modules():
             error = last_load_error(module_path)
-            # An async callable refused at import is left to next.E218, which names it.
-            if error is None or isinstance(error, AsyncCallableError):
+            if error is None:
+                continue
+            refusal = async_refusal(error)
+            if refusal is not None:
+                errors.append(async_callable_error(module_path, refusal))
                 continue
             errors.append(
                 Error(

@@ -19,6 +19,7 @@ from next.realtime.access import AccessCheck, SocketAccessCheck, TopicAuthorizer
 from next.realtime.backends import MemoryBroker
 from next.realtime.frames import Close
 from next.realtime.handlers import HandlerRegistry, on
+from next.realtime.pool import handler_pool
 from next.realtime.signals import upstream_received, upstream_rejected
 from next.realtime.socket import Handshake, SocketClock, TopicSocket
 from next.realtime.tickets import TicketClaims
@@ -501,8 +502,8 @@ def test_slow_handler_times_out_on_its_own_pool() -> None:
     with (
         override_settings(NEXT_FRAMEWORK=limits),
         ThreadPoolExecutor(1, thread_name_prefix="own") as pool,
-        patch.object(handlers, "handler_pool", lambda: pool),
-        patch.object(handlers, "handler_workers", lambda: 8),
+        patch.object(handler_pool, "executor", pool),
+        patch.object(handler_pool, "workers", 8),
     ):
         acks = asyncio.run(scenario())
     assert sorted(ack["id"] for ack in acks) == ["0", "1", "2"]
@@ -572,16 +573,31 @@ def _blocking() -> Iterator[tuple[threading.Event, threading.Event]]:
         release.set()
 
 
-async def _until_ok(port: MemoryPort, name: str) -> dict[str, object]:
-    """Send `name` until its ack is no longer refused, the way a client retries."""
-    async with asyncio.timeout(5):
-        while True:
-            port.push_json(_up(name, id="retry"))
-            ack = await _frame(port)
-            if ack["ok"]:
-                return ack
-            assert ack["error"] == "limit"
-            await asyncio.sleep(0.01)
+def _ack(ack_id: str, error: str | None = None) -> dict[str, object]:
+    if error is None:
+        return {"type": "ack", "id": ack_id, "ok": True}
+    return {"type": "ack", "id": ack_id, "ok": False, "error": error}
+
+
+async def _open_pair(
+    first: SocketTicket, second: SocketTicket
+) -> tuple[MemoryPort, asyncio.Task[None], MemoryPort, asyncio.Task[None]]:
+    port, other = MemoryPort(), MemoryPort()
+    _, task = await _open(port, first)
+    _, other_task = await _open(other, second)
+    return port, task, other, other_task
+
+
+class _Returns(threading.BoundedSemaphore):
+    """Handler pool permits that tell when a thread comes back to the pool."""
+
+    def __init__(self, value: int) -> None:
+        super().__init__(value)
+        self.returned = threading.Event()
+
+    def release(self, n: int = 1) -> None:
+        super().release(n)
+        self.returned.set()
 
 
 _FAST = {"RATE": 1000, "BURST": 1000}
@@ -590,36 +606,37 @@ _FAST = {"RATE": 1000, "BURST": 1000}
 @pytest.mark.django_db(transaction=True)
 def test_a_timed_out_sync_handler_keeps_its_slot_until_it_returns() -> None:
     first, second = _ticket(), _ticket()
+    permits = _Returns(8)
 
     async def scenario(entered: threading.Event, release: threading.Event) -> None:
         loop = asyncio.get_running_loop()
         clock = _LoopClock(loop)
-        port, other = MemoryPort(), MemoryPort()
         with patch.object(loop, "time", clock):
-            _, task = await _open(port, first)
-            _, other_task = await _open(other, second)
+            port, task, other, other_task = await _open_pair(first, second)
             port.push_json(_up("block", id="1"))
             assert await asyncio.to_thread(entered.wait, 5)
             clock.offset += 31
-            assert await _frame(port) == {
-                "type": "ack",
-                "id": "1",
-                "ok": False,
-                "error": "timeout",
-            }
+            assert await _frame(port) == _ack("1", "timeout")
             for index, name in enumerate(["cursor", "typing", "cursor"], start=2):
                 port.push_json(_up(name, id=str(index)))
-                assert (await _frame(port))["error"] == "limit"
+                assert await _frame(port) == _ack(str(index), "limit")
             other.push_json(_up("typing", id="1"))
-            assert await _frame(other) == {"type": "ack", "id": "1", "ok": True}
+            assert await _frame(other) == _ack("1")
+            permits.returned.clear()
             release.set()
-            assert (await _until_ok(port, "cursor"))["ok"] is True
+            assert await asyncio.to_thread(permits.returned.wait, 5)
+            port.push_json(_up("cursor", id="5"))
+            assert await _frame(port) == _ack("5")
             await _close(port, task)
             await _close(other, other_task)
         assert port.close_code is None
 
     limits = {"REALTIME": {"UPSTREAM": {"TIMEOUT": 30, "CONCURRENCY": 1, **_FAST}}}
-    with override_settings(NEXT_FRAMEWORK=limits), _blocking() as (entered, release):
+    with (
+        override_settings(NEXT_FRAMEWORK=limits),
+        patch.object(handler_pool, "permits", permits),
+        _blocking() as (entered, release),
+    ):
         asyncio.run(scenario(entered, release))
 
 
@@ -628,21 +645,19 @@ def test_one_connection_runs_sync_handlers_on_its_share_of_the_pool() -> None:
     first, second = _ticket(), _ticket()
 
     async def scenario(entered: threading.Event, release: threading.Event) -> None:
-        port, other = MemoryPort(), MemoryPort()
-        _, task = await _open(port, first)
-        _, other_task = await _open(other, second)
+        port, task, other, other_task = await _open_pair(first, second)
         port.push_json(_up("block", id="1"))
         assert await asyncio.to_thread(entered.wait, 5)
         port.push_json(_up("typing", id="2"))
-        assert (await _frame(port))["error"] == "limit"
+        assert await _frame(port) == _ack("2", "limit")
         port.push_json(_up("cursor", id="3"))
-        assert await _frame(port) == {"type": "ack", "id": "3", "ok": True}
+        assert await _frame(port) == _ack("3")
         other.push_json(_up("typing", id="1"))
-        assert await _frame(other) == {"type": "ack", "id": "1", "ok": True}
+        assert await _frame(other) == _ack("1")
         release.set()
-        assert await _frame(port) == {"type": "ack", "id": "1", "ok": True}
+        assert await _frame(port) == _ack("1")
         port.push_json(_up("typing", id="4"))
-        assert await _frame(port) == {"type": "ack", "id": "4", "ok": True}
+        assert await _frame(port) == _ack("4")
         await _close(port, task)
         await _close(other, other_task)
         assert port.close_code is None
@@ -650,7 +665,7 @@ def test_one_connection_runs_sync_handlers_on_its_share_of_the_pool() -> None:
     limits = {"REALTIME": {"UPSTREAM": _FAST}}
     with (
         override_settings(NEXT_FRAMEWORK=limits),
-        patch.object(handlers, "handler_workers", lambda: 2),
+        patch.object(handler_pool, "workers", 2),
         capture_signals(upstream_received, upstream_rejected) as recorder,
         _blocking() as (entered, release),
     ):
@@ -661,31 +676,25 @@ def test_one_connection_runs_sync_handlers_on_its_share_of_the_pool() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_full_pool_refuses_sync_events_of_every_connection() -> None:
+def test_a_full_pool_refuses_sync_events_of_every_connection(
+    permits: threading.BoundedSemaphore,
+) -> None:
     first, second = _ticket(), _ticket()
-    permits = threading.BoundedSemaphore(1)
 
     async def scenario(entered: threading.Event, release: threading.Event) -> None:
-        port, other = MemoryPort(), MemoryPort()
-        _, task = await _open(port, first)
-        _, other_task = await _open(other, second)
+        port, task, other, other_task = await _open_pair(first, second)
         port.push_json(_up("block", id="1"))
         assert await asyncio.to_thread(entered.wait, 5)
         other.push_json(_up("typing", id="1"))
-        assert await _frame(other) == {
-            "type": "ack",
-            "id": "1",
-            "ok": False,
-            "error": "limit",
-        }
+        assert await _frame(other) == _ack("1", "limit")
         other.push_json(_up("typing"))
         assert await _frame(other) == {"type": "error", "code": "limit"}
         other.push_json(_up("cursor", id="2"))
-        assert await _frame(other) == {"type": "ack", "id": "2", "ok": True}
+        assert await _frame(other) == _ack("2")
         release.set()
-        assert await _frame(port) == {"type": "ack", "id": "1", "ok": True}
+        assert await _frame(port) == _ack("1")
         other.push_json(_up("typing", id="3"))
-        assert await _frame(other) == {"type": "ack", "id": "3", "ok": True}
+        assert await _frame(other) == _ack("3")
         await _close(port, task)
         await _close(other, other_task)
         assert other.close_code is None
@@ -693,7 +702,6 @@ def test_a_full_pool_refuses_sync_events_of_every_connection() -> None:
     limits = {"REALTIME": {"UPSTREAM": _FAST}}
     with (
         override_settings(NEXT_FRAMEWORK=limits),
-        patch.object(handlers, "handler_threads", lambda: permits),
         capture_signals(upstream_rejected) as recorder,
         _blocking() as (entered, release),
     ):
@@ -1059,7 +1067,7 @@ def test_handler_sees_the_user_the_last_recheck_loaded(clock: ServerClock) -> No
             socket_module, "SocketAccessCheck", partial(SocketAccessCheck, clock=clock)
         ),
         ThreadPoolExecutor(1) as pool,
-        patch.object(handlers, "handler_pool", lambda: pool),
+        patch.object(handler_pool, "executor", pool),
     ):
         asyncio.run(scenario())
     assert allowed == [True, True, False]

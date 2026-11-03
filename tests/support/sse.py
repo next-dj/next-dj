@@ -16,6 +16,7 @@ class StalledSend:
         self.delivered = delivered
         self.bodies: list[bytes] = []
         self.blocked = asyncio.Event()
+        self._wrote = asyncio.Event()
 
     async def __call__(self, message: MutableMapping[str, object]) -> None:
         """Record a body chunk, or block forever once the quota is spent."""
@@ -27,13 +28,20 @@ class StalledSend:
         body = message.get("body", b"")
         assert isinstance(body, bytes)
         self.bodies.append(body)
+        self._wrote.set()
+
+    async def received(self, count: int) -> None:
+        """Wait until at least `count` body chunks have been delivered."""
+        while len(self.bodies) < count:
+            self._wrote.clear()
+            await self._wrote.wait()
 
 
 async def serve_stream(
     response: StreamingHttpResponse,
     send: StalledSend | None = None,
     *,
-    within: float = 2.0,
+    within: float = 5.0,
 ) -> asyncio.Task[None]:
     """Write `response` through Django's ASGI sender and return its finished task.
 
@@ -42,5 +50,6 @@ async def serve_stream(
     task = asyncio.create_task(
         ASGIHandler().send_response(response, send or StalledSend(delivered=10**6))
     )
-    await asyncio.wait({task}, timeout=within)
+    async with asyncio.timeout(within):
+        await asyncio.wait({task})
     return task

@@ -31,12 +31,8 @@ from next.components.sources import Position, TemplateWalk
 from next.interpolation import Interpolation
 from next.pages.paths import page_template_path
 from next.permissions.nodes import HasPermNode
-from next.utils import (
-    child_nodelists,
-    snapshot_mtime_ns,
-    stamps_fresh,
-    template_edits_watched,
-)
+from next.stamps import all_fresh, snapshot
+from next.utils import child_nodelists, template_edits_watched
 
 from .zone import ZoneNode, zones_under
 
@@ -244,7 +240,7 @@ class _Closure(TemplateWalk):
 
     @override
     def read(self, path: Path) -> None:
-        self.stamps.add((path, snapshot_mtime_ns(path)))
+        self.stamps.add((path, snapshot(path)))
 
 
 def _template_source(
@@ -286,7 +282,7 @@ class Components:
         key = (self._anchor, source.path, source.text, part)
         verdict = _verdicts.get(key)
         if verdict is None or (
-            template_edits_watched() and not stamps_fresh(verdict.stamps)
+            template_edits_watched() and not all_fresh(verdict.stamps)
         ):
             closure = _Closure(self._manager, self._anchor)
             guarding = closure.component(source, Position())

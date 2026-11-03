@@ -10,7 +10,6 @@ from django.http import HttpRequest
 from django.test import override_settings
 
 import next.pages.loaders as loaders_module
-from next import utils
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.errors import AsyncCallableError
@@ -50,21 +49,19 @@ from next.pages.loaders import (
 )
 from next.pages.placeholder import ROOT_MARKER
 from next.pages.processors import _get_context_processors, _import_context_processor
-from next.utils import (
-    MAX_ANCESTOR_WALK_DEPTH,
-    RACY_MTIME_WINDOW_NS,
-    UNSETTLED_MTIME_NS,
-    stat_mtime_ns,
-)
+from next.stamps import RACY_MTIME_WINDOW_NS, stat_mtime_ns, trusted
+from next.utils import MAX_ANCESTOR_WALK_DEPTH
 from tests.support import (
     LAYOUT_CONFIG_CASES,
     PAGES_DIRS_CONFIG_CASES,
     TEMPLATE_PRIORITY_CASES,
+    TICK_NS,
     LayoutConfigCase,
     PagesDirsConfigCase,
     TemplatePriorityCase,
     default_page_router_config,
     file_router_config_entry,
+    rewrite_in_tick,
     touch_later,
 )
 
@@ -2170,23 +2167,6 @@ class TestLayoutText:
         assert template_source(layout) == layout.read_text()
 
 
-_TICK_NS = 1_700_000_000 * 10**9
-
-
-def _rewrite_in_tick(path: Path, source: str) -> None:
-    """Rewrite `path` with `source`, stamped with the mtime of the shared tick."""
-    path.write_text(source)
-    os.utime(path, ns=(_TICK_NS, _TICK_NS))
-
-
-@pytest.fixture()
-def tick(monkeypatch) -> list[int]:
-    """Pin the snapshot clock to the shared tick, moved by assigning its one item."""
-    now = [_TICK_NS]
-    monkeypatch.setattr(utils, "time_ns", lambda: now[0])
-    return now
-
-
 class TestRewritesWithinOneTick:
     """A file rewritten in the mtime tick of its last read is read again."""
 
@@ -2196,7 +2176,7 @@ class TestRewritesWithinOneTick:
         site = tmp_path / "site"
         outer = _write_layout(site, "outer")
         inner = _write_layout(site / "inner", "inner")
-        _rewrite_in_tick(inner, _SHELL.format(tag="inner"))
+        rewrite_in_tick(inner, _SHELL.format(tag="inner"))
         page = site / "inner" / "page.py"
 
         with override_settings(
@@ -2204,7 +2184,7 @@ class TestRewritesWithinOneTick:
             NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(site)},
         ):
             assert layout_chain(page) == (inner, outer)
-            _rewrite_in_tick(inner, ROOT_MARKER + _SHELL.format(tag="inner"))
+            rewrite_in_tick(inner, ROOT_MARKER + _SHELL.format(tag="inner"))
 
             assert layout_chain(page) == (inner,)
 
@@ -2212,7 +2192,7 @@ class TestRewritesWithinOneTick:
         self, tmp_path, tick, monkeypatch
     ) -> None:
         layout = _write_layout(tmp_path, "html", root=True)
-        os.utime(layout, ns=(_TICK_NS, _TICK_NS))
+        rewrite_in_tick(layout)
         scans: list[str] = []
         scan_root = loaders_module.scan_root
         monkeypatch.setattr(
@@ -2224,7 +2204,7 @@ class TestRewritesWithinOneTick:
         assert _root_check(layout) is True
         assert _root_check(layout) is True
         assert len(scans) == 2
-        tick[0] = _TICK_NS + RACY_MTIME_WINDOW_NS
+        tick[0] = TICK_NS + RACY_MTIME_WINDOW_NS
         assert _root_check(layout) is True
         assert _root_check(layout) is True
 
@@ -2235,7 +2215,7 @@ class TestRewritesWithinOneTick:
     ) -> None:
         first = _write_layout(tmp_path / "first", "first")
         second = _write_layout(tmp_path / "second", "second")
-        _rewrite_in_tick(first, _SHELL.format(tag="first"))
+        rewrite_in_tick(first, _SHELL.format(tag="first"))
         page = tmp_path / "elsewhere" / "page.py"
         loader = LayoutTemplateLoader()
         config = _dirs_config(tmp_path / "first", tmp_path / "second")
@@ -2243,17 +2223,19 @@ class TestRewritesWithinOneTick:
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
             assert layout_chain(page) == (first, second)
             assert "<first>" in loader.compose_body("body", page)
-            _rewrite_in_tick(first, ROOT_MARKER + _SHELL.format(tag="fresh"))
+            rewrite_in_tick(first, ROOT_MARKER + _SHELL.format(tag="fresh"))
             chain = layout_chain(page)
             composed = loader.compose_body("body", page)
             racy = layout_stamps(page)
-            tick[0] = _TICK_NS + RACY_MTIME_WINDOW_NS
+            tick[0] = TICK_NS + RACY_MTIME_WINDOW_NS
             settled = layout_stamps(page)
 
         assert chain == (first,)
         assert "<fresh>" in composed
-        assert racy == ((first, UNSETTLED_MTIME_NS),)
-        assert settled == ((first, _TICK_NS),)
+        ((racy_path, racy_stamp),) = racy
+        assert racy_path == first
+        assert not trusted(racy_stamp)
+        assert settled == ((first, TICK_NS),)
 
     def test_a_layout_above_the_tree_is_held_once_its_mtime_settles(
         self, tmp_path, tick, monkeypatch
@@ -2261,7 +2243,7 @@ class TestRewritesWithinOneTick:
         site = tmp_path / "mid" / "site"
         (site / "sub").mkdir(parents=True)
         mid = _write_layout(site.parent, "mid")
-        os.utime(mid, ns=(_TICK_NS, _TICK_NS))
+        rewrite_in_tick(mid)
         page = site / "sub" / "page.py"
         probed: list[Path] = []
         layout_at = loaders_module._layout_at
@@ -2277,7 +2259,7 @@ class TestRewritesWithinOneTick:
             assert layout_chain(page) == (mid,)
             assert layout_chain(page) == (mid,)
             racy = probed.count(site.parent)
-            tick[0] = _TICK_NS + RACY_MTIME_WINDOW_NS
+            tick[0] = TICK_NS + RACY_MTIME_WINDOW_NS
             assert layout_chain(page) == (mid,)
             assert layout_chain(page) == (mid,)
 
@@ -2288,9 +2270,9 @@ class TestRewritesWithinOneTick:
         self, tmp_path, tick
     ) -> None:
         page = tmp_path / "page.py"
-        _rewrite_in_tick(page, "x = 1\n")
+        rewrite_in_tick(page, "x = 1\n")
         first, _error = load_page_module(page)
-        _rewrite_in_tick(page, "x = 22\n")
+        rewrite_in_tick(page, "x = 22\n")
         second, _error = load_page_module(page)
 
         assert first is not None
@@ -2301,10 +2283,10 @@ class TestRewritesWithinOneTick:
         self, tmp_path, tick
     ) -> None:
         _top, leaf = _ancestor_tree(tmp_path)
-        os.utime(leaf, ns=(_TICK_NS, _TICK_NS))
+        rewrite_in_tick(leaf)
         taken, _modules = AncestorStamps.begin(leaf).loaded()
 
-        assert taken.sure is False
+        assert not trusted(taken.stamps[-1])
         assert taken.revalidated() is None
 
 

@@ -1,5 +1,6 @@
 import functools
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from asgiref.sync import async_to_sync
@@ -11,6 +12,7 @@ from next.introspect import (
     defining_file,
     is_async_callable,
     refuse_async,
+    refuse_async_render,
     registering_file,
 )
 from next.pages.loaders import _load_python_module
@@ -292,3 +294,31 @@ class TestRefuseAsync:
         assert __file__ in message
         assert "next.dj pages, context and actions are sync" in message
         assert caught.value.role == "page.py render"
+
+
+def _module(**members: object) -> ModuleType:
+    module = ModuleType("page_module")
+    module.__dict__.update(members)
+    return module
+
+
+class TestRefuseAsyncRender:
+    """``refuse_async_render`` reads a module ``render`` only when it is callable."""
+
+    @pytest.mark.parametrize(
+        "module",
+        [
+            pytest.param(None, id="no-module"),
+            pytest.param(_module(), id="no-render"),
+            pytest.param(_module(render="not callable"), id="not-callable"),
+            pytest.param(_module(render=_sync_view), id="sync"),
+        ],
+    )
+    def test_passes(self, module: ModuleType | None) -> None:
+        refuse_async_render(module, "page.py render")
+
+    def test_async_render_raises_naming_role(self) -> None:
+        with pytest.raises(AsyncCallableError) as caught:
+            refuse_async_render(_module(render=_async_view), "component.py render")
+
+        assert caught.value.role == "component.py render"

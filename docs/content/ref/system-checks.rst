@@ -27,7 +27,7 @@ Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py che
 ``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
 ``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
 ``check_shared_broker`` (``next.W149``) flags the in-process default broker, which a development server runs on by design.
-``check_redis_connection_limit`` (``next.W151``) flags a ``RedisBroker`` left at the redis-py pool default, which a development server never reaches.
+``check_broker_deployment`` (``next.W151``) runs the ``check_deployment`` hook of the selected broker, where ``RedisBroker`` flags the redis-py pool default a development server never reaches.
 The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
 
 Every next.dj check carries the ``next`` tag.
@@ -1077,7 +1077,7 @@ Errors
        The dependency resolver refuses an async callable the same way when it first compiles the injection plan of one.
        ``next.E017`` and ``next.E084`` stay silent for that module, so the failure surfaces once.
        Realtime handlers are not affected, since they run async by design.
-     - ``next.pages.checks.modules``
+     - ``next.pages.checks.modules``, ``next.components.checks``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1503,8 +1503,8 @@ Warnings
        Selecting ``next.realtime.RedisBroker`` or another shared ``BrokerBackend`` clears it, and a single-process deployment lists the code in ``SILENCED_SYSTEM_CHECKS``.
      - ``next.realtime.checks``
    * - ``next.W150``
-     - A file of a page tree declares actions beside a ``page.py`` with a ``render()``, and no declaration of that page, no ``inherit=True`` declaration above it, and no ``Meta`` guard covers them, so only that ``render()`` guards them.
-       The dispatcher runs that ``render()`` for an origin inside the directory of the page and answers HTTP 403 for an origin outside it, after the HTTP 400 every action POST gets without a resolvable origin.
+     - A file of a page tree declares actions beside a ``page.py`` with a ``render()``, and no declaration of that page, no ``inherit=True`` declaration above it, and no ``Meta`` guard covers them, so only that ``render()`` guards them and each POST needs an origin inside the directory of the page.
+       The dispatcher runs that ``render()`` for an origin inside the directory of the page and answers HTTP 403 for an origin outside it or for a route with no page, after the HTTP 400 every action POST gets without a resolvable origin.
        Silent while the default login is on, through ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` or a listed ``LoginRequiredMiddleware``.
        Declaring ``page.login_required()``, ``permission_required()``, or ``page.public()`` for the page, or setting ``login_required`` on the action ``Meta``, clears it.
      - ``next.forms.checks.actions``

@@ -239,8 +239,11 @@ The typed URL kwargs come through the real URL converters, and the origin page s
 The result is memoised on the request, because the invalid re-render reads it from the dispatcher and from every ``{% form %}`` tag on the page.
 
 A missing field, an off-site value, or a path that does not resolve yields no origin match.
-The dispatcher then returns ``HTTP 400 Missing or invalid _next_form_origin`` before any access check, guard, or handler runs.
-A resolved view without ``next_page_path`` yields a match with no page, which the handler still receives, while the invalid branch returns the same HTTP 400.
+The dispatcher then raises :exc:`~django.core.exceptions.BadRequest` with ``MISSING_ORIGIN``, ``Missing or invalid _next_form_origin``, before any access check, guard, or handler runs, so the project :data:`~django.conf.urls.handler400` answers it.
+A resolved view without ``next_page_path`` yields a match with no page.
+The owner ``render()`` guard of a page-scoped action refuses that match with :exc:`~django.core.exceptions.PermissionDenied` and ``form_access_denied`` with ``reason="denied"``, the refusal of any origin outside the directory of the owner page.
+Any other action hands the match to its handler, and the invalid branch and the re-render after a handler that returns ``None`` raise ``BadRequest`` with ``NO_ORIGIN_PAGE``, ``The _next_form_origin names no page to re-render``.
+Both messages are constants of ``next.forms.dispatch.responses``.
 A hand-written view opts into re-rendering by carrying its own ``next_page_path`` attribute, see :ref:`topics-forms-templates-handwritten-views`.
 
 Backends

@@ -203,6 +203,27 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
    def featured_payload() -> dict:
        return {"id": 1, "title": "Hello"}
 
+.. _topics-pages-sync-callables:
+
+Sync callables
+--------------
+
+A ``render``, an ``@context`` callable, an ``@action`` handler, and a form hook are plain ``def`` functions, because the framework calls them synchronously.
+An ``async def`` one raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as :ref:`next.E218 <ref-system-checks>`.
+Async code is reached through :func:`~asgiref.sync.async_to_sync`.
+
+.. code-block:: python
+   :caption: page.py
+
+   from asgiref.sync import async_to_sync
+   from weather.client import fetch_forecast
+
+   from next import context
+
+   @context("forecast")
+   def forecast() -> dict:
+       return async_to_sync(fetch_forecast)()
+
 Page access
 -----------
 

@@ -2,7 +2,7 @@
 
 import itertools
 import types
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Final, override
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -33,14 +33,14 @@ _version_counter = itertools.count(1)
 """Process-wide source of form-action versions, so no two managers share one."""
 
 
-_DUCK_TYPED_HOOKS: tuple[str, ...] = ("get_initial", "get_success_message")
-"""Hooks dispatch calls on any form class, a plain Django form included."""
+_PLAIN_FORM_HOOKS: Final = ("get_initial", "get_success_message")
+"""Hooks dispatch calls on a plain Django form, refused when it registers."""
 
 
 def _refuse_async_registration(registration: "ActionRegistration") -> None:
-    """Refuse an async handler, form class factory or duck-typed form hook.
+    """Refuse an async handler, form class factory or hook of a plain Django form.
 
-    The next form bases refuse their own hooks earlier, when their class is created.
+    `BaseForm`, `BaseModelForm` and `FormWizard` refuse their hooks at class creation.
     """
     if registration.handler is not None:
         refuse_async(registration.handler, "@action handler")
@@ -50,7 +50,9 @@ def _refuse_async_registration(registration: "ActionRegistration") -> None:
     if not isinstance(form_class, type):
         refuse_async(form_class, "@action form_class factory")
         return
-    for hook in _DUCK_TYPED_HOOKS:
+    if getattr(form_class, "_hooks_refused", False):
+        return
+    for hook in _PLAIN_FORM_HOOKS:
         method = getattr(form_class, hook, None)
         if callable(method):
             refuse_async(method, f"{form_class.__name__} hook")

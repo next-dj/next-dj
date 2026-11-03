@@ -457,7 +457,7 @@ def test_async_topic_stream_drops_a_client_that_stopped_reading(
         request = AsyncRequestFactory().get("/polls/1/stream/")
         stream = TopicStream(request, "poll:1", heartbeat_seconds=0.01)
         send = StalledSend(delivered=1)
-        task = await serve_stream(stream, send, within=0.5)
+        task = await serve_stream(stream, send)
         assert task.cancelled()
         assert send.bodies == [b"retry: 3000\n\n"]
         assert [event.signal for event in streams.events] == [

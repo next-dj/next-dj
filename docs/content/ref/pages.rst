@@ -267,9 +267,8 @@ Its ``faulty(file_path, loaded)`` tells whether ``next.E012``, ``next.E013``, or
 ``next.E012``, ``next.E166``, and ``next.W128`` read the directories that declare actions through the one ``ActionOwners`` port of :doc:`ports`.
 ``branches`` finds the directories with no page and no action for ``next.W128``, which ``next.forms.checks.actions`` registers, since only the forms area knows the actions.
 
-The package exports forty-seven check callables.
+The package exports forty-six check callables.
 
-- ``check_async_callables``.
 - ``check_conditional_get_order``.
 - ``check_context_functions``.
 - ``check_context_processor_signature``.

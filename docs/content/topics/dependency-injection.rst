@@ -18,6 +18,7 @@ The resolver runs at several call sites.
 Page context functions, the page render function, component context functions, and the form dispatch all pass through it.
 The form dispatch resolves the form-class factory, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
 Every call site shares one provider list and one set of markers.
+Each of those callables is a plain ``def``, and the resolver refuses an ``async def`` one with ``AsyncCallableError``, see :ref:`topics-pages-sync-callables`.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
 Django has no counterpart to this, so everything on this page is new rather than a rename of something a Django view already does.

@@ -16,22 +16,15 @@ from django.core.checks import (
 from next.checks import NEXT
 from next.checks.common import (
     WALK_HINT,
+    async_callable_error,
+    async_refusal,
     first_visit,
     get_page_roots,
     get_router_manager,
     page_tree_skip_names,
 )
-from next.components.loading import last_load_error as component_load_error
-from next.components.sources import import_component_modules
-from next.errors import AsyncCallableError
 from next.pages.checks.access import declares_for_itself, passes_down
-from next.pages.loaders import (
-    build_registered_loaders,
-    last_load_error,
-    load_page_module,
-    load_python_module_memo,
-    serves,
-)
+from next.pages.loaders import build_registered_loaders, load_page_module, serves
 from next.pages.scan import iter_existing_scanned_pages
 from next.permissions.access import declared
 from next.ports import action_owners_slot
@@ -231,9 +224,8 @@ def _check_body_source_conflicts(
     )
 
 
-def _page_import_error_message(page_path: Path) -> str:
+def _page_import_error_message(page_path: Path, error: BaseException | None) -> str:
     """Compose the `next.E017` text, naming the recorded failure when known."""
-    error = last_load_error(page_path)
     if error is None:
         return (
             f"{page_path.name} at {page_path} could not be imported. Fix the syntax "
@@ -248,65 +240,31 @@ def _page_import_error_message(page_path: Path) -> str:
     )
 
 
-def _async_refusal(path: Path) -> AsyncCallableError | None:
-    """Return the async refusal that stopped the `page.py` at `path` from loading."""
-    error = last_load_error(path)
-    cause = None if error is None else error.__cause__
-    return cause if isinstance(cause, AsyncCallableError) else None
-
-
 @register(Tags.templates, NEXT)
 def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report the `page.py` files that raise while importing (`next.E017`).
+    """Report each `page.py` that raises while importing (`next.E017`).
 
-    An async callable refused at import is left to `next.E218`, which names it.
+    An async callable refused at import reports as `next.E218`, which names it.
     """
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
         return []
-    return [
-        Error(_page_import_error_message(path), obj=str(path), id="next.E017")
-        for path in iter_existing_scanned_pages(router_manager, set())
-        if load_python_module_memo(path) is None and _async_refusal(path) is None
-    ]
-
-
-def _async_error(path: Path, refusal: AsyncCallableError) -> CheckMessage:
-    """Build the `next.E218` error for the module at `path` and what it refused."""
-    return Error(
-        f"{path} did not load. {refusal}",
-        hint=(
-            "Async support is not part of pages, context and actions. Keep the "
-            "callable sync and bridge async code through async_to_sync."
-        ),
-        obj=str(path),
-        id="next.E218",
-    )
-
-
-@register(Tags.templates, NEXT)
-def check_async_callables(*args, **kwargs) -> list[CheckMessage]:
-    """Report a `page.py` or `component.py` whose async callable was refused.
-
-    The refusal stops the module from loading, so each one surfaces here (`next.E218`).
-    """
     errors: list[CheckMessage] = []
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is not None:
-        for path in iter_existing_scanned_pages(router_manager, set()):
-            refusal = _async_refusal(path)
-            if refusal is not None:
-                errors.append(_async_error(path, refusal))
-    for module_path in import_component_modules():
-        error = component_load_error(module_path)
-        if isinstance(error, AsyncCallableError):
-            errors.append(_async_error(module_path, error))
+    for path in iter_existing_scanned_pages(router_manager, set()):
+        module, error = load_page_module(path)
+        if module is not None:
+            continue
+        refusal = async_refusal(error)
+        if refusal is not None:
+            errors.append(async_callable_error(path, refusal))
+        else:
+            message = _page_import_error_message(path, error)
+            errors.append(Error(message, obj=str(path), id="next.E017"))
     return errors
 
 
 __all__ = [
     "LoadedPage",
-    "check_async_callables",
     "check_page_functions",
     "check_page_module_imports",
     "declares_without_page",

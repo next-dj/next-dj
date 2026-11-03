@@ -2,9 +2,10 @@ import asyncio
 import functools
 import threading
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
+from importlib import import_module
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import call, create_autospec, patch
 
 import pytest
 from django.test import override_settings
@@ -12,12 +13,13 @@ from django.test import override_settings
 from next import realtime
 from next.realtime import Upstream, checks, handlers
 from next.realtime.checks import check_realtime_settings, check_upstream_handlers
+from next.realtime.errors import PoolFullError
 from next.realtime.handlers import (
     MAX_PATTERN_LENGTH,
     Handler,
     HandlerRegistry,
-    PoolFullError,
     Route,
+    autodiscover_handlers,
     compile_pattern,
     dispatch,
     handler_modules,
@@ -450,14 +452,6 @@ async def _quiet(upstream: Upstream) -> None:
     del upstream
 
 
-@pytest.fixture()
-def permits() -> Iterator[threading.BoundedSemaphore]:
-    """Swap in a one-thread bound for the handler pool."""
-    held = threading.BoundedSemaphore(1)
-    with patch.object(handlers, "handler_threads", lambda: held):
-        yield held
-
-
 def _upstream() -> Upstream:
     return Upstream("lobby", "typing", None, "alice", "subject", "c1")
 
@@ -525,6 +519,33 @@ class TestPoolThreads:
         asyncio.run(scenario())
         assert permits.acquire(blocking=False)
 
+    @pytest.mark.parametrize(
+        "handler",
+        [_quiet, _shared(_quiet), functools.partial(_quiet)],
+        ids=["async", "wrapped", "partial"],
+    )
+    def test_an_async_handler_behind_a_wrapper_runs_on_the_loop(
+        self, handler: Handler
+    ) -> None:
+        assert Route.bind("lobby", "typing", handler).pooled is False
+
+    def test_a_sync_handler_returning_a_coroutine_is_awaited(
+        self, permits: threading.BoundedSemaphore
+    ) -> None:
+        done: list[str] = []
+
+        async def finish(event: Upstream) -> None:
+            done.append(event.name)
+
+        def typing(event: Upstream) -> Awaitable[None]:
+            return finish(event)
+
+        route = Route.bind("lobby", "typing", typing)
+        asyncio.run(route(_upstream()))
+        assert route.pooled is True
+        assert done == ["typing"]
+        assert permits.acquire(blocking=False)
+
     def test_a_cancelled_handler_keeps_its_thread_until_it_returns(
         self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
     ) -> None:
@@ -561,6 +582,15 @@ class TestModules:
             NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": ["a.realtime", "b"]}}
         ):
             assert handler_modules() == ("a.realtime", "b")
+
+    def test_discovery_imports_the_listed_modules(self) -> None:
+        imported = create_autospec(import_module)
+        with (
+            override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": ["a", "b.c"]}}),
+            patch.object(handlers, "import_module", imported),
+        ):
+            autodiscover_handlers()
+        imported.assert_has_calls([call("a"), call("b.c")])
 
     def test_an_invalid_value_imports_nothing(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": "a.b"}}):

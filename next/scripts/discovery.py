@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from next.utils import load_tree_source, stamp_fresh
+from next.stamps import fresh
+from next.utils import load_tree_source
 
 from .errors import ScriptsSourceImportError
 from .markers import Script
@@ -65,7 +66,7 @@ def load_scripts(root: Path) -> ScriptsSource | None:
 def source_stale(source: ScriptsSource | None, root: Path) -> bool:
     """Whether the `scripts.py` of `root` changed since `source` was read."""
     held = None if source is None else source.stamp
-    return not stamp_fresh(held, root / SCRIPTS_MODULE)
+    return not fresh(held, root / SCRIPTS_MODULE)
 
 
 __all__ = ["SCRIPTS_MODULE", "ScriptsSource", "load_scripts", "source_stale"]

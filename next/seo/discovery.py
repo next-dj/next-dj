@@ -15,15 +15,9 @@ from django.utils.text import slugify
 from next.discovery import routed_page_trees
 from next.pages.access import routed_pages
 from next.pages.responses import cache_control
+from next.stamps import all_fresh, snapshot
 from next.urls.manager import router_manager, seo_routes_version
-from next.utils import (
-    TreeSource,
-    app_holding,
-    load_tree_source,
-    snapshot_mtime_ns,
-    stamps_fresh,
-    walk_page_tree,
-)
+from next.utils import TreeSource, app_holding, load_tree_source, walk_page_tree
 
 from .errors import SeoSourceImportError
 from .registry import sitemap_items_registry
@@ -105,12 +99,12 @@ class SeoRoot:
 
     def stale(self) -> bool:
         """Whether a source file was created, deleted or modified since discovery."""
-        return not stamps_fresh(self.stamps)
+        return not all_fresh(self.stamps)
 
 
 def source_stamps(tree: Path) -> tuple[tuple[Path, int | None], ...]:
     """Snapshot each SEO source at the top of `tree`, `None` where it is absent."""
-    return tuple((tree / name, snapshot_mtime_ns(tree / name)) for name in SOURCE_NAMES)
+    return tuple((tree / name, snapshot(tree / name)) for name in SOURCE_NAMES)
 
 
 def load_source(path: Path) -> SeoSource | None:

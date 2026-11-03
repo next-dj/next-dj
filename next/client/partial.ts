@@ -13,6 +13,7 @@ import { Wire, none } from "./wire";
 import type {
   Clock,
   CsrfPayload,
+  EnvelopeOptions,
   FetchAdapter,
   Navigate,
   Outcome,
@@ -361,12 +362,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dispatch: announce(adapters),
       onEnvelope: (
         raw: unknown,
-        _response: Response,
-        snapshot: number,
-        key: string | undefined,
-        page: string | undefined,
-        owner: string | undefined,
-        isCurrent: (() => boolean) | undefined,
+        { snapshot, key, page, owner, isCurrent }: EnvelopeOptions,
       ) =>
         new Promise<Applied>((done) => {
           // A mutation scopes no zones, but its meta op belongs to the submitting page.

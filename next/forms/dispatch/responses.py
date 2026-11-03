@@ -3,11 +3,12 @@
 import warnings
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from django.contrib import messages
+from django.core.exceptions import BadRequest
 from django.db.models import Model
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms.origin import resolve_origin
 
@@ -29,6 +30,12 @@ if TYPE_CHECKING:
 
 
 _HTTP_ERROR_FLOOR = 400
+
+MISSING_ORIGIN: Final = "Missing or invalid _next_form_origin"
+"""The 400 of an action POST whose origin is absent or resolves to no route."""
+
+NO_ORIGIN_PAGE: Final = "The _next_form_origin names no page to re-render"
+"""The 400 of a re-render whose posted origin resolves to a route with no page."""
 
 
 class ActionOutcomeKind(StrEnum):
@@ -115,8 +122,10 @@ def _origin_rerender_response(
     The response skips `backend.shape_response`, so INVALID envelopes stay untouched.
     """
     origin_match = resolve_origin(request)
-    if origin_match is None or origin_match.page_path is None:
-        return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+    if origin_match is None:
+        raise BadRequest(MISSING_ORIGIN)
+    if origin_match.page_path is None:
+        raise BadRequest(NO_ORIGIN_PAGE)
     html = backend.render_invalid_page(
         request,
         action_name,

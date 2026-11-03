@@ -30,7 +30,7 @@ from typing import Any, Final, NamedTuple, Protocol, TypeGuard, cast, override
 from weakref import WeakKeyDictionary
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.checks import errors_for_unknown_keys
@@ -80,6 +80,9 @@ _POOL_EXHAUSTED = (
 _SUBSCRIPTIONS_EXHAUSTED = (
     "The Redis subscription pool is exhausted, so a new stream is refused. Raise "
     "REALTIME.BROKER.OPTIONS.SUBSCRIBE_MAX_CONNECTIONS to serve more open streams."
+)
+_INVALID_LIMIT: Final = (
+    f"{BROKER_OPTIONS}['SUBSCRIBE_MAX_CONNECTIONS'] must be a positive integer."
 )
 _HOLE = "\x00detail\x00"
 
@@ -162,6 +165,16 @@ def valid_client(value: object) -> TypeGuard[Mapping[str, object]]:
 def valid_connection_limit(value: object) -> TypeGuard[int]:
     """Whether `SUBSCRIBE_MAX_CONNECTIONS` is a positive int that is not a bool."""
     return is_int(value) and value >= 1
+
+
+def _connection_limit(options: Mapping[str, object]) -> int | None:
+    """Return the `SUBSCRIBE_MAX_CONNECTIONS` cap, None when unset, else raise."""
+    if "SUBSCRIBE_MAX_CONNECTIONS" not in options:
+        return None
+    limit = options["SUBSCRIBE_MAX_CONNECTIONS"]
+    if not valid_connection_limit(limit):
+        raise ImproperlyConfigured(_INVALID_LIMIT)
+    return limit
 
 
 def _transport_errors(exceptions: ModuleType) -> tuple[type[Exception], ...]:
@@ -354,19 +367,42 @@ class RedisBroker(BrokerBackend, PresenceWindow):
                     id="next.E187",
                 )
             )
-        if "SUBSCRIBE_MAX_CONNECTIONS" in options and not valid_connection_limit(
-            options["SUBSCRIBE_MAX_CONNECTIONS"]
-        ):
+        try:
+            _connection_limit(options)
+        except ImproperlyConfigured as error:
             errors.append(
                 Error(
-                    f"{BROKER_OPTIONS}['SUBSCRIBE_MAX_CONNECTIONS'] must be a positive "
-                    "integer.",
+                    str(error),
                     hint="It caps the Redis connections open streams hold at once.",
                     obj=settings,
                     id="next.E216",
                 )
             )
         return errors
+
+    @classmethod
+    @override
+    def check_deployment(cls, options: Mapping[str, object]) -> list[CheckMessage]:
+        """Warn when the stream pool is left at the redis-py default (`next.W151`)."""
+        client = options.get("CLIENT")
+        if "SUBSCRIBE_MAX_CONNECTIONS" in options or (
+            isinstance(client, Mapping) and "max_connections" in client
+        ):
+            return []
+        return [
+            DjangoWarning(
+                f"{cls.__qualname__} sets no connection limit, so each process serves "
+                "at most 100 open streams, the redis-py pool default, and refuses the "
+                "next one.",
+                hint=(
+                    f"Set {BROKER_OPTIONS}['SUBSCRIBE_MAX_CONNECTIONS'] to the open "
+                    "streams one process serves, which caps the subscription pool "
+                    "apart from the command pool."
+                ),
+                obj=settings,
+                id="next.W151",
+            )
+        ]
 
     def create_client(
         self, url: str, options: Mapping[str, object], *, asynchronous: bool
@@ -396,15 +432,9 @@ class RedisBroker(BrokerBackend, PresenceWindow):
 
     def _merged_subscriber_options(self) -> dict[str, object]:
         """Return the client options capped by `SUBSCRIBE_MAX_CONNECTIONS` when set."""
-        if "SUBSCRIBE_MAX_CONNECTIONS" not in self.options:
+        limit = _connection_limit(self.options)
+        if limit is None:
             return dict(self._client_options)
-        limit = self.options["SUBSCRIBE_MAX_CONNECTIONS"]
-        if not valid_connection_limit(limit):
-            msg = (
-                "REALTIME.BROKER.OPTIONS.SUBSCRIBE_MAX_CONNECTIONS must be a positive "
-                "integer."
-            )
-            raise ImproperlyConfigured(msg)
         return {**self._client_options, "max_connections": limit}
 
     @override

@@ -1,9 +1,10 @@
 import importlib.util
 import math
+from collections.abc import Mapping
 from types import ModuleType
 
 import pytest
-from django.core.checks import Error
+from django.core.checks import CheckMessage, Error
 from django.core.checks.registry import registry as check_registry
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
@@ -18,8 +19,8 @@ from next.realtime import (
     TicketBinding,
 )
 from next.realtime.checks import (
+    check_broker_deployment,
     check_realtime_settings,
-    check_redis_connection_limit,
     check_shared_broker,
     check_ticket_introspection,
 )
@@ -27,6 +28,7 @@ from next.realtime.manager import BrokerManager
 from next.realtime.replay import MAX_SIZE, MAX_TTL
 from next.realtime.transports import active_transports
 from next.realtime.views import TicketIntrospectionView
+from tests.support.cases.realtime import INVALID_CONNECTION_LIMITS
 
 
 class CustomBroker(MemoryBroker):
@@ -517,7 +519,13 @@ class SentinelBroker(RedisBroker):
     pass
 
 
-@pytest.mark.parametrize("limit", [0, -1, True, 2.5, "10", None])
+class GatedBroker(MemoryBroker):
+    @classmethod
+    def check_deployment(cls, options: Mapping[str, object]) -> list[CheckMessage]:
+        return [Error(f"gated {dict(options)}", id="tests.E001")]
+
+
+@pytest.mark.parametrize("limit", INVALID_CONNECTION_LIMITS)
 def test_check_rejects_an_unusable_stream_connection_limit(limit: object) -> None:
     assert _ids(NEXT_FRAMEWORK=_redis(SUBSCRIBE_MAX_CONNECTIONS=limit)) == {"next.E216"}
 
@@ -528,19 +536,19 @@ def test_check_accepts_a_stream_connection_limit() -> None:
 
 def _connection_limit_ids(broker: object) -> set[str]:
     with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": broker}}):
-        return {message.id for message in check_redis_connection_limit()}
+        return {message.id for message in check_broker_deployment()}
 
 
 def test_check_w151_is_a_deployment_check() -> None:
-    assert check_redis_connection_limit in check_registry.get_checks(
+    assert check_broker_deployment in check_registry.get_checks(
         include_deployment_checks=True
     )
-    assert check_redis_connection_limit not in check_registry.get_checks()
+    assert check_broker_deployment not in check_registry.get_checks()
 
 
 def test_check_w151_warns_a_redis_broker_without_a_connection_limit() -> None:
     with override_settings(NEXT_FRAMEWORK=_redis(CLIENT={"ssl": True})):
-        [warning] = check_redis_connection_limit()
+        [warning] = check_broker_deployment()
     assert warning.id == "next.W151"
     assert warning.msg.startswith("RedisBroker sets no connection limit")
     assert "SUBSCRIBE_MAX_CONNECTIONS" in str(warning.hint)
@@ -577,6 +585,13 @@ def test_check_w151_warns_every_unlimited_redis_broker(broker: object) -> None:
 )
 def test_check_w151_stays_quiet_with_a_limit_or_another_broker(broker: object) -> None:
     assert _connection_limit_ids(broker) == set()
+
+
+def test_the_deploy_check_reports_what_the_broker_hook_returns() -> None:
+    broker = {"BACKEND": "tests.realtime.test_checks.GatedBroker", "OPTIONS": {"A": 1}}
+    with override_settings(NEXT_FRAMEWORK={"REALTIME": {"BROKER": broker}}):
+        [error] = check_broker_deployment()
+    assert (error.id, error.msg) == ("tests.E001", "gated {'A': 1}")
 
 
 class HeaderTokenView(TicketIntrospectionView):

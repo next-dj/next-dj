@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
+from django.core.exceptions import BadRequest
 from django.db.models import Model
 from django.http import (
     HttpResponse,
@@ -50,6 +51,8 @@ from .permissions import (
 )
 from .responses import (
     _HTTP_ERROR_FLOOR,
+    MISSING_ORIGIN,
+    NO_ORIGIN_PAGE,
     ActionOutcome,
     ActionOutcomeKind,
     _flash_success_before_rerender,
@@ -168,7 +171,7 @@ class FormActionDispatch:
         """Route the action once the page tree, its guard and the origin admit it."""
         origin_match = resolve_origin(request)
         if origin_match is None:
-            return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+            raise BadRequest(MISSING_ORIGIN)
         dep_cache: dict[str, Any] = {}
         guard = guard_rule(meta)
         refusal = FormActionDispatch._refuse_access(
@@ -214,7 +217,7 @@ class FormActionDispatch:
         logger.warning(
             "action %r declared in %s has no handler, form_class, or wizard_class",
             action_name,
-            meta.get("file_path"),
+            meta["file_path"],
         )
         return HttpResponseBadRequest(
             f"Action {action_name!r} has no handler, form_class, or wizard_class."
@@ -236,7 +239,7 @@ class FormActionDispatch:
         """
         denial: HttpResponseBase | None = _check_tree_access(
             request,
-            meta.get("file_path"),
+            meta["file_path"],
             origin_match,
             dep_cache,
             action_name=action_name,
@@ -259,9 +262,9 @@ class FormActionDispatch:
             return denial
         return _check_owner_page_access(
             request,
-            meta.get("file_path"),
+            meta["file_path"],
             origin_match,
-            scope=meta.get("scope"),
+            scope=meta["scope"],
             action_name=action_name,
             uid=meta.get("uid"),
             sender=_DispatchState.signal_sender,
@@ -428,7 +431,7 @@ class FormActionDispatch:
         """
         if outcome.kind == ActionOutcomeKind.INVALID:
             if outcome.page_path is None:
-                return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+                raise BadRequest(NO_ORIGIN_PAGE)
             html = backend.render_invalid_page(
                 request,
                 outcome.action_name,

@@ -53,9 +53,8 @@ export interface Navigation {
   /**
    * Run the popstate handling in during, then announce the change as a pop.
    *
-   * during answers the page whose content is on screen, undefined for the one last
-   * announced. A bar showing another page reloads it unannounced, since nothing
-   * restores the content of a history entry.
+   * during answers the page on screen, undefined for the last announced one. A bar
+   * on another page reloads unannounced, since nothing restores a history entry.
    */
   popped(during: () => string | undefined): void;
 }

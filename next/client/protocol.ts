@@ -41,10 +41,12 @@ export function pollInterval(raw: string | null): number | null {
 
 /** The request deadline when the payload names none, long enough for a slow upload. */
 export const REQUEST_TIMEOUT_MS = 30000;
+/** The longest request deadline, the signed-32-bit timer ceiling. */
+export const MAX_TIMEOUT_MS = 2147483647;
 
 // Read the $timeout value in ms, zero turning it off and out of range the default.
 export function requestTimeout(raw: unknown): number {
-  return typeof raw === "number" && raw >= 0 && raw <= MAX_POLL_MS
+  return typeof raw === "number" && raw >= 0 && raw <= MAX_TIMEOUT_MS
     ? raw
     : REQUEST_TIMEOUT_MS;
 }
@@ -62,32 +64,6 @@ export function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     signal.addEventListener("abort", stop, { once: true });
     work.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
   });
-}
-
-/**
- * Whether a click on a link is the plain activation the runtime may take over.
- *
- * A modifier, a middle click, a handler that cancelled it, a foreign target and a
- * download all ask the browser for its own behaviour, so the link stays a link.
- */
-export function isPlainActivation(event: Event, link: Element): boolean {
-  if (event.defaultPrevented) return false;
-  if (
-    event instanceof MouseEvent &&
-    (event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey)
-  )
-    return false;
-  return inPlace(link.getAttribute("target")) && !link.hasAttribute("download");
-}
-
-/** Whether a browsing-context name keeps the navigation in the current page. */
-export function inPlace(target: string | null): boolean {
-  const name = target?.toLowerCase() ?? "";
-  return name === "" || name === "_self";
 }
 
 /** The dev diagnostics, provided by next.dev.min.js once it loads for a $dev page. */

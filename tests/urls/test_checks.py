@@ -446,14 +446,14 @@ class TestCollectUrlPatterns:
             ),
             pytest.raises(ValueError, match="unparsable"),
         ):
-            _collect_url_patterns(tmp_path, "Root", [])
+            _collect_url_patterns(tmp_path, "Root", [], reserved=[])
 
     def test_a_refused_parameter_name_is_reported_as_e082(self, tmp_path) -> None:
         """A bracket name Django refuses leaves the map under a code of its own."""
         write_page(tmp_path, "[2fa]")
         errors: list[Error] = []
 
-        patterns = _collect_url_patterns(tmp_path, "Root", errors)
+        patterns = _collect_url_patterns(tmp_path, "Root", errors, reserved=[])
 
         assert patterns == []
         assert [error.id for error in errors] == ["next.E082"]
@@ -466,7 +466,7 @@ class TestCollectUrlPatterns:
         write_page(tmp_path, "(g)/x")
         write_page(tmp_path, "y")
 
-        patterns = _collect_url_patterns(tmp_path, "App 'a: b'", [])
+        patterns = _collect_url_patterns(tmp_path, "App 'a: b'", [], reserved=[])
 
         assert [(p.url_path, p.grouped) for p in patterns] == [
             ("x", True),

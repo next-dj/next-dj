@@ -300,7 +300,7 @@ Default value.
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
 ``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.
 ``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
-A custom backend validates its own ``OPTIONS`` keys in its ``check_options`` classmethod, which ``manage.py check`` calls, see :doc:`realtime`.
+A custom backend validates its own ``OPTIONS`` keys in its ``check_options`` classmethod, which ``manage.py check`` calls, and reports its deployment warnings from ``check_deployment``, which ``manage.py check --deploy`` calls, see :doc:`realtime`.
 
 ``TRANSPORTS`` defaults to ``None`` and selects ``["ws", "sse"]`` in a process that mounts a ``WebSocketApp``, or ``["sse"]`` otherwise.
 A process that serves pages without mounting the socket, such as a WSGI worker next to a separate ASGI deployment, needs an explicit ``["ws", "sse"]`` to offer it.

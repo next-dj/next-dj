@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import groupby
 from pathlib import Path
-from time import time_ns
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypeGuard, cast, override
 from urllib.parse import unquote_to_bytes
 
@@ -33,6 +32,7 @@ from django.utils.regex_helper import normalize
 from next.caches import DEFAULT_CACHE_SIZE, BoundedCache
 from next.diagnostics import Capture
 from next.errors import InvalidDirsError
+from next.stamps import fresh, settled, snapshot
 
 
 if TYPE_CHECKING:
@@ -233,61 +233,6 @@ def forget_resolved_trees() -> None:
         clear()
 
 
-def stat_mtime_ns(path: Path) -> int | None:
-    """Return the nanosecond mtime of `path`, or `None` when it does not stat.
-
-    A float timestamp would round two distinct writes into one value.
-    """
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
-RACY_MTIME_WINDOW_NS: Final = 10_000_000
-"""The age an mtime reaches before a snapshot trusts it, past one coarse clock tick."""
-
-UNSETTLED_MTIME_NS: Final = -1
-"""The stamp a snapshot keeps for a racy mtime, which no later stat matches."""
-
-
-def settled_mtime_ns(mtime_ns: int) -> int:
-    """Return `mtime_ns`, or `UNSETTLED_MTIME_NS` while a write may share its tick.
-
-    Such a write leaves the mtime as it was, so a snapshot holding it would miss it.
-    """
-    if abs(time_ns() - mtime_ns) < RACY_MTIME_WINDOW_NS:
-        return UNSETTLED_MTIME_NS
-    return mtime_ns
-
-
-def mtime_settled(mtime_ns: int) -> bool:
-    """Whether a read made now sees every write stamped `mtime_ns`, so it can be held.
-
-    A memo keyed by the raw mtime records this before the read and serves only if so.
-    """
-    return settled_mtime_ns(mtime_ns) != UNSETTLED_MTIME_NS
-
-
-def snapshot_mtime_ns(path: Path) -> int | None:
-    """Return the mtime a snapshot of `path` keeps, `None` when it does not stat."""
-    mtime_ns = stat_mtime_ns(path)
-    return None if mtime_ns is None else settled_mtime_ns(mtime_ns)
-
-
-def stamp_fresh(held: int | None, path: Path) -> bool:
-    """Whether `path` still stats to the snapshot `held`, never so for an unsettled one.
-
-    The current mtime is read raw, so two unsettled snapshots never pass as equal.
-    """
-    return held != UNSETTLED_MTIME_NS and stat_mtime_ns(path) == held
-
-
-def stamps_fresh(held: Iterable[tuple[Path, int | None]]) -> bool:
-    """Whether every path in `held` still stats to the snapshot paired with it."""
-    return all(stamp_fresh(stamp, path) for path, stamp in held)
-
-
 def is_within(path: Path, root: Path) -> bool:
     """Return whether the resolved `path` is `root` or lies under it, by parts.
 
@@ -304,19 +249,15 @@ class _SourceLoader(importlib.machinery.SourceFileLoader):
 
     @override
     def path_stats(self, path: str) -> Mapping[str, Any]:
-        """Return the mtime in nanoseconds, whose low 32 bits the `.pyc` keeps."""
-        stat = Path(path).stat()
-        return {"mtime": stat.st_mtime_ns, "size": stat.st_size}
+        """Return the mtime in nanoseconds, refusing one still in its racy window.
 
-    @override
-    def get_code(self, fullname: str) -> types.CodeType | None:
-        """Compile a source still in its racy window, so no `.pyc` vouches for it.
-
-        A same-size rewrite in that tick keeps both the mtime and size a `.pyc` checks.
+        The refusal makes `get_code` compile the source and write no `.pyc` for it.
         """
-        if mtime_settled(Path(self.path).stat().st_mtime_ns):
-            return super().get_code(fullname)
-        return self.source_to_code(self.get_data(self.path), self.path)
+        stat = Path(path).stat()
+        if not settled(stat.st_mtime_ns):
+            msg = f"{path} was written within the racy mtime window"
+            raise OSError(msg)
+        return {"mtime": stat.st_mtime_ns, "size": stat.st_size}
 
 
 def exec_module_file(path: Path, name: str) -> types.ModuleType | None:
@@ -348,7 +289,7 @@ class TreeSource[E: Exception]:
 
     def stale(self) -> bool:
         """Return whether the file was deleted or rewritten since it ran."""
-        return not stamp_fresh(self.stamp, self.path)
+        return not fresh(self.stamp, self.path)
 
 
 def load_tree_source[E: Exception](
@@ -360,7 +301,7 @@ def load_tree_source[E: Exception](
     """
     if not path.is_file():
         return None
-    stamp = snapshot_mtime_ns(path)
+    stamp = snapshot(path)
     try:
         module = exec_module_file(path, module_name)
     except Exception as exc:
@@ -431,14 +372,14 @@ _MISS: Final = object()
 @functools.cache
 def _resolved_app_roots() -> tuple[tuple[str, Path], ...]:
     """Return each installed app label with its resolved root, deepest root first."""
-    roots = [(str(c.label), Path(c.path).resolve()) for c in apps.get_app_configs()]
-    return tuple(sorted(roots, key=lambda item: -len(item[1].parts)))
+    roots = [(c.label, Path(c.path).resolve()) for c in apps.get_app_configs()]
+    return tuple(sorted(roots, key=lambda item: len(item[1].parts), reverse=True))
 
 
-def app_holding(path: str | Path) -> tuple[str, str] | None:
+def app_holding(path: str | Path, *, resolved: bool = False) -> tuple[str, str] | None:
     """Return the label and posix subpath of the deepest installed app holding `path`.
 
-    Symlinks resolve first and the answer is memoised until the app list moves.
+    Symlinks resolve first unless `resolved` says so, and the answer is memoised.
     """
     key = str(path)
     held = _app_holding_cache.get(key, _MISS)
@@ -448,12 +389,12 @@ def app_holding(path: str | Path) -> tuple[str, str] | None:
         roots = _resolved_app_roots()
     except AppRegistryNotReady:
         return None
-    resolved = Path(key).resolve()
+    real = Path(key) if resolved else Path(key).resolve()
     found = next(
         (
-            (label, resolved.relative_to(root).as_posix())
+            (label, real.relative_to(root).as_posix())
             for label, root in roots
-            if resolved.is_relative_to(root)
+            if real.is_relative_to(root)
         ),
         None,
     )

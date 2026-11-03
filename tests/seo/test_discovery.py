@@ -1,5 +1,4 @@
 import logging
-import os
 import threading
 from pathlib import Path
 from types import ModuleType
@@ -27,7 +26,14 @@ from next.seo.discovery import (
 from next.seo.manager import seo_manager
 from next.seo.registry import sitemap_items_registry
 from next.urls.manager import seo_routes_version
-from tests.support import POSTS_ITEMS, importable_dir, routed, write_page, write_tree
+from tests.support import (
+    POSTS_ITEMS,
+    importable_dir,
+    rewrite_in_tick,
+    routed,
+    write_page,
+    write_tree,
+)
 
 
 def _roots() -> tuple[SeoRoot, ...]:
@@ -238,20 +244,16 @@ class TestSourceStamps:
         (root / "robots.txt").write_bytes(b"User-agent: *\n")
         assert seo_root.stale()
 
+    @pytest.mark.usefixtures("tick")
     def test_a_same_tick_rewrite_is_stale_while_edits_are_watched(
         self, tmp_path
     ) -> None:
         root = write_tree(tmp_path / "pages", sitemap="section = 'old'\n")
         path = root / "sitemap.py"
-        stamp = path.stat().st_mtime_ns
-        with (
-            patch("next.utils.time_ns", return_value=stamp + 1),
-            override_settings(DEBUG=True),
-            routed(root),
-        ):
+        rewrite_in_tick(path)
+        with override_settings(DEBUG=True), routed(root):
             [seo_root] = _roots()
-            path.write_text("section = 'new'\n")
-            os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+            rewrite_in_tick(path, "section = 'new'\n")
             assert seo_root.stale()
 
 

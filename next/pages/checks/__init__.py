@@ -41,11 +41,7 @@ from .metadata import (
     check_page_metadata_shape,
     check_route_group_breadcrumbs,
 )
-from .modules import (
-    check_async_callables,
-    check_page_functions,
-    check_page_module_imports,
-)
+from .modules import check_page_functions, check_page_module_imports
 from .processors import (
     REQUEST_CONTEXT_PROCESSOR,
     check_context_processor_signature,
@@ -64,7 +60,6 @@ from .zones import check_context_reads_foreign_zone
 
 
 __all__ = [
-    "check_async_callables",
     "check_conditional_get_order",
     "check_context_functions",
     "check_context_processor_signature",

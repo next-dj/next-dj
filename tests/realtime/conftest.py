@@ -1,4 +1,6 @@
+import threading
 from collections.abc import Callable, Iterator
+from unittest.mock import patch
 
 import fakeredis
 import fakeredis.aioredis
@@ -9,6 +11,7 @@ from django.test import override_settings
 
 from next.realtime.backends import BrokerBackend, MemoryBroker
 from next.realtime.manager import broker_manager
+from next.realtime.pool import handler_pool
 from next.realtime.redis import RedisBroker
 from next.testing import memory_broker as install_memory_broker
 from next.testing.realtime import SocketTicket, override_websocket_mount
@@ -25,6 +28,14 @@ def _reset_broker_manager():
     broker_manager.reset()
     yield
     broker_manager.reset()
+
+
+@pytest.fixture()
+def permits() -> Iterator[threading.BoundedSemaphore]:
+    """Bound the handler pool to one thread for the test."""
+    held = threading.BoundedSemaphore(1)
+    with patch.object(handler_pool, "permits", held):
+        yield held
 
 
 @pytest.fixture()

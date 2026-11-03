@@ -46,6 +46,10 @@ class BrokerConnectionError(ConnectionError):
     """Raised when a broker subscription can no longer guarantee delivery."""
 
 
+class PoolFullError(Exception):
+    """Raised when no handler pool thread is free for a sync handler, never queued."""
+
+
 class ConsoleError(Exception):
     """Raised when a terminal request to the broker is refused, with the reason."""
 
@@ -56,5 +60,6 @@ __all__ = [
     "InvalidMemberError",
     "InvalidTicketError",
     "InvalidTopicError",
+    "PoolFullError",
     "TopicPayloadError",
 ]

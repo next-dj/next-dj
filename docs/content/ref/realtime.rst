@@ -230,6 +230,8 @@ The storage calls are left to the project, and ``self.store`` stands for whateve
 ``Message.from_dict`` rejects wrong wire types with ``TypeError`` or ``ValueError``, so a backend that reads from an untrusted channel logs and skips such a payload.
 ``manage.py check`` reports a class that is not an importable concrete ``BrokerBackend`` subclass as ``next.E184`` and passes the ``OPTIONS`` mapping to the ``BrokerBackend.check_options`` classmethod of the configured class.
 ``check_options`` returns the system check messages for the options a backend reads, and the base implementation returns none.
+``manage.py check --deploy`` passes the same mapping to the ``check_deployment`` classmethod through ``check_broker_deployment``, which returns the warnings a production deployment needs and none by default.
+``RedisBroker`` implements it to report a stream pool left at the redis-py default as ``next.W151``.
 The skeleton keeps no replay log, so with a nonzero ``REPLAY['SIZE']`` the check warns with ``next.W143``.
 :doc:`/content/howto/write-a-broker-backend` adds the log and walks through a ``RedisBroker`` subclass.
 

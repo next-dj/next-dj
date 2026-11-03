@@ -1,6 +1,5 @@
 import errno
 import logging
-import os
 import types
 from pathlib import Path
 from unittest.mock import patch
@@ -24,7 +23,7 @@ from next.seo.robots import (
     rules_of,
 )
 from next.utils import PageRoot
-from tests.support import touch_later
+from tests.support import rewrite_in_tick, touch_later
 
 
 def _module(**attributes: object) -> types.ModuleType:
@@ -162,20 +161,16 @@ class TestTextFile:
         touch_later(path)
         assert source.read() == b"two\n"
 
+    @pytest.mark.usefixtures("tick")
     def test_a_same_tick_rewrite_is_read_while_edits_are_watched(
         self, tmp_path
     ) -> None:
         path = tmp_path / "robots.txt"
-        path.write_bytes(b"one\n")
-        stamp = path.stat().st_mtime_ns
+        rewrite_in_tick(path, "one\n")
         source = TextFile(path)
-        with (
-            patch("next.utils.time_ns", return_value=stamp + 1),
-            override_settings(DEBUG=True),
-        ):
+        with override_settings(DEBUG=True):
             assert source.read() == b"one\n"
-            path.write_bytes(b"two\n")
-            os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+            rewrite_in_tick(path, "two\n")
             assert source.read() == b"two\n"
 
     def test_the_memo_answers_while_the_mtime_stands(self, tmp_path) -> None:

@@ -38,7 +38,10 @@ class OriginMatch:
 
 
 def filter_reserved_url_kwargs(url_kwargs: dict[str, object]) -> dict[str, object]:
-    """Drop keys that collide with DI names used by `resolve_dependencies`."""
+    """Drop keys that collide with DI names, which only a hand-mounted route can carry.
+
+    The file router refuses those names in a segment, so its pages never hold one.
+    """
     return {k: v for k, v in url_kwargs.items() if k not in RESERVED_KEYS}
 
 

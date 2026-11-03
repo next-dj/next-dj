@@ -15,6 +15,7 @@ from types import (
     FunctionType,
     MethodType,
     MethodWrapperType,
+    ModuleType,
 )
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -126,7 +127,7 @@ def describe_callable(func: Callable[..., Any]) -> str:
     return f'"{name}"' if filename is None else f'"{name}" ({filename})'
 
 
-# Built-in routines, so an instance that only defines `__get__` still has its call read.
+# Plain routines. Anything else, a `__get__`-only descriptor too, has `__call__` read.
 _ROUTINE_TYPES = (FunctionType, MethodType, BuiltinFunctionType, MethodWrapperType)
 
 
@@ -152,7 +153,7 @@ def is_async_callable(func: object) -> bool:
     """
     plain = func.__func__ if type(func) is MethodType else func
     if type(plain) is FunctionType and not plain.__dict__:
-        # A bare function carries no marker and no wrapped layer, its code flags decide.
+        # With no marker and no wrapped layer, the code flags of a bare function decide.
         return bool(plain.__code__.co_flags & _ASYNC_CODE_FLAGS)
     seen: set[int] = set()
     target: object = func
@@ -171,6 +172,13 @@ def refuse_async(func: Callable[..., Any], role: str) -> None:
     """Raise `AsyncCallableError` naming `role` and `func` when `func` is async."""
     if is_async_callable(func):
         raise AsyncCallableError(role, describe_callable(func))
+
+
+def refuse_async_render(module: ModuleType | None, role: str) -> None:
+    """Raise `AsyncCallableError` naming `role` when the module `render` is async."""
+    render = getattr(module, "render", None)
+    if callable(render):
+        refuse_async(render, role)
 
 
 class MisattributedContext(NamedTuple):
@@ -219,6 +227,7 @@ __all__ = [
     "describe_callable",
     "is_async_callable",
     "refuse_async",
+    "refuse_async_render",
     "registering_file",
     "registering_site",
 ]

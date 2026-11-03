@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import ClassVar
 
 import pytest
@@ -14,6 +15,10 @@ class _StepForm(django_forms.Form):
     """Plain step form a wizard below points at."""
 
     name = django_forms.CharField()
+
+
+def _bound(func: Callable[..., object]) -> object:
+    return func
 
 
 class TestAsyncActionRefusal:
@@ -35,22 +40,24 @@ class TestAsyncActionRefusal:
             action(publish)
 
     @pytest.mark.parametrize(
-        "hook",
+        ("hook", "wrap"),
         [
-            "on_valid",
-            "get_initial",
-            "get_form_kwargs",
-            "check_permissions",
-            "has_object_permission",
+            ("on_valid", _bound),
+            ("get_success_message", _bound),
+            ("has_object_permission", _bound),
+            ("get_initial", classmethod),
+            ("get_form_kwargs", classmethod),
+            ("check_permissions", classmethod),
         ],
     )
-    def test_async_form_hook_is_refused(self, hook: str) -> None:
+    def test_async_form_hook_is_refused(
+        self, hook: str, wrap: Callable[[Callable[..., object]], object]
+    ) -> None:
         async def body(*args: object, **kwargs: object) -> None:
             return None
 
-        method = classmethod(body) if hook.startswith(("get_", "check_")) else body
         with pytest.raises(AsyncCallableError, match='Form hook "body"'):
-            type(f"Async{hook.title()}Form", (Form,), {hook: method})
+            type(f"Async{hook.title()}Form", (Form,), {hook: wrap(body)})
 
     def test_async_hook_of_an_unregistered_form_is_refused(self) -> None:
         with pytest.raises(AsyncCallableError, match='DraftForm hook "on_valid"'):

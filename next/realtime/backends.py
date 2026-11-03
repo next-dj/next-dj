@@ -73,6 +73,12 @@ class BrokerBackend(ABC):
         del options
         return []
 
+    @classmethod
+    def check_deployment(cls, options: Mapping[str, object]) -> list[CheckMessage]:
+        """Return the `check --deploy` messages for the `OPTIONS` this backend reads."""
+        del options
+        return []
+
     def validate_publication(self, topic: str, envelope: object) -> Envelope:
         """Check the topic name and envelope type before a broker numbers anything."""
         validate_topic(topic)

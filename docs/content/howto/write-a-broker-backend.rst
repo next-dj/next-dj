@@ -28,6 +28,8 @@ A subclass implements ``publish``, ``apublish``, ``subscribe``, ``asubscribe``, 
 The constructor receives the whole ``BROKER`` entry and exposes its ``OPTIONS`` as ``self.options``, and ``manage.py check`` hands them to the ``check_options`` classmethod of the backend.
 ``check_options(options)`` receives the ``OPTIONS`` mapping and returns a list of Django system check messages, empty by default.
 A third-party broker overrides it to report a bad or missing option as an error before the first request.
+``check_deployment(options)`` takes the same mapping under ``manage.py check --deploy`` alone and returns the warnings for a setting that works in development but not in production, empty by default.
+``RedisBroker`` overrides it to report ``next.W151`` for a stream pool left at the redis-py default.
 One instance serves the process, so every method runs from many threads and event loops at once.
 
 The rules that matter most are these.

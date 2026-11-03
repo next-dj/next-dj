@@ -63,6 +63,14 @@ class _CollectedPattern(NamedTuple):
     grouped: bool
 
 
+class _Collection(NamedTuple):
+    """Routes, other collection errors and reserved-segment refusals of one walk."""
+
+    patterns: list[_CollectedPattern]
+    errors: list[CheckMessage]
+    reserved: list[CheckMessage]
+
+
 _GROUP_CLASH_HINT = (
     "A route group leaves the URL, so two groups, or a group page and the page of "
     "its parent, serve one URL. Keep one page there, or move the other under a "
@@ -337,11 +345,11 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return []
 
-    all_patterns, collected = _collect_all_patterns(router_manager)
-    errors = [error for error in collected if error.id != _RESERVED_SEGMENT_ID]
+    collected = _collect_all_patterns(router_manager)
+    errors = list(collected.errors)
 
     try:
-        _check_url_conflicts(all_patterns, errors)
+        _check_url_conflicts(collected.patterns, errors)
     except (ValueError, TypeError) as e:
         errors.append(
             Error(
@@ -360,12 +368,11 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls, NEXT)
 def check_reserved_url_parameters(*args, **kwargs) -> list[CheckMessage]:
-    """Report a bracket segment named after an argument the framework passes itself."""
+    """Report a bracket segment named after a reserved argument (`next.E217`)."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
         return []
-    _patterns, collected = _collect_all_patterns(router_manager)
-    return [error for error in collected if error.id == _RESERVED_SEGMENT_ID]
+    return _collect_all_patterns(router_manager).reserved
 
 
 @register(Tags.urls, NEXT)
@@ -378,7 +385,7 @@ def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
         return []
 
     # Collection errors already surface through check_url_patterns.
-    all_patterns, _ = _collect_all_patterns(router_manager)
+    all_patterns = _collect_all_patterns(router_manager).patterns
 
     # reverse() picks by arguments, so a collision needs name and parameters both.
     grouped: dict[tuple[str, str, frozenset[str]], dict[str, list[str]]] = {}
@@ -421,6 +428,7 @@ class _CollectedPatternsMemo:
         self.router_manager: RouterManager | None = None
         self.patterns: list[_CollectedPattern] = []
         self.errors: list[CheckMessage] = []
+        self.reserved: list[CheckMessage] = []
 
 
 _collected_patterns = _CollectedPatternsMemo()
@@ -502,31 +510,34 @@ def reset_collected_patterns_cache(**kwargs) -> None:
     _collected_patterns.router_manager = None
     _collected_patterns.patterns = []
     _collected_patterns.errors = []
+    _collected_patterns.reserved = []
 
 
-def _collect_all_patterns(
-    router_manager: RouterManager,
-) -> tuple[list[_CollectedPattern], list[CheckMessage]]:
-    """Return per-run memoised patterns as fresh lists callers may mutate."""
+def _collect_all_patterns(router_manager: RouterManager) -> _Collection:
+    """Return the per-run memoised collection, whose lists callers must not mutate."""
     if _collected_patterns.router_manager is not router_manager:
-        patterns, errors = _collect_all_patterns_uncached(router_manager)
-        _collected_patterns.patterns = patterns
-        _collected_patterns.errors = errors
+        collection = _collect_all_patterns_uncached(router_manager)
+        _collected_patterns.patterns = collection.patterns
+        _collected_patterns.errors = collection.errors
+        _collected_patterns.reserved = collection.reserved
         _collected_patterns.router_manager = router_manager
-    return list(_collected_patterns.patterns), list(_collected_patterns.errors)
+    return _Collection(
+        _collected_patterns.patterns,
+        _collected_patterns.errors,
+        _collected_patterns.reserved,
+    )
 
 
-def _collect_all_patterns_uncached(
-    router_manager: RouterManager,
-) -> tuple[list[_CollectedPattern], list[CheckMessage]]:
+def _collect_all_patterns_uncached(router_manager: RouterManager) -> _Collection:
     """Collect one `_CollectedPattern` per route from every router backend."""
     all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
+    reserved: list[CheckMessage] = []
     seen: set[_TreeKey] = set()
 
     for router in router_manager.backends:
         try:
-            _collect_router_patterns(router, all_patterns, errors, seen)
+            _collect_router_patterns(router, all_patterns, errors, reserved, seen)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
@@ -537,13 +548,14 @@ def _collect_all_patterns_uncached(
                 )
             )
 
-    return all_patterns, errors
+    return _Collection(all_patterns, errors, reserved)
 
 
 def _collect_router_patterns(
     router: RouterBackend,
     all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
+    reserved: list[CheckMessage],
     seen: set[_TreeKey],
 ) -> None:
     """Append patterns from every page tree `router` reports.
@@ -566,6 +578,7 @@ def _collect_router_patterns(
                 skip_dir_names=skip_dir_names,
                 root=root,
                 mounts=mounts,
+                reserved=reserved,
             )
         )
 
@@ -601,6 +614,7 @@ def _collect_url_patterns(
     *,
     root: PageRoot = UNMOUNTED,
     mounts: UrlconfMounts = NO_MOUNTS,
+    reserved: list[CheckMessage],
 ) -> list[_CollectedPattern]:
     """Collect one `_CollectedPattern` per route from one pages root.
 
@@ -619,7 +633,11 @@ def _collect_url_patterns(
         try:
             django_pattern, parameters = default_url_parser.parse_url_pattern(url_path)
         except URLParameterError as exc:
-            errors.append(_parameter_refusal_error(exc, url_path, page_file))
+            refusal = _parameter_refusal_error(exc, url_path, page_file)
+            if isinstance(exc, ReservedURLParameterError):
+                reserved.append(refusal)
+            else:
+                errors.append(refusal)
             continue
         clash = sorted(prefix_names.intersection(parameters))
         if clash:

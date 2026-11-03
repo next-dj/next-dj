@@ -21,6 +21,7 @@ import {
   defaultClock,
   defaultFetch,
   defaultNavigate,
+  defaultReload,
   defaultSession,
 } from "./adapters";
 import type { Applied, Envelope } from "./apply";
@@ -104,20 +105,22 @@ export interface WireRequest {
   navigate?: boolean;
 }
 
-/**
- * Receiver of a recognised envelope. The snapshot is the dirty counter captured at
- * fetch time so a field touched after the request is protected from its own
- * response. The page is the URL a safe zone GET fetched, absent on mutations. The
- * owner is the page a mutation was submitted from.
- */
+/** What a recognised envelope arrives with, read by name like ApplyOptions. */
+export interface EnvelopeOptions {
+  response: Response;
+  // The dirty counter at fetch time, so a field touched later survives its response.
+  snapshot: number;
+  key: string | undefined;
+  // The URL a safe zone GET fetched, absent on mutations.
+  page: string | undefined;
+  // The page a mutation was submitted from.
+  owner: string | undefined;
+  isCurrent: () => boolean;
+}
+
 export type EnvelopeHandler = (
   raw: unknown,
-  response: Response,
-  snapshot: number,
-  key: string | undefined,
-  page: string | undefined,
-  owner: string | undefined,
-  isCurrent?: () => boolean,
+  options: EnvelopeOptions,
 ) => Promise<Applied>;
 
 /** Turns a foreign content-type body into a JSON-ish envelope before apply. */
@@ -128,8 +131,9 @@ export interface WireDeps {
   fetch?: FetchAdapter;
   document?: Document;
   navigate?: Navigate;
-  // The timer the request deadline runs on.
   clock?: Clock;
+  // The full reload a reply the server keeps to HTTP falls back to.
+  reload?: () => void;
   // The deadline in ms, read per request, zero waiting forever and absent the default.
   timeout?: () => number;
   // The navigate-once store of the non-envelope fallback. Absent, the default
@@ -166,6 +170,7 @@ export class Wire {
   readonly #document: Document;
   readonly #navigate: Navigate;
   readonly #clock: Clock;
+  readonly #reload: () => void;
   readonly #timeout: () => number;
   readonly #session: SessionStore;
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -189,6 +194,7 @@ export class Wire {
     this.#document = deps.document ?? document;
     this.#navigate = deps.navigate ?? defaultNavigate();
     this.#clock = deps.clock ?? defaultClock();
+    this.#reload = deps.reload ?? defaultReload();
     this.#timeout = deps.timeout ?? (() => REQUEST_TIMEOUT_MS);
     this.#session = deps.session ?? defaultSession();
     this.#dispatch = deps.dispatch;
@@ -413,7 +419,7 @@ export class Wire {
           url: request.url,
           reason: tunneled,
         });
-        if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
+        if (tunneled === REFUSAL_HTTP_ONLY) this.#reload();
         return failed;
       }
       disarm = this.#arm(deadline);
@@ -499,15 +505,14 @@ export class Wire {
       // Cleared once the body parses, so a later non-envelope reply on this page
       // navigates once more.
       this.#session.remove(NAVIGATED_FLAG);
-      const { envelope, ok, stale } = await this.#onEnvelope(
-        raw,
+      const { envelope, ok, stale } = await this.#onEnvelope(raw, {
         response,
         snapshot,
-        request.key,
+        key: request.key,
         page,
-        request.owner,
+        owner: request.owner,
         isCurrent,
-      );
+      });
       if (stale === true) return none("dropped");
       const invalid = envelope.form?.valid === false;
       return {

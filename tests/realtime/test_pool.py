@@ -3,7 +3,7 @@ import gc
 
 import pytest
 
-from next.realtime.pool import PooledSignal
+from next.realtime.pool import HandlerPool, PooledSignal
 from next.testing import capture_signals
 
 
@@ -58,3 +58,21 @@ def test_removing_a_sender_without_weak_references_is_a_miss() -> None:
 
 def test_an_uncached_signal_keeps_the_plain_cache() -> None:
     assert PooledSignal().sender_receivers_cache == {}
+
+
+def test_a_reset_pool_runs_on_fresh_threads_and_permits() -> None:
+    pool = HandlerPool()
+    executor, permits = pool.executor, pool.permits
+    pool.reset()
+    assert pool.executor is not executor
+    assert pool.permits is not permits
+
+
+@pytest.mark.parametrize(("workers", "limit"), [(1, 1), (2, 1), (9, 4)])
+def test_a_connection_takes_half_the_pool_and_at_least_one_thread(
+    workers: int, limit: int
+) -> None:
+    pool = HandlerPool()
+    pool.workers = workers
+    share = pool.share()
+    assert (share.limit, share.busy) == (limit, 0)

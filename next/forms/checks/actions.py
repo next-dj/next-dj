@@ -10,7 +10,8 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from django.utils.module_loading import import_string
 
 from next.checks import NEXT
-from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule, render_guard
+from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
+from next.pages.access import render_guard
 from next.pages.checks.access import access_in_use, load_declarations, tree_pages
 from next.pages.checks.branches import EmptyBranch, empty_branches
 from next.pages.checks.modules import declares_without_page, load_page
@@ -179,7 +180,7 @@ def _open_actions() -> dict[Path, list[str]]:
     for meta in iter_registered_actions():
         if meta.get("guard") is not None:
             continue
-        if render_guard(meta["file_path"], meta.get("scope")) is not None:
+        if render_guard(meta["file_path"], meta["scope"]) is not None:
             continue
         source = Path(meta["file_path"])
         owner = owner_rule(source)
@@ -224,7 +225,7 @@ def _render_guarded_actions() -> dict[Path, list[str]]:
     for meta in iter_registered_actions():
         if meta.get("guard") is not None:
             continue
-        if render_guard(meta["file_path"], meta.get("scope")) is None:
+        if render_guard(meta["file_path"], meta["scope"]) is None:
             continue
         source = Path(meta["file_path"])
         owner = owner_rule(source)
@@ -243,7 +244,7 @@ def check_render_guarded_actions(*args, **kwargs) -> list[CheckMessage]:
         DjangoWarning(
             f"{source} declares the actions {', '.join(map(repr, names))} beside a "
             "render() and no access declaration, so only that render() guards them "
-            "and each post needs an origin inside the page's directory.",
+            "and each POST needs an origin inside the page's directory.",
             hint=(
                 "Declare page.login_required() or permission_required() for the "
                 "page, set login_required on the action Meta, or declare "

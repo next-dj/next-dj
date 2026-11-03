@@ -11,6 +11,7 @@ import {
 } from "./adapters";
 import type { HistoryAdapter } from "./apply";
 import type { LazyModule } from "./chunks";
+import { inPlace, isPlainActivation } from "./events";
 import type { PollFactory, Poller } from "./poll";
 import {
   ATTR_ACTION,
@@ -22,8 +23,6 @@ import {
   HEADER_ORIGIN,
   addZone,
   currentUrl,
-  inPlace,
-  isPlainActivation,
   matching,
 } from "./protocol";
 import type { Diagnostics, WireTransport } from "./protocol";
@@ -348,7 +347,6 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (!(el instanceof Element)) return;
     const confirmer = el.closest(`[${CONFIRM_ATTR}]`);
     if (confirmer === null) return;
-    // closest matched the attribute, so getAttribute returns a string.
     /* v8 ignore next */
     const text = confirmer.getAttribute(CONFIRM_ATTR) ?? "";
     if (!confirm(text)) {

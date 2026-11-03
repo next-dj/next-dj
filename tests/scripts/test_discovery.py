@@ -1,14 +1,12 @@
 import logging
-import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
 
 from next.scripts import Script, ScriptsSourceImportError
 from next.scripts.discovery import SCRIPTS_MODULE, load_scripts, source_stale
-from tests.support import touch_later
+from tests.support import rewrite_in_tick, touch_later
 
 
 def _write(root: Path, source: str) -> Path:
@@ -105,16 +103,13 @@ class TestSourceStale:
         path.unlink()
         assert source_stale(source, tmp_path)
 
+    @pytest.mark.usefixtures("tick")
     def test_a_same_tick_rewrite_is_stale_while_edits_are_watched(
         self, tmp_path: Path
     ) -> None:
         path = _write(tmp_path, "scripts = ()\n")
-        stamp = path.stat().st_mtime_ns
-        with (
-            patch("next.utils.time_ns", return_value=stamp + 1),
-            override_settings(DEBUG=True),
-        ):
+        rewrite_in_tick(path)
+        with override_settings(DEBUG=True):
             source = load_scripts(tmp_path)
-            path.write_text("scripts = ('new',)\n")
-            os.utime(path, ns=(path.stat().st_atime_ns, stamp))
+            rewrite_in_tick(path, "scripts = ('new',)\n")
             assert source_stale(source, tmp_path)

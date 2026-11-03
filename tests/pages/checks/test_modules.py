@@ -3,11 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from next.checks import (
-    check_async_callables,
-    check_component_module_imports,
-    check_page_module_imports,
-)
+from next.checks import check_component_module_imports, check_page_module_imports
 from next.components import ComponentInfo, FileComponentsBackend
 from next.components.loading import ModuleLoader
 from tests.support import patch_checks_components_manager, patch_checks_router_manager
@@ -47,13 +43,6 @@ _ASYNC_PAGES = [
 ]
 
 
-@pytest.fixture()
-def _no_components():
-    with patch("next.pages.checks.modules.import_component_modules", return_value=()):
-        yield
-
-
-@pytest.mark.usefixtures("_no_components")
 class TestAsyncPageCallables:
     """`next.E218` names the async callable that stopped a `page.py` from loading."""
 
@@ -65,31 +54,38 @@ class TestAsyncPageCallables:
         page_file.write_text(source)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
-            messages = check_async_callables()
-            imports = check_page_module_imports()
+            messages = check_page_module_imports()
 
         assert [(m.id, m.obj) for m in messages] == [("next.E218", str(page_file))]
         assert named in messages[0].msg
-        assert imports == []
+        assert messages[0].hint is None
 
     def test_sync_page_reports_nothing(self, tmp_path: Path) -> None:
         (tmp_path / "page.py").write_text("def render():\n    return 'hi'\n")
 
         with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_async_callables() == []
+            assert check_page_module_imports() == []
 
-    def test_other_import_failure_is_left_to_e017(self, tmp_path: Path) -> None:
+    def test_other_import_failure_is_e017(self, tmp_path: Path) -> None:
         (tmp_path / "page.py").write_text("raise RuntimeError('boom')\n")
 
         with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_async_callables() == []
             assert [m.id for m in check_page_module_imports()] == ["next.E017"]
 
-    def test_no_router_manager_reports_nothing(self) -> None:
-        with patch(
-            "next.pages.checks.modules.get_router_manager", return_value=(None, [])
+    def test_vanished_page_reports_the_generic_e017(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("template = 'ok'\n")
+
+        with (
+            patch_checks_router_manager(pages_directory=tmp_path),
+            patch(
+                "next.pages.checks.modules.load_page_module", return_value=(None, None)
+            ),
         ):
-            assert check_async_callables() == []
+            [message] = check_page_module_imports()
+
+        assert message.id == "next.E017"
+        assert "could not be imported" in message.msg
 
 
 class TestAsyncComponentCallables:
@@ -124,19 +120,8 @@ class TestAsyncComponentCallables:
         )
         backend._loaded = True
 
-        with (
-            patch(
-                "next.pages.checks.modules.get_router_manager", return_value=(None, [])
-            ),
-            patch(
-                "next.pages.checks.modules.import_component_modules",
-                return_value=(module_path,),
-            ),
-            patch_checks_components_manager(backend),
-        ):
-            messages = check_async_callables()
-            imports = check_component_module_imports()
+        with patch_checks_components_manager(backend):
+            messages = check_component_module_imports()
 
         assert [(m.id, m.obj) for m in messages] == [("next.E218", str(module_path))]
         assert named in messages[0].msg
-        assert imports == []

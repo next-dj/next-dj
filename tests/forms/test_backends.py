@@ -1,8 +1,7 @@
 import copy
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,8 +37,8 @@ from next.forms.manager import (
 )
 from next.forms.registration import registration_diagnostics
 from next.pages.loaders import load_page_module
-from next.utils import forget_app_holdings
 from tests.support import isolated_form_registries
+from tests.support.apps import fake_app_configs
 from tests.support.pages import write_page
 
 
@@ -1342,18 +1341,8 @@ def subscribe() -> None:
 """
 
 
-def _fake_app(label: str, path: Path) -> SimpleNamespace:
-    return SimpleNamespace(label=label, path=str(path))
-
-
 class TestScopeKeyFor:
     """scope_key_for keys page scope by tree-relative path and shared by module."""
-
-    @pytest.fixture(autouse=True)
-    def _fresh_app_roots(self) -> Iterator[None]:
-        forget_app_holdings(setting="INSTALLED_APPS")
-        yield
-        forget_app_holdings(setting="INSTALLED_APPS")
 
     def test_page_under_base_dir_is_keyed_by_its_relative_path(
         self, settings, tmp_path
@@ -1371,7 +1360,7 @@ class TestScopeKeyFor:
         outer = tmp_path / "shop"
         inner = outer / "billing"
         page_file = write_page(inner, "pages/pay")
-        configs = [_fake_app("shop", outer), _fake_app("billing", inner)]
+        configs = fake_app_configs(("shop", outer), ("billing", inner))
         with patch.object(apps, "get_app_configs", return_value=configs):
             assert scope_key_for(str(page_file), "page") == "billing:pages/pay/page.py"
 

@@ -4,19 +4,18 @@ from typing import override
 import pytest
 from django.test import Client
 
-from next.forms.signals import action_dispatched
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial.backends import JsonPartialProtocolBackend
 from next.partial.envelope import Asset, Envelope, FormMeta, Patch
 from next.testing import (
     NextClient,
     PartialEnvelope,
-    capture_signals,
     envelope_of,
     override_next_settings,
 )
 from tests.forms import actions
 from tests.support import TWIN_ACTION
+from tests.support.forms import post_without_origin
 
 
 # Importing `actions` registers the baseline form actions, so keep it bound.
@@ -80,11 +79,8 @@ class TestNextClient:
 
     def test_a_post_without_an_origin_is_refused_before_dispatch(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
-        url = client.get_action_url("simple_form")
-        with capture_signals(action_dispatched) as recorder:
-            response = client.post(url, {"name": ""})
+        response = post_without_origin(client, "simple_form", {"name": ""})
         assert response.status_code == 400
-        assert recorder.events == []
 
     @pytest.mark.django_db()
     def test_post_action_data_origin_wins_over_keyword(self) -> None:

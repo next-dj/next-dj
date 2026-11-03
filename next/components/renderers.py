@@ -28,7 +28,8 @@ from next.seeding import (
     REQUEST_KEY,
     TEMPLATE_PATH_KEY,
 )
-from next.utils import snapshot_mtime_ns, stamp_fresh, template_edits_watched
+from next.stamps import fresh, snapshot
+from next.utils import template_edits_watched
 
 from .context import component
 from .errors import ComponentModuleImportError
@@ -122,10 +123,10 @@ class ComponentTemplateLoader:
 
 @dataclass(frozen=True, slots=True)
 class _CompiledTemplate:
-    """A compiled template with the file it came from and that file's mtime."""
+    """A compiled template with the file it came from and the stamp of that file."""
 
     source_path: Path
-    mtime_ns: int
+    stamp: int
     template: Template
 
 
@@ -133,19 +134,19 @@ class _CompiledTemplate:
 type _SourceKey = tuple[Path | None, Path | None]
 
 
-def _source_mtimes(info: ComponentInfo) -> dict[Path, int]:
-    """Stat every file a load may read for `info`, before any of them is read.
+def _source_stamps(info: ComponentInfo) -> dict[Path, int]:
+    """Stamp every file a load may read for `info`, before any of them is read.
 
-    A stat after the read would pair old text with a newer mtime and hide an edit.
+    A stamp after the read would pair old text with a newer mtime and hide an edit.
     """
-    mtimes: dict[Path, int] = {}
+    stamps: dict[Path, int] = {}
     for candidate in (info.template_path, info.module_path):
-        if candidate is None or candidate in mtimes:
+        if candidate is None or candidate in stamps:
             continue
-        mtime_ns = snapshot_mtime_ns(candidate)
-        if mtime_ns is not None:
-            mtimes[candidate] = mtime_ns
-    return mtimes
+        stamp = snapshot(candidate)
+        if stamp is not None:
+            stamps[candidate] = stamp
+    return stamps
 
 
 class CachedComponentTemplateLoader(ComponentTemplateLoader):
@@ -182,12 +183,10 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
             self._compiled.clear()
 
     def _is_fresh(self, entry: _CompiledTemplate) -> bool:
-        return not template_edits_watched() or stamp_fresh(
-            entry.mtime_ns, entry.source_path
-        )
+        return not template_edits_watched() or fresh(entry.stamp, entry.source_path)
 
     def _compile(self, key: _SourceKey, info: ComponentInfo) -> Template | None:
-        mtimes = _source_mtimes(info)
+        stamps = _source_stamps(info)
         source = self.load_source(info)
         if source is None:
             self._drop(key)
@@ -195,15 +194,15 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
 
         template = Template(source.text)
         # A subclass may read a file `ComponentInfo` does not name, so stat it here.
-        mtime_ns = mtimes.get(source.path)
-        if mtime_ns is None:
-            mtime_ns = snapshot_mtime_ns(source.path)
-        if mtime_ns is None:
-            # Without an mtime the entry could never expire, so it is not kept.
+        stamp = stamps.get(source.path)
+        if stamp is None:
+            stamp = snapshot(source.path)
+        if stamp is None:
+            # Without a stamp the entry could never expire, so it is not kept.
             self._drop(key)
             return template
 
-        self._store(key, _CompiledTemplate(source.path, mtime_ns, template))
+        self._store(key, _CompiledTemplate(source.path, stamp, template))
         return template
 
     def _drop(self, key: _SourceKey) -> None:
