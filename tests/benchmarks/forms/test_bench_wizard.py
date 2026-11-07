@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import types
 from decimal import Decimal
 from typing import ClassVar
@@ -150,7 +150,7 @@ class TestBenchSessionWizardBackend:
         return {
             "name": "x",
             "age": 30,
-            "day": datetime.date(2026, 6, 11),
+            "day": dt.date(2026, 6, 11),
             "amount": Decimal("9.50"),
         }
 

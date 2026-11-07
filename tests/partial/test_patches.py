@@ -24,7 +24,7 @@ from next.partial.errors import (
 from next.partial.headers import CONTENT_TYPE
 from next.partial.render import ZoneRenderResult
 from next.static import KindRegistry, StaticAsset
-from next.static.manager import default_manager
+from next.static.manager import default_manager, get_static_manager
 from next.testing import override_next_settings
 from tests.support import (
     BUILD_MANIFEST,
@@ -182,7 +182,7 @@ class TestAddAssetFollowsTheBackendRewrite:
             assert request is not None
             return f"/pfx{url}"
 
-        monkeypatch.setattr(default_manager, "asset_url", prefix)
+        monkeypatch.setattr(get_static_manager(), "asset_url", prefix)
         envelope = (
             Patches(partial_request("/"))
             .add_asset("css", "/static/app/x.css")
@@ -197,7 +197,7 @@ class TestAddAssetFollowsTheBackendRewrite:
             asked.append(url)
             return url
 
-        monkeypatch.setattr(default_manager, "asset_url", record)
+        monkeypatch.setattr(get_static_manager(), "asset_url", record)
         envelope = (
             Patches(partial_request("/"))
             .add_asset("css", "", inline=".x {}")
@@ -231,7 +231,7 @@ class TestAddAssetResolvesTheReference:
             asked.append(reference)
             return reference
 
-        monkeypatch.setattr(default_manager, "resolve_url", record)
+        monkeypatch.setattr(get_static_manager(), "resolve_url", record)
         envelope = (
             Patches(partial_request("/"))
             .add_asset("css", "", inline=".x {}")

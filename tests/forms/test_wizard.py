@@ -1,4 +1,4 @@
-import datetime
+import datetime as dt
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -926,7 +926,7 @@ class TestSessionFormWizardBackend:
             request,
             "wiz",
             "identity",
-            {"when": datetime.date(2026, 6, 11), "amount": Decimal("9.50")},
+            {"when": dt.date(2026, 6, 11), "amount": Decimal("9.50")},
         )
         raw = request.session["_next_wizard:wiz"]
         assert json.dumps(raw)
@@ -937,18 +937,18 @@ class TestSessionFormWizardBackend:
         request = _request()
         token = uuid4()
         data = {
-            "day": datetime.date(2026, 6, 11),
-            "at": datetime.datetime(2026, 6, 11, 12, 30, tzinfo=datetime.UTC),
-            "slot": datetime.time(9, 15),
+            "day": dt.date(2026, 6, 11),
+            "at": dt.datetime(2026, 6, 11, 12, 30, tzinfo=dt.UTC),
+            "slot": dt.time(9, 15),
             "amount": Decimal("9.50"),
             "token": token,
         }
         backend.save_step(request, "wiz", "identity", data)
         loaded = backend.load(request, "wiz")["identity"]
         assert loaded == data
-        assert isinstance(loaded["day"], datetime.date)
-        assert isinstance(loaded["at"], datetime.datetime)
-        assert isinstance(loaded["slot"], datetime.time)
+        assert isinstance(loaded["day"], dt.date)
+        assert isinstance(loaded["at"], dt.datetime)
+        assert isinstance(loaded["slot"], dt.time)
         assert isinstance(loaded["amount"], Decimal)
         assert isinstance(loaded["token"], UUID)
 
@@ -957,16 +957,13 @@ class TestSessionFormWizardBackend:
         backend = SessionFormWizardBackend()
         request = _request()
         data = {
-            "days": [datetime.date(2026, 6, 11), datetime.date(2026, 6, 12)],
+            "days": [dt.date(2026, 6, 11), dt.date(2026, 6, 12)],
             "pair": ("a", "b"),
             "nested": {"amount": Decimal("1.25")},
         }
         backend.save_step(request, "wiz", "identity", data)
         loaded = backend.load(request, "wiz")["identity"]
-        assert loaded["days"] == [
-            datetime.date(2026, 6, 11),
-            datetime.date(2026, 6, 12),
-        ]
+        assert loaded["days"] == [dt.date(2026, 6, 11), dt.date(2026, 6, 12)]
         assert loaded["pair"] == ["a", "b"]
         assert loaded["nested"] == {"amount": Decimal("1.25")}
 

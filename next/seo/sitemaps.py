@@ -5,7 +5,7 @@ The items are read lazily, so a sitemap page reads only the rows it lists.
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import functools
 import re
 from collections.abc import Iterable, Mapping, Sequence
@@ -153,13 +153,13 @@ def is_excluded(trail: str, exclude: Sequence[str]) -> bool:
     return any(_glob_pattern(glob).fullmatch(trail) for glob in exclude)
 
 
-def lastmod_datetime(value: datetime.date) -> datetime.datetime:
+def lastmod_datetime(value: dt.date) -> dt.datetime:
     """Return a `lastmod` as an aware datetime, so dates and datetimes compare.
 
     A date or a naive datetime is read in the current time zone.
     """
-    if not isinstance(value, datetime.datetime):
-        value = datetime.datetime.combine(value, datetime.time.min)
+    if not isinstance(value, dt.datetime):
+        value = dt.datetime.combine(value, dt.time.min)
     if timezone.is_naive(value):
         value = timezone.make_aware(value)
     return value
@@ -225,12 +225,12 @@ def _rows(value: object, func: Callable[..., Any]) -> Rows:
     return value if isinstance(value, Sequence) else list(value)
 
 
-def _stamp(row: object, field: str | None) -> datetime.date | None:
+def _stamp(row: object, field: str | None) -> dt.date | None:
     """Return the `lastmod` field of one row, when the declaration names one."""
     if field is None:
         return None
     value = row.get(field) if isinstance(row, Mapping) else getattr(row, field, None)
-    return value if isinstance(value, datetime.date) else None
+    return value if isinstance(value, dt.date) else None
 
 
 def _items_note(entry: SitemapItemsEntry, what: str) -> str:
@@ -360,7 +360,7 @@ class PageTreeSitemap(_SitemapBase):
             )
             raise
 
-    def lastmod(self, item: SitemapItem) -> datetime.datetime | None:
+    def lastmod(self, item: SitemapItem) -> dt.datetime | None:
         """Return the modification time the entry carries, as an aware datetime."""
         stamp = item.entry.lastmod
         return None if stamp is None else lastmod_datetime(stamp)
@@ -406,12 +406,12 @@ class PageTreeSitemap(_SitemapBase):
         return urls
 
     @override
-    def get_latest_lastmod(self) -> datetime.datetime | None:
+    def get_latest_lastmod(self) -> dt.datetime | None:
         """Return the latest `lastmod` of the items, `None` unless every item has one.
 
         A `QuerySet` part with a `lastmod` field costs one aggregate query.
         """
-        latest: datetime.datetime | None = None
+        latest: dt.datetime | None = None
         for part in self.entries().parts:
             if part.count() == 0:
                 continue
@@ -421,7 +421,7 @@ class PageTreeSitemap(_SitemapBase):
             latest = found if latest is None else max(latest, found)
         return latest
 
-    def _part_latest(self, part: Part[SitemapItem]) -> datetime.datetime | None:
+    def _part_latest(self, part: Part[SitemapItem]) -> dt.datetime | None:
         """Return the latest `lastmod` of one part, `None` unless every row has a date.
 
         A `QuerySet` part reads the latest date and the undated rows in one query.

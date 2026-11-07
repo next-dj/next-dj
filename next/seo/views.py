@@ -40,7 +40,7 @@ from .sitemaps import lastmod_datetime
 
 
 if TYPE_CHECKING:
-    import datetime
+    import datetime as dt
 
     from django.contrib.sitemaps import Sitemap
 
@@ -112,7 +112,7 @@ def _unavailable() -> HttpResponse:
     return response
 
 
-def _later(current: datetime.datetime | None, new: datetime.date) -> datetime.datetime:
+def _later(current: dt.datetime | None, new: dt.date) -> dt.datetime:
     """Return the later of two lastmod values, both read with `lastmod_datetime`."""
     stamp = lastmod_datetime(new)
     return stamp if current is None else max(current, stamp)
@@ -125,7 +125,7 @@ def _needs_index(sections: Mapping[str, Sitemap[Any]]) -> bool:
     )
 
 
-def _last_modified(latest: datetime.datetime | None) -> dict[str, str] | None:
+def _last_modified(latest: dt.datetime | None) -> dict[str, str] | None:
     return None if latest is None else {"Last-Modified": http_date(latest.timestamp())}
 
 
@@ -137,7 +137,7 @@ def _index(
     namespace = _namespace(request)
     items: list[SitemapIndexItem] = []
     every_dated = True
-    latest: datetime.datetime | None = None
+    latest: dt.datetime | None = None
     for name, section in sections.items():
         path = reverse(f"{namespace}:{SECTION_NAME}", kwargs={"section": name})
         scheme = section.get_protocol(origin.scheme)
