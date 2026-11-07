@@ -85,7 +85,7 @@ class TestBenchPageRenderedSignal:
         page_path = tmp_path / "page.py"
         page_path.write_text("def render(r): return 'x'\n")
         page.register_template(page_path, _SIMPLE_TEMPLATE)
-        benchmark(page.render, page_path, title="bench")
+        benchmark(page.render, page_path, None, {"title": "bench"})
 
     @pytest.mark.benchmark(group="pages.signals")
     def test_render_with_receiver(self, tmp_path: Path, benchmark) -> None:
@@ -96,7 +96,7 @@ class TestBenchPageRenderedSignal:
         page.register_template(page_path, _SIMPLE_TEMPLATE)
         page_rendered.connect(noop_signal_receiver)
         try:
-            benchmark(page.render, page_path, title="bench")
+            benchmark(page.render, page_path, None, {"title": "bench"})
         finally:
             page_rendered.disconnect(noop_signal_receiver)
 
@@ -115,6 +115,6 @@ class TestBenchPageRenderedSignal:
         _register_context_functions(page, page_path, 20)
         page_rendered.connect(noop_signal_receiver)
         try:
-            benchmark(page.render, page_path, title="bench")
+            benchmark(page.render, page_path, None, {"title": "bench"})
         finally:
             page_rendered.disconnect(noop_signal_receiver)

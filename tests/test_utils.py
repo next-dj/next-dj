@@ -1179,6 +1179,18 @@ class TestAppHolding:
         ):
             assert app_holding(link / "pages") == ("app", "pages")
 
+    def test_a_path_taken_as_resolved_is_answered_apart(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        (app / "pages").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(app)
+        with patch.object(
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
+        ):
+            assert app_holding(link / "pages") == ("app", "pages")
+            assert app_holding(link / "pages", resolved=True) is None
+            assert app_holding(link / "pages") == ("app", "pages")
+
     def test_a_path_outside_every_app_is_none(self, tmp_path) -> None:
         with patch.object(apps, "get_app_configs", return_value=[]):
             assert app_holding(tmp_path) is None

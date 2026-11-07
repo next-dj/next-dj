@@ -15,6 +15,7 @@ from next.forms.dispatch.permissions import _trees
 from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
+    OriginMatch,
     filter_reserved_url_kwargs,
     resolve_origin,
 )
@@ -150,8 +151,11 @@ class TestBenchDispatchEndToEnd:
         assert isinstance(response, HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
-    def test_dispatch_invalid_form(self, benchmark) -> None:
-        """Invalid submission, so validation_failed fires with an errors payload."""
+    def test_dispatch_invalid_form(self, tmp_path: Path, benchmark) -> None:
+        """Invalid submission, so validation_failed fires and the origin re-renders."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        (tmp_path / "template.djx").write_text("<main>{{ form.errors }}</main>")
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
@@ -164,8 +168,10 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        # The required name is missing, so the dispatch takes the error path.
-        request = _action_request("/plain/")
+        # The required name is missing, so the dispatch re-renders the origin page.
+        request = _action_request("/items/42/")
+        origin = OriginMatch(page_path=page_file, url_kwargs={}, origin="/items/42/")
+        setattr(request, _ORIGIN_MATCH_ATTR, origin)
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )

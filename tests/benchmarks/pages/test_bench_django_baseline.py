@@ -42,4 +42,4 @@ class TestBenchAgainstDjango:
         page_path = tmp_path / "page.py"
         page_path.write_text("def render(r): return 'x'\n")
         page_instance.register_template(page_path, _SOURCE)
-        benchmark(page_instance.render, page_path, **_CONTEXT)
+        benchmark(page_instance.render, page_path, None, _CONTEXT)

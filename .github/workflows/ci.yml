@@ -71,6 +71,15 @@ jobs:
     - name: Run ecosystem compatibility tests
       run: uv run pytest tests/compat -q --no-cov
 
+  test-benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+    - uses: ./.github/actions/setup-python-uv
+    - name: Run every benchmark once as a plain test
+      run: uv run pytest tests/benchmarks -p no:randomly --no-cov --override-ini=addopts= --benchmark-disable -q
+
   # The matrix tests the wheel on a sparse checkout without next/client and docs/, so the
   # tests that compare the core with those trees skip there and run here instead.
   test-source:

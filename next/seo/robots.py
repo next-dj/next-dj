@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from next.deps.resolver import current_resolver
 from next.introspect import describe_callable
-from next.stamps import fresh, snapshot
+from next.stamps import stamp_of, stat_mtime_ns
 from next.utils import WEB_SCHEMES
 
 from .discovery import BrokenSource, declared_cache
@@ -157,10 +157,11 @@ class TextFile:
 
     def _read(self) -> bytes:
         held = self._held
-        if held is not None and fresh(held[0], self.path):
+        mtime_ns = stat_mtime_ns(self.path)
+        if held is not None and mtime_ns == held[0]:
             return held[1]
         # Stamped before the read, so a write in between leaves the copy stale.
-        stamp = snapshot(self.path)
+        stamp = None if mtime_ns is None else stamp_of(mtime_ns)
         content = self.path.read_bytes()
         self._held = (stamp, content)
         return content

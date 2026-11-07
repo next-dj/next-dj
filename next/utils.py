@@ -365,7 +365,9 @@ def resolve_base_dir() -> Path | None:
     return None
 
 
-_app_holding_cache: BoundedCache[str, tuple[str, str] | None] = BoundedCache()
+_app_holding_cache: BoundedCache[tuple[str, bool], tuple[str, str] | None] = (
+    BoundedCache()
+)
 _MISS: Final = object()
 
 
@@ -381,7 +383,8 @@ def app_holding(path: str | Path, *, resolved: bool = False) -> tuple[str, str] 
 
     Symlinks resolve first unless `resolved` says so, and the answer is memoised.
     """
-    key = str(path)
+    raw = str(path)
+    key = (raw, resolved)
     held = _app_holding_cache.get(key, _MISS)
     if held is not _MISS:
         return cast("tuple[str, str] | None", held)
@@ -389,7 +392,7 @@ def app_holding(path: str | Path, *, resolved: bool = False) -> tuple[str, str] 
         roots = _resolved_app_roots()
     except AppRegistryNotReady:
         return None
-    real = Path(key) if resolved else Path(key).resolve()
+    real = Path(raw) if resolved else Path(raw).resolve()
     found = next(
         (
             (label, real.relative_to(root).as_posix())

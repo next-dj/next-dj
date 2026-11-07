@@ -23,7 +23,7 @@ class TestBenchPageRender:
         page_path = tmp_path / "page.py"
         page_path.write_text("def render(r): return 'x'\n")
         page_instance.register_template(page_path, _SIMPLE_TEMPLATE)
-        benchmark(page_instance.render, page_path, title="Bench")
+        benchmark(page_instance.render, page_path, None, {"title": "Bench"})
 
     @pytest.mark.benchmark(group="pages.render")
     def test_render_heavy_context(
@@ -33,7 +33,7 @@ class TestBenchPageRender:
         page_path.write_text("def render(r): return 'x'\n")
         page_instance.register_template(page_path, _HEAVY_TEMPLATE)
         kwargs = {f"v_{i}": f"val_{i}" for i in range(50)}
-        benchmark(page_instance.render, page_path, **kwargs)
+        benchmark(page_instance.render, page_path, None, kwargs)
 
     @pytest.mark.benchmark(group="pages.render")
     def test_build_render_context(
@@ -41,4 +41,6 @@ class TestBenchPageRender:
     ) -> None:
         page_path = tmp_path / "page.py"
         page_path.write_text("def render(r): return 'x'\n")
-        benchmark(page_instance.build_render_context, page_path, title="Bench")
+        benchmark(
+            page_instance.build_render_context, page_path, None, {"title": "Bench"}
+        )

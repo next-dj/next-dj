@@ -93,6 +93,18 @@ class TestAsyncActionRefusal:
         ):
             action("save_factory", form_class=build_form)(save)
 
+    def test_sync_form_class_factory_registers(self) -> None:
+        def build_form(request: HttpRequest) -> type[Form]:
+            return Form
+
+        def save(request: HttpRequest) -> HttpResponse:
+            return HttpResponse()
+
+        action("save_sync_factory", form_class=build_form)(save)
+
+        meta = form_action_manager.default_backend.get_meta("save_sync_factory")
+        assert meta is not None
+
     def test_async_wizard_done_is_refused(self) -> None:
         with pytest.raises(AsyncCallableError, match='hook "done"'):
 
