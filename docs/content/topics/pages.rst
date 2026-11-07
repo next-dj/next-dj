@@ -203,6 +203,27 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
    def featured_payload() -> dict:
        return {"id": 1, "title": "Hello"}
 
+.. _topics-pages-sync-callables:
+
+Sync callables
+--------------
+
+A ``render``, an ``@context`` callable, an ``@action`` handler, and a form hook are plain ``def`` functions, because the framework calls them synchronously.
+An ``async def`` one raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as :ref:`next.E218 <ref-system-checks>`.
+Async code is reached through :func:`~asgiref.sync.async_to_sync`.
+
+.. code-block:: python
+   :caption: page.py
+
+   from asgiref.sync import async_to_sync
+   from weather.client import fetch_forecast
+
+   from next import context
+
+   @context("forecast")
+   def forecast() -> dict:
+       return async_to_sync(fetch_forecast)()
+
 Page access
 -----------
 
@@ -599,15 +620,9 @@ The loader records the failure against the modification time of the file that ex
 A later request for the same unchanged file answers from the memo without a second log record.
 ``ImportError``, ``SyntaxError``, and ``AttributeError`` are the common causes, not a closed list.
 
-What the request does with that record depends on one predicate, ``next.conf.fail_loudly``, which is true when ``settings.DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]`` is set.
-
-Fail loud.
-   The view raises ``PageModuleImportError`` with the original exception as its ``__cause__``.
-   Under ``DEBUG`` the technical 500 page points at the failing line, and under ``STRICT_LOADING`` alone the client sees the generic 500 while the traceback stays in the server log.
-
-Fail quiet, the default.
-   The view answers 404 and the failure is visible only in the log record.
-   A deployment that never reads its logs therefore reads a broken page as a missing one, which is the reason :doc:`/content/deployment/settings` recommends ``STRICT_LOADING`` in production.
+Every request to the broken page raises ``PageModuleImportError`` with the original exception as its ``__cause__``, so it answers 500 whatever ``settings.DEBUG`` and ``NEXT_FRAMEWORK["STRICT_LOADING"]`` hold.
+Under ``DEBUG`` the technical 500 page points at the failing line.
+Without ``DEBUG`` the client sees the generic 500 page, and Django's ``django.request`` logger records the traceback on every request, so monitoring on 5xx sees a broken deploy.
 
 The blast radius is the broken page and the pages below it in every mode, since what it would have declared with ``inherit=True`` is unknown, see :ref:`topics-access`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.

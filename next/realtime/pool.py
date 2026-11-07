@@ -1,15 +1,25 @@
 """Blocking work run off the event loop on a thread pool, with fresh DB connections."""
 
 import asyncio
+import inspect
 import logging
+import os
+import threading
 from collections.abc import Awaitable, Callable, Iterator, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
-from typing import override
+from contextlib import suppress
+from contextvars import ContextVar, Token
+from types import TracebackType
+from typing import Self, override
 from weakref import WeakKeyDictionary
 
 from asgiref.sync import sync_to_async
 from django.db import close_old_connections
 from django.dispatch import Signal
+
+from next.utils import after_fork
+
+from .errors import PoolFullError
 
 
 _dispatch_logger = logging.getLogger("django.dispatch")
@@ -39,6 +49,167 @@ async def run_pooled[**P, R](
     """Run blocking code on its own pool, so it never queues the shared one."""
     call = _fresh_links(func, *args, **kwargs)
     return await sync_to_async(call, thread_sensitive=False, executor=executor)()
+
+
+class ThreadShare:
+    """The handler pool threads one connection holds at most and holds now."""
+
+    __slots__ = ("busy", "limit")
+
+    def __init__(self, limit: int) -> None:
+        """Start with no thread busy and `limit` threads to take."""
+        self.limit = limit
+        self.busy = 0
+
+
+_LEASE: ContextVar["Lease | None"] = ContextVar("next_realtime_lease", default=None)
+
+
+class Lease:
+    """One event's hold on its connection slot, kept until its pool threads return.
+
+    `release` runs once on the event loop, after the `with` block and the last thread.
+    """
+
+    __slots__ = ("_closed", "_release", "_share", "_threads", "_token")
+    _token: Token["Lease | None"]
+
+    def __init__(self, share: ThreadShare, release: Callable[[], None]) -> None:
+        """Bind the lease to its connection's share and the slot it frees."""
+        self._share = share
+        self._release: Callable[[], None] | None = release
+        self._threads = 0
+        self._closed = False
+
+    def __enter__(self) -> Self:
+        """Make the lease the one sync handlers of this task claim threads under."""
+        self._token = _LEASE.set(self)
+        return self
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """End the event, freeing the slot now unless a thread still runs."""
+        _LEASE.reset(self._token)
+        self._closed = True
+        self._settle()
+
+    def take(self) -> bool:
+        """Count one more thread for the event, False once the share is used up."""
+        if self._share.busy >= self._share.limit:
+            return False
+        self._share.busy += 1
+        self._threads += 1
+        return True
+
+    def give(self) -> None:
+        """Count a thread of the event as returned."""
+        self._share.busy -= 1
+        self._threads -= 1
+        self._settle()
+
+    def _settle(self) -> None:
+        release = self._release
+        if self._closed and not self._threads and release is not None:
+            self._release = None
+            release()
+
+
+class PoolThread:
+    """A claimed handler pool thread, given back when the handler on it returns."""
+
+    __slots__ = ("_executor", "_lease", "_permits")
+
+    def __init__(
+        self,
+        executor: ThreadPoolExecutor,
+        permits: threading.BoundedSemaphore,
+        lease: Lease | None,
+    ) -> None:
+        """Hold a taken permit, the lease it counts against and the pool to run on."""
+        self._executor = executor
+        self._permits = permits
+        self._lease = lease
+
+    def give(self) -> None:
+        """Return the thread to the pool and to the lease, on the event loop."""
+        self._permits.release()
+        if self._lease is not None:
+            self._lease.give()
+
+    async def run[T](self, handler: Callable[[T], object], event: T) -> None:
+        """Run a sync handler on the thread, a cancel leaving it to finish alone.
+
+        A sync-looking handler that returns an awaitable is awaited, so `ok` means done.
+        """
+        loop = asyncio.get_running_loop()
+        outcome = await run_pooled(self._executor, self._call, loop, handler, event)
+        if inspect.isawaitable(outcome):
+            await outcome
+
+    def _call[T](
+        self, loop: asyncio.AbstractEventLoop, handler: Callable[[T], object], event: T
+    ) -> object:
+        """Call the handler on the pool thread and give the thread back as it exits.
+
+        The thread outlives a cancelled await, so the permit comes back from here.
+        """
+        try:
+            return handler(event)
+        finally:
+            self._permits.release()
+            if self._lease is not None:
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(self._lease.give)
+
+
+class HandlerPool:
+    """The bulkhead sync upstream handlers run in, apart from the pool Django shares.
+
+    A slow handler fills only these threads, and one connection only its share of them.
+    """
+
+    __slots__ = ("executor", "permits", "workers")
+    workers: int
+    executor: ThreadPoolExecutor
+    permits: threading.BoundedSemaphore
+
+    def __init__(self) -> None:
+        """Size the pool like Django's default executor."""
+        self.reset()
+
+    def reset(self) -> None:
+        """Start a fresh executor and fresh permits, as a forked child has to."""
+        self.workers = min(32, (os.cpu_count() or 1) + 4)
+        self.executor = ThreadPoolExecutor(
+            self.workers, thread_name_prefix="next-handler"
+        )
+        self.permits = threading.BoundedSemaphore(self.workers)
+
+    def share(self) -> ThreadShare:
+        """Return a connection's share of the threads, half the pool."""
+        return ThreadShare(max(1, self.workers // 2))
+
+    def claim(self) -> PoolThread:
+        """Take a free thread under the current lease, else `PoolFullError`.
+
+        A permit stays taken until its handler returns, past a timeout too.
+        """
+        permits = self.permits
+        if not permits.acquire(blocking=False):
+            raise PoolFullError
+        lease = _LEASE.get()
+        if lease is not None and not lease.take():
+            permits.release()
+            raise PoolFullError
+        return PoolThread(self.executor, permits, lease)
+
+
+handler_pool = HandlerPool()
+after_fork(handler_pool.reset)
 
 
 def _fresh_links[**P, R](
@@ -161,4 +332,4 @@ def _name(receiver: Callable[..., object]) -> object:
     return getattr(receiver, "__qualname__", receiver)
 
 
-__all__ = ["PooledSignal", "run_detached", "run_pooled"]
+__all__ = ["HandlerPool", "PooledSignal", "handler_pool", "run_detached", "run_pooled"]

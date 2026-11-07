@@ -2,11 +2,13 @@
 
 import asyncio
 import contextlib
+import logging
 import math
 import time
 from collections.abc import AsyncIterable
-from typing import TYPE_CHECKING, TypeGuard, cast
+from typing import TYPE_CHECKING, Any, Final, TypeGuard, cast, override
 
+from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
@@ -22,7 +24,7 @@ from .stream import StreamEnd, StreamHello, StreamMeta, StreamSkip
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
     from typing import Protocol
 
     from django.http import HttpRequest
@@ -54,7 +56,7 @@ if TYPE_CHECKING:
 _EVENT_STREAM = "text/event-stream"
 _CACHE_CONTROL = "no-cache, no-transform"
 _ACCEL_BUFFERING = "X-Accel-Buffering"
-_HEARTBEAT_COMMENT = ": heartbeat\n\n"
+_HEARTBEAT_FRAME: Final = b": heartbeat\n\n"
 RETRY_OPTION = "RETRY_MS"
 HEARTBEAT_OPTION = "HEARTBEAT_SECONDS"
 SSE_OPTION = "SSE"
@@ -63,6 +65,57 @@ _DEFAULT_RETRY_MS: int = _SSE_DEFAULTS[RETRY_OPTION]
 _DEFAULT_HEARTBEAT_SECONDS = float(_SSE_DEFAULTS[HEARTBEAT_OPTION])
 _CONTROL_FRAMES = (StreamHello, StreamSkip, StreamEnd)
 _UNSAFE_ID = frozenset("\r\n\0")
+
+logger = logging.getLogger(__name__)
+
+
+class _Stall:
+    """Track the frame a consumer is writing, so a reader that stops is dropped."""
+
+    __slots__ = ("_pending", "_writes")
+
+    def __init__(self) -> None:
+        self._pending: int | None = None
+        self._writes = 0
+
+    def start(
+        self, limit: float, drop: "Callable[[], Awaitable[None]]"
+    ) -> "asyncio.Task[None]":
+        """Start watching the writes of the running task, bound once as the consumer."""
+        return asyncio.create_task(self._watch(limit, drop, asyncio.current_task()))
+
+    def hold(self) -> None:
+        """Mark a frame handed to the consumer task that is about to send it."""
+        self._writes += 1
+        self._pending = self._writes
+
+    def written(self) -> None:
+        """Mark the frame as written, the consumer back for the next one."""
+        self._pending = None
+
+    async def _watch(
+        self,
+        limit: float,
+        drop: "Callable[[], Awaitable[None]]",
+        consumer: "asyncio.Task[Any] | None",
+    ) -> None:
+        """Drop the stream once two wakes `limit` apart find the same write pending.
+
+        `drop` finalises the response first, then the cancel ends the blocked `send`.
+        """
+        seen: int | None = None
+        while True:
+            await asyncio.sleep(limit)
+            pending = self._pending
+            if pending is not None and pending == seen and consumer is not None:
+                logger.info("SSE stream dropped a client that stopped reading")
+                try:
+                    await drop()
+                finally:
+                    # A failed drop must not leave the send blocked forever.
+                    consumer.cancel()
+                return
+            seen = pending
 
 
 class PatchStreamWriter(StreamingHttpResponse):
@@ -95,11 +148,23 @@ class PatchStreamWriter(StreamingHttpResponse):
         self._retry_ms = _retry_ms()
         self._opened_at = self._clock()
         self._guard_source_kind(source)
+        self._finished = False
         content = self._build_content(source)
         super().__init__(content, content_type=_EVENT_STREAM)
         self["Cache-Control"] = _CACHE_CONTROL
         self[_ACCEL_BUFFERING] = "no"
         set_partial_vary(self)
+
+    @override
+    def close(self) -> None:
+        """Close the response once, so a stalled stream fires `request_finished` once.
+
+        The stall watchdog closes it ahead of Django, whose own later close is a no-op.
+        """
+        if self._finished:
+            return
+        self._finished = True
+        super().close()
 
     def _guard_source_kind(self, source: "PatchSource") -> None:
         """Refuse a source kind the request's server kind would buffer.
@@ -143,7 +208,7 @@ class PatchStreamWriter(StreamingHttpResponse):
             yield self._retry_frame()
             for item in source:
                 if item is None:
-                    yield _HEARTBEAT_COMMENT.encode("utf-8")
+                    yield _HEARTBEAT_FRAME
                     continue
                 frame = self._event_frame(item)
                 if not isinstance(item, _CONTROL_FRAMES):
@@ -175,15 +240,29 @@ class PatchStreamWriter(StreamingHttpResponse):
         sent = 0
         iterator = source.__aiter__()
         task: asyncio.Future[PatchItem] | None = None
+        stall = _Stall()
+        watch: asyncio.Task[None] | None = None
+
+        async def drop() -> None:
+            try:
+                await self._cleanup_async(iterator, task)
+            finally:
+                await sync_to_async(self.close)()
+
         try:
             await self._aannounce_opened()
-            yield self._retry_frame()
+            if self._heartbeat_seconds > 0:
+                watch = stall.start(self._heartbeat_seconds, drop)
+            frame = self._retry_frame()
             while True:
+                stall.hold()
+                yield frame
+                stall.written()
                 if task is None:
                     task = asyncio.ensure_future(iterator.__anext__())
                 done, _ = await asyncio.wait({task}, timeout=self._heartbeat_seconds)
                 if not done:
-                    yield _HEARTBEAT_COMMENT.encode("utf-8")
+                    frame = _HEARTBEAT_FRAME
                     continue
                 try:
                     patches = task.result()
@@ -192,31 +271,36 @@ class PatchStreamWriter(StreamingHttpResponse):
                 finally:
                     task = None
                 if patches is None:
-                    yield _HEARTBEAT_COMMENT.encode("utf-8")
+                    frame = _HEARTBEAT_FRAME
                     continue
                 frame = self._event_frame(patches)
                 if not isinstance(patches, _CONTROL_FRAMES):
                     sent += 1
-                yield frame
         finally:
             try:
-                await self._cleanup_async(task, iterator)
+                await self._cleanup_async(iterator, task, watch)
             finally:
                 await self._aannounce_closed(sent)
 
     async def _cleanup_async(
         self,
-        task: "asyncio.Future[PatchItem] | None",
         iterator: "AsyncIterator[PatchItem]",
+        *pending: "asyncio.Future[Any] | None",
     ) -> None:
-        """Cancel an in-flight pull and close the source generator.
+        """Cancel an in-flight pull and the stall watch, then close the source.
 
-        A disconnect throws mid-pull, so the pending task is cancelled and `aclose` run.
+        All tasks are cancelled before any is awaited, so a failed pull strands none.
         """
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
-                await task
+        futures = [future for future in pending if future is not None]
+        for future in futures:
+            future.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            outcomes = await asyncio.gather(*futures, return_exceptions=True)
+            for outcome in outcomes:
+                if isinstance(outcome, Exception) and not isinstance(
+                    outcome, StopAsyncIteration
+                ):
+                    logger.warning("SSE source failed on disconnect", exc_info=outcome)
         aclose = getattr(iterator, "aclose", None)
         if callable(aclose):
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):

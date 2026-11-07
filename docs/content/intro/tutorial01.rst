@@ -182,7 +182,7 @@ Page module is not discovered.
    Confirm that ``NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
 
 The page module raises while importing.
-   A ``page.py`` that fails to import leaves its directory unrouted, and the failure is easy to miss.
+   A ``page.py`` that fails to import keeps its URL, and every request to it answers 500 with ``PageModuleImportError``, the technical page under ``DEBUG`` naming the original error.
    Run ``uv run python manage.py check``, which imports every page module and reports the failure as ``next.E017``, naming the module path and the exception that stopped it.
 
 Template renders without the notes loop.

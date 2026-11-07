@@ -29,6 +29,7 @@ from next.discovery import (
     read_page_roots,
     reset_router_manager_cache,
 )
+from next.errors import AsyncCallableError
 
 
 if TYPE_CHECKING:
@@ -142,6 +143,19 @@ def import_backend_class(dotted_path: str) -> type[Any]:
         raise ImportError(msg) from exc
 
 
+def async_refusal(error: BaseException | None) -> AsyncCallableError | None:
+    """Return the `AsyncCallableError` behind a failed load, the error or its cause."""
+    for candidate in (error, None if error is None else error.__cause__):
+        if isinstance(candidate, AsyncCallableError):
+            return candidate
+    return None
+
+
+def async_callable_error(path: Path, refusal: AsyncCallableError) -> CheckMessage:
+    """Build the `next.E218` error for the module at `path` and what it refused."""
+    return Error(f"{path} did not load. {refusal}", obj=str(path), id="next.E218")
+
+
 def _names_by_file(records: list[tuple[Path, Path, str]]) -> dict[Path, set[str]]:
     """Group the misattributed names by the file they are bound to."""
     grouped: dict[Path, set[str]] = {}
@@ -212,6 +226,8 @@ __all__ = [
     "PageRootsError",
     "RegistrationSubject",
     "RunMemo",
+    "async_callable_error",
+    "async_refusal",
     "discover_page_registrations",
     "errors_for_unknown_keys",
     "first_visit",

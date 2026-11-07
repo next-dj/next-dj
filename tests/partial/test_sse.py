@@ -1,11 +1,17 @@
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, MutableMapping
 from contextlib import contextmanager
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
+import django
 import pytest
+from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
+from django.core.handlers.asgi import ASGIHandler
+from django.core.signals import request_finished
+from django.http import HttpRequest
 from django.test import AsyncRequestFactory, RequestFactory, override_settings
+from django.urls import path
 
 from next.partial import Envelope, JsonPartialProtocolBackend, Patches, PatchEventStream
 from next.partial.manager import partial_backend_manager
@@ -13,6 +19,11 @@ from next.partial.signals import sse_stream_closed, sse_stream_opened
 from next.partial.sse import _retry_ms, sse_heartbeat_seconds
 from next.partial.stream import StreamEnd, StreamMeta
 from next.testing import capture_signals
+from tests.support.sse import StalledSend, serve_stream
+
+
+# Django 6.1 sends inside the handler's TaskGroup body, so a cancelled send leaves it.
+_CANCEL_ESCAPES_HANDLER = django.VERSION >= (6, 1)
 
 
 @contextmanager
@@ -451,6 +462,21 @@ class TestAsyncDisconnectCleanup:
         assert source.finalized is True
         assert closed.events[0]["envelopes_sent"] == 0
 
+    def test_a_failed_pull_does_not_strand_the_stall_watch(
+        self, async_request_obj: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        async def scenario() -> asyncio.Task[None]:
+            loop = asyncio.get_running_loop()
+            pull: asyncio.Future[Patches] = loop.create_future()
+            pull.set_exception(ConnectionError("broker gone"))
+            watch = asyncio.create_task(asyncio.sleep(3600))
+            stream = PatchEventStream(async_request_obj, _PlainAsyncSource(0))
+            await stream._cleanup_async(_PlainAsyncSource(0), pull, watch)
+            return watch
+
+        assert asyncio.run(scenario()).cancelled() is True
+        assert "SSE source failed on disconnect" in caplog.text
+
 
 class _PlainAsyncSource:
     """Async source whose iterator is a plain object, not a generator."""
@@ -716,3 +742,182 @@ class TestEndFrame:
             frames = _consume(PatchEventStream(request_obj, source))
         assert frames[-1] == b'event: next-end\ndata: {"code":"auth"}\n\n'
         assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+
+
+class _EndlessSource:
+    """Async source that yields one item, then waits for good until it is closed."""
+
+    def __init__(self) -> None:
+        """Start unfinalized."""
+        self.finalized = False
+
+    def __aiter__(self) -> AsyncIterator[Patches]:
+        """Return the async iterator over the one item and the endless wait."""
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[Patches]:
+        """Yield one item, block forever, and mark finalized in the closing finally."""
+        try:
+            yield _patches()
+            await asyncio.Event().wait()
+        finally:
+            self.finalized = True
+
+
+class _FailingCloseEndlessSource(_EndlessSource):
+    """Endless source whose close fails while a client is stalled."""
+
+    async def _iterate(self) -> AsyncIterator[Patches]:
+        """Yield one patch, then raise while the stream is being closed."""
+        try:
+            yield _patches()
+            await asyncio.Event().wait()
+        finally:
+            self.finalized = True
+            msg = "broker gone"
+            raise ConnectionError(msg)
+
+
+@pytest.mark.django_db()
+class TestStalledWriter:
+    """A client that stops reading is dropped once a write blocks past a heartbeat."""
+
+    def test_a_blocked_send_drops_the_stream_and_closes_the_source(
+        self, async_request_obj: object
+    ) -> None:
+        source = _EndlessSource()
+        send = StalledSend(delivered=1)
+
+        async def scenario() -> asyncio.Task[None]:
+            response = PatchEventStream(
+                async_request_obj, source, heartbeat_seconds=0.01
+            )
+            return await serve_stream(response, send)
+
+        with capture_signals(sse_stream_closed, request_finished) as recorder:
+            task = asyncio.run(scenario())
+        assert task.cancelled()
+        assert send.blocked.is_set()
+        assert send.bodies == [b"retry: 3000\n\n"]
+        assert source.finalized
+        assert recorder.first_for(sse_stream_closed).kwargs["envelopes_sent"] == 1
+        assert len(recorder.events_for(request_finished)) == 1
+
+    def test_a_failing_source_close_still_cancels_a_blocked_send(
+        self, async_request_obj: object, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        source = _FailingCloseEndlessSource()
+        send = StalledSend(delivered=1)
+
+        async def scenario() -> asyncio.Task[None]:
+            response = PatchEventStream(
+                async_request_obj, source, heartbeat_seconds=0.01
+            )
+            return await serve_stream(response, send)
+
+        with capture_signals(request_finished) as recorder:
+            task = asyncio.run(scenario())
+        assert task.cancelled()
+        assert send.blocked.is_set()
+        assert source.finalized
+        assert len(recorder.events_for(request_finished)) == 1
+        assert "SSE source failed on disconnect" in caplog.text
+
+    def test_a_reading_client_outlives_many_heartbeats(
+        self, async_request_obj: object
+    ) -> None:
+        send = StalledSend(delivered=10**6)
+
+        async def source() -> AsyncIterator[Patches]:
+            await send.received(6)
+            yield _patches()
+
+        async def scenario() -> asyncio.Task[None]:
+            response = PatchEventStream(
+                async_request_obj, source(), heartbeat_seconds=0.005
+            )
+            return await serve_stream(response, send)
+
+        task = asyncio.run(scenario())
+        assert not task.cancelled()
+        assert task.result() is None
+        assert send.bodies[1:6] == [b": heartbeat\n\n"] * 5
+        assert send.bodies[6].startswith(b"event: next-patches")
+
+    def test_a_second_close_is_a_no_op(self, async_request_obj: object) -> None:
+        response = PatchEventStream(async_request_obj, _EndlessSource())
+
+        async def close_twice() -> None:
+            await sync_to_async(response.close)()
+            await sync_to_async(response.close)()
+
+        with capture_signals(request_finished) as recorder:
+            asyncio.run(close_twice())
+        assert len(recorder.events_for(request_finished)) == 1
+
+
+def _stalled_urlconf(source: _EndlessSource) -> ModuleType:
+    """Build a urlconf whose one view streams `source` under a short heartbeat."""
+
+    async def view(request: HttpRequest) -> PatchEventStream:
+        return PatchEventStream(request, source, heartbeat_seconds=0.01)
+
+    urlconf = ModuleType("stalled_sse_urls")
+    vars(urlconf)["urlpatterns"] = [path("stream/", view)]
+    return urlconf
+
+
+class _QuietReceive:
+    """ASGI `receive` that hands over an empty body, then never reports a disconnect."""
+
+    def __init__(self) -> None:
+        """Start with the request body still to deliver."""
+        self.delivered = False
+
+    async def __call__(self) -> MutableMapping[str, object]:
+        """Return the empty request body once, then wait for good."""
+        if not self.delivered:
+            self.delivered = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.Event().wait()
+        return {"type": "http.disconnect"}
+
+
+@pytest.mark.django_db()
+class TestStalledWriterUnderTheHandler:
+    """Django's ASGI handler finalises a dropped stream exactly once."""
+
+    def test_a_stalled_client_fires_request_finished_once(self) -> None:
+        source = _EndlessSource()
+        send = StalledSend(delivered=1)
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/stream/",
+            "raw_path": b"/stream/",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"host", b"testserver")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("testserver", 80),
+        }
+
+        async def scenario() -> asyncio.Task[None]:
+            task = asyncio.create_task(ASGIHandler()(scope, _QuietReceive(), send))
+            async with asyncio.timeout(5):
+                await asyncio.wait({task})
+            return task
+
+        with (
+            override_settings(ROOT_URLCONF=_stalled_urlconf(source)),
+            capture_signals(request_finished, sse_stream_closed) as recorder,
+        ):
+            task = asyncio.run(scenario())
+        assert task.cancelled() is _CANCEL_ESCAPES_HANDLER
+        assert send.bodies == [b"retry: 3000\n\n"]
+        assert source.finalized
+        assert len(recorder.events_for(request_finished)) == 1
+        assert len(recorder.events_for(sse_stream_closed)) == 1

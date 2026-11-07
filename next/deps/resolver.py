@@ -13,10 +13,10 @@ from django.utils.functional import SimpleLazyObject, empty
 
 from next.backends import resolve_setting_class
 from next.caches import LruCache
-from next.introspect import describe_callable
+from next.introspect import describe_callable, refuse_async
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
-from .context import RESERVED_KEYS, ResolutionContext
+from .context import RECEIVER_NAMES, RESERVED_KEYS, ResolutionContext
 from .errors import DependencyCycleError, UnknownDependencyError
 from .introspect import (
     HINT_ERRORS,
@@ -204,7 +204,7 @@ class DependencyResolver:
 
         Public as the `compile_plan` predicate, which a subclass may widen.
         """
-        return param.name in ("self", "cls") or param.kind in (
+        return param.name in RECEIVER_NAMES or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
         )
@@ -212,8 +212,9 @@ class DependencyResolver:
     def _compile_plan(self, func: Callable[..., Any]) -> tuple[InjectionPlan, bool]:
         """Compile the plan for `func` and say whether it is settled enough to cache.
 
-        Unresolved hints mark the plan provisional, so a later import is retried.
+        Unresolved hints mark the plan provisional, and an async `func` is refused.
         """
+        refuse_async(func, "dependency-injected callable")
         try:
             sig = cached_signature(func)
         except (ValueError, TypeError):
@@ -275,6 +276,7 @@ class DependencyResolver:
 
         Drops any leaf note for the name, so the new callable is looked at afresh.
         """
+        refuse_async(callable_dep, f"dependency {name!r}")
         self._dependency_callables[name] = callable_dep
         self._leaf_dependencies.pop(name, None)
         return callable_dep
@@ -431,7 +433,7 @@ class DependencyResolver:
         return result
 
     def resolve_dependencies(
-        self, func: Callable[..., Any], **context
+        self, func: Callable[..., Any], /, **context
     ) -> dict[str, Any]:
         """Resolve `func` from a loose kwargs mapping and build a context object.
 

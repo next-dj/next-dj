@@ -24,7 +24,8 @@ E2E_BUILD ?= build-js build-examples
 help: # show this help message
 	@echo "Available commands:"
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
-	@echo "  test            - run tests in parallel with 100% coverage requirement"
+	@echo "  test            - run tests in parallel with 100% coverage requirement (compat apart, as in CI)"
+	@echo "  test-benchmarks - run every benchmark once as a plain test, no timing"
 	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
 	@echo "  bench-codspeed  - run the benchmarks under pytest-codspeed, as the CodSpeed job does"
 	@echo "  test-compat     - run ecosystem compatibility tests (no coverage)"
@@ -80,8 +81,8 @@ type-check-js: # type-check the client runtime with tsc --noEmit
 install: # install the package (editable) using the lockfile
 	uv sync --locked --no-dev
 
-test: # run tests with 100% coverage requirement
-	uv run pytest tests/ -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
+test: # run tests with 100% coverage requirement, compat apart as in CI
+	uv run pytest tests/ --ignore=tests/compat -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
 
 BENCH_FLAGS ?= \
 	-m perf \
@@ -105,6 +106,9 @@ BENCH_EXTRA ?=
 
 bench: # run performance benchmarks locally (opt-in, no coverage, paired comparisons via BENCH_EXTRA)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
+
+test-benchmarks: # run every benchmark once as a plain test, no timing
+	uv run pytest tests/benchmarks -p no:randomly --no-cov --override-ini=addopts= --benchmark-disable -q
 
 bench-codspeed: # run the benchmarks under pytest-codspeed (walltime off Linux CI)
 	uv run --group codspeed pytest tests/benchmarks -m perf --codspeed \
@@ -227,6 +231,7 @@ ci: # run the core CI checks locally with 100% coverage (docs, security, and the
 	make type-check-js
 	make test-js-coverage
 	make test
+	make test-benchmarks
 	make test-examples
 	make test-compat
 

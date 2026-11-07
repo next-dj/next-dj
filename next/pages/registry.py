@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from next.caches import PageCache
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
-from next.introspect import MisattributedContext, MisattributionLog, callable_name
+from next.introspect import (
+    MisattributedContext,
+    MisattributionLog,
+    callable_name,
+    refuse_async,
+)
 
 from .context import ContextResult
 from .errors import PageContextShapeError
@@ -17,7 +22,7 @@ from .signals import context_registered
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -227,6 +232,7 @@ class PageContextRegistry:
 
         A `zone` name scopes the callable, so a GET for any other zone skips it.
         """
+        refuse_async(func, "@context callable")
         if zone is not None and inherit_context:
             msg = (
                 "`@context` cannot combine `zone=` with `inherit_context=True`, "
@@ -259,10 +265,10 @@ class PageContextRegistry:
         self,
         file_path: Path,
         request: HttpRequest | None = None,
+        url_kwargs: Mapping[str, object] | None = None,
         *,
         dep_cache: dict[str, Any] | None = None,
-        _requested_zones: frozenset[str] | None = None,
-        **kwargs,
+        requested_zones: frozenset[str] | None = None,
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
 
@@ -273,6 +279,7 @@ class PageContextRegistry:
         js_context_serializers: dict[str, JsContextSerializer] = {}
         dep_cache = render_dep_cache(request) if dep_cache is None else dep_cache
         dep_stack: list[str] = []
+        kwargs: Mapping[str, object] = {} if url_kwargs is None else url_kwargs
 
         inherited_context = self._collect_inherited_context(
             file_path, request, kwargs, dep_cache, dep_stack
@@ -285,9 +292,9 @@ class PageContextRegistry:
         for key, entry in order.entries:
             # `isdisjoint` tests the batch without allocating an intersection.
             if (
-                _requested_zones is not None
+                requested_zones is not None
                 and entry.zones is not None
-                and entry.zones.isdisjoint(_requested_zones)
+                and entry.zones.isdisjoint(requested_zones)
             ):
                 continue
             resolved = active.resolve_dependencies(
@@ -325,7 +332,7 @@ class PageContextRegistry:
         self,
         file_path: Path,
         request: HttpRequest | None,
-        url_kwargs: dict[str, object],
+        url_kwargs: Mapping[str, object],
         dep_cache: dict[str, Any],
         dep_stack: list[str],
     ) -> dict[str, Any]:

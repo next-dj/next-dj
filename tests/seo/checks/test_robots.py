@@ -304,12 +304,14 @@ class TestRoutePaths:
 
     def test_a_trail_that_does_not_reverse_is_skipped(self, tmp_path: Path) -> None:
         with patch(
-            "next.seo.checks.robots.page_reverse", side_effect=NoReverseMatch("x")
+            "next.seo.checks.robots.page_reverse_in", side_effect=NoReverseMatch("x")
         ):
             assert _paths(tmp_path, "about") == {}
 
     def test_a_reverse_under_another_route_is_skipped(self, tmp_path: Path) -> None:
-        with patch("next.seo.checks.robots.page_reverse", return_value="/elsewhere/"):
+        with patch(
+            "next.seo.checks.robots.page_reverse_in", return_value="/elsewhere/"
+        ):
             assert _paths(tmp_path, "about") == {}
 
 

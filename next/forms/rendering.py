@@ -59,10 +59,7 @@ def render_form_page_with_errors(
     url_kwargs = params.url_kwargs
     overrides = params.overrides or {}
 
-    # Pinned so mypy does not read the url kwarg splat as the zone batch.
-    context_data = page.build_render_context(
-        file_path, request, _requested_zones=None, **url_kwargs
-    )
+    context_data = page.build_render_context(file_path, request, url_kwargs)
     if form is not None:
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")

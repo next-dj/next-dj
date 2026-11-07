@@ -1,10 +1,11 @@
 """Backend abstractions and in-memory registry for form actions."""
 
 import hashlib
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast, override
 from weakref import WeakSet
 
@@ -16,6 +17,7 @@ from django.views.decorators.http import require_http_methods
 
 from next.caches import BoundedCache
 from next.ports import partial_shaper_slot
+from next.utils import app_holding, resolve_base_dir
 
 from .dispatch import FormActionDispatch
 from .dispatch.responses import ActionOutcome
@@ -70,11 +72,41 @@ def file_to_dotted_module(file_path: str) -> str:
     return dotted
 
 
+def _tree_relative_key(resolved: str) -> str | None:
+    """Return `<app label>:<path>` or `:<path>` under BASE_DIR, None outside both.
+
+    The deepest installed app wins, as its label survives a move of the whole checkout.
+    """
+    held = app_holding(resolved, resolved=True)
+    if held is not None:
+        return f"{held[0]}:{held[1]}"
+    base_dir = resolve_base_dir()
+    if base_dir is None:
+        return None
+    root = _resolved_path_str(str(base_dir)).rstrip(os.sep) + os.sep
+    if not resolved.startswith(root):
+        return None
+    return f":{PurePath(resolved[len(root) :]).as_posix()}"
+
+
+def _action_keys(file_path: str, scope: str) -> tuple[str, str]:
+    """Return the registry key a page lookup carries and the scope key, from one path.
+
+    A page keys the registry by its absolute path, a shared action by its module.
+    """
+    if scope != "page":
+        dotted = file_to_dotted_module(file_path)
+        return dotted, dotted
+    resolved = _resolved_path_str(file_path)
+    return resolved, _tree_relative_key(resolved) or resolved
+
+
 def scope_key_for(file_path: str, scope: str) -> str:
-    """Return the registry scope key partitioning actions and wizard storage."""
-    if scope == "page":
-        return _resolved_path_str(file_path)
-    return file_to_dotted_module(file_path)
+    """Return the scope key the action uid and wizard storage hash, stable across hosts.
+
+    A page file outside every app and BASE_DIR keeps its absolute path.
+    """
+    return _action_keys(file_path, scope)[1]
 
 
 def _handler_fingerprint(handler: "Callable[..., Any]") -> tuple[str, str]:
@@ -393,9 +425,8 @@ class RegistryFormActionBackend(FormActionBackend):
         handler = registration.handler
         form_class = registration.form_class
         wizard_class = registration.wizard_class
-        scope_key = scope_key_for(file_path, scope)
-
-        uid = _make_uid_for_action(scope_key, name)
+        scope_key, stable_key = _action_keys(file_path, scope)
+        uid = _make_uid_for_action(stable_key, name)
         existing_key = self._uid_to_name.get(uid)
         if existing_key is not None and existing_key != (scope_key, name):
             msg = (

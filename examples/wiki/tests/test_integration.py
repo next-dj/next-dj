@@ -170,14 +170,14 @@ class TestArticleCreation:
     """Posting the create form publishes a fresh `/wiki/<slug>/` URL."""
 
     def test_creating_article_publishes_url(self, next_client: NextClient) -> None:
-        url = next_client.get_action_url("article_create_form")
-        response = next_client.post(
-            url,
+        response = next_client.post_action(
+            "article_create_form",
             {
                 "slug": "freshly-baked",
                 "title": "Freshly baked",
                 "body_md": "## Hello\n\nA brand new article.",
             },
+            origin=reverse("next:page_articles_new"),
         )
         assert response.status_code == 302
         assert response.headers["Location"] == "/wiki/freshly-baked/"

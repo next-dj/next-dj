@@ -75,7 +75,6 @@ def render_zone(
     A nested zone runs its `@context(zone=)` too, and a batch of unknown names raises.
     """
     start = time.perf_counter()
-    kwargs = url_kwargs or {}
     template = page.composed_template_for(page_path)
     zones = zones_of(template, page_path)
     rendered_names = _renderable_zone_names(zone_names, zones)
@@ -84,8 +83,8 @@ def render_zone(
         context_data = page.build_render_context(
             page_path,
             request,
-            _requested_zones=_context_zone_names(rendered_names, zones),
-            **kwargs,
+            url_kwargs,
+            requested_zones=_context_zone_names(rendered_names, zones),
         )
     if overrides:
         context_data.update(overrides)

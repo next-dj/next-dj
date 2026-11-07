@@ -18,6 +18,9 @@ RESERVED_KEYS: Final[frozenset[str]] = frozenset(
     {"request", "form", "cleaned_data", "_cache", "_stack", "_context_data"}
 )
 
+RECEIVER_NAMES: Final[frozenset[str]] = frozenset({"self", "cls"})
+"""Parameter names the resolver skips as a method receiver, so none is ever injected."""
+
 
 @dataclass(slots=True, eq=False)
 class ResolutionContext:

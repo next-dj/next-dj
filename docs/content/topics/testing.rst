@@ -344,6 +344,7 @@ Posting to actions
 ~~~~~~~~~~~~~~~~~~
 
 ``NextClient.post_action`` resolves an action name to its URL and posts the data in one call.
+Its required ``origin`` keyword names the page that renders the form.
 
 .. code-block:: python
    :caption: tests/test_create_action.py
@@ -351,10 +352,13 @@ Posting to actions
    from next.testing.client import NextClient
 
    def test_create_note(db) -> None:
-       response = NextClient().post_action("create_note", {"title": "Test", "body": ""})
+       response = NextClient().post_action(
+           "create_note", {"title": "Test", "body": ""}, origin="/"
+       )
        assert response.status_code == 302
 
-The ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser, the page URL the dispatcher resolves to re-render on a validation failure.
+The ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
+The dispatcher resolves that URL on every action POST, for the URL kwargs, the authorization of the page, and the re-render on a validation failure, and answers HTTP 400 without it.
 
 .. code-block:: python
    :caption: failing submission re-renders the origin
@@ -363,7 +367,8 @@ The ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% for
        response = NextClient().post_action("create_note", {"title": ""}, origin="/")
        assert response.status_code == 200
 
-A value already present in ``data`` under ``_next_form_origin`` wins over the keyword, so protocol-level tests can drive the raw field directly, including posting without it to assert the HTTP 400 rejection.
+A value already present in ``data`` under ``_next_form_origin`` wins over the keyword, so protocol-level tests can drive the raw field directly.
+A test that asserts the HTTP 400 rejection of a POST without the field posts to ``get_action_url`` through the inherited ``post`` instead.
 
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
@@ -409,6 +414,7 @@ Pass ``partial=True`` to ``post_action`` to turn the POST into a patch request, 
        response = NextClient().post_action(
            "create_note",
            {"title": "hi"},
+           origin="/",
            partial="notes",
        )
        envelope = envelope_of(response)
@@ -487,7 +493,7 @@ Capture signals
 
    def test_emits(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           NextClient().post_action("create_note", {"title": "hi"})
+           NextClient().post_action("create_note", {"title": "hi"}, origin="/")
        assert len(recorder.events) == 1
        event = recorder.events[0]
        assert event.kwargs["action_name"] == "create_note"
@@ -513,7 +519,7 @@ Two convenience wrappers cover the common multi-signal cases.
 
    def test_dispatch_and_render(db) -> None:
        with capture_signals(action_dispatched, page_rendered) as recorder:
-           NextClient().post_action("create_note", {"title": "hi"})
+           NextClient().post_action("create_note", {"title": "hi"}, origin="/")
        assert len(recorder.events_for(action_dispatched)) == 1
        dispatch = recorder.first_for(action_dispatched)
        assert dispatch.kwargs["action_name"] == "create_note"

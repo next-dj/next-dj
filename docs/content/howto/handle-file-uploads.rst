@@ -135,9 +135,9 @@ Inspect ``MEDIA_ROOT`` and verify the file appears under ``attachments/``.
 
 A test feeds a fake file into ``NextClient`` with ``SimpleUploadedFile``.
 A valid submission redirects.
-The failing test names the origin with ``origin="/attachments/"`` so the dispatcher can resolve that path and re-render the page with the missing-file error.
+Both tests name the origin with ``origin="/attachments/"``, so the dispatcher can resolve that path and, on the failing test, re-render the page with the missing-file error.
 The path must belong to a routed page, here the attachments page from the walkthrough.
-Without a resolvable origin the invalid submission is rejected with HTTP 400, see :doc:`test-a-page-with-actions` for both branches.
+Without a resolvable origin the submission is rejected with HTTP 400, see :doc:`test-a-page-with-actions` for both branches.
 
 .. code-block:: python
    :caption: tests/test_upload.py
@@ -151,6 +151,7 @@ Without a resolvable origin the invalid submission is rejected with HTTP 400, se
        response = NextClient().post_action(
            "attachment_form",
            {"title": "First", "file": fake},
+           origin="/attachments/",
        )
        assert response.status_code == 302
 

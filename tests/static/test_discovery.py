@@ -11,6 +11,7 @@ from django.test import override_settings
 from next.caches import BoundedCache
 from next.components import ComponentInfo
 from next.pages.placeholder import ROOT_MARKER
+from next.stamps import RACY_MTIME_WINDOW_NS, trusted
 from next.static import (
     AssetDiscovery,
     StaticAsset,
@@ -24,6 +25,7 @@ from next.static.collector import HashContentDedup, default_placeholders
 from next.static.discovery import PathResolver, StemRegistry, _url_suffix, default_stems
 from next.static.signals import asset_registered
 from tests.support import (
+    TICK_NS,
     RecordingStaticBackend,
     StaticAssetProvider,
     assert_bounded_by_insert_age,
@@ -32,6 +34,7 @@ from tests.support import (
     page_naming_one_style,
     record_path_calls,
     restored_static_registries,
+    rewrite_in_tick,
     static_names_resolved_by,
     touch_later,
 )
@@ -615,6 +618,7 @@ class TestAssetDiscoveryWatchedDirectories:
             "/static/next/d6/layout.css"
         ]
 
+    @pytest.mark.usefixtures("tick")
     def test_a_file_written_during_the_walk_shows_up_on_the_next_render(
         self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
     ) -> None:
@@ -625,12 +629,13 @@ class TestAssetDiscoveryWatchedDirectories:
         provider = StaticAssetProvider(file_backend, (tmp_path.resolve(),))
         discovery = AssetDiscovery(provider)
         probe = static_discovery.find_role_files
+        rewrite_in_tick(page_dir)
 
         def _write_while_reading(
             directory: Path, *, logical_name: str, role: str, stems: StemRegistry
         ) -> list[object]:
             found = probe(directory, logical_name=logical_name, role=role, stems=stems)
-            (page_dir / "template.css").write_text("body{}")
+            rewrite_in_tick(page_dir / "template.css", "body{}", folder=True)
             return found
 
         with override_settings(DEBUG=True):
@@ -1820,6 +1825,7 @@ class TestAssetDiscoveryComponentPlanFolders:
             "/static/next/components/widget.css"
         ]
 
+    @pytest.mark.usefixtures("tick")
     def test_a_file_written_during_the_probe_shows_up_on_the_next_render(
         self, tmp_path: Path, file_backend: StaticBackend, monkeypatch
     ) -> None:
@@ -1828,12 +1834,13 @@ class TestAssetDiscoveryComponentPlanFolders:
         info = _component_at(directory, "widget", module=None)
         discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()))
         probe = static_discovery.find_role_files
+        rewrite_in_tick(directory)
 
         def _write_while_reading(
             folder: Path, *, logical_name: str, role: str, stems: StemRegistry
         ) -> list[object]:
             found = probe(folder, logical_name=logical_name, role=role, stems=stems)
-            (directory / "component.css").write_text(".w{}")
+            rewrite_in_tick(directory / "component.css", ".w{}", folder=True)
             return found
 
         with override_settings(DEBUG=True):
@@ -1848,6 +1855,31 @@ class TestAssetDiscoveryComponentPlanFolders:
         assert [a.url for a in collector.assets_in_slot("styles")] == [
             "/static/next/components/widget.css"
         ]
+
+    @pytest.mark.parametrize(
+        ("tick", "settled"),
+        [(0, False), (RACY_MTIME_WINDOW_NS, True)],
+        ids=["same-tick", "settled"],
+        indirect=["tick"],
+    )
+    def test_a_snapshot_is_trusted_only_past_the_tick_of_the_folder(
+        self, tmp_path: Path, file_backend: StaticBackend, tick, *, settled: bool
+    ) -> None:
+        directory = tmp_path / "widget"
+        directory.mkdir()
+        info = _component_at(directory, "widget", module=None)
+        discovery = AssetDiscovery(StaticAssetProvider(file_backend, ()))
+        rewrite_in_tick(directory)
+
+        with override_settings(DEBUG=True):
+            discovery.discover_component_assets(info, StaticCollector())
+            plan = discovery._component_plan_cache[_component_key(info)]
+
+            ((path, recorded),) = plan.directory_mtimes
+            assert path == directory.resolve()
+            assert trusted(recorded) is settled
+            assert (recorded == TICK_NS) is settled
+            assert discovery._plan_stale(plan) is not settled
 
     def test_a_simple_info_does_not_read_the_composite_plan(
         self, tmp_path: Path, file_backend: StaticBackend

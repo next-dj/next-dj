@@ -16,6 +16,7 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from next.conf.signals import settings_reloaded
+from next.stamps import RACY_MTIME_WINDOW_NS, trusted
 from next.static import (
     AssetDiscovery,
     NextAppDirectoriesFinder,
@@ -36,6 +37,7 @@ from tests.support import (
     NESTED_ROOT_CASES,
     TEMPLATE_AND_COMPONENT_SOURCES,
     TEST_ROOT_KEY,
+    TICK_NS,
     MalformedRootsRouter,
     NestedRootCase,
     StaticAssetProvider,
@@ -43,6 +45,7 @@ from tests.support import (
     file_router_config_entry,
     patched_watch_sources,
     restored_static_registries,
+    rewrite_in_tick,
 )
 
 
@@ -224,6 +227,24 @@ class TestScanDirectorySnapshot:
         assert _scan_directories(_ScanRoots(((missing, None),), ())) == (
             (missing, None),
         )
+
+    @pytest.mark.parametrize(
+        ("tick", "settled"),
+        [(0, False), (RACY_MTIME_WINDOW_NS, True)],
+        ids=["same-tick", "settled"],
+        indirect=["tick"],
+    )
+    def test_a_tree_in_the_tick_of_the_snapshot_is_not_trusted(
+        self, tmp_path: Path, tick: list[int], *, settled: bool
+    ) -> None:
+        """A folder written in the tick the scan shares rebuilds the next lookup."""
+        rewrite_in_tick(tmp_path)
+
+        ((path, recorded),) = _scan_directories(_ScanRoots(((tmp_path, None),), ()))
+
+        assert path == tmp_path
+        assert trusted(recorded) is settled
+        assert (recorded == TICK_NS) is settled
 
     def test_a_root_that_holds_no_directory_ends_the_walk(self, tmp_path: Path) -> None:
         leaf = tmp_path / "notes.txt"

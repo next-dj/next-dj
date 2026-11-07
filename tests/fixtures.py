@@ -1,3 +1,4 @@
+import time
 from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from django.template.engine import Engine
 from django.test import override_settings
 from django.utils.encoding import iri_to_uri
 
-from next import utils
+from next import stamps, utils
 from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.deps.objects import forget_object_rows
@@ -31,6 +32,7 @@ from next.server import NextStatReloader
 from next.urls import URLPatternParser
 from tests.support import (
     OBJECT_PERMISSION_BACKENDS,
+    TICK_NS,
     CountingWizardBackend,
     IntentOnlyShaper,
     build_mock_http_request,
@@ -90,6 +92,26 @@ def mock_http_request():
     return build_mock_http_request
 
 
+_SETTLED_LEAD_NS = 3600 * 10**9
+
+
+@pytest.fixture(autouse=True)
+def _settled_mtimes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read the snapshot clock an hour ahead, so no mtime a test writes counts as racy.
+
+    A test about the racy window pins the clock through the `tick` fixture instead.
+    """
+    monkeypatch.setattr(stamps, "time_ns", lambda: time.time_ns() + _SETTLED_LEAD_NS)
+
+
+@pytest.fixture()
+def tick(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Pin the snapshot clock to `TICK_NS` plus an indirect lead, moved by its item."""
+    now = [TICK_NS + getattr(request, "param", 0)]
+    monkeypatch.setattr(stamps, "time_ns", lambda: now[0])
+    return now
+
+
 @pytest.fixture(autouse=True)
 def _reload_next_framework_settings_after_test() -> Generator[None, None, None]:
     """Reload the global ``next_framework_settings`` after each test (teardown only)."""
@@ -140,6 +162,14 @@ def _fresh_translation_memo() -> Generator[None, None, None]:
     forget_translated_urls()
     yield
     forget_translated_urls()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_app_holdings() -> Generator[None, None, None]:
+    """Drop the app-holding memo, since tests patch the installed app list."""
+    utils.forget_app_holdings(setting="INSTALLED_APPS")
+    yield
+    utils.forget_app_holdings(setting="INSTALLED_APPS")
 
 
 @pytest.fixture(autouse=True)

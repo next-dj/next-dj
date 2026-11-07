@@ -26,7 +26,14 @@ from next.seo.discovery import (
 from next.seo.manager import seo_manager
 from next.seo.registry import sitemap_items_registry
 from next.urls.manager import seo_routes_version
-from tests.support import POSTS_ITEMS, importable_dir, routed, write_page, write_tree
+from tests.support import (
+    POSTS_ITEMS,
+    importable_dir,
+    rewrite_in_tick,
+    routed,
+    write_page,
+    write_tree,
+)
 
 
 def _roots() -> tuple[SeoRoot, ...]:
@@ -224,10 +231,10 @@ class TestSourceStamps:
 
     def test_the_stamps_follow_the_source_names(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages", robots="")
-        stamps = source_stamps(root)
-        assert len(stamps) == len(SOURCE_NAMES)
-        assert stamps[SOURCE_NAMES.index("robots.py")] is not None
-        assert stamps[SOURCE_NAMES.index("sitemap.py")] is None
+        stamps = dict(source_stamps(root))
+        assert list(stamps) == [root / name for name in SOURCE_NAMES]
+        assert stamps[root / "robots.py"] is not None
+        assert stamps[root / "sitemap.py"] is None
 
     def test_a_new_file_makes_the_tree_stale(self, tmp_path) -> None:
         root = write_tree(tmp_path / "pages")
@@ -236,6 +243,18 @@ class TestSourceStamps:
         assert not seo_root.stale()
         (root / "robots.txt").write_bytes(b"User-agent: *\n")
         assert seo_root.stale()
+
+    @pytest.mark.usefixtures("tick")
+    def test_a_same_tick_rewrite_is_stale_while_edits_are_watched(
+        self, tmp_path
+    ) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="section = 'old'\n")
+        path = root / "sitemap.py"
+        rewrite_in_tick(path)
+        with override_settings(DEBUG=True), routed(root):
+            [seo_root] = _roots()
+            rewrite_in_tick(path, "section = 'new'\n")
+            assert seo_root.stale()
 
 
 class TestPageTreeRoots:

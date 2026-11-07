@@ -41,13 +41,16 @@ Reverse a captured page
 
    from next.urls import page_reverse
 
-   url = page_reverse("notes/[id]", id=7)
+   # pages/notes/[int:id]/page.py
+   url = page_reverse("notes/[int:id]", id=7)
    # "/notes/7/"
 
+   # pages/posts/[slug]/comments/page.py
    url = page_reverse("posts/[slug]/comments", slug="hello")
    # "/posts/hello/comments/"
 
-The path template uses the same bracket syntax that the file router uses.
+The path template spells each segment exactly as its directory name, converter included.
+A ``notes/[int:id]`` directory answers to ``"notes/[int:id]"``, and ``"notes/[id]"`` raises ``NoReverseMatch`` because the converter is part of the URL name.
 The parameter name in the template matches the keyword argument.
 
 Reverse a page under a prefix
@@ -100,7 +103,7 @@ Use inside an action handler
 
        def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
            note = self.save()
-           return HttpResponseRedirect(page_reverse("notes/[id]", id=note.id))
+           return HttpResponseRedirect(page_reverse("notes/[int:id]", id=note.id))
 
 Use inside a component
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -115,7 +118,7 @@ Use inside a component
 
    @component.context("href")
    def href(note: Note) -> str:
-       return page_reverse("notes/[id]", id=note.id)
+       return page_reverse("notes/[int:id]", id=note.id)
 
 Verification
 ------------
@@ -127,7 +130,7 @@ Print the URL from a Django shell.
 
    uv run python manage.py shell -c "
    from next.urls import page_reverse
-   print(page_reverse('notes/[id]', id=1))
+   print(page_reverse('notes/[int:id]', id=1))
    "
 
 The shell prints ``/notes/1/``.

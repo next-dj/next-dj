@@ -226,7 +226,9 @@ def render(request, **kwargs):
 
         assert pattern is not None
 
-        result = page_instance.render(page_file, title="Welcome", name="World")
+        result = page_instance.render(
+            page_file, url_kwargs={"title": "Welcome", "name": "World"}
+        )
         assert result == "<h1>Welcome</h1><p>Hello World!</p>"
 
     def test_create_url_pattern_with_context_functions(

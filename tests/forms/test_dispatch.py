@@ -7,6 +7,7 @@ import pytest
 from django import forms as django_forms
 from django.contrib.auth.models import Group
 from django.contrib.sessions.backends.db import SessionStore
+from django.core.exceptions import BadRequest
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -27,18 +28,21 @@ from next.forms import (
     ModelForm,
     RegistryFormActionBackend,
 )
+from next.forms.backends import ActionMeta
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.build import (
     _construct_form,
     _form_action_context_callable,
     _resolve_form_class,
 )
+from next.forms.dispatch.responses import MISSING_ORIGIN, NO_ORIGIN_PAGE
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
 from next.forms.signals import action_dispatched, wizard_completed
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import FormWizard
 from next.pages import page
 from next.pages.registry import PageContextRegistry
-from next.testing import override_dependency
+from next.testing import capture_signals, override_dependency
 from tests.support import DeferringProvider, bound_dependency
 
 
@@ -47,6 +51,16 @@ PAGE_MODULE_FOR_FORM_TESTS = (
 ).resolve()
 
 _FAKE_FILE = "/fake/myapp/forms.py"
+
+
+# A routed URL whose view is not a page, so the origin resolves without a page path.
+_PAGELESS_ORIGIN = "/_next/csrf/"
+
+
+def _origin_post(origin: str = "/") -> QueryDict:
+    post = QueryDict(mutable=True)
+    post[ORIGIN_FIELD_NAME] = origin
+    return post
 
 
 class WizardIdentityStep(Form):
@@ -197,6 +211,25 @@ class TestFormActionDispatch:
         if assert_extra is not None:
             assert assert_extra(resp)
 
+    @pytest.mark.parametrize(
+        ("post", "message"),
+        [
+            pytest.param(QueryDict(), MISSING_ORIGIN, id="missing"),
+            pytest.param(_origin_post(_PAGELESS_ORIGIN), NO_ORIGIN_PAGE, id="pageless"),
+        ],
+    )
+    def test_a_none_result_without_an_origin_page_is_a_bad_request(
+        self, mock_http_request, post: QueryDict, message: str
+    ) -> None:
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        with pytest.raises(BadRequest, match=message):
+            FormActionDispatch.ensure_http_response(
+                None,
+                request=request,
+                action_name="a",
+                backend=RegistryFormActionBackend(),
+            )
+
 
 @pytest.mark.django_db()
 class TestDispatchViaClient:
@@ -264,14 +297,16 @@ class TestDispatchViaClient:
     def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
         """A handler returning a redirect reaches the client unwrapped."""
         url = form_action_manager.get_action_url("simple_form_redirect")
-        resp = client_no_csrf.post(url, data={"name": "Bob"}, follow=False)
+        resp = client_no_csrf.post(
+            url, data={"name": "Bob", ORIGIN_FIELD_NAME: "/"}, follow=False
+        )
         assert resp.status_code == 302
         assert resp.url == "/done/"
 
     def test_no_form_action_post_returns_200(self, client_no_csrf) -> None:
         """Action without form_class POST returns 200 and body."""
         url = form_action_manager.get_action_url("test_no_form")
-        resp = client_no_csrf.post(url, data={})
+        resp = client_no_csrf.post(url, data={ORIGIN_FIELD_NAME: "/"})
         assert resp.status_code == 200
         assert b"ok" in resp.content
 
@@ -365,7 +400,7 @@ class TestFormDispatchRenderInvalidPageBranches:
             )
         )
 
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         post["name"] = "test"
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
@@ -440,7 +475,7 @@ class TestFormDispatchRenderInvalidPageBranches:
             )
         )
 
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
@@ -478,7 +513,7 @@ class TestFormDispatchRenderInvalidPageBranches:
             )
         )
 
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
@@ -494,7 +529,7 @@ class TestFormDispatchRenderInvalidPageBranches:
     ) -> None:
         """Dispatch with no form_class and no handler returns 400."""
         backend = RegistryFormActionBackend()
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = {
@@ -512,21 +547,6 @@ class TestFormDispatchRenderInvalidPageBranches:
         assert _FAKE_FILE not in body
         assert _FAKE_FILE in caplog.text
         assert "'no_op'" in caplog.text
-
-    def test_dispatch_no_target_without_file_path_names_the_action(
-        self, mock_http_request
-    ) -> None:
-        """The 400 body names the action even when the meta stores no file path."""
-        backend = RegistryFormActionBackend()
-        post = QueryDict(mutable=True)
-        request = mock_http_request(method="POST", POST=post, FILES=None)
-
-        meta = {"handler": None, "form_class": None, "uid": "fake_uid"}
-        response = FormActionDispatch.dispatch(backend, request, "no_op", meta)
-        assert response.status_code == 400
-        body = response.content.decode()
-        assert "'no_op'" in body
-        assert "declared in" not in body
 
 
 class TestDispatchOnValid:
@@ -553,7 +573,7 @@ class TestDispatchOnValid:
             )
         )
 
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         post["name"] = "Alice"
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
@@ -564,18 +584,17 @@ class TestDispatchOnValid:
         assert response.status_code == 302
         assert response.url == "/redirected/"
 
-    def test_on_valid_returning_none_gives_400_without_origin(
-        self, mock_http_request
-    ) -> None:
-        """on_valid returning None without _next_form_origin gives 400 bad request."""
-        backend = RegistryFormActionBackend()
+    def test_on_valid_never_runs_without_an_origin(self, mock_http_request) -> None:
+        """A post without `_next_form_origin` is refused before `on_valid` runs."""
+        runs: list[str] = []
 
         class NoneForm(Form):
             name = django_forms.CharField(max_length=100)
 
             def on_valid(self, request: HttpRequest) -> None:
-                return None
+                runs.append("on_valid")
 
+        backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
                 name="none_form",
@@ -592,9 +611,125 @@ class TestDispatchOnValid:
         meta = backend.get_meta("none_form")
         assert meta is not None
 
-        # A None result re-renders the origin, which resolves to nothing, so 400.
-        response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
-        assert response.status_code == 400
+        with (
+            capture_signals(action_dispatched) as recorder,
+            pytest.raises(BadRequest, match=MISSING_ORIGIN),
+        ):
+            FormActionDispatch.dispatch(backend, request, "none_form", meta)
+        assert runs == []
+        assert recorder.events == []
+
+
+class TestOriginAdmission:
+    """Every action post names a routed origin page before anything else runs."""
+
+    @pytest.fixture()
+    def origin_gate(self) -> tuple[RegistryFormActionBackend, ActionMeta, list[str]]:
+        """Register a shared handler that records each run, with its meta."""
+        runs: list[str] = []
+
+        def handler() -> HttpResponse:
+            runs.append("handler")
+            return HttpResponse("ok")
+
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="origin_gate",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
+        )
+        meta = backend.get_meta("origin_gate")
+        assert meta is not None
+        return backend, meta, runs
+
+    @pytest.mark.parametrize(
+        "origin", [None, "/no/such/route/"], ids=("missing", "unresolvable")
+    )
+    def test_a_handler_never_runs_without_a_routed_origin(
+        self, mock_http_request, origin_gate, origin: str | None
+    ) -> None:
+        backend, meta, runs = origin_gate
+        post = QueryDict(mutable=True) if origin is None else _origin_post(origin)
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+
+        with (
+            capture_signals(action_dispatched) as recorder,
+            pytest.raises(BadRequest, match=MISSING_ORIGIN),
+        ):
+            FormActionDispatch.dispatch(backend, request, "origin_gate", meta)
+        assert runs == []
+        assert recorder.events == []
+
+    def test_a_routed_origin_admits_the_handler(
+        self, mock_http_request, origin_gate
+    ) -> None:
+        backend, meta, runs = origin_gate
+        request = mock_http_request(method="POST", POST=_origin_post(), FILES=None)
+
+        response = FormActionDispatch.dispatch(backend, request, "origin_gate", meta)
+        assert response.status_code == 200
+        assert runs == ["handler"]
+
+    def test_an_invalid_post_from_a_route_without_a_page_is_a_400(
+        self, mock_http_request
+    ) -> None:
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        def handler(form: F) -> HttpResponse:
+            return HttpResponse("ok")
+
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="pageless_invalid",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=F,
+            )
+        )
+        post = _origin_post(_PAGELESS_ORIGIN)
+        post["name"] = ""
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        meta = backend.get_meta("pageless_invalid")
+        assert meta is not None
+
+        with pytest.raises(BadRequest, match=NO_ORIGIN_PAGE):
+            FormActionDispatch.dispatch(backend, request, "pageless_invalid", meta)
+
+    def test_a_none_result_from_a_route_without_a_page_is_a_400(
+        self, mock_http_request
+    ) -> None:
+        runs: list[str] = []
+
+        class NoneForm(Form):
+            name = django_forms.CharField(max_length=10)
+
+            def on_valid(self, request: HttpRequest) -> None:
+                runs.append("on_valid")
+
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="pageless_none",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=NoneForm,
+            )
+        )
+        post = _origin_post(_PAGELESS_ORIGIN)
+        post["name"] = "Alice"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        meta = backend.get_meta("pageless_none")
+        assert meta is not None
+
+        with pytest.raises(BadRequest, match=NO_ORIGIN_PAGE):
+            FormActionDispatch.dispatch(backend, request, "pageless_none", meta)
+        assert runs == ["on_valid"]
 
 
 class TestShapeResponseHook:
@@ -627,7 +762,7 @@ class TestShapeResponseHook:
                 form_class=F,
             )
         )
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         post["name"] = ""
         request = mock_http_request(method="POST", POST=post, FILES=None)
         meta = backend.get_meta("hook_action")
@@ -869,7 +1004,7 @@ class TestFormClassInitKwargs:
             )
         )
 
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         post["name"] = "x"
         request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
         meta = backend.get_meta("init_kwargs_action")
@@ -902,7 +1037,7 @@ class TestDispatchSharedDepCache:
             )
         )
 
-        post = QueryDict(mutable=True)
+        post = _origin_post()
         request = mock_http_request(method="POST", POST=post)
 
         meta = backend.get_meta("only_handler")
@@ -936,7 +1071,7 @@ class TestDispatchSharedDepCache:
 
         action_dispatched.connect(receiver)
         try:
-            post = QueryDict(mutable=True)
+            post = _origin_post()
             request = mock_http_request(method="POST", POST=post)
             meta = backend.get_meta("dep_handler")
             assert meta is not None

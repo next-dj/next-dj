@@ -40,7 +40,7 @@ def _verify_built(outputs: list[Path]) -> None:
     """Refuse a missing bundle or one that links a map the artifact leaves out."""
     for output in outputs:
         if not output.exists():
-            msg = f"Expected {output} after npm run build:next, but it is missing."
+            msg = f"{output} is missing. Run npm run build:next before building."
             raise RuntimeError(msg)
         _verify_no_sourcemap_reference(output)
 
@@ -59,10 +59,9 @@ class NextJsBuildHook(BuildHookInterface):
         bundles = root / "next" / "static" / "next"
         outputs = [bundles / name for name in _BUNDLES]
 
+        # The flag skips npm, not the bundles: an artifact without them has no runtime.
         if os.environ.get("NEXT_DJ_SKIP_JS_BUILD"):
-            for output in outputs:
-                if output.exists():
-                    _verify_no_sourcemap_reference(output)
+            _verify_built(outputs)
             return
 
         npm = shutil.which("npm")

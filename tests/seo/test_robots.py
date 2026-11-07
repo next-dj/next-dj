@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from django.http import HttpRequest
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 from next.pages.responses import NO_STORE, cache_control
 from next.seo import RobotsRule
@@ -23,7 +23,7 @@ from next.seo.robots import (
     rules_of,
 )
 from next.utils import PageRoot
-from tests.support import touch_later
+from tests.support import rewrite_in_tick, touch_later
 
 
 def _module(**attributes: object) -> types.ModuleType:
@@ -160,6 +160,18 @@ class TestTextFile:
         path.write_bytes(b"two\n")
         touch_later(path)
         assert source.read() == b"two\n"
+
+    @pytest.mark.usefixtures("tick")
+    def test_a_same_tick_rewrite_is_read_while_edits_are_watched(
+        self, tmp_path
+    ) -> None:
+        path = tmp_path / "robots.txt"
+        rewrite_in_tick(path, "one\n")
+        source = TextFile(path)
+        with override_settings(DEBUG=True):
+            assert source.read() == b"one\n"
+            rewrite_in_tick(path, "two\n")
+            assert source.read() == b"two\n"
 
     def test_the_memo_answers_while_the_mtime_stands(self, tmp_path) -> None:
         path = tmp_path / "robots.txt"

@@ -83,7 +83,7 @@ def refuse_intercept(
 ) -> None:
     """Raise `ForeignPageNotAuthorizedError` when the rule of a page refuses `request`.
 
-    A broken chain is refused as a routed page's is, its failure under DEBUG, else 404.
+    A broken chain raises its import failure, as the view of a routed page does.
     """
     try:
         redirect = admit(page_path, request, url_kwargs)

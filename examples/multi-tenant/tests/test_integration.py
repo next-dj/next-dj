@@ -393,6 +393,7 @@ class TestNoteCreate:
             "note_create_form",
             {"title": "Fresh idea", "body": "## body"},
             HTTP_X_TENANT="acme",
+            origin="/notes/new/",
         )
         assert response.status_code == 302
         new_pk = next(
@@ -414,6 +415,7 @@ class TestNoteCreate:
             "note_create_form",
             {"title": "Globex only", "body": ""},
             HTTP_X_TENANT="globex",
+            origin="/notes/new/",
         )
         assert Note.objects.filter(tenant=acme, title="Globex only").count() == 0
         assert Note.objects.filter(tenant=globex, title="Globex only").count() == 1

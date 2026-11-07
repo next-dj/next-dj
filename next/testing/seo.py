@@ -5,7 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from defusedxml.ElementTree import fromstring
+
+try:
+    from defusedxml.ElementTree import fromstring
+except ImportError as exc:
+    msg = (
+        "next.testing needs defusedxml, which ships with the testing extra. "
+        'Install it with `uv add --dev "next.dj[testing]"` '
+        "or `pip install 'next.dj[testing]'`."
+    )
+    raise ImportError(msg) from exc
 
 from .responses import response_text
 

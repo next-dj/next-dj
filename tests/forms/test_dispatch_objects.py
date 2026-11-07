@@ -6,6 +6,7 @@ from typing import Any, ClassVar, Literal
 import pytest
 from django import forms as django_forms
 from django.contrib.auth.models import Group
+from django.core.exceptions import BadRequest
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory
 
@@ -19,6 +20,7 @@ from next.forms import (
     RegistryFormActionBackend,
 )
 from next.forms.dispatch import FormActionDispatch
+from next.forms.dispatch.responses import MISSING_ORIGIN
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.pages.loaders import _load_python_module
 from next.testing import NextClient
@@ -173,7 +175,8 @@ class TestUnboundObjectOnDispatch:
     def test_a_missing_origin_is_a_bad_request(
         self, registration: ActionRegistration
     ) -> None:
-        assert _dispatch(registration, None).status_code == 400
+        with pytest.raises(BadRequest, match=MISSING_ORIGIN):
+            _dispatch(registration, None)
 
     def test_a_missing_parent_still_raises(self) -> None:
         with pytest.raises(UnboundObjectError) as caught:

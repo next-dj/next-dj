@@ -304,7 +304,7 @@ The root header uses `active_when="page_admin"` so `/admin/` and `/admin/metrics
 | `pages/admin/metrics/page.py` | `/admin/metrics/` | `next:page_admin_metrics` |
 | `pages/demo/page.py`          | `/demo/`          | `next:page_demo`          |
 
-The bulk-toggle action is mounted at the framework's action URL. Tests use `NextClient.post_action("bulk_toggle_form", {...})` instead of a hardcoded path.
+The bulk-toggle action is mounted at the framework's action URL. Tests use `NextClient.post_action("bulk_toggle_form", {...}, origin="/admin/")` instead of a hardcoded path, and `origin` names the page whose form a browser submits.
 
 ### 11. Tab titles and a `noindex` admin
 

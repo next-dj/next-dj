@@ -9,7 +9,7 @@ import pytest
 from django.core.management import call_command
 from django.http import HttpRequest, QueryDict
 from django.test import override_settings
-from markup import render_markdown
+from next_dj_examples_shared.markup import render_markdown
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
 from notes.demo import DEMO_TENANTS, seed_demo

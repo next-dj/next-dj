@@ -2,9 +2,10 @@ import asyncio
 import functools
 import threading
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
+from importlib import import_module
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import call, create_autospec, patch
 
 import pytest
 from django.test import override_settings
@@ -12,10 +13,13 @@ from django.test import override_settings
 from next import realtime
 from next.realtime import Upstream, checks, handlers
 from next.realtime.checks import check_realtime_settings, check_upstream_handlers
+from next.realtime.errors import PoolFullError
 from next.realtime.handlers import (
     MAX_PATTERN_LENGTH,
+    Handler,
     HandlerRegistry,
     Route,
+    autodiscover_handlers,
     compile_pattern,
     dispatch,
     handler_modules,
@@ -444,6 +448,129 @@ class TestDispatch:
             _send("lobby", "boom")
 
 
+async def _quiet(upstream: Upstream) -> None:
+    del upstream
+
+
+def _upstream() -> Upstream:
+    return Upstream("lobby", "typing", None, "alice", "subject", "c1")
+
+
+class TestPoolThreads:
+    """A sync handler holds a handler pool thread until it returns."""
+
+    def test_a_sync_route_claims_a_thread_when_called_without_one(
+        self, permits: threading.BoundedSemaphore
+    ) -> None:
+        threads: list[str] = []
+
+        def typing(event: Upstream) -> None:
+            threads.append(threading.current_thread().name)
+
+        asyncio.run(Route.bind("lobby", "typing", typing)(_upstream()))
+        assert threads[0].startswith("next-handler")
+        assert permits.acquire(blocking=False)
+
+    def test_a_full_pool_refuses_before_the_signal(
+        self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
+    ) -> None:
+        realtime.on("lobby", "typing")(_first)
+        assert permits.acquire(blocking=False)
+        with (
+            capture_signals(upstream_received) as recorder,
+            pytest.raises(PoolFullError),
+        ):
+            _send("lobby", "typing")
+        assert len(recorder) == 0
+
+    def test_an_async_handler_takes_no_thread(
+        self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
+    ) -> None:
+        realtime.on("lobby", "typing")(_quiet)
+        assert permits.acquire(blocking=False)
+        assert _send("lobby", "typing") is True
+
+    @pytest.mark.parametrize("handler", [_first, _quiet], ids=["sync", "async"])
+    def test_a_cancel_during_the_signal_gives_the_thread_back(
+        self,
+        registry: HandlerRegistry,
+        permits: threading.BoundedSemaphore,
+        handler: Handler,
+    ) -> None:
+        realtime.on("lobby", "typing")(handler)
+
+        async def scenario() -> None:
+            heard = asyncio.Event()
+
+            async def stall(**kwargs: object) -> None:
+                heard.set()
+                await asyncio.Event().wait()
+
+            upstream_received.connect(stall, sender=handler, weak=False)
+            try:
+                task = asyncio.create_task(dispatch(_upstream()))
+                await heard.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            finally:
+                upstream_received.disconnect(stall, sender=handler)
+
+        asyncio.run(scenario())
+        assert permits.acquire(blocking=False)
+
+    @pytest.mark.parametrize(
+        "handler",
+        [_quiet, _shared(_quiet), functools.partial(_quiet)],
+        ids=["async", "wrapped", "partial"],
+    )
+    def test_an_async_handler_behind_a_wrapper_runs_on_the_loop(
+        self, handler: Handler
+    ) -> None:
+        assert Route.bind("lobby", "typing", handler).pooled is False
+
+    def test_a_sync_handler_returning_a_coroutine_is_awaited(
+        self, permits: threading.BoundedSemaphore
+    ) -> None:
+        done: list[str] = []
+
+        async def finish(event: Upstream) -> None:
+            done.append(event.name)
+
+        def typing(event: Upstream) -> Awaitable[None]:
+            return finish(event)
+
+        route = Route.bind("lobby", "typing", typing)
+        asyncio.run(route(_upstream()))
+        assert route.pooled is True
+        assert done == ["typing"]
+        assert permits.acquire(blocking=False)
+
+    def test_a_cancelled_handler_keeps_its_thread_until_it_returns(
+        self, registry: HandlerRegistry, permits: threading.BoundedSemaphore
+    ) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        @realtime.on("lobby", "typing")
+        def typing(event: Upstream) -> None:
+            entered.set()
+            release.wait(5)
+            raise LookupError(event.name)
+
+        async def scenario() -> None:
+            task = asyncio.create_task(dispatch(_upstream()))
+            assert await asyncio.to_thread(entered.wait, 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not permits.acquire(blocking=False)
+            release.set()
+            assert await asyncio.to_thread(permits.acquire, timeout=5)
+
+        asyncio.run(scenario())
+
+
 class TestModules:
     """`REALTIME['HANDLERS']` selects the modules discovery imports."""
 
@@ -455,6 +582,15 @@ class TestModules:
             NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": ["a.realtime", "b"]}}
         ):
             assert handler_modules() == ("a.realtime", "b")
+
+    def test_discovery_imports_the_listed_modules(self) -> None:
+        imported = create_autospec(import_module)
+        with (
+            override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": ["a", "b.c"]}}),
+            patch.object(handlers, "import_module", imported),
+        ):
+            autodiscover_handlers()
+        imported.assert_has_calls([call("a"), call("b.c")])
 
     def test_an_invalid_value_imports_nothing(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"REALTIME": {"HANDLERS": "a.b"}}):

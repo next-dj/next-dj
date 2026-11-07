@@ -45,6 +45,7 @@ Write the test.
            response = client.post_action(
                "create_note",
                {"title": "First", "body": "Hello"},
+               origin="/",
            )
 
        assert response.status_code == 302
@@ -77,13 +78,14 @@ The ``origin`` keyword fills the ``_next_form_origin`` field the ``{% form %}`` 
 The status code is ``200`` because the dispatcher resolves the origin path and re-renders that page with the bound form in scope.
 
 A protocol-level test asserts the rejection instead.
-Without a resolvable origin the invalid branch cannot re-render and answers HTTP 400.
+Without a resolvable origin the dispatcher answers HTTP 400 before the form is bound, and ``post_action`` always sends one, so the test posts to the dispatch URL through the inherited ``post``.
 
 .. code-block:: python
    :caption: tests/test_validation_failure.py
 
    def test_blank_title_without_origin_is_rejected(db) -> None:
-       response = NextClient().post_action("create_note", {"title": ""})
+       client = NextClient()
+       response = client.post(client.get_action_url("create_note"), {"title": ""})
        assert response.status_code == 400
 
 Test the guard, not the happy path
@@ -128,7 +130,7 @@ Take three guarded actions, one per layer.
 
 An anonymous POST to a login-guarded action redirects to ``LOGIN_URL`` with the posted origin in ``next``.
 The static guard runs before the form is built, so no row is written and no application code runs.
-The origin passes a same-site string check rather than a URLconf lookup, and a missing or off-site value produces ``next=/`` instead.
+A missing or unresolvable origin never reaches the guard, because the dispatcher answers it with HTTP 400 first.
 
 .. code-block:: python
    :caption: tests/test_guards.py
@@ -238,7 +240,9 @@ Use an unguarded action for this test, so the 403 can come from nothing but the 
 
    def test_post_without_a_token_is_forbidden(db) -> None:
        client = NextClient(enforce_csrf_checks=True)
-       response = client.post_action("create_note", {"title": "First", "body": "Hello"})
+       response = client.post_action(
+           "create_note", {"title": "First", "body": "Hello"}, origin="/"
+       )
        assert response.status_code == 403
 
 The complement asserts that a tag-rendered form carries what the middleware wants.

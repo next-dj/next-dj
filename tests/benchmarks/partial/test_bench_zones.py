@@ -80,14 +80,14 @@ class TestBenchFiveZonePageAgainstBaseline:
         page_path = tmp_path / "page.py"
         page_path.write_text("x = 1\n")
         page_instance.register_template(page_path, _PLAIN_TEMPLATE)
-        benchmark(page_instance.render, page_path, **_KWARGS)
+        benchmark(page_instance.render, page_path, None, _KWARGS)
 
     @pytest.mark.benchmark(group="partial.full_render")
     def test_render_five_zones(
         self, tmp_path: Path, page_instance: Page, benchmark
     ) -> None:
         page_path = _write_zoned_page(tmp_path, _ZONED_DJX)
-        benchmark(page_instance.render, page_path, **_KWARGS)
+        benchmark(page_instance.render, page_path, None, _KWARGS)
 
 
 class TestBenchSingleZoneRender:

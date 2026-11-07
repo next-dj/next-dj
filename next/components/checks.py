@@ -13,6 +13,8 @@ from django.core.checks import CheckMessage, Error, register
 from next.checks import NEXT
 from next.checks.common import (
     RegistrationSubject,
+    async_callable_error,
+    async_refusal,
     errors_for_unknown_keys,
     import_backend_class,
     registration_file_errors,
@@ -336,7 +338,10 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
 
 @register(NEXT)
 def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
-    """Report a `component.py` that raises while importing (`next.E084`)."""
+    """Report a `component.py` that raises while importing (`next.E084`).
+
+    An async callable refused at import reports as `next.E218`, which names it.
+    """
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return []
@@ -346,6 +351,10 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
         for module_path in backend.import_component_modules():
             error = last_load_error(module_path)
             if error is None:
+                continue
+            refusal = async_refusal(error)
+            if refusal is not None:
+                errors.append(async_callable_error(module_path, refusal))
                 continue
             errors.append(
                 Error(

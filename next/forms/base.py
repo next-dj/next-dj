@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Final, Protocol, cast, override
+from typing import Any, ClassVar, Final, Protocol, cast, override
 
 from django import forms as django_forms
 from django.conf import settings
@@ -21,7 +21,7 @@ from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.deps import render_dep_cache
 from next.deps.objects import scoped_model, scoped_row
-from next.introspect import defining_file
+from next.introspect import defining_file, refuse_async
 
 from .backends import (
     ActionGuard,
@@ -310,6 +310,23 @@ def _stamp_hook_flag(base_hook: object, override_hook: object) -> bool:
     return _hook_func(override_hook) is not _hook_func(base_hook)
 
 
+def _refuse_async_hooks(cls: type, hooks: tuple[str, ...]) -> None:
+    """Refuse every hook among `hooks` that `cls` declares as `async def`."""
+    for hook in hooks:
+        refuse_async(getattr(cls, hook), f"{cls.__name__} hook")
+
+
+FORM_HOOKS: Final = (
+    "check_permissions",
+    "has_object_permission",
+    "get_form_kwargs",
+    "get_initial",
+    "get_success_message",
+    "on_valid",
+)
+"""Hooks both form bases declare, each refused at class creation when async."""
+
+
 class _PermissionHooks:
     """Opt-in DI-resolved permission gates layered over the static ActionGuard.
 
@@ -382,11 +399,14 @@ class BaseForm(_FormKwargsHook, _PermissionHooks, DjangoBaseForm):
     """Custom `BaseForm` extended with `get_initial` and `on_valid`."""
 
     default_renderer = _div_form_renderer
+    _hooks_refused: ClassVar[bool] = True
+    """Whether the class refused its async hooks, so registration skips them."""
 
     @override
     def __init_subclass__(cls, **kwargs) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(cls, FORM_HOOKS)
         _auto_register_form_class(cls)
         _validate_instance_from_url(cls, is_model_form=False)
 
@@ -411,11 +431,14 @@ class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
     """Custom `BaseModelForm` with `get_initial` and `on_valid` support."""
 
     default_renderer = _div_form_renderer
+    _hooks_refused: ClassVar[bool] = True
+    """Whether the class refused its async hooks, so registration skips them."""
 
     @override
     def __init_subclass__(cls, **kwargs) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
+        _refuse_async_hooks(cls, FORM_HOOKS)
         _auto_register_form_class(cls)
         _validate_instance_from_url(cls, is_model_form=True)
 

@@ -92,7 +92,7 @@ The scope of a form class depends on the file it is declared in.
 
 Page scope.
    A class declared in ``page.py`` or ``component.py`` receives ``page`` scope.
-   The framework keys it to the absolute path of that file.
+   The framework keys it to the path of that file inside its installed app or below ``BASE_DIR``.
    A page-scoped name is local to its directory, the way a name is local to a Python module.
    Two pages may each declare a ``NoteForm`` with no coordination, and a form opts into a project-wide name by moving to a shared file.
 
@@ -135,6 +135,7 @@ The method signature uses the same dependency-injection rules as any other DI-re
 ``request`` receives the current ``HttpRequest`` only when the parameter is annotated ``HttpRequest``.
 An unannotated ``request`` parameter resolves to ``None``.
 Any additional parameter is resolved through the DI injector, through ``DUrl[...]`` markers, ``Depends`` providers, and similar mechanisms.
+``on_valid``, every other form hook, and an ``@action`` handler are plain ``def`` functions, and an ``async def`` one raises ``AsyncCallableError`` when its class or action registers, see :ref:`topics-pages-sync-callables`.
 
 The default implementation on ``BaseForm`` redirects to ``Meta.success_url`` when declared, otherwise it returns ``redirect_to_origin(request)``.
 The default implementation on ``BaseModelForm`` calls ``self.save()`` then follows the same redirect rule.
@@ -441,7 +442,8 @@ The semantics mirror Django's :class:`~django.contrib.auth.mixins.PermissionRequ
 ``permission_required`` accepts a single permission string or an iterable of them, the user must hold every listed permission, and declaring a permission implicitly requires authentication.
 The static guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access, so a request denied by the static guard runs no application code.
 An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
-A submission whose ``_next_form_origin`` is missing or not a same-site path gets ``next=/`` instead, so a hand-crafted form should always carry the field.
+A submission whose ``_next_form_origin`` is missing or does not resolve raises :exc:`~django.core.exceptions.BadRequest` before the guard runs, which the project :data:`~django.conf.urls.handler400` answers with HTTP 400, so a hand-crafted form always carries the field.
+A page-scoped action declared beside a ``page.py`` with a ``render()`` answers HTTP 403 to an origin outside the directory of that page, a route with no page included, see :doc:`/content/security/actions`.
 An origin so long that the login URL would exceed the length Django allows in a redirect ``Location`` sends the user to plain ``LOGIN_URL`` with no ``next``.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 
@@ -602,8 +604,11 @@ Each action gets a stable URL at ``/_next/form/<uid>/``.
 The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name}")``, where ``name`` is the derived action name and ``scope_key`` depends on the scope.
 
 Page scope.
-   ``scope_key`` is the absolute filesystem path of the declaring ``page.py`` or ``component.py``.
-   The UID is therefore stable only as long as the file stays where it is.
+   ``scope_key`` is ``<app label>:<path>`` with the path of the declaring ``page.py`` or ``component.py`` inside the deepest installed app that holds it.
+   A file in no installed app gives ``:<path>`` with its path below ``BASE_DIR``, and a file outside both keeps its absolute path.
+   For a file inside an installed app or ``BASE_DIR``, the UID survives a deploy into another directory, such as a blue/green switch or a new ``releases/<timestamp>`` checkout.
+   For a file outside both, moving its checkout can change the UID.
+   Moving a file inside the project or changing its derived action name changes the UID.
 
 Shared scope.
    ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.

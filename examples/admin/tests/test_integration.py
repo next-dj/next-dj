@@ -116,6 +116,7 @@ class TestAuth:
         r = next_client.post_action(
             "admin:login",
             {"username": "admin", "password": "admin-pass", "next": "/admin/"},
+            origin="/admin/login/",
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/"
@@ -123,7 +124,7 @@ class TestAuth:
         assert r2.status_code == 200
 
     def test_logout_clears_session(self, admin_client):
-        r = admin_client.post_action("admin:logout", {})
+        r = admin_client.post_action("admin:logout", {}, origin="/admin/")
         assert r.status_code == 302
         assert r["Location"] == "/admin/logout/"
         r2 = admin_client.get("/admin/")
@@ -131,7 +132,7 @@ class TestAuth:
         assert r2["Location"].startswith("/admin/login/")
 
     def test_logout_lands_on_farewell_page(self, admin_client):
-        r = admin_client.post_action("admin:logout", {}, follow=True)
+        r = admin_client.post_action("admin:logout", {}, follow=True, origin="/admin/")
         body = r.content.decode()
         assert "You have been signed out." in body
         assert "Sign in again" in body
@@ -142,6 +143,7 @@ class TestAuth:
         r = next_client.post_action(
             "admin:login",
             {**rendered, "username": "admin", "password": "wrong", "next": "/admin/"},
+            origin="/admin/login/",
         )
         assert r.status_code == 200
         body = r.content.decode()
@@ -916,7 +918,9 @@ class TestAddView:
         get = admin_client.get("/admin/library/tag/add/")
         form = action_form(admin_client, get.content.decode(), "admin:add")
         payload = {**hidden_fields(form), "name": "", "slug": ""}
-        r = admin_client.post_action("admin:add", payload)
+        r = admin_client.post_action(
+            "admin:add", payload, origin="/admin/library/tag/add/"
+        )
         assert r.status_code == 200
         body = r.content.decode()
         assert "This field is required" in body
@@ -1149,7 +1153,9 @@ class TestInlines:
             "summary": "",
             "price": "0",
         }
-        r = admin_client.post_action("admin:add", payload)
+        r = admin_client.post_action(
+            "admin:add", payload, origin="/admin/library/book/add/"
+        )
         assert r.status_code == 302, r.content.decode()[:1500]
         assert Book.objects.filter(title="Browser-flow book").exists()
 
@@ -1550,8 +1556,13 @@ class TestLayerDismiss:
         with pytest.raises(LookupError):
             find_form(add, action=discard_url)
 
-    def test_discard_closes_layer_with_dismiss_reason(self, admin_client):
-        response = admin_client.post_action("admin:discard", {}, partial=True)
+    def test_discard_closes_layer_with_dismiss_reason(self, admin_client, chapter):
+        response = admin_client.post_action(
+            "admin:discard",
+            {},
+            origin=f"/admin/library/chapter/{chapter.pk}/change/",
+            partial=True,
+        )
         assert response.status_code == 200
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["layer.close"]
@@ -1559,8 +1570,12 @@ class TestLayerDismiss:
         assert op["dismiss"] is True
         assert op["reason"] == "discarded"
 
-    def test_discard_without_runtime_redirects_to_dashboard(self, admin_client):
-        response = admin_client.post_action("admin:discard", {})
+    def test_discard_without_runtime_redirects_to_dashboard(
+        self, admin_client, chapter
+    ):
+        response = admin_client.post_action(
+            "admin:discard", {}, origin=f"/admin/library/chapter/{chapter.pk}/change/"
+        )
         assert response.status_code == 302
         assert response.headers["Location"] == "/admin/"
 
@@ -1603,7 +1618,9 @@ class TestInlineValidationFailure:
             "chapters-0-title": "",
             "chapters-0-word_count": "10",
         }
-        r = admin_client.post_action("admin:add", payload)
+        r = admin_client.post_action(
+            "admin:add", payload, origin="/admin/library/book/add/"
+        )
         assert r.status_code == 200
         body = r.content.decode()
         assert "Book with bad chapter" in body
@@ -1950,6 +1967,7 @@ class TestFlashMessages:
             "admin:login",
             {"username": "admin", "password": "admin-pass", "next": "/admin/"},
             follow=True,
+            origin="/admin/login/",
         )
         body = r.content.decode()
         assert "Welcome, admin." in body

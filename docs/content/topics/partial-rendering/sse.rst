@@ -158,6 +158,14 @@ An async source yields ``None`` the same way, and under ASGI it also receives he
 The stream interleaves a heartbeat during a quiet period through :func:`asyncio.wait`, so a buffering proxy keeps the connection.
 The heartbeat period is ``SSE.HEARTBEAT_SECONDS`` in ``PARTIAL_BACKENDS``.
 One stream overrides the period with ``PatchEventStream(request, source, heartbeat_seconds=10)``, which leaves the backend default in place for every other stream.
+A watchdog wakes once per heartbeat and drops an async stream once two wakes in a row find the same write to the client pending.
+A client that stops reading is therefore dropped one to two heartbeats after a write to it blocks, and the ``next.partial.sse`` logger records the drop at ``INFO``.
+The stream first closes its source, which releases a broker subscription.
+It then closes the response, so ``request_finished`` fires once and the database connections of the request are released as for any other request.
+Last, it cancels the blocked send, and the server closes the connection.
+On Django 6.1 that cancel leaves the Django ASGI handler, so uvicorn or daphne may log the dropped connection as an application exception.
+On Django 5.2 and 6.0 the handler absorbs the cancel.
+A sync stream under WSGI has no such watchdog, so a blocked write holds its worker until the WSGI server gives up on the socket.
 
 .. list-table::
    :header-rows: 1

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from next.deps.resolver import current_resolver
 from next.introspect import describe_callable
+from next.stamps import stamp_of, stat_mtime_ns
 from next.utils import WEB_SCHEMES
 
 from .discovery import BrokenSource, declared_cache
@@ -133,7 +134,7 @@ class TextFile:
     def __init__(self, path: Path) -> None:
         """Store the path without reading the file."""
         self.path = path
-        self._held: tuple[int, bytes] | None = None
+        self._held: tuple[int | None, bytes] | None = None
 
     def read(self) -> bytes | None:
         """Return the bytes of the file, `None` once it no longer exists.
@@ -155,12 +156,14 @@ class TextFile:
             return held[1]
 
     def _read(self) -> bytes:
-        mtime_ns = self.path.stat().st_mtime_ns
         held = self._held
-        if held is not None and held[0] == mtime_ns:
+        mtime_ns = stat_mtime_ns(self.path)
+        if held is not None and mtime_ns == held[0]:
             return held[1]
+        # Stamped before the read, so a write in between leaves the copy stale.
+        stamp = None if mtime_ns is None else stamp_of(mtime_ns)
         content = self.path.read_bytes()
-        self._held = (mtime_ns, content)
+        self._held = (stamp, content)
         return content
 
 

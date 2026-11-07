@@ -171,7 +171,10 @@ class TestPage:
         for key, func in case.context.items():
             page_instance.contexts.register_context(test_file_path, key, func)
 
-        assert page_instance.render(test_file_path, **case.kwargs) == case.expected
+        assert (
+            page_instance.render(test_file_path, url_kwargs=case.kwargs)
+            == case.expected
+        )
 
     def test_render_with_multiple_files(self, page_instance) -> None:
         """Two page paths keep separate templates and context, with no cross-talk."""
@@ -304,7 +307,7 @@ class TestPageHasTemplateAndLazyRender:
         page_file.write_text("y = 2")
         (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
         assert page_file not in page_instance._templates.composed
-        result = page_instance.render(page_file, title="Lazy")
+        result = page_instance.render(page_file, url_kwargs={"title": "Lazy"})
         assert page_file in page_instance._templates.composed
         assert "Lazy" in result
 
@@ -325,10 +328,10 @@ class TestPageHasTemplateAndLazyRender:
         page_file.write_text("z = 3")
         djx = tmp_path / "template.djx"
         djx.write_text("<h1>{{ title }}</h1>")
-        result1 = page_instance.render(page_file, title="First")
+        result1 = page_instance.render(page_file, url_kwargs={"title": "First"})
         assert "First" in result1
         djx.write_text("<h2>{{ title }}</h2>")
-        result2 = page_instance.render(page_file, title="Second")
+        result2 = page_instance.render(page_file, url_kwargs={"title": "Second"})
         assert "<h2>Second</h2>" in result2
 
     def test_render_injects_current_template_path_in_context(
@@ -561,7 +564,7 @@ class TestLayoutIntegration:
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
 
         assert pattern is not None
-        result = page_instance.render(page_file, title="Test")
+        result = page_instance.render(page_file, url_kwargs={"title": "Test"})
         assert "Test" in result
 
     def test_render_with_layout_inheritance(self, page_instance, tmp_path) -> None:
@@ -574,7 +577,7 @@ class TestLayoutIntegration:
         (sub_dir / "template.djx").write_text("<h1>{{ title }}</h1>")
 
         page_file = sub_dir / "page.py"
-        result = page_instance.render(page_file, title="Test")
+        result = page_instance.render(page_file, url_kwargs={"title": "Test"})
 
         assert result.startswith("<html><body><main>")
         assert "<h1>Test</h1>" in result
@@ -594,7 +597,7 @@ class TestLayoutIntegration:
         template_file.write_text("<h1>{{ title }}</h1>")
 
         page_file = sub_dir / "page.py"
-        result = page_instance.render(page_file, title="Hi")
+        result = page_instance.render(page_file, url_kwargs={"title": "Hi"})
 
         assert "<html><body>" in result
         assert "<h1>Hi</h1>" in result
@@ -609,7 +612,7 @@ class TestLayoutIntegration:
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
 
-        result = page_instance.render(page_file, title="Test")
+        result = page_instance.render(page_file, url_kwargs={"title": "Test"})
 
         assert result == "<h1>Test</h1>"
 
@@ -937,23 +940,23 @@ class TestBrokenPageImportView:
             pattern.callback(build_page_request())
 
     @_broken_sources
-    def test_broken_page_returns_404_in_prod(
+    def test_broken_page_raises_in_prod(
         self, page_instance, tmp_path, url_parser, broken_source
     ) -> None:
-        """With both flags off the broken page returns 404, never a sibling body."""
+        """With both flags off the broken page raises, never a 404 or a sibling body."""
         (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
         )
 
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
 
     def test_broken_page_recovers_after_fix_without_restart(
         self, page_instance, tmp_path, url_parser
     ) -> None:
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
 
         stamp = page_file.stat().st_mtime + 10
@@ -1054,11 +1057,11 @@ class TestBrokenPageImportView:
         monkeypatch.setattr(loaders_module, "_load_python_module", counting)
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        # The build probes once, and every later request returns 404 from the memo.
-        with pytest.raises(Http404):
+        # The build probes once, and every later request raises from the memo.
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
         first_pass = calls.count(page_file)
-        with pytest.raises(Http404):
+        with pytest.raises(PageModuleImportError):
             pattern.callback(build_page_request())
 
         assert calls.count(page_file) == first_pass
@@ -1146,7 +1149,7 @@ class TestResolvePageBodyWithoutRender:
         page_file.write_text('template = "<p>static</p>"')
 
         module = load_python_module_memo(page_file)
-        resolution = page_instance._resolve_page_body(page_file, module, _dep_cache={})
+        resolution = page_instance._resolve_page_body(page_file, module, dep_cache={})
 
         assert resolution.body == "<p>static</p>"
         assert resolution.http_response is None
@@ -1159,7 +1162,7 @@ class TestResolvePageBodyWithoutRender:
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
         resolution = page_instance._resolve_page_body(
-            tmp_path / "page.py", None, _dep_cache={}
+            tmp_path / "page.py", None, dep_cache={}
         )
 
         assert resolution.body == "<p>virtual</p>"

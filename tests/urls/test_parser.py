@@ -6,9 +6,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.urls import path
 
 import next.urls
+from next.deps import RESERVED_KEYS
+from next.deps.context import RECEIVER_NAMES
 from next.urls import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
+    ReservedURLParameterError,
     URLParameterError,
     URLPatternParser,
 )
@@ -187,7 +190,12 @@ class TestPublicExports:
 
     @pytest.mark.parametrize(
         "name",
-        ["DuplicateURLParameterError", "InvalidURLParameterError", "URLParameterError"],
+        [
+            "DuplicateURLParameterError",
+            "InvalidURLParameterError",
+            "ReservedURLParameterError",
+            "URLParameterError",
+        ],
     )
     def test_name_is_exported(self, name) -> None:
         """A caller catching one refusal can catch the other the same way."""
@@ -213,6 +221,40 @@ class TestDuplicateURLParameterError:
     def test_classvar_points_at_the_shared_base(self) -> None:
         """Parser exposes one error class for import-cycle-free callers."""
         assert URLPatternParser.parameter_error is URLParameterError
+
+
+class TestReservedNames:
+    """A bracket name dependency injection reserves is refused."""
+
+    @pytest.mark.parametrize("name", sorted(RESERVED_KEYS | RECEIVER_NAMES))
+    @pytest.mark.parametrize("shape", ["x/[{}]", "x/[int:{}]", "x/[[{}]]"])
+    def test_a_reserved_name_raises(self, url_parser, name, shape) -> None:
+        """Every bracket form answers with the reserved refusal."""
+        url_path = shape.format(name)
+        with pytest.raises(ReservedURLParameterError) as excinfo:
+            url_parser.parse_url_pattern(url_path)
+        assert excinfo.value.param_name == name
+        assert "dependency injection reserves" in str(excinfo.value)
+
+    def test_the_name_is_read_after_normalisation(self, url_parser) -> None:
+        """A hyphenated directory reaches the page as the reserved underscore name."""
+        with pytest.raises(ReservedURLParameterError):
+            url_parser.parse_url_pattern("x/[cleaned-data]")
+
+    @pytest.mark.parametrize(
+        "name", ["dep_cache", "file_path", "namespace", "requested_zones", "url_kwargs"]
+    )
+    def test_a_render_pipeline_argument_name_is_routable(
+        self, url_parser, name
+    ) -> None:
+        """URL kwargs travel as one mapping, so a render argument name is free."""
+        pattern, params = url_parser.parse_url_pattern(f"x/[{name}]")
+        assert pattern == f"x/<str:{name}>/"
+        assert params == {name: name}
+
+    def test_is_an_invalid_parameter(self) -> None:
+        """A caller catching the invalid refusal catches the reserved one too."""
+        assert issubclass(ReservedURLParameterError, InvalidURLParameterError)
 
 
 class TestNamesDjangoRefuses:

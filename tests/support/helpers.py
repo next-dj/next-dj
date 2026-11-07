@@ -201,6 +201,22 @@ def touch_later(path: Path, source: str | None = None) -> None:
     os.utime(path, ns=(stamp, stamp))
 
 
+TICK_NS = 1_700_000_000 * 10**9
+
+
+def rewrite_in_tick(
+    path: Path, source: str | None = None, *, folder: bool = False
+) -> None:
+    """Rewrite `path` with `source` when given, then stamp it with `TICK_NS`.
+
+    With `folder` its folder is stamped too, as a file created in that tick leaves it.
+    """
+    if source is not None:
+        path.write_text(source)
+    for stamped in (path, path.parent) if folder else (path,):
+        os.utime(stamped, ns=(TICK_NS, TICK_NS))
+
+
 def cookie_request(path: str = "/", **cookies: str | None) -> HttpRequest:
     """Return a GET for `path` carrying every named cookie given a value."""
     request = RequestFactory().get(path)

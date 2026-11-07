@@ -1,24 +1,21 @@
 """Registry of the upstream handlers a client event on a granted topic reaches."""
 
-import functools
 import inspect
-import os
 import re
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from importlib import import_module
 from types import CodeType, MappingProxyType
 from typing import Final, TypeGuard, cast
 
-from asgiref.sync import iscoroutinefunction
 from django.utils.module_loading import autodiscover_modules
 
 from next.conf.scopes import scope_value
-from next.utils import after_fork
+from next.introspect import is_async_callable
 
 from .lifecycle import areceived
-from .pool import run_pooled
+from .pool import PoolThread, handler_pool
 
 
 type Handler = Callable[[Upstream], Awaitable[None] | None]
@@ -85,35 +82,6 @@ def valid_name(name: object) -> bool:
     return isinstance(name, str) and _NAME.fullmatch(name) is not None
 
 
-@functools.cache
-def handler_pool() -> ThreadPoolExecutor:
-    """Return the pool sync handlers run on, apart from the one Django shares.
-
-    A slow handler then fills only its own threads, sized like the default pool.
-    """
-    workers = min(32, (os.cpu_count() or 1) + 4)
-    return ThreadPoolExecutor(workers, thread_name_prefix="next-handler")
-
-
-after_fork(handler_pool.cache_clear)
-
-
-def _runner(handler: Handler) -> Callable[[Upstream], Awaitable[None]]:
-    """Return an awaitable call of the handler, a sync one on the handler pool.
-
-    A sync-looking handler that returns an awaitable is awaited, so `ok` means done.
-    """
-    if iscoroutinefunction(handler) or iscoroutinefunction(type(handler).__call__):
-        return cast("Callable[[Upstream], Awaitable[None]]", handler)
-
-    async def run(upstream: Upstream) -> None:
-        outcome = await run_pooled(handler_pool(), handler, upstream)
-        if inspect.isawaitable(outcome):
-            await outcome
-
-    return run
-
-
 @dataclass(frozen=True, slots=True)
 class Route:
     """One handler bound to a topic pattern and an event name."""
@@ -122,13 +90,13 @@ class Route:
     name: str
     handler: Handler
     matcher: re.Pattern[str] | None
-    run: Callable[[Upstream], Awaitable[None]]
+    pooled: bool
 
     @classmethod
     def bind(cls, pattern: str, name: str, handler: Handler) -> "Route":
         """Bind a handler, with no matcher when the pattern or the name is invalid."""
         matcher = compile_pattern(pattern) if valid_name(name) else None
-        return cls(pattern, name, handler, matcher, _runner(handler))
+        return cls(pattern, name, handler, matcher, not is_async_callable(handler))
 
     @property
     def valid(self) -> bool:
@@ -151,9 +119,18 @@ class Route:
             return _NO_PARAMS
         return MappingProxyType(found.groupdict())
 
-    async def __call__(self, upstream: Upstream) -> None:
-        """Run the handler, a sync one on the handler pool."""
-        await self.run(upstream)
+    def claim(self) -> PoolThread | None:
+        """Claim a pool thread for a sync handler, None for an async one."""
+        return handler_pool.claim() if self.pooled else None
+
+    async def __call__(
+        self, upstream: Upstream, thread: PoolThread | None = None
+    ) -> None:
+        """Run the handler, a sync one on `thread` or on a thread it claims."""
+        if not self.pooled:
+            await cast("Callable[[Upstream], Awaitable[None]]", self.handler)(upstream)
+            return
+        await (thread or handler_pool.claim()).run(self.handler, upstream)
 
 
 def _origin(handler: Handler) -> tuple[str, int, str] | None:
@@ -269,7 +246,7 @@ def on[H: Handler](pattern: str, name: str) -> Callable[[H], H]:
 async def dispatch(upstream: Upstream) -> bool:
     """Run the handler of one upstream event, False when no handler serves it.
 
-    The caller checks the topic grant first, and a handler error propagates to it.
+    A sync handler claims its thread before `upstream_received`, else `PoolFullError`.
     """
     found = handler_registry.resolve(upstream.topic, upstream.name)
     if found is None:
@@ -277,8 +254,13 @@ async def dispatch(upstream: Upstream) -> bool:
     bound, params = found
     if params:
         upstream = replace(upstream, params=params)
-    await areceived(bound.handler, upstream)
-    await bound(upstream)
+    with ExitStack() as stack:
+        thread = bound.claim()
+        if thread is not None:
+            stack.callback(thread.give)
+        await areceived(bound.handler, upstream)
+        stack.pop_all()
+    await bound(upstream, thread)
     return True
 
 
@@ -324,7 +306,6 @@ __all__ = [
     "compile_pattern",
     "dispatch",
     "handler_modules",
-    "handler_pool",
     "handler_registry",
     "on",
     "valid_modules",

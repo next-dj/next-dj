@@ -13,6 +13,9 @@ from tests.support.codecs import (
 from tests.support.realtime import ROOM_AUTHORIZER_REF
 
 
+INVALID_CONNECTION_LIMITS: tuple[object, ...] = (0, -1, True, 2.5, "10", None)
+
+
 @dataclass(frozen=True, slots=True)
 class RefusedFrameCase:
     """One ``websocket.receive`` payload the consumer refuses, its error and close code."""

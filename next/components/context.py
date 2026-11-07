@@ -16,6 +16,7 @@ from next.introspect import (
     callable_name,
     declared_file,
     defining_file,
+    refuse_async,
     registering_file,
     registering_site,
 )
@@ -103,6 +104,7 @@ class ComponentContextRegistry:
         serializer: JsContextSerializer | None = None,
     ) -> None:
         """Register `func` under `key` for `component_path`, rejecting reserved keys."""
+        refuse_async(func, "@component.context callable")
         path = resolved_tree(component_path)
 
         if isinstance(key, str) and key in RESERVED_KEYS:

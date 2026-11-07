@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Permission
-from django.http import Http404
 from django.test import RequestFactory, override_settings
 from django.urls import resolve
 
@@ -183,19 +182,17 @@ class TestRefuseIntercept:
 
     _BROKEN = f"{PAGE_HEAD}raise RuntimeError('boom')\n"
 
-    def test_a_broken_intercept_is_a_404_in_production(self, root: Path) -> None:
-        page_file = _page(root, "broken", "x", self._BROKEN)
-
-        with _mounted(root, "/broken/"), pytest.raises(Http404):
-            refuse_intercept(page_file, _request(()), {})
-
-    @override_settings(DEBUG=True)
-    def test_a_broken_intercept_raises_its_import_failure_under_debug(
-        self, root: Path
+    @pytest.mark.parametrize("debug", [False, True], ids=["production", "debug"])
+    def test_a_broken_intercept_raises_its_import_failure(
+        self, root: Path, debug
     ) -> None:
         page_file = _page(root, "broken", "x", self._BROKEN)
 
-        with _mounted(root, "/broken/"), pytest.raises(PageModuleImportError):
+        with (
+            _mounted(root, "/broken/"),
+            override_settings(DEBUG=debug),
+            pytest.raises(PageModuleImportError),
+        ):
             refuse_intercept(page_file, _request(()), {})
 
     def test_a_broken_intercept_sends_an_anonymous_user_to_login_first(

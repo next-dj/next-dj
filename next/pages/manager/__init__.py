@@ -250,23 +250,27 @@ class Page(PageDeclarations):
         self,
         file_path: Path,
         request: HttpRequest | None = None,
+        url_kwargs: Mapping[str, object] | None = None,
         *,
-        _requested_zones: frozenset[str] | None = None,
-        **kwargs,
+        requested_zones: frozenset[str] | None = None,
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
 
         `JS_CONTEXT_KEY` carries the `serialize=True` subset, which `render` pops.
         """
         return self._render_context(
-            file_path, request, kwargs, _requested_zones, render_dep_cache(request)
+            file_path,
+            request,
+            url_kwargs or {},
+            requested_zones,
+            render_dep_cache(request),
         )
 
     def _render_context(
         self,
         file_path: Path,
         request: HttpRequest | None,
-        url_kwargs: dict[str, Any],
+        url_kwargs: Mapping[str, object],
         requested_zones: frozenset[str] | None,
         dep_cache: dict[str, Any],
     ) -> dict[str, object]:
@@ -281,9 +285,9 @@ class Page(PageDeclarations):
         context_result = self._context_manager.collect_context(
             file_path,
             request,
+            url_kwargs,
             dep_cache=dep_cache,
-            _requested_zones=requested_zones,
-            **url_kwargs,
+            requested_zones=requested_zones,
         )
         context_data.update(context_result.context_data)
         context_data[JS_CONTEXT_KEY] = context_result.js_context
@@ -334,9 +338,9 @@ class Page(PageDeclarations):
         file_path: Path,
         module: types.ModuleType | None,
         request: HttpRequest | None = None,
+        url_kwargs: Mapping[str, object] | None = None,
         *,
-        _dep_cache: dict[str, Any],
-        **kwargs,
+        dep_cache: dict[str, Any],
     ) -> _BodyResolution:
         """Resolve the page body per-request.
 
@@ -346,7 +350,7 @@ class Page(PageDeclarations):
             render_func = getattr(module, "render", None)
             if callable(render_func):
                 return self._call_render_function(
-                    render_func, file_path, request, kwargs, _dep_cache
+                    render_func, file_path, request, url_kwargs or {}, dep_cache
                 )
         return _BodyResolution(body=self._load_static_body(file_path, module))
 
@@ -397,14 +401,17 @@ class Page(PageDeclarations):
         file_path: Path,
         template: Template | str,
         start: float,
-        request: HttpRequest | None = None,
+        request: HttpRequest | None,
+        url_kwargs: Mapping[str, object],
         *,
-        _dep_cache: dict[str, Any] | None = None,
-        **kwargs,
+        dep_cache: dict[str, Any] | None,
     ) -> str:
         """Build context, render `template`, inject static assets, emit signal."""
-        dep_cache = render_dep_cache(request) if _dep_cache is None else _dep_cache
-        context_data = self._render_context(file_path, request, kwargs, None, dep_cache)
+        if dep_cache is None:
+            dep_cache = render_dep_cache(request)
+        context_data = self._render_context(
+            file_path, request, url_kwargs, None, dep_cache
+        )
         result, collector = self.render_with_static_assets(
             file_path, template, context_data, request=request
         )
@@ -425,9 +432,9 @@ class Page(PageDeclarations):
         file_path: Path,
         body: str,
         request: HttpRequest | None = None,
+        url_kwargs: Mapping[str, object] | None = None,
         *,
-        _dep_cache: dict[str, Any],
-        **kwargs,
+        dep_cache: dict[str, Any],
     ) -> str:
         """Compose `body` through layouts and render.
 
@@ -437,7 +444,7 @@ class Page(PageDeclarations):
         skeleton = self._layout_skeleton_for(file_path)
         composed = self._layout_loader.fill_skeleton(skeleton, body)
         return self._render_template_str(
-            file_path, composed, start, request, _dep_cache=_dep_cache, **kwargs
+            file_path, composed, start, request, url_kwargs or {}, dep_cache=dep_cache
         )
 
     def _layout_skeleton_for(self, file_path: Path) -> str:
@@ -476,7 +483,12 @@ class Page(PageDeclarations):
         return compiled
 
     def render(
-        self, file_path: Path, request: HttpRequest | None = None, **kwargs
+        self,
+        file_path: Path,
+        request: HttpRequest | None = None,
+        url_kwargs: Mapping[str, object] | None = None,
+        *,
+        dep_cache: dict[str, Any] | None = None,
     ) -> str:
         """Render the page with Django `Template` and the static collector.
 
@@ -484,7 +496,9 @@ class Page(PageDeclarations):
         """
         start = time.perf_counter()
         template = self.composed_template_for(file_path)
-        return self._render_template_str(file_path, template, start, request, **kwargs)
+        return self._render_template_str(
+            file_path, template, start, request, url_kwargs or {}, dep_cache=dep_cache
+        )
 
     def authorization_outcome(
         self,

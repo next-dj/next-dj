@@ -494,9 +494,9 @@ def test_window_already_announced_publishes_nothing_twice(
 ) -> None:
     api = build()
     api.join(TOPIC, "a", None)
-    api.broker.presence_schedule.schedule(TOPIC, WINDOW)
 
-    assert api.close_window(clock) == 2
+    assert api.close_window(clock) == 1
+    api.broker.announce_presence(TOPIC)
     assert _announced(snapshots) == [(TOPIC, {"count": 1})]
 
 

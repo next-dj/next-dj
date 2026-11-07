@@ -511,7 +511,7 @@ class TestWizardStorageScopeIsolation:
     def test_page_scope_wizard_storage_scope_is_page_path(
         self, settings, tmp_path
     ) -> None:
-        """A page-scoped wizard keys its storage by the resolved page path."""
+        """A page-scoped wizard keys its storage by the path under BASE_DIR."""
         settings.BASE_DIR = tmp_path
         page_dir = tmp_path / "shop"
         page_dir.mkdir()
@@ -519,7 +519,7 @@ class TestWizardStorageScopeIsolation:
         page_file.write_text("")
 
         wizard_cls = self._make_wizard(str(page_file))
-        assert wizard_cls.__dict__["_storage_scope_key"] == str(page_file.resolve())
+        assert wizard_cls.__dict__["_storage_scope_key"] == ":shop/page.py"
 
     def test_unregistered_wizard_falls_back_to_module_scope(self) -> None:
         """An unregistered wizard derives its storage scope from its module."""

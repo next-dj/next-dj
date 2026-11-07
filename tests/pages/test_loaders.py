@@ -12,6 +12,7 @@ from django.test import override_settings
 import next.pages.loaders as loaders_module
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
+from next.errors import AsyncCallableError
 from next.pages.loaders import (
     AncestorStamps,
     DjxTemplateLoader,
@@ -48,16 +49,19 @@ from next.pages.loaders import (
 )
 from next.pages.placeholder import ROOT_MARKER
 from next.pages.processors import _get_context_processors, _import_context_processor
-from next.utils import MAX_ANCESTOR_WALK_DEPTH, stat_mtime_ns
+from next.stamps import RACY_MTIME_WINDOW_NS, stat_mtime_ns, trusted
+from next.utils import MAX_ANCESTOR_WALK_DEPTH
 from tests.support import (
     LAYOUT_CONFIG_CASES,
     PAGES_DIRS_CONFIG_CASES,
     TEMPLATE_PRIORITY_CASES,
+    TICK_NS,
     LayoutConfigCase,
     PagesDirsConfigCase,
     TemplatePriorityCase,
     default_page_router_config,
     file_router_config_entry,
+    rewrite_in_tick,
     touch_later,
 )
 
@@ -146,7 +150,9 @@ class TestDjxTemplateLoader:
         assert page_instance.create_url_pattern("test", page_file, url_parser)
 
         # The template is read at the first render, not at pattern creation.
-        rendered = page_instance.render(page_file, title="Title", name="World")
+        rendered = page_instance.render(
+            page_file, url_kwargs={"title": "Title", "name": "World"}
+        )
 
         expected = case.template.replace("{{ title }}", "Title").replace(
             "{{ name }}", "World"
@@ -168,7 +174,9 @@ class TestDjxTemplateLoader:
             if template_content:
                 page_instance.register_template(page_file, template_content)
 
-        result = page_instance.render(page_file, title="Welcome", name="World")
+        result = page_instance.render(
+            page_file, url_kwargs={"title": "Welcome", "name": "World"}
+        )
 
         assert result == "<h1>Welcome</h1><p>Hello World!</p>"
 
@@ -201,7 +209,7 @@ class TestDjxTemplateLoader:
                 page_instance.register_template(page_file, template_content)
 
         result = page_instance.render(
-            page_file, title="Items", items=["Apple", "Banana"]
+            page_file, url_kwargs={"title": "Items", "items": ["Apple", "Banana"]}
         )
 
         assert "Items" in result
@@ -1140,7 +1148,9 @@ class TestContextProcessors:
         with patch(
             "next.pages.manager._get_context_processors", return_value=[test_processor]
         ):
-            result = page_instance.render(page_file, mock_request, title="Test Title")
+            result = page_instance.render(
+                page_file, mock_request, url_kwargs={"title": "Test Title"}
+            )
 
             assert "Test Title" in result
             assert "from_processor" in result
@@ -1157,7 +1167,7 @@ class TestContextProcessors:
         with patch(
             "next.pages.manager._get_context_processors", return_value=[test_processor]
         ):
-            result = page_instance.render(page_file, title="Test Title")
+            result = page_instance.render(page_file, url_kwargs={"title": "Test Title"})
 
             assert result == "<h1>Test Title</h1>"
             assert "from_processor" not in result
@@ -1172,7 +1182,9 @@ class TestContextProcessors:
         mock_request.META = {}
 
         with patch("next.pages.manager._get_context_processors", return_value=[]):
-            result = page_instance.render(page_file, mock_request, title="Test Title")
+            result = page_instance.render(
+                page_file, mock_request, url_kwargs={"title": "Test Title"}
+            )
 
             assert result == "<h1>Test Title</h1>"
 
@@ -1199,7 +1211,9 @@ class TestContextProcessors:
             ),
             patch("next.pages.manager.logger") as mock_logger,
         ):
-            result = page_instance.render(page_file, mock_request, title="Test Title")
+            result = page_instance.render(
+                page_file, mock_request, url_kwargs={"title": "Test Title"}
+            )
 
             assert "Test Title" in result
             assert "good_value" in result
@@ -1227,7 +1241,9 @@ class TestContextProcessors:
             ),
             pytest.raises(ValueError, match="boom"),
         ):
-            page_instance.render(page_file, mock_request, title="Test Title")
+            page_instance.render(
+                page_file, mock_request, url_kwargs={"title": "Test Title"}
+            )
 
     def test_render_with_context_processor_non_dict_return(
         self, page_instance, tmp_path
@@ -1250,7 +1266,9 @@ class TestContextProcessors:
             "next.pages.manager._get_context_processors",
             return_value=[non_dict_processor, good_processor],
         ):
-            result = page_instance.render(page_file, mock_request, title="Test Title")
+            result = page_instance.render(
+                page_file, mock_request, url_kwargs={"title": "Test Title"}
+            )
 
             assert "Test Title" in result
             assert "good_value" in result
@@ -1746,6 +1764,28 @@ class TestPageModuleImportErrors:
         assert first.__cause__ is second.__cause__
 
 
+class TestAsyncRenderRefusal:
+    """An `async def render` stops the `page.py` from loading, refused at load time."""
+
+    def test_async_render_records_the_refusal(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("async def render():\n    return 'hi'\n")
+
+        assert load_python_module_memo(page_file) is None
+        error = last_load_error(page_file)
+        assert isinstance(error, PageModuleImportError)
+        assert isinstance(error.__cause__, AsyncCallableError)
+        assert f'page.py render "render" ({page_file})' in str(error.__cause__)
+
+    def test_sync_render_loads(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render():\n    return 'hi'\n")
+
+        module = load_python_module_memo(page_file)
+        assert module is not None
+        assert module.render() == "hi"
+
+
 class TestTheModuleMemoIsBounded:
     """Every entry holds a whole executed module alive, so the memo has a bound."""
 
@@ -2125,6 +2165,129 @@ class TestLayoutText:
         layout = _write_layout(tmp_path, "html")
 
         assert template_source(layout) == layout.read_text()
+
+
+class TestRewritesWithinOneTick:
+    """A file rewritten in the mtime tick of its last read is read again."""
+
+    def test_a_layout_turned_root_in_the_same_tick_cuts_the_chain(
+        self, tmp_path, tick
+    ) -> None:
+        site = tmp_path / "site"
+        outer = _write_layout(site, "outer")
+        inner = _write_layout(site / "inner", "inner")
+        rewrite_in_tick(inner, _SHELL.format(tag="inner"))
+        page = site / "inner" / "page.py"
+
+        with override_settings(
+            DEBUG=True,
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(site)},
+        ):
+            assert layout_chain(page) == (inner, outer)
+            rewrite_in_tick(inner, ROOT_MARKER + _SHELL.format(tag="inner"))
+
+            assert layout_chain(page) == (inner,)
+
+    def test_a_root_scan_is_held_once_its_mtime_settles(
+        self, tmp_path, tick, monkeypatch
+    ) -> None:
+        layout = _write_layout(tmp_path, "html", root=True)
+        rewrite_in_tick(layout)
+        scans: list[str] = []
+        scan_root = loaders_module.scan_root
+        monkeypatch.setattr(
+            loaders_module,
+            "scan_root",
+            lambda text: scans.append(text) or scan_root(text),
+        )
+
+        assert _root_check(layout) is True
+        assert _root_check(layout) is True
+        assert len(scans) == 2
+        tick[0] = TICK_NS + RACY_MTIME_WINDOW_NS
+        assert _root_check(layout) is True
+        assert _root_check(layout) is True
+
+        assert len(scans) == 3
+
+    def test_a_shared_layout_rewritten_in_the_same_tick_shows(
+        self, tmp_path, tick
+    ) -> None:
+        first = _write_layout(tmp_path / "first", "first")
+        second = _write_layout(tmp_path / "second", "second")
+        rewrite_in_tick(first, _SHELL.format(tag="first"))
+        page = tmp_path / "elsewhere" / "page.py"
+        loader = LayoutTemplateLoader()
+        config = _dirs_config(tmp_path / "first", tmp_path / "second")
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            assert layout_chain(page) == (first, second)
+            assert "<first>" in loader.compose_body("body", page)
+            rewrite_in_tick(first, ROOT_MARKER + _SHELL.format(tag="fresh"))
+            chain = layout_chain(page)
+            composed = loader.compose_body("body", page)
+            racy = layout_stamps(page)
+            tick[0] = TICK_NS + RACY_MTIME_WINDOW_NS
+            settled = layout_stamps(page)
+
+        assert chain == (first,)
+        assert "<fresh>" in composed
+        ((racy_path, racy_stamp),) = racy
+        assert racy_path == first
+        assert not trusted(racy_stamp)
+        assert settled == ((first, TICK_NS),)
+
+    def test_a_layout_above_the_tree_is_held_once_its_mtime_settles(
+        self, tmp_path, tick, monkeypatch
+    ) -> None:
+        site = tmp_path / "mid" / "site"
+        (site / "sub").mkdir(parents=True)
+        mid = _write_layout(site.parent, "mid")
+        rewrite_in_tick(mid)
+        page = site / "sub" / "page.py"
+        probed: list[Path] = []
+        layout_at = loaders_module._layout_at
+
+        def probing(directory: Path, *, linked: bool) -> tuple[Path, int] | None:
+            probed.append(directory)
+            return layout_at(directory, linked=linked)
+
+        monkeypatch.setattr(loaders_module, "_layout_at", probing)
+        with override_settings(
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(site)}
+        ):
+            assert layout_chain(page) == (mid,)
+            assert layout_chain(page) == (mid,)
+            racy = probed.count(site.parent)
+            tick[0] = TICK_NS + RACY_MTIME_WINDOW_NS
+            assert layout_chain(page) == (mid,)
+            assert layout_chain(page) == (mid,)
+
+        assert racy == 2
+        assert probed.count(site.parent) == 3
+
+    def test_a_page_module_rewritten_in_the_same_tick_loads_again(
+        self, tmp_path, tick
+    ) -> None:
+        page = tmp_path / "page.py"
+        rewrite_in_tick(page, "x = 1\n")
+        first, _error = load_page_module(page)
+        rewrite_in_tick(page, "x = 22\n")
+        second, _error = load_page_module(page)
+
+        assert first is not None
+        assert second is not None
+        assert (first.x, second.x) == (1, 22)
+
+    def test_an_ancestor_loaded_in_its_tick_vouches_for_no_memo(
+        self, tmp_path, tick
+    ) -> None:
+        _top, leaf = _ancestor_tree(tmp_path)
+        rewrite_in_tick(leaf)
+        taken, _modules = AncestorStamps.begin(leaf).loaded()
+
+        assert not trusted(taken.stamps[-1])
+        assert taken.revalidated() is None
 
 
 class TestLayoutChainCut:

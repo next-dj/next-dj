@@ -13,6 +13,7 @@ import { Wire, none } from "./wire";
 import type {
   Clock,
   CsrfPayload,
+  EnvelopeOptions,
   FetchAdapter,
   Navigate,
   Outcome,
@@ -43,6 +44,7 @@ import {
   currentUrl,
   fire,
   matching,
+  requestTimeout,
 } from "./protocol";
 import type { Diagnostics, WireTransport } from "./protocol";
 import type { StreamMeta } from "./stream";
@@ -71,6 +73,7 @@ export interface PartialAdapters {
   dialog?: DialogAdapter;
   history?: HistoryAdapter;
   popstate?: PopStateAdapter;
+  reload?: () => void;
   loadLink?: LinkLoader;
   observer?: IntersectionAdapter;
   session?: SessionStore;
@@ -170,7 +173,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   // The SSE bridge once its chunk has loaded, built with the adapters configured last.
   let bridge: Sse | undefined;
   let wsTransport: SocketTransport | undefined;
-  let sseAdapters: PartialAdapters | undefined;
+  // The adapters configured last, which a rebuilt bridge or wire takes.
+  let configured: PartialAdapters | undefined;
   // The request ids sent before the bridge is built. A stream that opens once its
   // chunk lands can still carry their echoes, so the bridge takes them over.
   let unbridged: string[] = [];
@@ -178,7 +182,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   let epoch = 0;
   const live = (factory: SseFactory): Sse => {
     if (bridge === undefined) {
-      bridge = factory(sseDeps(sseAdapters));
+      bridge = factory(sseDeps(configured));
       for (const id of unbridged) bridge.remember(id);
       unbridged = [];
     }
@@ -244,6 +248,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       epoch += 1;
     },
   };
+  let wireGeneration = 0;
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());
   let detachLayers = layers.install(document);
@@ -349,27 +354,37 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   }
 
   function wireDeps(adapters?: PartialAdapters) {
+    const generation = wireGeneration;
     return {
       // The fetch, document, navigate, and the session store the asset guard uses.
       ...adapters,
+      active: () => wireGeneration === generation,
       dispatch: announce(adapters),
       onEnvelope: (
         raw: unknown,
-        _response: Response,
-        snapshot: number,
-        key: string | undefined,
-        page: string | undefined,
-        owner: string | undefined,
+        { snapshot, key, page, owner, isCurrent }: EnvelopeOptions,
       ) =>
         new Promise<Applied>((done) => {
           // A mutation scopes no zones, but its meta op belongs to the submitting page.
-          const envelope = applier.apply(raw, { snapshot, key, page, owner, done });
+          const envelope = applier.apply(raw, {
+            snapshot,
+            key,
+            page,
+            owner,
+            done,
+            isCurrent,
+          });
           // A csrf meta rotates the token so the next mutation submits the fresh
           // one, not just the forms already in the document.
           if (envelope.csrf) surface.setCsrf(envelope.csrf);
         }),
       version: () => assets.version(),
-      csrf: { current: () => csrf.current(), ensure: () => csrf.ensure() },
+      // Read per request, so the $timeout of the _init payload applies once it lands.
+      timeout: () => requestTimeout(deps.context().$timeout),
+      csrf: {
+        current: () => csrf.current(),
+        ensure: (signal?: AbortSignal) => csrf.ensure(signal),
+      },
       dirtySnapshot: () => dirty.snapshot(),
       // Feeds the ring id to the SSE bridge so the echo stream event drops.
       rememberRequestId: (id: string) => stream.remember(id),
@@ -461,6 +476,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // Diagnostics that arrive after the ready scan check the already mounted page.
       if (mounted && diagnostics !== previous) diagnostics?.attrs(document);
       if (onlyDev(adapters)) return;
+      // A reply from the outgoing seams must not apply to the replacement runtime.
+      wireGeneration += 1;
+      wire._reset();
+      csrf.cancelPending();
       if (adapters.document !== undefined) dirty.install(adapters.document);
       if (adapters.history !== undefined) history = adapters.history;
       if (adapters.navigate !== undefined) navigate = adapters.navigate;
@@ -482,7 +501,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       triggers = createTriggers(triggerDeps(adapters));
       bridge = undefined;
       wsTransport = undefined;
-      sseAdapters = adapters;
+      configured = adapters;
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
       const doc = adapters.document ?? document;
@@ -491,7 +510,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       detachCsrf = csrf.install(doc);
     },
     _reset() {
+      wireGeneration += 1;
       wire._reset();
+      wire = new Wire(wireDeps(configured));
       applier._reset();
       dirty._reset();
       layers._reset();

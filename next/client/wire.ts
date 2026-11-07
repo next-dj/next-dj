@@ -10,12 +10,20 @@ import {
   HEADER_ZONE,
   REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
+  REQUEST_TIMEOUT_MS,
+  bounded,
   newId,
   pageKey,
   sameOrigin,
 } from "./protocol";
 import type { PartialError, WireTransport } from "./protocol";
-import { defaultFetch, defaultNavigate, defaultSession } from "./adapters";
+import {
+  defaultClock,
+  defaultFetch,
+  defaultNavigate,
+  defaultReload,
+  defaultSession,
+} from "./adapters";
 import type { Applied, Envelope } from "./apply";
 import type { SessionStore } from "./assets";
 
@@ -67,7 +75,8 @@ export interface CsrfPayload {
 export interface CsrfSource {
   current(): CsrfPayload | undefined;
   // null when the csrf chunk failed to load, a failure its loader already reported.
-  ensure(): Promise<CsrfPayload | undefined | null>;
+  // An abort ends only this caller's wait, a mint another caller waits on goes on.
+  ensure(signal?: AbortSignal): Promise<CsrfPayload | undefined | null>;
 }
 
 /** A single wire request with its queueing and locking intent. */
@@ -96,19 +105,22 @@ export interface WireRequest {
   navigate?: boolean;
 }
 
-/**
- * Receiver of a recognised envelope. The snapshot is the dirty counter captured at
- * fetch time so a field touched after the request is protected from its own
- * response. The page is the URL a safe zone GET fetched, absent on mutations. The
- * owner is the page a mutation was submitted from.
- */
+/** What a recognised envelope arrives with, read by name like ApplyOptions. */
+export interface EnvelopeOptions {
+  response: Response;
+  // The dirty counter at fetch time, so a field touched later survives its response.
+  snapshot: number;
+  key: string | undefined;
+  // The URL a safe zone GET fetched, absent on mutations.
+  page: string | undefined;
+  // The page a mutation was submitted from.
+  owner: string | undefined;
+  isCurrent: () => boolean;
+}
+
 export type EnvelopeHandler = (
   raw: unknown,
-  response: Response,
-  snapshot: number,
-  key: string | undefined,
-  page: string | undefined,
-  owner: string | undefined,
+  options: EnvelopeOptions,
 ) => Promise<Applied>;
 
 /** Turns a foreign content-type body into a JSON-ish envelope before apply. */
@@ -119,6 +131,11 @@ export interface WireDeps {
   fetch?: FetchAdapter;
   document?: Document;
   navigate?: Navigate;
+  clock?: Clock;
+  // The full reload a reply the server keeps to HTTP falls back to.
+  reload?: () => void;
+  // The deadline in ms, read per request, zero waiting forever and absent the default.
+  timeout?: () => number;
   // The navigate-once store of the non-envelope fallback. Absent, the default
   // wraps sessionStorage, the same store the version guard writes to.
   session?: SessionStore;
@@ -128,6 +145,8 @@ export interface WireDeps {
   csrf: CsrfSource;
   // The dirty counter read at fetch time, threaded to apply with the response.
   dirtySnapshot?: () => number;
+  // Invalidates in-flight work when the owning partial runtime is rebuilt.
+  active?: () => boolean;
   // Every mutating request stamps X-Next-Request-Id and reports it here so the
   // SSE echo ring drops the matching stream event. Absent, no id is stamped.
   rememberRequestId?: (id: string) => void;
@@ -150,12 +169,16 @@ export class Wire {
   readonly #fetch: FetchAdapter;
   readonly #document: Document;
   readonly #navigate: Navigate;
+  readonly #clock: Clock;
+  readonly #reload: () => void;
+  readonly #timeout: () => number;
   readonly #session: SessionStore;
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #onEnvelope: EnvelopeHandler;
   readonly #version: () => string;
   readonly #csrf: CsrfSource;
   readonly #dirtySnapshot: () => number;
+  readonly #active: () => boolean;
   readonly #rememberRequestId: (id: string) => void;
   readonly #forgetRequestId: (id: string) => void;
   readonly #tunnel: NonNullable<WireDeps["tunnel"]>;
@@ -170,12 +193,16 @@ export class Wire {
     this.#fetch = deps.fetch ?? defaultFetch();
     this.#document = deps.document ?? document;
     this.#navigate = deps.navigate ?? defaultNavigate();
+    this.#clock = deps.clock ?? defaultClock();
+    this.#reload = deps.reload ?? defaultReload();
+    this.#timeout = deps.timeout ?? (() => REQUEST_TIMEOUT_MS);
     this.#session = deps.session ?? defaultSession();
     this.#dispatch = deps.dispatch;
     this.#onEnvelope = deps.onEnvelope;
     this.#version = deps.version ?? (() => "");
     this.#csrf = deps.csrf;
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
+    this.#active = deps.active ?? (() => true);
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
     this.#forgetRequestId = deps.forgetRequestId ?? (() => undefined);
     this.#tunnel = deps.tunnel ?? (() => undefined);
@@ -221,6 +248,7 @@ export class Wire {
 
   /** Shape, queue or lock, send, and classify a single request. */
   async fetch(request: WireRequest): Promise<Outcome> {
+    if (!this.#active()) return none("dropped");
     const target = sameOrigin(request.url, this.#document);
     if (target === undefined) {
       return this.#fail({
@@ -244,6 +272,7 @@ export class Wire {
         if (!(await new Promise<boolean>((resume) => busy.push(resume))))
           return none("dropped");
       }
+      if (!this.#active()) return none("dropped");
       const waiters = busy ?? [];
       if (!busy) this.#busy.set(uid, waiters);
       release = () => {
@@ -259,16 +288,12 @@ export class Wire {
       let csrf = this.#csrf.current();
       // A deferred token is fetched inside the lock, so a double submit fetches once.
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
-        const ensured = await this.#csrf.ensure();
+        const ensured = await this.#ensureCsrf();
         if (ensured === null) return none("error");
+        // Told apart by the header, as a DOMException is not an Error in every realm.
+        if (!("header" in ensured))
+          return this.#fail({ kind: "csrf", url: request.url, error: ensured });
         csrf = ensured;
-        if (csrf?.token === undefined) {
-          return this.#fail({
-            kind: "csrf",
-            url: request.url,
-            error: new Error("no CSRF token for the mutation"),
-          });
-        }
       }
       return await this.#run(request, target, method, csrf, queueKey, entry);
     } finally {
@@ -277,6 +302,40 @@ export class Wire {
         this.#queues.delete(queueKey);
       }
     }
+  }
+
+  // A token fetch that never answers fails on the deadline, so it frees the uid lock.
+  // A missing token or the deadline answers the Error the csrf failure carries.
+  async #ensureCsrf(): Promise<CsrfPayload | null | Error> {
+    const controller = new AbortController();
+    const disarm = this.#arm(controller);
+    try {
+      const ensured = await bounded(
+        this.#csrf.ensure(controller.signal),
+        controller.signal,
+      );
+      return ensured === null || ensured?.token !== undefined
+        ? ensured
+        : new Error("no CSRF token for the mutation");
+    } catch (error) {
+      if (controller.signal.aborted) return controller.signal.reason as Error;
+      throw error;
+    } finally {
+      disarm();
+    }
+  }
+
+  // Abort the controller with a TimeoutError once the deadline passes, zero never.
+  #arm(controller: AbortController): () => void {
+    const ms = this.#timeout();
+    const timer =
+      ms > 0
+        ? this.#clock.setTimeout(
+            () => controller.abort(new DOMException("timed out", "TimeoutError")),
+            ms,
+          )
+        : 0;
+    return () => this.#clock.clearTimeout(timer);
   }
 
   // A zone GET queues per path+zone so two pages sharing a zone name run
@@ -309,6 +368,11 @@ export class Wire {
     queueKey: string | undefined,
     entry: AbortController | undefined,
   ): Promise<Outcome> {
+    const isCurrent = (): boolean =>
+      this.#active() &&
+      entry?.signal.aborted !== true &&
+      (queueKey === undefined || this.#queues.get(queueKey) === entry);
+    if (!isCurrent()) return none("dropped");
     // Snapshot the dirty counter before the request is sent. A field touched after
     // this point is dirty relative to the response it will receive.
     const snapshot = this.#dirtySnapshot();
@@ -317,6 +381,12 @@ export class Wire {
       method,
       intent: { zone: request.zone, uid: request.uid },
     });
+    // One signal ends the request on its deadline or a supersede, armed after a tunnel.
+    const deadline = new AbortController();
+    let disarm: (() => void) | undefined;
+    // A before-request listener may already have aborted the queue.
+    if (entry?.signal.aborted === true) deadline.abort();
+    entry?.signal.addEventListener("abort", () => deadline.abort(), { once: true });
     // Inside the try, since a caller's header name can be invalid and an abort or a
     // dropped connection can reject the body read after the headers arrived.
     let own: string | undefined;
@@ -334,10 +404,13 @@ export class Wire {
       }
       const init: RequestInit = { method, headers, mode: "same-origin" };
       if (request.body !== undefined) init.body = request.body;
-      if (entry !== undefined) init.signal = entry.signal;
+      init.signal = deadline.signal;
       const tunneled =
         request.transport === "any" && method === "POST"
-          ? await this.#tunnel(target, init, csrf?.header)
+          ? await bounded(
+              Promise.resolve(this.#tunnel(target, init, csrf?.header)),
+              deadline.signal,
+            )
           : undefined;
       if (typeof tunneled === "string" && request.abortable !== true) {
         if (own !== undefined) this.#forgetRequestId(own);
@@ -346,20 +419,37 @@ export class Wire {
           url: request.url,
           reason: tunneled,
         });
-        if (tunneled === REFUSAL_HTTP_ONLY) this.#document.location.reload();
+        if (tunneled === REFUSAL_HTTP_ONLY) this.#reload();
         return failed;
       }
+      disarm = this.#arm(deadline);
       const response =
-        tunneled instanceof Response ? tunneled : await this.#fetch(target, init);
+        tunneled instanceof Response
+          ? tunneled
+          : await bounded(this.#fetch(target, init), deadline.signal);
       // A safe-GET response that a newer request superseded is dropped unreported.
-      if (queueKey !== undefined && this.#queues.get(queueKey) !== entry)
-        return none("dropped");
-      return await this.#classify(request, target, method, response, snapshot);
+      if (!isCurrent()) return none("dropped");
+      return await this.#classify(
+        request,
+        target,
+        method,
+        response,
+        snapshot,
+        isCurrent,
+      );
     } catch (error) {
+      // A request past its deadline may have committed, so its echo must refresh too.
+      const reason = deadline.signal.reason as Error | undefined;
+      if (reason?.name === "TimeoutError") {
+        if (own !== undefined) this.#forgetRequestId(own);
+        return this.#fail({ kind: "network", url: request.url, error: reason });
+      }
       // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error) || entry?.signal.aborted === true) return none("dropped");
       if (own !== undefined) this.#forgetRequestId(own);
       return this.#fail({ kind: "network", error });
+    } finally {
+      disarm?.();
     }
   }
 
@@ -374,6 +464,7 @@ export class Wire {
     method: string,
     response: Response,
     snapshot: number,
+    isCurrent: () => boolean,
   ): Promise<Outcome> {
     // A 409 on a safe method means an asset version mismatch with an empty body. The
     // runtime then does a full visit of the current URL and nothing else.
@@ -381,10 +472,7 @@ export class Wire {
       this.#navigate(response.url || target);
       return none("ok");
     }
-    if (response.status >= 500) {
-      const body = await response.text();
-      return this.#fail({ kind: "http", status: response.status, body });
-    }
+    const crashed = response.status >= 500;
     // Only a safe zone GET names a page. Mutations keep the unscoped resolve.
     const page =
       SAFE_METHODS.has(method) && request.zone !== undefined
@@ -394,19 +482,22 @@ export class Wire {
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
     // A mutation never navigates to its own endpoint, that would answer 405
-    if (hook === undefined && (baseType !== CONTENT_TYPE || response.redirected)) {
-      const navigates = response.redirected || SAFE_METHODS.has(method);
-      const refused = !response.redirected && (response.status >= 400 || !navigates);
-      if (!refused)
-        return request.navigate === false
-          ? { ...none("ok"), location: response.url || target }
-          : this.#fallbackNavigate(response.url || target);
-      const body = await response.text();
+    const foreign =
+      !crashed &&
+      hook === undefined &&
+      (baseType !== CONTENT_TYPE || response.redirected);
+    const navigates = response.redirected || SAFE_METHODS.has(method);
+    if (foreign && (response.redirected || (response.status < 400 && navigates)))
+      return request.navigate === false
+        ? { ...none("ok"), location: response.url || target }
+        : this.#fallbackNavigate(response.url || target);
+    const body = await response.text();
+    if (!isCurrent()) return none("dropped");
+    if (crashed || foreign) {
       const failed = this.#fail({ kind: "http", status: response.status, body });
-      if (navigates) this.#fallbackNavigate(response.url || target);
+      if (foreign && navigates) this.#fallbackNavigate(response.url || target);
       return failed;
     }
-    const body = await response.text();
     // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
     // is a parse error rather than an unhandled rejection of a fire-and-forget fetch.
     try {
@@ -414,14 +505,15 @@ export class Wire {
       // Cleared once the body parses, so a later non-envelope reply on this page
       // navigates once more.
       this.#session.remove(NAVIGATED_FLAG);
-      const { envelope, ok } = await this.#onEnvelope(
-        raw,
+      const { envelope, ok, stale } = await this.#onEnvelope(raw, {
         response,
         snapshot,
-        request.key,
+        key: request.key,
         page,
-        request.owner,
-      );
+        owner: request.owner,
+        isCurrent,
+      });
+      if (stale === true) return none("dropped");
       const invalid = envelope.form?.valid === false;
       return {
         status: invalid ? "invalid" : response.status < 400 ? "ok" : "error",

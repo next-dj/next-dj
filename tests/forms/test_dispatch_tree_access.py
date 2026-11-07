@@ -32,6 +32,7 @@ from tests.support.access import (
     login_required_middleware,
     write_guard,
 )
+from tests.support.forms import logged_request_error, post_without_origin
 
 
 _PERM = "auth.view_user"
@@ -109,6 +110,11 @@ def _post(root: Path, kind: str, action: str, origin: str, **framework: object):
         return client.post_action(action, {"name": "x"}, origin=origin)
 
 
+def _post_without_origin(root: Path, kind: str, action: str, **framework: object):
+    with routed(root, **framework):
+        return post_without_origin(client_as(kind), action, {"name": "x"})
+
+
 def _assert_status(response, status: int, origin: str) -> None:
     assert response.status_code == status
     if status == 302:
@@ -173,20 +179,26 @@ class TestOwnerRule:
             write_guard(root, "page.login_required(inherit=True)\n")
             _assert_status(_post(root, "anonymous", "note", "/notes/"), 302, "/notes/")
 
-    @pytest.mark.parametrize("origin", ["/open/", None])
+    @pytest.mark.parametrize("origin", ["/open/", "/notes/"])
     def test_a_file_beside_a_page_answers_its_rule_from_any_origin(
-        self, tmp_path: Path, origin: str | None
+        self, tmp_path: Path, origin: str
     ) -> None:
         tree = _Tree(
             {"open": _plain(), "notes": _plain(_LOGIN)},
             beside={"notes": _action("note")},
         )
         root = tree.write(tmp_path / "pages")
-        with routed(root):
-            response = client_as("anonymous").post_action(
-                "note", {"name": "x"}, origin=origin
-            )
-        _assert_status(response, 302, origin or "/")
+        _assert_status(_post(root, "anonymous", "note", origin), 302, origin)
+
+    def test_a_file_beside_a_page_refuses_a_post_without_an_origin(
+        self, tmp_path: Path
+    ) -> None:
+        tree = _Tree(
+            {"open": _plain(), "notes": _plain(_LOGIN)},
+            beside={"notes": _action("note")},
+        )
+        root = tree.write(tmp_path / "pages")
+        assert _post_without_origin(root, "anonymous", "note").status_code == 400
 
     @pytest.mark.parametrize(("kind", "status"), _LOGIN_STATUS)
     def test_a_guard_in_a_skipped_folder_binds_its_files(
@@ -267,8 +279,8 @@ class TestActionOutsideTheTree:
         _outside(tmp_path)
         _assert_status(_post(root, kind, "loose_note", origin), status, origin)
 
-    def test_an_action_without_a_file_answers_an_open_rule(self) -> None:
-        held = _tree(None, None)
+    def test_an_action_outside_every_tree_answers_an_open_rule(self) -> None:
+        held = _tree("/elsewhere/forms.py", None)
 
         assert (held.rule, held.broken, held.deferred) == (OPEN, None, True)
 
@@ -366,22 +378,19 @@ class TestLoginByDefault:
         _outside(tmp_path)
         _assert_status(_closed(root, kind, action, origin, by), status, origin)
 
-    @pytest.mark.parametrize(
-        ("action", "status"),
-        [("public_note", 200), ("beside_note", 200), ("hidden_note", 302)],
-    )
+    @pytest.mark.parametrize("action", ["public_note", "beside_note", "hidden_note"])
     @pytest.mark.parametrize(
         ("framing", "framework"),
         [(login_required_middleware, {}), (nullcontext, {"LOGIN_REQUIRED": True})],
         ids=["middleware", "setting"],
     )
-    def test_a_post_without_an_origin(
-        self, tmp_path: Path, action: str, status: int, framing, framework
+    def test_a_post_without_an_origin_is_a_400(
+        self, tmp_path: Path, action: str, framing, framework
     ) -> None:
         root = _DEFAULTS.write(tmp_path / "pages")
-        with framing(), routed(root, **framework):
-            response = client_as("anonymous").post_action(action, {"name": "x"})
-        _assert_status(response, status, "/")
+        with framing():
+            response = _post_without_origin(root, "anonymous", action, **framework)
+        assert response.status_code == 400
 
     def test_without_the_middleware_an_open_action_stays_open(
         self, tmp_path: Path
@@ -487,17 +496,15 @@ class TestObjectRule:
         response = _post(root, "visitor", "owner_note", f"/owner/{group.pk}/")
         assert response.status_code == 404
 
-    @pytest.mark.parametrize("origin", ["/bare/", None], ids=["bare", "missing"])
-    def test_an_origin_without_the_kwarg_is_a_400(
-        self, tmp_path: Path, origin: str | None
-    ) -> None:
+    def test_an_origin_without_the_kwarg_is_a_400(self, tmp_path: Path) -> None:
         add_perm(_READ, lambda _user, _obj: True)
         root = _OBJECTS.write(tmp_path / "pages")
-        with routed(root):
-            response = client_as("visitor").post_action(
-                "owner_note", {"name": "x"}, origin=origin
-            )
-        assert response.status_code == 400
+        assert _post(root, "visitor", "owner_note", "/bare/").status_code == 400
+
+    def test_a_missing_origin_is_a_400(self, tmp_path: Path) -> None:
+        add_perm(_READ, lambda _user, _obj: True)
+        root = _OBJECTS.write(tmp_path / "pages")
+        assert _post_without_origin(root, "visitor", "owner_note").status_code == 400
 
     def test_the_check_and_the_handler_read_one_row(self, tmp_path: Path) -> None:
         add_perm(_READ, lambda _user, _obj: True)
@@ -518,11 +525,23 @@ class TestBrokenGuard:
     """A `page.py` above that fails to import refuses every action below it."""
 
     @pytest.mark.parametrize("kind", ["anonymous", "holder"])
-    def test_status(self, tmp_path: Path, kind: str) -> None:
+    @override_settings(DEBUG=False)
+    def test_status(
+        self, tmp_path: Path, kind: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
         root = tmp_path / "pages"
         _Tree({"notes": _action("note")}).write(root)
-        write_guard(root, 'raise RuntimeError("broken guard")\n')
-        assert _post(root, kind, "note", "/notes/").status_code == 404
+        guard = write_guard(root, 'raise RuntimeError("broken guard")\n')
+        with routed(root):
+            client = client_as(kind)
+            client.raise_request_exception = False
+            response = client.post_action("note", {"name": "x"}, origin="/notes/")
+
+        assert response.status_code == 500
+        assert b"broken guard" not in response.content
+        error = logged_request_error(caplog)
+        assert isinstance(error, PageModuleImportError)
+        assert error.file_path == guard
 
     def test_failing_loudly_raises_the_import_error(self, tmp_path: Path) -> None:
         root = tmp_path / "pages"

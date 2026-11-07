@@ -867,12 +867,8 @@ class Patches:
         """
         context = self._render_contexts.get(page_path)
         if context is None:
-            # Pinned so mypy does not read the url kwarg splat as the zone batch.
             context = page_manager.build_render_context(
-                page_path,
-                self._require_request(),
-                _requested_zones=None,
-                **self._origin_url_kwargs(),
+                page_path, self._require_request(), self._origin_url_kwargs()
             )
             self._render_contexts[page_path] = context
         return dict(context)

@@ -152,7 +152,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
      - When the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission checked on the bound form denies a request, never on the static guard path.
        ``layer`` is ``"page"``, ``"view"``, or ``"object"``, and a registered permission refused on the bound form is ``"object"`` with ``"denied"``.
-       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is ``"denied"`` for a refused access rule and ``"response"`` for a ``render()`` that answered.
+       ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is ``"denied"`` for a refused access rule or an origin outside the directory of an owner page with a ``render()``, a route with no page included, and ``"response"`` for a ``render()`` that answered.
    * - ``form_backend_loaded``
      - The form action backend class
      - ``config``, ``instance``

@@ -129,6 +129,74 @@ describe("layer stack", () => {
     expect(found!.closest("dialog")).not.toBeNull();
   });
 
+  it("shares one history entry for nested layers with the same URL", async () => {
+    const before = window.history.length;
+    layers.install(document);
+    await layers.open(null, "/w/", "outer");
+    await layers.open(null, "/w/", "inner");
+    expect(layers.size()).toBe(2);
+    expect(window.history.length).toBe(before + 1);
+
+    window.history.replaceState(null, "", "/feed/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(layers.size()).toBe(0);
+  });
+
+  it("pushes an own entry for a page that only a lower layer shows", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    const before = window.history.length;
+    layers.install(document);
+    await layers.open(null, "/w/", "a");
+    await layers.open(null, "/x/", "b");
+    await layers.open(null, "/w/", "c");
+    expect(window.history.length).toBe(before + 3);
+    expect(window.location.pathname).toBe("/w/");
+
+    window.history.replaceState(null, "", "/x/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(layers.size()).toBe(2);
+    expect(window.location.pathname).toBe("/x/");
+  });
+
+  it("restores the URL below when a non-sharing layer closes", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    await layers.open(null, "/w/", "a");
+    await layers.open(null, "/x/", "b");
+    await layers.open(null, "/w/", "c");
+
+    layers.close({});
+    expect(layers.size()).toBe(2);
+    expect(window.location.pathname).toBe("/x/");
+  });
+
+  it("keeps the shared URL when the inner of two same-URL layers closes", async () => {
+    window.history.replaceState(null, "", "/feed/");
+    await layers.open(null, "/w/", "outer");
+    await layers.open(null, "/w/", "inner");
+
+    layers.close({});
+    expect(layers.size()).toBe(1);
+    expect(window.location.pathname).toBe("/w/");
+  });
+
+  it("drops a concurrent layer open for a URL whose first body is pending", async () => {
+    let settle: (() => void) | undefined;
+    const navigation = createNavigation({ dispatch: () => undefined });
+    const pending = createTrackedLayers({
+      dispatch: () => undefined,
+      fetch: () => new Promise((resolve) => (settle = () => resolve(undefined))),
+      document,
+      dialog: mockDialog().adapter,
+      navigation,
+    });
+    const first = pending.open(null, "/w/", "outer");
+
+    await pending.open(null, "/w/", "inner");
+    expect(pending.size()).toBe(1);
+    settle?.();
+    await first;
+  });
+
   it("resolves a zone nested inside a layer container", async () => {
     await layers.open(null, "/w/", "outer");
     const container = document.querySelector('dialog [data-next-zone="outer"]')!;
@@ -395,6 +463,50 @@ describe("layer stack", () => {
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     opener.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+    expect(layers.size()).toBe(0);
+    detach();
+  });
+
+  it.each([
+    { metaKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+    { altKey: true },
+    { button: 1 },
+  ])("leaves a layer link clicked with %o to the browser", (init) => {
+    const detach = layers.install(document);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "z");
+    document.body.append(opener);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, ...init });
+    opener.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(layers.size()).toBe(0);
+    detach();
+  });
+
+  it.each([['target="_blank"'], ["download"]])(
+    "leaves a layer link carrying %s to the browser",
+    (attr) => {
+      const detach = layers.install(document);
+      document.body.innerHTML = `<a href="/wizard/" data-next-layer="z" ${attr}>go</a>`;
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      document.querySelector("a")!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(layers.size()).toBe(0);
+      detach();
+    },
+  );
+
+  it("opens no layer for a click a handler on the link already cancelled", () => {
+    const detach = layers.install(document);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "z");
+    opener.addEventListener("click", (e) => e.preventDefault());
+    document.body.append(opener);
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(layers.size()).toBe(0);
     detach();
   });

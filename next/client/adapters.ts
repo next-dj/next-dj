@@ -32,6 +32,11 @@ export function defaultNavigate(): Navigate {
   return (url) => globalThis.location.assign(url);
 }
 
+/** The reload seam, jsdom does not implement location.reload. */
+export function defaultReload(): () => void {
+  return () => globalThis.location.reload();
+}
+
 /** The history seam the navigation writes through, over the History global. */
 export function defaultHistory(): HistoryAdapter {
   return {

@@ -4,7 +4,14 @@
 
 import { defaultFetch } from "./adapters";
 import type { LazyModule } from "./chunks";
-import { ATTR_ACTION, REQUEST_FLAG, asString, isRecord, sameOrigin } from "./protocol";
+import {
+  ATTR_ACTION,
+  REQUEST_FLAG,
+  asString,
+  bounded,
+  isRecord,
+  sameOrigin,
+} from "./protocol";
 import type { CsrfPayload, CsrfSource, FetchAdapter } from "./wire";
 
 /** Fetch a token from its endpoint, resolving undefined on any failure. */
@@ -12,10 +19,12 @@ export type CsrfMint = (
   url: string,
   fetch: FetchAdapter,
   doc: Document,
+  signal?: AbortSignal,
 ) => Promise<CsrfPayload | undefined>;
 
 export interface Csrf extends CsrfSource {
   set(payload: CsrfPayload | undefined): void;
+  cancelPending(): void;
   /** Prefetch the token on the first focus or press inside an action form. */
   install(doc: Document): () => void;
   _reset(): void;
@@ -46,6 +55,7 @@ export async function mintCsrf(
   url: string,
   fetch: FetchAdapter,
   doc: Document,
+  signal?: AbortSignal,
 ): Promise<CsrfPayload | undefined> {
   const target = sameOrigin(url, doc);
   try {
@@ -55,6 +65,7 @@ export async function mintCsrf(
         credentials: "same-origin",
         cache: "no-store",
         headers: { [REQUEST_FLAG]: "1" },
+        ...(signal === undefined ? {} : { signal }),
       });
       if (response.ok) return readCsrf(await response.json());
     }
@@ -70,42 +81,75 @@ export function createCsrf(deps: CsrfDeps): Csrf {
   const doc = deps.document ?? document;
   let payload: CsrfPayload | undefined;
   let pending: Promise<CsrfPayload | undefined | null> | undefined;
+  // The signals of the callers waiting on the pending mint, which ends once all abort.
+  let waiters: AbortSignal[] = [];
+  let controller: AbortController | undefined;
   // Incremented by set and _reset, so a fetch started earlier cannot overwrite them.
   let epoch = 0;
 
   async function mint(url: string): Promise<CsrfPayload | undefined | null> {
     const started = epoch;
+    const { signal } = (controller = new AbortController());
     const mintWith = deps.mint.get() ?? (await deps.mint.load());
     // A chunk that cannot load answers null, since its loader reported it as an asset.
-    const minted = mintWith === undefined ? null : await mintWith(url, fetch, doc);
+    const minted =
+      mintWith === undefined
+        ? null
+        : started === epoch
+          ? await mintWith(url, fetch, doc, signal)
+          : undefined;
     // A token an envelope set while this fetch was in flight is newer and is kept.
     if (started !== epoch) return payload;
-    if (minted?.token === undefined) {
-      // Cleared, so the next mutation fetches again instead of failing permanently.
-      pending = undefined;
-      return minted === null ? null : undefined;
-    }
+    // Cleared, so the next mutation fetches again and a late abort cancels nothing.
+    pending = undefined;
+    if (minted?.token === undefined) return minted === null ? null : undefined;
     payload = minted;
     deps.rotated?.(minted.token);
     return minted;
   }
 
-  function ensure(): Promise<CsrfPayload | undefined | null> {
+  function ensure(signal?: AbortSignal): Promise<CsrfPayload | undefined | null> {
     const url = payload?.url;
     if (payload?.token !== undefined || url === undefined)
       return Promise.resolve(payload);
-    pending ??= mint(url);
-    return pending;
+    // An aborted caller starts no mint.
+    if (signal?.aborted === true) return bounded(Promise.resolve(payload), signal);
+    if (pending === undefined) {
+      waiters = [];
+      // mint awaits before it touches pending, so the promise is in place by then.
+      pending = mint(url);
+    }
+    const active = pending;
+    if (signal === undefined) return active;
+    waiters.push(signal);
+    signal.addEventListener(
+      "abort",
+      () => {
+        if (pending === active && waiters.every((waiter) => waiter.aborted))
+          cancelPending();
+      },
+      { once: true },
+    );
+    return bounded(active, signal);
+  }
+
+  // Aborting the controller of a mint that already settled is harmless.
+  function cancelPending(): void {
+    controller?.abort();
+    pending = undefined;
+    epoch += 1;
+  }
+
+  function set(next: CsrfPayload | undefined): void {
+    payload = next;
+    cancelPending();
   }
 
   return {
     current: () => payload,
     ensure,
-    set(next) {
-      payload = next;
-      pending = undefined;
-      epoch += 1;
-    },
+    cancelPending,
+    set,
     install(target) {
       const controller = new AbortController();
       const prefetch = (event: Event): void => {
@@ -119,10 +163,6 @@ export function createCsrf(deps: CsrfDeps): Csrf {
       target.addEventListener("pointerdown", prefetch, options);
       return () => controller.abort();
     },
-    _reset() {
-      payload = undefined;
-      pending = undefined;
-      epoch += 1;
-    },
+    _reset: () => set(undefined),
   };
 }

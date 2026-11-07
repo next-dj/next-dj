@@ -1,5 +1,6 @@
 import functools
 import importlib.util
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -15,6 +16,7 @@ from next.components import (
     component,
     render_component,
 )
+from next.errors import AsyncCallableError
 from next.static import StaticCollector
 from tests.support import (
     assert_bounded_by_insert_age,
@@ -662,3 +664,20 @@ class TestComponentContextRegistryLookupBound:
             entry.func for entry in reg.get_functions(link_dir / "component.py")
         ] == [provide]
         assert list(reg._lookup_cache) == [link_dir / "component.py"]
+
+
+class TestComponentContextAsyncRefusal:
+    """An async `@component.context` callable is refused before it is registered."""
+
+    def test_decorator_refuses_async(self) -> None:
+        manager = ComponentContextManager()
+
+        async def greeting() -> str:
+            return "hi"
+
+        with pytest.raises(
+            AsyncCallableError,
+            match=re.escape('@component.context callable "greeting"'),
+        ):
+            manager.context("greeting")(greeting)
+        assert len(manager.registry) == 0

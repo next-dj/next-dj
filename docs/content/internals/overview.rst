@@ -240,6 +240,8 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
        ``ActionOwners`` lets the body-source check read the directories that declare actions without importing ``next.forms``, ``FormRoutes`` lets the URL checks read the form action routes without importing ``next.forms``, ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``, and ``RealtimeNegotiation`` lets the page payload name the transports and content types of a stream without importing ``next.realtime``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the ``TreeSource`` loader of a file at the top of a page tree.
+   * - ``next.stamps``
+     - A single flat module holding the freshness stamps of files, which never trust an mtime written in the current clock tick.
    * - ``next.caches``
      - A single flat module holding ``BoundedCache`` and ``LruCache``, so every memo in the framework carries its own bound and eviction policy rather than leaving it to the caller.
    * - ``next.introspect``

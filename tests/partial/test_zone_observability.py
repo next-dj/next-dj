@@ -164,8 +164,8 @@ class TestFullPageRenderEquivalence:
             zoned_dir, '<main>{% zone "z" %}<p>{{ msg }}</p>{% endzone %}</main>'
         )
 
-        plain = page_instance.render(plain_page, msg="hi")
-        zoned = page_instance.render(zoned_page, msg="hi")
+        plain = page_instance.render(plain_page, url_kwargs={"msg": "hi"})
+        zoned = page_instance.render(zoned_page, url_kwargs={"msg": "hi"})
         opener = f'<div {ZONE_ATTR}="z">'
         assert zoned == plain.replace("<p>hi</p>", f"{opener}<p>hi</p></div>")
 
@@ -314,7 +314,7 @@ class TestLayoutAndComponentComposites:
         template = page_instance.composed_template_for(page_file)
         assert set(zones_of(template, page_file)) == {"footer", "main"}
 
-        out = page_instance.render(page_file, m="M", f="F")
+        out = page_instance.render(page_file, url_kwargs={"m": "M", "f": "F"})
         assert f'<main><div {ZONE_ATTR}="main"><p>M</p></div></main>' in out
         assert f'<div {ZONE_ATTR}="footer"><p>F</p></div>' in out
 

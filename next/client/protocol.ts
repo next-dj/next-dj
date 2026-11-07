@@ -39,6 +39,33 @@ export function pollInterval(raw: string | null): number | null {
   return ms >= MIN_POLL_MS && ms <= MAX_POLL_MS ? ms : null;
 }
 
+/** The request deadline when the payload names none, long enough for a slow upload. */
+export const REQUEST_TIMEOUT_MS = 30000;
+/** The longest request deadline, the signed-32-bit timer ceiling. */
+export const MAX_TIMEOUT_MS = 2147483647;
+
+// Read the $timeout value in ms, zero turning it off and out of range the default.
+export function requestTimeout(raw: unknown): number {
+  return typeof raw === "number" && raw >= 0 && raw <= MAX_TIMEOUT_MS
+    ? raw
+    : REQUEST_TIMEOUT_MS;
+}
+
+// Settle with work or reject on abort, so even a transport ignoring the signal ends.
+export function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const stop = (): void =>
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("aborted", "AbortError"),
+      );
+    if (signal.aborted) stop();
+    signal.addEventListener("abort", stop, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 /** The dev diagnostics, provided by next.dev.min.js once it loads for a $dev page. */
 export interface Diagnostics {
   /** Report what the envelope boundary dropped from a raw wire envelope. */

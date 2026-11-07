@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 import os
 import sys
@@ -7,6 +5,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from django.apps import apps
+from django.core.exceptions import AppRegistryNotReady
 from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
@@ -20,9 +20,11 @@ from next.utils import (
     PageRoot,
     TreeSource,
     after_fork,
+    app_holding,
     child_nodelists,
     classify_dirs_entries,
     exec_module_file,
+    forget_app_holdings,
     int_between,
     is_dynamic_trail,
     is_int,
@@ -42,12 +44,12 @@ from next.utils import (
     regex_trail,
     resolve_base_dir,
     resolve_intercept,
-    stat_mtime_ns,
     strip_route_groups,
     template_edits_watched,
     walk_page_tree,
 )
-from tests.support import write_page
+from tests.support import rewrite_in_tick, write_page
+from tests.support.apps import fake_app_configs
 from tests.support.cases.grammar import (
     INTERCEPT_NAME_CASES,
     INTERCEPT_RESOLVE_CASES,
@@ -57,20 +59,6 @@ from tests.support.cases.grammar import (
 
 
 _OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
-
-
-class TestStatMtimeNs:
-    """Tests for ``stat_mtime_ns``."""
-
-    def test_a_file_reports_the_nanoseconds_its_stat_carries(self, tmp_path) -> None:
-        """The value is the one a caller comparing snapshots would take itself."""
-        target = tmp_path / "page.py"
-        target.write_text("")
-        assert stat_mtime_ns(target) == target.stat().st_mtime_ns
-
-    def test_a_path_that_does_not_stat_reports_nothing(self, tmp_path) -> None:
-        """Nothing rather than a sentinel, because no real mtime equals nothing."""
-        assert stat_mtime_ns(tmp_path / "never-written") is None
 
 
 class TestIsWithin:
@@ -1050,6 +1038,19 @@ class TestExecModuleFile:
                 assert module is not None
                 assert module.value == value
 
+    @pytest.mark.usefixtures("tick")
+    def test_a_same_size_rewrite_in_one_tick_runs_the_new_source(
+        self, tmp_path
+    ) -> None:
+        path = tmp_path / "x.py"
+        with patch.object(sys, "dont_write_bytecode", False):
+            for value in (1, 2):
+                rewrite_in_tick(path, f"value = {value}\n")
+                module = exec_module_file(path, "probe")
+                assert module is not None
+                assert module.value == value
+        assert not list(tmp_path.glob("__pycache__/*.pyc"))
+
     def test_a_suffix_without_a_loader_answers_none(self, tmp_path) -> None:
         path = tmp_path / "x.unknown"
         path.write_text("value = 1\n")
@@ -1149,3 +1150,73 @@ class TestChildNodelists:
         (node,) = Template('{% has_perm "a.b" %}x{% endhas_perm %}').nodelist
         node.nodelist_false = None
         assert list(child_nodelists(node)) == [node.nodelist_true]
+
+
+class TestAppHolding:
+    """The deepest installed app holding a path names it, memoised until it moves."""
+
+    @pytest.mark.parametrize(
+        "folders",
+        [("outer", "outer/inner"), ("outer/inner", "outer")],
+        ids=["outer-first", "inner-first"],
+    )
+    def test_the_deepest_app_wins_in_either_order(self, tmp_path, folders) -> None:
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        (inner / "pages").mkdir(parents=True)
+        configs = fake_app_configs(*((Path(at).name, tmp_path / at) for at in folders))
+        with patch.object(apps, "get_app_configs", return_value=configs):
+            assert app_holding(inner / "pages") == ("inner", "pages")
+            assert app_holding(outer / "x.py") == ("outer", "x.py")
+
+    def test_a_symlinked_path_resolves_into_its_app(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        (app / "pages").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(app)
+        with patch.object(
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
+        ):
+            assert app_holding(link / "pages") == ("app", "pages")
+
+    def test_a_path_taken_as_resolved_is_answered_apart(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        (app / "pages").mkdir(parents=True)
+        link = tmp_path / "link"
+        link.symlink_to(app)
+        with patch.object(
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
+        ):
+            assert app_holding(link / "pages") == ("app", "pages")
+            assert app_holding(link / "pages", resolved=True) is None
+            assert app_holding(link / "pages") == ("app", "pages")
+
+    def test_a_path_outside_every_app_is_none(self, tmp_path) -> None:
+        with patch.object(apps, "get_app_configs", return_value=[]):
+            assert app_holding(tmp_path) is None
+
+    def test_an_unready_registry_answers_none_without_caching(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        app.mkdir()
+        with patch.object(
+            apps, "get_app_configs", side_effect=AppRegistryNotReady("early")
+        ):
+            assert app_holding(app) is None
+        with patch.object(
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
+        ):
+            assert app_holding(app) == ("app", ".")
+
+    def test_the_answer_is_memoised_until_the_app_list_changes(self, tmp_path) -> None:
+        app = tmp_path / "app"
+        app.mkdir()
+        with patch.object(
+            apps, "get_app_configs", return_value=fake_app_configs(("app", app))
+        ):
+            assert app_holding(app) == ("app", ".")
+        with patch.object(apps, "get_app_configs", return_value=[]):
+            assert app_holding(app) == ("app", ".")
+            forget_app_holdings(setting="ROOT_URLCONF")
+            assert app_holding(app) == ("app", ".")
+            forget_app_holdings(setting="INSTALLED_APPS")
+            assert app_holding(app) is None

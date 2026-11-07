@@ -2,11 +2,12 @@
 
 import itertools
 import types
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Final, override
 
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import BackendListManager, backend_entries, load_backends
+from next.introspect import refuse_async
 
 from .backends import FormActionBackend, declaring_files
 from .dispatch.build import _form_action_context_callable
@@ -30,6 +31,31 @@ type ActionsSnapshot = tuple[tuple[FormActionBackend, object], ...]
 
 _version_counter = itertools.count(1)
 """Process-wide source of form-action versions, so no two managers share one."""
+
+
+_PLAIN_FORM_HOOKS: Final = ("get_initial", "get_success_message")
+"""Hooks dispatch calls on a plain Django form, refused when it registers."""
+
+
+def _refuse_async_registration(registration: "ActionRegistration") -> None:
+    """Refuse an async handler, form class factory or hook of a plain Django form.
+
+    `BaseForm`, `BaseModelForm` and `FormWizard` refuse their hooks at class creation.
+    """
+    if registration.handler is not None:
+        refuse_async(registration.handler, "@action handler")
+    form_class = registration.form_class
+    if form_class is None:
+        return
+    if not isinstance(form_class, type):
+        refuse_async(form_class, "@action form_class factory")
+        return
+    if getattr(form_class, "_hooks_refused", False):
+        return
+    for hook in _PLAIN_FORM_HOOKS:
+        method = getattr(form_class, hook, None)
+        if callable(method):
+            refuse_async(method, f"{form_class.__name__} hook")
 
 
 class FormActionManager(BackendListManager[FormActionBackend]):
@@ -103,7 +129,8 @@ class FormActionManager(BackendListManager[FormActionBackend]):
         )
 
     def register_action(self, registration: "ActionRegistration") -> None:
-        """Forward registration to the first backend."""
+        """Refuse async callables, then forward registration to the first backend."""
+        _refuse_async_registration(registration)
         self._first_backend().register_action(registration)
         self._bump()
 

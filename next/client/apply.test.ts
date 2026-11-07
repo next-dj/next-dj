@@ -1298,6 +1298,24 @@ describe("Applier lifecycle events", () => {
     expect(applied!.detail.ok).toBe(true);
   });
 
+  it("closes the pair with a stale applied when the envelope is superseded", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier, dispatched } = makeApplier();
+    const done = vi.fn();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]), {
+      isCurrent: () => false,
+      done,
+    });
+    expect(dispatched.map((d) => d.event)).toEqual([
+      "partial:before-apply",
+      "partial:applied",
+    ]);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail).toMatchObject({ ok: false, nodes: [], stale: true });
+    expect(done).toHaveBeenCalledWith(applied!.detail);
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
+  });
+
   it("names the nodes the ops touched on applied", () => {
     document.body.innerHTML = '<div data-next-zone="z"></div><p id="gone"></p>';
     const { applier, dispatched } = makeApplier();

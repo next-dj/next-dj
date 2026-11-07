@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from next.caches import PageCache
 from next.pages.loaders import build_registered_loaders
-from next.utils import stat_mtime_ns, template_edits_watched
+from next.stamps import all_fresh, snapshot
+from next.utils import template_edits_watched
 
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ class PageTemplateCache:
             return
         mtimes: dict[Path, int] = {}
         for source in paths:
-            mtime = stat_mtime_ns(source)
+            mtime = snapshot(source)
             if mtime is not None:
                 mtimes[source] = mtime
         if mtimes:
@@ -108,7 +109,7 @@ class PageTemplateCache:
         stored = store.get(file_path)
         if not stored:
             return False
-        return any(stat_mtime_ns(p) != old_mtime for p, old_mtime in stored.items())
+        return not all_fresh(stored.items())
 
 
 __all__ = ["PageTemplateCache", "SourceMtimes"]

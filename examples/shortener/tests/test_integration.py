@@ -59,7 +59,7 @@ class TestShorten:
 
     def test_post_creates_link_and_redirects(self, next_client) -> None:
         response = next_client.post_action(
-            "create_link_form", {"url": "https://example.com/a"}
+            "create_link_form", {"url": "https://example.com/a"}, origin="/"
         )
         assert response.status_code == 302
         assert response["Location"] == "/"
@@ -67,7 +67,10 @@ class TestShorten:
 
     def test_success_message_flashes_on_home(self, next_client) -> None:
         response = next_client.post_action(
-            "create_link_form", {"url": "https://example.com/a"}, follow=True
+            "create_link_form",
+            {"url": "https://example.com/a"},
+            follow=True,
+            origin="/",
         )
         body = response.content.decode()
         assert "Short link created for https://example.com/a." in body

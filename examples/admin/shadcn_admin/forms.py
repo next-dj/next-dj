@@ -18,7 +18,7 @@ from django.http import (
     HttpResponseRedirect,
     QueryDict,
 )
-from fragments import render_fragment
+from next_dj_examples_shared.fragments import render_fragment
 
 from next import Depends, action
 from next.forms import BaseModelForm, cleanup_extra_initial, form_spec

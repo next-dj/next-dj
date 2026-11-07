@@ -12,6 +12,8 @@ from django.urls import NoReverseMatch, include, path, re_path
 from django.views import View
 
 from next.checks import reset_check_caches
+from next.deps import RESERVED_KEYS
+from next.deps.context import RECEIVER_NAMES
 from next.forms import RegistryFormActionBackend
 from next.forms.manager import form_action_manager
 from next.forms.uid import reverse_form_action
@@ -21,6 +23,7 @@ from next.urls.checks import (
     _collect_url_patterns,
     check_framework_routes_reachable,
     check_next_pages_configuration,
+    check_reserved_url_parameters,
     check_reverse_name_collisions,
     check_router_manager,
     check_url_patterns,
@@ -397,6 +400,36 @@ class TestCheckReverseNameCollisions:
         assert name_messages == []
 
 
+class TestReservedUrlParameters:
+    """A segment named after an injected argument is reported and left unrouted."""
+
+    @pytest.mark.parametrize("name", sorted(RESERVED_KEYS | RECEIVER_NAMES))
+    def test_the_check_reports_e217_and_the_router_skips_the_route(
+        self, tmp_path, name
+    ) -> None:
+        write_page(tmp_path, f"items/[{name}]")
+        write_page(tmp_path, "ok")
+        router = file_router(app_dirs=False, dirs=[tmp_path])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            reserved = check_reserved_url_parameters(None)
+            patterns = check_url_patterns(None)
+        routes = [str(pattern.pattern) for pattern in router.generate_urls()]
+
+        [error] = reserved
+        assert error.id == "next.E217"
+        assert f"'{name}'" in error.msg
+        assert "Rename the bracket directory" in error.hint
+        assert "file_path" not in error.hint
+        assert "dep_cache" not in error.hint
+        assert [m.id for m in patterns] == []
+        assert routes == ["ok/"]
+
+    def test_no_router_manager_reports_nothing(self) -> None:
+        with patch("next.urls.checks.get_router_manager", return_value=(None, [])):
+            assert check_reserved_url_parameters(None) == []
+
+
 class TestCollectUrlPatterns:
     """`_collect_url_patterns` reports each parser refusal under its own code."""
 
@@ -413,14 +446,14 @@ class TestCollectUrlPatterns:
             ),
             pytest.raises(ValueError, match="unparsable"),
         ):
-            _collect_url_patterns(tmp_path, "Root", [])
+            _collect_url_patterns(tmp_path, "Root", [], reserved=[])
 
     def test_a_refused_parameter_name_is_reported_as_e082(self, tmp_path) -> None:
         """A bracket name Django refuses leaves the map under a code of its own."""
         write_page(tmp_path, "[2fa]")
         errors: list[Error] = []
 
-        patterns = _collect_url_patterns(tmp_path, "Root", errors)
+        patterns = _collect_url_patterns(tmp_path, "Root", errors, reserved=[])
 
         assert patterns == []
         assert [error.id for error in errors] == ["next.E082"]
@@ -433,7 +466,7 @@ class TestCollectUrlPatterns:
         write_page(tmp_path, "(g)/x")
         write_page(tmp_path, "y")
 
-        patterns = _collect_url_patterns(tmp_path, "App 'a: b'", [])
+        patterns = _collect_url_patterns(tmp_path, "App 'a: b'", [], reserved=[])
 
         assert [(p.url_path, p.grouped) for p in patterns] == [
             ("x", True),

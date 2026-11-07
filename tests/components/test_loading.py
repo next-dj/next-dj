@@ -9,6 +9,7 @@ from next.components.loading import (
     ModuleLoader,
     last_load_error,
 )
+from next.errors import AsyncCallableError
 
 
 BODIES_THAT_RAISE = [
@@ -95,6 +96,27 @@ class TestAFailingComponentModuleDegradesTheRender:
         path.write_text("TITLE = 'card'\n")
 
         assert ModuleLoader().load(path) is not None
+        assert last_load_error(path) is None
+
+
+class TestAsyncComponentRender:
+    """An `async def render` in a `component.py` is refused when the module loads."""
+
+    def test_async_render_is_recorded_as_the_load_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "component.py"
+        path.write_text("async def render():\n    return 'hi'\n")
+
+        assert ModuleLoader().load(path) is None
+        error = last_load_error(path)
+        assert isinstance(error, AsyncCallableError)
+        assert 'component.py render "render"' in str(error)
+
+    def test_sync_render_loads(self, tmp_path: Path) -> None:
+        path = tmp_path / "component.py"
+        path.write_text("def render():\n    return 'hi'\n")
+
+        module = ModuleLoader().load(path)
+        assert module is not None
         assert last_load_error(path) is None
 
 

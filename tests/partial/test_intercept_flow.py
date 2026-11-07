@@ -256,14 +256,15 @@ class TestBrokenIntercept:
 
     _BROKEN = "raise RuntimeError('boom')\n"
 
-    def test_a_broken_intercept_is_a_404_in_production(self, root: Path) -> None:
+    def test_a_broken_intercept_answers_500_in_production(self, root: Path) -> None:
         _site(root, intercept_source=self._BROKEN)
 
         with routed(root):
-            response = _peek(_client("visitor"))
+            client = _client("visitor")
+            client.raise_request_exception = False
+            response = _peek(client)
 
-        assert response.status_code == 404
-        assert _directives(response) >= _NO_STORE
+        assert response.status_code == 500
 
     def test_a_broken_intercept_raises_its_import_failure_under_debug(
         self, root: Path

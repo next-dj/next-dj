@@ -308,6 +308,7 @@ class TestMoveCard:
         response = next_client.post_action(
             "move_card_form",
             {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
+            origin=f"/board/{backlog.board_id}/",
         )
         assert response.status_code == 302
         card.refresh_from_db()
@@ -320,6 +321,7 @@ class TestMoveCard:
         next_client.post_action(
             "move_card_form",
             {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
+            origin=f"/board/{backlog.board_id}/",
         )
         positions = list(
             done.cards.order_by("position").values_list("position", flat=True)
@@ -335,8 +337,9 @@ class TestMoveCard:
         response = next_client.post_action(
             "move_card_form",
             {"card_id": card.pk, "target_column": other_col.pk, "target_position": "0"},
+            origin=f"/board/{board.pk}/",
         )
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
         card.refresh_from_db()
         assert card.column.board_id == board.pk
 
@@ -349,8 +352,9 @@ class TestMoveCard:
         response = next_client.post_action(
             "move_card_form",
             {"card_id": card_id, "target_column": done.pk, "target_position": "0"},
+            origin=f"/board/{done.board_id}/",
         )
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
 
     def test_negative_position_rejected(
         self, next_client: NextClient, backlog: Column, done: Column
@@ -359,8 +363,9 @@ class TestMoveCard:
         response = next_client.post_action(
             "move_card_form",
             {"card_id": card.pk, "target_column": done.pk, "target_position": "-1"},
+            origin=f"/board/{backlog.board_id}/",
         )
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
 
 
 class TestPreviewComponent:
@@ -373,6 +378,7 @@ class TestPreviewComponent:
         next_client.post_action(
             "move_card_form",
             {"card_id": card.pk, "target_column": done.pk, "target_position": "0"},
+            origin=f"/board/{board.pk}/",
         )
         response = next_client.get(f"/board/{board.pk}/?moved={card.pk}")
         body = response.content.decode()
@@ -412,7 +418,9 @@ class TestCreateCard:
     ) -> None:
         before = backlog.cards.count()
         response = next_client.post_action(
-            "create_card_form", {"column": backlog.pk, "title": "Extra"}
+            "create_card_form",
+            {"column": backlog.pk, "title": "Extra"},
+            origin=f"/board/{backlog.board_id}/",
         )
         assert response.status_code == 302
         backlog.refresh_from_db()
@@ -425,7 +433,9 @@ class TestCreateCard:
         self, next_client: NextClient, board: Board, backlog: Column
     ) -> None:
         response = next_client.post_action(
-            "create_card_form", {"column": backlog.pk, "title": "Extra"}
+            "create_card_form",
+            {"column": backlog.pk, "title": "Extra"},
+            origin=f"/board/{board.pk}/",
         )
         new = backlog.cards.order_by("-position").first()
         assert response["Location"] == f"/board/{board.pk}/?created={new.pk}"
@@ -435,9 +445,11 @@ class TestCreateCard:
     ) -> None:
         Card.objects.create(column=progress, title="Second", position=1)
         response = next_client.post_action(
-            "create_card_form", {"column": progress.pk, "title": "Over the limit"}
+            "create_card_form",
+            {"column": progress.pk, "title": "Over the limit"},
+            origin=f"/board/{progress.board_id}/",
         )
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
         assert progress.cards.filter(title="Over the limit").count() == 0
 
     def test_a_column_on_a_board_outside_the_scope_is_refused(
@@ -449,9 +461,11 @@ class TestCreateCard:
             BoardQuerySet, "visible_to", lambda qs, _user: qs.exclude(slug="secret")
         ):
             response = next_client.post_action(
-                "create_card_form", {"column": hidden.pk, "title": "Injected"}
+                "create_card_form",
+                {"column": hidden.pk, "title": "Injected"},
+                origin=f"/board/{board.pk}/",
             )
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
         assert not hidden.cards.exists()
 
     def test_wip_limit_none_allows_unlimited(
@@ -459,7 +473,9 @@ class TestCreateCard:
     ) -> None:
         for index in range(5):
             response = next_client.post_action(
-                "create_card_form", {"column": backlog.pk, "title": f"Card {index}"}
+                "create_card_form",
+                {"column": backlog.pk, "title": f"Card {index}"},
+                origin=f"/board/{backlog.board_id}/",
             )
             assert response.status_code == 302
         assert backlog.cards.count() >= 5
@@ -694,7 +710,9 @@ class TestBoardPeek:
 
 def _sign_in(next_client: NextClient, user: User) -> None:
     response = next_client.post_action(
-        "sign_in_form", {"username": user.username, "password": DEMO_PASSWORD}
+        "sign_in_form",
+        {"username": user.username, "password": DEMO_PASSWORD},
+        origin="/sign-in/",
     )
     assert response.status_code == 302
 
@@ -721,7 +739,9 @@ class TestSignIn:
         self, next_client: NextClient, ada: User
     ) -> None:
         response = next_client.post_action(
-            "sign_in_form", {"username": "ada", "password": DEMO_PASSWORD}
+            "sign_in_form",
+            {"username": "ada", "password": DEMO_PASSWORD},
+            origin="/sign-in/",
         )
         assert response.status_code == 302
         assert response["Location"] == "/"
@@ -742,7 +762,7 @@ class TestSignIn:
         self, next_client: NextClient, ada: User
     ) -> None:
         _sign_in(next_client, ada)
-        response = next_client.post_action("sign_out_form", {})
+        response = next_client.post_action("sign_out_form", {}, origin="/")
         assert response.status_code == 302
         assert "_auth_user_id" not in next_client.session
 
@@ -909,7 +929,9 @@ class TestBoardBroadcast:
             django_capture_on_commit_callbacks(execute=True),
         ):
             next_client.post_action(
-                "create_card_form", {"column": backlog.pk, "title": "Fresh"}
+                "create_card_form",
+                {"column": backlog.pk, "title": "Fresh"},
+                origin=f"/board/{board.pk}/",
             )
         assert len(published) == 1
 
@@ -923,7 +945,9 @@ class TestBoardBroadcast:
             capture_published() as published,
         ):
             response = next_client.post_action(
-                "create_card_form", {"column": progress.pk, "title": "Late"}
+                "create_card_form",
+                {"column": progress.pk, "title": "Late"},
+                origin=f"/board/{progress.board_id}/",
             )
         assert response.status_code == 400
         assert response.content.decode() == "Column has reached its WIP limit."

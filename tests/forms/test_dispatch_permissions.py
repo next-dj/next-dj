@@ -17,6 +17,7 @@ from next.forms.dispatch.permissions import (
     guard_rule,
 )
 from next.forms.manager import form_action_manager
+from next.forms.origin import OriginMatch
 from next.forms.signals import form_access_denied
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.permissions import add_perm
@@ -620,21 +621,24 @@ class TestBranch:
         add_perm(_EDIT, owns_group)
         request = _guarded_request(rf, _GuardUser(allowed=False))
         guard = ActionGuard(permissions=(_MODEL_PERM, _EDIT))
-        meta = {**meta, "guard": guard, "file_path": _FORMS}
+        meta = {**meta, "guard": guard, "file_path": _FORMS, "scope": "shared"}
+        origin = OriginMatch(page_path=None, url_kwargs={}, origin="/")
         with pytest.raises(PermissionDenied):
             FormActionDispatch._refuse_access(
-                request, meta, None, "x", {}, guard=guard_rule(meta)
+                request, meta, origin, "x", {}, guard=guard_rule(meta)
             )
         expected = (_MODEL_PERM,) if deferred else (_MODEL_PERM, _EDIT)
         assert request.user.received == [expected]
 
     def test_an_action_with_no_branch_is_a_400(self, rf) -> None:
-        backend_meta = {"guard": None, "file_path": "/x/forms.py"}
-        request = _guarded_request(rf, _GuardUser())
+        backend_meta = {"guard": None, "file_path": "/x/forms.py", "scope": "shared"}
+        request = rf.post("/_next/form/x/", {ORIGIN_FIELD_NAME: "/"})
+        request.user = _GuardUser()
         response = FormActionDispatch.dispatch(
             None, request, "branchless", backend_meta
         )
         assert response.status_code == 400
+        assert b"'branchless' has no handler" in response.content
 
 
 class TestAnonymous:

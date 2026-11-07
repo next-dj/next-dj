@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from django.core.exceptions import PermissionDenied
@@ -20,6 +19,7 @@ from next.pages.access import (
     enforce,
     owner_access,
     page_access,
+    render_guard,
     url_lookup,
 )
 from next.permissions.access import declared, login_redirect, signed_in
@@ -217,8 +217,6 @@ def _action_lookup(
 
 _ACTION_GATE: Final = Gate(_action_lookup, _origin_path)
 
-_NO_KWARGS: Final[MappingProxyType[str, object]] = MappingProxyType({})
-
 
 @dataclass(frozen=True, slots=True)
 class _Tree:
@@ -233,17 +231,17 @@ class _Tree:
     deferred: bool
 
 
-_trees: PageCache[tuple[str | None, Path | None], _Tree] = PageCache()
+_trees: PageCache[tuple[str, Path | None], _Tree] = PageCache()
 
 
 def _build_tree(
-    file_path: str | None, origin_path: Path | None, stamp: AccessStamp | None
+    file_path: str, origin_path: Path | None, stamp: AccessStamp | None
 ) -> _Tree:
     """Read the rules of the action owner and of the origin page and join them.
 
     A tree file answers to the page of its directory, a `component.py` to itself too.
     """
-    owner = None if file_path is None else owner_rule(Path(file_path))
+    owner = owner_rule(Path(file_path))
     origin = None if origin_path is None else page_access(origin_path)
     accesses: list[OwnerRule | PageAccess] = [
         held for held in (owner, origin) if held is not None
@@ -255,7 +253,7 @@ def _build_tree(
     return _Tree(None if broken is not None else stamp, rule, broken, deferred)
 
 
-def _tree(file_path: str | None, origin_path: Path | None) -> _Tree:
+def _tree(file_path: str, origin_path: Path | None) -> _Tree:
     """Return the joined rules over an action, one memo read while no rule changed.
 
     Past any load, or under watched edits, the rules are read and joined again.
@@ -270,8 +268,8 @@ def _tree(file_path: str | None, origin_path: Path | None) -> _Tree:
 
 def _check_tree_access(
     request: "HttpRequest",
-    file_path: object,
-    origin_match: "OriginMatch | None",
+    file_path: str,
+    origin_match: "OriginMatch",
     dep_cache: dict[str, Any],
     *,
     action_name: str,
@@ -282,15 +280,13 @@ def _check_tree_access(
 
     A forged origin adds its rule to the owner's and lifts none of it.
     """
-    origin_path = origin_match.page_path if origin_match is not None else None
-    tree = _tree(file_path if isinstance(file_path, str) else None, origin_path)
-    url_kwargs = origin_match.url_kwargs if origin_match is not None else _NO_KWARGS
+    tree = _tree(file_path, origin_match.page_path)
     try:
         return enforce(
             tree.rule,
             tree.broken,
             request,
-            url_kwargs,
+            origin_match.url_kwargs,
             dep_cache,
             undeclared=tree.deferred,
             gate=_ACTION_GATE,
@@ -304,7 +300,7 @@ def _check_tree_access(
 
 def _check_page_access(
     request: "HttpRequest",
-    origin_match: "OriginMatch | None",
+    origin_match: "OriginMatch",
     *,
     action_name: str,
     uid: str | None,
@@ -314,10 +310,49 @@ def _check_page_access(
 
     The page view never runs for an action URL, so a guarded page refuses here.
     """
-    if origin_match is None or origin_match.page_path is None:
+    if origin_match.page_path is None:
         return None
     denial, _dynamic = page.authorization_outcome(
         origin_match.page_path, request, origin_match.origin, origin_match.url_kwargs
+    )
+    if denial is not None:
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="response", sender=sender
+        )
+    return denial
+
+
+def _check_owner_page_access(
+    request: "HttpRequest",
+    file_path: str,
+    origin_match: "OriginMatch",
+    *,
+    scope: str,
+    action_name: str,
+    uid: str | None,
+    sender: type,
+) -> "HttpResponseBase | None":
+    """Return the owner page's own refusal of this action POST, or None.
+
+    Its `render()` guards a page-scoped action, refusing an origin outside its subtree.
+    """
+    owner = render_guard(file_path, scope)
+    if owner is None:
+        return None
+    origin_page = origin_match.page_path
+    if origin_page is not None and not origin_page.parent.is_relative_to(owner.parent):
+        # The origin walks the tree as served, a symlinked directory included.
+        origin_page = origin_page.resolve()
+    if origin_page is None or not origin_page.parent.is_relative_to(owner.parent):
+        _emit_form_access_denied(
+            request, action_name, uid, layer="page", reason="denied", sender=sender
+        )
+        raise PermissionDenied
+    if origin_page == owner:
+        # The origin check already ran this page's `render()`.
+        return None
+    denial, _dynamic = page.authorization_outcome(
+        owner, request, origin_match.origin, origin_match.url_kwargs
     )
     if denial is not None:
         _emit_form_access_denied(

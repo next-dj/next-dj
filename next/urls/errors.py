@@ -84,8 +84,22 @@ class InvalidURLParameterError(URLParameterError):
         )
 
 
+class ReservedURLParameterError(InvalidURLParameterError):
+    """Raised when a bracket segment takes a name dependency injection reserves."""
+
+    @override
+    def _reason(self) -> str:
+        """Name the refused parameter and why the page call would break on it."""
+        return (
+            f"URL parameter '{self.param_name}' in URL pattern "
+            f"'{self.url_path}' is a name dependency injection reserves, so no "
+            "callable parameter of that name would receive the URL value."
+        )
+
+
 __all__ = [
     "DuplicateURLParameterError",
     "InvalidURLParameterError",
+    "ReservedURLParameterError",
     "URLParameterError",
 ]

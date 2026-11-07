@@ -4,6 +4,7 @@ from typing import override
 import pytest
 from django.test import Client
 
+from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial.backends import JsonPartialProtocolBackend
 from next.partial.envelope import Asset, Envelope, FormMeta, Patch
 from next.testing import (
@@ -14,6 +15,7 @@ from next.testing import (
 )
 from tests.forms import actions
 from tests.support import TWIN_ACTION
+from tests.support.forms import post_without_origin
 
 
 # Importing `actions` registers the baseline form actions, so keep it bound.
@@ -37,17 +39,19 @@ class TestNextClientByPage:
 
     @pytest.mark.parametrize("label", ["create", "edit"])
     def test_post_action_reaches_the_named_page(self, twins: Path, label: str) -> None:
-        response = NextClient().post_action(TWIN_ACTION, page=twins / label)
+        response = NextClient().post_action(
+            TWIN_ACTION, origin=f"/{label}/", page=twins / label
+        )
         assert response.content == label.encode()
 
     def test_get_action_url_names_the_page_of_post_action(self, twins: Path) -> None:
         client = NextClient()
         url = client.get_action_url(TWIN_ACTION, page=twins / "edit")
-        assert client.post(url).content == b"edit"
+        assert client.post(url, {ORIGIN_FIELD_NAME: "/edit/"}).content == b"edit"
 
     def test_a_bare_name_is_refused(self, twins: Path) -> None:
         with pytest.raises(LookupError, match="several files"):
-            NextClient().post_action(TWIN_ACTION)
+            NextClient().post_action(TWIN_ACTION, origin="/create/")
 
 
 class TestNextClient:
@@ -60,7 +64,9 @@ class TestNextClient:
 
     def test_post_action_dispatches_form(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
-        response = client.post_action("simple_form_redirect", {"name": "Carol"})
+        response = client.post_action(
+            "simple_form_redirect", {"name": "Carol"}, origin="/"
+        )
         assert response.status_code == 302
         assert response["Location"] == "/done/"
 
@@ -71,9 +77,9 @@ class TestNextClient:
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
 
-    def test_post_action_without_origin_keeps_protocol_raw(self) -> None:
+    def test_a_post_without_an_origin_is_refused_before_dispatch(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
-        response = client.post_action("simple_form", {"name": ""})
+        response = post_without_origin(client, "simple_form", {"name": ""})
         assert response.status_code == 400
 
     @pytest.mark.django_db()

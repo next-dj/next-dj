@@ -31,9 +31,10 @@ Strict loading
 
    NEXT_FRAMEWORK["STRICT_LOADING"] = True
 
-Set ``STRICT_LOADING`` to ``True`` in production so a ``page.py`` that fails to import or a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
-With ``DEBUG=False`` the client sees the generic 500 page, and the traceback appears only in the server log through ``logger.exception``.
-Without the flag a broken ``page.py`` answers a generic 404 and a missed component renders as an empty string, which monitoring rarely catches.
+Set ``STRICT_LOADING`` to ``True`` in production so a ``{% component %}`` name that does not resolve fails the request instead of serving a silently degraded page.
+With ``DEBUG=False`` the client sees the generic 500 page, and the traceback appears only in the server log.
+Without the flag a missed component renders as an empty string, which monitoring rarely catches.
+A ``page.py`` that fails to import answers 500 with or without the flag, so monitoring on 5xx sees a broken deploy.
 See :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 
 Component module loading
@@ -137,13 +138,15 @@ Realtime
            "OPTIONS": {
                "URL": os.environ["REDIS_URL"],
                "CLIENT": {"max_connections": 200},
+               "SUBSCRIBE_MAX_CONNECTIONS": 1000,
            },
        },
    }
 
 Set ``BROKER`` to ``RedisBroker``, because the default ``MemoryBroker`` reaches subscribers of one process only.
 Until it does, ``manage.py check --deploy`` reports ``next.W149``.
-The ``max_connections`` value is a placeholder, and the pool needs one connection per open stream of the process, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
+The ``max_connections`` and ``SUBSCRIBE_MAX_CONNECTIONS`` values are placeholders.
+The subscription pool needs one connection per open stream of the process, and the command pool one per Redis call the process runs at once, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
 
 A project that routes the ticket introspection endpoint for a gateway outside Python adds ``"GATEWAY_TOKEN": os.environ["GATEWAY_TOKEN"]``, read from the environment rather than committed.
 ``HEARTBEAT`` is the WebSocket ping interval, and an SSE stream takes its heartbeat from the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend.

@@ -15,6 +15,7 @@ from next.forms.dispatch.permissions import _trees
 from next.forms.dispatch.responses import _normalize_handler_response
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
+    OriginMatch,
     filter_reserved_url_kwargs,
     resolve_origin,
 )
@@ -115,6 +116,18 @@ def _ok_handler(**kwargs) -> HttpResponseRedirect:
     return HttpResponseRedirect("/")
 
 
+def _action_request(origin: str, **fields: str) -> HttpRequest:
+    """Return an action POST from `origin`, resolved against the fixed bench urlconf."""
+    post = QueryDict(mutable=True)
+    post.update({**fields, ORIGIN_FIELD_NAME: origin})
+    return build_mock_http_request(
+        method="POST",
+        POST=post,
+        FILES=None,
+        urlconf="tests.benchmarks.forms.urls_bench",
+    )
+
+
 class TestBenchDispatchEndToEnd:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_valid_form(self, benchmark) -> None:
@@ -131,16 +144,20 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        post = QueryDict("name=bench")
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/items/42/", name="bench")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
         assert isinstance(response, HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
-    def test_dispatch_invalid_form(self, benchmark) -> None:
-        """Invalid submission, so validation_failed fires with an errors payload."""
+    def test_dispatch_invalid_form_rerenders_origin(
+        self, tmp_path: Path, benchmark
+    ) -> None:
+        """Invalid submission, so validation_failed fires and the origin re-renders."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        (tmp_path / "template.djx").write_text("<main>{{ form.errors }}</main>")
         backend = RegistryFormActionBackend()
         backend.register_action(
             ActionRegistration(
@@ -153,9 +170,10 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        # The required name is missing, so the dispatch takes the error path.
-        post = QueryDict()
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        # The required name is missing, so the dispatch re-renders the origin page.
+        request = _action_request("/items/42/")
+        origin = OriginMatch(page_path=page_file, url_kwargs={}, origin="/items/42/")
+        setattr(request, _ORIGIN_MATCH_ATTR, origin)
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
@@ -181,8 +199,7 @@ class TestBenchDispatchEndToEnd:
         assert meta is not None
         assert _BenchForm._has_check_permissions is False
         assert _BenchForm._has_object_permission is False
-        post = QueryDict("name=bench")
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/items/42/", name="bench")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
@@ -211,8 +228,7 @@ class TestBenchDispatchEndToEnd:
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
-        post = QueryDict("name=bench")
-        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        request = _action_request("/items/42/", name="bench")
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )

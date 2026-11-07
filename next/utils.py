@@ -17,20 +17,22 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import groupby
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypeGuard, override
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypeGuard, cast, override
 from urllib.parse import unquote_to_bytes
 
+from django.apps import apps
 from django.conf import settings
-from django.core.exceptions import DisallowedRedirect
+from django.core.exceptions import AppRegistryNotReady, DisallowedRedirect
 from django.http import HttpResponseRedirect
 from django.template.base import NodeList
 from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
 from django.utils.regex_helper import normalize
 
-from next.caches import DEFAULT_CACHE_SIZE
+from next.caches import DEFAULT_CACHE_SIZE, BoundedCache
 from next.diagnostics import Capture
 from next.errors import InvalidDirsError
+from next.stamps import fresh, settled, snapshot
 
 
 if TYPE_CHECKING:
@@ -231,17 +233,6 @@ def forget_resolved_trees() -> None:
         clear()
 
 
-def stat_mtime_ns(path: Path) -> int | None:
-    """Return the nanosecond mtime of `path`, or `None` when it does not stat.
-
-    A float timestamp would round two distinct writes into one value.
-    """
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
 def is_within(path: Path, root: Path) -> bool:
     """Return whether the resolved `path` is `root` or lies under it, by parts.
 
@@ -258,8 +249,14 @@ class _SourceLoader(importlib.machinery.SourceFileLoader):
 
     @override
     def path_stats(self, path: str) -> Mapping[str, Any]:
-        """Return the mtime in nanoseconds, whose low 32 bits the `.pyc` keeps."""
+        """Return the mtime in nanoseconds, refusing one still in its racy window.
+
+        The refusal makes `get_code` compile the source and write no `.pyc` for it.
+        """
         stat = Path(path).stat()
+        if not settled(stat.st_mtime_ns):
+            msg = f"{path} was written within the racy mtime window"
+            raise OSError(msg)
         return {"mtime": stat.st_mtime_ns, "size": stat.st_size}
 
 
@@ -282,7 +279,7 @@ def exec_module_file(path: Path, name: str) -> types.ModuleType | None:
 class TreeSource[E: Exception]:
     """One Python file at the top of a page tree, with its executed module or failure.
 
-    `stamp` is the mtime at execution, so a watched process reruns the file on an edit.
+    `stamp` is the snapshot before execution, so a watched process reruns an edit.
     """
 
     path: Path
@@ -292,7 +289,7 @@ class TreeSource[E: Exception]:
 
     def stale(self) -> bool:
         """Return whether the file was deleted or rewritten since it ran."""
-        return stat_mtime_ns(self.path) != self.stamp
+        return not fresh(self.stamp, self.path)
 
 
 def load_tree_source[E: Exception](
@@ -304,7 +301,7 @@ def load_tree_source[E: Exception](
     """
     if not path.is_file():
         return None
-    stamp = stat_mtime_ns(path)
+    stamp = snapshot(path)
     try:
         module = exec_module_file(path, module_name)
     except Exception as exc:
@@ -368,8 +365,55 @@ def resolve_base_dir() -> Path | None:
     return None
 
 
+_app_holding_cache: BoundedCache[tuple[str, bool], tuple[str, str] | None] = (
+    BoundedCache()
+)
+_MISS: Final = object()
+
+
+@functools.cache
+def _resolved_app_roots() -> tuple[tuple[str, Path], ...]:
+    """Return each installed app label with its resolved root, deepest root first."""
+    roots = [(c.label, Path(c.path).resolve()) for c in apps.get_app_configs()]
+    return tuple(sorted(roots, key=lambda item: len(item[1].parts), reverse=True))
+
+
+def app_holding(path: str | Path, *, resolved: bool = False) -> tuple[str, str] | None:
+    """Return the label and posix subpath of the deepest installed app holding `path`.
+
+    Symlinks resolve first unless `resolved` says so, and the answer is memoised.
+    """
+    raw = str(path)
+    key = (raw, resolved)
+    held = _app_holding_cache.get(key, _MISS)
+    if held is not _MISS:
+        return cast("tuple[str, str] | None", held)
+    try:
+        roots = _resolved_app_roots()
+    except AppRegistryNotReady:
+        return None
+    real = Path(raw) if resolved else Path(raw).resolve()
+    found = next(
+        (
+            (label, real.relative_to(root).as_posix())
+            for label, root in roots
+            if real.is_relative_to(root)
+        ),
+        None,
+    )
+    _app_holding_cache[key] = found
+    return found
+
+
+def forget_app_holdings(*, setting: str, **kwargs: object) -> None:
+    """Drop the memoised app lookups when the app list moves."""
+    if setting == "INSTALLED_APPS":
+        _app_holding_cache.clear()
+        _resolved_app_roots.cache_clear()
+
+
 def template_edits_watched() -> bool:
-    """Whether the caches re-read the disk, since autoreload misses `.djx` edits."""
+    """Whether the caches revalidate snapshots, since autoreload misses `.djx` edits."""
     return bool(settings.DEBUG)
 
 

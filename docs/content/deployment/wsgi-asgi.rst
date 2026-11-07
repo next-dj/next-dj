@@ -207,17 +207,19 @@ Watch these signals during a run and in production.
 
 - Delivery latency from publish to the client and the count of lost or replayed messages.
 - Server CPU of every ASGI process, since the event loop is single threaded.
-- The Redis connection pool, because every open WebSocket and SSE stream holds one connection for its subscription, and an exhausted pool ends the stream and makes the browser reconnect.
+- The Redis subscription pool, because every open WebSocket and SSE stream holds one connection of it, and a full pool refuses the next stream and makes the browser reconnect, while publishing runs on a separate command pool.
 - The Redis ``maxclients`` limit, which all processes share.
 - The session cache, which closes sockets with ``4401`` when it evicts live sessions.
-- The handler thread pool, which runs sync upstream handlers and tunneled views and queues work when handlers are slow.
+- The handler thread pool, which runs sync upstream handlers and refuses an event with ``limit`` when no thread of it is free.
 - File descriptor limits of the process and connection limits of the proxy and load balancer.
 - Presence cost, which grows with the attendee count and the ``REALTIME['PRESENCE']['SIZE']`` member cap.
 - Replay cost, which grows with ``REALTIME['REPLAY']['SIZE']`` and the size of each message.
 
 Scale out with more ASGI processes behind one ``RedisBroker``, on one host or several.
 The broker carries every publication to the subscribers of every process, so no process needs to know where a client sits, and sticky sessions are not required.
-Raise ``OPTIONS['CLIENT']['max_connections']`` of the broker with the streams a process holds, and keep the sum across processes under the Redis ``maxclients``, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+Set ``OPTIONS['SUBSCRIBE_MAX_CONNECTIONS']`` of the broker to the streams a process holds at its peak, since each open stream takes one connection of the subscription pool.
+The command pool, sized by ``OPTIONS['CLIENT']['max_connections']``, needs only as many connections as the process runs Redis calls at once.
+Keep the sum of both pools across processes under the Redis ``maxclients``, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
 Repeat the load run after each change of process count, pool size, or replay and presence caps, and run it before launch against the shared broker, see :doc:`checklist`.
 
 See also

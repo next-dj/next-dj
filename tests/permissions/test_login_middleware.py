@@ -277,17 +277,15 @@ class TestBrokenChains:
         assert answers[0]["Location"] == answers[1]["Location"]
         assert answers[0]["Location"].startswith("/accounts/login/?next=")
 
+    @pytest.mark.parametrize("framing", list(_FRAMINGS))
     @pytest.mark.parametrize("where", ["own-page", "above-page", "above-action"])
-    def test_a_signed_in_user_meets_the_404(self, tmp_path, where) -> None:
+    def test_a_signed_in_user_meets_the_import_error(
+        self, tmp_path, where, framing
+    ) -> None:
         root = _broken_tree(tmp_path / "pages")
-        statuses = [
-            _answer(
-                root, framing, _signed_in(_BROKEN_CALLS[where], framing)
-            ).status_code
-            for framing in _FRAMINGS
-        ]
 
-        assert statuses == [404, 404]
+        with pytest.raises(PageModuleImportError):
+            _answer(root, framing, _signed_in(_BROKEN_CALLS[where], framing))
 
     @pytest.mark.parametrize("framing", list(_FRAMINGS))
     def test_a_public_page_under_a_broken_chain_meets_the_refusal(
@@ -296,16 +294,17 @@ class TestBrokenChains:
         root = _broken_tree(tmp_path / "pages")
         call = _get("/under/lifted/")
 
-        assert _answer(root, framing, call).status_code == 404
+        with pytest.raises(PageModuleImportError):
+            _answer(root, framing, call)
         with pytest.raises(PageModuleImportError):
             _answer(root, framing, call, STRICT_LOADING=True)
 
-    def test_without_the_default_login_an_anonymous_request_meets_the_404(
+    def test_without_the_default_login_an_anonymous_request_meets_the_500(
         self, tmp_path
     ) -> None:
         root = _broken_tree(tmp_path / "pages")
 
         with routed(root):
-            response = Client().get("/under/leaf/")
+            response = Client(raise_request_exception=False).get("/under/leaf/")
 
-        assert response.status_code == 404
+        assert response.status_code == 500

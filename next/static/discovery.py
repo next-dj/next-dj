@@ -16,12 +16,12 @@ from urllib.parse import urlsplit
 from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.pages import loaders as pages_loaders
+from next.stamps import all_fresh, snapshot
 from next.utils import (
     LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
     is_within,
     resolved_tree,
-    stat_mtime_ns,
     template_edits_watched,
 )
 
@@ -93,7 +93,7 @@ def _directory_mtimes(
 
     A missing directory records as `None`, so one appearing later rebuilds.
     """
-    return tuple((directory, stat_mtime_ns(directory)) for directory in directories)
+    return tuple((directory, snapshot(directory)) for directory in directories)
 
 
 def _unwatched_layout_directories(
@@ -377,10 +377,7 @@ class AssetDiscovery:
             return True
         if not template_edits_watched():
             return False
-        return any(
-            stat_mtime_ns(path) != mtime
-            for path, mtime in chain(plan.directory_mtimes, plan.file_mtimes)
-        )
+        return not all_fresh(chain(plan.directory_mtimes, plan.file_mtimes))
 
     def discover_component_assets(
         self, info: ComponentInfo, collector: StaticCollector
@@ -511,7 +508,7 @@ class AssetDiscovery:
         outer_root = self._outer_page_root(current_dir)
         for depth in range(MAX_ANCESTOR_WALK_DEPTH):
             # Stat first, so a file created in between leaves the plan stale.
-            mtime = stat_mtime_ns(current_dir)
+            mtime = snapshot(current_dir)
             if (
                 outer_root is not None
                 or depth == 0

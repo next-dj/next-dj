@@ -59,9 +59,14 @@ export interface NextEventMap {
     intent: { zone?: string; uid?: string };
   };
   "partial:before-apply": { envelope: Envelope };
-  // ok is false when any op threw or named an unknown verb. nodes are the roots the
-  // ops inserted or morphed, which the mount pass ran over.
-  "partial:applied": { envelope: Envelope; ok: boolean; nodes: readonly Element[] };
+  // ok is false when any op threw or named an unknown verb, and stale when a newer
+  // request superseded the envelope. nodes are the roots the mount pass ran over.
+  "partial:applied": {
+    envelope: Envelope;
+    ok: boolean;
+    nodes: readonly Element[];
+    stale?: true;
+  };
   "partial:error": PartialError;
   "partial:layer-opened": { opener: HTMLElement | null };
   "partial:layer-accepted": { result: unknown };

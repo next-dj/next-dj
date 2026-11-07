@@ -182,7 +182,9 @@ class TestVoteAction:
     ) -> None:
         choice = poll.choices.get(text="Tabs")
         response = next_client.post_action(
-            "vote_form", {"poll": poll.pk, "choice": choice.pk}
+            "vote_form",
+            {"poll": poll.pk, "choice": choice.pk},
+            origin=f"/polls/{poll.pk}/",
         )
         assert response.status_code == 302
         choice.refresh_from_db()
@@ -200,10 +202,12 @@ class TestVoteAction:
         choice = poll.choices.get(text="Tabs")
 
         response = next_client.post_action(
-            "vote_form", {"poll": poll.pk, "choice": choice.pk}
+            "vote_form",
+            {"poll": poll.pk, "choice": choice.pk},
+            origin=f"/polls/{poll.pk}/",
         )
 
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
         choice.refresh_from_db()
         assert choice.votes == 0
 
@@ -226,7 +230,9 @@ class TestVoteAction:
         choice = poll.choices.get(text="Spaces")
         for _ in range(rounds):
             response = next_client.post_action(
-                "vote_form", {"poll": poll.pk, "choice": choice.pk}
+                "vote_form",
+                {"poll": poll.pk, "choice": choice.pk},
+                origin=f"/polls/{poll.pk}/",
             )
             assert response.status_code == 302
         choice.refresh_from_db()
@@ -238,7 +244,9 @@ class TestVoteAction:
         choice = poll.choices.get(text="Tabs")
         with SignalRecorder(action_dispatched) as recorder:
             response = next_client.post_action(
-                "vote_form", {"poll": poll.pk, "choice": choice.pk}
+                "vote_form",
+                {"poll": poll.pk, "choice": choice.pk},
+                origin=f"/polls/{poll.pk}/",
             )
         assert response.status_code == 302
         events = recorder.events_for(action_dispatched)
@@ -257,9 +265,11 @@ class TestVoteAction:
         foreign_choice = second_poll.choices.first()
         with SignalRecorder(form_validation_failed) as recorder:
             response = next_client.post_action(
-                "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
+                "vote_form",
+                {"poll": poll.pk, "choice": foreign_choice.pk},
+                origin=f"/polls/{poll.pk}/",
             )
-        assert response.status_code == 400
+        assert response["X-Next-Form"] == "invalid"
         foreign_choice.refresh_from_db()
         assert foreign_choice.votes == 0
         events = recorder.events_for(form_validation_failed)
@@ -412,7 +422,11 @@ class TestBroadcastReceiver:
             SignalRecorder(message_published) as recorder,
             TestCase.captureOnCommitCallbacks(execute=True),
         ):
-            next_client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
+            next_client.post_action(
+                "vote_form",
+                {"poll": poll.pk, "choice": choice.pk},
+                origin=f"/polls/{poll.pk}/",
+            )
         events = recorder.events_for(message_published)
         assert len(events) == 2
         assert events[0].kwargs["topic"] == f"poll:{poll.pk}"
@@ -454,7 +468,9 @@ class TestBroadcastReceiver:
             TestCase.captureOnCommitCallbacks(execute=True),
         ):
             next_client.post_action(
-                "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
+                "vote_form",
+                {"poll": poll.pk, "choice": foreign_choice.pk},
+                origin=f"/polls/{poll.pk}/",
             )
         assert recorder.events_for(message_published) == []
 

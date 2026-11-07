@@ -371,7 +371,7 @@ Status codes
        On a mutation the runtime stays in place and fires ``partial:error`` with the status and body.
        On a safe method it fires the same ``partial:error`` and then navigates fully.
    * - 404
-     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope or a broken ``page.py`` over the page.
+     - The request named a form uid the action registry does not hold, or the page answered a zone GET with 404, such as a ``DObject`` row outside the scope.
        On a safe method the runtime fires ``partial:error`` and then navigates fully, and on a mutation it stays in place after the event.
    * - 409
      - A version mismatch on a safe method, with an empty body.
@@ -511,8 +511,8 @@ An ``AbortError`` never reaches this event.
    * - Kind
      - Cause
    * - ``{kind: "network", error, url?}``
-     - A fetch reject, a response body whose read fails after the headers arrived, a header name the browser refuses, a dropped stream connection, a ``next-end`` denial, whose code is the ``error``, a zone that still answers a non-envelope after the navigate-once fallback already navigated, or a target off the page's origin refused unsent.
-       ``url`` is present only on that last refusal.
+     - A fetch reject, a response body whose read fails after the headers arrived, a header name the browser refuses, a dropped stream connection, a ``next-end`` denial, whose code is the ``error``, a zone that still answers a non-envelope after the navigate-once fallback already navigated, a target off the page's origin refused unsent, or a request past its deadline, whose ``error`` is a ``TimeoutError``.
+       ``url`` is present only on those last two.
    * - ``{kind: "http", status, body}``
      - A 5xx, a mutating reply that is not an envelope, or a 4xx a safe GET got without an envelope before the runtime navigates.
    * - ``{kind: "parse", body, error}``

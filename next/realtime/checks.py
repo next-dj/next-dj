@@ -538,6 +538,21 @@ def check_shared_broker(*args, **kwargs) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT, deploy=True)
+def check_broker_deployment(*args, **kwargs) -> list[CheckMessage]:
+    """Report the deploy warnings of the selected broker, `next.W151` for Redis."""
+    broker = scope_value("REALTIME", "BROKER")
+    if not isinstance(broker, Mapping):
+        return []
+    backend_class = _broker_class(broker)
+    if backend_class is None:
+        return []
+    options = broker.get("OPTIONS")
+    return backend_class.check_deployment(
+        options if isinstance(options, Mapping) else {}
+    )
+
+
 @register(NEXT)
 def check_upstream_handlers(*args, **kwargs) -> list[CheckMessage]:
     """Report handlers that can never match and pairs two handlers claim."""
@@ -635,6 +650,7 @@ def _default_access(view: Callable[..., object]) -> bool:
 
 
 __all__ = [
+    "check_broker_deployment",
     "check_realtime_settings",
     "check_shared_broker",
     "check_ticket_introspection",

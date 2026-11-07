@@ -84,6 +84,7 @@ from next.urls.manager import (
 )
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
+from next.utils import forget_app_holdings
 
 from . import autodiscover, autoreload, components, staticfiles, templates
 
@@ -102,6 +103,7 @@ _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     forget_template_processors,
     forget_render_pipeline,
     forget_action_urls,
+    forget_app_holdings,
     forget_asset_version,
     forget_storage_state,
     reload_app_routers,

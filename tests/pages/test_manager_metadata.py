@@ -335,7 +335,7 @@ class TestRenderContext:
         instance = Page()
         (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
         context_data = instance.build_render_context(
-            leaf, _requested_zones=frozenset({"z"})
+            leaf, requested_zones=frozenset({"z"})
         )
         assert isinstance(context_data[METADATA_KEY], MetadataThunk)
 

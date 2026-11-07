@@ -3,9 +3,9 @@ import json
 import sys
 import threading
 import time
-from contextlib import ExitStack
+from contextlib import AsyncExitStack, ExitStack
 from dataclasses import replace
-from unittest.mock import AsyncMock, Mock, create_autospec
+from unittest.mock import AsyncMock, Mock, call, create_autospec
 
 import fakeredis
 import fakeredis.aioredis
@@ -18,6 +18,7 @@ from redis.crc import key_slot
 from next.partial import Patches
 from next.realtime import BrokerConnectionError, Position, Presence, RedisBroker
 from next.realtime.redis import broker as broker_module, pubsub as pubsub_module
+from tests.support.cases.realtime import INVALID_CONNECTION_LIMITS
 from tests.support.realtime import message_payload, refresh_envelope, silent_schedule
 
 
@@ -134,17 +135,13 @@ def test_redis_publish_uses_registered_script_with_counter_and_log_keys(
 def test_redis_client_options_enable_health_checks_and_keepalive(clients) -> None:
     RedisBroker({"OPTIONS": {"HEALTH_CHECK_INTERVAL": 3}})
     RedisBroker()
+    tuned = {"decode_responses": True, "health_check_interval": 3}
+    default = {"decode_responses": True, "health_check_interval": 10.0}
     assert clients.options == [
-        {
-            "decode_responses": True,
-            "health_check_interval": 3,
-            "socket_keepalive": True,
-        },
-        {
-            "decode_responses": True,
-            "health_check_interval": 10.0,
-            "socket_keepalive": True,
-        },
+        {**tuned, "socket_keepalive": True},
+        {**tuned, "socket_keepalive": True},
+        {**default, "socket_keepalive": True},
+        {**default, "socket_keepalive": True},
     ]
 
 
@@ -169,8 +166,8 @@ def test_redis_client_option_reaches_sync_and_async_clients(clients) -> None:
         await backend.apositions(["poll:1"])
 
     asyncio.run(scenario())
-    assert clients.options == [expected]
-    assert clients.async_options == [expected]
+    assert clients.options == [expected, expected]
+    assert clients.async_options == [expected, expected]
 
 
 def test_redis_client_option_overrides_the_health_check_default(clients) -> None:
@@ -239,6 +236,8 @@ def test_redis_subclass_create_client_builds_both_clients(clients) -> None:
     }
     assert backend.calls == [
         ("redis://sentinel/0", options, False),
+        ("redis://sentinel/0", options, False),
+        ("redis://sentinel/0", options, True),
         ("redis://sentinel/0", options, True),
     ]
     assert clients.options == []
@@ -257,7 +256,7 @@ def test_redis_sync_pool_exhaustion_logs_a_warning(clients, caplog) -> None:
     ):
         pass
     assert isinstance(caught.value.__cause__, redis.exceptions.MaxConnectionsError)
-    assert "connection pool is exhausted" in caplog.text
+    assert "subscription pool is exhausted" in caplog.text
     assert caplog.records[-1].levelname == "WARNING"
 
 
@@ -275,7 +274,7 @@ def test_redis_async_pool_exhaustion_logs_a_warning(clients, caplog) -> None:
         await backend.aclose()
 
     asyncio.run(scenario())
-    assert "connection pool is exhausted" in caplog.text
+    assert "subscription pool is exhausted" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -383,7 +382,7 @@ def test_redis_async_subscribe_consumes_every_ack_before_yielding(clients) -> No
 
     async def scenario() -> None:
         async with backend.asubscribe(["poll:1", "poll:2"], timeout=0.2) as messages:
-            assert len(clients.created) == 1
+            assert len(clients.created) == 2
             started = time.monotonic()
             assert await anext(messages) is None
             assert time.monotonic() - started >= 0.15
@@ -485,8 +484,8 @@ def test_redis_async_subscription_reconnect_raises_connection_error(clients) -> 
     async def scenario() -> None:
         async with backend.asubscribe(["poll:1"], timeout=0.05) as messages:
             assert await anext(messages) is None
-            (client,) = clients.created
-            await client.connection_pool.disconnect()
+            _, subscriber = clients.created
+            await subscriber.connection_pool.disconnect()
             with pytest.raises(BrokerConnectionError, match="reconnected"):
                 await anext(messages)
 
@@ -563,10 +562,10 @@ def test_redis_async_client_per_event_loop_is_not_reused(clients) -> None:
     asyncio.run(publish_twice())
     asyncio.run(publish_twice())
 
-    assert len(clients.created) == 2
-    assert clients.created[0] is not clients.created[1]
+    assert len(clients.created) == 4
+    assert clients.created[0] is not clients.created[2]
     assert clients.created[0] not in [
-        client for client, _ in backend._async_clients.values()
+        entry.client for entry in backend._async_clients.values()
     ]
     assert backend.positions(["poll:1"])["poll:1"].seq == 4
 
@@ -584,7 +583,7 @@ def test_redis_async_client_drops_the_entry_of_a_closed_loop(clients) -> None:
         running.close()
     assert closed not in backend._async_clients
     assert running in backend._async_clients
-    assert len(clients.created) == 2
+    assert len(clients.created) == 4
 
 
 def test_redis_aclose_releases_sync_and_async_clients(clients, monkeypatch) -> None:
@@ -594,15 +593,16 @@ def test_redis_aclose_releases_sync_and_async_clients(clients, monkeypatch) -> N
 
     async def use_and_close() -> None:
         await backend.apositions(["poll:1"])
-        (client,) = clients.created
-        aclose = create_autospec(client.aclose)
-        monkeypatch.setattr(client, "aclose", aclose)
+        closes = [create_autospec(client.aclose) for client in clients.created]
+        for client, aclose in zip(clients.created, closes, strict=True):
+            monkeypatch.setattr(client, "aclose", aclose)
         await backend.aclose()
-        aclose.assert_awaited_once_with()
+        for aclose in closes:
+            aclose.assert_awaited_once_with()
 
     asyncio.run(use_and_close())
     assert backend._async_clients == {}
-    closed.assert_called_once_with()
+    closed.assert_has_calls([call(), call()])
 
 
 def test_redis_close_with_running_loop_schedules_async_close(
@@ -621,12 +621,13 @@ def test_redis_close_with_running_loop_schedules_async_close(
 
     asyncio.run_coroutine_threadsafe(register(), loop).result(5)
     assert ready.is_set()
-    (client,) = clients.created
+    client, subscriber = clients.created
 
     async def aclose() -> None:
         done.set()
 
-    monkeypatch.setattr(client, "aclose", aclose)
+    monkeypatch.setattr(client, "aclose", AsyncMock())
+    monkeypatch.setattr(subscriber, "aclose", aclose)
     backend.close()
     assert done.wait(5)
     loop.call_soon_threadsafe(loop.stop)
@@ -713,7 +714,7 @@ def test_redis_aclose_without_async_client_closes_sync_pool(
     closed = create_autospec(clients.sync.close)
     monkeypatch.setattr(clients.sync, "close", closed)
     asyncio.run(backend.aclose())
-    closed.assert_called_once_with()
+    closed.assert_has_calls([call(), call()])
     assert clients.created == []
 
 
@@ -726,8 +727,8 @@ def test_redis_aclose_closes_the_sync_pool_off_the_event_loop(
         clients.sync, "close", lambda: threads.append(threading.current_thread())
     )
     asyncio.run(backend.aclose())
-    assert len(threads) == 1
-    assert threads[0] is not threading.main_thread()
+    assert len(threads) == 2
+    assert threading.main_thread() not in threads
 
 
 _TRANSPORT_ERRORS = [
@@ -850,7 +851,7 @@ def test_publish_and_positions_wrap_redis_transport_errors(
 
     async def scenario() -> None:
         entry = backend._loop_client()
-        client, scripts = entry
+        client, scripts, _ = entry
         failing = AsyncMock(spec=scripts.publish, side_effect=failure)
         backend._async_clients[asyncio.get_running_loop()] = entry._replace(
             scripts=replace(scripts, publish=failing)
@@ -890,7 +891,7 @@ def test_redis_forked_child_forgets_parent_async_clients(clients) -> None:
     assert backend._async_lock is not parent_lock
     assert len(backend._async_clients) == 0
     asyncio.run(use())
-    assert len(clients.created) == 2
+    assert len(clients.created) == 4
     loop.close()
 
 
@@ -945,3 +946,101 @@ def test_redis_presence_heals_an_evicted_identified_set(clients, operation) -> N
     assert backend.presence("room") == Presence(0)
     backend.join("room", "d", {"id": 3}, 30)
     assert backend.presence("room") == Presence(1, ({"id": 3},))
+
+
+def _stream_pool_broker(**options: object) -> _FakeServerBroker:
+    return _FakeServerBroker(
+        fakeredis.FakeServer(),
+        {"OPTIONS": {"CLIENT": {"health_check_interval": 0}, **options}},
+    )
+
+
+def test_redis_full_stream_pool_refuses_a_stream_and_keeps_publishing(caplog) -> None:
+    backend = _stream_pool_broker()
+
+    async def scenario() -> None:
+        async with AsyncExitStack() as stack:
+            streams = [
+                await stack.enter_async_context(
+                    backend.asubscribe([f"poll:{index}"], timeout=0.05)
+                )
+                for index in range(100)
+            ]
+            with pytest.raises(BrokerConnectionError) as caught:
+                async with backend.asubscribe(["poll:late"], timeout=0.05):
+                    pass
+            assert isinstance(
+                caught.value.__cause__, redis.exceptions.MaxConnectionsError
+            )
+            assert "SUBSCRIBE_MAX_CONNECTIONS" in str(caught.value)
+            message = await backend.apublish("poll:0", refresh_envelope())
+            assert await anext(streams[0]) == message
+            assert await backend.apositions(["poll:0"]) == {
+                "poll:0": Position(message.epoch, 1)
+            }
+            replayed = await backend.areplay("poll:0", Position(message.epoch, 0))
+            assert replayed.messages == (message,)
+        await backend.aclose()
+
+    asyncio.run(scenario())
+    assert "subscription pool is exhausted" in caplog.text
+
+
+def test_redis_full_sync_stream_pool_refuses_a_stream_and_keeps_publishing() -> None:
+    backend = _stream_pool_broker(SUBSCRIBE_MAX_CONNECTIONS=3)
+    with ExitStack() as stack:
+        streams = [
+            stack.enter_context(backend.subscribe([f"poll:{index}"], timeout=0.05))
+            for index in range(3)
+        ]
+        with (
+            pytest.raises(BrokerConnectionError, match="SUBSCRIBE_MAX_CONNECTIONS"),
+            backend.subscribe(["poll:late"], timeout=0.05),
+        ):
+            pass
+        message = backend.publish("poll:0", refresh_envelope())
+        assert next(streams[0]) == message
+        assert backend.positions(["poll:0"])["poll:0"] == Position(message.epoch, 1)
+        replayed = backend.replay("poll:0", Position(message.epoch, 0))
+        assert replayed.messages == (message,)
+
+
+def test_redis_stream_pool_takes_its_own_connection_limit() -> None:
+    backend = _stream_pool_broker(SUBSCRIBE_MAX_CONNECTIONS=7)
+
+    async def scenario() -> None:
+        backend._loop_client()
+        await backend.aclose()
+
+    asyncio.run(scenario())
+    limits = [options.get("max_connections") for _, options, _ in backend.calls]
+    assert limits == [None, 7, None, 7]
+
+
+def test_redis_stream_pool_inherits_the_client_connection_limit(clients) -> None:
+    RedisBroker({"OPTIONS": {"CLIENT": {"max_connections": 50}}})
+    assert [options["max_connections"] for options in clients.options] == [50, 50]
+
+
+@pytest.mark.parametrize("limit", INVALID_CONNECTION_LIMITS)
+def test_redis_invalid_stream_connection_limit_raises(clients, limit) -> None:
+    with pytest.raises(ImproperlyConfigured, match="SUBSCRIBE_MAX_CONNECTIONS"):
+        RedisBroker({"OPTIONS": {"SUBSCRIBE_MAX_CONNECTIONS": limit}})
+    assert clients.options == []
+
+
+def test_redis_loop_client_closes_the_stream_pool_after_a_failed_close(clients) -> None:
+    backend = RedisBroker()
+
+    async def scenario() -> None:
+        entry = backend._loop_client()
+        failing = create_autospec(redis.asyncio.Redis, instance=True)
+        failing.aclose.side_effect = OSError("closed")
+        closing = create_autospec(redis.asyncio.Redis, instance=True)
+        broken = entry._replace(client=failing, subscriber=closing)
+        with pytest.raises(OSError, match="closed"):
+            await broken.aclose()
+        closing.aclose.assert_awaited_once_with()
+        await backend.aclose()
+
+    asyncio.run(scenario())

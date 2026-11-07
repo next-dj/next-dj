@@ -20,6 +20,7 @@ from next.pages.access import (
     page_access,
     refusal,
     refuse_broken,
+    render_guard,
     url_lookup,
 )
 from next.pages.errors import PageModuleImportError
@@ -27,6 +28,7 @@ from next.pages.loaders import load_python_module_memo
 from next.permissions import add_perm
 from next.permissions.access import declarations
 from next.permissions.markers import OPEN, AccessRule, Requirement
+from next.testing import NextClient
 from tests.support import (
     PermissionHolder,
     bound_dependency,
@@ -45,6 +47,8 @@ from tests.support.access import (
     sign_in,
     write_guard,
 )
+from tests.support.cases.intercepts import zone_body
+from tests.support.forms import logged_request_error
 
 
 pytestmark = pytest.mark.django_db
@@ -696,26 +700,18 @@ class TestRefusal:
         with routed(root), pytest.raises(PermissionDenied):
             refusal(page_path, request, {}, {})
 
-    def test_a_broken_page_above_is_a_404(self, root, client) -> None:
-        write_guard(root, "raise RuntimeError('boom')\n")
-        write_page(root, "a", page_source())
-
-        with routed(root):
-            response = client.get("/a/")
-
-        assert response.status_code == 404
-
-    def test_a_broken_page_above_raises_when_failing_loudly(self, root) -> None:
+    def test_a_broken_page_above_raises_its_import_failure(self, root) -> None:
         write_guard(root, "raise RuntimeError('boom')\n")
         page_path = write_page(root, "a", page_source())
         request = RequestFactory().get("/a/")
 
-        with routed(root, STRICT_LOADING=True), pytest.raises(PageModuleImportError):
+        with routed(root), pytest.raises(PageModuleImportError):
             refusal(page_path, request, {}, {})
 
-    def test_a_fixed_page_above_applies_on_the_next_request(self, root, client) -> None:
+    def test_a_fixed_page_above_applies_on_the_next_request(self, root) -> None:
         declaring = write_guard(root, "raise RuntimeError('boom')\n")
         write_page(root, "a", page_source())
+        client = Client(raise_request_exception=False)
 
         with routed(root):
             broken = client.get("/a/")
@@ -723,14 +719,41 @@ class TestRefusal:
             touch_later(declaring)
             fixed = client.get("/a/")
 
-        assert (broken.status_code, fixed.status_code) == (404, 302)
+        assert (broken.status_code, fixed.status_code) == (500, 302)
 
     def test_refuse_broken_without_a_recorded_error_is_a_404(self, tmp_path) -> None:
-        with (
-            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
-            pytest.raises(Http404),
-        ):
+        with pytest.raises(Http404):
             refuse_broken(tmp_path / "page.py")
+
+
+class TestBrokenPageAnswers500:
+    """A `page.py` that fails to import answers 500 with its traceback in the log."""
+
+    @pytest.fixture()
+    def broken(self, root: Path) -> Path:
+        write_page(root, "a", page_source(template=zone_body("feed")))
+        return write_guard(root, "raise RuntimeError('boom')\n")
+
+    @pytest.mark.parametrize(
+        "get",
+        [
+            pytest.param(lambda client: client.get("/a/"), id="page"),
+            pytest.param(lambda client: client.get_zones("/a/", "feed"), id="partial"),
+        ],
+    )
+    @override_settings(DEBUG=False)
+    def test_a_get(self, root, broken, caplog, get) -> None:
+        client = NextClient(raise_request_exception=False)
+
+        with routed(root):
+            response = get(client)
+
+        assert response.status_code == 500
+        assert b"boom" not in response.content
+        error = logged_request_error(caplog)
+        assert isinstance(error, PageModuleImportError)
+        assert error.file_path == broken
+        assert isinstance(error.__cause__, RuntimeError)
 
 
 class TestAccessMemo:
@@ -834,3 +857,48 @@ class TestOwnerAccess:
     def test_a_file_outside_every_tree_has_no_owner(self, root, tmp_path) -> None:
         with routed(root):
             assert owner_access(tmp_path / "elsewhere" / "forms.py") is None
+
+
+_RENDERS = "def render(request):\n    return 'ok'\n"
+
+
+class TestRenderGuard:
+    """A page-scoped action answers to the `render()` of the page in its directory."""
+
+    @pytest.mark.parametrize("debug", [False, True])
+    def test_a_page_with_render_guards_the_files_beside_it(self, root, debug) -> None:
+        page_path = write_page(root, "a", _RENDERS)
+        beside = str(root / "a" / "forms.py")
+
+        with routed(root), override_settings(DEBUG=debug):
+            first = render_guard(beside, "page")
+            second = render_guard(beside, "page")
+
+        assert (first, second) == (page_path, page_path)
+
+    @pytest.mark.parametrize(
+        ("source", "scope"), [(_RENDERS, "shared"), ('template = "ok"\n', "page")]
+    )
+    def test_nothing_guards_without_a_page_render(self, root, source, scope) -> None:
+        page_path = write_page(root, "a", source)
+
+        with routed(root):
+            assert render_guard(str(page_path), scope) is None
+
+    def test_a_file_outside_every_tree_has_no_guard(self, root, tmp_path) -> None:
+        with routed(root):
+            assert (
+                render_guard(str(tmp_path / "elsewhere" / "forms.py"), "page") is None
+            )
+
+    def test_a_page_loaded_again_is_read_again(self, root) -> None:
+        page_path = write_page(root, "a", 'template = "ok"\n')
+
+        with routed(root):
+            before = render_guard(str(page_path), "page")
+            page_path.write_text(_RENDERS)
+            touch_later(page_path)
+            load_python_module_memo(page_path)
+            after = render_guard(str(page_path), "page")
+
+        assert (before, after) == (None, page_path)

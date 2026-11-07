@@ -7,7 +7,6 @@ import threading
 import time
 import weakref
 from abc import ABC, abstractmethod
-from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
@@ -324,7 +323,7 @@ class PresenceSchedule:
     def reset(self) -> None:
         """Drop the pending topics, the lock and the thread, as a forked child must."""
         self._due: list[tuple[float, str]] = []
-        self._queued: Counter[str] = Counter()
+        self._queued: dict[str, float] = {}
         self._condition = threading.Condition()
         self._thread: threading.Thread | None = None
 
@@ -344,7 +343,11 @@ class PresenceSchedule:
     def pending(self) -> tuple[str, ...]:
         """Return the topics waiting for their window to close, soonest first."""
         with self._condition:
-            return tuple(topic for _, topic in sorted(self._due))
+            return tuple(
+                topic
+                for due, topic in sorted(self._due)
+                if self._queued.get(topic) == due
+            )
 
     def run_due(self, now: float | None = None) -> int:
         """Publish every snapshot due by `now` and return how many were attempted.
@@ -355,7 +358,11 @@ class PresenceSchedule:
         ripe: list[str] = []
         with self._condition:
             while self._due and self._due[0][0] <= moment:
-                ripe.append(self._pop())
+                due, topic = heapq.heappop(self._due)
+                if self._queued.get(topic) != due:
+                    continue
+                del self._queued[topic]
+                ripe.append(topic)
         for topic in ripe:
             try:
                 self._publish(topic)
@@ -373,17 +380,12 @@ class PresenceSchedule:
             self._condition.notify()
 
     def _push(self, topic: str, due: float) -> None:
-        """Queue a topic on the heap and count it among the queued ones."""
+        """Queue a topic once, keeping the earliest deadline requested."""
+        current = self._queued.get(topic)
+        if current is not None and current <= due:
+            return
+        self._queued[topic] = due
         heapq.heappush(self._due, (due, topic))
-        self._queued[topic] += 1
-
-    def _pop(self) -> str:
-        """Take the soonest topic off the heap, uncounting it once no entry is left."""
-        _, topic = heapq.heappop(self._due)
-        self._queued[topic] -= 1
-        if not self._queued[topic]:
-            del self._queued[topic]
-        return topic
 
     def close(self) -> None:
         """Publish what is pending right away and let the thread exit at its wakeup."""
@@ -405,7 +407,11 @@ class PresenceSchedule:
         """Refuse new topics, wake the thread to exit and hand back the pending ones."""
         with self._condition:
             self._closed = True
-            ripe = tuple(dict.fromkeys(topic for _, topic in sorted(self._due)))
+            ripe = tuple(
+                topic
+                for due, topic in sorted(self._due)
+                if self._queued.get(topic) == due
+            )
             self._due.clear()
             self._queued.clear()
             self._condition.notify_all()

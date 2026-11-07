@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         check_invalid_action_transport,
         check_invalid_form_meta_scope,
         check_public_actions,
+        check_render_guarded_actions,
         check_shared_action_name_collisions,
         check_shared_page_forms,
         check_success_message_framework,
@@ -157,6 +158,7 @@ if TYPE_CHECKING:
         check_permissions_known,
     )
     from next.realtime.checks import (
+        check_broker_deployment,
         check_realtime_settings,
         check_shared_broker,
         check_ticket_introspection,
@@ -217,6 +219,7 @@ if TYPE_CHECKING:
     from next.urls.checks import (
         check_framework_routes_reachable,
         check_next_pages_configuration,
+        check_reserved_url_parameters,
         check_reverse_name_collisions,
         check_router_manager,
         check_url_patterns,
@@ -275,6 +278,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_invalid_action_transport",
         "check_invalid_form_meta_scope",
         "check_public_actions",
+        "check_render_guarded_actions",
         "check_shared_action_name_collisions",
         "check_shared_page_forms",
         "check_success_message_framework",
@@ -364,6 +368,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_permissions_known",
     ),
     "next.realtime.checks": (
+        "check_broker_deployment",
         "check_realtime_settings",
         "check_shared_broker",
         "check_ticket_introspection",
@@ -424,6 +429,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.urls.checks": (
         "check_framework_routes_reachable",
         "check_next_pages_configuration",
+        "check_reserved_url_parameters",
         "check_reverse_name_collisions",
         "check_router_manager",
         "check_url_patterns",
@@ -444,6 +450,7 @@ __all__ = [
     "check_asset_kinds_are_loadable",
     "check_asset_renderers",
     "check_asset_version_moves_between_deploys",
+    "check_broker_deployment",
     "check_builtin_tag_libraries_complete",
     "check_colocated_name_collisions",
     "check_component_action_objects",
@@ -554,9 +561,11 @@ __all__ = [
     "check_public_actions",
     "check_public_beside_requirements",
     "check_realtime_settings",
+    "check_render_guarded_actions",
     "check_repeated_form_has_key",
     "check_request_in_context",
     "check_reserved_js_context_keys",
+    "check_reserved_url_parameters",
     "check_reverse_name_collisions",
     "check_robots_disallow",
     "check_root_marker_outside_layouts",

@@ -8,7 +8,7 @@ from django.template.base import TextNode
 from next.components import ComponentInfo, sources
 from next.components.renderers import TemplateSource
 from next.partial import guards
-from next.partial.guards import Components, bound_zones, fresh, guarded_zones
+from next.partial.guards import Components, bound_zones, guarded_zones
 from tests.support import touch_later
 from tests.support.guards import (
     CHILDREN_BODY,
@@ -263,21 +263,6 @@ class TestMemoAndStamps:
         components.guarding("card")
         stamped = {path.name for path, _mtime in components.stamps}
         assert stamped == {"card.djx", part}
-        assert fresh(components.stamps) is True
-
-    def test_fresh_notices_an_edit_and_a_removal(self, tmp_path: Path) -> None:
-        kept, edited, removed = (tmp_path / name for name in ("a", "b", "c"))
-        for path in (kept, edited, removed):
-            path.write_text("x")
-        stamps = frozenset(
-            (path, path.stat().st_mtime) for path in (kept, edited, removed)
-        )
-        assert fresh(stamps) is True
-        touch_later(edited, "y")
-        assert fresh(stamps) is False
-        assert fresh(frozenset({(kept, kept.stat().st_mtime)})) is True
-        removed.unlink()
-        assert fresh(frozenset({(removed, 1.0)})) is False
 
     @pytest.mark.parametrize(("debug", "guarding"), [(True, True), (False, False)])
     def test_an_edited_include_is_read_again_only_under_debug(

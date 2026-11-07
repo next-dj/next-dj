@@ -36,7 +36,7 @@ def resolve_page_metadata(
     page: Page, file_path: Path, request: HttpRequest | None = None, **kwargs: object
 ) -> ResolvedMetadata:
     """Resolve the metadata of `file_path` by building its whole render context."""
-    context_data = page.build_render_context(file_path, request, **kwargs)
+    context_data = page.build_render_context(file_path, request, kwargs)
     thunk = context_data[METADATA_KEY]
     assert isinstance(thunk, MetadataThunk)
     return resolve_metadata(thunk.fold(context_data), request=request)

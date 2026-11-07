@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCsrf, mintCsrf, readCsrf } from "./csrf";
+import type { CsrfMint } from "./csrf";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import { chunkModules, landed } from "./test-doubles";
@@ -42,6 +43,20 @@ describe("readCsrf", () => {
     expect(readCsrf({ header: "X-CSRFToken" })).toBeUndefined();
     expect(readCsrf({ token: "t" })).toBeUndefined();
     expect(readCsrf("nope")).toBeUndefined();
+  });
+});
+
+describe("mintCsrf", () => {
+  it("supports callers without an abort signal", async () => {
+    const minted = await mintCsrf(
+      CSRF_URL,
+      async (_url, init) => {
+        expect(init.signal).toBeUndefined();
+        return json({ header: "X-CSRFToken", token: "minted" });
+      },
+      document,
+    );
+    expect(minted).toEqual({ header: "X-CSRFToken", token: "minted" });
   });
 });
 
@@ -156,6 +171,67 @@ describe("the deferred token", () => {
     csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
     void csrf.ensure();
     expect(calls).toHaveLength(2);
+  });
+
+  it("does not start a mint canceled while its chunk is loading", async () => {
+    let resolveLoad: (mint: CsrfMint) => void = () => undefined;
+    let calls = 0;
+    const csrf = createCsrf({
+      mint: {
+        get: () => undefined,
+        load: () => new Promise((resolve) => (resolveLoad = resolve)),
+        whenLoaded: () => undefined,
+      },
+      fetch: async () => {
+        calls += 1;
+        return json({ header: "X-CSRFToken", token: "minted" });
+      },
+    });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
+
+    const pending = csrf.ensure();
+    csrf.cancelPending();
+    resolveLoad(mintCsrf);
+
+    expect(await pending).toEqual({ header: "X-CSRFToken", url: CSRF_URL });
+    expect(calls).toBe(0);
+  });
+
+  it("refuses a wait whose signal is already aborted, without a mint", async () => {
+    const { fetch, calls } = minting();
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
+    const reason = new Error("gone");
+
+    await expect(csrf.ensure(AbortSignal.abort(reason))).rejects.toBe(reason);
+    await expect(csrf.ensure(AbortSignal.abort("gone"))).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("aborts and forgets a pending token mint", async () => {
+    const calls: RequestInit[] = [];
+    const csrf = createCsrf({
+      mint: chunkModules.csrf,
+      fetch: (_url, init) => {
+        calls.push(init);
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        });
+      },
+    });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL });
+
+    const first = csrf.ensure();
+    csrf.cancelPending();
+    expect(await first).toEqual({ header: "X-CSRFToken", url: CSRF_URL });
+    void csrf.ensure();
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.signal?.aborted).toBe(true);
   });
 
   it("fetches the csrf chunk first when it has not landed yet", async () => {

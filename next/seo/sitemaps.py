@@ -26,7 +26,7 @@ from next.pages import page
 from next.pages.access import anonymous_admitted, page_access
 from next.pages.metadata.hreflang import x_default_url
 from next.pages.metadata.normalize import X_DEFAULT
-from next.urls.reverse import page_reverse
+from next.urls.reverse import page_reverse_in
 from next.utils import is_dynamic_trail, is_int
 
 from .discovery import declared_cache
@@ -352,7 +352,7 @@ class PageTreeSitemap(_SitemapBase):
         """Reverse the item under the active language, so its prefix is in the path."""
         kwargs: dict[str, Any] = dict(item.entry.kwargs)
         try:
-            return page_reverse(item.trail, namespace=self._namespace, **kwargs)
+            return page_reverse_in(self._namespace, item.trail, kwargs)
         except NoReverseMatch as exc:
             exc.add_note(
                 f"Raised reversing the trail {item.trail!r} with the kwargs "

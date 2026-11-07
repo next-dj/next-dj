@@ -7,6 +7,7 @@ from django.http import HttpRequest
 
 import next.pages.registry as registry_module
 from next.deps import DependencyResolver
+from next.errors import AsyncCallableError
 from next.pages import Context, Page, PageContextShapeError
 from next.pages.context import ContextByDefaultProvider
 from next.pages.registry import PageContextEntry, PageContextRegistry, ZoneBinding
@@ -935,7 +936,7 @@ class TestZoneBatchWithInheritedChain:
         context_manager.register_context(child, "table", lambda: "rows", zone="table")
 
         result = context_manager.collect_context(
-            child, _requested_zones=frozenset({"other"})
+            child, requested_zones=frozenset({"other"})
         )
 
         assert result.context_data == {"shared": "inherited", "always": "own"}
@@ -952,10 +953,10 @@ class TestZoneBatchWithInheritedChain:
         builds = _count_chain_builds(monkeypatch)
 
         first = context_manager.collect_context(
-            child, _requested_zones=frozenset({"table"})
+            child, requested_zones=frozenset({"table"})
         )
         second = context_manager.collect_context(
-            child, _requested_zones=frozenset({"other"})
+            child, requested_zones=frozenset({"other"})
         )
 
         assert builds == [child]
@@ -1002,7 +1003,9 @@ class TestInheritedResolution:
         )
         context_manager.register_context(shop, "offers", offers, inherit_context=True)
 
-        result = context_manager.collect_context(offer, category="shoes")
+        result = context_manager.collect_context(
+            offer, url_kwargs={"category": "shoes"}
+        )
 
         assert [type(value) for value in seen] == [_Category]
         assert result.context_data["offers"] == ["shoes-1"]
@@ -1042,7 +1045,7 @@ class TestInheritedResolution:
             shop, "category", category, inherit_context=True
         )
 
-        result = context_manager.collect_context(shop, category="shoes")
+        result = context_manager.collect_context(shop, url_kwargs={"category": "shoes"})
 
         assert received == ["shoes"]
         assert result.context_data["category"].slug == "shoes"
@@ -1062,7 +1065,7 @@ class TestInheritedResolution:
             shop, "category", category, inherit_context=True
         )
 
-        context_manager.collect_context(offer, category="shoes")
+        context_manager.collect_context(offer, url_kwargs={"category": "shoes"})
 
         assert calls == ["shoes"]
 
@@ -1181,7 +1184,7 @@ class TestInheritedResolution:
         context_manager.register_context(polls, "poll", poll, inherit_context=True)
         context_manager.register_context(polls, "live_results", live_results)
 
-        result = context_manager.collect_context(polls, pk="7")
+        result = context_manager.collect_context(polls, url_kwargs={"pk": "7"})
 
         assert calls == ["7"]
         assert result.context_data["live_results"] == "results of 7"
@@ -1202,3 +1205,17 @@ class TestInheritedResolution:
 
         assert result.context_data == {"brand": "keyed", "tagline": "t"}
         assert result.js_context == {"brand": "keyed", "tagline": "t"}
+
+
+class TestAsyncContextRefusal:
+    """An async `@context` callable is refused before it is registered."""
+
+    def test_register_context_refuses_async(
+        self, context_manager, test_file_path
+    ) -> None:
+        async def rows() -> list[int]:
+            return [1]
+
+        with pytest.raises(AsyncCallableError, match='@context callable "rows"'):
+            context_manager.register_context(test_file_path, "rows", rows)
+        assert context_manager._context_registry == {}

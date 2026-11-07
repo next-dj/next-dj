@@ -64,12 +64,11 @@ def _initial_only_form(calls: list[str]) -> type[Form]:
     return InitialOnlyForm
 
 
-def _post(data: dict[str, str] | None = None, *, origin: str | None = None):
+def _post(data: dict[str, str] | None = None, *, origin: str):
     post = QueryDict(mutable=True)
     for key, value in (data or {}).items():
         post[key] = value
-    if origin is not None:
-        post[ORIGIN_FIELD_NAME] = origin
+    post[ORIGIN_FIELD_NAME] = origin
     return post
 
 
@@ -78,7 +77,7 @@ def _dispatch(
     form_class: object,
     data: dict[str, str] | None = None,
     *,
-    origin: str | None = None,
+    origin: str = "/",
     handler: Callable[..., object] | None = None,
 ) -> tuple[HttpResponse, django_forms.Form | None]:
     """POST through the dispatch pipeline and return the response and bound form."""

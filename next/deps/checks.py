@@ -19,7 +19,9 @@ from next.checks.common import (
 from next.components.context import component
 from next.components.sources import components_listed, import_component_modules
 from next.discovery import iter_scanned_intercepts
+from next.forms.base import FORM_HOOKS
 from next.forms.checks.sources import iter_registered_actions
+from next.forms.wizard import WIZARD_HOOKS
 from next.introspect import describe_callable
 from next.pages.access import page_access, routed
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
@@ -49,17 +51,6 @@ if TYPE_CHECKING:
     from next.permissions.markers import Requirement
     from next.urls import RouterManager
     from next.utils import PageRoot
-
-
-_FORM_HOOKS = (
-    "get_initial",
-    "get_form_kwargs",
-    "check_permissions",
-    "has_object_permission",
-    "on_valid",
-)
-
-_WIZARD_HOOKS = ("check_permissions", "done")
 
 
 class _ObjectParam(NamedTuple):
@@ -179,8 +170,7 @@ def _loaded_pages(
 ) -> Iterator[tuple[PageRoot, str, Path]]:
     """Yield each page that loaded once, with the tree the walk found it in.
 
-    An intercept page comes under its target trail. A `page.py` with no body serves no
-    route, so it is left out.
+    An intercept page comes under its target trail. A bodiless `page.py` is left out.
     """
     loaded = {path for _url_path, path in discover_page_registrations(router_manager)}
     for router in router_manager.backends:
@@ -210,9 +200,9 @@ def _hooks(owner: object, names: Iterable[str]) -> Iterator[Callable[..., Any]]:
 
 
 def _form_class_callables(form_class: object) -> Iterator[Callable[..., Any]]:
-    """Yield the DI-resolved hooks of a form class, or a form factory itself."""
+    """Yield the hooks of a form class, or a form factory itself."""
     if isinstance(form_class, type):
-        yield from _hooks(form_class, _FORM_HOOKS)
+        yield from _hooks(form_class, FORM_HOOKS)
     elif callable(form_class):
         yield form_class
 
@@ -227,7 +217,7 @@ def _form_callables() -> Iterator[Callable[..., Any]]:
         wizard_class = meta.get("wizard_class")
         if wizard_class is None:
             continue
-        yield from _hooks(wizard_class, _WIZARD_HOOKS)
+        yield from _hooks(wizard_class, WIZARD_HOOKS)
         for _step, step_class in wizard_class._static_steps():
             yield from _form_class_callables(step_class)
 

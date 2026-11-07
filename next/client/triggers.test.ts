@@ -801,6 +801,161 @@ describe("trigger delegation", () => {
   });
 });
 
+describe("browser defaults the triggers leave alone", () => {
+  const PAGER = '<a href="/p2/" data-next-merge="append" data-next-target="list"';
+  const FORM =
+    '<form action="/_next/form/u/" data-next-action="u">' +
+    '<input name="title" value="x"><button type="submit">Save</button></form>';
+  let detach: () => void;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    detach?.();
+  });
+
+  function click(link: Element, init: MouseEventInit = {}): MouseEvent {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, ...init });
+    link.dispatchEvent(event);
+    return event;
+  }
+
+  // A submit as the browser fires it, carrying the button the user pressed.
+  function submit(form: HTMLFormElement, submitter: Element | null = null): Event {
+    const event = new Event("submit", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "submitter", { value: submitter });
+    form.dispatchEvent(event);
+    return event;
+  }
+
+  it.each([
+    { metaKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+    { altKey: true },
+    { button: 1 },
+  ])("leaves a pagination click with %o to the browser", (init) => {
+    document.body.innerHTML = `${PAGER}>more</a>`;
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    const event = click(document.querySelector("a")!, init);
+    expect(event.defaultPrevented).toBe(false);
+    expect(requests).toHaveLength(0);
+  });
+
+  it.each([['target="_blank"'], ['target="feed"'], ["download"]])(
+    "leaves a pagination link carrying %s to the browser",
+    (attr) => {
+      document.body.innerHTML = `${PAGER} ${attr}>more</a>`;
+      const { triggers, requests } = makeTriggers();
+      detach = triggers.install(document);
+      expect(click(document.querySelector("a")!).defaultPrevented).toBe(false);
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  it("paginates a link that names its own browsing context", () => {
+    document.body.innerHTML = `${PAGER} target="_SELF">more</a>`;
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    expect(click(document.querySelector("a")!).defaultPrevented).toBe(true);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("does not paginate a click a handler on the link already cancelled", () => {
+    document.body.innerHTML = `${PAGER}>more</a>`;
+    const link = document.querySelector("a")!;
+    link.addEventListener("click", (e) => e.preventDefault());
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    click(link);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("does not post a submit a handler on the form cancelled", () => {
+    document.body.innerHTML = FORM;
+    const form = document.querySelector("form")!;
+    form.addEventListener("submit", (e) => e.preventDefault());
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    submit(form);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("posts to the formaction of the pressed button", () => {
+    document.body.innerHTML = FORM;
+    const button = document.querySelector("button")!;
+    button.setAttribute("formaction", "/_next/form/other/");
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    submit(document.querySelector("form")!, button);
+    expect(requests[0]).toMatchObject({ url: "/_next/form/other/", uid: "u" });
+  });
+
+  it.each([["get"], ["dialog"]])(
+    "leaves a submit whose button asks for formmethod=%s to the browser",
+    (method) => {
+      document.body.innerHTML = FORM;
+      const button = document.querySelector("button")!;
+      button.setAttribute("formmethod", method);
+      const { triggers, requests } = makeTriggers();
+      detach = triggers.install(document);
+      expect(submit(document.querySelector("form")!, button).defaultPrevented).toBe(
+        false,
+      );
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  it("intercepts a submit whose button asks for formmethod=POST", () => {
+    document.body.innerHTML = FORM;
+    const button = document.querySelector("button")!;
+    button.setAttribute("formmethod", "POST");
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    expect(submit(document.querySelector("form")!, button).defaultPrevented).toBe(true);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("leaves a submit aimed at another browsing context to the browser", () => {
+    document.body.innerHTML = FORM;
+    const form = document.querySelector("form")!;
+    const button = document.querySelector("button")!;
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    button.setAttribute("formtarget", "_blank");
+    expect(submit(form, button).defaultPrevented).toBe(false);
+    button.removeAttribute("formtarget");
+    form.setAttribute("target", "_blank");
+    expect(submit(form, button).defaultPrevented).toBe(false);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("a button's formtarget=_self keeps a form aimed elsewhere in the page", () => {
+    document.body.innerHTML = FORM;
+    const form = document.querySelector("form")!;
+    form.setAttribute("target", "_blank");
+    const button = document.querySelector("button")!;
+    button.setAttribute("formtarget", "_self");
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    submit(form, button);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("intercepts a formnovalidate submit, which the browser let through unchecked", () => {
+    document.body.innerHTML = FORM;
+    const button = document.querySelector("button")!;
+    button.setAttribute("formnovalidate", "");
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    submit(document.querySelector("form")!, button);
+    expect(requests).toHaveLength(1);
+  });
+});
+
 describe("zone polling", () => {
   let detach: () => void;
 

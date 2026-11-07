@@ -194,7 +194,8 @@ def test_redis_async_scripts_are_bound_once_per_loop(server, clock) -> None:
         first = broker._loop_client().scripts
         await broker.ajoin(TOPIC, "a", None, 30)
         assert broker._loop_client().scripts is first
-        (_, scripts), *_ = broker._async_clients.values()
+        entry, *_ = broker._async_clients.values()
+        scripts = entry.scripts
         bound = [getattr(scripts, field.name) for field in fields(scripts)]
         assert len(bound) == 6
         assert len({id(script) for script in bound}) == 6
@@ -333,11 +334,23 @@ def test_failed_snapshot_is_not_queued_twice_or_after_close() -> None:
     schedule.schedule("room:1", 0)
     schedule.schedule("room:1", 0)
 
-    assert schedule.run_due() == 2
+    assert schedule.pending() == ("room:1",)
+    assert schedule.run_due() == 1
     assert schedule.pending() == ("room:1",)
     schedule.close()
     schedule._again("room:1")
     assert schedule.pending() == ()
+
+
+def test_rescheduling_a_topic_keeps_its_earlier_deadline() -> None:
+    published: list[str] = []
+    schedule = PresenceSchedule(published.append, clock=lambda: 0.0, threaded=False)
+    schedule.schedule("room:1", 10)
+    schedule.schedule("room:1", 5)
+
+    assert schedule.pending() == ("room:1",)
+    assert schedule.run_due(5) == 1
+    assert published == ["room:1"]
 
 
 def test_closing_a_schedule_publishes_what_is_pending(caplog) -> None:

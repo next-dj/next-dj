@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from next.utils import load_tree_source, stat_mtime_ns
+from next.stamps import fresh
+from next.utils import load_tree_source
 
 from .errors import ScriptsSourceImportError
 from .markers import Script
@@ -55,16 +56,17 @@ def load_scripts(root: Path) -> ScriptsSource | None:
     )
     if loaded is None:
         return None
+    stamp = loaded.stamp
     if loaded.error is not None:
-        return ScriptsSource(root, loaded.path, loaded.stamp, error=loaded.error)
+        return ScriptsSource(root, loaded.path, stamp, error=loaded.error)
     scripts, problem = _declared(getattr(loaded.module, "scripts", ()))
-    return ScriptsSource(root, loaded.path, loaded.stamp, scripts, problem=problem)
+    return ScriptsSource(root, loaded.path, stamp, scripts, problem=problem)
 
 
 def source_stale(source: ScriptsSource | None, root: Path) -> bool:
     """Whether the `scripts.py` of `root` changed since `source` was read."""
     held = None if source is None else source.stamp
-    return stat_mtime_ns(root / SCRIPTS_MODULE) != held
+    return not fresh(held, root / SCRIPTS_MODULE)
 
 
 __all__ = ["SCRIPTS_MODULE", "ScriptsSource", "load_scripts", "source_stale"]

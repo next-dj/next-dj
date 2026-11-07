@@ -34,7 +34,7 @@ The tag does the following.
 2. Resolves the stable dispatch URL for that action.
 3. Emits ``<form action="..." method="post" data-next-action="...">``, then ``data-next-transport`` for an action that opts in to the WebSocket, then the compiled partial ``data-next-*`` attributes, then an automatic ``enctype="multipart/form-data"`` for a multipart form, then the remaining attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input, except on a page whose CSRF token is deferred, where the client runtime sends the token in a header, see :ref:`security-csrf-and-forms`.
-5. Emits a hidden ``_next_form_origin`` input set to the URL the page was rendered under, query string included, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
+5. Emits a hidden ``_next_form_origin`` input set to the URL the page was rendered under, query string included, resolved through the URLconf on every POST and used by ``redirect_to_origin`` on success.
 6. Publishes ``form`` inside the block body (see `The form variable`_ below).
 7. Publishes ``wizard`` alongside ``form`` when the action is a ``FormWizard``.
 
@@ -235,7 +235,7 @@ Manual CSRF
 The tag emits ``csrfmiddlewaretoken`` automatically on a page that renders its token eagerly, and leaves it out on a page that defers the token.
 Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
 A page that defers its token keeps ``{% csrf_token %}`` out of a hand-written form, because the token would then sit in HTML a shared cache keeps.
-A hand-crafted form must also include the ``_next_form_origin`` hidden field or the dispatcher cannot re-render on failure.
+A hand-crafted form must also include the ``_next_form_origin`` hidden field, because the dispatcher answers HTTP 400 to an action POST without it.
 Set it to the URL the page was rendered under with its query string, which ``{{ request.get_full_path }}`` produces, the same value the tag emits.
 
 The ``{% action_url %}`` tag resolves the dispatch URL by action name with the same page scoping as ``{% form %}``, so a hand-crafted form never hard-codes a UID.

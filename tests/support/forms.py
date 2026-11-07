@@ -3,17 +3,20 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar
 
+import pytest
 from django import forms as django_forms
 from django.core.cache import cache
-from django.http import HttpRequest, HttpResponseRedirect, QueryDict
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 
 from next.deps import Depends
 from next.forms import Form, PermissionOutcome
 from next.forms.backends import ActionRegistration
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
+from next.forms.signals import action_dispatched
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import wizard_backend_manager
+from next.testing import NextClient, capture_signals
 from tests.support.pages import write_page
 
 
@@ -29,12 +32,12 @@ _TWIN = (
 
 
 def write_twin_pages(root: Path) -> Path:
-    """Write `create` and `edit` pages that each declare an action named `twin`.
+    """Write routed `create` and `edit` pages that each declare an action named `twin`.
 
     Each handler answers with the name of its page, so a test sees which one ran.
     """
     for label in ("create", "edit"):
-        write_page(root, label, _TWIN.format(label=label))
+        write_page(root, label, _TWIN.format(label=label), body=label)
     return root
 
 
@@ -75,6 +78,23 @@ def isolated_form_registries() -> Generator[None, None, None]:
         registration_diagnostics.restore(diagnostics)
         wizard_backend_manager.reset()
         cache.clear()
+
+
+def post_without_origin(
+    client: NextClient, action: str, data: dict[str, object]
+) -> HttpResponse:
+    """Post `data` to `action` with no origin field, asserting nothing dispatched."""
+    with capture_signals(action_dispatched) as recorder:
+        response = client.post(client.get_action_url(action), data)
+    assert recorder.events == []
+    return response
+
+
+def logged_request_error(caplog: pytest.LogCaptureFixture) -> BaseException | None:
+    """Return the exception of the one `django.request` record `caplog` holds."""
+    [record] = [r for r in caplog.records if r.name == "django.request"]
+    assert record.exc_info is not None
+    return record.exc_info[1]
 
 
 def build_post_request(mock_http_request, *, origin: str = "/") -> HttpRequest:

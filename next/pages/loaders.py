@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING, ClassVar, Final, override
 from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
+from next.introspect import refuse_async_render
 from next.pages.errors import PageModuleImportError
 from next.permissions.access import declarations
+from next.stamps import all_fresh, stamp_of, stat_mtime_ns, trusted
 from next.utils import (
     LAYOUT_TEMPLATE,
     MAX_ANCESTOR_WALK_DEPTH,
@@ -25,7 +27,6 @@ from next.utils import (
     exec_module_file,
     is_within,
     resolve_base_dir,
-    stat_mtime_ns,
     template_edits_watched,
 )
 
@@ -57,12 +58,12 @@ PAGE_MODULE: Final = "page.py"
 
 @dataclass(frozen=True, slots=True)
 class _PageLoad:
-    """One execution of a `page.py`, recorded with the nanosecond mtime it read.
+    """One execution of a `page.py`, recorded with the stamp taken before it ran.
 
     The module and the failure share one entry, so a concurrent load cannot split them.
     """
 
-    mtime_ns: int
+    stamp: int
     module: types.ModuleType | None
     error: Exception | None
 
@@ -71,7 +72,7 @@ _MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
-# Load mtime per path, kept on eviction since a re-exec at that mtime is a no-op.
+# Load stamp per path, kept on eviction since a re-exec at that mtime is a no-op.
 _stamps: dict[Path, int] = {}
 
 
@@ -103,7 +104,7 @@ def module_generation() -> int:
 
 
 def module_stamps(paths: tuple[Path, ...]) -> tuple[int | None, ...]:
-    """Return the mtime each path was last loaded at, `None` for one never loaded.
+    """Return the stamp each path was last loaded at, `None` for one never loaded.
 
     A chain memo compares them, so a load elsewhere in the tree leaves it valid.
     """
@@ -111,8 +112,8 @@ def module_stamps(paths: tuple[Path, ...]) -> tuple[int | None, ...]:
 
 
 def _load_stamps(loads: Iterable[_PageLoad | None]) -> tuple[int | None, ...]:
-    """Return the mtime each load ran against, `None` for a file that did not stat."""
-    return tuple(None if load is None else load.mtime_ns for load in loads)
+    """Return the stamp each load ran against, `None` for a file that did not stat."""
+    return tuple(None if load is None else load.stamp for load in loads)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +128,7 @@ class AncestorStamps:
     watched: bool
     generation: int = -1
     stamps: tuple[int | None, ...] = ()
+    settled: bool = True
 
     @classmethod
     def begin(cls, file_path: Path) -> AncestorStamps:
@@ -149,15 +151,22 @@ class AncestorStamps:
         if module_stamps(self.paths) != stamps:
             generation = -1
         modules = tuple(None if load is None else load.module for load in loads)
-        return replace(self, generation=generation, stamps=stamps), modules
+        settled = all(map(trusted, stamps))
+        return replace(
+            self, generation=generation, stamps=stamps, settled=settled
+        ), modules
 
     def revalidated(self) -> AncestorStamps | None:
         """Return the stamps while no ancestor has reloaded, otherwise `None`.
 
-        Watched template edits reload each ancestor, so an edit takes effect at once.
+        A chain holding a token of an unsettled mtime is never served, edits or not.
         """
         watched = template_edits_watched()
-        if self.version != _version.value or self.watched is not watched:
+        if (
+            not self.settled
+            or self.version != _version.value
+            or self.watched is not watched
+        ):
             return None
         if watched:
             loads = tuple(map(_page_load, self.paths))
@@ -173,7 +182,7 @@ class AncestorStamps:
 def has_load_errors() -> bool:
     """Whether the latest load of any `page.py` failed.
 
-    The per-request fail-loud check calls it first, so a site without one runs no stat.
+    The page access chain calls it first, so a site without one runs no stat.
     """
     return bool(_FAILED_PATHS)
 
@@ -202,17 +211,22 @@ def load_page_module(
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Execute `file_path` as a fresh page module, raising whatever its body raises."""
-    return exec_module_file(file_path, "page_module")
+    """Execute `file_path` as a fresh page module, raising whatever its body raises.
+
+    An async `render` raises here too, so the refusal runs once per load.
+    """
+    module = exec_module_file(file_path, "page_module")
+    refuse_async_render(module, "page.py render")
+    return module
 
 
-def _remember(file_path: Path, load: _PageLoad) -> None:
-    """Store `load` and the failure index, unless the file changed since its stat.
+def _remember(file_path: Path, mtime_ns: int, load: _PageLoad) -> None:
+    """Store `load` and the failure index, unless the file changed since `mtime_ns`.
 
     A slower load of an older mtime would otherwise overwrite the load that replaced it.
     """
     with _MEMO_WRITE_LOCK:
-        if stat_mtime_ns(file_path) != load.mtime_ns:
+        if stat_mtime_ns(file_path) != mtime_ns:
             return
         # Ordered so a lock-free read never finds a failure missing from the index.
         if load.error is None:
@@ -221,7 +235,7 @@ def _remember(file_path: Path, load: _PageLoad) -> None:
         else:
             _FAILED_PATHS.add(file_path)
             _MODULE_MEMO[file_path] = load
-        _stamps[file_path] = load.mtime_ns
+        _stamps[file_path] = load.stamp
         _generation.value += 1
 
 
@@ -252,10 +266,11 @@ def _page_load(file_path: Path) -> _PageLoad | None:
         return None
 
     cached = _MODULE_MEMO.get(file_path)
-    if cached is not None and cached.mtime_ns == mtime_ns:
+    if cached is not None and cached.stamp == mtime_ns:
         # Not reordered, since it runs up to three times per dispatch.
         return cached
 
+    stamp = stamp_of(mtime_ns)
     try:
         with declarations.collecting(file_path):
             module = _load_python_module(file_path)
@@ -265,10 +280,10 @@ def _page_load(file_path: Path) -> _PageLoad | None:
             _forget(file_path)
             return None
         logger.exception("Could not import page module %s", file_path)
-        load = _PageLoad(mtime_ns, None, exc)
+        load = _PageLoad(stamp, None, exc)
     else:
-        load = _PageLoad(mtime_ns, module, None)
-    _remember(file_path, load)
+        load = _PageLoad(stamp, module, None)
+    _remember(file_path, mtime_ns, load)
     return load
 
 
@@ -540,12 +555,9 @@ def _above_tree(tree_root: Path, room: int) -> tuple[tuple[Path, int], ...]:
     A process watching template edits walks again, so a layout added later shows.
     """
     key = (tree_root, room)
+    watched = template_edits_watched()
     held = _ABOVE_TREE.get(key)
-    if (
-        held is not None
-        and not template_edits_watched()
-        and all(stat_mtime_ns(path) == mtime for path, mtime in held)
-    ):
+    if held is not None and not watched and all_fresh(held):
         return held
     found: list[tuple[Path, int]] = []
     # The filesystem root is the last ancestor and holds no layout.
@@ -553,9 +565,9 @@ def _above_tree(tree_root: Path, room: int) -> tuple[tuple[Path, int], ...]:
         layout = _layout_at(directory, linked=False)
         if layout is not None:
             found.append(layout)
-    layouts = tuple(found)
-    _ABOVE_TREE[key] = layouts
-    return layouts
+    if not watched:
+        _ABOVE_TREE[key] = tuple((path, stamp_of(mtime)) for path, mtime in found)
+    return tuple(found)
 
 
 def _walk(
@@ -667,12 +679,13 @@ def layout_chain(
 def layout_stamps(
     file_path: Path, tree_root: Path | None = None
 ) -> tuple[tuple[Path, int | None], ...]:
-    """Return the cut layouts of `file_path` with their stat'd mtimes.
+    """Return the cut layouts of `file_path` with the mtimes a snapshot keeps.
 
     A `tree_root` only says where to hold the tail, so any ancestor yields one chain.
     """
     layouts, _, mtimes = _walk(file_path, 0, tree_root=tree_root)
-    return tuple(zip(layouts, mtimes, strict=True))
+    stamps = (None if mtime_ns is None else stamp_of(mtime_ns) for mtime_ns in mtimes)
+    return tuple(zip(layouts, stamps, strict=True))
 
 
 def _as_placeholder_fallback(body: str) -> str:
@@ -683,8 +696,19 @@ def _as_placeholder_fallback(body: str) -> str:
     return f"{PLACEHOLDER_OPEN}{body}{PLACEHOLDER_CLOSE}"
 
 
-_LAYOUT_TEXTS: PageCache[Path, tuple[int, str]] = PageCache()
-_LAYOUT_ROOTS: PageCache[Path, tuple[int, RootScan]] = PageCache()
+@dataclass(frozen=True, slots=True)
+class _Held[T]:
+    """A value read from a file under the stamp taken before the read.
+
+    A token of an unsettled mtime never equals a stat, so such an entry is never shared.
+    """
+
+    stamp: int
+    value: T
+
+
+_LAYOUT_TEXTS: PageCache[Path, _Held[str]] = PageCache()
+_LAYOUT_ROOTS: PageCache[Path, _Held[RootScan]] = PageCache()
 
 
 def template_source(source: Path) -> str | None:
@@ -695,23 +719,25 @@ def template_source(source: Path) -> str | None:
     mtime_ns = stat_mtime_ns(source)
     if mtime_ns is None:
         return None
-    return _text_at(source, mtime_ns)
+    held = _held_text(source, mtime_ns)
+    return None if held is None else held.value
 
 
-def _text_at(source: Path, mtime_ns: int) -> str | None:
-    """Return the text of `source` held for `mtime_ns`, reading it on a miss.
+def _held_text(source: Path, mtime_ns: int) -> _Held[str] | None:
+    """Return the text of `source` held for `mtime_ns`, read again on any other stamp.
 
     The BOM a Windows editor writes is dropped, so it never lands inside a page.
     """
     held = _LAYOUT_TEXTS.get(source)
-    if held is not None and held[0] == mtime_ns:
-        return held[1]
+    if held is not None and held.stamp == mtime_ns:
+        return held
+    stamp = stamp_of(mtime_ns)
     try:
         text = source.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None
-    _LAYOUT_TEXTS[source] = (mtime_ns, text)
-    return text
+    held = _LAYOUT_TEXTS[source] = _Held(stamp, text)
+    return held
 
 
 def forget_layout_texts() -> None:
@@ -733,13 +759,13 @@ def layout_root_scan(layout_file: Path) -> RootScan | None:
 def _scan_at(layout_file: Path, mtime_ns: int) -> RootScan | None:
     """Return the root scan of `layout_file` read at `mtime_ns`, lexing it on a miss."""
     held = _LAYOUT_ROOTS.get(layout_file)
-    if held is not None and held[0] == mtime_ns:
-        return held[1]
-    content = _text_at(layout_file, mtime_ns)
+    if held is not None and held.stamp == mtime_ns:
+        return held.value
+    content = _held_text(layout_file, mtime_ns)
     if content is None:
         return None
-    scan = scan_root(content)
-    _LAYOUT_ROOTS[layout_file] = (mtime_ns, scan)
+    scan = scan_root(content.value)
+    _LAYOUT_ROOTS[layout_file] = _Held(content.stamp, scan)
     return scan
 
 
