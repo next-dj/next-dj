@@ -199,7 +199,7 @@ Multiline tags
 
 Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
 The framework adds one line-spanning branch to Django's tag pattern at startup, and that branch matches only a tag whose name is one of next.dj's own.
-The widened set is ``action_url``, ``asset``, ``collect_scripts``, ``collect_styles``, ``component``, ``form``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+The widened set covers the next.dj tag names in the void form and in the ``{% #name %}`` opening form alike, and :ref:`ref-template-tags` lists them.
 
 .. note::
 

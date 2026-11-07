@@ -13,7 +13,7 @@ A ``page.py`` declares it as a module dict or as a dependency-injected callable,
 Overview
 --------
 
-Each ``page.py`` on the path from the page root to the requested page contributes one layer, ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` contributes the outermost one, and the framework merges them into one immutable ``Metadata`` value the tag renders.
+Each ``page.py`` on the path from the page root to the requested page contributes one layer, ``NEXT_FRAMEWORK["METADATA"]["DEFAULTS"]`` contributes the outermost one, and the framework merges them into one immutable ``Metadata`` value, which the request resolves into what the tag renders.
 
 The keys of a layer are ``title``, ``description``, ``site_name``, ``canonical``, ``alternates``, ``robots``, ``og``, ``twitter``, ``verification``, ``keywords``, ``icons``, ``manifest``, ``links``, ``viewport``, ``theme_color``, ``color_scheme``, ``other``, ``properties``, ``jsonld``, and, on a page alone, ``breadcrumb``.
 Every key is optional, a text value may be a lazy translation, and an unknown key or a value of the wrong type is a ``PageMetadataShapeError`` naming the file and the key path.
@@ -76,6 +76,7 @@ The callable returns a mapping and never receives the ancestors' metadata as a p
 
 The callable runs once per template render, on the first ``{% metadata %}`` read, against the context the tag renders in, so a value a ``{% with %}`` block or a zone override puts in scope reaches it.
 It shares the dependency cache of the render with ``render()`` and the ``@context`` callables, so a ``Depends`` value resolved by one of them is reused.
+
 A callable that raises :exc:`~django.http.Http404` or :exc:`~django.core.exceptions.PermissionDenied` answers 404 or 403 for the whole page, which is what a metadata lookup that finds no row should answer.
 Any other exception, or a returned value the schema refuses, leaves that callable out of the merge, and the page renders what the rest of the chain declares, see :ref:`topics-failure-containment`.
 A chain the schema refuses as a whole, such as a misspelt key in a ``metadata`` dict or a file declaring both forms, renders the ``DEFAULTS`` under ``noindex``, and the ``X-Robots-Tag`` and the sitemap read the same ``noindex``.
@@ -164,6 +165,7 @@ Open Graph, Twitter, and JSON-LD stay as first rendered, because the crawlers th
 An inherited ancestor callable runs as the render would, against a GET visit of the origin URL or of the URL a queued ``push_url()`` or ``replace_url()`` names, so ``meta()`` first runs the ``render()`` guard of the origin page, raising ``ForeignPageNotAuthorizedError`` on a denial.
 An inherited callable that fails otherwise drops the ``meta`` operation alone, so the rest of the patch still applies.
 A value the action passes to ``meta()`` that the schema refuses raises ``PageMetadataShapeError`` every time, since it is a bug in the action itself.
+
 A builder without an origin page merges the value over ``DEFAULTS`` alone and leaves out every tag that stays unset, so the client keeps the tag it has.
 A canonical that names the page itself is left out too, rather than pointing at the action endpoint.
 A ``push_url()`` or ``replace_url()`` queued before ``meta()`` names the address the canonical is built from, so the tag follows the URL the same envelope moves the browser to.

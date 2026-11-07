@@ -3,7 +3,7 @@
 Sessions and authentication
 ===========================
 
-This page states what next.dj does with the session and the authenticated user, which is far less than a reader expects, and where the two nevertheless touch framework code.
+This page states what next.dj does with the session and the authenticated user, and where the two touch framework code.
 
 .. contents::
    :local:
@@ -12,7 +12,7 @@ This page states what next.dj does with the session and the authenticated user, 
 What the framework does not touch
 ---------------------------------
 
-The framework ships no authentication backend, no user model, no login view, and no session engine.
+The framework ships no authenticating backend, no user model, no login view, and no session engine.
 ``request.user`` arrives from Django's ``AuthenticationMiddleware`` and ``request.session`` from ``SessionMiddleware``, exactly as in a project with no next.dj in it.
 The dependency resolver reads both off the request and never constructs either, so a page that annotates ``request: HttpRequest`` sees the same object a plain Django view sees.
 

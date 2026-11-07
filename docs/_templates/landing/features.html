@@ -26,23 +26,28 @@
           <h3 class="ndj-feature-title">Pages are files</h3>
           <p>
             Add a directory with a <code>page.py</code> under <code>pages/</code>
-            and it answers a URL. Bracketed segments capture typed parameters.
+            and it answers a URL. Groups in parentheses organise the tree without
+            touching the URL, and an intercepting route opens a page over the
+            current one.
           </p>
           <ul class="ndj-feature-bullets">
             <li>{{ check() }} Directories become URL segments, no <code>urls.py</code></li>
-            <li>{{ check() }} <code>[int:post_id]</code> captures a typed path parameter</li>
-            <li>{{ check() }} <code>DUrl[int]</code> coerces and injects it by type</li>
+            <li>{{ check() }} <code>[int:id]</code> captures a typed path parameter</li>
+            <li>{{ check() }} <code>(app)/</code> shares a layout or an access rule and adds no segment</li>
+            <li>{{ check() }} <code>(.)</code> opens a page as a modal while its URL stays honest</li>
           </ul>
         </div>
         <div class="ndj-mock">
-          {{ mockbar("pages/posts/[int:post_id]/page.py") }}
-          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> notes.models <span class="c-kw">import</span> Note
-<span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
-<span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
-
-<span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
-<span class="c-kw">def</span> <span class="c-fn">note</span>(post_id: DUrl[<span class="c-kw">int</span>]) -> Note:
-    <span class="c-kw">return</span> Note.objects.<span class="c-fn">get</span>(pk=post_id)</pre>
+          {{ mockbar("photos/pages/") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-fn">(auth)/</span>
+  layout.djx                <span class="c-com"># wraps every page below</span>
+  login/page.py             /login/
+<span class="c-fn">(app)/</span>
+  page.py                   <span class="c-com"># login_required(inherit=True)</span>
+  photos/
+    page.py                 /photos/
+    [int:id]/page.py        /photos/&lt;int:id&gt;/
+    <span class="c-fn">(.)[int:id]/</span>page.py     <span class="c-com"># modal over /photos/&lt;int:id&gt;/</span></pre>
         </div>
       </article>
 
@@ -57,7 +62,7 @@
           <ul class="ndj-feature-bullets">
             <li>{{ check() }} One tag, <code>{% raw %}{% component %}{% endraw %}</code>, for every component</li>
             <li>{{ check() }} Props are explicit, slots fill block content</li>
-            <li>{{ check() }} Co-locate CSS and JS in the component folder</li>
+            <li>{{ check() }} CSS and JS beside the component ship only when it renders</li>
           </ul>
         </div>
         <div class="ndj-mock">
@@ -111,7 +116,7 @@
           <ul class="ndj-feature-bullets">
             <li>{{ check() }} <code>data-next-trigger</code> auto-submits, <code>morph</code> keeps focus and caret</li>
             <li>{{ check() }} The server authors every patch, selectors never cross the wire</li>
-            <li>{{ check() }} Modals, toasts, and an SSE stream ride the same protocol</li>
+            <li>{{ check() }} Modals and toasts ride the same protocol</li>
             <li>{{ check() }} Every interaction degrades to a plain request without JS</li>
           </ul>
         </div>
@@ -133,30 +138,98 @@
 
       <article class="ndj-feature">
         <div class="ndj-feature-text">
-          <span class="ndj-feature-kicker">Static assets</span>
-          <h3 class="ndj-feature-title">Assets next to pages</h3>
+          <span class="ndj-feature-kicker">Realtime</span>
+          <h3 class="ndj-feature-title">Every open tab stays current</h3>
           <p>
-            Drop a <code>template.css</code> or <code>component.js</code> beside
-            the file that uses it. The pipeline collects each asset and injects
-            it where the page renders.
+            A mutation publishes a zone refresh to a topic. Each page subscribed
+            to it fetches that zone again through its own guarded request, so no
+            tab ever receives HTML rendered for someone else.
           </p>
           <ul class="ndj-feature-bullets">
-            <li>{{ check() }} Asset files pair with a page or component by filename</li>
-            <li>{{ check() }} Component assets ship only when the component renders</li>
-            <li>{{ check() }} <code>{% raw %}{% collect_styles %}{% endraw %}</code> emits the deduplicated output</li>
+            <li>{{ check() }} <code>publish</code> fires once the transaction commits</li>
+            <li>{{ check() }} WebSocket where the process mounts it, SSE everywhere else</li>
+            <li>{{ check() }} <code>RedisBroker</code> fans out across workers and hosts</li>
+            <li>{{ check() }} Plain ASGI, no Django Channels and no channel layer</li>
           </ul>
         </div>
         <div class="ndj-mock">
-          {{ mockbar("notes/") }}
-          <pre class="ndj-mock-body ndj-code"><span class="c-fn">pages/</span>
-  page.py
-  template.djx
-  template.css        <span class="c-com"># collected with the page</span>
-  template.js
-<span class="c-fn">_components/note_card/</span>
-  component.djx
-  component.css       <span class="c-com"># collected with the component</span>
-  component.js</pre>
+          {{ mockbar("polls/pages/polls/[int:id]/page.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">import</span> next.forms
+<span class="c-kw">from</span> next.partial <span class="c-kw">import</span> Patches
+<span class="c-kw">from</span> next.realtime <span class="c-kw">import</span> publish
+
+<span class="c-kw">class</span> <span class="c-fn">VoteForm</span>(next.forms.Form):
+    choice = next.forms.<span class="c-fn">ModelChoiceField</span>(queryset=Choice.objects.<span class="c-fn">all</span>())
+
+    <span class="c-kw">def</span> <span class="c-fn">on_valid</span>(self, request: HttpRequest) -> HttpResponse:
+        choice = self.cleaned_data[<span class="c-str">"choice"</span>]
+        Choice.objects.<span class="c-fn">filter</span>(pk=choice.pk).<span class="c-fn">update</span>(votes=<span class="c-fn">F</span>(<span class="c-str">"votes"</span>) + <span class="c-num">1</span>)
+        <span class="c-fn">publish</span>(
+            <span class="c-str">f"poll:{choice.poll_id}"</span>,
+            <span class="c-fn">Patches</span>(request).<span class="c-fn">refresh</span>(zone=<span class="c-str">"poll-results"</span>),
+        )
+        <span class="c-kw">return</span> <span class="c-fn">redirect_to_origin</span>(request)</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Access</span>
+          <h3 class="ndj-feature-title">Access rules live in the tree</h3>
+          <p>
+            A <code>page.py</code> declares who may open its page, and with
+            <code>inherit=True</code> every page below it. The page's actions and
+            zone requests answer to the same rule.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} <code>login_required</code>, <code>permission_required</code>, and <code>public</code> in Django's own terms</li>
+            <li>{{ check() }} <code>DObject[Book]</code> checks the permission on the row the URL names</li>
+            <li>{{ check() }} <code>add_perm</code> backs <code>user.has_perm</code> with a plain predicate</li>
+            <li>{{ check() }} <code>manage.py permissions</code> prints the rule of every page</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("library/pages/library/book/[int:book]/page.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> library.models <span class="c-kw">import</span> Book
+
+<span class="c-kw">from</span> next <span class="c-kw">import</span> page
+<span class="c-kw">from</span> next.deps <span class="c-kw">import</span> DObject
+
+page.<span class="c-fn">login_required</span>(inherit=<span class="c-kw">True</span>)
+page.<span class="c-fn">permission_required</span>(<span class="c-str">"library.change_book"</span>, obj=DObject[Book])</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">SEO</span>
+          <h3 class="ndj-feature-title">Metadata that follows the tree</h3>
+          <p>
+            A <code>page.py</code> names its title and description, and the page
+            tree layers them from the root down. <code>{% raw %}{% metadata %}{% endraw %}</code>
+            renders the head, and a <code>sitemap.py</code> beside the pages
+            publishes <code>/sitemap.xml</code>.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} A static <code>metadata</code> dict reaches every page below it</li>
+            <li>{{ check() }} <code>@page.metadata</code> reads the row the page already loaded</li>
+            <li>{{ check() }} Canonical links and Open Graph tags build on the site origin</li>
+            <li>{{ check() }} <code>manage.py showmetadata</code> names the source of every key</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("notes/pages/notes/[int:note_id]/page.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> next <span class="c-kw">import</span> context, page
+<span class="c-kw">from</span> next.pages <span class="c-kw">import</span> MetadataDict
+<span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
+
+<span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
+<span class="c-kw">def</span> <span class="c-fn">note</span>(note_id: DUrl[<span class="c-kw">int</span>]) -> Note:
+    <span class="c-kw">return</span> <span class="c-fn">get_object_or_404</span>(Note, pk=note_id)
+
+<span class="c-deco">@page.metadata</span>
+<span class="c-kw">def</span> <span class="c-fn">note_metadata</span>(note: Note) -> MetadataDict:
+    <span class="c-kw">return</span> {<span class="c-str">"title"</span>: note.title, <span class="c-str">"og"</span>: {<span class="c-str">"type"</span>: <span class="c-str">"article"</span>}}</pre>
         </div>
       </article>
 
@@ -191,37 +264,12 @@
         </div>
       </article>
 
-      <article class="ndj-feature">
-        <div class="ndj-feature-text">
-          <span class="ndj-feature-kicker">Testing</span>
-          <h3 class="ndj-feature-title">Tests that know the router</h3>
-          <p>
-            <code>NextClient</code> boots the file router and registers actions,
-            so a test posts to an action by name.
-          </p>
-          <ul class="ndj-feature-bullets">
-            <li>{{ check() }} <code>NextClient</code> extends Django's test client</li>
-            <li>{{ check() }} <code>post_action</code> resolves an action to its URL</li>
-            <li>{{ check() }} <code>render_page</code> covers template-only assertions</li>
-          </ul>
-        </div>
-        <div class="ndj-mock">
-          {{ mockbar("notes/tests/test_actions.py") }}
-          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> next.testing.client <span class="c-kw">import</span> NextClient
-
-<span class="c-kw">def</span> <span class="c-fn">test_create_note</span>():
-    response = <span class="c-fn">NextClient</span>().<span class="c-fn">post_action</span>(
-        <span class="c-str">"note_form"</span>, {<span class="c-str">"title"</span>: <span class="c-str">"Test"</span>, <span class="c-str">"body"</span>: <span class="c-str">""</span>},
-    )
-    <span class="c-kw">assert</span> response.status_code == <span class="c-num">302</span></pre>
-        </div>
-      </article>
-
     </div>
 
     <p class="ndj-feature-more">
-      These are the core blocks. next.dj ships more — layouts, signals,
-      autoreload, deployment, and the full reference live in the
+      next.dj ships more than these blocks. Co-located static assets, root
+      layouts, a test client that knows the router, signals, and the full
+      reference live in the
       <a href="{{ pathto('content/topics/index') }}">documentation</a>.
     </p>
   </div>

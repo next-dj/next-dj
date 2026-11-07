@@ -124,22 +124,7 @@ None of them is replayed, so a listener receives only the events that follow its
 ``ready`` and ``context-updated`` of :doc:`client` are the only runtime events that reach the bus alone.
 The chunk reveals a consented block a patch brings in from the ``nodes`` of ``partial:applied``, the elements that patch touched.
 
-Counting page views
-~~~~~~~~~~~~~~~~~~~
-
-A vendor adapter counts the page it loads on from ``Next.navigation.current()``, and one more view per ``next:navigated`` whose ``action`` is not ``none``.
-
-.. code-block:: javascript
-   :caption: static/site/vendor.js
-
-   const Next = window.Next;
-
-   window.vendor("page", Next.navigation.current().url);
-   Next.on("next:navigated", ({ url, action }) => {
-     if (action !== "none") window.vendor("page", url);
-   });
-
-:doc:`/content/topics/scripts/page-views` covers layers and the vendor tags that watch history themselves.
+A vendor adapter counts page views from ``Next.navigation.current()`` and ``next:navigated``, see :doc:`/content/topics/scripts/page-views`.
 
 The init payload
 ----------------
@@ -153,8 +138,7 @@ The framework reserves four keys of the ``Next._init`` payload for this surface,
    * - Key
      - Value
    * - ``$chunks``
-     - ``{scripts, stream, ws, csrf, poll}``, the URLs of ``next.scripts.min.js``, ``next.stream.min.js``, ``next.ws.min.js``, ``next.csrf.min.js``, and ``next.poll.min.js`` through the staticfiles storage.
-       The ``ws`` entry is listed only while the ``ws`` transport is active, and under ``DEBUG`` ``dev`` joins them, the URL of ``next.dev.min.js``.
+     - The URLs of the lazy chunks through the staticfiles storage, see :doc:`/content/topics/static-assets/js-context`.
    * - ``$realtime``
      - ``{protocol, transports, content_type}``, the stream protocol advertised by the server and the selected partial response content type used by registered stream parse hooks.
        The key is left out while ``sse`` is the only transport and the partial content type is the stock one, and the runtime then assumes those defaults.

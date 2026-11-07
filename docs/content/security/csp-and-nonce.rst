@@ -14,7 +14,7 @@ Where the nonce comes from
 --------------------------
 
 ``NEXT_FRAMEWORK["CSP_NONCE"]`` is a bool, ``True`` by default, and ``False`` turns nonces off.
-While it is on, the framework reads ``request.csp_nonce`` from django-csp and falls back to ``get_nonce`` of Django's own CSP middleware where the installed Django provides one.
+While it is on, the framework reads ``request.csp_nonce`` from django-csp and falls back to ``get_nonce`` of Django's own CSP middleware, available from Django 6.0.
 Reading the nonce is what makes either middleware mint it, so the header they send names the same value.
 The nonce is read once per request, and without either middleware installed no tag carries one.
 

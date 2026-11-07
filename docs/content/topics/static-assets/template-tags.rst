@@ -3,8 +3,8 @@
 Static template tags
 ====================
 
-The static pipeline registers six Django template tags plus two inline block forms.
-``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
+The static pipeline registers seven Django template tags plus two inline block forms.
+``{% collect_styles %}``, ``{% collect_scripts %}``, and ``{% collect_head %}`` mark placeholder slots in the layout.
 ``{% use_style %}``, ``{% use_script %}``, and ``{% use_module %}`` register an asset on the active collector.
 ``{% asset %}`` returns one URL for a raw attribute and registers nothing.
 ``{% #use_style %}`` and ``{% #use_script %}`` are block forms that capture an inline body.
@@ -80,6 +80,12 @@ Place the tag at the end of ``<body>`` so the document body is parsed before scr
 
 Under the default ``AUTO`` script injection policy this tag is also where the ``next.min.js`` runtime and the ``Next._init`` call land, so a layout chain without it leaves ``window.Next`` undefined.
 See :ref:`Runtime script options <topics-static-js-runtime-script-options>` for the policy that controls the injection.
+
+collect_head
+------------
+
+``{% collect_head %}`` marks the ``head`` slot that receives the head scripts of ``scripts.py``, see :doc:`/content/topics/scripts/declaring`.
+The tag takes no arguments.
 
 use_style
 ---------
@@ -172,7 +178,7 @@ The author writes only the inner CSS or JS, not the surrounding tag.
 Neither block form takes a ``kind`` argument, and the two are fixed to ``css`` and ``js``.
 
 The block body is rendered with the current template context, so inline blocks can interpolate page variables.
-Blank only blocks are dropped.
+Blank-only blocks are dropped.
 The collector deduplicates inline entries by the rendered body, so two identical blocks collapse to one.
 
 .. note::

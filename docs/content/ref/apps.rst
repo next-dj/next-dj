@@ -42,9 +42,10 @@ Each signal below lists its receivers in the order they run, and each is connect
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
 It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``permissions.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
 
-``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, and ``signals`` submodules of every installed app, finishing one module name across all apps before it starts the next.
+``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, ``realtime``, and ``signals`` submodules of every installed app, finishing one module name across all apps before it starts the next.
 It runs ahead of ``components.install()``, so a ``component.py`` imported in the last step finds every provider and named dependency registered.
-The ``deps``, ``permissions``, and ``signals`` sweeps always run, the way Django's admin imports every ``admin.py``, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one, see :doc:`settings`.
+The ``deps``, ``permissions``, ``realtime``, and ``signals`` sweeps always run, the way Django's admin imports every ``admin.py``, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one, see :doc:`settings`.
+The ``realtime`` sweep imports the modules that ``REALTIME["HANDLERS"]`` selects.
 
 Steps five to fourteen bind the nine :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
@@ -80,7 +81,7 @@ Staticfiles integration
 .. automodule:: next.apps.staticfiles
    :members:
 
-``staticfiles.install()`` calls ``next.static.register_defaults`` to register the built-in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
+``staticfiles.install()`` calls ``next.static.register_defaults`` to register the built-in ``css``, ``js``, and ``module`` kinds and the ``head``, ``styles``, and ``scripts`` slots.
 The installer appends ``NextStaticFilesFinder`` and puts ``NextAppDirectoriesFinder`` in place of the stock ``AppDirectoriesFinder``, which keeps the framework package itself out of ``STATIC_ROOT``.
 A list that names the stock path beside the framework one collapses to a single entry, so a project that already lists ``NextAppDirectoriesFinder`` gains no duplicate scan.
 ``reinstall_finders`` runs on ``setting_changed``, so an override that replaces ``STATICFILES_FINDERS`` gets both back as soon as the override lands.

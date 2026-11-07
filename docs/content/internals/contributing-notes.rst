@@ -47,7 +47,7 @@ The recurring per-area module names are fixed, so a reader finds the same concer
 ``registry.py`` holds the ordered registrations, ``manager.py`` the façade over the backends, ``backends.py`` the settings-driven contract, ``markers.py`` the frozen dataclasses, ``providers.py`` the dependency providers, ``signals.py`` the area signals, ``checks.py`` the system checks, ``dispatch.py`` the action pipeline, ``ports.py`` the area's implementation of the cross-area protocols, and ``errors.py`` the area's public exceptions.
 
 Machinery shared across areas lives in a flat module at the root of ``next/`` rather than in a package, and never in a package whose name starts with an underscore.
-``backends.py``, ``caches.py``, ``diagnostics.py``, ``discovery.py``, ``errors.py``, ``introspect.py``, ``ports.py``, ``seeding.py``, ``signals.py``, and ``utils.py`` are those modules.
+``backends.py``, ``caches.py``, ``csrf.py``, ``diagnostics.py``, ``discovery.py``, ``errors.py``, ``intercept.py``, ``interpolation.py``, ``introspect.py``, ``middleware.py``, ``ports.py``, ``seeding.py``, ``signals.py``, ``stamps.py``, and ``utils.py`` are those modules.
 ``next/ports.py`` holds the narrow Protocol ports that let one area call another without importing it, each one reached through a slot that ``AppConfig.ready()`` binds once at startup.
 The protocol and the slot live there, the implementation lives in the ``ports.py`` of the area that owns it, so ``next/partial/ports.py`` supplies the partial shaper and ``next/urls/ports.py`` the router access.
 
@@ -137,8 +137,8 @@ The repository ships its own pytest suite plus a per example suite under ``examp
 The system checks run through an example project because the framework itself ships no ``manage.py``.
 Always run the framework suite and the system checks before opening a pull request.
 
-Documentation tests
--------------------
+Public API tests
+----------------
 
 When introducing or removing a public API, update the import-presence coverage in ``tests/test_public_api.py`` or the matching area suite so an accidental removal fails CI.
 
@@ -152,7 +152,7 @@ Run both before submitting.
    :caption: shell
 
    uv run ruff check
-   uv run mypy
+   uv run mypy next/
 
 See also
 --------

@@ -206,18 +206,6 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
      - Yes
      - The morph engine before one attribute changes, with detail ``{name, mutationType}`` over ``update`` and ``remove``.
        A veto skips that one mutation.
-   * - ``next:stream-state``
-     - The document
-     - No
-     - The stream bridge, on every change of a connection state.
-   * - ``next:stream-gap``
-     - The document
-     - No
-     - The stream bridge, when a gap or epoch change triggers a zone resync.
-   * - ``next:toast``
-     - The document
-     - No
-     - The layer stack, alongside appending the toast element.
    * - ``partial:before-request``
      - The document
      - No
@@ -665,10 +653,7 @@ Exported types
 ~~~~~~~~~~~~~~
 
 The entry module exports nineteen type names.
-``NextContext``, ``NextEventMap``, and ``NextChunks`` are its own, and ``PartialError`` and ``PartialErrorKind`` come from the protocol module, which is where the client and the server agree on the wire vocabulary.
-``Envelope``, ``Patch``, ``Asset``, ``AssetLoad``, and ``FormMeta`` come from the apply module and type the envelope a parse hook or a ``partial:before-apply`` listener handles.
-``NavigatedDetail``, ``NavigationState``, ``NavigationAction``, ``ConsentChange``, ``ScriptsChunk``, ``ScriptStatus``, and ``StreamMeta`` come from the navigation, consent, chunk, scripts, and stream modules, see :doc:`client-extras` and :doc:`/content/topics/realtime`.
-``Outcome`` comes from the wire module and types the result of ``fetch`` and ``submit``, and ``SubmitAction`` comes from the partial module and types the argument of ``submit``.
+See :doc:`client-extras` and :doc:`/content/topics/realtime` for the navigation, consent, scripts, and stream types.
 A page written in TypeScript reaches them through the bundle's declaration output rather than by importing ``next/client/``.
 
 .. code-block:: typescript

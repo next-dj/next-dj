@@ -20,11 +20,12 @@ The runtime fetches the token from ``url`` before the first unsafe request, and 
 The address is reversed once per URLconf, script prefix, and language, and again after the routes change.
 When ``ROOT_URLCONF`` does not route the endpoint, ``csrf_payload`` embeds the token after all, so forms still post, see :ref:`topics-failure-containment`.
 ``next.E148`` reports the missing route at startup.
+``defer_token`` sets the request attribute named by ``CSRF_DEFERRED_ATTR``, and ``forget_csrf_delivery`` drops the memoised mode and endpoint address after a settings reload.
 ``nonce_minted(request)`` answers whether the render minted a CSP nonce, read off ``NONCE_ATTR`` for the framework's nonce and ``CSP_NONCE_ATTR`` for the one Django's CSP middleware or django-csp keeps, so the response path makes such a page private without importing ``next.static``.
 ``CSRF_USE_SESSIONS = True`` reads the session on every render, so every shared page is sent with ``Cache-Control: private`` whatever the mode, and ``manage.py check`` warns about it.
 
 .. automodule:: next.csrf
-   :members: CsrfDelivery, csrf_delivery, csrf_header_name, csrf_payload, csrf_token_payload, csrf_url, defer_token, token_deferred, CSRF_URL_NAME, nonce_minted, NONCE_ATTR, CSP_NONCE_ATTR
+   :members: CsrfDelivery, csrf_delivery, csrf_header_name, csrf_payload, csrf_token_payload, csrf_url, defer_token, token_deferred, CSRF_URL_NAME, nonce_minted, NONCE_ATTR, CSP_NONCE_ATTR, CSRF_DEFERRED_ATTR, forget_csrf_delivery, csrf_view
 
 The token endpoint
 ------------------

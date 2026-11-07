@@ -50,8 +50,9 @@ It receives ``None`` where no request exists, in a sitemap build or a management
 An answer of ``None`` falls through to the ``Site`` row and the request host.
 Any other answer goes through the same validation as a literal, and a callable takes the request as its one positional argument, which ``manage.py check`` reads off its signature without calling it.
 
-A callable that raises fails with its own exception, and one that answers a value that is no origin with ``ImproperlyConfigured``.
-A contained one leaves a page on the request host, and ``/sitemap.xml`` and a ``robots.py`` answer 503 with ``Retry-After``, so no crawler document is built on a host a ``Host`` header chose, see :ref:`topics-failure-containment`.
+Under ``DEBUG`` or ``STRICT_LOADING`` a callable that raises fails with its own exception, and one that answers no origin fails with ``ImproperlyConfigured``.
+Otherwise the failure is contained and a page falls back to the request host.
+``/sitemap.xml`` and a ``robots.py`` answer 503 with ``Retry-After``, so no crawler document is built on a host a ``Host`` header chose, see :ref:`topics-failure-containment`.
 
 .. code-block:: python
    :caption: tenants/site.py
@@ -122,7 +123,7 @@ A site that is not indexable for a request answers that request as follows.
 - ``/robots.txt`` answers ``User-agent: *`` with an empty ``Disallow:``, ignoring the declared rules and the ``Sitemap:`` line, and it answers 404 when no robots source exists.
 - ``/sitemap.xml`` answers 404.
 
-The robots file never answers ``Disallow: /``, because a crawler kept out of a page never reads the ``noindex`` it carries, and a URL linked from elsewhere stays in the index under a bare title.
+The robots file never answers ``Disallow: /``, for the reason :doc:`robots` gives.
 The site rule overrides the page, so a page cannot opt back into the index on a closed host.
 
 A site that only ``DEBUG`` closes, under the ``"auto"`` rule, still serves ``/sitemap.xml`` and its own ``/robots.txt`` for a preview, both under ``X-Robots-Tag: noindex, nofollow``.

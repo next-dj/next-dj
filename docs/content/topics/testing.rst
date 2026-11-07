@@ -293,6 +293,7 @@ It returns the list of imported ``page.py`` paths and raises ``FileNotFoundError
 A repeated call for the same directory returns an empty list, because the loader memoises per absolute directory.
 Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
 Each file runs through the loader a request uses, so a page imported here never executes a second time as another module, and a page that fails to import raises ``PageModuleImportError`` from ``next.pages`` during setup.
+
 ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
 It is intended for self-tests of the loader and for the rare case of rewritten ``page.py`` files within one session.
 A normal test suite does not call it, since each pytest session starts a fresh interpreter.
@@ -849,64 +850,9 @@ Testing realtime
 ``memory_broker()`` serves realtime from a fresh ``MemoryBroker`` for a block, so wrap every test that publishes in it and no message or sequence number leaks into the next test.
 ``capture_published(*topics)`` records what ``publish`` and ``apublish`` send, and ``SseReader`` parses a streaming SSE response into ``SseEvent`` values.
 
-.. code-block:: python
-   :caption: polls/tests/test_stream.py
-
-   import pytest
-   from django.test import Client
-
-   from next.partial import Patches
-   from next.realtime import publish
-   from next.testing import SseReader, capture_published, memory_broker
-
-   @pytest.mark.django_db
-   def test_stream_delivers_a_refresh(client: Client) -> None:
-       with memory_broker(), capture_published("poll:1") as published:
-           response = client.get("/polls/1/stream/")
-           with SseReader(response) as events:
-               assert next(events).event == "next-hello"
-               publish("poll:1", Patches(None).refresh(zone="results"), on_commit=False)
-               patches = next(events)
-       assert patches.event == "next-patches"
-       assert len(published) == 1
-
 ``WebSocketCommunicator`` drives an ASGI application through one WebSocket connection.
-``issue_socket_ticket`` issues a ticket through the configured binding, and its ``cookie`` property is the header pair the handshake presents.
-``override_websocket_mount()`` hands back the process-wide ``ws`` flag that building the socket application sets.
-
-.. code-block:: python
-   :caption: rooms/tests/test_socket.py
-
-   import asyncio
-
-   import pytest
-   from django.core.asgi import get_asgi_application
-
-   from next.realtime import application
-   from next.testing import (
-       WebSocketCommunicator,
-       issue_socket_ticket,
-       memory_broker,
-       override_websocket_mount,
-   )
-
-   @pytest.mark.django_db(transaction=True)
-   def test_socket_subscribes_to_the_room() -> None:
-       ticket = issue_socket_ticket(("room:42",), authorizer_ref="rooms.access.can_watch")
-       headers = [(b"origin", b"http://testserver"), (b"host", b"testserver"), ticket.cookie]
-
-       async def scenario() -> None:
-           app = application(get_asgi_application())
-           communicator = WebSocketCommunicator(app, "/_next/ws/", headers, timeout=5)
-           connected, _ = await communicator.connect()
-           assert connected
-           assert (await communicator.subscribe(ticket))["type"] == "hello"
-           await communicator.disconnect()
-
-       with override_websocket_mount(), memory_broker():
-           asyncio.run(scenario())
-
-See :doc:`/content/ref/testing` for ``send_up``, ``request``, ``MemoryPort``, and the async ticket helper.
+``issue_socket_ticket`` issues a ticket through the configured binding, and ``override_websocket_mount()`` hands back the process-wide ``ws`` flag that building the socket application sets.
+The full SSE and WebSocket examples live in the Realtime section of :ref:`ref-testing`.
 
 System checks
 -------------
@@ -925,7 +871,7 @@ Pytest can run ``manage.py check`` as part of the suite.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
 
 That run already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
-Seven framework checks are registered with ``deploy=True`` and stay out of it, because each describes a deployment rather than a development checkout.
+Eight framework checks are registered with ``deploy=True`` and stay out of it, because each describes a deployment rather than a development checkout.
 A second call turns them on.
 
 .. code-block:: python
@@ -936,9 +882,10 @@ A second call turns them on.
    def test_deploy_checks_pass() -> None:
        call_command("check", deploy=True, fail_level="WARNING", verbosity=0)
 
-That run adds ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, and ``next.W149``, see :doc:`/content/deployment/checklist` for what each one reports.
+That run adds ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, ``next.W149``, and ``next.W151``, see :doc:`/content/deployment/checklist` for what each one reports.
 A suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
 The same suite selects a shared realtime broker, or lists ``next.W149`` in ``SILENCED_SYSTEM_CHECKS`` for a single-process deployment, because the default ``MemoryBroker`` keeps topics inside one process.
+A suite on ``RedisBroker`` sets the connection limit ``next.W151`` asks for, or lists the code in ``SILENCED_SYSTEM_CHECKS``.
 See :ref:`ref-system-checks` for the full catalog.
 
 See also

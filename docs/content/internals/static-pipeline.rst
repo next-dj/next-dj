@@ -12,7 +12,7 @@ The static subsystem discovers assets, collects them per request, deduplicates t
 Overview
 --------
 
-The static pipeline runs entirely per request.
+The static pipeline runs per request and reuses the asset plans described below.
 ``AssetDiscovery`` walks the page and component trees, builds ``StaticAsset`` records, and feeds them to the request ``StaticCollector``.
 The walk itself happens once per page and once per component, and later renders reuse what it found on disk.
 
@@ -159,7 +159,7 @@ Modules
    A directory scanned in the tick of its own mtime is held as unsettled, so the next lookup walks the trees again.
 
 ``next.static.defaults``.
-   ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
+   ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``head``, ``styles``, and ``scripts`` slots.
 
 Asset kinds
 -----------

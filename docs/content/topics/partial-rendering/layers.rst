@@ -17,6 +17,7 @@ A ``data-next-layer`` link opens a modal over the current view and pushes the re
 The pushed URL is the real address of the body rather than a masked URL of the page beneath it.
 A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
 There is no client router and no URL masking.
+Next.js applies intercepting routes to every matching link through a client router, while here an intercept is opt-in per link through ``data-next-layer`` and an intercept directory, see :ref:`topics-file-router-intercepts`.
 
 A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
 A layer whose push the browser refused has no history entry, so Back leaves it open.

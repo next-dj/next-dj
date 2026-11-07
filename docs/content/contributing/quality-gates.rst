@@ -14,7 +14,8 @@ Where the gates run
 -------------------
 
 ``make ci`` runs the core gates locally in one command.
-It runs ``lint``, ``type-check``, ``build-js``, ``lint-js``, ``format-js-check``, ``type-check-js``, ``test-js-coverage``, ``test``, ``test-examples``, and ``test-compat`` in that order.
+It runs ``lint``, ``type-check``, ``build-js``, ``lint-js``, ``format-js-check``, ``type-check-js``, ``test-js-coverage``, ``test``, ``test-benchmarks``, ``test-examples``, and ``test-compat`` in that order.
+``test-benchmarks`` runs every benchmark once as a plain test with no timing.
 GitHub Actions runs the same work split across jobs, and adds the documentation build, the support matrix, the supply-chain checks, and the benchmark comparison, which ``make ci`` leaves out.
 
 .. list-table:: Gates and where they run
@@ -52,7 +53,7 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
      - ``make docs-lint``
      - ``docs`` job, "Check documentation code snippets" step
    * - Benchmarks
-     - ``make bench``, ``make bench-codspeed``
+     - ``make test-benchmarks``, ``make bench``, ``make bench-codspeed``
      - CodSpeed workflow on every pull request
    * - Supply chain
      - ``make pre-commit-run``
@@ -109,61 +110,9 @@ The memory instrument runs the whole suite as well and tracks every heap allocat
 The walltime instrument times only the benchmarks marked ``walltime`` on a CodSpeed bare-metal runner, the ones dominated by filesystem, socket, and Redis calls whose real cost the simulation understates.
 ``make bench-codspeed`` runs the suite locally under ``pytest-codspeed`` in walltime mode, since the simulation needs Valgrind on Linux.
 
-The realtime benchmarks live in ``tests/benchmarks/realtime/`` and need no running Redis.
-The ``realtime.publish``, ``realtime.hello``, ``realtime.presence``, and ``realtime.replay`` groups run on ``MemoryBroker`` and on a ``RedisBroker`` backed by ``fakeredis``, ``realtime.fanout`` runs on the memory broker alone, and the other groups touch no broker.
-The ``fakeredis`` rows measure the client and Lua script overhead on an in-process emulator, not the latency of a Redis server.
 Each benchmark checks its own result outside the measured body, so a call that degrades into an early exit fails the test instead of looking fast.
-Each group measures one step of the publish and delivery path.
-
-.. list-table:: Realtime benchmark groups
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Group
-     - What it measures
-   * - ``realtime.publish``
-     - Numbering and storing one envelope on the memory and Redis brokers, and the public ``publish`` call through the configured broker with its validation, snapshot, and signal.
-   * - ``realtime.fanout``
-     - One publish on the memory broker reaching 1, 100, and 1000 synchronous subscribers of the same topic, and the same publish reaching asynchronous subscribers on one event loop.
-       The asynchronous cases measure an enqueue that schedules a loop wakeup per subscriber and one that finds the wakeup already queued.
-       Decoding one small or medium Redis Pub/Sub payload into a message sits in this group too.
-   * - ``realtime.frame``
-     - Serialising one small or medium envelope into an SSE event frame, and delivering one message as a WebSocket patches frame.
-   * - ``realtime.inbound``
-     - Decoding one client text frame with ``frames.parse``, for a heartbeat pong, a subscribe frame with a cursor, and an ``up`` frame.
-   * - ``realtime.upstream``
-     - Resolving the route of one upstream event in a fresh registry of 1 and of 100 routes, where the target event name holds one route and the rest sit under other names, and a miss on an event name no route serves.
-       Dispatching one event to a trivial async handler on the loop and to a trivial sync handler on the handler pool, the ``upstream_received`` signal included.
-   * - ``realtime.transform``
-     - Applying one subscriber's topic transform to a delivered message with ``atransformed``, an async transform awaited on the loop and a sync transform run on the shared pool.
-   * - ``realtime.hello``
-     - Reading the latest position of 1 or 64 topics in one batch, and building and serialising the handshake frame from positions read beforehand, without touching a broker while it measures.
-   * - ``realtime.presence``
-     - Joining one connection to a roster of 1 and of 1000, refreshing the deadline of one connection on a roster of the same sizes, and reading the attendance snapshot of 1 and of 1000 members, on the memory broker and on a Redis broker backed by ``fakeredis``.
-       The joining connection leaves again before each round, so every round measures the same roster size.
-       The windows are not scheduled while it measures, so no background snapshot enters a timing.
-       Cutting the members from a presence message of 1 and of 100 members with ``counted``, and passing a message without a presence event through untouched, need no broker.
-   * - ``realtime.replay``
-     - Reading the log of one topic after a cursor 1 and 64 messages behind, and after a cursor from a stale epoch that reports the gap, on both brokers.
-       ``catch_up`` over 1 and 64 topics that each trail their snapshot by one message, and parsing a valid and a malformed ``Last-Event-ID``, complete the group.
-   * - ``realtime.access``
-     - Rechecking topic grants for one live connection with the synchronous ``check()``, inside the throttle window where the cached verdict answers and outside it where the authorizer runs again.
-       Live connections under ASGI go through ``acheck()``, which this group does not measure.
-   * - ``realtime.ticket``
-     - Signing and verifying a session-bound WebSocket grant over 1 or 64 topics.
-   * - ``realtime.negotiation``
-     - Answering a request for a WebSocket ticket on a saved session over 1 or 64 topics, and the SSE fallback for an authorizer without an import-stable path.
-   * - ``realtime.tunnel``
-     - One ``http`` frame through ``DjangoTunnel``, from the frame checks and the URL routing on the shared pool to a trivial ASGI endpoint and the shaped reply.
-   * - ``realtime.transports``
-     - Resolving the transports a deployment offers, from the warm cache and cold after a cache clear that re-reads the settings and installed apps.
-   * - ``partial.sse``
-     - Draining a finite stream through ``PatchStreamWriter`` to its last byte.
-       The cases are a stream of 50 heartbeat frames, a stream of 20 topic message frames that each carry the topic, sequence, epoch, and server time, and an empty stream that opens and closes.
-       The benchmark lives in ``tests/benchmarks/partial/``.
-   * - ``forms.transport``
-     - Telling a tunneled form action from a plain one on a WSGI request, an ASGI request, and a tunneled request, and pinning the session of a tunneled action, cold on a fresh session and warm on one already pinned.
-       The benchmark lives in ``tests/benchmarks/forms/``.
+Groups are named ``<area>.<step>`` and mirror the area under ``tests/benchmarks/``, such as ``realtime.publish`` in ``tests/benchmarks/realtime/``.
+The realtime benchmarks need no running Redis, and the Redis cases run on ``fakeredis``, which measures the client and Lua script overhead on an in-process emulator, not the latency of a Redis server.
 
 Documentation build
 -------------------

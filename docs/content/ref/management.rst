@@ -232,18 +232,32 @@ runserver
 ``--wsgi`` serves Django's WSGI handler even with an ASGI server installed.
 The command class extends the staticfiles ``runserver``, so a project command that subclasses ``next.management.commands.runserver.Command`` keeps the static options and the static serving too.
 
+Choosing the server
+~~~~~~~~~~~~~~~~~~~
+
 With uvicorn installed it runs the system checks and the migration check as Django does, then serves the project over ASGI on the server ``NEXT_FRAMEWORK['DEV_SERVER']`` names, uvicorn by default.
 The checks run before the command resolves the server, so a ``DEV_SERVER`` that names no server stops it with ``next.E212``, and under ``--skip-checks`` with a ``CommandError`` that names the path and ``next.E212``.
-The banner reads ``Starting ASGI development server with the realtime WebSocket`` only while the app mounts the socket and uvicorn finds a WebSocket library, and Django's development-server warning follows it unless ``DJANGO_RUNSERVER_HIDE_WARNING`` is ``true``.
-A numeric ``addrport`` host shows as the socket reads it, so ``0`` binds every interface and shows as ``0.0.0.0``.
 The app is the one the ``ASGI_APPLICATION`` setting names by dotted path, the key Daphne and Channels read, since Django has no ASGI setting of its own.
 Without the setting it is ``next.realtime.application`` over :func:`~django.core.asgi.get_asgi_application`, which serves the realtime WebSocket at ``REALTIME['WS_PATH']`` and turns ``ws`` on for the process.
+
+Banner, static files, and reload
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The banner reads ``Starting ASGI development server with the realtime WebSocket`` only while the app mounts the socket and uvicorn finds a WebSocket library, and Django's development-server warning follows it unless ``DJANGO_RUNSERVER_HIDE_WARNING`` is ``true``.
+A numeric ``addrport`` host shows as the socket reads it, so ``0`` binds every interface and shows as ``0.0.0.0``.
 Under ``DEBUG``, or with ``--insecure``, static files under ``STATIC_URL`` come from the staticfiles finders through Django's ``ASGIStaticFilesHandler`` unless ``--nostatic`` is given, and a WebSocket passes through it.
 Django's autoreloader restarts the process, so the watch list of ``next.server`` applies as it does under WSGI and uvicorn runs without a reloader of its own, while ``--nothreading`` has no effect.
+
+WebSocket and heartbeat
+~~~~~~~~~~~~~~~~~~~~~~~
+
 A uvicorn that finds neither ``websockets`` nor ``wsproto`` cannot accept a WebSocket, so the command warns on stderr while the app mounts the socket, and the pages fall back to SSE.
 The command hands the server ``max_frame_bytes`` set to the 64 KiB inbound frame limit and ``ping_interval`` set to ``None``, which ``UvicornServer`` passes to uvicorn as ``ws_max_size`` and ``ws_ping_interval``.
 The socket pings on its own after one ``HEARTBEAT`` without traffic and drops a peer silent for more than two heartbeats after an unanswered ping, so a server-level ping adds nothing.
 It leaves lifespan on uvicorn's ``auto``, since ``next.realtime.application`` answers lifespan itself and an app from ``ASGI_APPLICATION`` may not speak it.
+
+Fallback and application order
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Without uvicorn, or with ``--wsgi``, the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
 

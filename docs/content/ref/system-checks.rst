@@ -8,7 +8,7 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Seven of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which seven and why.
+Eight of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which eight and why.
 
 Check registration
 ------------------
@@ -23,17 +23,46 @@ Each of these modules registers checks.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 
 Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
-``check_asset_version_moves_between_deploys`` (``next.W083``) describes a configuration every development checkout has, so reporting it outside a deployment audit would warn every project about nothing.
-``check_page_module_imports`` (``next.E017``), ``check_component_module_imports`` (``next.E084``), and ``check_composed_templates_compile`` (``next.E072``) run on every ``manage.py check``, since the other page and component checks already import and compile those modules.
-``check_runtime_bundles_deployed`` (``next.W090``) asks the static files a deployment serves for the client runtime, which a source checkout builds only on demand.
-``check_shared_broker`` (``next.W149``) flags the in-process default broker, which a development server runs on by design.
-``check_broker_deployment`` (``next.W151``) runs the ``check_deployment`` hook of the selected broker, where ``RedisBroker`` flags the redis-py pool default a development server never reaches.
-The other four read the settings a deployment runs on, ``check_site_url_for_deploy`` (``next.W110``, ``next.W122``) and ``check_seo_sources_on_closed_site`` (``next.W111``) with the ``seo`` tag, ``check_script_deploy`` (``next.W118``), and ``check_consent_cookie_secure`` (``next.W119``).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 40
+
+   * - Check
+     - Codes
+     - Why deploy only
+   * - ``check_asset_version_moves_between_deploys``
+     - ``next.W083``
+     - Every development checkout has the configuration it describes.
+   * - ``check_runtime_bundles_deployed``
+     - ``next.W090``
+     - A source checkout builds the client runtime only on demand.
+   * - ``check_shared_broker``
+     - ``next.W149``
+     - A development server runs on the in-process default broker by design.
+   * - ``check_broker_deployment``
+     - ``next.W151``
+     - The ``check_deployment`` hook of ``RedisBroker`` flags a redis-py pool default a development server never reaches.
+   * - ``check_site_url_for_deploy``
+     - ``next.W110``, ``next.W122``
+     - It reads the site settings a deployment runs on, and carries the ``seo`` tag.
+   * - ``check_seo_sources_on_closed_site``
+     - ``next.W111``
+     - It reads the site settings a deployment runs on, and carries the ``seo`` tag.
+   * - ``check_script_deploy``
+     - ``next.W118``
+     - It reads the script settings a deployment runs on.
+   * - ``check_consent_cookie_secure``
+     - ``next.W119``
+     - It reads the consent settings a deployment runs on.
+
+``next.E017``, ``next.E084``, and ``next.E072`` run on every ``manage.py check``, because the page and component checks already import and compile those modules.
 
 Every next.dj check carries the ``next`` tag.
 That tag is the importable string constant ``next.checks.NEXT``, so a project check joins the framework ones by decorating itself with ``@register(NEXT)`` rather than by repeating the literal.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
+
 A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.

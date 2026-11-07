@@ -62,7 +62,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    Object permissions in ``permissions.py``, the backend, the ``{% has_perm %}`` tag, and form guards.
 
 :doc:`signals`
-   Every signal emitted by the framework, with payload tables.
+   Every signal emitted by the framework, when it fires, and how a receiver connects.
 
 :doc:`testing`
    ``NextClient``, ``SignalRecorder``, registry isolation.

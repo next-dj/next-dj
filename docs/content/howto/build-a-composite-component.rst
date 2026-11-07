@@ -28,6 +28,7 @@ Create the folder ``notes/pages/_components/info_card/`` with three files.
      <header class="info-card__head">
        <h3>{{ title }}</h3>
        {% if subtitle %}<small>{{ subtitle }}</small>{% endif %}
+       {% if is_staff %}<a href="#">Edit</a>{% endif %}
      </header>
      <div class="info-card__body">
        {% set_slot "content" %}
@@ -56,9 +57,7 @@ The second callable takes a parameter no prop supplies.
 ``request: HttpRequest`` is filled from the page render around the component, which is the same resolver that fills a page context callable, so a component reads URL segments, query parameters, and named dependencies the same way a ``page.py`` does.
 See :doc:`/content/topics/dependency-injection` for the providers and what each one matches.
 
-The module carries no ``from __future__ import annotations``.
-The resolver reads the annotations of each callable at runtime, and the future import turns every one of them into a string whose names still have to be importable at that point, so a type held behind ``if TYPE_CHECKING`` stops matching any provider and the parameter arrives as ``None``.
-A ``component.py`` keeps its annotations real for that reason.
+The module carries no ``from __future__ import annotations``, because the resolver reads real annotations.
 
 .. code-block:: css
    :caption: notes/pages/_components/info_card/component.css

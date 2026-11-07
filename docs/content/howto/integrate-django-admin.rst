@@ -89,12 +89,14 @@ Use ``reverse`` from inside the file router.
    def admin_url() -> str:
        return reverse("admin:notes_note_changelist")
 
-Use frozen form specs inside admin
-----------------------------------
+Object permissions in the admin
+-------------------------------
 
-When the admin renders a custom form, ``next.forms.form_spec`` produces a frozen descriptor that admin templates can render without touching the standard Django widgets.
-The repository ships a full admin integration.
-See the ``admin`` row in :doc:`/content/misc/examples`.
+List ``ObjectPermissionBackend`` next to ``ModelBackend`` in ``AUTHENTICATION_BACKENDS`` to let the admin see the permissions that ``permissions.py`` registers.
+The admin index calls ``has_module_perms`` and ``get_all_permissions()``, which ask every registered predicate with ``obj=None``, so a predicate must handle ``None`` before it reads ``obj``.
+See :ref:`topics-permissions` for the predicate rules.
+
+The ``admin`` example rebuilds the admin pages on next.dj, see :doc:`/content/misc/examples`.
 
 Verification
 ------------
@@ -115,5 +117,5 @@ See also
 
 .. seealso::
 
-   :doc:`/content/topics/forms/serializers` for frozen form specs.
-   :doc:`/content/misc/examples` for the ``admin`` sample project.
+   :doc:`/content/topics/permissions` for object permissions.
+   :doc:`/content/misc/examples` for the ``admin`` example, which rebuilds the admin pages on next.dj.

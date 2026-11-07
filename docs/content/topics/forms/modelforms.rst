@@ -3,9 +3,7 @@
 ModelForms
 ==========
 
-An edit page in plain Django reloads the instance by hand in both the initial render and the save handler, mapping each field twice.
-next.dj collapses that to one declarative line.
-A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form, and ``Meta.instance_from_url`` loads the row the page already addresses in its URL, so a single class serves both create and edit.
+On a :doc:`ModelForm <django:topics/forms/modelforms>`, ``Meta.instance_from_url`` loads the row the URL addresses, so one class serves both create and edit pages.
 The `Before and after`_ section below shows the delta against the hand-written lookup.
 
 next.dj supports ModelForms anywhere a plain ``Form`` works.
@@ -216,10 +214,10 @@ See :doc:`actions` for the scope derivation and the UID rules.
 
 .. _topics-forms-modelforms-separate:
 
-Separate create and edit forms are an option, and the repository examples take that route, see :doc:`/content/misc/examples`.
-The wiki example's create page declares a plain ``ArticleCreateForm`` while its edit page keeps the ``ArticleEditForm`` ModelForm.
-The multi-tenant example's create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
-Split the two when the create and edit fields diverge, when validation differs, or when the edit form loads its row through ``DObject``, which needs the kwarg on every page the form serves.
+Separate create and edit forms
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Split the create and edit forms when their fields diverge, when validation differs, or when the edit form loads its row through ``DObject``, which needs the kwarg on every page the form serves.
 In a project whose scope is the user, the create form hands the owner to the new row from its own ``get_form_kwargs``.
 
 .. code-block:: python

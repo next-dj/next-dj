@@ -128,19 +128,8 @@ With ``staticfiles`` listed first, or without uvicorn, it is the WSGI ``runserve
 The command caps inbound frames at 64 KiB and turns off the protocol ping of uvicorn, because the socket checks the liveness of its peer itself.
 See :doc:`/content/ref/management` for the options.
 
-Production runs several uvicorn workers, either through uvicorn itself or under gunicorn with the worker class of the ``uvicorn-worker`` package.
-Several workers need a shared broker, see :ref:`howto-realtime-several-workers`.
-The ``--workers`` value below is an example to size from measurement, see :ref:`deployment-capacity` for how to measure capacity.
-
-.. code-block:: bash
-   :caption: shell
-
-   uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws-max-size 65536
-   uv run gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker --workers 4
-
-The socket closes a larger inbound frame with ``1009`` anyway.
-``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
-Uvicorn pings every 20 seconds by default, which the socket does not need, so ``--ws-ping-interval`` is a deployment decision and a server-level ping is only an extra layer.
+Production runs several uvicorn workers, and :ref:`deployment-wsgi-asgi` gives the commands, the ``--ws-max-size`` flag, and the gunicorn worker class.
+Size ``--workers`` from measurement, see :ref:`deployment-capacity`.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
 The default ``MemoryBroker`` reaches subscribers in one process only.
 Use ``RedisBroker`` once there is more than one worker, see :doc:`fan-out-across-processes-with-redis`.

@@ -22,6 +22,14 @@ Terms used throughout the next.dj documentation.
       A combination of extension and renderer that decides how an asset becomes HTML.
       Bundled kinds are ``css``, ``js``, and ``module``.
 
+   logical name
+      The path under which the pipeline publishes a co-located asset, for example ``components/note_card``, served below the ``next/`` staticfiles namespace.
+      See :doc:`/content/topics/static-assets/name-resolution`.
+
+   object permission
+      A predicate registered in ``permissions.py`` that ``ObjectPermissionBackend`` answers for ``user.has_perm(perm, obj)``.
+      See :doc:`/content/topics/permissions`.
+
    asset name
       An asset reference carrying no scheme, no host, no query, and no fragment, whose path is relative.
       The pipeline resolves it through Django staticfiles, while every other reference reaches the document as written.

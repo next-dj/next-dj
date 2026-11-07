@@ -4,7 +4,7 @@ Reporting a vulnerability
 =========================
 
 The disclosure process is private and the maintainers acknowledge every report.
-The canonical policy is :repo:`SECURITY.md <blob/main/SECURITY.md>` in the repository, and this page restates it for the manual.
+The canonical policy is :repo:`SECURITY.md <blob/main/SECURITY.md>`.
 
 Where to report
 ---------------
@@ -20,11 +20,11 @@ What to include
 
 A complete report contains the following.
 
-- Dependency versions that match your environment (for example a lock file or the output of ``pip freeze``) so maintainers can reproduce the stack.
-- The affected subsystem (pages, components, forms, urls, partial, static, deps, server, conf).
-- A reproducible test case or at minimum a step by step description.
-- The observed impact, including any account or data exposure.
-- Suggested mitigations if you have any.
+- Include dependency versions that match your environment, for example a lock file or the output of ``pip freeze``.
+- Name the affected subsystem, for example pages, components, forms, urls, partial, permissions, realtime, seo, site, static, deps, server, or conf.
+- Add a reproducible test case or at minimum a step by step description.
+- Describe the observed impact, including any account or data exposure.
+- Suggest mitigations if you have any.
 
 A reproducible test case shortens the triage time considerably.
 

@@ -65,7 +65,7 @@ Modules
    See :doc:`/content/topics/dependency-injection` for the marker semantics and the provider order.
 
 ``next.urls.reverse``.
-   ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` helpers.
+   ``page_reverse``, ``page_reverse_lazy``, ``page_reverse_in``, and ``with_query`` helpers.
 
 ``next.urls.urlconf``.
    Walks the root URLconf for the route ``next.urls`` is included under and for every ``pages()`` include, as `Trees placed by pages()`_ below describes.
@@ -181,7 +181,7 @@ The router imports the page module of each published intercept, as it does for a
 ``generation`` guards against a race with a reload.
 The walk reads the table's ``generation`` before it starts, a reload bumps it, and a walk that began before the reload is refused at publish, so its stale rules never overwrite the cleared table.
 ``intercepts.of(target_file)`` returns the rules over one routed page in file order with a single dictionary lookup, and ``all()`` returns every rule.
-``RouterManager.reload()`` clears the table before it installs the new backends, so a build inside ``router_reloaded`` publishes into the fresh table and the rebuild publishes it again.
+``RouterManager.reload()`` clears the table right after it installs the new backends and before it sends ``router_reloaded``, so a build inside ``router_reloaded`` publishes into the fresh table and the rebuild publishes it again.
 
 Each published rule sends ``intercept_registered``, only when the publish was accepted.
 The table is read at request time to pick the intercepting page that serves a zone request over its target.
@@ -208,18 +208,18 @@ The views also carry ``next_page_path`` and the ``login_required`` attribute ``L
 Reload mechanics
 ----------------
 
-``router_manager.reload()`` does five things in order.
+``router_manager.reload()`` does six things in order.
 
-1. Bumps the version counter that invalidates the cached pattern concat and the resolver's route index.
-2. Rebuilds the backend list from ``PAGE_BACKENDS``, sending ``router_backend_loaded`` once per entry the shared loader instantiates.
-3. Publishes the new list in one assignment, so a read racing the build never sees a partial one.
-4. Clears the Django URL resolver cache.
-5. Emits the ``router_reloaded`` signal.
+1. Rebuilds the backend list from ``PAGE_BACKENDS``, sending ``router_backend_loaded`` once per entry the shared loader instantiates.
+2. Publishes the new list in one assignment, so a read racing the build never sees a partial one.
+3. Clears the intercept table, so the rebuild publishes it afresh.
+4. Bumps the version counter that invalidates the cached pattern concat and the resolver's route index.
+5. Clears the Django URL resolver cache.
+6. Emits the ``router_reloaded`` signal.
 
-``notify=False`` suppresses three of those effects, the per-entry ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``.
+``notify=False`` suppresses four of those effects, the per-entry ``router_backend_loaded``, the intercept clear, the URL-cache clear, and ``router_reloaded``.
 The version bump and the rebuild itself always happen, which is what lets a receiver of ``router_reloaded`` reload the backends without re-entering its own signal.
 The next request observes the new patterns without a process restart.
-The ``router_reloaded`` receivers also drop the intercept table, which the rebuild fills again.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
 
 The manager also reloads on two signals of its own accord.
@@ -245,7 +245,37 @@ Route introspection
 -------------------
 
 Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete introspection methods, ``page_roots``, ``components_folder_name``, and ``skip_dir_names``.
-They are a public contract, the only thing the system checks and the development watcher read from a backend, and :doc:`/content/howto/write-a-router-backend` is the canonical description of each method and of the safe defaults that make overriding them the opt-in.
+They are a public contract, the only thing the system checks and the development watcher read from a backend.
+:doc:`/content/howto/write-a-router-backend` shows a subclass of the file router.
+
+``page_roots`` reports the page trees the system checks walk as ``PageRoot`` entries, each pairing a directory with the label the reports name it by.
+Implement ``page_roots`` when the backend has page trees.
+Give each ``PageRoot`` a ``key``, because the co-located ``layout`` and ``template`` assets of a tree without one are not served and ``next.W132`` warns about it, see :ref:`topics-static-name-resolution-colocated`.
+The base returns an empty list, so a backend that does not implement it is not checked and not watched, which is the right answer for a backend routing from a database or another source that is no tree on disk.
+
+A subclass of ``FileRouterBackend`` inherits the file router's own implementation and is checked as it stands.
+Report only trees the backend actually serves from, because the same list is what the development watcher observes, and a tree missing from it is neither checked nor reloaded.
+``components_folder_name`` completes that pair by naming the folder the backend registers components from while it walks, ``None`` for a backend that registers none.
+``skip_dir_names`` names the directories the backend's own walk refuses to enter, an empty set for a backend that refuses none.
+
+The checks walk the reported trees themselves rather than asking the backend to walk them, so ``page_roots`` is the whole contract for being checked.
+A backend that reports a tree is reached by every page check, from the structural ones to the partial zone checks and ``next.E017``.
+The names that walk refuses to enter are the folder ``components_folder_name`` returns plus the names ``skip_dir_names`` returns.
+Both come from the backend under check rather than from the settings, so one entry's ``DIRS`` never blinds the checks to another entry's trees.
+``FileRouterBackend`` answers with the skip set it built from its own ``DIRS``, the entries that name no existing directory.
+
+``page_roots`` and ``components_folder_name`` are read on the ``runserver``, ``collectstatic``, and staticfiles paths.
+An override that reaches a database or a network is therefore called where an outage must not stop the process.
+The framework guards every such read, and it guards the value as well as the call.
+A backend that raises, or that answers something other than ``PageRoot`` entries, contributes no tree for that call instead of reaching a caller that dereferences it, and one that names its components folder as anything but a string contributes no component glob.
+The ``scripts.py`` and SEO source discovery a request runs reads ``page_roots`` inside ``FailureLog.guard`` instead, so a failure there costs that backend its trees under :ref:`topics-failure-containment`.
+
+``skip_dir_names`` is guarded the same way, and a backend that raises there or answers anything but a collection of names refuses no directory to the check walk.
+These paths run per reloader tick and per static lookup, so the failure is logged at the FailureLog rate, a backend that raised with its traceback and one that answered the wrong type by that type, see :ref:`topics-failure-containment`.
+``manage.py check`` reports the same failure once as ``next.E030``, with the traceback, which is where a human is reading output on purpose.
+``next.E030`` covers the report itself, a ``page_roots`` that raises or answers something other than ``PageRoot`` entries.
+A tree the backend reports successfully but the check walk then cannot read, an unreadable directory among them, is a separate report, ``next.E088``.
+An override that can fail slowly is still worth a cache of its own, because nothing upstream caches the answer for it.
 
 The checks walk the reported trees themselves, refusing every directory whose name starts with an underscore, the names ``skip_dir_names`` returns, and the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
 

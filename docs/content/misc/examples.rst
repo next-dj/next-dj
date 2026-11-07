@@ -33,7 +33,8 @@ The table runs roughly in order of how much it assumes.
      - Shortens a URL, lists the results, and prepends a new row into the live list without a reload.
        Reads request values through custom DI providers, caches lookups in ``LocMemCache``, declares the post-submit redirect and flash message on the form itself, and seeds data from a management command.
        Serves a static ``robots.txt`` that keeps crawlers off the redirect URLs.
-     - :doc:`/content/topics/file-router`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/robots`
+       Opens a link as a quick look modal over the admin list through a ``(.)links`` intercept.
+     - :doc:`/content/topics/file-router`, :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/robots`, :ref:`topics-file-router-intercepts`
    * - :repo:`markdown-blog <tree/main/examples/markdown-blog>`
      - Publishes Markdown posts through nested layouts, hands serialised values to the browser, feeds a site-wide value through a context processor, and runs a co-located ``component.js`` beside the component that needs it.
        Builds the head from ``DEFAULTS`` down to a per-post ``@page.metadata`` callable with a plain ``BlogPosting`` JSON-LD dict and keywords from the front matter, renders ``{% breadcrumbs %}`` in its nested layouts, names a static social card in ``og.images``, and advertises an RSS feed through ``alternates.feeds``.
@@ -54,11 +55,13 @@ The table runs roughly in order of how much it assumes.
      - Filters a catalog from the query string with faceted filters that submit themselves and a list that extends as the visitor scrolls, across three levels of nested layouts sharing inherited context and a cached search.
        Carries one title template across the layouts, a self canonical that drops the filter query, a ``meta`` patch after a preset filter, and a ``sitemap.py`` over categories and products.
        Shows the marketing side as well, a category landing a CDN may cache, structured data on the product pages, third-party scripts in ``scripts.py`` behind a consent banner with hand-written vendor adapters, and ``{% #consented %}`` embeds.
-     - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`, :doc:`/content/topics/seo/social-and-canonical`, :doc:`/content/topics/scripts/index`, :doc:`/content/howto/write-a-vendor-adapter`
+       Opens a product as a quick view modal over the listing through a ``(.)[slug]`` intercept.
+     - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`, :doc:`/content/topics/seo/social-and-canonical`, :doc:`/content/topics/scripts/index`, :doc:`/content/howto/write-a-vendor-adapter`, :ref:`topics-file-router-intercepts`
    * - :repo:`wiki <tree/main/examples/wiki>`
      - Serves articles out of the database through a hybrid router that rebuilds its routes on a signal, with a search zone that answers as the visitor types and an editor that previews Markdown live.
        Titles and describes each article through a ``@page.metadata`` callable that reuses the row its context resolved, marks the editing pages ``noindex``, lists the articles through a lazy ``QuerySet`` sitemap dated per row, and keeps crawlers out of the search pages through a ``robots.py``.
-     - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/robots`
+       Previews an article over the search results through a ``(..)wiki`` intercept.
+     - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/robots`, :ref:`topics-file-router-intercepts`
    * - :repo:`multi-tenant <tree/main/examples/multi-tenant>`
      - Resolves a tenant from a request header in middleware, rewrites every co-located asset URL per tenant on top of the staticfiles names it inherits, stamps a deploy build id into those URLs, and shares a header and footer across page roots.
        Makes the tenant the ``site_name`` and the default title of every workspace page through ``@page.metadata(inherit=True)``, which keeps each workspace ``noindex`` as well.
@@ -67,7 +70,8 @@ The table runs roughly in order of how much it assumes.
    * - :repo:`kanban <tree/main/examples/kanban>`
      - Drives a board of React cards, teaching the pipeline a ``.jsx`` asset kind through a custom static backend, deep-merging serialised context across levels, and deduplicating co-located CSS by content hash.
        Shows a realtime board as well, with an action that moves a card over the WebSocket, a presence list of who has the board open, and upstream events that broadcast a card while it is dragged.
-     - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`, :doc:`/content/topics/realtime`
+       Previews the columns of a board over the index through a ``(.)board`` intercept.
+     - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`, :doc:`/content/topics/realtime`, :ref:`topics-file-router-intercepts`
    * - :repo:`live-polls <tree/main/examples/live-polls>`
      - Streams poll results to every open browser over SSE by default, with optional WebSocket delivery under ASGI, fanning out from a signal receiver that reads the bound form.
        Publishes to topics, replays the messages a reconnecting browser missed, and shows a presence count of the viewers.
@@ -77,7 +81,8 @@ The table runs roughly in order of how much it assumes.
        The locally bundled Vue component listens for context and topic events and uses a custom ``.vue`` asset kind.
        Titles the poll list with a ``metadata`` dict and each poll after its question through ``@page.metadata``.
        Serves each poll as an embeddable widget under a root layout with a document shell of its own.
-     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`, :doc:`/content/howto/count-down-to-a-server-deadline`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
+       Opens the embed snippet as a modal over the vote page through a ``(.)embed`` intercept.
+     - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`, :doc:`/content/howto/count-down-to-a-server-deadline`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`, :ref:`topics-file-router-intercepts`
    * - :repo:`observability <tree/main/examples/observability>`
      - Watches a running project through one receiver per signal group, refreshing a dashboard from polling and lazy zones and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.
        Exports Prometheus metrics from the signals of the realtime streams.

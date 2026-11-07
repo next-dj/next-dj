@@ -36,7 +36,7 @@ Signal.
 
 Port.
    Replace the implementation one subsystem calls another through.
-   Used for the nine slots the table under Ports lists, one wherever a subsystem reaches another.
+   Used for the nine slots the table under Ports lists, one for each place a subsystem reaches another.
 
 Backends
 --------
@@ -332,37 +332,27 @@ A port is the narrow surface one subsystem calls another through.
 
 .. list-table::
    :header-rows: 1
-   :widths: 24 34 42
+   :widths: 30 70
 
    * - Slot
-     - Shipped implementation
      - What it answers
    * - ``action_owners_slot``
-     - ``next.forms.ports.ActionOwnersImpl``
      - Answers the ``page.py`` of every directory whose files declare an action.
    * - ``form_routes_slot``
-     - ``next.forms.manager.form_action_manager``
      - Answers the URL patterns of every form backend.
    * - ``page_scan_slot``
-     - ``next.pages.ports.PageScanImpl``
      - Executes every routed ``page.py`` and answers the ones that loaded.
    * - ``partial_shaper_slot``
-     - ``next.partial.ports.PartialShaperImpl``
      - Reads the partial intent off a request and shapes page and form responses into envelopes.
    * - ``realtime_negotiation_slot``
-     - ``next.realtime.ports.RealtimeNegotiationImpl``
      - Answers the transports and the partial content types the ``$realtime`` entry of a page carries.
    * - ``router_access_slot``
-     - ``next.urls.ports.RouterAccessImpl``
-     - Builds router backends and managers and answers the URL pattern parser.
+     - Builds router backends and managers, answers the URL pattern parser, and the kwargs of a page trail.
    * - ``page_scripts_slot``
-     - ``next.scripts.ports.PageScriptsImpl``
      - Answers the head scripts and the ``$scripts`` and ``$consent`` payload entries of one render.
    * - ``seo_routes_slot``
-     - ``next.seo.ports.SeoRoutesImpl``
      - Answers the sitemap and robots routes the lazy urlpatterns append, each only while its source exists.
    * - ``static_assets_slot``
-     - ``next.static.ports.StaticAssetsImpl``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
 ``NextFrameworkConfig.ready()`` binds all nine, ahead of every step that imports user code.
@@ -396,7 +386,7 @@ Subclass the shipped implementation rather than the ``Protocol``, so a method th
 A port differs from a backend in who reads it.
 A backend family is configured in ``NEXT_FRAMEWORK`` and reloads itself when the settings change, while a slot is bound once at startup and nothing rebinds it, which is why replacing one is a startup decision rather than a configuration key.
 Reach for a port only when no backend, strategy, or protocol covers the seam, because the protocols are narrower than the subsystems behind them and a replacement takes on whatever the shipped implementation was doing for every caller.
-See :doc:`/content/ref/ports` for the method contract of each.
+See :doc:`/content/ref/ports` for the shipped implementation and the method contract of each.
 
 .. _topics-failure-containment:
 
@@ -422,7 +412,11 @@ A log key names a source such as a file, a route, or a setting, never request da
 A reload of the framework settings, or ``next.testing.reset_failure_logs()``, makes every failure log again.
 
 A backend answer read on every reloader tick or static lookup goes through ``BackendReadLog`` instead, which drops an answer that raises or has the wrong type and never re-raises, under ``DEBUG`` included.
-:doc:`/content/ref/utils` documents ``FailureLog`` and its ``guard`` boundary.
+
+``FailureLog.guard(key, message, *args, catch=(Exception,), pass_through=INTENDED_EXCEPTIONS, detail=None)`` answers a ``Guard``, the context manager that applies this policy to the exception its block raises.
+After the block, ``failed`` tells whether it contained one, and ``error`` holds the exception for a caller that memoises the failure.
+``catch`` narrows the exceptions it contains, and only an ``Exception`` qualifies, so ``KeyboardInterrupt`` and ``SystemExit`` always propagate.
+A call site outside any view passes ``pass_through=()``, and ``detail`` draws message arguments from the exception while the key stays the one the caller passed.
 
 Choosing between mechanisms
 ---------------------------
@@ -496,11 +490,11 @@ Declare the dependency on next.dj under its distribution name, and constrain it 
 
    [project]
    name = "next-audit"
-   dependencies = ["next.dj"]
+   dependencies = ["next.dj>=X.Y"]
 
-The lower bound names the release the extension was developed against, which is what keeps an adopter from installing it beside a framework that has none of the names it imports.
+Replace ``X.Y`` with the release the extension was developed against, which is what keeps an adopter from installing it beside a framework that has none of the names it imports.
 The framework is the host application's choice, so a ceiling on it strands the adopter on an old release for as long as the extension goes unmaintained.
-Add one only for an extension built on a deep module path or another surface outside the curated package ``__all__``, since those move without notice.
+A ceiling belongs only to an extension built on a deep module path, since those move without notice.
 An extension that stays on the curated package paths, the backend base classes, and the signal catalog needs no ceiling at all.
 
 Worked examples

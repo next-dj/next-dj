@@ -95,7 +95,7 @@ Static files.
 What stays the same
 -------------------
 
-next.dj adds no middleware and no model layer, so the following stay Django's.
+next.dj adds no middleware to ``MIDDLEWARE`` on its own and no model layer, so the following stay Django's.
 
 - Models, the ORM, and migrations are untouched.
 - ``django.contrib.admin`` is included as usual, see :doc:`/content/howto/integrate-django-admin`.

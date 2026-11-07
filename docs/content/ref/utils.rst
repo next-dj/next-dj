@@ -6,7 +6,7 @@ Utils reference
 Module summary
 --------------
 
-``next.utils`` exposes two helpers that project code can import, ``resolve_base_dir`` and ``classify_dirs_entries``, the ``PageRoot`` value object, and the readers of the two directory-name grammars that route groups and intercepting routes use.
+``next.utils`` exposes ``resolve_base_dir``, ``classify_dirs_entries``, ``redirect_or_fallback``, the ``PageRoot`` value object, and the readers of the two directory-name grammars that route groups and intercepting routes use.
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
 A ``DIRS`` that is no sequence of trees raises :class:`~next.errors.InvalidDirsError`, a bare string included, because iterating a string would split it into characters.
@@ -24,30 +24,15 @@ A directory named with a marker and a segment, such as ``(.)photo``, is an inter
 ``resolve_intercept(scope_trail, marker, rest)`` returns the URL trail the intercept targets from the group-free URL trail of the directory that holds it, or ``None`` when ``(..)`` climbs past the tree root.
 ``InterceptPage`` is the frozen value the walk reports for a page under an intercept directory, with the ``target_trail`` it sits over, its ``file``, the marked ``source`` directory, and the ``marker``.
 
-The rest of the module is framework machinery and is excluded from the listing below.
-It holds ``walk_page_tree``, the depth-first page-tree walk the file router and the system checks both run, `The page-tree walk`_ below, ``list_page_dir`` and ``routes_into``, the one listing of a page-tree directory and the one rule for which subdirectories the router enters, that the walk and the empty-branch check share with ``PAGE_FILES``, ``page_roots_shape_error``, the shared shape probe a check runs over what a router reports, ``template_edits_watched``, the ``DEBUG`` predicate the page, component, and static caches read before they stat anything, and ``normalise_route_name``, the one reading of a hyphen as an underscore that the URL parser and the directory check share.
-Those sit beside ``PageRoot`` for the reason ``PageRoot`` sits here, that more than one subsystem reads each of them.
-``WEB_SCHEMES``, ``is_int``, ``ROUTE_BRACKET_PATTERN``, and ``is_dynamic_trail`` join them for the same reason, the URL schemes a head tag or a sitemap may name, the strict int probe the metadata normaliser and the SEO checks share, and the bracket-segment pattern behind the predicate that tells a route with a parameter from a static one.
-``prefix_trail`` and ``join_trail`` sit beside that pattern, the first reading a ``pages()`` prefix as a trail with ``<int:wallet>`` turned into ``[int:wallet]``, the second joining two trails with one slash, and the router, the URL checks, the breadcrumb resolution, and ``PageRoot.route_trail`` all build the full trail of a page under a prefix through them.
-``regex_trail`` reads a :func:`~django.urls.re_path` route the way Django reverses it, a named group as ``[name]`` and a route Django cannot reverse as a catch-all, so no page under such a route reads as static.
-``TreeSource`` and ``load_tree_source`` are the one loader of a Python file at the top of a page tree, which ``sitemap.py``, ``robots.py``, and ``scripts.py`` all go through.
-``load_tree_source`` executes the file as its own module, keeps any failure of that user code on the returned ``TreeSource`` for the checks to report, and records the file's modification time, so ``TreeSource.stale()`` tells a watched process to read it again and an edit shows without a restart.
-``decode_url_path`` and ``exec_module_file`` are the smaller shared helpers behind them, and ``is_middleware`` and ``middleware_listed`` tell whether a ``MIDDLEWARE`` entry names a class or a subclass of it, for the checks that read the middleware order.
+``redirect_or_fallback(target, fallback, *, status=302)`` redirects to ``target``, or to ``fallback`` when Django refuses it as a ``Location``.
 
-Six more flat modules sit at the root of the package for the same reason, and all six are framework-internal.
-``next.caches`` holds ``BoundedCache``, ``LruCache``, and ``PageCache``, the bounded caches every path-keyed memo of the framework is built from, each owning its bound and the policy it gives an entry up by.
-A ``PageCache`` keys a memo by page, and each URL build sets its bound to two entries per routed page, never below 2048 entries, so a large site does not evict every entry before its next read and a smaller build releases the entries of the pages it no longer routes.
-``next.introspect`` backs decorator registration, attributing a decorated object to the file where it was declared, naming it for diagnostics, collecting the registrations bound to another file, and refusing an ``async def`` callable with ``AsyncCallableError`` through ``refuse_async`` and, for a module ``render``, ``refuse_async_render``.
-``next.discovery`` holds the per-run router manager and the walk of the page trees it routes, which the system checks, the component sources, and the page scan all read, and it reaches the routers through ``next.ports`` rather than by importing ``next.urls``.
-``next.diagnostics`` holds ``FailureLog``, the containment every area routes a failure of user or third-party code through, and ``BackendReadLog``, the guarded read a watch layer puts a third-party backend answer through, which drops a raising or malformed answer.
-``FailureLog.guard(key, message, *args, catch=(Exception,), pass_through=INTENDED_EXCEPTIONS, detail=None)`` answers a ``Guard``, the context manager that applies the policy :ref:`topics-failure-containment` states to the exception its block raises.
-After the block, ``failed`` tells whether it contained one, and ``error`` holds the exception for a caller that memoises the failure.
-``catch`` narrows the exceptions it contains, and only an ``Exception`` qualifies, so ``KeyboardInterrupt`` and ``SystemExit`` always propagate.
-The default ``pass_through``, ``INTENDED_EXCEPTIONS``, lets a view's ``Http404``, ``PermissionDenied``, ``SuspiciousOperation``, and ``BadRequest`` propagate, and a call site outside any view passes ``pass_through=()``.
-``detail`` draws message arguments from the exception, ``type_name`` and ``exception_text`` naming its type or text, while the key stays the one the caller passed, so request data never reaches it.
-``Capture``, the base of ``Guard``, holds an exception of its ``catch`` in ``error`` and suppresses it without logging or degrading, for a caller that handles the failure itself.
-``next.stamps`` holds the freshness stamps every mtime-keyed memo compares, an mtime once it has left the racy window and a token no stat equals before that, see :doc:`/content/internals/page-discovery`.
-``next.seeding`` holds the render-context keys the areas share, the ``RenderFrame`` that seeds them for a caller building its context from scratch, and ``seed_collector``, the one hydration of a ``StaticCollector`` that a full page render and a standalone zone render both run through the ``next.ports`` static slot.
+The rest of the module is shared framework machinery and is excluded from the listing below.
+It holds the page-tree walk described next, the listing and shape probes the router and the system checks share, the trail helpers behind ``PageRoot.route_trail``, and ``TreeSource`` with ``load_tree_source``, the one loader of a Python file at the top of a page tree.
+``load_tree_source`` keeps any failure of that user code on the returned ``TreeSource`` for the checks to report, and ``TreeSource.stale()`` tells a watched process to read the file again.
+
+Other flat modules at the root of the package, among them ``next.caches``, ``next.introspect``, ``next.discovery``, ``next.diagnostics``, ``next.stamps``, and ``next.seeding``, are framework-internal.
+:doc:`/content/internals/overview` maps each one, and :ref:`topics-failure-containment` covers ``FailureLog`` and its ``guard`` boundary.
+``next.seeding`` holds the ``RenderFrame`` that seeds a render context, ``ambient_frame(frame)`` publishes one for the widgets a binder had no instance to reach, and ``current_ambient_frame()`` reads it.
 
 The page-tree walk
 ------------------
@@ -66,7 +51,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, app_holding, forget_app_holdings, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed
+   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, app_holding, forget_app_holdings, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed, int_between, positive_number, non_negative_number, after_fork, is_within, child_nodelists, is_intercept_name, regex_trail, UNMOUNTED, LAYOUT_TEMPLATE
 
 See also
 --------

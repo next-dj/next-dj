@@ -47,7 +47,7 @@ The response is ``text/plain; charset=utf-8``.
    Sitemap: https://notes.example/sitemap.xml
    Sitemap: https://cdn.notes.example/sitemap-news.xml
 
-``RobotsRule`` validates on construction and raises ``RobotsRuleError`` for an agent that is no token, a path that does not start with ``/`` or ``*`` or carries a space, a control character, or a ``$`` before its end, and a crawl delay that is no finite number of seconds.
+``RobotsRule`` validates on construction and raises ``RobotsRuleError`` for an agent that is no token, a path that does not start with ``/`` or ``*``, carries a space, a control character, or ``#``, or holds ``$`` before its end, and a crawl delay that is no finite number of seconds from 0.
 A rule that raises at import keeps the route answering 503 with ``Retry-After`` and ``manage.py check`` reports the reason, as it reports a ``rules``, ``sitemaps``, or ``cache`` of the wrong shape.
 
 Rules per request
@@ -76,7 +76,7 @@ The Sitemap lines
 -----------------
 
 The project's own ``Sitemap:`` line is written while the project serves a sitemap, and the ``sitemaps`` the file lists follow it.
-Its URL is absolute, ``SITE["URL"]`` followed by the path of the sitemap route, and without a site URL the origin of the request.
+Its URL is absolute and built on ``site_origin(request)`` of :doc:`site`, the site URL, then the ``Site`` row, then the request host, followed by the path of the sitemap route.
 The path is reversed in the namespace the request reached the robots route through, so a robots served from ``include("next.seo.urls")`` names a sitemap under the same include.
 A listed URL is an absolute ``http`` or ``https`` URL on one line.
 
@@ -116,6 +116,7 @@ One source per address
 A ``robots.py`` and a ``robots.txt`` in one root, or a source in two roots, is an error of ``manage.py check``.
 At runtime the first source in router order answers, ``robots.py`` ahead of ``robots.txt`` within a root, and under ``DEBUG`` a warning names the ones ignored, once.
 A ``robots.py`` that fails to import keeps the route and answers 503 with ``Retry-After`` rather than falling back to another source.
+
 A 404 would be wrong here, since RFC 9309 reads a 4xx on ``/robots.txt`` as no restriction at all, which would open a staging host to every crawler.
 RFC 9309 reads a 5xx as an unreachable file, which a crawler answers by crawling nothing or by keeping the rules it cached before.
 
@@ -127,7 +128,6 @@ A page that declares ``"robots": {"index": False}`` is not added to ``Disallow``
 A private area therefore keeps its ``noindex`` and stays crawlable, and ``manage.py check`` reports a ``Disallow`` that covers a ``noindex`` page.
 It also reports the opposite mistake, a ``Disallow`` covering a URL the sitemap lists or the sitemap address itself.
 Both checks read only the groups that name ``*``, since a crawler named in a group of its own follows that group alone, so a group that keeps AI crawlers out of the whole site warns about nothing.
-A site closed to search follows the same rule, and its ``/robots.txt`` disallows nothing whatever the sources declare, see :doc:`site`.
 
 See also
 --------

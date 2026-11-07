@@ -60,7 +60,9 @@ The ld nodes
    * - ``Ref``
      - ``id`` alone, rendered as ``{"@id": ...}`` to point at a node declared elsewhere.
    * - ``BreadcrumbList``
-     - ``items``, a tuple of ``ListItem(name=..., position=..., item=...)``.
+     - ``items``, a tuple of ``ListItem``.
+   * - ``ListItem``
+     - One position of a ``BreadcrumbList`` with ``name``, ``position``, and an optional ``item`` URL.
 
 A subclass of ``Node`` types the node a site repeats, so a missing required property is a ``TypeError`` where the node is built, at import for a module-level node, and a type error under mypy.
 ``TYPE`` names the schema.org type, and ``URLS`` the fields resolved the way an ``@id`` is.

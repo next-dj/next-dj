@@ -21,19 +21,21 @@ The requirements in :doc:`install` stay Python, Django, and an ASGI or WSGI serv
 What next.dj adds
 -----------------
 
-next.dj layers seven things on top of a regular Django project.
+next.dj layers eight things on top of a regular Django project.
 Each one starts from work a Django team does by hand today and names the mechanism that removes it.
 
 File router.
    A new page costs a ``path()`` entry, a view, and a route name to reverse.
    Every directory under a configured page root becomes a URL instead, and a ``page.py`` turns it into a navigable page.
    A bracketed segment such as ``[slug]`` becomes a captured URL parameter.
+   A ``(name)/`` directory groups pages without touching the URL, and a ``(.)name/`` directory opens a page as a modal over another, see :ref:`topics-file-router-route-groups` and :ref:`topics-file-router-intercepts`.
    Resolving a request follows the depth of the path it asks for rather than the number of pages the project holds.
    See :doc:`/content/topics/file-router`.
 
 Layouts and context.
    A shared page envelope costs an ``{% extends %}`` line in every template and a repeated ``get_context_data`` on every view.
    A ``layout.djx`` wraps every page under its directory instead, and layouts nest down the tree.
+   A ``{% layout root %}`` marker in a layout gives a section a document shell of its own, see :ref:`topics-layouts-root`.
    A ``@context`` decorator publishes named values into the template scope, optionally inherited by every descendant page.
    A ``page.py`` declares the login and the permissions its page requires, and with ``inherit=True`` every page below it, and the framework checks them on the page, its actions, and its zones.
    See :doc:`/content/topics/layouts`, :doc:`/content/topics/context`, and :doc:`/content/topics/access`.
@@ -58,9 +60,9 @@ Form actions.
 
 Partial rendering.
    Updating part of a page costs a JSON endpoint, a client-side template, and a second copy of the state that renders it.
-   A ``{% zone %}`` block names a slice of a page the server can re-render on its own instead, and a form, filter, or link targets that zone.
-   A form, filter, or link that targets a zone degrades to a full page cycle when JavaScript is off, because the markup it carries is an ordinary form or anchor either way.
-   A ``lazy=`` zone holds its placeholder, a ``poll=`` zone never re-fetches, and the Server-Sent Events bridge and the ``toast``, ``layer.open``, ``layer.close``, and ``event`` verbs have no server-rendered form at all.
+   A ``{% zone %}`` block names a slice of a page the server re-renders on its own, and a form, filter, or link targets that zone.
+   With JavaScript off the same markup is an ordinary form or anchor, so the page falls back to a full cycle.
+   Zones can also update from a realtime topic, see :doc:`/content/topics/realtime`.
    See :doc:`/content/topics/partial-rendering/index`.
 
 Co-located assets.
@@ -69,6 +71,11 @@ Co-located assets.
    The ``{% collect_styles %}`` and ``{% collect_scripts %}`` tags mark the collector slots in the layout where the collected assets of the rendered page land.
    A file that no page or component owns, such as a compiled bundle, is named in a tag and resolved through Django staticfiles, which is where ``{% static %}`` reads from as well.
    See :doc:`/content/topics/static-assets/index`.
+
+Metadata and SEO.
+   The head of a page costs a block in every template and a sitemap and robots view kept by hand.
+   A ``metadata`` declaration on a page or layout builds the title, description, and social tags, and the site publishes a sitemap and a robots file from the same sources instead.
+   See :doc:`/content/topics/seo/index`.
 
 .. _intro-overview-django-unchanged:
 
@@ -90,21 +97,15 @@ The nouns *page*, *layout*, *component*, *action*, and *context function* carry 
 What the model costs
 --------------------
 
-Each of the seven mechanisms above trades something away, and the trade lands on the same few places.
-
-The filesystem rule makes a rename a behaviour change, because moving a directory moves the URL, the URL name, the layout chain, and the ``page.py`` chain of its access at once, and no static check finds a ``{% url %}`` call left behind.
-Resolution by name makes a context key a contract no tool checks, and a published context key shadows a captured URL segment carrying the same name.
-Registration on import makes a form action live the moment its module is imported, reachable by any visitor until the class, its page, or a ``page.py`` above it declares a guard.
-Composition by substitution gives a layout one placeholder and no override across the chain, so there is no ``{% block %}`` and no ``{{ block.super }}``.
-
-:doc:`/content/misc/design-philosophy` states the rejected alternative and the cost beside every principle, and :doc:`limitations` lists the boundaries the model does not cross.
+Every mechanism trades something away.
+:doc:`/content/misc/design-philosophy` states each cost beside its principle and :doc:`limitations` lists the boundaries.
 
 A minimal project
 -----------------
 
 Once installed, the smallest next.dj project is a ``page.py`` plus a ``template.djx`` under an app's ``pages/`` directory such as ``notes/pages/``.
-It also needs the ``NEXT_FRAMEWORK`` block in ``config/settings.py`` and a one-line ``include("next.urls")`` in ``config/urls.py``.
-:doc:`install` shows the full three-file shape with each block spelled out.
+It also needs a one-line ``include("next.urls")`` in ``config/urls.py``.
+Settings are optional, see :doc:`install`.
 Every new directory under ``pages/`` then adds another page without touching the URL configuration.
 
 .. seealso::

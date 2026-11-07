@@ -13,7 +13,8 @@ Every static route is listed on its own, a dynamic route lists the rows an ``@si
 The file convention
 -------------------
 
-A page root is every tree the routers report, an application's pages directory or an entry of ``DIRS``.
+A page root is a tree the routers report.
+It is the pages directory of an application or an entry of ``DIRS``.
 The framework probes the top of each root for ``sitemap.py``, and a file there is what switches the feature on.
 Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` placed after ``include("next.urls")`` keeps answering.
 
@@ -25,6 +26,7 @@ Without one no sitemap route exists, so a ``path("sitemap.xml", ...)`` placed af
 
 The file is executed once when the framework discovers the tree and kept until the SEO routes reset on a router or settings reload.
 While ``DEBUG`` is on an edit shows on the next request without a restart, since every SEO route first checks the files at the top of each page root.
+
 A file that fails to import is logged, keeps its route, and answers 404, so no partial sitemap is served, and ``manage.py check`` reports the cause.
 A 404 is safe here, since a crawler reads a missing sitemap as nothing listed and keeps the URLs it already knows.
 ``sitemap.py`` is read by the dependency resolver like a ``page.py``, so it keeps ``from __future__ import annotations`` out.
@@ -36,10 +38,11 @@ A site closed to search answers 404 for every sitemap address, see :doc:`site`.
 Static routes
 -------------
 
-Every route of the tree without a bracket segment is listed automatically, reversed through ``page_reverse`` at render time.
+Every route of the tree without a bracket segment is listed automatically, reversed through ``page_reverse_in`` in the namespace of its tree at render time.
 A route whose static metadata is ``noindex`` is left out, because a sitemap invites the crawler to a page the tag then turns away.
 A route an anonymous visitor cannot reach is left out too, one whose access rule has a requirement and one that the default login closes because it declares nothing and no ``page.public()``, see :ref:`topics-access-default-login`.
 A page whose ``page.py`` chain failed to import is left out as well.
+
 A route matching a glob in ``exclude`` is left out as well, and a glob matches the whole route, ``drafts/*`` for a subtree and ``admin`` for one page.
 Only ``*`` and ``?`` are wildcards, and brackets are literal because routes spell parameters with them, so ``posts/[slug]`` names that one dynamic route.
 
@@ -72,6 +75,8 @@ A ``QuerySet`` stays lazy.
 The paginator counts it with one ``COUNT`` and reads a page with one ``LIMIT`` and ``OFFSET``, so a table of a million rows costs the rows of one page per request, and the newest ``lastmod`` of the section is one aggregate query.
 An unordered ``QuerySet`` is ordered by primary key, since a page slice needs a stable order.
 A generator is read into a list first, so a large table belongs in a ``QuerySet``.
+A sliced ``QuerySet`` must be ordered, and a string or a mapping is no sequence of rows, so both raise a ``TypeError`` naming the callable.
+A tree that a ``pages()`` include mounts under a prefix with a parameter lists no static route, since the prefix needs kwargs that only an items callable gives.
 
 Each row becomes one URL in one of three ways.
 A ``SitemapEntry`` carries its own ``kwargs``, ``lastmod``, ``changefreq``, and ``priority``, a mapping is read as the kwargs alone, and any other row, a model instance among them, needs ``kwargs=`` on the decorator, a callable answering the kwargs of the row.

@@ -113,6 +113,16 @@ It does not narrow the set of routes an include publishes, because both includes
 
 Passing a ``namespace`` that no Django include registers raises ``NoReverseMatch``.
 
+Use ``page_reverse_in(namespace, path_template, kwargs)`` when the captured parameters arrive as a mapping.
+The keyword form cannot carry a parameter named ``namespace``, and the mapping form can.
+
+.. code-block:: python
+   :caption: mapping form
+
+   from next.urls import page_reverse_in
+
+   page_reverse_in("staff", "log/[int:entry]", {"entry": 3})  # "/staff/log/3/"
+
 Names of placed trees
 ~~~~~~~~~~~~~~~~~~~~~
 

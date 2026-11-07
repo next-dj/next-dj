@@ -62,7 +62,7 @@ A kind registration carries five fields, the ``kind`` identifier that keys it an
 
 ``slot``.
    The name of the placeholder slot that buckets the asset at render time.
-   The bundled slots are ``styles`` and ``scripts``.
+   The bundled slots are ``head``, ``styles``, and ``scripts``.
 
 ``renderer``.
    The method name that the active static backend exposes for rendering this kind.
@@ -125,7 +125,10 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
            return f'<script type="text/babel" src="{escape(url)}"{nonce_attr(nonce)}></script>'
 
 A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
-The injector calls every renderer with ``request`` and ``nonce`` keywords, and ``nonce_attr(nonce)`` writes the CSP nonce of the request, or nothing without one.
+The injector always passes ``request`` and passes ``nonce`` whenever the request carries a CSP nonce.
+``nonce_attr(nonce)`` writes the nonce, or nothing without one.
+A renderer without ``request`` fails every page holding the asset, and one without ``nonce`` fails every page that carries a nonce.
+``next.E147`` reports both before the first render.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -178,7 +181,7 @@ Placeholder slots
 
 A slot is the location where the static manager injects rendered tags.
 The slot registry is ``next.static.default_placeholders``.
-The framework registers two slots, each with an HTML comment token.
+The framework registers three slots, each with an HTML comment token.
 
 .. list-table::
    :header-rows: 1
@@ -186,10 +189,14 @@ The framework registers two slots, each with an HTML comment token.
 
    * - Slot
      - Token
+   * - ``head``
+     - ``<!-- next:head -->``
    * - ``styles``
      - ``<!-- next:styles -->``
    * - ``scripts``
      - ``<!-- next:scripts -->``
+
+The ``head`` slot receives the head scripts of ``scripts.py`` and no kind targets it, see :doc:`/content/topics/scripts/declaring`.
 
 The placeholder registry
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -199,7 +206,7 @@ A ``PlaceholderSlot`` binds a slot ``name`` to the HTML comment ``token`` that t
 The ``register`` method has the signature ``register(name, *, token)``.
 A repeated call with the same token is idempotent, and a repeated call with a different token raises ``ValueError``.
 
-Register a new slot when a kind should inject somewhere other than the standard two slots.
+Register a new slot when a kind should inject somewhere other than the built-in slots.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -241,9 +248,8 @@ The two renders agree on that split, because the client drops an inline entry th
 System checks
 -------------
 
-The static system checks ``next.W030``, ``next.W031``, ``next.E036`` through ``next.E038``, ``next.E092``, and ``next.E093`` validate the backend configuration.
-The ``next.W042`` check and ``next.W079`` through ``next.W082`` validate the ``JS_CONTEXT_SERIALIZER`` setting, one condition per id.
-The ``next.E083`` check refuses a ``STATICFILES_FINDERS`` entry that walks application static directories without skipping the framework's own package.
+``manage.py check`` validates the backend entry, the serializer setting, and the renderer signatures, see :doc:`/content/ref/system-checks`.
+The ``next.E147`` check reports a renderer that lacks the keywords the injector passes.
 
 The ``next.W074`` check walks the registered kinds and warns about each one whose renderer carries no client insertion verb.
 The ``next.W076`` check walks the same kinds and warns about each one whose ``inline_tag`` is not the element its renderer's verb builds, so its URL form travels in a patch envelope while its inline bodies do not.

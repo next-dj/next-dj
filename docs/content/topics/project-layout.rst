@@ -479,22 +479,6 @@ Custom management commands
 Place commands inside ``notes/management/commands/``.
 The framework does not require any special wiring beyond what Django already documents.
 
-Common variations
------------------
-
-Project layout with chrome
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Add a ``chrome/`` directory at the project root and reference it through ``DIRS``.
-The chrome holds a project-wide layout and possibly a few project-level pages such as ``/login`` or ``/health``.
-
-Per domain trees
-~~~~~~~~~~~~~~~~
-
-Define two backends in ``PAGE_BACKENDS``.
-Each backend walks a different directory.
-The first matching URL pattern wins, so the order matters.
-
 See also
 --------
 

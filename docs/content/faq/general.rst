@@ -26,15 +26,13 @@ See *Resolution performance* in :doc:`/content/topics/file-router` for the algor
 Which Django and Python versions are supported
 ----------------------------------------------
 
-Python 3.12, 3.13, 3.14, and 3.15, with Django 5.2, 6.0, and 6.1.
-Python 3.15 needs Django 6.1.3 or newer, because Django 5.2 and 6.0 support 3.12 to 3.14 only.
-See the *Requirements* list in :doc:`/content/intro/install` for the combinations continuous integration tests.
+See the *Requirements* list in :doc:`/content/intro/install`.
 
 Is next.dj production ready
 ---------------------------
 
 Yes for a project that pins an exact release and reads what changed before it upgrades, and no for one that expects a frozen API and a long-term support line.
-The code itself is held to strict gates, 100 percent line and branch coverage on ``next/`` and on every example, strict mypy, and a CodSpeed benchmark report on every pull request, as :doc:`/content/contributing/quality-gates` records.
+The code itself is held to the gates :doc:`/content/contributing/quality-gates` records.
 What is not settled is the public API, so the documented surface is a contract that can still change in ways that require edits to application code, and :ref:`faq-safe-symbols` below defines exactly what it covers.
 The manual carries no release history by policy, so each change states its own impact in the pull request that makes it.
 Pin the Python and Django releases the matrix tests (see :doc:`/content/intro/install`), pin an exact next.dj release, and read the pull requests behind an upgrade before taking it.
@@ -85,8 +83,8 @@ The ``next.testing`` submodules are documented that way, so :doc:`/content/intro
 Second, symbols whose names start with a single underscore are internal and may change without notice, even when they appear in a module ``__all__``.
 The underscore rule is binding and overrides any incidental re-export.
 
-A few underscore-free names carry a narrower cross-area contract, documented on the reference page of their subsystem (see :doc:`/content/ref/pages`).
-The underscore rule holds for them, so they are not removed without notice, but they do not promise the application-facing stability of the Stable tier, which :doc:`/content/ref/index` names alongside the other tiers a subsystem page uses.
+A few names without an underscore carry a narrower cross-area contract, documented on the reference page of their subsystem.
+They are not removed without notice, but they do not promise the application-facing stability of the Stable tier, which :doc:`/content/ref/index` describes.
 
 See :doc:`/content/ref/forms` for a concrete example of how the API tiers apply to ``next.forms``.
 

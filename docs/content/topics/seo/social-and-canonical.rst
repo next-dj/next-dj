@@ -18,6 +18,7 @@ An ``http`` or ``https`` URL passes through, a root-relative path such as ``/not
 The origin is ``site_origin(request)`` of :doc:`site`, ``SITE["URL"]`` first, then the ``Site`` row of ``django.contrib.sites``, then the request host, the same origin the sitemap lists the page under.
 A protocol-relative URL such as ``//cdn.notes.example/cover.png`` keeps its own host and takes the scheme of that origin.
 A relative URL with neither a site URL nor a request raises ``SiteOriginError``.
+
 A URL with any other scheme, ``javascript:`` or ``data:`` among them, is a ``PageMetadataShapeError`` naming the key path, which ``manage.py check`` reports ahead of the render.
 
 Canonical
@@ -71,9 +72,10 @@ hreflang alternates
 ``languages`` is either a mapping of language codes to URLs or ``True``, and ``x_default`` names the fallback variant.
 An ``"x-default"`` key inside the mapping moves to ``x_default``, and a mapping that names it both ways is a ``PageMetadataShapeError``.
 
-``True`` walks ``LANGUAGES`` and translates the canonical path, or the self path when no canonical is set, into each language through :func:`~django.urls.translate_url`.
-The translation runs under the language of the path rather than the active one, so the result never depends on who asked.
-A language whose translation fails is left out, and fewer than two languages render no alternate at all.
+``True`` walks ``LANGUAGES`` and reverses the route of the canonical path, or of the self path when no canonical is set, under each language.
+The reversal runs under the language of the path rather than the active one, so the result never depends on who asked.
+A language whose reversal fails is left out, and fewer than two languages render no alternate at all.
+
 It needs the page routes inside :func:`~django.conf.urls.i18n.i18n_patterns`, otherwise nothing translates and ``manage.py check`` says so.
 ``x-default`` defaults to the ``LANGUAGE_CODE`` variant, the same URL the sitemap names, and renders exactly once, last.
 :doc:`/content/howto/internationalize-routes` shows the settings side.

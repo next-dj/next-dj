@@ -147,24 +147,8 @@ Configuring the default backend
 
 Every template takes ``{nonce_attr}`` as well, which renders the ``nonce`` attribute of the request's CSP nonce or nothing without one, and a template that leaves it out while a nonce is active triggers ``next.W117``.
 
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "STATIC_BACKENDS": [
-           {
-               "BACKEND": "next.static.StaticFilesBackend",
-               "OPTIONS": {
-                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin{nonce_attr}>',
-                   "js_tag": '<script src="{url}" defer{nonce_attr}></script>',
-                   "module_tag": '<script type="module" src="{url}" crossorigin{nonce_attr}></script>',
-               },
-           }
-       ]
-   }
-
 Bake attributes such as ``crossorigin``, ``defer``, or ``integrity`` directly into the format string.
-This covers most customisation without a subclass.
+This covers most customisation without a subclass, see :doc:`/content/howto/write-a-static-backend` for a worked example.
 
 Dedup and JS context options
 ----------------------------
@@ -206,10 +190,9 @@ Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change on
 Override ``render_link_tag``, ``render_script_tag``, and ``render_module_tag`` so ``.css``, ``.js``, and ``.mjs`` assets all carry the new attribute or host.
 A renderer that is not overridden falls back to the parent output, which is why dropping ``render_module_tag`` makes ``.mjs`` assets skip the customisation.
 
-To move the URL rather than the markup, override ``asset_url`` instead.
-One override then covers all three kinds and the runtime bundle, and the tag templates configured through ``css_tag``, ``js_tag``, ``module_tag``, and ``NEXT_JS_OPTIONS`` keep applying on top of the new URL.
-To look a reference up somewhere other than staticfiles, override ``resolve_url``, which runs once per reference rather than once per render.
-A single constant host in front of the static origin is neither, and belongs in ``STATIC_URL``, see :doc:`/content/deployment/static-files`.
+To move the URL rather than the markup, override ``asset_url``, and to look a reference up somewhere other than staticfiles, override ``resolve_url``, which runs once per reference rather than once per render.
+:doc:`/content/howto/write-a-static-backend` walks through a request-aware ``asset_url``.
+A single constant host in front of the static origin belongs in ``STATIC_URL``, see :doc:`/content/deployment/static-files`.
 
 .. warning::
 

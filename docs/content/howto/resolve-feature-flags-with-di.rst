@@ -210,7 +210,7 @@ The ``post_save`` receiver drops the cached entry, the next ``get_cached_flag`` 
 
 A second context function that also asks for ``DFlag[Flag]`` triggers the provider again on the same request.
 ``get_cached_flag`` shares Django's :class:`~django.core.cache.backends.locmem.LocMemCache` entry, so the lookup is served from process memory rather than the database.
-The framework's per-resolution cache only memoises ``Depends("name")`` callables, so identity across calls comes from the LocMem cache the helper builds.
+The framework cache holds named ``Depends`` values and ``DObject`` rows, so identity across calls comes from the LocMem cache the helper builds.
 
 See also
 --------

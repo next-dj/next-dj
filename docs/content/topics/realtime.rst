@@ -3,7 +3,7 @@
 Realtime topics
 ===============
 
-Realtime topics fan out small patch instructions to connected pages.
+Realtime topics fan out small :term:`patch` instructions to connected pages.
 The browser loads current HTML through the page's normal guarded HTTP request.
 
 .. contents::
@@ -14,7 +14,7 @@ What realtime is for
 --------------------
 
 A page that stays open goes stale when another user or a worker changes the data behind it.
-Realtime lets the server tell every open page of a topic that a part of it changed, in the form of small patch instructions such as a refresh of one zone.
+Realtime lets the server tell every open page of a topic that a part of it changed, in the form of small patch instructions such as a refresh of one :term:`zone`.
 Each page then reloads that zone through its own guarded request, so a subscriber never receives HTML rendered for someone else.
 Over a WebSocket a page also sends small events and form submissions back to the server.
 
@@ -23,7 +23,7 @@ How one update travels
 
 1. The page renders a ``{% zone %}`` and a ``data-next-stream`` element that points at a stream page.
 2. The client runtime requests the stream page, whose guard runs and whose ``render`` returns a ``TopicStream``.
-   A process that mounts ``WebSocketApp`` answers with a signed ticket and the client opens a WebSocket.
+   A process that mounts ``WebSocketApp`` answers with a signed :term:`ticket` and the client opens a WebSocket.
    Otherwise, or when the socket fails, the same URL serves Server-Sent Events.
 3. The stream subscribes to the broker and sends ``next-hello`` with the current position of each topic.
 4. A mutation calls ``publish(topic, Patches(request).refresh(zone=...))``, and the broker receives the message once the transaction commits.
@@ -52,40 +52,6 @@ A form whose action opts in with ``transport="any"`` submits through the same so
        Page-->>Tab: zone HTML
        Tab->>Stream: upstream event or tunneled form, WebSocket only
 
-Terms
------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 18 82
-
-   * - Term
-     - Meaning
-   * - topic
-     - A named channel such as ``room:42`` that a mutation publishes to and a stream subscribes to, see `Publish after a mutation`_.
-   * - broker
-     - The backend that numbers, stores, and fans out topic messages, ``MemoryBroker`` by default and ``RedisBroker`` across processes, see `Delivery guarantees`_.
-   * - stream
-     - One open connection from a page to its topics, over WebSocket or SSE, see `Subscribe from an authorized page`_.
-   * - ``TopicStream``
-     - The response a stream page returns to open a stream after its guard, see `Subscribe from an authorized page`_.
-   * - ticket
-     - A signed token that carries the stream's grant from the guarded page to the WebSocket, see `Access while a stream is open`_.
-   * - binding
-     - The rule that ties a ticket to the identity of the browser, ``SessionBinding`` by default, see `The signed-cookie session engine`_.
-   * - replay
-     - The bounded catch-up of messages a reconnecting stream missed, see `Replay after a reconnect`_.
-   * - presence
-     - The live count or member list of the streams open on a topic, see `Presence`_.
-   * - upstream
-     - A small event a page sends to the server over its WebSocket, see `Upstream events`_.
-   * - tunnel
-     - The path that carries a form action over the open WebSocket, see `Form actions over WebSocket`_.
-   * - zone
-     - A named region of a page template that the server renders on its own, see :doc:`/content/topics/partial-rendering/zones`.
-   * - patch
-     - One instruction of an envelope, such as ``refresh`` or ``event``, that the client applies, see :doc:`/content/topics/partial-rendering/how-it-works`.
-
 SSE, WebSocket, and Django Channels
 -----------------------------------
 
@@ -104,7 +70,7 @@ SSE, WebSocket, and Django Channels
      - Both ways, with upstream events and tunneled form actions.
    * - Requirements
      - None beyond the stream page.
-     - An importable ``authorize`` callback, and with the default binding a session engine that stores sessions on the server, as `The signed-cookie session engine`_ explains.
+     - An importable ``authorize`` callback, and with the default :term:`binding <ticket binding>` a session engine that stores sessions on the server, as `The signed-cookie session engine`_ explains.
    * - Role
      - The fallback every stream keeps.
      - Preferred when the process mounts it, with SSE taking over when negotiation or the socket fails.
@@ -182,8 +148,8 @@ The page's regular access checks and dependency resolution run before the stream
 
 ``DUrl[str]`` reads the ``code`` segment of the URL, see :doc:`/content/topics/dependency-injection`.
 The backend subscription is selected from the request's WSGI or ASGI type.
-The broker wait timeout is the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend, 25 seconds by default, and each timeout writes a heartbeat comment under WSGI and ASGI alike.
-A WebSocket times its pings, access rechecks, and presence refreshes by ``REALTIME['HEARTBEAT']`` instead, 25 seconds by default, and every later mention of the heartbeat interval means the one of the stream's transport.
+The broker wait timeout is the heartbeat interval of the transport, ``SSE.HEARTBEAT_SECONDS`` for SSE and ``REALTIME['HEARTBEAT']`` for a WebSocket, 25 seconds each by default, and later sections say heartbeat for whichever applies.
+Each SSE timeout writes a heartbeat comment under WSGI and ASGI alike, and a WebSocket times its pings, access rechecks, and presence refreshes by its interval.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
 Under ASGI, a client that stops reading is dropped one to two heartbeats after a write to it blocks.
 Closing the stream releases the broker subscription.
@@ -222,6 +188,8 @@ When the process mounts a ``WebSocketApp``, the client can negotiate a WebSocket
 The signed ticket binds the current session to the topics, transform, and importable ``authorize`` callback chosen by the page.
 The client sends the ticket in its first WebSocket frame and never in the URL.
 The first handshake does not consume the ticket, so it stays valid for every handshake until ``REALTIME['TICKET_MAX_AGE']`` elapses.
+A ticket grants at most 64 topics and lives ``TICKET_MAX_AGE`` seconds, 60 by default and at most 600.
+A stream over more topics stays on SSE.
 It is signed from ``SECRET_KEY`` and also verifies under ``SECRET_KEY_FALLBACKS``, so a rotation that keeps the old key as a fallback leaves outstanding tickets valid, and dropping the old key invalidates them.
 The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
 WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine under the default ticket binding, see `The signed-cookie session engine`_.
@@ -356,7 +324,7 @@ Presence
 
 Presence tells a page who is watching a topic.
 A stream that opts in is recorded on its topics while it is open, and the broker publishes the live attendance as an ordinary topic message.
-Pass ``presence=True`` for a counter or an ``identify`` callable for a list of members.
+Pass ``presence=True`` for a counter, or pass an ``identify`` callable or its dotted path as ``presence`` for a list of members.
 
 .. code-block:: python
    :caption: rooms/pages/rooms/[slug:code]/stream/page.py
@@ -764,9 +732,6 @@ See also
 
 .. seealso::
 
-   :doc:`/content/howto/stream-live-updates-with-sse` for a short recipe.
-   :doc:`/content/howto/fan-out-across-processes-with-redis` for shared broker setup.
-   :doc:`/content/howto/stream-over-websockets` for the WebSocket transport.
    :doc:`/content/ref/realtime` for the broker contract and the replay order.
    :doc:`/content/howto/write-a-broker-backend` for a custom backend with replay and presence.
    :doc:`/content/topics/partial-rendering/sse` for the underlying SSE transport.

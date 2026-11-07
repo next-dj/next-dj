@@ -72,8 +72,7 @@ The envelope addresses the zone by name and the client morphs it in place.
 A page with ``serialize=True`` providers adds a ``context`` op after the morph, see `The context patch`_.
 
 The network payload shrinks from a page to a zone, and the server render shrinks with it.
-Reach for a zone when a page is heavy, when a form sits among expensive siblings, or when the response size matters.
-Leave it off when the page is small and the extract default already does the job.
+Add a zone when the page is heavy or the response size matters.
 
 Zone assets on a standalone render
 ----------------------------------
@@ -172,9 +171,6 @@ The wrapper carries ``data-next-zone`` regardless of the tag, so the zone stays 
 
 Key your dynamic list rows
 --------------------------
-
-Keys
-~~~~
 
 The morph engine matches old nodes to new ones to preserve identity, focus, and the caret.
 A node it reuses keeps its own state, scroll position included, because the node never leaves the document.

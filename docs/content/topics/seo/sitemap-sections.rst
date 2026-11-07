@@ -15,7 +15,7 @@ Sections
 
 Each page root with a ``sitemap.py`` is one section, served at ``/sitemap-<section>.xml``.
 The name is the ``section`` attribute of the file when it declares one, else the label of the innermost installed application whose directory holds the root, else the slugified directory name.
-Two trees that would take one name each declare a ``section`` of their own, and the checks warn until they do.
+Two trees that would take one name get numbered sections in router order, ``pages`` and ``pages-2``, and ``next.W099`` warns until each declares a ``section`` of its own, since the number depends on router order.
 A tree a URLconf includes twice through ``pages()`` is still one section, which lists the URLs of the include the URLconf names first, see :ref:`topics-file-router-trees`.
 
 ``@sitemap.items(..., section="products")`` moves the URLs of one route into a section of their own, so a large catalog pages separately from the static pages.
@@ -34,7 +34,7 @@ A tree a URLconf includes twice through ``pages()`` is still one section, which 
        return Product.objects.live().order_by("pk")
 
 The tree serves ``/sitemap-shop.xml`` for its static pages and ``/sitemap-products.xml`` for the products.
-Two sources serving one section name, two trees or a tree and a backend, list only the first, and ``manage.py check`` reports the collision.
+Two sources serving one section name, an ``@sitemap.items`` section and a tree section or a backend section, list only the first, and ``next.E116`` reports the collision.
 
 Route groups and intercepts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -49,7 +49,8 @@ The index
 With several sections, or a section whose URLs exceed its ``limit``, ``/sitemap.xml`` answers an index listing every section and every ``?p=N`` page of it.
 The index lists the newest ``lastmod`` of each section, and both documents carry a ``Last-Modified`` header when every listed entry carries a ``lastmod``.
 Every sitemap response carries ``X-Robots-Tag: noindex, noodp, noarchive``, so the XML itself never ranks.
-A section reads its template from its ``template_name`` attribute, ``sitemap.xml`` by default, which is the seam for an image, video, or news sitemap template.
+A section a backend returns reads its template from its ``template_name`` attribute, ``sitemap.xml`` by default, which is the seam for an image, video, or news sitemap template.
+A ``sitemap.py`` section always renders ``sitemap.xml``.
 
 Backends
 --------
@@ -124,8 +125,7 @@ The fingerprint covers the files of the page trees and the backend list, not the
 The index and every section share the wrapper, and with several trees the shortest declared ``cache`` wins, one that forbids storing beating every age.
 Only a 200 carries the declared ``Cache-Control`` and is stored, so no shared cache holds a 404 or a 503 for its age, and ``cache`` in ``robots.py`` works the same way for ``/robots.txt``.
 
-The walk of the page tree is kept until the SEO routes reset, while the items callables run on every uncached request, so a large table pays one ``COUNT`` and one page query per crawler visit.
-Under ``DEBUG`` every SEO route first checks the source files at the top of each page root, and one that appeared, went, or moved resets the routes, so an edit shows on the next request without a reload.
+Items callables run on every uncached request, so a large table pays one ``COUNT`` and one page query per crawler visit.
 
 .. _topics-seo-host-root:
 

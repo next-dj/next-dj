@@ -26,7 +26,11 @@ First full-stack app
 5. :doc:`/content/topics/forms/index`
 6. :doc:`/content/topics/partial-rendering/index`
 7. :doc:`/content/topics/static-assets/index`
-8. :doc:`/content/deployment/checklist`
+8. :doc:`/content/topics/access` and :doc:`/content/topics/permissions`
+9. :doc:`/content/topics/seo/index`
+10. :doc:`/content/topics/realtime`
+11. :doc:`/content/topics/caching`
+12. :doc:`/content/deployment/checklist`
 
 Customize the pipeline
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -39,6 +43,7 @@ Customize the pipeline
 6. :doc:`/content/internals/action-dispatch` and :doc:`/content/internals/component-pipeline`
 7. :doc:`/content/howto/add-a-custom-template-loader`
 8. :doc:`/content/howto/observe-framework-signals`
+9. :doc:`/content/howto/write-a-broker-backend`
 
 Multi-tenant or multi-project setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

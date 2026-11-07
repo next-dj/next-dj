@@ -300,7 +300,7 @@ Render-time failures
 The tag raises ``ImproperlyConfigured`` when ``request`` is absent from the template context.
 Add ``django.template.context_processors.request`` to ``TEMPLATES[*].OPTIONS.context_processors`` to make the request available.
 
-The ``next.E019`` system check, described in :doc:`/content/security/csrf-and-forms`, catches the missing context processor before a request reaches the tag.
+The ``next.E019`` system check, listed in :doc:`/content/ref/system-checks`, catches the missing context processor before a request reaches the tag.
 
 See also
 --------

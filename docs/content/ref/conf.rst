@@ -46,7 +46,7 @@ Defaults
 Scopes
 ~~~~~~
 
-The nested scopes, ``METADATA``, ``SITE``, ``SEO``, and ``CONSENT``, are read through ``next.conf.scopes`` alone.
+The nested scopes ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` are read through ``next.conf.scopes`` alone.
 ``scope_value(name, key)`` answers one key of a scope, the entry of ``DEFAULTS`` where the project leaves the key out.
 ``DEFAULTS`` holds every key of every scope, so the defaults live in one place and a consumer never spells a fallback of its own.
 ``AUTO`` of ``next.conf.defaults`` is the one ``"auto"`` constant the defaults of ``SITE["INDEXABLE"]``, ``CSRF_DELIVERY``, and ``CONSENT["SERVER_RENDER"]`` hold and the site and consent areas compare against.

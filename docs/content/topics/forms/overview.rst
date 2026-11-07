@@ -4,7 +4,6 @@ Forms overview
 ==============
 
 A Django form usually costs a URL entry, a view, a ``{% csrf_token %}`` tag, and a redirect-on-success per action before it accepts a single POST.
-The forms subsystem removes that wiring.
 Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name from every template its scope covers, with a POST endpoint, CSRF, and re-render-on-failure already attached.
 No decorator, no manual registry call, and no URL wiring is required.
 

@@ -51,42 +51,11 @@ Override ``on_valid`` to run code after the form passes validation.
 The default ``on_valid`` saves a ``ModelForm`` and redirects back to the page that rendered the form, the :term:`origin page`.
 Common Django fields and widgets are re-exported from ``next.forms``, see :doc:`/content/ref/forms`.
 
-Register context for the index page
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The index page publishes context values.
-Update ``notes/pages/page.py``.
-The ``inherit_context=True`` flag on the three layout-scope callables stays from :doc:`tutorial02` so each value still reaches every descendant page.
-
-.. code-block:: python
-   :caption: notes/pages/page.py
-
-   from notes.models import Note
-
-   from next import context
-
-   @context("site_name", inherit_context=True)
-   def site_name() -> str:
-       return "Notes"
-
-   @context("tagline", inherit_context=True)
-   def tagline() -> str:
-       return "A small tutorial application."
-
-   @context("note_count", inherit_context=True)
-   def note_count() -> int:
-       return Note.objects.count()
-
-   @context("notes")
-   def recent_notes() -> list[Note]:
-       return list(Note.objects.all())
-
-``CreateNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
-No manual import in ``page.py`` is needed.
-See :doc:`/content/topics/forms/overview` for scope rules and autodiscovery.
-
 Render the create form
 ~~~~~~~~~~~~~~~~~~~~~~
+
+``CreateNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery, so ``page.py`` needs no import.
+See :doc:`/content/topics/forms/overview` for scope rules and autodiscovery.
 
 Add the form to the index template.
 The ``{% form %}`` tag takes the auto-derived action name as a quoted string.
@@ -241,21 +210,6 @@ The action handler therefore resolves ``DUrl["id", int]`` without any extra argu
 
 Add the delete handler to the detail page.
 ``DeleteNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
-The detail ``page.py`` only needs to add its own context.
-
-.. code-block:: python
-   :caption: notes/pages/notes/[int:id]/page.py
-
-   from django.shortcuts import get_object_or_404
-   from notes.models import Note
-
-   from next import context
-   from next.urls import DUrl
-
-   @context("note")
-   def fetch_note(note_id: DUrl["id", int]) -> Note:
-       return get_object_or_404(Note, pk=note_id)
-
 ``DeleteNoteForm.on_valid`` handles the delete, and ``Meta.login_required`` guards it.
 Update ``notes/forms.py`` to add the full import block, the guard, and the delete logic.
 The complete file now looks like this.
@@ -343,10 +297,8 @@ How re-render works
 ~~~~~~~~~~~~~~~~~~~
 
 A failing validation re-renders the origin page rather than producing an error page.
-The framework keeps a per-request cache that memoises dependency-injected values between the initial dispatch and the re-render, so the re-render reads from it instead of recomputing.
-See :doc:`/content/topics/dependency-injection` for the full cache model.
-It runs the same context functions, so the surrounding page content stays consistent.
-See :doc:`/content/topics/forms/validation-rerender` for the full re-render contract.
+The re-render runs the same context functions, so the surrounding page stays consistent, and a per-request dependency cache keeps values resolved during dispatch from being computed again, see :doc:`/content/topics/dependency-injection`.
+The full contract is in :doc:`/content/topics/forms/validation-rerender`.
 
 You can confirm this by submitting the create form with an empty title.
 The page re-renders, the title field shows the error, the list of notes still appears, and the URL stays at ``/``.

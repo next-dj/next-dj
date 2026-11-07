@@ -118,8 +118,7 @@ Sensitive data in drafts
    The session backend keeps it for the session lifetime, and the cache backend keeps it until ``TIMEOUT``, which defaults to ``SESSION_COOKIE_AGE``.
    A wizard that collects personal data leaves that data in the store for the full lifetime.
 
-   Set a short ``TIMEOUT`` on the cache backend for drafts that hold personal data, prefer an encrypted or signed backend over a plain shared store, and rely on ``done`` clearing the draft after a successful finish.
-   The wizard calls ``clear`` after a successful ``done``, so a draft that never completes is what lingers.
+   Set a short ``TIMEOUT`` on the cache backend for drafts that hold personal data, prefer an encrypted or signed backend over a plain shared store, and note that the dispatcher clears the draft after a successful ``done``, so only a draft that never completes lingers.
    See :doc:`/content/deployment/checklist` for the production review.
 
 Draft expiry mid-wizard
@@ -188,6 +187,7 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
    from typing import Any
 
    import redis
+   from django.core.serializers.json import DjangoJSONEncoder
    from django.http import HttpRequest
 
    from next.forms import FormWizardBackend
@@ -200,20 +200,30 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
            url = options.get("URL", "redis://localhost:6379/0")
            self._client = redis.Redis.from_url(url)
 
-       def _key(self, request: HttpRequest, storage_id: str) -> str:
+       def _key(self, request: HttpRequest, storage_id: str) -> str | None:
+           if request.session.session_key is None:
+               return None
            return f"next_wizard:{request.session.session_key}:{storage_id}"
 
        def load(self, request: HttpRequest, storage_id: str) -> dict[str, Any]:
-           raw = self._client.hgetall(self._key(request, storage_id))
+           key = self._key(request, storage_id)
+           if key is None:
+               return {}
+           raw = self._client.hgetall(key)
            return {step.decode(): json.loads(data) for step, data in raw.items()}
 
        def save_step(
            self, request: HttpRequest, storage_id: str, step: str, data: dict[str, Any]
        ) -> None:
-           self._client.hset(self._key(request, storage_id), step, json.dumps(data))
+           if request.session.session_key is None:
+               request.session.create()
+           key = self._key(request, storage_id)
+           self._client.hset(key, step, json.dumps(data, cls=DjangoJSONEncoder))
 
        def clear(self, request: HttpRequest, storage_id: str) -> None:
-           self._client.delete(self._key(request, storage_id))
+           key = self._key(request, storage_id)
+           if key is not None:
+               self._client.delete(key)
 
 .. code-block:: python
    :caption: config/settings.py
@@ -227,6 +237,8 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 
 The framework reads ``FORM_WIZARD_BACKEND`` on first use, caches the instance for the process, and resets the cache when settings reload, so the constructor runs once.
 The test isolation helper :func:`next.testing.reset_form_registration_state` resets it between cases.
+The example stores plain JSON values only, so it suits step fields limited to strings, numbers, and dates.
+A step with model values needs the typed codec of ``SessionFormWizardBackend``.
 A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
 
 Building the instance sends ``wizard_backend_loaded``.

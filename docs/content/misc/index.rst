@@ -7,7 +7,7 @@ Meta and miscellany
    The principles behind file routing, convention over configuration, and the thin layer over Django.
 
 :doc:`project-status`
-   The public API surface, the settings contract, the supported Python and Django releases, what has to settle before 1.0, who maintains the project, and the licence.
+   The public API surface, the settings contract, the supported Python and Django releases, who maintains the project, where a change is announced, and the licence.
 
 :doc:`glossary`
    Definitions for every term the documentation uses with a specific meaning.

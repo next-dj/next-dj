@@ -21,7 +21,6 @@ Every call site shares one provider list and one set of markers.
 Each of those callables is a plain ``def``, and the resolver refuses an ``async def`` one with ``AsyncCallableError``, see :ref:`topics-pages-sync-callables`.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
-Django has no counterpart to this, so everything on this page is new rather than a rename of something a Django view already does.
 A Django view receives ``request`` as its first positional argument and reads everything else off it, while here a callable declares what it wants and the resolver supplies it.
 
 Two examples first
@@ -88,10 +87,12 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
     A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
 11. Query string provider (priority 80).
     A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
+12. Unserved object provider (priority 1000).
+    A ``DObject`` parameter that no earlier provider loaded raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
 
 The object provider comes first so that nothing reaches a ``DObject`` parameter around ``visible_to``, neither a ``Depends`` default nor a context value or URL kwarg of the same name.
 The context by name and URL kwargs providers refuse a ``DObject`` annotation as well, and a ``DObject`` parameter that no provider loads raises :exc:`~django.core.exceptions.ImproperlyConfigured` instead of receiving the raw kwarg.
-The order makes the default-driven and marker-driven providers decisive.
+A marker or a default claims its parameter before any name-based provider can.
 ``Depends`` and ``Context`` look only at the parameter default.
 ``DUrl`` and ``DQuery`` look only at the annotation.
 The context-by-name provider sits ahead of the form, URL, and query providers because a context key under the same name is considered a deliberate publication.
@@ -597,7 +598,7 @@ Declare the provider in ``deps.py``.
    A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The eleven built-in providers that fill parameters occupy the range ``0`` (object) through ``80`` (query string), so the default keeps a custom provider after each of them, and only the refusal of an unloaded ``DObject`` runs later, at ``1000``.
+The twelve built-in providers occupy the range ``0`` (object) through ``80`` (query string) and ``1000`` for the refusal of an unloaded ``DObject``, so the default keeps a custom provider after every one that fills a parameter.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 

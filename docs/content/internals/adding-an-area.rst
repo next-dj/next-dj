@@ -28,30 +28,26 @@ An area adds a module when it owns the concern, not to complete a template.
 
 ``registry.py``
    An ordered list of registrations plus a dict index over it.
-   Present in ``pages``, ``components``, ``deps``, and ``partial``.
-   A ``_version`` counter joins it wherever a derived cache has to be invalidated, which today means the page, component, and provider registries.
+   A ``_version`` counter joins it wherever a derived cache has to be invalidated.
 
 ``manager.py``
    A façade over the area with lazy backend initialisation.
-   Present in ``pages``, ``components``, ``forms``, ``partial``, ``static``, and ``urls``.
 
 ``backends.py``
    A Protocol or ABC contract with settings-driven selection.
-   Present in ``components``, ``forms``, ``partial``, ``static``, and ``urls``.
 
 ``errors.py``
    The area's public exceptions, each re-exported from the area's ``__init__.py`` so callers never import the module directly.
-   Present in ``deps``, ``forms``, ``pages``, ``partial``, ``seo``, and ``urls``.
 
 ``ports.py``
    The area's implementation of a ``next.ports`` protocol, which ``AppConfig.ready()`` binds into the matching slot.
-   Present in ``pages``, ``partial``, ``seo``, ``static``, and ``urls``, the five areas another area has to reach without importing.
+   An area ships one when another area has to reach it without importing, see :doc:`/content/ref/ports` for the areas that do.
 
 ``dispatch.py``, ``markers.py``, ``providers.py``, ``signals.py``, ``checks.py``
    Appear when the area dispatches actions, declares frozen dataclass markers, provides dependencies, emits signals, or validates configuration.
    ``checks.py`` becomes a package of one-word submodules once one file stops holding the area's checks, as it has in ``pages``, ``forms``, and ``partial``.
 
-The number of submodules varies from four in ``server`` to seventeen in ``partial``, so no area serves as a size template for another.
+The number of submodules differs widely between areas, so no area serves as a size template for another.
 
 Where an area does ship the full set, the modules form one chain from the settings mapping to the structures a request reads.
 

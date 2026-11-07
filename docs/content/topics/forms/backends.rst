@@ -114,7 +114,9 @@ The base class also offers seven optional override points.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``get_meta(action_name, page_path=None)`` returns the stored ``ActionMeta`` for a name, or ``None`` when this backend does not own it.
-``ActionMeta`` is a ``TypedDict`` carrying the action ``name``, the action target (``handler``, ``form_class``, ``wizard_class``), the derived ``uid``, the declaration ``file_path``, the ``scope``, and the access ``guard``.
+``ActionMeta`` is a ``TypedDict``.
+The keys ``name``, ``uid``, ``file_path``, and ``scope`` are required.
+The keys ``handler``, ``form_class``, ``wizard_class``, ``guard``, ``requires_runtime``, and ``transport`` are optional.
 The ``guard`` value is the ``ActionGuard`` built from the declared ``login_required`` and ``permission_required`` requirements, ``None`` when the action declares none, so a custom backend can inspect the access rules of any action it stores.
 
 The base implementation returns ``None``.
@@ -226,6 +228,8 @@ The four abstract methods must all be present.
                form_class=registration.form_class,
                wizard_class=registration.wizard_class,
                guard=registration.guard,
+               file_path=registration.file_path,
+               scope=registration.scope,
            )
 
        def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
@@ -242,7 +246,8 @@ The four abstract methods must all be present.
            return FormActionDispatch.dispatch(self, request, meta["name"], meta)
 
 The skeleton keys its dispatch URL by the plain action name, where the bundled backend derives a hashed UID from the scope key and the name.
-Its meta stores no ``uid``, so the rendered forms carry no ``data-next-action`` attribute, as `get_meta and multi-backend routing`_ describes.
+Its meta leaves out the ``uid`` key, which a type checker reports and the pipeline tolerates, so the rendered forms carry no ``data-next-action`` attribute, as `get_meta and multi-backend routing`_ describes.
+The pipeline reads ``file_path`` and ``scope`` of every meta to find the owner rule of the action, so a backend must store both.
 The bundled backend wraps its dispatch view in ``require_http_methods(["GET", "POST"])`` so the endpoint rejects other verbs, and a from-scratch backend should restrict its own view the same way.
 
 ``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
@@ -384,7 +389,7 @@ Audit log
 ~~~~~~~~~
 
 Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to write an audit row.
-See ``examples/audit-forms``.
+See :doc:`/content/misc/examples` for a worked audit backend.
 
 Rate limiting
 ~~~~~~~~~~~~~

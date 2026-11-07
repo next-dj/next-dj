@@ -60,8 +60,6 @@ The wizard lists them in order.
            obj = AccessRequest.objects.create(**cleaned_data)
            return HttpResponseRedirect(f"/request/{obj.pk}/audit/")
 
-The captions mirror the ``access`` application of the repository's ``audit-forms`` example.
-
 Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
 Every step form subclasses ``django.forms`` directly because a step is not a standalone action and has nothing to register.
 A step built on a ``next.forms`` base registers as its own form action unless it sets ``Meta.abstract = True``, which leaves a live POST endpoint beside the wizard.

@@ -110,13 +110,13 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    ``next.signals`` aggregator that re-exports every framework signal.
 
 :doc:`testing`
-   ``next.testing`` for the test client, signal recorder, and isolation helpers.
+   ``next.testing`` for the test client, signal recorder, isolation, metadata and sitemap assertions, and the realtime broker, SSE, and WebSocket helpers.
 
 :doc:`apps`
    ``next.apps`` for the Django application configuration.
 
 :doc:`utils`
-   ``next.utils`` for small helpers that the framework uses internally.
+   ``next.utils`` for ``PageRoot``, the directory-name grammars, and the shared path helpers.
 
 :doc:`errors`
    ``next.errors`` for the configuration exceptions shared by more than one subsystem.

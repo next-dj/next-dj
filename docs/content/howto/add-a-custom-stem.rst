@@ -46,12 +46,6 @@ Ship a file with the new stem.
 
 Discovery now records ``page.css`` as a ``css`` asset owned by the page, because ``page`` is a registered stem under the ``template`` role and ``.css`` is the extension of the ``css`` kind.
 
-Stem and kind pairing
-~~~~~~~~~~~~~~~~~~~~~
-
-A new stem participates in every registered kind.
-After registering ``vendor`` under the ``component`` role, discovery looks for ``vendor.css``, ``vendor.js``, and ``vendor.mjs`` inside component folders.
-
 Verification
 ------------
 
@@ -69,12 +63,8 @@ The finder maps a template-directory asset to ``next/<logical_name><suffix>``.
 The logical name is the key of the page tree followed by the template directory relative to its page root, and a root template has the logical name ``index``, see :ref:`topics-static-name-resolution-colocated`.
 The stem does not appear in the static path, so ``page.css`` next to the root ``template.djx`` of the ``notes`` application resolves under ``next/notes/pages/index.css``.
 
-.. warning::
-
-   Two stems of one role therefore share one logical path.
-   A directory holding both ``template.css`` and ``page.css`` ships ``template.css`` only, and ``page.css`` is dropped with a logged warning.
-   ``manage.py check`` reports the pair as ``next.E167``.
-   Treat the new stem as a rename of the existing file, not as a second file.
+A new stem pairs with every registered kind, and two stems of one role share one logical path per extension.
+Register an extra stem as a rename, see :doc:`/content/topics/static-assets/custom-stems` for the pairing and collision rules.
 
 See also
 --------

@@ -272,7 +272,13 @@ The table below lists the public package, its primary narrative page, and its re
      - :doc:`/content/ref/backends`
    * - ``next/client``
      - :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/partial-rendering/co-located-js`
-     - :doc:`/content/ref/client`
+     - :doc:`/content/ref/client`, :doc:`/content/ref/client-extras`
+   * - ``next.middleware``
+     - :doc:`/content/topics/caching`, :doc:`/content/deployment/checklist`
+     - :doc:`/content/ref/pages`
+   * - ``next.pages`` decorators and metadata
+     - :doc:`/content/topics/seo/metadata`
+     - :doc:`/content/ref/metadata`, :doc:`/content/ref/decorators`
 
 When you edit the signal aggregator in ``next/signals.py``, update :doc:`/content/topics/signals` and :doc:`/content/ref/signals` so every re-exported name and payload matches the module.
 
