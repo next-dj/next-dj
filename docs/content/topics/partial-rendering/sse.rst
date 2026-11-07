@@ -104,12 +104,7 @@ The stream carries no HTML.
    event: next-patches
    data: {"version":"9f3c2e1b","ops":[{"op":"refresh","zone":"poll-results"}],"assets":[],"form":null,"request_id":"1c9f…-r1","server_time":1792843200000,"topic":"poll:42","epoch":"9f2c41d07a3be851","seq":18}
 
-Topic streams append ``server_time``, ``topic``, ``epoch``, and ``seq`` to the SSE data object.
-Manual ``PatchEventStream`` sources receive ``server_time`` as well.
-Neither path changes the ordinary ``PatchResponse`` body or ``Envelope.as_dict()``.
-
-The envelope keeps the key order ``version``, ``ops``, ``assets``, ``form``, and ``csrf`` when present, then ``request_id`` when present.
-Empty ``assets`` and an absent form are serialized as ``[]`` and ``null``.
+Topic streams add ``topic``, ``epoch``, and ``seq`` beside ``server_time``, see :doc:`reference`.
 
 Authorization stays in the subscriber's view, because the zone GET travels the page's own URL, the same view, the same guards, the same middleware as a full load.
 The stream never broadcasts one user's HTML to another, and the event channel does not have to know who may see what.
@@ -193,10 +188,8 @@ Stream politeness
 * ``X-Accel-Buffering: no`` turns off nginx buffering.
 * The leading ``retry`` hint comes from ``SSE.RETRY_MS`` so the browser's native reconnect uses the configured interval.
 
-On the client a background tab pauses the stream by closing the connection.
-A WebSocket connection closes after a brief drain, once the tunneled requests and acknowledged ``up`` frames already sent on it get their replies.
-A page loaded in a hidden tab opens its streams on the first show.
-When the tab becomes visible the runtime reconnects and re-fetches the zones the stream addressed since the connection opened.
+A background tab closes the stream and the runtime reconnects on return, see :ref:`topics-realtime`.
+When the tab becomes visible the runtime re-fetches the zones the stream addressed since the connection opened.
 A tab hidden for less than three seconds reconnects the stream and skips the re-fetches.
 Each connection tracks at most 64 zones for the resume re-GET, so a long sleep cannot storm the server.
 Events missed while paused are not lost, because ``refresh`` is idempotent.

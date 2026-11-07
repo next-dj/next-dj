@@ -90,7 +90,7 @@ Set the serializer when context values include types beyond the standard JSON se
 
    ``PydanticJsContextSerializer`` requires the ``pydantic`` package, which is not a dependency of next.dj.
    Install it separately (``pip install pydantic``) before enabling this serializer.
-   If ``pydantic`` is not installed, the first render that serializes context raises ``ImportError``.
+   Without ``pydantic`` the serializer fails to build, so a production render falls back to the JSON serializer and logs the error, while ``DEBUG`` or ``STRICT_LOADING`` raises ``ImportError``.
 
 Page backends with context processors
 -------------------------------------
@@ -148,11 +148,7 @@ Until it does, ``manage.py check --deploy`` reports ``next.W149``.
 The ``max_connections`` and ``SUBSCRIBE_MAX_CONNECTIONS`` values are placeholders.
 The subscription pool needs one connection per open stream of the process, and the command pool one per Redis call the process runs at once, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
 
-A project that routes the ticket introspection endpoint for a gateway outside Python adds ``"GATEWAY_TOKEN": os.environ["GATEWAY_TOKEN"]``, read from the environment rather than committed.
-``HEARTBEAT`` is the WebSocket ping interval, and an SSE stream takes its heartbeat from the ``SSE.HEARTBEAT_SECONDS`` option of the partial backend.
-Keep both below the shortest idle timeout of the proxy and load balancer in front of the streams.
-List ``TRANSPORTS`` explicitly in a split deployment where the process that renders the pages never mounts the socket, see :doc:`wsgi-asgi`.
-See :doc:`/content/ref/realtime` for every key.
+Heartbeats, the gateway token, and the transports are covered in :doc:`checklist` and :doc:`/content/ref/realtime`.
 
 .. _combining-keys:
 

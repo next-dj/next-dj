@@ -46,6 +46,7 @@ The page answers ``Cache-Control: public, max-age=60, s-maxage=300, stale-while-
 The directives are applied through :func:`~django.utils.cache.patch_cache_control` and :func:`~django.utils.cache.patch_vary_headers`, and only on a successful response to a ``GET`` or a ``HEAD``, so a ``POST`` the page answers itself never carries the page's cache.
 A callable ``cache`` runs once ``render()`` has resolved the body, and is skipped for a zone request and for a response ``render()`` returns that is no success or names its own ``Cache-Control``, so a redirect or a 403 from ``render()`` never runs it and the page's own guards answer before an ``Http404`` the callable raises.
 ``manage.py check`` reports an unknown key, a negative age, a flag that is no bool, and ``public`` together with ``no_store``.
+
 A callable ``cache`` that raises, or returns anything but the forms above, sends the page with ``private, no-store``, since no cache may keep a response whose policy is unknown.
 A render that contained a failure anywhere is sent with ``private, no-store`` as well, whatever its ``cache`` declares, see :ref:`topics-failure-containment`.
 
@@ -54,6 +55,7 @@ The checks cannot call a callable ``cache``, so they count its page as one that 
 A shared page renders so that its HTML is the same for every visitor.
 The CSRF token stays out of the HTML under ``CSRF_DELIVERY="auto"``, see :doc:`/content/security/csrf-and-forms`.
 A ``Consent`` parameter reads an undecided visitor, and gated scripts travel in the runtime manifest, see :doc:`/content/topics/scripts/consent`.
+
 A render that still puts data of one visitor into the HTML makes the response private, as `Going private`_ describes.
 
 headers
@@ -126,6 +128,7 @@ A shared page is sent with ``private`` in place of its shared directives, the ot
 The response carries ``SharedCookies`` in place of Django's cookie jar, so the first cookie set on it makes the response private at whatever point it is set, and a ``TemplateResponse`` rendered after the view is settled once its content exists.
 A cookie written through ``update()`` or ``load()`` on the jar makes the response private as well.
 ``public`` and ``Set-Cookie`` never leave the server together, provided ``ConditionalGetMiddleware`` sits above every middleware that sets a cookie.
+
 The 304 that middleware answers copies the cache headers of the page, so a cookie an outer middleware sets afterwards would reach a public response, and ``next.W124`` reports that order.
 ``next.middleware.SharedCacheGuardMiddleware`` closes that gap and any other one a third-party middleware opens, see `The shared cache guard`_.
 A layout that reads ``request.user`` accesses the session and makes every shared page under it private, which the warning makes visible.
@@ -138,6 +141,7 @@ The shared cache guard
 A response that sets a cookie while a shared cache may keep it loses ``public`` and ``s-maxage`` and gains ``private``, its ``CDN-Cache-Control``, ``Cloudflare-CDN-Cache-Control``, and ``Surrogate-Control`` headers are removed, and ``Vary`` gains ``Cookie``.
 A shared cache may keep a response whose ``Cache-Control`` carries ``public`` or ``s-maxage``, one with a CDN header, and one with a ``max-age`` or an ``Expires`` but neither ``private`` nor ``no-store``.
 Every other directive stays, and the rewrite is logged at the FailureLog rate per URL route name.
+
 List it first in ``MIDDLEWARE``, so it sees every cookie the stack sets.
 A project that uses ``UpdateCacheMiddleware`` lists the guard directly below it, never above it, so the copy Django's cache stores is the private one.
 In either position ``next.W124`` stays silent.
@@ -202,18 +206,15 @@ The organic page answers ``Cache-Control: public, max-age=60, s-maxage=600, stal
 Partial responses
 -----------------
 
-Every zone response carries ``Cache-Control: private, no-store`` together with the ``headers`` of its page, the answer to a zone GET, a lazy zone, and a 400 or 409 refusal alike.
-A denial by the access rule of the page itself is the response a plain GET of the URL gets, since it does not depend on the zone.
-A response that the page's ``render()`` function returns to a zone GET carries ``private, no-store`` too, unless it sets a ``Cache-Control`` of its own.
-A zone response whose render contained a failure carries ``private, no-store`` whatever it sets.
-Every patch envelope an action answers carries ``private, no-store`` as well, and a stream carries ``no-cache, no-transform``.
 Many CDNs ignore ``Vary``, so a cached zone response would reach a visitor who asked for the full page at the same URL.
-A zone response that an intercepting route serves follows the same rules.
-It carries ``private, no-store`` and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and no ``ETag``.
-A refusal of the intercept carries them as well, even when a custom ``handler403`` or ``handler404`` sets a ``Cache-Control`` of its own.
-The ``cache`` and ``headers`` of an intercept page never apply to its zone response, and a check reports one that declares them.
-A CDN therefore keys on ``X-Next-Zone`` or bypasses partial requests, because one URL answers a different page per zone name.
-A CDN in front of a shared page therefore bypasses its cache for every request that carries ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.
+Every zone response therefore carries ``Cache-Control: private, no-store`` with the ``headers`` of its page, a lazy zone, a 400 or 409 refusal and every patch envelope an action answers included, and a stream carries ``no-cache, no-transform``.
+A denial by the access rule of the page itself is the response a plain GET of the URL gets.
+A ``render()`` response to a zone GET gets the same ``private, no-store`` unless it sets its own ``Cache-Control``, and a zone whose render contained a failure gets it whatever it sets.
+
+A zone response an intercepting route serves, and a refusal of the intercept, carry ``private, no-store``, ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and no ``ETag``, even when a custom ``handler403`` or ``handler404`` sets a ``Cache-Control``.
+The ``cache`` and ``headers`` of an intercept page never apply to it, and a check reports a page that declares them.
+
+A CDN in front of a shared page bypasses its cache for every request that carries ``X-Next-Request``, see :doc:`/content/howto/cache-pages-on-a-cdn`.
 
 See also
 --------

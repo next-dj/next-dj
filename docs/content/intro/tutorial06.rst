@@ -42,8 +42,7 @@ Wrap the list in ``notes/pages/template.djx`` and give each row a stable key.
      {% endfor %}
    {% endzone %}
 
-The ``tag="ul"`` argument makes the zone the ``<ul>`` element itself.
-A wrapper ``<div>`` inside a ``<ul>`` would be dropped by the HTML parser, so a list zone names the list element directly.
+The ``tag="ul"`` argument makes the zone the ``<ul>`` element itself, see :ref:`topics-partial-rendering-zones`.
 Each ``data-next-key`` keeps a row stable when the list re-renders, so the :term:`morph` reuses the node a row already owns instead of rebuilding it.
 
 Reload ``/`` and confirm the list looks unchanged.
@@ -235,16 +234,6 @@ Both partial paths are reachable from the test client of :doc:`tutorial05`.
 
 ``envelope_of`` refuses a response that is not a patch envelope, so a test that loses the partial switch fails on the decode rather than on a weaker assertion.
 Drop ``partial`` from the second call and the same submission takes the ``super().on_valid`` branch, which answers with a 302 to the origin, the status :doc:`tutorial05` asserts for the same form.
-
-How it degrades
-~~~~~~~~~~~~~~~
-
-Turn JavaScript off and exercise the same page.
-The search box submits a full ``GET`` that reloads the filtered list.
-The create form posts and redirects to origin, and the reloaded page lists the new note.
-The handler reaches its ``super().on_valid`` branch because ``is_partial_request`` is ``False`` without the runtime.
-
-The page that works without the runtime keeps working with it, and gains the partial behaviour for free.
 
 Checkpoint
 ----------

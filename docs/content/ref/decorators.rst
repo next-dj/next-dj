@@ -149,7 +149,7 @@ A row the scope does not see answers 404, as a missing one does.
 The same marker names the row of an access declaration, as ``page.permission_required(perm, obj=DObject[Model])``.
 See :ref:`topics-di-dobject` for the lookup, the cache it shares, and the checks.
 
-The eleven built-in providers that fill parameters are listed with their priorities in :doc:`/content/topics/dependency-injection`.
+The twelve built-in providers are listed with their priorities in :doc:`/content/topics/dependency-injection`.
 
 Provider base classes
 ---------------------

@@ -67,10 +67,7 @@ The axis that separates them is how much of that enforcement comes for free.
 In next.dj a zone request is the same URL as the page, and the unified page view resolves the page body before it hands the request to the zone branch.
 A redirect, a login bounce, or a denial the page already performs therefore stands before any zone renders, without a second guard written for the partial path.
 
-A zone rendered for a page whose own view did not run carries the same check by another route.
-``Patches.morph_zone`` re-runs the body resolution of the page the posted form origin names, and ``Patches.morph_foreign_zone`` does the same for the page the handler names, both raising ``ForeignPageNotAuthorizedError`` when the requester may not render it, before the zone renders.
-``resolve_partial_origin`` validates the ``X-Next-Origin`` header same-site before it trusts it and resolves it with its path decoded like ``request.path``, and a header that names no page falls back to the posted form origin.
-The handler passes the page it returns to ``morph(page=, url_kwargs=)``, while ``morph(zone=)`` always renders against the posted form origin.
+A zone rendered for another page re-runs that page's body resolution first, see :ref:`topics-partial-rendering-layers`.
 
 htmx and Turbo place the same responsibility on the view the request reaches, which is the ordinary Django position and is neither better nor worse in itself.
 The difference is that the region to update is chosen in the template rather than derived from the page the server has already authorized.
@@ -150,14 +147,6 @@ Reach for Unicorn when the natural unit is a stateful component whose state live
 A zone renders from the page context on every request, and next.dj keeps no per-component state between requests, so an interaction that needs remembered state puts it in the URL, the form, or the database.
 The one server-held exception is the multi-step wizard, which stores step drafts through its own backend, by default in the Django session, and that is a wizard rather than a general component-state mechanism.
 Unicorn is also the shorter path when a team wants reactive behaviour without writing an endpoint for each interaction.
-
-Next.js intercepting routes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Next.js offers intercepting routes that a client router applies to every matching link.
-In next.dj an intercepting route is opt-in per link.
-It takes a ``data-next-layer`` link plus an intercept directory, and the zone name on the link selects the page that renders in the modal, see :ref:`topics-file-router-intercepts`.
-The opt-in stays a ``data-next-*`` attribute, the address bar shows the honest URL, and there is no client router and no URL masking.
 
 Server push
 -----------

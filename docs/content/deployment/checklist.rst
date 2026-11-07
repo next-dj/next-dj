@@ -28,13 +28,7 @@ The transport and cookie settings below are the hardening set a next.dj project 
 - ``CSRF_COOKIE_SECURE = True`` sends the CSRF cookie only over HTTPS.
 - ``CSRF_TRUSTED_ORIGINS`` lists every public origin a form may be submitted from.
 
-Run the standard :doc:`Django deployment check <django:howto/deployment/checklist>`.
-
-.. code-block:: bash
-   :caption: shell
-
-   uv run python manage.py check --deploy
-
+Run the standard :doc:`Django deployment check <django:howto/deployment/checklist>` through ``manage.py check --deploy``, see `System checks`_.
 Resolve every warning before deploying.
 
 next.dj settings
@@ -101,39 +95,26 @@ Review these when the project serves partial responses.
 - Set ``STATIC_VERSION`` to a per-release string when no hashing staticfiles storage is configured, or pin the ``VERSION`` option of the ``PARTIAL_BACKENDS`` entry when the partial stamp has to differ from the one the asset URLs carry.
 - Confirm the version a deployed response stamps changes between releases, because a version that never moves leaves the guard silent.
 
-Every partial response carries the asset version in its ``X-Next-Version`` header.
-A safe-method zone request that asserts a different version answers HTTP 409 with an empty body, and the runtime turns that one answer into a single full visit of the page that owns the zone.
-A client spanning two versions therefore pays one full page load and then runs on the new assets, rather than patching new HTML into a page whose scripts and styles come from the release before.
+A client on the old assets answers HTTP 409 and does one full visit, and a version that never moves leaves the guard silent, which ``manage.py check --deploy`` reports as ``next.W083``.
 
-The ``VERSION`` option is unset by default, and an unset option reads ``STATIC_VERSION`` before it hashes the staticfiles manifest the configured storage writes.
-A deployment that offers neither resolves a stable string that never changes and a guard that never fires, which ``manage.py check --deploy`` reports as ``next.W083``.
-An entry that names the sentinel ``"manifest"`` states the manifest as a requirement, and ``manage.py check`` reports ``next.W069`` when the storage cannot meet it.
-
-See :doc:`/content/topics/partial-rendering/reference` for the header and the status codes.
+See :doc:`/content/topics/partial-rendering/reference` for the header, the status codes, and the ``VERSION`` option.
 
 Realtime streams
 ----------------
 
 Review these when the project publishes ``TopicStream`` updates.
 
-- Use a shared broker across workers and hosts.
-  ``MemoryBroker`` is process-local, so choose ``RedisBroker`` or another shared ``BrokerBackend``, see :ref:`howto-realtime-several-workers`.
-  ``manage.py check --deploy`` reports ``next.W149`` while the broker is ``MemoryBroker``, and a deployment that truly runs one process lists it in ``SILENCED_SYSTEM_CHECKS``.
-- Under ASGI, keep the proxy upgrade enabled when a ``WebSocketApp`` is mounted and set read and send timeouts above the intended connection lifetime.
-  Keep the SSE ``HEARTBEAT_SECONDS`` option of the partial backend and ``NEXT_FRAMEWORK["REALTIME"]["HEARTBEAT"]``, 25 seconds each by default, below the shortest intermediary idle timeout.
+- Use a shared broker across workers and hosts, see :ref:`howto-realtime-several-workers`.
+  ``next.W149`` reports ``MemoryBroker``, and a deployment that truly runs one process lists it in ``SILENCED_SYSTEM_CHECKS``.
+- Under ASGI, keep the proxy upgrade enabled and set read and send timeouts above the intended connection lifetime, see :doc:`wsgi-asgi`.
+- Keep both heartbeats below the shortest idle timeout of the proxy, see :doc:`/content/ref/realtime`.
 - Keep SSE available as the fallback transport and verify a route through the production proxy.
-- Keep authorization on the guarded stream page and provide a stable topic authorizer for WebSocket subscriptions.
-  The authorizer and the session are rechecked at most once per heartbeat, so a revocation takes effect within about two heartbeat intervals.
-- Keep ``ALLOWED_HOSTS``, ``CSRF_TRUSTED_ORIGINS`` and ``SECURE_PROXY_SSL_HEADER`` accurate, or pass an explicit ``origins`` list, because the WebSocket Origin check follows Django's CSRF rule and refuses a connection with no Origin.
-  Behind a proxy, enable ``USE_X_FORWARDED_HOST`` when the proxy rewrites ``Host``.
-- Store sessions on the server when WebSockets are enabled, because ``next.W142`` reports the signed-cookie engine under the default ticket binding, see :ref:`topics-realtime-signed-cookie`.
-  Set ``REALTIME['TICKET_BINDING']`` to ``next.realtime.SignedCookieBinding`` to keep that engine, and note that logout then leaves an open socket running, which ``next.W147`` reports next to a server-side engine.
-  Size a cache-backed session store for the open sockets, since an evicted session closes its socket with ``4401``.
+- Keep authorization on the guarded stream page and provide a stable topic authorizer for WebSocket subscriptions, see :doc:`/content/howto/stream-over-websockets`.
+- Keep ``ALLOWED_HOSTS``, ``CSRF_TRUSTED_ORIGINS`` and ``SECURE_PROXY_SSL_HEADER`` accurate, because the WebSocket Origin check follows Django's CSRF rule.
+- Store sessions on the server, because ``next.W142`` reports the signed-cookie engine under the default ticket binding, see :ref:`topics-realtime-signed-cookie`.
 - Set ``REALTIME['GATEWAY_TOKEN']`` from the environment when a gateway outside Python calls the ticket introspection endpoint.
-- Run a load test against the shared broker before launch, with the process count, Redis pool, and replay and presence caps the deployment will use, see :ref:`deployment-capacity`.
-- Treat topic delivery as best-effort notification.
-  Verify reconnect and guarded zone resync, and do not use it as durable event history.
-  Send an event that must not be lost through an outbox table, see :doc:`/content/howto/deliver-events-durably`.
+- Run a load test against the shared broker before launch, see :ref:`deployment-capacity`.
+- Treat topic delivery as best-effort notification and send an event that must not be lost through an outbox table, see :doc:`/content/howto/deliver-events-durably`.
 
 See :doc:`/content/topics/realtime` and :doc:`/content/howto/stream-over-websockets`.
 
@@ -174,9 +155,9 @@ Run the framework system checks as part of CI and as part of the deployment scri
 
 A clean exit is required for the deployment to proceed.
 
-The ``--deploy`` flag is what matters here, because seven framework checks are registered as deployment checks and a plain ``check`` never runs them.
+The ``--deploy`` flag is what matters here, because the framework registers its deployment checks for that flag alone and a plain ``check`` never runs them.
 A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile, and the deployment run repeats them.
-``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, ``next.W119`` an insecure consent cookie, and ``next.W149`` a process-local realtime broker.
+``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, ``next.W119`` an insecure consent cookie, ``next.W149`` a process-local realtime broker, and ``next.W151`` a Redis subscription pool left unbounded.
 
 See :ref:`ref-system-checks` for the full catalog.
 

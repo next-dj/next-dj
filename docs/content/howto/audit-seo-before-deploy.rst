@@ -33,6 +33,8 @@ Pin the head in a test
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The checks read the static metadata alone, so what a ``@page.metadata`` callable builds per row belongs to a test.
+:doc:`/content/topics/seo/auditing` shows how to pin the head of a page with ``assert_metadata``.
+The test below covers a draft whose callable answers ``"robots": {"index": False}``, which the items callable of the sitemap has to leave out as well.
 
 .. code-block:: python
    :caption: notes/tests/test_seo.py
@@ -42,24 +44,12 @@ The checks read the static metadata alone, so what a ``@page.metadata`` callable
    from next.testing import NextClient, assert_metadata, parse_sitemap
 
    @override_settings(DEBUG=False)
-   def test_note_head(note):
-       response = NextClient().get(f"/notes/{note.pk}/")
-       assert_metadata(
-           response,
-           title=f"{note.title} · Notes",
-           description=note.summary,
-           canonical=f"https://notes.example/notes/{note.pk}/",
-           robots=None,
-       )
-
-   @override_settings(DEBUG=False)
    def test_draft_stays_out(draft):
        response = NextClient().get(f"/notes/{draft.pk}/")
        assert_metadata(response, robots="noindex")
        urls = parse_sitemap(NextClient().get("/sitemap.xml"))
        assert f"https://notes.example/notes/{draft.pk}/" not in {url.loc for url in urls}
 
-The second test covers a draft whose callable answers ``"robots": {"index": False}``, which the items callable of the sitemap has to leave out as well.
 ``DEBUG=False`` opens the site to search, so the robots meta shows what the pages declare rather than the ``noindex, nofollow`` of development.
 
 Gate the pipeline
@@ -78,15 +68,7 @@ Gate the pipeline
 The ``--tag seo`` narrowing matters, because without it ``--fail-level WARNING`` also fails on Django's own ``security.W0xx`` deployment warnings, which a CI settings module usually triggers on purpose.
 Run Django's deployment checks in a separate step against the production settings.
 
-Explain a surprising key
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-``showmetadata`` prints which layer sets each key of a page, ``DEFAULTS`` or a ``page.py``, and lists the callables after them.
-
-.. code-block:: bash
-   :caption: shell
-
-   uv run python manage.py showmetadata /notes/42/
+A surprising key is explained by ``manage.py showmetadata``, see :doc:`/content/topics/seo/auditing`.
 
 Verification
 ------------

@@ -102,8 +102,8 @@ Both merge by name along the tree, so a page that sets one name replaces every v
        "properties": {"fb:app_id": "123456"},
    }
 
-A name a typed key renders, ``description``, ``keywords``, ``robots``, ``viewport``, ``theme-color``, a verification meta, or a ``twitter:*`` name, is refused in ``other``, and so is an ``og:*``, ``article:*``, ``profile:*``, or ``book:*`` property in ``properties``.
-The typed key keeps the value checked, merged by its strategy, and rendered once.
+``manage.py check`` reports ``next.E125`` for a name a typed key renders in ``other``, such as ``description``, ``keywords``, ``robots``, ``googlebot``, ``viewport``, ``theme-color``, ``color-scheme``, a verification meta, or a ``twitter:*`` name, and for an ``og:*``, ``article:*``, ``profile:*``, or ``book:*`` property in ``properties``.
+The tag would render twice, so declare it through the typed key, which keeps the value checked, merged by its strategy, and rendered once.
 
 Render order
 ------------

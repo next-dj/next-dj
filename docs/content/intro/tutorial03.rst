@@ -62,7 +62,7 @@ The ``{% component "note_card" %}`` tag does three things in one line.
 It resolves the component by name, runs any context functions declared in a ``component.py``, and renders the component template inside the loop iteration.
 
 Reload ``/`` and confirm that the page still lists both notes.
-The HTML now uses an ``<article>`` per note instead of an ``<li>`` block.
+The markup of each note now lives in the component and the loop keeps only the ``<li>`` wrapper.
 
 Add co-located CSS
 ~~~~~~~~~~~~~~~~~~
@@ -232,10 +232,8 @@ Common pitfalls
 ---------------
 
 Component is not found.
-   Search the served HTML for ``next: component``.
-   Under ``DEBUG`` the tag replaces the component with an HTML comment naming it, plus a did-you-mean hint when a near name exists, so the comment usually names the typo outright.
-   Confirm that the folder name and the string argument to ``{% component %}`` match exactly, because the component name comes from the directory and not from any Python identifier.
-   Confirm too that the ``_components/`` folder sits inside the ``pages/`` tree, since the file router only registers component folders it walks past during page discovery.
+   Search the served HTML for ``next: component``, the comment names the typo.
+   Check that the folder name matches the argument and that ``_components/`` sits inside ``pages/``, see the first section of this part.
    With ``DEBUG`` off and ``STRICT_LOADING`` left at its default the tag logs a warning and renders empty output instead, and with ``STRICT_LOADING`` set to ``True`` it raises ``TemplateSyntaxError`` on either setting of ``DEBUG``.
 
 CSS does not load.

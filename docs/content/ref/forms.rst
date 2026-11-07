@@ -57,7 +57,7 @@ Framework machinery.
    ``FormNode``, the node ``{% form %}`` compiles to, and ``anchor_lookup_from_context`` live in ``next.forms.nodes``, which is where the partial checks reach the node without importing the tag library.
    ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in ``next.forms.registration``.
    ``next.forms.transport`` holds the ``Transport`` alias, the ``TRANSPORTS`` it admits, the ``data-next-transport`` and ``X-Next-Transport`` names, and the tunnel refusals ``http_only`` and ``rotation_refused`` the dispatch answers with.
-   The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
+   The forms system checks live in ``next.forms.checks``, a package of one-word submodules, ``actions``, ``config``, ``csrf``, ``widgets``, and ``wizards`` for the checks themselves and ``sources`` for the registration readers they share.
    The framework application config imports the package at startup, and the forms package re-exports it, so ``next.forms.checks`` names the same package either way.
    ``next.forms.ports`` holds ``ActionOwnersImpl``, which binds the ``action_owners`` reader of ``sources`` to the ``ActionOwners`` port of :doc:`ports`.
    ``FormActionNotFoundError``, ``SessionRotationError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError`` live in ``next.forms.errors`` and are re-exported at the package level.
@@ -308,12 +308,7 @@ It lives in ``next.forms.uid`` and is not re-exported at the package level.
 ``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
 ``current_origin_path`` names the URL a rendering request should return to, its query string included.
 Its path is percent-encoded the way ``request.get_full_path()`` encodes it, so a ``?`` or a non-ASCII character inside a segment survives the round trip, and resolution decodes it back the way Django builds ``request.path``.
-``validated_origin_path`` takes the posted value and answers it only when it is a same-site path.
-A value longer than ``MAX_ORIGIN_LENGTH``, 16384 characters and the value of Django's ``MAX_URL_REDIRECT_LENGTH``, is refused before it is stripped, so an oversized value costs no scan.
-The stripped value then passes ``is_path_only``, which holds when it starts with a single ``/`` followed by neither a second slash nor a backslash, and when it carries no tab, newline, or carriage return anywhere.
-A browser drops those code points and folds a backslash into a slash before resolving a URL, so leaving either in place would hide a protocol-relative target such as ``/\evil.example`` behind a value that reads as a path.
-The rule is path-only, so it refuses any absolute URL, this host's own included, and it reads no request, host, or scheme.
-The cap sits far above Django's 2048-character URL cap, because a long page URL that ``current_origin_path`` rendered has to come back.
+``validated_origin_path`` answers a posted value only when it is a same-site path of at most ``MAX_ORIGIN_LENGTH`` characters, and ``is_path_only`` is the path test it applies, see :doc:`/content/security/csrf-and-forms` for the rules.
 ``posted_origin_path`` answers the validated origin field of a POST and ``None`` for any other method.
 ``redirect_to_origin`` builds the success redirect back to the page named by the posted origin field.
 It falls back to ``fallback`` when the request is not a POST, when the field is absent or off-site, and when the origin exceeds the length Django allows in a redirect ``Location``, which a non-ASCII origin under the cap can still do once encoded.

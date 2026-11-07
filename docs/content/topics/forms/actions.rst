@@ -57,7 +57,8 @@ The framework derives the action name from the class name and infers the scope f
 Name derivation
 ---------------
 
-The action name is the ``CamelCase`` class name converted to ``snake_case`` by inserting underscores before each uppercase letter that is preceded by a lowercase letter or a digit.
+The action name is the ``CamelCase`` class name converted to ``snake_case``.
+An underscore goes between a lowercase letter or digit and an uppercase letter, and an acronym stays one word.
 
 .. list-table::
    :header-rows: 1
@@ -75,8 +76,7 @@ The action name is the ``CamelCase`` class name converted to ``snake_case`` by i
    * - ``Form``
      - ``form``
 
-The conversion collapses consecutive uppercase runs, so an acronym stays a single word.
-``HTTPLoginForm`` becomes ``http_login_form`` and ``HTMLForm`` becomes ``html_form``.
+For example ``HTTPLoginForm`` becomes ``http_login_form`` and ``HTMLForm`` becomes ``html_form``.
 
 .. warning::
 
@@ -616,8 +616,6 @@ Shared scope.
 
 The UID addresses an action, it does not authorise one, so a caller who knows a UID still meets the guards described above.
 See :doc:`/content/security/overview` for the boundary the dispatch endpoint draws.
-
-This has one practical consequence.
 
 .. warning::
 

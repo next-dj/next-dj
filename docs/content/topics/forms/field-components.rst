@@ -3,11 +3,9 @@
 Field components
 ================
 
-Changing an input's classes or accessibility markup across a project usually means editing every form or shadowing Django's widget templates, because a next.dj form pins its own renderer and the project-wide ``FORM_RENDERER`` setting never reaches it.
-``ComponentWidget`` keeps that change in one place.
-It is a form widget that renders a registered next.dj component instead of a Django widget template.
-One field maps to one component.
-The component owns the markup and the styling, so the same ``input`` or ``textarea`` lives in a single ``component.djx`` that every form reuses, and a styling or accessibility change ships once instead of propagating across every form.
+``ComponentWidget`` is a form widget that renders a registered component instead of a Django widget template.
+One field maps to one component, so the markup and styling of an input live in one ``component.djx`` that every form reuses.
+A next.dj form pins its own renderer, so the project-wide ``FORM_RENDERER`` setting never reaches it.
 
 .. contents::
    :local:
@@ -214,9 +212,6 @@ Every form that wants the same look copies the constant.
    class ArticleCreateForm(next.forms.Form):
        slug = next.forms.CharField(widget=ComponentWidget("input", placeholder="wiki-slug"))
        title = next.forms.CharField(widget=ComponentWidget("input", placeholder="Title"))
-
-The Tailwind classes now live once in the shared ``component.djx``.
-The ``INPUT_CLASS`` constant disappears from the form file, and a styling change happens in one place.
 
 .. _topics-forms-field-components-files:
 

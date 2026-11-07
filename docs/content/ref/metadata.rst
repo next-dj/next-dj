@@ -126,6 +126,7 @@ It answers the head markup as a ``SafeString``.
 
 ``NEXT_FRAMEWORK["METADATA"]["RENDERER"] = "site.metadata.SiteRenderer"`` installs it, and the framework builds it without arguments once and again on every ``settings_reloaded``.
 A path that does not import, names no concrete subclass, or a class whose constructor raises leaves the page on ``HtmlMetadataRenderer``, and ``next.E107`` reports the path before the first render.
+While the path is broken every page is sent with ``Cache-Control: private, no-store``, and a build under ``DEBUG`` or ``STRICT_LOADING`` raises instead of falling back.
 A ``render`` that raises leaves the head empty, see :ref:`topics-failure-containment`.
 
 .. automodule:: next.pages.metadata.backends

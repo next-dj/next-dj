@@ -47,7 +47,6 @@ The cookie
 ----------
 
 ``CookieConsentBackend`` reads a first-party cookie the runtime writes on every choice, ``next_consent=2:analytics|marketing:<seconds>``, the version, the granted categories past ``necessary``, and the time of the decision.
-The server and the runtime also read the ``1:analytics,marketing:<seconds>`` form, which separates the categories with commas, and the runtime writes the ``2:`` form on the next choice.
 The cookie is not ``HttpOnly``, since the runtime writes it, and no server endpoint is involved.
 ``OPTIONS`` names the cookie, its ``max_age``, ``samesite``, ``domain``, ``path``, and ``secure``, which follows the scheme of the page while it is ``None``.
 

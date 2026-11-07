@@ -482,8 +482,8 @@ A broker keeps the coalescing itself with the helpers of ``next.realtime.roster`
      - A mixin that holds ``presence_limits`` and ``presence_schedule``.
        Its schedule calls the ``announce_presence(topic)`` hook once a window closes.
        ``aannounce_presence(topic)`` is the hook ``aclose`` awaits for each pending topic, and it runs ``announce_presence`` on the shared thread pool unless a broker overrides it.
-   * - ``presence_limits()``
-     - Reads the ``PRESENCE`` limits.
+   * - ``presence_limits(limits=None)``
+     - Reads ``REALTIME['PRESENCE']`` into a ``PresenceLimits`` that ``PresenceWindow`` stores on ``self.presence_limits``.
    * - ``PresenceSchedule``
      - Coalesces the changes of a topic into one window.
    * - ``announce(broker, topic)``
@@ -506,6 +506,10 @@ A broker keeps the coalescing itself with the helpers of ``next.realtime.roster`
 .. autofunction:: next.realtime.roster.decode_member
 
 .. autofunction:: next.realtime.roster.announce
+
+.. autofunction:: next.realtime.roster.presence_limits
+
+.. autoclass:: next.realtime.roster.PresenceLimits
 
 ``MemoryBroker`` keeps a roster per topic and prunes by the earliest deadline, so a refresh costs the same on a large roster.
 ``RedisBroker`` keeps eight keys per topic under the hash tag.
@@ -765,7 +769,7 @@ The WebSocket ``hello`` tells the client the limits it builds its frames by.
 With the defaults the frame ends in ``"upstream":{"frame":16384,"timeout":10.0},"tunnel":{"timeout":30.0,"frame":65536,"headers":["accept","content-type"],"prefixes":["x-next-"],"csrf":"x-csrftoken"}``.
 A client sends a header outside ``headers``, ``prefixes``, and ``csrf`` over HTTP, since the tunnel drops it.
 
-A stock JSON backend returns the frame as JSON text from ``stream_data`` once a subclass sets its own ``content_type``.
+``JsonPartialProtocolBackend`` returns the frame as JSON text from ``stream_data`` when a subclass sets a ``content_type`` other than the stock one, because the parse hook of a custom type reads text only.
 The client hands a string ``data`` to the same parse hook the SSE transport uses, so a custom wire format works on both transports.
 ``server_time`` is stamped in milliseconds when each frame is written.
 
@@ -1203,6 +1207,7 @@ Creating a ``WebSocketApp`` marks the process as serving ``ws``, which switches 
 It also logs the session warnings of ``manage.py check`` as ``WARNING`` records on the ``next.realtime.asgi`` logger, and ``next.W146`` when the tunnel is on and an explicit ``origins`` entry is one the CSRF check would refuse.
 An explicit ``TRANSPORTS`` that lists ``ws`` in a process that creates no ``WebSocketApp`` logs one warning on the ``next.realtime.transports`` logger at the first ticket negotiation.
 It reads ``UPSTREAM`` and ``TUNNEL`` once, so a bad value raises ``ImproperlyConfigured`` when the application is built rather than on every connection, and ``WebSocketApp.limits`` holds the result.
+``WebSocketApp.limits`` is a ``SocketLimits`` of an ``UpstreamLimits`` and an optional ``TunnelLimits``, which is ``None`` while the tunnel is disabled.
 
 Three methods of ``WebSocketApp`` are the extension points of a subclass.
 ``allow_origin(origin, scope)`` decides the Origin, ``authenticate(scope)`` returns the ``Handshake`` of the connection or ``None`` for a refusal, and ``topic_socket(port, handshake, scope)`` returns the ``TopicSocket`` that serves it.
@@ -1266,6 +1271,12 @@ The ``count`` of a snapshot follows the rules of `Presence`_, one member for eve
 .. autoexception:: next.realtime.InvalidTicketError
    :members:
 
+.. autoclass:: next.realtime.limits.SocketLimits
+
+.. autoclass:: next.realtime.limits.UpstreamLimits
+
+.. autoclass:: next.realtime.limits.TunnelLimits
+
 .. autoclass:: next.realtime.frames.Close
    :members:
    :undoc-members:
@@ -1302,7 +1313,7 @@ A ``WebSocketApp`` logs the session warnings itself when it is created, since ``
 An error flags a routed ticket introspection endpoint that has no ``GATEWAY_TOKEN``.
 The checks run against the defaults when ``NEXT_FRAMEWORK`` has no ``REALTIME`` key.
 Errors flag invalid ``UPSTREAM`` and ``TUNNEL`` limits and upstream handlers that can never match.
-See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, ``next.E213``, and ``next.W141`` to ``next.W144``, ``next.W146``, ``next.W147``, and ``next.W149``.
+See :doc:`system-checks` for the ids ``next.E177`` to ``next.E199``, ``next.E201`` to ``next.E211``, ``next.E213``, ``next.E216``, and ``next.W141`` to ``next.W144``, ``next.W146``, ``next.W147``, ``next.W149``, and ``next.W151``.
 
 See also
 --------

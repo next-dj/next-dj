@@ -29,20 +29,21 @@ Pipeline
        Endpoint --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
        Lookup -- "found, non-POST" --> NotAllowed
-       Lookup -- "found, POST" --> Tree{"Page tree access rule"}
+       Lookup -- "found, POST" --> Origin0{"Origin resolves"}
+       Origin0 -- no --> BadRequest["HTTP 400"]
+       Origin0 -- yes --> Tree{"Page tree access rule"}
        Tree -- anonymous --> LoginRedirect
-       Tree -- "refused" --> Forbidden
-       Tree -- "refused" --> AccessDenied
+       Tree -- "refused, sends form_access_denied" --> Forbidden
        Tree -- pass --> Guard{"Static access guard"}
        Guard -- anonymous --> LoginRedirect["HTTP 302 to LOGIN_URL"]
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
        Guard -- pass --> PageAuth{"Origin page authorizes"}
        PageAuth -- denies --> PageDenied["Origin page short-circuit response"]
-       PageAuth -- "allows, no form_class" --> HandlerOnly["Run handler only"]
-       PageAuth -- "allows, form_class" --> ViewHook{"check_permissions hook"}
-       PageAuth -- "allows, wizard_class" --> WizardOrigin{"Origin resolves"}
-       WizardOrigin -- no --> BadRequest["HTTP 400"]
-       WizardOrigin -- yes --> ViewHook
+       PageAuth -- allows --> OwnerAuth{"Owner page render guard"}
+       OwnerAuth -- refuses --> OwnerDenied["HTTP 403 or response"]
+       OwnerAuth -- "allows, no form_class" --> HandlerOnly["Run handler only"]
+       OwnerAuth -- "allows, form_class" --> ViewHook{"check_permissions hook"}
+       OwnerAuth -- "allows, wizard_class" --> ViewHook
        ViewHook -- "deny" --> HookDenied["HTTP 403 or response"]
        ViewHook -- "deny" --> AccessDenied["form_access_denied signal"]
        ViewHook -- "allow, form_class" --> Build["Build form"]
@@ -114,7 +115,7 @@ Modules
    The form base classes, the ``__init_subclass__`` auto-registration gate, and the permission-hook presence flags the dispatcher reads.
 
 ``next.forms.checks``.
-   A package of one-word submodules, ``actions``, ``config``, ``sources``, ``widgets``, and ``wizards``, holding the system checks that read the registration diagnostics and walk every configured backend.
+   A package of one-word submodules, ``actions``, ``config``, ``csrf``, ``sources``, ``widgets``, and ``wizards``, holding the system checks that read the registration diagnostics and walk every configured backend.
 
 ``next.forms.uid``.
    ``redirect_to_origin``, ``reverse_form_action``, ``current_origin_path``, ``is_path_only``, ``validated_origin_path``, and ``posted_origin_path`` helpers for the origin page round trip, plus the ``MAX_ORIGIN_LENGTH`` cap, the ``ORIGIN_FIELD_NAME`` wire constant, and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
@@ -142,6 +143,21 @@ Modules
 
 ``next.forms.formsets``.
    ``cleanup_extra_initial`` helper for blank extra rows.
+
+``next.forms.transport``.
+   The transports an action admits and the tunnel refusals ``http_only`` and ``rotation_refused``, see :ref:`topics-forms-actions-transport`.
+
+``next.forms.rendering``.
+   The HTML rendering of a validation-error response.
+
+``next.forms.ports``.
+   ``ActionOwnersImpl``, the owner reader bound into the ``next.ports`` slot at startup.
+
+``next.forms.signals``.
+   The signals the forms area sends.
+
+``next.forms.autodiscover``.
+   The import of every installed app's ``forms`` module, so shared forms register on startup.
 
 ``next.partial.shaping``.
    The package behind the bound shaper, which turns a dispatch outcome into a patch envelope for a partial request, see `Partial shaping`_.
@@ -348,8 +364,8 @@ Eight signals fire.
 - ``wizard_step_submitted`` fires at request time after a wizard step validates, with the wizard class as the sender and the step name plus a copy of its cleaned data in the payload.
 - ``wizard_completed`` fires at request time after the wizard ``done`` method returns a response below HTTP 400, with the wizard class as the sender and the merged cleaned data in the payload.
   An error response from ``done`` skips the signal and keeps the saved drafts.
-- ``form_access_denied`` fires at request time when the origin page or a dynamic permission hook denies a request, never on the static guard path, with the action name, the action uid, the live request, the ``layer`` (``"page"``, ``"view"``, or ``"object"``), and the ``reason`` (``"raised"``, ``"denied"``, or ``"response"``) in the payload.
-  A ``"page"`` denial always reports ``"response"``, because a page refuses by returning one.
+- ``form_access_denied`` fires at request time when the page tree rule, the origin page, a dynamic permission hook, or a registered permission on the bound form denies a request, never on the static guard path, with the action name, the action uid, the live request, the ``layer`` (``"page"``, ``"view"``, or ``"object"``), and the ``reason`` (``"raised"``, ``"denied"``, or ``"response"``) in the payload.
+  A ``"page"`` denial is ``"denied"`` for a refused rule and ``"response"`` for a ``render()`` that answered.
 - ``form_backend_loaded`` fires once per ``FORM_ACTION_BACKENDS`` entry the loader turns into an instance, and a skipped entry sends nothing.
 - ``wizard_backend_loaded`` fires when the single ``FORM_WIZARD_BACKEND`` instance is built, on first use and again after a settings reload rebuilds it.
 

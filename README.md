@@ -12,7 +12,7 @@ A next-gen framework based on Django without the tears.
 
 ## What is `next.dj`?
 
-`next.dj` adds file-based routing, nested `layout.djx` wrappers, reusable components with co-located assets, dependency-injected context and actions, forms that register themselves next to pages with declarative access guards, a multi-step `FormWizard`, form dispatch via `{% form %}` and `{% action_url %}`, page metadata rendered into `<head>`, sitemaps and `robots.txt` built from the page tree, and third-party scripts gated by visitor consent. Directories map to URLs. A `page.py` file turns a segment into a page. Configuration lives in the `NEXT_FRAMEWORK` mapping alongside standard Django settings.
+`next.dj` adds file-based routing with route groups and intercepting routes, nested `layout.djx` wrappers, reusable components with co-located assets, dependency-injected context and actions, forms that register themselves next to pages and dispatch through `{% form %}` and `{% action_url %}`, a multi-step `FormWizard`, partial rendering of `{% zone %}` regions, realtime topics over WebSocket and Server-Sent Events, access rules and object permissions declared on the page tree, page metadata rendered into `<head>`, sitemaps and `robots.txt` built from the page tree, and third-party scripts gated by visitor consent. Directories map to URLs. A `page.py` file turns a segment into a page. Configuration lives in the `NEXT_FRAMEWORK` mapping alongside standard Django settings.
 
 ## Documentation
 

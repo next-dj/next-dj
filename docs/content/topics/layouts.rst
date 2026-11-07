@@ -14,7 +14,7 @@ A layout carries markup alone, and the logic and the access of a segment live in
 Overview
 --------
 
-A page is wrapped by every ``layout.djx`` between the page directory and the page root.
+A page is wrapped by every ``layout.djx`` from its own directory up the ancestor chain, the page root included, until a ``{% layout root %}`` layout ends the walk.
 The closest layout is the innermost wrapper.
 The root layout is the outermost wrapper.
 The page body is substituted into a ``{% template %}`` placeholder that each layout must contain.

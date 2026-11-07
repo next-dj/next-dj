@@ -20,6 +20,13 @@ A ``lazy=`` zone defers its first render behind a placeholder, but the deferral 
 That round trip is the runtime's, so a page without it shows the placeholder and nothing more.
 A lazy zone is the one zone mode with no server-rendered fallback, and content that has to reach a reader without JavaScript renders inline instead.
 
+Some operations exist only in an envelope
+-----------------------------------------
+
+``toast``, ``layer.open``, ``layer.close``, and ``event`` live only inside a partial envelope that the client runtime applies.
+A request without the runtime gets the full page or the redirect of the action, and none of these operations reaches it.
+A notice that has to reach every reader renders in the page itself, for example through Django's messages framework.
+
 Realtime transports
 -------------------
 

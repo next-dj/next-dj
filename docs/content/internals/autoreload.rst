@@ -66,13 +66,14 @@ Runtime
    ``NextStatReloader`` extends the Django stat reloader and also restarts the process when the discovered route set changes.
 
 ``next.server.watcher``.
-   ``iter_all_autoreload_watch_specs`` returns the deduplicated list of built-in specs plus pairs registered through ``register_autoreload_watch_spec``.
+   ``iter_all_autoreload_watch_specs`` returns the deduplicated list of built-in specs plus pairs registered through ``register_autoreload_watch_spec``, as the worked example in :ref:`topics-extending` shows.
 
 ``next.server.roots``.
    ``get_framework_filesystem_roots_for_linking`` returns the canonical page and component directory roots for build tooling.
 
 ``next.server.signals``.
    ``watch_specs_ready`` fires on every call to ``iter_all_autoreload_watch_specs`` after the spec list is built.
+   The sender is the function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for that aggregation.
 
 Watch specs
 -----------
@@ -99,6 +100,7 @@ It is logged per backend and subject at the FailureLog rate rather than per tick
 
 Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
+Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime, so a saved edit shows up on the next request, while with ``DEBUG`` off it takes a restart.
 The tree-top sources, ``sitemap.py``, ``robots.py``, ``robots.txt``, and ``scripts.py``, are omitted as well, because they reload in process without restarting ``runserver``.
 While ``DEBUG`` is on, every SEO route compares the modification times of the SEO sources with the ones they were loaded at, every page render does the same for ``scripts.py``, and a file that appeared, went, or moved is read again on that request, see :doc:`seo-pipeline`.
 
@@ -128,7 +130,7 @@ A custom router that builds routes from another source rebuilds them through ``r
 Router lifetime
 ~~~~~~~~~~~~~~~
 
-Reading that list builds one router per ``PAGE_BACKENDS`` entry, and a router answers about the disk it probed while it was built.
+Reading the page roots builds one router per ``PAGE_BACKENDS`` entry, and a router answers about the disk it probed while it was built.
 With ``DEBUG`` off the routers are held until the configuration behind them changes, so a static lookup and a reloader tick stop paying for a build per read.
 A settings reload, a change of ``BASE_DIR``, and ``router_manager.reload`` each build them again.
 A build that dropped an entry is held by nothing, so a router that failed while the apps were still loading is tried again on the next read rather than staying out of the watch list for good.
@@ -140,30 +142,12 @@ A page created inside a tree that is already watched needs no rebuild at all, be
 What is held whatever ``DEBUG`` is set to is the resolution of the trees the routers report.
 A root symlink re-pointed at another release therefore reaches the watcher only after a restart or a reconfigure.
 
-A ``.djx`` edit triggers neither path.
-Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime.
-A saved edit shows up on the next request without a process restart, while with ``DEBUG`` off it takes one.
-
-Signals
--------
-
-The autoreload pipeline fires ``watch_specs_ready`` on every call to ``iter_all_autoreload_watch_specs`` after the watch-spec aggregation completes.
-The sender is the ``iter_all_autoreload_watch_specs`` function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for that aggregation.
-
-Receivers subscribe to ``watch_specs_ready`` to log or assert on the resolved spec set.
-
 Extension points
 ----------------
 
 - Register extra ``(path, glob)`` pairs from ``AppConfig.ready`` through ``register_autoreload_watch_spec``.
 - Subscribe to ``router_reloaded`` to refresh an in-process cache when the routers are rebuilt.
 - Subscribe to ``watch_specs_ready`` for diagnostic logging during development.
-
-Registering extra watch directories
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Packages that generate templates or routes outside the usual page trees register additional ``(path, glob)`` pairs by calling ``register_autoreload_watch_spec`` inside ``AppConfig.ready``, as the worked example in :ref:`topics-extending` shows.
-Registered pairs merge into the list returned by ``iter_all_autoreload_watch_specs`` and receive the same deduplication pass as built-in specs.
 
 See also
 --------

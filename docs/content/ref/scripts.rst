@@ -18,7 +18,7 @@ A script runs in the order its ``scripts.py`` declares it, and ``ALLOWED_ATTRS``
 ``ScriptsSourceImportError`` names a ``scripts.py`` that failed to import.
 
 .. automodule:: next.scripts.markers
-   :members: Script, Strategy, HEAD_STRATEGIES, ALLOWED_ATTRS, SCRIPT_ATTR
+   :members: Script, Strategy, HEAD_STRATEGIES, ALLOWED_ATTRS, SCRIPT_ATTR, allowed_attr
 
 .. automodule:: next.scripts.errors
    :members:
@@ -42,6 +42,7 @@ Consent
 
 ``Consent`` is the frozen value a visitor's choice reads as, ``granted`` holding ``necessary`` always and ``decided`` staying false until the visitor chooses.
 ``allows(category)`` answers one category, false for a blank one, and reads a name of several space-separated categories as all of them, and a template reads ``consent.marketing`` through ``__getitem__``.
+``joint_category(*names)`` builds the space-separated name of a script that waits for several categories.
 ``get_consent(request)`` answers the consent of a request, read once and kept to the configured categories, and ``consent_categories()`` the configured list with ``necessary`` first.
 
 .. automodule:: next.consent.markers
@@ -58,7 +59,7 @@ A ``ConsentBackend`` takes its whole ``CONSENT`` entry, exposes ``OPTIONS`` as `
 ``client_config()`` answers the entries the backend adds to ``$consent``, nothing by default, and the categories and the choice win over an entry of the same name.
 The consent manager reads ``client_config()`` once per backend instance, so its entries depend on the settings alone.
 The runtime keeps the choice only in its consent cookie, so a backend that reads something else gets nothing back from the browser.
-``CookieConsentBackend`` reads the ``2:<a>|<b>:<seconds>`` cookie the runtime writes and also accepts the ``1:<a>,<b>:<seconds>`` form, whose categories are separated by commas.
+``CookieConsentBackend`` reads the ``2:<a>|<b>:<seconds>`` cookie the runtime writes.
 Its ``cookie()`` answers the name, age, and flags the runtime writes the cookie with, which is the ``cookie`` entry its ``client_config()`` adds.
 Under a backend that adds no ``cookie`` entry, the runtime keeps its cookie of the choice under the default name and age.
 A backend that raises or answers anything but a ``Consent`` reads as ``UNDECIDED``, see :ref:`topics-failure-containment`.

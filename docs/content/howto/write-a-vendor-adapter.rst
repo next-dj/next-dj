@@ -88,7 +88,7 @@ The ``init`` queue stub lets the adapter call ``plausible`` before the loader ha
 
    start();
 
-``next:navigated`` does not fire for the page load, so the adapter counts the first page from ``Next.navigation.current()``, and an ``action`` of ``none`` marks a change of the title alone, see :doc:`/content/topics/scripts/page-views`.
+The adapter counts views the way :doc:`/content/topics/scripts/page-views` describes.
 Plausible sets no cookie, so a revoke has nothing to clear.
 
 Google Analytics 4

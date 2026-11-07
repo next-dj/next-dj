@@ -31,7 +31,8 @@ Backends
 ~~~~~~~~
 
 Every renderer takes the URL and the ``request`` and ``nonce`` keywords, ``(self, url, *, request=None, nonce=None)``, and writes the nonce onto the tag it returns whenever one is set.
-A registered kind whose renderer on the rendering backend lacks either keyword would fail every page that holds such an asset, so ``manage.py check`` reports it as an error.
+A registered kind whose renderer on the rendering backend lacks ``request`` fails every page that holds such an asset, and one that lacks ``nonce`` fails every page that carries a nonce.
+``next.E147`` reports both before the first render.
 
 .. automodule:: next.static.backends
    :members:
@@ -93,11 +94,7 @@ Every builder method takes a ``nonce`` keyword, and the three templates take ``{
    :members:
    :exclude-members: csrf_payload_for
 
-The init payload reserves ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent`` for the framework, so an automatically injected payload drops a project key of any of these names before it reaches ``window.Next.context``.
-``$chunks`` names ``next.scripts.min.js`` under ``scripts``, ``next.stream.min.js`` under ``stream``, ``next.ws.min.js`` under ``ws`` while the ``ws`` transport is active, ``next.csrf.min.js`` under ``csrf``, and ``next.poll.min.js`` under ``poll``, the chunks the finder serves beside ``next.min.js``.
-``$scripts`` and ``$consent`` feed the scripts chunk, see :doc:`client-extras`.
-Under ``DEBUG`` it also names ``next.dev.min.js`` under ``dev``, the diagnostics bundle the runtime loads only when ``$dev`` is true, and a production payload carries neither that entry nor ``$dev``.
-``$realtime`` appears only when the enabled transports or the protocol content type differ from the defaults, see :doc:`/content/topics/static-assets/js-context` for what it carries.
+The reserved init payload keys and the lazy chunks are described in :doc:`/content/topics/static-assets/js-context`.
 
 The CSRF payload and the header name are built by ``next.csrf``, see :doc:`site`.
 See :doc:`/content/topics/static-assets/js-context` for the ownership rule and the ``next.W075`` check that reports a collision.

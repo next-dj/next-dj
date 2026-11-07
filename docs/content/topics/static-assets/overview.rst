@@ -10,14 +10,6 @@ It deduplicates them across the request and injects link and script tags into pl
    :local:
    :depth: 2
 
-What it replaces
-----------------
-
-Without the pipeline a stylesheet that belongs to one page is three separate decisions.
-The file goes somewhere under a static directory, a ``<link>`` tag goes into every template that needs it, and somebody has to remember to take the tag out when the page stops using the file.
-The pipeline collapses the three into one, a file named after the template it belongs to and living in the same directory.
-The page owns the asset from there, so rendering the page collects it and a page that stops rendering collects nothing.
-
 The pipeline
 ------------
 
@@ -62,7 +54,7 @@ Asset kinds
 -----------
 
 A kind binds a file extension to a placeholder slot and a backend renderer method.
-The framework registers the two placeholder slots and the three asset kinds at startup through ``register_defaults``.
+The framework registers three placeholder slots, ``head``, ``styles``, and ``scripts``, and three asset kinds at startup through ``register_defaults``.
 Those three kinds are ``css``, ``js``, and ``module``, see :doc:`asset-kinds` for the extension, slot, and renderer of each.
 
 The kind registry is ``next.static.default_kinds``.
@@ -96,21 +88,13 @@ See :doc:`custom-stems`.
 Hot reload
 ----------
 
-Discovery re-probes co-located files while ``DEBUG`` is true, so a saved or added ``component.css`` or ``component.js`` is picked up on the next page load without a process restart.
-A page is re-probed when the directory holding its assets moves, which is what creating or deleting a file there does.
-With ``DEBUG`` off, what a page contributes is read once per process and the probing cost disappears from the render path, unless ``STATIC_DISCOVERY_CACHE`` is false, see :doc:`co-located-files`.
-Module-level ``styles`` and ``scripts`` lists are read when the module imports, so an edit to one takes effect after a ``page.py`` change restarts the dev server.
-See the Hot reload section of :doc:`/content/topics/components` for the full reload contract across ``page.py``, ``component.py``, and ``.djx`` changes.
+Discovery re-probes co-located files while ``DEBUG`` is true, so a saved or added asset is picked up on the next page load.
+See :doc:`co-located-files` for the reload contract and :doc:`/content/topics/components` for ``page.py``, ``component.py``, and ``.djx`` changes.
 
 Production build
 ----------------
 
-In production, ``collectstatic`` copies every registered asset into ``STATIC_ROOT`` under the ``next/`` namespace.
-Two finders of its own reach ``STATICFILES_FINDERS`` for that, both installed automatically.
-``NextStaticFilesFinder`` is appended, and it is what makes Django see a co-located asset at all.
-``NextAppDirectoriesFinder`` replaces a listed ``AppDirectoriesFinder`` entry, because ``next/static`` is the ``next.static`` Python package as well as a directory, and the stock finder would have ``collectstatic`` publish the framework's own modules into ``STATIC_ROOT``.
-
-See :ref:`ref-static` for the finder contract and :doc:`/content/deployment/static-files` for production guidance.
+``collectstatic`` publishes co-located assets under the ``next/`` namespace through two finders the framework installs, see :ref:`ref-static` and :doc:`/content/deployment/static-files`.
 
 See also
 --------

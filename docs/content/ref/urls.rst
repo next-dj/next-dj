@@ -102,7 +102,7 @@ Reverse-name population iterates the wrapped sequence with ``reversed()``, which
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 ``reload()`` loads the list through the shared backend loader, which logs and skips an entry whose ``BACKEND`` path does not resolve into the family and an entry whose backend answers ``ImproperlyConfigured``, a malformed file-router entry among them.
 Any other exception from a custom backend propagates and stops startup, because a constructor that refuses the entry is a bug in that backend rather than a misconfigured site.
-``reload(notify=False)`` rebuilds the backends without clearing the Django URL caches and without sending ``router_reloaded``, for a caller that reloads from inside a receiver of that signal.
+``reload(notify=False)`` rebuilds the backends without sending ``router_backend_loaded`` or ``router_reloaded`` and without clearing the intercept table or the Django URL caches, for a caller that reloads from inside a receiver of that signal.
 
 ``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so a caller that asks before the first resolve reads the configured routers instead of an empty tuple.
 The build runs under a reentrant lock, so under a threaded server a read racing the first load waits for it rather than resolving against a list that is not there yet, while a backend consulting the manager while it is constructed still reads the pre-rebuild list.
@@ -257,7 +257,7 @@ See :doc:`/content/topics/dependency-injection` and :doc:`/content/topics/file-r
 Signals
 -------
 
-The URL subsystem fires three signals.
+The URL subsystem fires four signals.
 
 ``route_registered``.
    Sent by ``FileRouterBackend`` once per registered route, including virtual ``template.djx`` routes, with the ``url_path`` and ``file_path`` keyword arguments.
@@ -270,6 +270,9 @@ The URL subsystem fires three signals.
 ``router_reloaded``.
    Sent by the router manager class after the router rebuilds, with no keyword arguments.
    The sender is the ``RouterManager`` class.
+
+``intercept_registered``.
+   Sent by ``FileRouterBackend`` once per published intercept rule, with the ``target_file``, ``file_path``, and ``marker`` keyword arguments.
 
 See :doc:`signals` and :doc:`/content/topics/signals` for the wider signal catalog.
 
@@ -319,6 +322,9 @@ Checks
       * - ``next.E035``
         - An entry carries a key outside its allowed set, ``BACKEND``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, and ``PAGES_DIR`` for a file router, ``BACKEND`` alone otherwise.
 
+``check_router_manager``.
+   Reports a router that cannot be built once per run.
+
 ``check_url_patterns``.
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
    Fails with :ref:`next.E015 <ref-system-checks>` when two file routes convert to exactly the same Django path string.
@@ -337,9 +343,22 @@ Checks
    Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name within one namespace.
    It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so :ref:`next.E016 <ref-system-checks>` surfaces only once.
 
+``check_framework_routes_reachable``.
+   Fails with :ref:`next.E149 <ref-system-checks>` when ``ROOT_URLCONF`` resolves a framework endpoint such as ``_next/csrf/`` to another view.
+
 .. automodule:: next.urls.checks
    :members:
    :no-index:
+
+The route group and intercept checks live in ``next.pages.checks``, see :doc:`system-checks` for their codes.
+
+Intercepts
+----------
+
+``intercepts`` is the process-wide table the file router fills and zone GETs read, see :ref:`internals-url-router`.
+
+.. automodule:: next.intercept
+   :members:
 
 Ports
 -----

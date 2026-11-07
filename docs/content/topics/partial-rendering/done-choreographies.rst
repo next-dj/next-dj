@@ -6,7 +6,6 @@ Wizard done choreographies
 A wizard inside a modal finishes on its last step.
 The request is created, the modal closes, and the list on the page beneath it has to refresh.
 There are two ways to drive that refresh.
-This page describes both and compares them so the choice is informed.
 
 The opening and the steps are identical for both, see :doc:`scenarios`.
 The two choreographies differ only in what ``done`` returns and how the list gets fresh data.
@@ -27,8 +26,6 @@ The default choreography is the one :doc:`scenarios` walks through, from the ``d
 The list re-renders through its own page view, with its own guards and middleware, on a request that carries the caller's cookies.
 The wizard is portable.
 It sits on any page without a change, and ``data-next-accepted`` moves with the markup.
-
-The cost is one extra GET after the modal closes.
 
 The result a ``layer_close(result=...)`` carries reaches the page twice.
 The runtime fires ``partial:layer-accepted`` with the result, and the ``Outcome.envelope`` of the request that carried the close holds the same envelope, see :doc:`/content/ref/client`.
@@ -94,8 +91,6 @@ A ``morph(zone=…)`` against the posted origin re-runs the body resolution of t
 The page's guards and redirects are honoured either way, so the list never travels in the response when the page would have denied the caller on its own request.
 A denial surfaces as ``ForeignPageNotAuthorizedError`` rather than an empty morph.
 A foreign page whose body resolves dynamically raises ``DynamicForeignPageError``, since it has no template to render the zone from.
-
-One round trip closes everything at once.
 
 ``morph(page=)`` emits no ``context`` patch, while ``morph(zone=)`` against the origin page does whenever the zone has values to ship.
 ``Next.context`` therefore keeps the values it held for the host page after a page-addressed morph.

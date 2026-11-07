@@ -76,8 +76,7 @@ The cost is that a new behaviour is a two-sided change.
 A custom verb is registered on the server with ``register_patch_op`` and supplied on the client with ``Next.partial.defineOp``, so a template author cannot express a new DOM operation from markup alone.
 The gain is that a response cannot ask a page to do anything the application never named.
 ``Patches.op()`` refuses an unregistered verb on the call that builds it, so the op never reaches the browser.
-Two system checks cover the registry side at ``manage.py check``.
-``register_patch_op`` refuses a name that shadows a built-in verb, and ``next.E090`` reports a name that is not a valid verb token.
+``register_patch_op`` raises ``BuiltinPatchOpError`` for a name that shadows a built-in verb, and the system check ``next.E090`` reports a name that is not a valid verb token.
 See :doc:`/content/topics/partial-rendering/extending` for the three seams and :doc:`/content/topics/partial-rendering/limitations` for what the closed set does not cover.
 
 Stable URLs

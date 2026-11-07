@@ -10,8 +10,8 @@ The server writes the scripts a page may run at once into its head, and the runt
    :local:
    :depth: 2
 
-Declaring scripts
------------------
+The scripts file
+----------------
 
 .. code-block:: python
    :caption: shop/pages/scripts.py

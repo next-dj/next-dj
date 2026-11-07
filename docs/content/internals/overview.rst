@@ -47,6 +47,15 @@ Subsystems
    * - Realtime
      - Topics, brokers, topic streams, the WebSocket app, tickets and bindings, presence, upstream handlers, the form tunnel.
      - ``next.realtime``
+   * - Scripts
+     - Third-party scripts, their discovery, and head injection.
+     - ``next.scripts``
+   * - Consent
+     - Visitor consent backend and categories.
+     - ``next.consent``
+   * - Site
+     - Site origin and indexability.
+     - ``next.site``
    * - SEO
      - Sitemap and robots discovery, the items registry, the sitemap and robots views.
      - ``next.seo``
@@ -77,9 +86,12 @@ The hook calls ``register_all()`` to register the framework system checks.
 It then runs nineteen startup steps in a fixed order.
 The first three connect every signal receiver of the framework, in three ordered tables for ``setting_changed``, ``settings_reloaded``, and ``router_reloaded``, each with a ``dispatch_uid`` of its module and qualified name, so no module connects a receiver at import time.
 ``reset_failure_logs`` runs first on ``settings_reloaded``, and the ``router_reloaded`` table drops every watch, page-root, dependency, object-row, SEO-source, hreflang, and scripts memo a router rebuild leaves stale.
+
 The fourth, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
+
 The next ten bind the nine ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
+
 The next three install autoreload, template-tag builtins, and staticfiles integration into the Django runtime.
 Then ``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, ``realtime``, and ``signals`` modules of every installed application, in that order, so providers, object permissions, shared forms, upstream handlers, and receivers register before the first request arrives.
 The last, ``components.install()``, bootstraps the components into the Django runtime, after the providers a ``component.py`` may need are in place.
@@ -108,7 +120,7 @@ Signals fan out
 ---------------
 
 Most cross subsystem coordination happens through signals.
-The diagram below shows which subsystem emits each signal and the typical receivers.
+The diagram below sketches which subsystem emits each signal and the typical receivers.
 
 .. mermaid::
 
@@ -121,6 +133,8 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Partial["next.partial"]
        Realtime["next.realtime"]
        Seo["next.seo"]
+       Scripts["next.scripts"]
+       Consent["next.consent"]
        Deps["next.deps"]
        Server["next.server"]
        Conf["next.conf"]
@@ -131,12 +145,14 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Pages -- "template_loaded, context_registered, metadata_registered, page_rendered" --> Audit
        Seo -- "sitemap_backend_loaded" --> Audit
        Components -- "component_registered, components_registered, component_rendered, component_backend_loaded" --> Audit
-       URLs -- "route_registered, router_reloaded, router_backend_loaded" --> Watch
+       URLs -- "route_registered, intercept_registered, router_reloaded, router_backend_loaded" --> Watch
        Forms -- "action_registered, action_dispatched, form_validation_failed, form_access_denied, wizard_step_submitted, wizard_completed, form_backend_loaded, wizard_backend_loaded" --> Audit
        Forms -- "action_dispatched" --> Cache
        Static -- "asset_registered, collector_finalized, html_injected, static_backend_loaded" --> Audit
        Partial -- "zone_registered, zone_rendered, patch_op_registered, intercept_access_denied, field_validated, sse_stream_opened, sse_stream_closed, partial_backend_loaded" --> Audit
        Realtime -- "broker_backend_loaded, message_published, stream_subscribed, stream_unsubscribed, upstream_received, upstream_rejected" --> Audit
+       Scripts -- "scripts_registered" --> Audit
+       Consent -- "consent_backend_loaded" --> Audit
        Deps -- "provider_registered" --> Audit
        Server -- "watch_specs_ready" --> Watch
        Conf -- "settings_reloaded" --> Watch
@@ -192,15 +208,15 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.pages``
      - ``manager`` (``templates``, ``views``), ``registry``, ``access``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``visits``, ``metadata`` (``dicts``, ``markers``, ``normalize``, ``shapes``, ``scope``, ``titles``, ``fold``, ``chain``, ``registry``, ``resolve``, ``hreflang``, ``ld``, ``head``, ``backends``, ``nodes``), ``responses``, ``ports``, ``errors``, ``checks`` (``composed``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``zones``), ``signals``, ``watch``.
    * - ``next.components``
-     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``errors``, ``nodes``, ``watch``, ``ports``, ``checks``, ``signals``.
+     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``errors``, ``nodes``, ``watch``, ``checks``, ``signals``.
    * - ``next.urls``
      - ``manager``, ``ports``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``mount``, ``routes``, ``urlconf``, ``errors``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``nodes``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``registration``, ``ports``, ``errors``, ``checks`` (``actions``, ``config``, ``sources``, ``widgets``, ``wizards``), ``signals``.
+     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``nodes``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``registration``, ``transport``, ``ports``, ``errors``, ``checks`` (``actions``, ``config``, ``sources``, ``widgets``, ``wizards``), ``signals``.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``runtime``, ``nonce``, ``inject``, ``serializers``, ``defaults``, ``finders``, ``ports``, ``errors``, ``checks``, ``signals``.
    * - ``next.partial``
-     - ``manager``, ``registry`` (``ops``, ``zones``), ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``guards``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``ports``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks`` (``backends``, ``codes``, ``forms``, ``nodes``, ``ops``, ``templates``, ``zones``), ``signals``.
+     - ``manager``, ``registry`` (``ops``, ``zones``), ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``guards``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``ports``, ``sse``, ``stream``, ``intercept``, ``view``, ``headers``, ``keys``, ``origin``, ``checks`` (``backends``, ``codes``, ``forms``, ``nodes``, ``ops``, ``templates``, ``zones``), ``signals``.
        :doc:`partial-pipeline` walks what each one does on a zone request.
    * - ``next.realtime``
      - ``manager``, ``backends``, ``topics``, ``messages``, ``delivery``, ``replay``, ``roster``, ``attendance``, ``lifecycle``, ``limits``, ``pool``, ``transports``, ``negotiation``, ``tickets``, ``binding``, ``access``, ``asgi``, ``socket``, ``frames``, ``handlers``, ``tunnel``, ``views``, ``urls``, ``console``, ``deployment``, ``redis`` (``broker``, ``pubsub``, ``scripts``), ``ports``, ``errors``, ``checks``, ``signals``.
@@ -217,7 +233,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.csrf``
      - A single flat module deciding where a page puts its CSRF token and serving ``/_next/csrf/``, read by the static, form, partial, and page areas.
    * - ``next.deps``
-     - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``objects``, ``introspect``, ``errors``, ``signals``.
+     - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``objects``, ``introspect``, ``errors``, ``checks``, ``signals``.
    * - ``next.permissions``
      - ``access``, ``backends``, ``checks``, ``errors``, ``manager``, ``markers``, ``nodes``, ``registry``.
    * - ``next.management``
@@ -229,7 +245,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.conf``
      - ``settings``, ``defaults``, ``scopes``, ``merge``, ``frozen``, ``sentinels``, ``helpers``, ``imports``, ``checks``, ``signals``.
    * - ``next.testing``
-     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``responses``, ``plugin``.
+     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``realtime``, ``responses``, ``plugin``.
        ``plugin`` is the only module in the area that imports pytest, and a suite loads it with ``-p next.testing.plugin``.
    * - ``next.apps``
      - ``config``, ``autoreload``, ``autodiscover``, ``templates``, ``staticfiles``, ``components``, ``checks``.
@@ -240,6 +256,10 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
        ``ActionOwners`` lets the body-source check read the directories that declare actions without importing ``next.forms``, ``FormRoutes`` lets the URL checks read the form action routes without importing ``next.forms``, ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``, and ``RealtimeNegotiation`` lets the page payload name the transports and content types of a stream without importing ``next.realtime``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the ``TreeSource`` loader of a file at the top of a page tree.
+   * - ``next.intercept``
+     - A single flat module holding the table of intercepting routes, which page serves a zone over a routed target.
+   * - ``next.interpolation``
+     - A single flat module that interpolates ``{{ expr }}`` inside the string a template tag argument holds.
    * - ``next.stamps``
      - A single flat module holding the freshness stamps of files, which never trust an mtime written in the current clock tick.
    * - ``next.caches``
@@ -260,7 +280,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - ``__init__`` aggregates system-check registration across every subpackage.
        ``common`` provides shared helpers used by individual ``checks`` modules.
    * - ``next.templatetags``
-     - ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``scripts``.
+     - ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``permissions``, ``scripts``.
 
 See also
 --------

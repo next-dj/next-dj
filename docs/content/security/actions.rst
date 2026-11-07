@@ -50,6 +50,13 @@ An action in a ``component.py``, in a page tree or outside every tree, also answ
 The dispatcher checks that rule before the ``Meta`` guard, the ``render()`` of the origin page and of the owner page, and any form hook, with the same order and the same answers the page view gives, see :ref:`topics-permissions-tree`.
 An anonymous POST is redirected to ``LOGIN_URL`` with the origin path as ``next``, a refusal answers 403 and sends ``form_access_denied`` with ``layer="page"`` and ``reason="denied"``, and a broken ``page.py`` over the owner refuses the action as it closes the pages.
 
+Over the WebSocket tunnel
+-------------------------
+
+An action that declares ``transport="any"`` can also be posted through an open WebSocket, see :ref:`topics-forms-actions-transport`.
+The tunneled request runs the same owner rule, origin rule, and guards as an HTTP post.
+An action that stayed on ``"http"`` answers a tunneled request with 421 before any rule runs, so nothing executes.
+
 A forged origin lifts nothing
 -----------------------------
 

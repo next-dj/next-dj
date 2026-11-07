@@ -45,13 +45,8 @@ Content hash
 
 The default ``StaticFilesBackend`` resolves asset URLs through Django staticfiles.
 Pair it with ``ManifestStaticFilesStorage`` so each URL carries a content hash slice.
-Two consequences flow from the hash.
-
-Cache busting.
-   A change in the file content changes the URL, which forces every browser cache miss.
-
-Tamper detection.
-   A mismatch between the stored hash and the served bytes indicates either a deployment bug or an active attack.
+A change in the file content changes the URL, which forces every browser cache miss.
+The hash is computed once at ``collectstatic`` and never checked at request time, so integrity of the served bytes comes from `Subresource Integrity`_ below.
 
 Run ``uv run python manage.py collectstatic`` during deployment.
 Combined with ``ManifestStaticFilesStorage`` the framework cooperates with the standard Django manifest pipeline.

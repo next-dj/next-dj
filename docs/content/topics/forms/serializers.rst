@@ -98,9 +98,6 @@ Use them when the standard ``{% form %}`` tag does not match the layout you want
      </fieldset>
    {% endfor %}
 
-A custom renderer can read the same fields from Python.
-The dataclass exposes a fixed set of attributes.
-
 Non-Django engine notes
 -----------------------
 

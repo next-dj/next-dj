@@ -27,6 +27,7 @@ Neither subsystem imports ``next.partial``.
 ``next.urls`` routes to pages and so imports ``next.pages``, which leaves the page watcher and the system checks needing routers from the other direction.
 They read ``router_access_slot`` instead, at watch time and at check time.
 ``url_parser`` answers the parser the file router routes bracket segments through, for a caller that has a route string and no router to ask.
+``page_kwargs`` answers the URL kwargs a page at a trail takes, or ``None`` when the router refuses the trail, which the intercept checks use to compare a target with an intercept.
 
 ``StaticAssets`` is the static-manager surface one page render calls, a collector, page and component asset discovery, and placeholder injection.
 ``next.static`` reads page trees and page modules and so imports ``next.pages``, so the render path reads ``static_assets_slot`` rather than importing the static manager back.

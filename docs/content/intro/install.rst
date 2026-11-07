@@ -125,9 +125,9 @@ The ``next`` app registers system checks, template tag builtins, autoreload hook
 Configure NEXT_FRAMEWORK
 ------------------------
 
-Tell next.dj where to look for pages and components.
-With ``APP_DIRS`` set to ``True`` and no ``DIRS``, each installed app carries its own ``pages/`` tree, and a ``_components/`` folder placed inside that tree holds the app's components.
+The defaults already scan a ``pages/`` tree in every installed app, and a ``_components/`` folder placed inside that tree holds the components of the app, so the tutorial needs no ``NEXT_FRAMEWORK`` setting.
 The file router walk registers each ``_components/`` folder it encounters while walking the page tree, so the component backend needs no separate ``APP_DIRS`` flag.
+The block below spells the defaults out and changes nothing.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -149,9 +149,7 @@ The file router walk registers each ``_components/`` folder it encounters while 
        ],
    }
 
-``PAGES_DIR`` is set to ``pages``, the built-in default, so next.dj scans a ``pages/`` directory inside each app.
-``_components`` is the per-application folder the component backend scans, placed inside the page tree and covered in :doc:`tutorial03`.
-The entry leaves out ``DIRS`` and ``OPTIONS``, which then read as an empty list and an empty mapping, see :ref:`ref-settings` for both keys.
+Components are covered in :doc:`tutorial03` and both keys in :ref:`ref-settings`.
 
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
@@ -242,7 +240,7 @@ The command exits with status zero, and every message it does print names both t
 The partial asset version needs no settings of its own, because it is derived from the staticfiles manifest when the project has one and falls back to a stable string when it does not, see :doc:`/content/ref/settings`.
 
 Among its reports ``next.E017`` names a ``page.py`` that raises while importing, ``next.E084`` names the same for a ``component.py``, and ``next.E072`` names a composed page template that fails to compile.
-Seven other framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
+Eight framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
 
 .. code-block:: bash
    :caption: shell
@@ -260,73 +258,7 @@ The steps above already hold the two that are required.
 - ``"next"`` in ``INSTALLED_APPS``.
 - ``path("", include("next.urls"))`` as the last entry of the root URLconf.
 
-The rest is optional and follows what the project needs.
-
-Every page behind a login.
-   Set ``NEXT_FRAMEWORK["LOGIN_REQUIRED"]`` to ``True``, or list Django's :class:`~django.contrib.auth.middleware.LoginRequiredMiddleware` right after ``AuthenticationMiddleware``, which also closes the Django views of the project, and set ``LOGIN_URL``.
-   A page anyone may open, the sign-in page among them, then declares ``page.public()`` in its ``page.py``, see :doc:`/content/howto/require-login-on-pages`.
-
-   .. code-block:: python
-      :caption: config/settings.py
-
-      MIDDLEWARE = [
-          "django.middleware.security.SecurityMiddleware",
-          "django.contrib.sessions.middleware.SessionMiddleware",
-          "django.middleware.common.CommonMiddleware",
-          "django.middleware.csrf.CsrfViewMiddleware",
-          "django.contrib.auth.middleware.AuthenticationMiddleware",
-          "django.contrib.auth.middleware.LoginRequiredMiddleware",
-          "django.contrib.messages.middleware.MessageMiddleware",
-          "django.middleware.clickjacking.XFrameOptionsMiddleware",
-      ]
-
-      LOGIN_URL = "/login/"
-
-Object permissions.
-   List ``ObjectPermissionBackend`` beside ``ModelBackend``, so ``user.has_perm(perm, obj)`` reaches the predicates every ``permissions.py`` registers, see :doc:`/content/topics/permissions`.
-
-   .. code-block:: python
-      :caption: config/settings.py
-
-      AUTHENTICATION_BACKENDS = [
-          "django.contrib.auth.backends.ModelBackend",
-          "next.permissions.ObjectPermissionBackend",
-      ]
-
-One layout for every page.
-   Name a project-level page root in ``DIRS`` of the ``PAGE_BACKENDS`` entry and put a ``layout.djx`` in it, which wraps the pages of every application tree, see :doc:`/content/topics/layouts`.
-
-   .. code-block:: python
-      :caption: config/settings.py
-
-      NEXT_FRAMEWORK = {
-          "PAGE_BACKENDS": [
-              {
-                  "BACKEND": "next.urls.FileRouterBackend",
-                  "DIRS": [BASE_DIR / "chrome"],
-                  "APP_DIRS": True,
-                  "PAGES_DIR": "pages",
-              }
-          ],
-      }
-
-   .. code-block:: jinja
-      :caption: chrome/layout.djx
-
-      <!doctype html>
-      <html lang="en">
-        <head>
-          <meta charset="utf-8">
-          {% metadata %}
-          {% collect_styles %}
-        </head>
-        <body>
-          {% template %}
-          {% collect_scripts %}
-        </body>
-      </html>
-
-   ``{% metadata %}`` renders the head tags of the page, ``{% collect_styles %}`` and ``{% collect_scripts %}`` the co-located assets, and ``{% template %}`` the page itself.
+Login, object permissions, and a shared layout are optional, see :doc:`/content/howto/require-login-on-pages`, :doc:`/content/topics/permissions`, and :doc:`/content/topics/layouts`.
 
 An application starts from a plain ``uv run python manage.py startapp shop`` and its entry in ``INSTALLED_APPS``, and gains the files of :ref:`topics-project-layout-files` as it needs them.
 

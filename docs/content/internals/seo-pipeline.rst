@@ -87,6 +87,7 @@ A ``@page.metadata`` callable is user code that runs on every request, so the re
 ``MetadataThunk.fold`` leaves a callable that raises, or returns a shape the schema refuses, out of the fold, its log key the file and the exception type, see :ref:`topics-failure-containment`.
 A chain the schema refuses as a whole, a shape error in a ``page.py`` dict or a file declaring both forms, folds to the settings tier under ``noindex``.
 The refusal is memoised in the ``ChainEntry``, so ``contained_chain``, which the thunk, the response policy, and the sitemap read, reports it on every read without walking the ancestors again.
+
 ``chain_entry`` walks again and raises a new exception for the checks, ``showmetadata``, and ``Patches.meta``.
 ``fold_metadata``, the call ``Patches.meta`` makes, does not contain, so the caller decides what a failure costs, and ``meta()`` drops its own operation.
 
@@ -112,6 +113,7 @@ The resolve is memoised in the root layer of the template's render context, whic
 The ``ResolvedMetadata`` is published on the request, and the response layer repeats its blocking robots directives as ``X-Robots-Tag``.
 
 ``resolve_metadata`` reads ``site_url`` and ``site_indexable`` from ``next.site``, makes every URL absolute, fills the self canonical and the translated hreflang alternates, derives the Open Graph fallbacks and locale, places naive times in the current time zone, and appends the ``BreadcrumbList`` node when the page has at least two crumbs.
+
 The translated alternates are memoised per route and URL arguments in one entry that holds the path under every language, so every language variant and query of a page shares it.
 A page view passes the resolver match of its request, so the path is not resolved again, and a path that no named route resolves has no alternates.
 ``ResolvedMetadata.crumbs`` holds a lazy ``Breadcrumbs``, and its ``breadcrumbs`` property reverses the crumb URLs on the first read under the URLconf of the request.
@@ -120,6 +122,7 @@ The memo is dropped on ``settings_reloaded``.
 
 ``metadata_renderer`` builds the class ``NEXT_FRAMEWORK["METADATA"]["RENDERER"]`` names once, through ``resolve_setting_class``, and again on ``settings_reloaded``.
 A path that does not resolve, or a constructor that raises, leaves the render on ``HtmlMetadataRenderer`` with one logged error, and ``next.E107`` resolves the same path at check time without building the class.
+``metadata_renderer`` marks the render degraded on that fallback, so the response policy holds the page private.
 ``HtmlMetadataRenderer`` binds the ``render_<name>`` hook of each of its ``sections`` once per instance and joins what each returns, which is the seam a subclass reorders or extends, see :doc:`/content/ref/metadata`.
 ``MetadataNode.render`` contains a ``render`` that raises, leaving the head empty.
 
@@ -173,6 +176,7 @@ Manager and backends
 ``sections(request)`` answers nothing on a site closed to search, save one only ``DEBUG`` closes, and otherwise merges the sections of every backend in order, the first holder of a name keeping it.
 ``fingerprint`` hashes the bytes of every source file, the backend entries, and the site config, and prefixes the ``cache_page`` keys with it, so an edited source never answers from a stale copy.
 The entries and the config are spelled through ``stable_repr``, sorted collections, a callable as its dotted name, and a lazy string as its text, so every worker computes the same key.
+
 Its ``version`` reads ``seo_routes_version`` of ``next.urls.manager``, which every reset moves, and keys the cached views and the route filter.
 ``cache_control`` combines the caches of several backends through ``shortest_cache``, keyed on whether a cache may store at all and then on the shortest age.
 
@@ -192,7 +196,7 @@ The paginator is the public ``paginator`` property of the Django sitemap, overri
 Under ``i18n`` a ``LanguagePairs`` sequence pairs every entry with every language, and its count is the product.
 ``get_latest_lastmod`` answers a ``QuerySet`` part with one aggregate query that reads the ``Max`` of the ``lastmod`` column and counts the undated rows, ``None`` when any row has no date, and a materialised part with the newest date it holds when every entry has one.
 
-``location`` reverses through ``page_reverse`` per call, so the language active in Django's ``i18n`` loop appears in the path.
+``location`` reverses through ``page_reverse_in`` in the namespace of its tree per call, so the language active in Django's ``i18n`` loop appears in the path.
 Without ``i18n``, ``get_urls`` runs under ``LANGUAGE_CODE``, so the document never depends on the language of the crawler.
 The Django ``x_default`` derivation is switched off, and ``get_urls`` appends an ``x-default`` alternate on the URL of the default language through the same ``x_default_url`` helper the head uses.
 ``get_domain`` reads ``request_origin``, ``SITE["URL"]`` first, then :func:`~django.contrib.sites.shortcuts.get_current_site`, then the request host.
@@ -204,6 +208,7 @@ The URL slot
 ``SeoRoutes`` in ``next.ports`` declares ``patterns``, ``SeoRoutesImpl`` in ``next.seo.ports`` implements it over the manager, and ``NextFrameworkConfig.ready()`` binds the implementation into ``seo_routes_slot``.
 ``_LazyUrlPatterns`` concatenates the router patterns, the form-action patterns, the ``/_next/csrf/`` route, and the slot's patterns, and its ``version_token`` is the triple of the router version, the form-action version, and ``seo_routes_version``.
 ``seo_routes_version`` of ``next.urls.manager`` is moved by ``NextFrameworkConfig.ready()`` right after it binds the slot and by the seo manager on every reset, so a resolve reads the token as a plain attribute and the port carries no version.
+
 ``patterns`` answers only the routes whose source exists, so an empty answer leaves a project's own pattern below ``include("next.urls")`` in charge of that address.
 A source lookup that raises while the routes are filtered, ``Http404`` included, runs inside ``FailureLog.guard`` with ``pass_through=()``, which keeps the route mounted to answer 503.
 ``next.seo.urls`` serves the same routes through ``SeoPatterns``, a lazy sequence refiltered whenever the manager version moves.

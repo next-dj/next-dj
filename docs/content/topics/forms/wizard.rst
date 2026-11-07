@@ -3,9 +3,8 @@
 Form wizards
 ============
 
-A multi-step form across several requests usually means hand-rolling step routing, stashing partial data in the session, and re-wiring all of it for the browser back button.
-A ``next.forms.FormWizard`` carries that load.
-Each step is a plain ``django.forms.Form`` or ``django.forms.ModelForm``, and the wizard finalises once on the last step.
+A ``next.forms.FormWizard`` routes a sequence of step forms across requests, stores each step's draft, and finalises once on the last step.
+Each step is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
 
 .. contents::
    :local:
@@ -91,8 +90,6 @@ Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
        def done(self, request: HttpRequest, cleaned_data):
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
-
-The captions on this page mirror the ``access`` application of the repository's ``audit-forms`` example.
 
 Every step form subclasses ``django.forms`` directly.
 A step is not a standalone action, so a plain Django form has nothing to register and nothing to suppress.

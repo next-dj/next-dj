@@ -376,10 +376,10 @@ See :doc:`realtime` for the broker API and :doc:`/content/howto/stream-over-webs
 Application modules
 -------------------
 
-``NextFrameworkConfig.ready`` imports four conventional modules from every installed app, the third-party ones included, the way Django's admin imports every ``admin.py``.
-All ``deps`` modules load first, then all ``permissions`` modules, then all ``forms`` modules, then all ``signals`` modules, so a form finds the providers, named dependencies, and object permissions of every app already registered.
+``NextFrameworkConfig.ready`` imports five conventional modules from every installed app, the third-party ones included, the way Django's admin imports every ``admin.py``.
+All ``deps`` modules load first, then all ``permissions`` modules, then all ``forms`` modules, then all ``realtime`` modules, then all ``signals`` modules, so a form finds the providers, named dependencies, and object permissions of every app already registered.
 An app without the module is skipped, and a module that fails to import raises its own error out of ``ready``.
-The ``deps``, ``permissions``, and ``signals`` sweeps always run, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one.
+The ``deps``, ``permissions``, ``realtime``, and ``signals`` sweeps always run, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one.
 
 FORM_AUTODISCOVER
 ~~~~~~~~~~~~~~~~~
@@ -507,8 +507,8 @@ Default value ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
 ``resolve_serializer`` reads this setting on every call, so ``override_settings`` takes effect without a restart.
 ``manage.py check`` reports a value that is no dotted-path string as ``next.W042``, a path that does not import as ``next.W079``, a path naming something other than a class as ``next.W080``, a class that refuses to instantiate with no arguments as ``next.W081``, and an instance without a ``dumps`` method as ``next.W082``.
-At render time such a value raises ``ImportError`` or ``TypeError`` on first use, so fix the dotted path rather than rely on a fallback.
-The built-in ``JsonJsContextSerializer`` steps in only when the setting is unset.
+A value that cannot serialize falls back to ``JsonJsContextSerializer`` with an error in the log.
+The same failure raises when ``DEBUG`` or ``STRICT_LOADING`` is on, see :ref:`topics-failure-containment`.
 
 See :doc:`static` under *JS context serializer* for the protocol and the bundled serializers.
 
@@ -533,11 +533,9 @@ Strictness
 STRICT_CONTEXT
 ~~~~~~~~~~~~~~
 
-When ``True``, any ``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError`` raised by a Django context processor is re-raised immediately.
-The default behaviour is to log a warning and swallow the exception.
-The check applies only to processors listed under a page backend ``OPTIONS["context_processors"]``.
-Context callables registered with ``@context`` always propagate their exceptions regardless of this setting.
-When ``False``, the default, a failing processor is skipped so local development keeps rendering.
+When ``True``, a ``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError`` raised by a context processor listed under a page backend ``OPTIONS["context_processors"]`` is re-raised.
+When ``False``, it is logged as a warning and the processor is skipped.
+Exceptions from ``@context`` callables always propagate.
 
 Default value ``False``.
 :doc:`/content/deployment/settings` explains when to turn this on in production.

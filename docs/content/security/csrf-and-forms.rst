@@ -62,7 +62,7 @@ A re-render further needs the resolved view to carry the ``next_page_path`` attr
 The client therefore never names a file, and a re-render can target only pages that are already reachable through the routing table.
 
 On the success path the same field feeds ``redirect_to_origin``.
-``redirect_to_origin`` falls back to ``/`` for an origin longer than Django allows in a redirect ``Location``.
+``redirect_to_origin`` redirects to its ``fallback``, ``/`` by default, for an origin longer than Django allows in a redirect ``Location``.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
 
 Manual forms

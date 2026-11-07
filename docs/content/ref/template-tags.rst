@@ -146,7 +146,7 @@ Multiline tag bodies
 The framework adds one line-spanning branch to Django's template tag pattern during ``AppConfig.ready``, so a framework block tag may carry its arguments over several lines.
 That allows readable block components and slots when the argument list is long.
 
-The added branch matches nineteen literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``has_perm``, ``metadata``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+The added branch matches twenty literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``has_perm``, ``layout``, ``metadata``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
 Django's own block-tag branch stays behind it untouched, so every other tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
 A newline inside ``{% if x %}`` still ends the tag, a third-party tag keeps its stock lexing, and a stray ``{%`` inside inline JavaScript swallows no more text than it does without next.dj installed.
 ``{{ ... }}`` and ``{# ... #}`` are outside the rebind entirely, so a newline still ends a variable or a comment.

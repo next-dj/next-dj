@@ -37,10 +37,8 @@ The ``next`` application imports it at startup, so it needs no import of its own
 
    add_perm("notes.edit_note", is_owner)
 
-``edit_note`` is a codename no model defines, so the predicate alone answers it.
-``note`` is ``None`` on the model-level question, and ``is_owner`` refuses it, since no row has an owner yet.
-A predicate that never looks at the row takes the user alone, ``def is_editor(user)``, and one that looks at neither takes no parameter, ``def notes_open()``.
-See :ref:`topics-permissions` for a predicate that combines several conditions with ``and`` and ``or``.
+``edit_note`` is a codename no model defines, so the predicate alone answers it, and ``note`` is ``None`` on the model-level question.
+See :ref:`topics-permissions` for the other signatures and for combined conditions.
 
 List the backend
 ~~~~~~~~~~~~~~~~

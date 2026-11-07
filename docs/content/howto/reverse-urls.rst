@@ -31,7 +31,7 @@ Reverse a static page
 
 Call the helper from inside a request, not at the top level of a ``page.py``.
 A page module executes while the router builds the URL patterns, so a module-level ``page_reverse()`` runs before the URLconf is complete and raises ``NoReverseMatch``.
-Put the call in a ``@context`` callable, an action handler, or a ``render`` function, or reach for ``page_reverse_lazy`` when the value has to sit in a class body.
+Put the call in a ``@context`` callable, a form hook, or a ``render`` function, or reach for ``page_reverse_lazy`` when the value has to sit in a class body.
 
 Reverse a captured page
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -67,8 +67,7 @@ Reverse a page under a prefix
    url = page_reverse("", namespace="wallets", wallet=1)
    # "/wallets/1/operations/" for path("wallets/<int:wallet>/operations/", pages("wallets", "operations"))
 
-A tree placed through ``pages()`` lives in the namespace of its application label, or the ``namespace`` the call passes, and its template starts below the prefix.
-A converter in the route above the include travels as a keyword argument like any captured segment.
+A tree placed through ``pages()`` lives in the namespace of its application label, or the ``namespace`` the call passes.
 
 Add query parameters
 ~~~~~~~~~~~~~~~~~~~~
@@ -84,41 +83,11 @@ Add query parameters
 Pass ``None`` to remove a key.
 Pass a list or tuple to repeat a key in the output.
 
-Use inside an action handler
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Use it elsewhere
+~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-   :caption: notes/pages/page.py
-
-   from django.http import HttpRequest, HttpResponseRedirect
-   from notes.models import Note
-
-   from next.forms import ModelForm
-   from next.urls import page_reverse
-
-   class CreateNoteForm(ModelForm):
-       class Meta:
-           model = Note
-           fields = ("title", "body")
-
-       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-           note = self.save()
-           return HttpResponseRedirect(page_reverse("notes/[int:id]", id=note.id))
-
-Use inside a component
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-   :caption: _components/note_link/component.py
-
-   from notes.models import Note
-
-   from next import component
-   from next.urls import page_reverse
-
-   @component.context("href")
-   def href(note: Note) -> str:
-       return page_reverse("notes/[int:id]", id=note.id)
+Call ``page_reverse`` from a ``@context`` callable, a form's ``on_valid`` hook, or a ``@component.context`` callable.
+See :ref:`topics-url-reversing` for the examples.
 
 Verification
 ------------

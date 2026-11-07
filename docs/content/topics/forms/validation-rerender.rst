@@ -51,19 +51,20 @@ The render pipeline
 
 A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 
-1. The dispatcher resolves the action UID to its handler and form class.
-2. The static ``ActionGuard`` runs, so a denied request never reaches application code, see :ref:`topics-forms-actions-guards`.
+1. The dispatcher resolves the action UID to its handler and form class and checks the transport the action admits.
+2. The posted origin resolves to its page module and typed URL kwargs, and a missing origin answers HTTP 400.
+3. The page tree rule of the action owner and of the origin page is enforced, see :doc:`/content/security/actions`.
+4. The static ``ActionGuard`` runs, so a denied request never reaches application code, see :ref:`topics-forms-actions-guards`.
    A permission registered in a ``permissions.py`` waits for the bound form on a class-bound form.
-3. The posted origin resolves to its page module and typed URL kwargs.
-4. That page authorizes the request through its own ``render()``, and a response it returns is sent as the answer to the submission.
-5. The shared dependency cache is installed on the request.
-6. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
-7. The form is constructed with POST data, uploaded files, and the kwargs that ``get_form_kwargs`` returns, or the initial data of ``get_initial`` when the class does not override that hook.
-8. The registered permissions of ``Meta.permission_required`` are checked on the bound row as ``user.has_perm(perm, obj)``, see :ref:`topics-permissions`.
-9. ``has_object_permission`` runs on the bound form.
-10. A request that names validate fields short circuits here.
+5. The origin page and the owner page authorize the request through their own ``render()``, and a response either returns is sent as the answer to the submission.
+6. The shared dependency cache is installed on the request.
+7. The form class resolves through the dependency resolver and ``check_permissions`` runs on it, see :ref:`topics-forms-actions-dynamic-guards`.
+8. The form is constructed with POST data, uploaded files, and the kwargs that ``get_form_kwargs`` returns, or the initial data of ``get_initial`` when the class does not override that hook.
+9. The registered permissions of ``Meta.permission_required`` are checked on the bound row as ``user.has_perm(perm, obj)``, see :ref:`topics-permissions`.
+10. ``has_object_permission`` runs on the bound form.
+11. A request that names validate fields short circuits here.
     The form validates, the response carries only the errors of the named fields, and the handler never runs.
-11. ``form.is_valid()`` runs.
+12. ``form.is_valid()`` runs.
     On a valid form the handler is called with the dependency-resolved parameters and its return value goes to the client.
     On an invalid form the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
 
@@ -176,12 +177,7 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
        Note.objects.filter(pk=note_id).update(favourite=True)
        return redirect_to_origin(request, fallback="/notes/")
 
-``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag sets to the rendering URL with its query string, so the redirect lands back on the same filtered view.
-It accepts the value only when it is a string, and it strips the surrounding whitespace before any other test.
-The policy is path-only and reads no host or scheme, so it refuses even an absolute URL naming this very host.
-The value passes only when it starts with a single ``/`` followed by neither a second slash nor a backslash, so ``/\evil.example`` is refused as protocol-relative.
-A tab, a newline, or a carriage return inside the stripped value refuses it too, because a browser drops those code points before it resolves a URL and a value the check read as same-site would become a jump off site.
-When the request is not a POST, when the field is absent or fails validation, or when the origin is longer than Django allows in a redirect ``Location``, the helper redirects to ``fallback`` instead.
+``redirect_to_origin(request, fallback="/")`` redirects to the validated ``_next_form_origin`` value, query string included, and to ``fallback`` when the value is absent, off site, or longer than a redirect ``Location`` may be, see :doc:`/content/security/csrf-and-forms`.
 
 One field, two roles
 ~~~~~~~~~~~~~~~~~~~~
@@ -240,9 +236,9 @@ Edge cases
 - A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely.
   Use this on success only.
 - Virtual page origins backed by ``template.djx`` resolve through the template loader, as :ref:`topics-forms-validation-rerender-origin` explains above.
-- The re-render emits a fresh ``csrfmiddlewaretoken`` through ``get_token``, so the browser cookie stays valid and the resubmission passes CSRF without a reload.
-- File inputs reset on re-render because the HTTP spec does not let a server re-populate them.
-  Set ``enctype="multipart/form-data"`` and re-prompt the user for the upload.
+- The re-render emits a fresh ``csrfmiddlewaretoken`` through ``get_token`` on a page that embeds the token, and a deferred page keeps relying on the header the runtime sends.
+- File inputs reset on re-render because a browser never lets a server re-populate them.
+  The tag already emits the multipart ``enctype``, so the form only re-prompts for the upload.
 - Text, select, checkbox, and textarea widgets keep their raw submitted values because the dispatcher binds the failing form to ``request.POST``.
   Password widgets clear unless ``render_value=True``.
 

@@ -42,11 +42,12 @@ When to add a stem
 Add a stem when a project ships an asset under a filename that the default stems do not cover.
 
 - A ``page`` stem so that a project can name the page asset ``page.css`` instead of ``template.css``.
-- A ``vendor`` stem for third party assets inside a component folder.
+- A ``vendor`` stem for third-party assets inside a component folder.
 
 .. warning::
 
-   Two stems of one role collapse into a single logical static path, because the path is built from the directory and drops the stem.
+   Two stems of one role share one logical static path per extension, because the path is built from the directory and drops the stem.
+   ``template.css`` and ``page.css`` in one directory collide on ``.css``, while ``vendor.js`` beside ``component.css`` does not.
    A directory holding both ``template.css`` and ``page.css`` therefore ships ``template.css`` only, the second file is dropped with a logged warning, and ``manage.py check`` reports ``next.E167``.
    Register an extra stem as a rename, not as an addition.
 
@@ -73,7 +74,7 @@ After the registration, discovery picks up ``page.css`` and ``page.js`` next to 
 
 The ``register`` method takes the role and the new stem.
 The role is created when it does not exist.
-A repeated registration of the same stem is a no op.
+A repeated registration of the same stem is a no-op.
 
 .. warning::
 

@@ -14,16 +14,16 @@ Which to choose
 
 WSGI is the default and suits most projects.
 Pick WSGI when every response is synchronous and short lived, because a long-lived SSE connection occupies a worker while it waits.
+A WSGI worker handles one request at a time, so size the worker count from the request rate and the average response time.
+A patch stream holds its connection open until the source ends or the client disconnects, which outlives any reasonable sync worker timeout, so serve streams from ASGI workers rather than raising the WSGI worker timeout.
 
+An ASGI worker multiplexes many concurrent SSE or WebSocket connections through its event loop.
 ASGI is the right choice when the project uses any of these features.
 
 - Server Sent Events for real time updates, including the patch streams described in :doc:`/content/topics/partial-rendering/sse`.
 - WebSocket delivery through the built-in ``WebSocketApp``.
 - Async view handlers that await I/O.
 - Streaming responses that hold the connection open.
-
-Both servers run the same next.dj pipeline.
-The difference lies in how Django dispatches the request.
 
 For a patch stream the server kind is a contract rather than a preference, and it binds in both directions.
 ``PatchEventStream`` inspects the request and refuses a mismatched pair in its constructor, because Django buffers a mismatched iterator fully before the first byte and an infinite stream would hang instead of flushing.
@@ -99,7 +99,8 @@ Without one uvicorn refuses the upgrade, and the client falls back to SSE.
    uv run uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --ws-max-size 65536
 
 The ``--workers`` value is a placeholder, see `Estimate capacity and scale out`_.
-The socket closes an inbound frame larger than 64 KiB with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first, as :doc:`/content/howto/stream-over-websockets` explains.
+The socket closes an inbound frame larger than 64 KiB with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
+Uvicorn pings every 20 seconds by default, which the socket does not need, so ``--ws-ping-interval`` is a deployment decision and a server-level ping is only an extra layer.
 
 Behind gunicorn, use the uvicorn worker class from the ``uvicorn-worker`` package, ``gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker``, which replaces the deprecated ``uvicorn.workers`` module.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
@@ -129,24 +130,11 @@ Route ``WS_PATH`` to the ASGI deployment at the proxy, and share ``SECRET_KEY``,
 The explicit list also makes ``manage.py check`` run the WebSocket session checks, ``next.W141`` and ``next.W142`` among them, in the WSGI project.
 Put ``"sse"`` alone in the list to turn WebSocket off whatever is mounted.
 
-Worker sizing
--------------
-
-WSGI workers are blocking.
-One worker handles one request at a time.
-Size the worker count proportional to the request rate and the average response time.
-
-ASGI workers can multiplex many connections through an event loop.
-A single worker handles many concurrent SSE or WebSocket connections.
-A patch stream (see :doc:`/content/topics/partial-rendering/sse`) holds its connection open until the source ends or the client disconnects, which outlives any reasonable sync worker timeout.
-Serve those streams from ASGI workers rather than raising the WSGI worker timeout.
-
 Reverse proxy
 -------------
 
 Place a reverse proxy in front of either server for TLS termination and connection handling.
 The most common choice is ``nginx`` or ``caddy``.
-An ordinary next.dj response asks nothing of the proxy that a Django response does not.
 
 A patch stream asks the proxy to stay out of the way, and ``PatchEventStream`` states that in the response itself.
 It sets ``Cache-Control: no-cache, no-transform`` so no intermediary caches an event frame or recompresses the body, and ``X-Accel-Buffering: no`` so nginx forwards each frame rather than filling a buffer first.

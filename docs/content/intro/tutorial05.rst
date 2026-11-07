@@ -46,6 +46,8 @@ The ``next_pages`` value resolves relative to ``pytest.ini``, so a project that 
    addopts = --tb=short -p next.testing.plugin
    next_pages = notes/pages
 
+Two more options exist, ``next_components = true`` imports every ``component.py`` once per session and ``next_clear_cache = true`` clears the default cache before each test, see :doc:`/content/topics/testing`.
+
 The project needs no ``conftest.py``.
 The plugin imports every ``page.py`` under ``notes/pages`` once per session and hands out a ``next_client`` fixture, a fresh ``NextClient`` per test.
 That fixture is named ``next_client`` rather than ``client`` so it sits next to pytest-django's own ``client`` fixture instead of replacing it.
@@ -119,7 +121,7 @@ The framework gives each action a stable URL.
        assert response["Location"] == "/"
 
 ``post_action`` looks the action name up through ``resolve_action_url`` and posts the data to the dispatch endpoint.
-Its ``origin`` keyword is required and names the page that renders the form, here the index page at ``"/"``.
+``origin`` names the page that renders the form, as above.
 The action name ``create_note_form`` is derived automatically from the class name ``CreateNoteForm``.
 The redirect target is ``"/"`` because ``on_valid`` calls ``redirect_to_origin``, which sends the visitor back to the page that rendered the form.
 
@@ -158,7 +160,7 @@ Test validation failure
 
 A failed validation does not produce a redirect.
 The pipeline re-renders the origin page with the bound form and a non-zero error count.
-The ``origin="/"`` the test passes fills the hidden ``_next_form_origin`` field a browser submission carries, so the dispatcher knows which page to re-render.
+The ``origin="/"`` tells the dispatcher which page to re-render.
 Append the failure test to ``tests/test_notes_actions.py``.
 
 .. code-block:: python

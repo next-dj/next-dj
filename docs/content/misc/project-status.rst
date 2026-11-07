@@ -18,10 +18,7 @@ A deployment therefore pins an exact release and re-reads this page before it up
 Run ``uv run python manage.py check`` after an upgrade, because the framework reports a configuration mistake with a code and a hint, as :doc:`/content/ref/system-checks` describes.
 
 What that classifier does not describe is how the code is held, which is the part a reader evaluating the project can verify.
-Every merge carries 100 percent line and branch coverage over ``next/``, the same threshold on every project under ``examples/``, and the same on the TypeScript client runtime.
-Mypy runs strict over the whole package, Ruff runs with every rule selected, and every pull request carries a CodSpeed report on CPU, memory, and wall time.
-The client runtime has a hard gzip budget, checked on every run because it ships on every page, and each lazy chunk carries a budget of its own.
-:doc:`/content/contributing/quality-gates` states the budget values, what each gate measures, and which command reproduces it.
+Every merge passes the coverage, typing, benchmark, and bundle budget gates, and :doc:`/content/contributing/quality-gates` states what each gate measures and which command reproduces it.
 
 Who maintains next.dj
 ---------------------
@@ -34,17 +31,14 @@ A deployment that needs a guaranteed response time plans for reading the code it
 What counts as public API
 -------------------------
 
-Two rules define the surface, and :ref:`faq-safe-symbols` states both.
-Anything exported from a top-level ``next.*`` package is safe to import, and so is any module a page under :doc:`/content/ref/index` documents with an ``automodule`` entry.
-A symbol whose name starts with a single underscore is internal and may change without notice, even when it appears in a module ``__all__``.
-The underscore rule is binding and overrides any incidental re-export, so a recipe that reaches for a private name carries a risk the project accepts on its own.
+Top-level ``next.*`` exports and the modules documented under :doc:`/content/ref/index` are public, and a name with a leading underscore is internal, as :ref:`faq-safe-symbols` states.
 
 How NEXT_FRAMEWORK keys change
 ------------------------------
 
 :doc:`/content/ref/settings` lists every key, its default, and its accepted shape, and that page is the contract.
 The framework merges those defaults under the project dict, so a key a project never sets keeps the documented default and an upgrade that adds a key leaves an existing configuration working.
-``manage.py check`` reports a settings mistake under one of four codes.
+``manage.py check`` validates the shape of ``NEXT_FRAMEWORK`` itself under four codes, and per-key checks add their own, see :doc:`/content/ref/system-checks`.
 
 .. list-table:: Settings check codes
    :header-rows: 1
@@ -53,7 +47,7 @@ The framework merges those defaults under the project dict, so a key a project n
    * - Code
      - Reported for
    * - ``next.E035``
-     - A top-level key the framework no longer knows.
+     - A top-level key that is not a framework setting.
    * - ``next.E076``
      - A value whose type the settings merge would discard.
    * - ``next.E077``
@@ -61,7 +55,7 @@ The framework merges those defaults under the project dict, so a key a project n
    * - ``next.W072``
      - A non-bool value for a bool flag.
 
-A renamed or removed key therefore fails a check run instead of degrading a deployment silently.
+A misspelled or unknown key therefore fails a check run instead of degrading a deployment silently.
 See :doc:`/content/deployment/settings` for the values a production deployment sets explicitly.
 
 Supported Python and Django

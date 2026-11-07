@@ -28,7 +28,7 @@ Pipeline
        Sig --> Plan[Compile injection plan]
        Plan --> Providers[Replay plan candidates]
        Providers --> Resolution[ResolutionContext]
-       Resolution --> Cache{Cache hit}
+       Resolution --> Cache{Named dependency cached}
        Cache -- yes --> Value[Cached value]
        Cache -- no --> Provider[Provider.resolve]
        Provider --> Value
@@ -77,7 +77,7 @@ Modules
    ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, and ``render_dep_cache``, which hands a render the dispatch cache when the request carries one and a fresh dict the request never sees otherwise, so it never answers ``None``.
 
 ``next.deps.errors``.
-   ``DependencyCycleError`` and ``UnknownDependencyError``, the two exceptions a graph the resolver cannot serve raises.
+   ``DependencyCycleError``, ``UnknownDependencyError``, and ``UnboundObjectError``, the exceptions a graph or a ``DObject`` the resolver cannot serve raises.
 
 ``next.deps.context``.
    ``ResolutionContext`` value object passed to every provider, plus the ``RESERVED_KEYS`` frozenset of names excluded from name-based resolution.
@@ -146,7 +146,7 @@ Compiled fillers
 
 A terminal provider is asked once more, through the optional ``compile_resolve`` hook, for the call that fills the parameter from a context alone.
 Whatever that call needs from the signature is read at compile time, so the replay of a ``DUrl["id", int]`` parameter is left with one lookup in the URL kwargs and the coercion itself, rather than taking the annotation apart again on every request.
-The three marker providers implement it, and a provider that returns ``None`` from it, or defines no hook at all, keeps its plain ``resolve`` on the replay path.
+The providers behind ``Depends``, ``Context``, ``DUrl``, and ``DObject`` implement it, and a provider that returns ``None`` from it, or defines no hook at all, keeps its plain ``resolve`` on the replay path.
 The fillers belong to the plan, so every recompile builds them again from the provider list the plan saw.
 
 Depends forms
@@ -198,7 +198,8 @@ Its page view still shares one cache between ``render()``, the ``@context`` call
 Two consequences flow from the cache.
 
 Provider results are never cached.
-   The framework cache memoises only named ``Depends("name")`` values.
+   The framework cache memoises named ``Depends("name")`` values and the rows ``DObject`` parameters load.
+   A provider result is never cached.
    A provider that must return one value per request keeps its own request-scoped store.
 
 Shared across the dispatch.

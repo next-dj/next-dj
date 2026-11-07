@@ -49,8 +49,8 @@ Registration and questions
 --------------------------
 
 ``add_perm(name, predicate) -> None`` registers the function under the permission name.
-A name outside ``app_label.codename`` raises ``ValueError``, the same function under a name already held changes nothing, and a different one raises ``PermissionAlreadyRegisteredError``.
 A function of the same qualified name defined again in the same file, as a module that runs twice under the development server defines it, replaces the one the name held, so an edited ``page.py`` that registers a permission imports again.
+The name and duplicate rules are in :doc:`/content/topics/permissions`.
 The ``permissions.py`` module of every installed application is imported at startup, so that is where ``add_perm`` calls live.
 
 ``has_perm(user, perm, obj=None)`` answers from the registered predicates alone.
@@ -97,7 +97,7 @@ An ``obj=DObject[Model]`` of a ``page.py`` whose route lacks the kwarg raises ``
 Template tag
 ------------
 
-``{% has_perm perm [obj] %}`` … ``{% else %}`` … ``{% endhas_perm %}`` is a builtin from ``next.templatetags.permissions``, see :doc:`template-tags`.
+``{% has_perm perm [obj] %}``, an optional ``{% else %}``, and ``{% endhas_perm %}`` form a builtin from ``next.templatetags.permissions``, see :doc:`template-tags`.
 A zone under the tag, or in the body of a component that decides what it shows, is refused to a partial request as an unknown zone, see :ref:`topics-permissions-zones`.
 
 Management command
@@ -110,7 +110,8 @@ System checks
 
 ``next.permissions.checks`` owns ``next.E159``, ``next.E160``, ``next.W127``, ``next.W130``, and ``next.W131``.
 ``next.W128``, ``next.W129``, and ``next.E166`` live with the forms checks, ``next.E161`` with the zone checks, ``next.E162`` with the ``DObject`` checks, and ``next.E163`` and ``next.E164`` with the page checks, see :doc:`system-checks`.
-``next.W129``, like ``next.W127`` for a form guard, runs only in a project that declares access, and only while the default login is off.
+``next.W127`` for a form guard runs only in a project that declares access.
+``next.W129`` adds the condition that the default login is off.
 
 See also
 --------

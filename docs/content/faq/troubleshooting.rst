@@ -217,8 +217,8 @@ Hashed URLs come from the staticfiles manifest, so re-run ``collectstatic`` afte
 The backend memoises each resolved asset URL for the life of the process, so restart the development server to pick up the new hash.
 A URL written by hand as ``/static/...`` never carries a hash at all, because it is a finished URL and the pipeline leaves it alone, see :doc:`/content/topics/static-assets/name-resolution`.
 
-A static name does not resolve
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A logical name does not resolve
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``StaticAssetNotFoundError`` names a reference the staticfiles manifest does not hold, and the render aborts rather than dropping the tag.
 Run ``uv run python manage.py findstatic <name>`` to see which file the name maps to, and re-run ``collectstatic`` when the manifest predates the file.
@@ -364,17 +364,17 @@ Four common causes explain this.
   The request provider tests a concrete subclass annotation against the request in flight, so annotate ``HttpRequest`` unless the handler genuinely needs one concrete class.
 
 To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing.deps`` in a shell or test.
-The snippet below uses ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.
+The snippet below resolves a callable shaped like ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.
 
 .. code-block:: python
 
    from next.testing.deps import resolve_call
    from next.urls import DUrl
 
-   def fetch_note(note_id: DUrl["id", int]):
+   def probe(note_id: DUrl["id", int]):
        return None
 
-   resolved = resolve_call(fetch_note, url_kwargs={"id": "1"})
+   resolved = resolve_call(probe, url_kwargs={"id": "1"})
    print(resolved)
 
 Import the real ``fetch_note`` directly when the page module sits at an importable path.

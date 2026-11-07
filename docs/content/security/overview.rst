@@ -18,7 +18,7 @@ The framework does not bypass any standard :doc:`Django middleware <django:topic
 - CSRF tokens flow through the standard :doc:`CsrfViewMiddleware <django:ref/csrf>`.
 - Session management uses the standard :doc:`SessionMiddleware <django:topics/http/sessions>`, and the wizard is the one subsystem that writes into the session, see :doc:`sessions-and-auth`.
 - Authentication uses ``AuthenticationMiddleware`` and the standard :doc:`auth backends <django:topics/auth/index>`.
-- Permissions checking, password hashing, and signed cookies remain unchanged.
+- Authentication, password hashing, and signed cookies remain unchanged, and the one addition to authorization is ``ObjectPermissionBackend``, see :doc:`/content/topics/permissions`.
 - Django template engine :doc:`auto escaping <django:ref/templates/language>` is active for every page and component template.
 
 A standard ``MIDDLEWARE`` block in ``settings.py`` inherits the middleware half of that baseline.
@@ -241,12 +241,12 @@ The framework system checks cover configuration mistakes that affect security.
 
 - ``next.E041`` reports two actions registered under the same name from different handlers.
 - ``next.E045`` reports a form action backend that does not subclass ``FormActionBackend``.
-- ``next.E020`` reports a component registered more than once within the same scope.
 - ``next.E046`` reports one shared action name declared by two different modules, where a lookup by bare name resolves to whichever module imported first.
 - ``next.W060`` reports an action that declares ``permission_required`` while ``django.contrib.auth`` is out of ``INSTALLED_APPS``, so the guard described under `Access control`_ cannot resolve users or permissions.
 - ``next.W061`` reports an action that declares ``Meta.success_message`` while the messages framework is not fully installed, which makes the submission raise ``MessageFailure``.
 - ``next.W145`` reports an action that opts in to the WebSocket tunnel while messages are stored in a cookie.
 - ``next.W146`` reports an explicit ``WebSocketApp`` origin that ``CSRF_TRUSTED_ORIGINS`` does not cover, whose tunneled posts fail the CSRF check.
+- ``next.E159``, ``next.E160``, ``next.E162`` to ``next.E166``, ``next.W127``, ``next.W129``, ``next.W130``, ``next.W131``, and ``next.W150`` report access declarations that guard nothing, name no permission, or contradict the login default, see :ref:`ref-system-checks`.
 
 Run them with ``uv run python manage.py check``.
 

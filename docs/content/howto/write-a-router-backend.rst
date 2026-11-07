@@ -22,37 +22,9 @@ Walkthrough
 Subclass FileRouterBackend
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``RouterBackend`` is the abstract base.
-Its one abstract method is ``generate_urls``, which returns the patterns the backend contributes to the project URLconf.
-It also carries ``page_roots``, which reports the page trees the system checks walk as ``PageRoot`` entries, each pairing a directory with the label the reports name it by.
-Implement ``page_roots`` when the backend has page trees.
-Give each ``PageRoot`` a ``key``, because the co-located ``layout`` and ``template`` assets of a tree without one are not served and ``next.W132`` warns about it, see :ref:`topics-static-name-resolution-colocated`.
-The base returns an empty list, so a backend that does not implement it is not checked and not watched, which is the right answer for a backend routing from a database or another source that is no tree on disk.
-
-A subclass of ``FileRouterBackend`` inherits the file router's own implementation and is checked as it stands.
-Report only trees the backend actually serves from, because the same list is what the development watcher observes, and a tree missing from it is neither checked nor reloaded.
-``components_folder_name`` completes that pair by naming the folder the backend registers components from while it walks, ``None`` for a backend that registers none.
-``skip_dir_names`` names the directories the backend's own walk refuses to enter, an empty set for a backend that refuses none.
-
-The checks walk the reported trees themselves rather than asking the backend to walk them, so ``page_roots`` is the whole contract for being checked.
-A backend that reports a tree is reached by every page check, from the structural ones to the partial zone checks and ``next.E017``.
-The names that walk refuses to enter are the folder ``components_folder_name`` returns plus the names ``skip_dir_names`` returns.
-Both come from the backend under check rather than from the settings, so one entry's ``DIRS`` never blinds the checks to another entry's trees.
-``FileRouterBackend`` answers with the skip set it built from its own ``DIRS``, the entries that name no existing directory.
-
-``page_roots`` and ``components_folder_name`` are read on the ``runserver``, ``collectstatic``, and staticfiles paths.
-An override that reaches a database or a network is therefore called where an outage must not stop the process.
-The framework guards every such read, and it guards the value as well as the call.
-A backend that raises, or that answers something other than ``PageRoot`` entries, contributes no tree for that call instead of reaching a caller that dereferences it, and one that names its components folder as anything but a string contributes no component glob.
-The ``scripts.py`` and SEO source discovery a request runs reads ``page_roots`` inside ``FailureLog.guard`` instead, so a failure there costs that backend its trees under :ref:`topics-failure-containment`.
-
-``skip_dir_names`` is guarded the same way, and a backend that raises there or answers anything but a collection of names refuses no directory to the check walk.
-These paths run per reloader tick and per static lookup, so the failure is logged at the FailureLog rate, a backend that raised with its traceback and one that answered the wrong type by that type, see :ref:`topics-failure-containment`.
-``manage.py check`` reports the same failure once as ``next.E030``, with the traceback, which is where a human is reading output on purpose.
-``next.E030`` covers the report itself, a ``page_roots`` that raises or answers something other than ``PageRoot`` entries.
-A tree the backend reports successfully but the check walk then cannot read, an unreadable directory among them, is a separate report, ``next.E088``.
-An override that can fail slowly is still worth a cache of its own, because nothing upstream caches the answer for it.
-``FileRouterBackend`` already implements filesystem discovery, so subclass it and extend ``generate_urls`` rather than starting from the bare base.
+``RouterBackend`` is the abstract base, and its one abstract method is ``generate_urls``.
+Subclass ``FileRouterBackend`` and extend ``generate_urls``.
+The page-tree hooks ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` keep their file-router answers, see :ref:`internals-url-router`.
 
 .. code-block:: python
    :caption: wiki/backends.py

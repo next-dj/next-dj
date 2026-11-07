@@ -37,7 +37,7 @@ Register the kind.
            )
 
 See :doc:`/content/topics/static-assets/asset-kinds` for the ``register`` signature.
-The ``module`` style ``render_module_tag`` is reused here because pre compiled JSX ships as ES modules.
+The ``module`` style ``render_module_tag`` is reused here because precompiled JSX ships as ES modules.
 
 Ship the file.
 
@@ -72,8 +72,9 @@ When the new kind needs a tag shape that the bundled methods do not produce, add
            return f'<script type="text/babel" src="{escape(url)}"{nonce_attr(nonce)}></script>'
 
 A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
-The injector calls every renderer with ``request`` and ``nonce`` keywords, and ``nonce_attr(nonce)`` writes the CSP nonce of the request, or nothing without one.
-A renderer that leaves either keyword out raises ``TypeError`` on every page holding such an asset, and ``manage.py check`` reports it as an error before the first render.
+The injector always passes ``request`` and passes ``nonce`` whenever the request carries a CSP nonce, and ``nonce_attr(nonce)`` writes the nonce, or nothing without one.
+A renderer without ``request`` fails every page holding the asset, and one without ``nonce`` fails every page that carries a nonce.
+``next.E147`` reports both before the first render.
 
 Register the kind against the new method and register the backend.
 Replace the ``ready`` registration from the walkthrough with this one, keeping a single registration per kind.

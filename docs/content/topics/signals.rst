@@ -5,7 +5,7 @@ Signals
 
 next.dj emits :doc:`Django signals <django:topics/signals>` from every subsystem.
 A signal is the right integration point when external code needs to react to a framework event without subclassing or monkey patching.
-This page lists every signal, its payload, and the typical patterns for receiver functions.
+This page lists every signal and the moment it fires, and shows the patterns for receiver functions, with the payload of each in :doc:`/content/ref/signals`.
 
 .. contents::
    :local:
@@ -278,6 +278,7 @@ A receiver is an observation point, and its failure should cost an observation r
 A settings reload has to reach every manager that cached something from ``NEXT_FRAMEWORK``, and leaving the managers behind a failed receiver holding stale state would be worse than the error itself.
 The two stream signals go through ``Signal.send_robust``, or ``Signal.asend_robust`` on an asynchronous stream, and Django logs a raising receiver and drops its error, so an observer never ends the stream it watches.
 The five realtime signals go out with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop, and a raising receiver is logged on the ``next.realtime.signals`` logger while the publication, the upstream event, or the stream goes on.
+From an event loop, and from ``apublish`` for ``message_published``, their synchronous receivers run on the shared thread pool wrapped in ``close_old_connections``, so a receiver that queries the database never holds a connection past its call.
 
 Disconnecting
 ~~~~~~~~~~~~~
@@ -334,11 +335,6 @@ Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwar
 
 See :doc:`/content/topics/testing` for the full testing surface.
 
-Common patterns
----------------
-
-:doc:`/content/howto/observe-framework-signals` walks through the audit trail, cache invalidation, hot reload, and observability patterns with production-sized receiver code.
-
 See also
 --------
 
@@ -347,5 +343,5 @@ See also
    :doc:`/content/topics/forms/signals` for the forms-specific signals.
    :doc:`/content/topics/static-assets/signals` for the static-specific signals.
    :doc:`/content/topics/testing` for ``SignalRecorder`` and other helpers.
-   :doc:`/content/howto/observe-framework-signals` for production sized receivers.
+   :doc:`/content/howto/observe-framework-signals` for metrics, backend inventory, vendor-origin audit, and cache invalidation on a settings reload, with production sized receiver code.
    :doc:`/content/ref/signals` for the public API.

@@ -39,6 +39,7 @@ Backends
 A backend takes its ``SITEMAP_BACKENDS`` entry, keeps ``OPTIONS`` as ``options``, and answers fresh Django sitemaps keyed by section name from ``sections(request)``, the request ``None`` for a check.
 ``serves()`` routes ``/sitemap.xml`` while any backend answers true, and ``cache_control()`` names the cache the sitemap views carry as a ``next.pages.CacheControl``, or ``None``.
 ``serves()`` runs while URLs resolve, outside any view, so one that raises, ``Http404`` included, counts as serving, and ``sections()`` raising answers 503 through the route, see :ref:`topics-failure-containment`.
+
 ``backend_path`` answers the dotted path of a backend class.
 ``shortest_cache`` combines the cache of several backends, one that forbids storing winning, then the shortest age.
 ``PageTreeSitemapBackend`` answers one section per page tree with a ``sitemap.py``, plus one per ``section=`` its items name.

@@ -174,18 +174,18 @@ Repository wide layout
 Put a single layout in ``_shared/chrome/`` and add the path to the ``PAGE_BACKENDS`` ``DIRS`` of every project.
 Every project then renders inside the same shell.
 
-Per tenant project
-~~~~~~~~~~~~~~~~~~
+.. code-block:: python
+   :caption: settings.py
 
-Run one project per tenant from the same repository.
-Each project ships its own settings, chrome, and applications.
-The shared components folder keeps the design consistent across tenants.
-
-Domain specific components
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Add a ``_internal/`` shared folder for components that should only be visible to a subset of projects.
-Reference it from the appropriate projects through ``DIRS``.
+   NEXT_FRAMEWORK = {
+       "PAGE_BACKENDS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [str(SHARED_DIR / "chrome")],
+               "APP_DIRS": True,
+           }
+       ],
+   }
 
 See also
 --------

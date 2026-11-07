@@ -62,8 +62,8 @@ The value is a dotted path string, not a class object.
 The settings merge keeps only a string or ``None`` under this key, so a class object assigned directly is dropped and the default JSON serializer stays in place with no error at import time.
 
 The class is resolved at render time rather than at startup, and under the default ``AUTO`` injection policy every rendered page resolves it, whether or not the page publishes a ``serialize=True`` value.
-A bad value therefore breaks every page, not only the pages that expose context.
-A path that cannot be imported raises ``ImportError``, and a class whose instance has no ``dumps(value) -> str`` method raises ``TypeError``.
+Outside ``DEBUG`` and ``STRICT_LOADING`` a value that cannot serve gives way to the JSON serializer with a logged error and a degraded render.
+Under ``DEBUG`` the ``ImportError`` of an unimportable path or the ``TypeError`` of a class without a ``dumps(value) -> str`` method reaches the page.
 
 Run ``uv run python manage.py check`` before deploying.
 Five warnings split the failures, ``next.W042`` for a value that is not a dotted-path string, ``next.W079`` for a path that cannot be imported, ``next.W080`` for a path that imports into something other than a class, ``next.W081`` for a class that refuses to instantiate with no arguments, and ``next.W082`` for an instance without a ``dumps`` method.

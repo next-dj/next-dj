@@ -55,7 +55,8 @@ An anonymous request for any page is redirected to ``LOGIN_URL`` with the full p
 A zone request travels the URL of its page, so it meets the same redirect, and the client runtime follows it with a full navigation.
 Under the key alone a view of the project closes with :func:`~django.contrib.auth.decorators.login_required` on the view, see :ref:`topics-access-default-login`.
 
-The action endpoint ``/_next/form/<uid>/``, the CSRF endpoint ``/_next/csrf/``, ``sitemap.xml``, and ``robots.txt`` stay open to the middleware, and an action is still closed, because the dispatcher requires a login for an action unless the rule of the page of its directory is public and its origin is public too.
+The action endpoint ``/_next/form/<uid>/``, the CSRF endpoint ``/_next/csrf/``, ``sitemap.xml``, and ``robots.txt`` are exempt from the middleware.
+An action still asks a login, because the dispatcher requires one unless both the page of the action's directory and the origin page are public.
 
 Open the public pages
 ~~~~~~~~~~~~~~~~~~~~~

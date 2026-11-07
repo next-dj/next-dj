@@ -17,6 +17,7 @@ It keeps the answer on the request, and without a declared ``URL`` and without a
 ``site_url(request=None)`` answers the declared origin alone, the literal ``URL`` or what a callable ``URL`` answers for the request, and ``None`` without one or when the callable answers ``None``.
 A callable ``URL`` is called once per request.
 One that raises keeps its own exception and one that answers no origin raises ``ImproperlyConfigured``, both contained as :ref:`topics-failure-containment` states, and ``site_url_failed(request)`` then answers true so the SEO routes answer 503.
+
 ``url_origin(value)`` is the one validation both read, an ``http`` or ``https`` URL with a host and no path, query, or fragment, and ``url_rule(value)`` the reading of a setting value the runtime and ``check_site_settings`` share.
 ``site_indexable(request=None)`` answers whether search engines may index the site for the request, ``"auto"`` reading ``DEBUG`` on every call, a bool standing as it is, and a callable receiving the request or ``None``, one that raises answering false.
 ``debug_closed()`` answers whether only ``DEBUG`` closes the site under ``"auto"``, the case where the sitemap and the robots file are still served under ``noindex`` for a preview, and ``site_closed_to_crawlers(request)`` whether the SEO routes serve the closed documents.
@@ -44,7 +45,8 @@ The page responses, the zone responses, and the SEO routes are stamped this way.
 Checks
 ~~~~~~
 
-``check_site_settings`` reports an unusable ``SITE`` value, a ``URL`` with a path among them, a callable ``URL`` or ``INDEXABLE`` whose signature takes no request alone, and an unknown key, and it never calls either callable.
+``check_site_settings`` reports an unusable ``SITE`` value, such as a ``URL`` with a path, and a callable ``URL`` or ``INDEXABLE`` that cannot take the request as its one positional argument, and it reports an unknown key.
+It never calls either callable.
 ``check_site_url_for_deploy`` carries ``deploy=True`` and the ``seo`` tag and reports a missing ``URL`` unless ``SITE_ID`` pins a ``django.contrib.sites`` row, more sharply under ``ALLOWED_HOSTS = ["*"]``.
 The check on a closed site that still publishes a sitemap or a robots source lives in ``next.seo.checks``, see :doc:`seo`.
 The checks register through ``next.checks``, since ``next.pages`` imports ``next.site`` early, and :doc:`system-checks` lists their codes.
@@ -58,5 +60,4 @@ See also
 .. seealso::
 
    :doc:`/content/topics/seo/site` for the site scope.
-   :doc:`csrf` for the CSRF delivery.
    :doc:`settings` for ``SITE``.

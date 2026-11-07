@@ -17,7 +17,7 @@ Connect plain receivers in the ``signals.py`` of an app and forward each payload
 This is the production counterpart of ``SignalRecorder``, which captures the same signals inside tests.
 
 This page stays task focused.
-Use :doc:`/content/topics/signals` when you need the full catalog with payload tables, import paths, and testing notes.
+Use :doc:`/content/topics/signals` for the full catalog and the failure contract, and :doc:`/content/ref/signals` for payloads.
 
 Walkthrough
 -----------
@@ -82,6 +82,7 @@ The keyword names are fixed by the framework.
 ``page_rendered`` carries ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, and ``context_keys``.
 ``action_dispatched`` carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 ``form_validation_failed`` carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
+
 ``form_access_denied`` carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
 It fires when the origin page or a dynamic permission hook denies a request, never on the static ``ActionGuard`` path, which makes it the signal to audit refused form submissions.
 See :ref:`topics-forms-signals-form-access-denied` for the full contract.
@@ -205,6 +206,8 @@ The sender is the resolved backend class rather than the manager, so ``sender=``
    from next.components import FileComponentsBackend
    from next.signals import component_backend_loaded
 
+   from .metrics import incr
+
    @receiver(component_backend_loaded, sender=FileComponentsBackend)
    def on_default_components_backend(**kwargs) -> None:
        incr("backends.components", "default")
@@ -274,7 +277,7 @@ The first error reaches the caller that asked for the reload once the whole chai
 Connect receivers at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``next`` application imports ``obs/signals.py`` at startup, so the ``@receiver`` decorators run once with no ``AppConfig.ready`` code, see :doc:`/content/ref/settings`.
+The ``next`` application imports ``obs/signals.py`` at startup, so the ``@receiver`` decorators run once with no ``AppConfig.ready`` code, see :doc:`/content/ref/apps`.
 
 Verification
 ------------

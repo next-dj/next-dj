@@ -3,7 +3,8 @@
 SEO quickstart
 ==============
 
-This page wires a site up from scratch, the settings, the head tag, a title per page, a sitemap, and a robots file, and every step links the topic that covers it in depth.
+This page wires a site up from scratch in five steps, and every step links the topic that covers it in depth.
+The steps name the site, render the head, title a page, publish a sitemap, and add a robots file.
 
 .. contents::
    :local:
@@ -38,9 +39,7 @@ See :doc:`site` for the ``SITE`` scope.
 
 .. note::
 
-   Open Graph tags render only when some layer declares an ``og`` block, even an empty one.
-   The ``og`` block in ``DEFAULTS`` above is what turns them on for the whole site, deriving ``og:title``, ``og:description``, and ``og:url`` from the rest of the head.
-   Without it a page gets a title and a description and no social card.
+   Open Graph tags render only when some layer declares an ``og`` block, even an empty one, which is why ``DEFAULTS`` carries it here, see :doc:`social-and-canonical`.
 
 Render the head
 ---------------
@@ -57,6 +56,7 @@ The tag is a builtin, so no ``{% load %}`` is needed.
        <meta charset="utf-8">
        {% metadata %}
        {% collect_styles %}
+       {% collect_head %}
      </head>
      <body>
        {% template %}
@@ -157,7 +157,7 @@ A ``robots.py`` beside it serves ``/robots.txt``.
 
 The file answers the group and a ``Sitemap:`` line naming ``https://notes.example/sitemap.xml``.
 An empty ``robots.py`` answers ``User-agent: *`` with an empty ``Disallow:``, which allows everything.
-Keep a page out of the index with ``"robots": {"index": False}`` in its metadata rather than a ``Disallow``, since a crawler that never fetches the page never reads its ``noindex``, see :doc:`robots`.
+Keep a page out of the index with ``"robots": {"index": False}`` in its metadata rather than a ``Disallow``, see :doc:`robots`.
 
 Both routes join ``include("next.urls")`` on their own.
 A router mounted under a prefix or inside :func:`~django.conf.urls.i18n.i18n_patterns` needs ``include("next.seo.urls")`` at the root of the URLconf, see :ref:`topics-seo-host-root`.

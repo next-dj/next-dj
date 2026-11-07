@@ -55,7 +55,7 @@ Mount the API above ``include("next.urls")`` in ``config/urls.py`` and the API p
        path("", include("next.urls")),
    ]
 
-next.dj contributes no middleware, no authentication layer, and no renderer, so the DRF request cycle is untouched.
+next.dj adds no middleware to the request cycle unless the project lists one of its two optional classes, no authentication layer, and no renderer, so the DRF request cycle is untouched.
 The framework registers its template tags as Django builtins, which changes nothing for the browsable API because those templates never call them.
 
 JSON APIs for mobile clients and third-party consumers are out of scope for next.dj.
@@ -86,14 +86,14 @@ Reconstruct the query string from the validated fields instead.
    from django.urls import reverse
 
    from next.forms import CharField, Form
+   from next.urls import with_query
 
    class SearchForm(Form):
        q = CharField(required=False)
 
        def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
            q = self.cleaned_data.get("q", "")
-           base = reverse("next:page_")
-           return HttpResponseRedirect(f"{base}?q={q}" if q else base)
+           return HttpResponseRedirect(with_query(reverse("next:page_"), q=q or None))
 
 The form registers as ``search_form`` automatically.
 Use ``{% form "search_form" %}`` in the template.
@@ -104,7 +104,9 @@ The ``DQuery`` marker then reads every filter from the query string on the GET r
 Can a form action return a custom HTTP status code
 --------------------------------------------------
 
-Return any ``HttpResponseBase`` subclass.
+Return an ``HttpResponse`` or a subclass of it.
+A string becomes the body, a model instance with ``get_absolute_url`` becomes a redirect, and ``None`` re-renders the origin page.
+A streaming or file response is not accepted.
 
 .. code-block:: python
    :caption: notes/forms.py

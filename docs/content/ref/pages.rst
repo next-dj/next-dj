@@ -258,63 +258,14 @@ System checks
 
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``.
-The package splits by subject into ``access``, ``branches``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, and ``zones``, and importing the package registers every one of them.
-``metadata`` is a package of its own, ``scope``, ``titles``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
+The package splits by subject into ``access``, ``branches``, ``composed``, ``contexts``, ``groups``, ``intercepts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``walk``, and ``zones``, and importing the package registers every one of them.
+``metadata`` is a package of its own, ``scope``, ``titles``, ``crumbs``, ``shape``, ``head``, ``ld``, ``links``, ``pages``, and ``templates``, and ``responses`` owns the ``cache``, ``headers``, ``CSRF_DELIVERY``, and ``CSRF_USE_SESSIONS`` checks, see :doc:`system-checks` for the codes each one owns.
 ``access`` owns the checks of the access declarations, ``next.E163`` and ``next.E164``, while ``next.E162`` for an ``obj=DObject[Model]`` lives with the ``DObject`` checks in ``next.deps.checks``.
 Its ``passes_down(file_path)`` tells whether a ``page.py`` passes access with ``inherit=True`` or context with ``inherit_context=True`` to the pages below, and ``declares_for_itself(file_path)`` whether it declares access only a page of its own would take.
 ``modules`` builds on them with ``load_page(file_path)``, one load of a ``page.py`` and whether it routes, which every body check reads instead of loading the file again.
 Its ``faulty(file_path, loaded)`` tells whether ``next.E012``, ``next.E013``, or ``next.E166`` names a ``page.py``, so ``next.W128`` leaves to that error the branch it names and still reports every other empty branch around it.
 ``next.E012``, ``next.E166``, and ``next.W128`` read the directories that declare actions through the one ``ActionOwners`` port of :doc:`ports`.
 ``branches`` finds the directories with no page and no action for ``next.W128``, which ``next.forms.checks.actions`` registers, since only the forms area knows the actions.
-
-The package exports forty-six check callables.
-
-- ``check_conditional_get_order``.
-- ``check_context_functions``.
-- ``check_context_processor_signature``.
-- ``check_context_reads_foreign_zone``.
-- ``check_context_registration_files``.
-- ``check_csrf_delivery``.
-- ``check_csrf_endpoint_reversible``.
-- ``check_csrf_in_session``.
-- ``check_declaring_modules``.
-- ``check_intercept_default_login``.
-- ``check_intercept_inert_declarations``.
-- ``check_intercept_layouts``.
-- ``check_intercept_render``.
-- ``check_intercept_scope``.
-- ``check_intercept_targets``.
-- ``check_intercept_url_kwargs``.
-- ``check_layout_templates``.
-- ``check_metadata_callable_returns_mapping``.
-- ``check_metadata_enum_values``.
-- ``check_metadata_head_literals``.
-- ``check_metadata_head_tags``.
-- ``check_metadata_hreflang_patterns``.
-- ``check_metadata_jsonld``.
-- ``check_metadata_noindex_canonical``.
-- ``check_metadata_parent_parameter``.
-- ``check_metadata_registration_files``.
-- ``check_metadata_settings_scope``.
-- ``check_metadata_social_folds``.
-- ``check_metadata_tag_rendered``.
-- ``check_metadata_title_templates``.
-- ``check_nested_intercepts``.
-- ``check_page_functions``.
-- ``check_page_metadata_shape``.
-- ``check_page_module_imports``.
-- ``check_page_response_declarations``.
-- ``check_pages_structure``.
-- ``check_parenthesised_directory_names``.
-- ``check_pointless_route_groups``.
-- ``check_public_beside_requirements``.
-- ``check_request_in_context``.
-- ``check_root_marker_outside_layouts``.
-- ``check_route_group_breadcrumbs``.
-- ``check_shared_page_responses``.
-- ``check_single_keyless_context``.
-- ``check_template_loaders``.
-- ``check_unrouted_working_directory_pages``.
 
 See :doc:`system-checks` for each check identifier, its condition, and the full autodoc of ``next.pages.checks``.
 

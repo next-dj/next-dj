@@ -153,6 +153,7 @@ Two context functions can mark the same key for serialisation.
 The collector resolves the conflict through a JS context policy.
 
 The framework ships four policies in ``next.static.collector``.
+Without ``JS_CONTEXT_POLICY`` the collector uses ``FirstWinsPolicy``.
 
 ``FirstWinsPolicy``.
    Keeps the first value, ignores later ones.
@@ -369,7 +370,7 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
        The script builder stays available for custom emission.
      - Pages where you control placement of the script tags in a layout template.
 
-The runtime rides the ``scripts`` slot, so a layout without ``{% collect_scripts %}`` gets no ``next.min.js`` and no ``window.Next`` even under ``AUTO``, while the preload hint is still injected and points at a script the page never loads.
+The runtime rides the ``scripts`` slot, so a layout without ``{% collect_scripts %}`` gets no ``next.min.js`` and no ``window.Next`` even under ``AUTO``.
 The preload hint needs a ``</head>`` and the ``{% collect_scripts %}`` placeholder the runtime loads from, and a page without either carries none.
 The hint is inserted before the first ``</head>`` in the document.
 
@@ -385,9 +386,10 @@ Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"manual"``.
 The key also accepts a ``ScriptInjectionPolicy`` member directly, so a settings module may import the enum from ``next.static`` instead of spelling the string.
 
-Any other value raises ``ValueError`` from the script builder.
-``next.E076`` reports a ``NEXT_JS_OPTIONS`` that is not a dict, but no check reads the keys inside it, and the builder is created on the first injection, so a bad ``policy`` surfaces as a render-time error on every page rather than at ``manage.py check``.
-Verify the value by loading one page after the change.
+A value that names no policy is reported by ``next.E130`` at ``manage.py check``.
+A render outside ``DEBUG`` and ``STRICT_LOADING`` logs the cause and injects the runtime as under ``auto``.
+``DEBUG`` and ``STRICT_LOADING`` raise the ``ValueError`` of the builder instead.
+``next.E076`` reports a ``NEXT_JS_OPTIONS`` that is not a dict, and ``next.E139`` reports a tag template that ``str.format`` cannot fill.
 
 .. warning::
 

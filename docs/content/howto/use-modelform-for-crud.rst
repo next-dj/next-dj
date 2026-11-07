@@ -93,10 +93,8 @@ Both classes live outside ``page.py``, so they register with shared scope and au
        def get_form_kwargs(cls, note: DObject[Note]) -> dict[str, Any]:
            return {"instance": note}
 
-``get_form_kwargs`` returns the keyword arguments of the form constructor, and the dispatcher adds the posted data and files itself.
-The default ``on_valid`` calls ``self.save()`` and redirects to the origin page, so the create form inserts a row that already carries its owner and the edit form updates the row it loaded.
-``Meta.success_url`` redirects the successful submission to another page instead, and ``Meta.success_message`` flashes a message, see :ref:`topics-forms-actions-success`.
-See :ref:`topics-forms-actions-form-kwargs` for the hook contract.
+The default ``on_valid`` saves the instance and redirects to the origin page.
+See :ref:`topics-forms-actions-form-kwargs` for the ``get_form_kwargs`` contract and :ref:`topics-forms-actions-success` for ``Meta.success_url`` and ``Meta.success_message``.
 
 ``Note(owner=scope)`` accepts only a signed-in user, so the pages that render these forms sit behind a login, see :doc:`require-login-on-pages`.
 ``Meta.login_required`` guards the action endpoint, which lies outside the page URL space.

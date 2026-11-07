@@ -78,7 +78,6 @@ The usual multi-process commands all need the shared broker.
    uv run gunicorn config.wsgi:application --workers 4
 
 The first two serve ASGI, with WebSocket and async SSE streams.
-``uvicorn_worker.UvicornWorker`` comes from the ``uvicorn-worker`` package, which replaces the deprecated ``uvicorn.workers`` module.
 The third serves WSGI with gunicorn sync workers, where SSE is the only transport and each open stream holds one worker, or one thread under ``--threads``, for its whole lifetime, see :ref:`deployment-wsgi-asgi`.
 The worker counts are placeholders to size from a load run, see :ref:`deployment-capacity`.
 

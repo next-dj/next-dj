@@ -33,12 +33,6 @@ Define the row form and the formset.
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
 
-``abstract = True`` matters here.
-Without it, subclassing ``ModelForm`` would register ``NoteRowForm`` as the standalone action ``note_row_form`` through ``__init_subclass__``.
-That is a live endpoint that saves a single row through the default ``on_valid``, even though only the formset action is intended.
-The flag suppresses that registration, and ``formset_factory`` still builds the formset from the abstract class as usual.
-See :ref:`Preventing registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
-
 Register the action.
 
 .. code-block:: python
@@ -61,11 +55,8 @@ Register the action.
                row.save()
        return redirect_to_origin(request)
 
-Passing a formset class directly to ``@action``'s ``form_class`` is accepted at decoration time but fails at request time.
-The dispatcher calls ``get_initial`` on a directly passed class, and Django formset classes have none.
-Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
-The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
-A formset has no ``get_initial``, so the ``init_kwargs`` must be non-empty even if they only set the ``prefix``.
+Mark the row form ``abstract`` so it registers no action of its own, and register the formset through a factory that returns a non-empty ``(FormSetClass, init_kwargs)`` tuple.
+:doc:`/content/topics/forms/formsets` explains both rules.
 
 ``redirect_to_origin`` reads the posted origin path, so a successful submission lands back on the bulk page.
 
@@ -93,10 +84,7 @@ Always render ``{{ form.management_form }}`` before the row loop.
 Clean up empty rows
 -------------------
 
-A formset with ``extra=3`` ships three blank rows.
-Field-level initials, declared on the row form or inherited from model field defaults, pre-populate those blank rows.
-An untouched pre-filled row no longer looks empty to Django, so it validates as a partial submission and triggers errors.
-Use ``cleanup_extra_initial`` to clear initial values from blank extra rows before the formset is rendered.
+Use ``cleanup_extra_initial`` to clear initial values from blank extra rows before the formset is rendered, see :doc:`/content/topics/forms/formsets`.
 
 .. code-block:: python
    :caption: notes/pages/notes/bulk/page.py

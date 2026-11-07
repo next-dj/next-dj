@@ -20,7 +20,7 @@ Public API
 Pytest plugin
 ~~~~~~~~~~~~~
 
-``next.testing.plugin`` registers the ``next_pages``, ``next_components``, and ``next_clear_cache`` ini options together with the ``next_client`` fixture, once a project adds ``-p next.testing.plugin`` to its pytest ``addopts``.
+``next.testing.plugin`` registers the ``next_pages``, ``next_components``, and ``next_clear_cache`` ini options and three fixtures, the autouse ``next_pages`` and ``next_cache_isolation`` and ``next_client``, once a project adds ``-p next.testing.plugin`` to its pytest ``addopts``.
 
 .. automodule:: next.testing.plugin
    :members:
@@ -114,9 +114,11 @@ Metadata and SEO
 ``None`` expects a tag to be absent, ``og`` and ``twitter`` take a dict of property suffixes, and ``jsonld`` lists every node, the members of the ``@graph`` flattened in.
 ``og=None`` and ``twitter=None`` expect no tag of that block at all.
 An unknown key raises ``TypeError``, and every mismatch is reported in one ``AssertionError``.
+
 The head is read by ``head_tags(html)`` of ``next.testing.metadata`` into a ``HeadTags`` value, and parsing stops at ``</head>``, so a tag in the body never counts.
 The read is strict, so a single-valued tag rendered twice, a second ``<title>`` or canonical link among them, and a JSON-LD script that holds no JSON raise ``HeadParseError``, a ``ValueError``, rather than reading the first value.
 A response is decoded with its own charset and a streaming one is read to its end, the same way ``parse_sitemap`` reads one.
+
 ``parse_sitemap`` answers the ``SitemapUrl`` values of a sitemap or an index response, each with ``loc``, ``lastmod``, and ``alternates``, both exported from ``next.testing``.
 A body that is no well-formed XML raises ``xml.etree.ElementTree.ParseError``, so a malformed sitemap fails the test rather than reading as empty.
 A robots file is plain text, so a test reads ``response.content`` directly.
@@ -146,6 +148,7 @@ A direct ``broker.publish()`` does not send the signal and stays invisible to it
 ``SseReader(response)`` parses the body of a ``TopicStream`` or any streaming SSE response into ``SseEvent`` values with ``event``, ``data``, ``id``, and ``json()``.
 It iterates with ``for`` and ``next`` over a WSGI response and with ``async for`` and ``anext`` over an ASGI one.
 Heartbeat comments, ``retry:`` lines, and blocks without ``data`` are not events, and the last ``retry:`` value is ``SseReader.retry``.
+
 ``close()`` and ``aclose()`` end the stream the way a disconnecting browser does, so the broker subscription is released and ``stream_unsubscribed`` goes out with the reason ``client``.
 ``aclose()`` on a response that was never read starts nothing and sends no signal, and a cancellation of the caller propagates out of it.
 The reader is a context manager of both kinds.
@@ -177,9 +180,11 @@ The ``timeout`` in seconds belongs to the constructor and bounds every receive a
 ``subscribe(ticket, last_seq=None)`` sends the ``sub`` frame of a ``SocketTicket`` and returns the ``hello`` frame as a dict.
 ``send_up(topic, name, data=None)`` sends an ``up`` event with a fresh id and returns ``None`` once the handler ran, or the ``UpstreamError`` its ``ack`` names.
 An ``ack`` that names no known error raises ``AssertionError``.
+
 ``request(method, path, *, headers=None, body="")`` tunnels one HTTP request over the socket and returns a ``Reply`` with ``status``, ``headers``, and ``body``, or a ``Refusal``.
 Frames that arrive while a call waits for its own answer are held and handed out by the next ``receive_json_from``, so a ``patches`` frame published before the ``hello`` is not lost.
 A close that arrives during such a wait is held too, a failed call leaves it for ``receive_close()``, and a repeated wait fails at once instead of timing out.
+
 ``disconnect(code=1000)`` closes the socket and waits for the application to exit within the constructor ``timeout``.
 An application still running past it is cancelled, and ``disconnect()`` raises ``AssertionError``.
 An error the application exits with is raised from ``disconnect()``.
@@ -192,6 +197,7 @@ The returned ``SocketTicket`` holds the ``grant``, the ``session``, the ``cookie
 Its ``cookie`` property is the ready ``cookie`` header pair for the handshake.
 ``subscribe_frame()`` builds the ``sub`` frame.
 The ``credential`` is what a ``Handshake`` for the ticket carries.
+
 ``aissue_socket_ticket`` takes the same arguments and awaits the session work on a worker thread, so an async test issues a ticket inside its scenario without ``SynchronousOnlyOperation``, under ``django_db(transaction=True)`` as the socket itself needs.
 Under the default binding the credential is the session key, and under ``SignedCookieBinding`` it is the ``user:`` or ``visitor:`` credential of the binding.
 
