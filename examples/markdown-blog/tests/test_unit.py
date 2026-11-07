@@ -1,4 +1,4 @@
-import datetime
+import datetime as dt
 from pathlib import Path
 
 import pytest
@@ -49,18 +49,18 @@ class TestParsePost:
             slug="my-post",
             title="Something",
             author="Ada",
-            published=datetime.date(2026, 1, 2),
-            updated=datetime.date(2026, 2, 3),
+            published=dt.date(2026, 1, 2),
+            updated=dt.date(2026, 2, 3),
             description="Said plainly.",
             keywords=("one", "two", "three"),
             body="body text",
         )
-        assert post.modified == datetime.date(2026, 2, 3)
+        assert post.modified == dt.date(2026, 2, 3)
 
     def test_an_unedited_post_was_modified_when_published(self) -> None:
         post = parse_post("p", FRONT + "text")
         assert post.updated is None
-        assert post.modified == datetime.date(2026, 1, 2)
+        assert post.modified == dt.date(2026, 1, 2)
         assert post.keywords == ()
 
     @pytest.mark.parametrize(

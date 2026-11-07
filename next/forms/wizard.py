@@ -1,6 +1,6 @@
 """Declarative multi-step form wizard with a pluggable draft-storage backend."""
 
-import datetime
+import datetime as dt
 import hashlib
 import types
 from abc import ABC, abstractmethod
@@ -150,17 +150,17 @@ class CacheFormWizardBackend(FormWizardBackend):
 _CODEC_KEY: Final[str] = "__next_wizard__"
 
 _SCALAR_ENCODERS: Final[tuple[tuple[type, str, Callable[[Any], str]], ...]] = (
-    (datetime.datetime, "datetime", datetime.datetime.isoformat),
-    (datetime.date, "date", datetime.date.isoformat),
-    (datetime.time, "time", datetime.time.isoformat),
+    (dt.datetime, "datetime", dt.datetime.isoformat),
+    (dt.date, "date", dt.date.isoformat),
+    (dt.time, "time", dt.time.isoformat),
     (Decimal, "decimal", str),
     (UUID, "uuid", str),
 )
 
 _SCALAR_DECODERS: Final[dict[str, Callable[[str], object]]] = {
-    "datetime": datetime.datetime.fromisoformat,
-    "date": datetime.date.fromisoformat,
-    "time": datetime.time.fromisoformat,
+    "datetime": dt.datetime.fromisoformat,
+    "date": dt.date.fromisoformat,
+    "time": dt.time.fromisoformat,
     "decimal": Decimal,
     "uuid": UUID,
 }

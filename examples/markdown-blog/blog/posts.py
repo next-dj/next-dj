@@ -1,4 +1,4 @@
-import datetime
+import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,14 +26,14 @@ class Post:
     slug: str
     title: str
     author: str
-    published: datetime.date
-    updated: datetime.date | None
+    published: dt.date
+    updated: dt.date | None
     description: str
     keywords: tuple[str, ...]
     body: str
 
     @property
-    def modified(self) -> datetime.date:
+    def modified(self) -> dt.date:
         """Return the day of the last edit, the publication day for an unedited post."""
         return self.updated or self.published
 
@@ -85,8 +85,8 @@ def parse_post(slug: str, text: str) -> Post:
         slug=slug,
         title=fields["title"],
         author=fields["author"],
-        published=datetime.date.fromisoformat(fields["date"]),
-        updated=datetime.date.fromisoformat(updated) if updated else None,
+        published=dt.date.fromisoformat(fields["date"]),
+        updated=dt.date.fromisoformat(updated) if updated else None,
         description=fields.get("description") or excerpt(body),
         keywords=tuple(filter(None, keywords)),
         body=body.strip(),

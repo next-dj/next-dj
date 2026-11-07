@@ -1,4 +1,4 @@
-import datetime
+import datetime as dt
 
 from django.contrib.syndication.views import Feed
 from django.urls import reverse
@@ -40,9 +40,9 @@ class LatestPostsFeed(Feed):
         """Point an entry at its post."""
         return absolute_url(item.path)
 
-    def item_pubdate(self, item: Post) -> datetime.datetime:
+    def item_pubdate(self, item: Post) -> dt.datetime:
         """Date an entry at the start of the day its post came out."""
-        day = datetime.datetime.combine(item.published, datetime.time.min)
+        day = dt.datetime.combine(item.published, dt.time.min)
         return timezone.make_aware(day)
 
     def item_categories(self, item: Post) -> tuple[str, ...]:
