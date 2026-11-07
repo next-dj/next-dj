@@ -3,7 +3,7 @@ import gc
 
 import pytest
 
-from next.realtime.pool import HandlerPool, PooledSignal
+from next.realtime.pool import HandlerPool, Lease, PooledSignal
 from next.testing import capture_signals
 
 
@@ -66,6 +66,20 @@ def test_a_reset_pool_runs_on_fresh_threads_and_permits() -> None:
     pool.reset()
     assert pool.executor is not executor
     assert pool.permits is not permits
+
+
+def test_a_thread_given_back_on_the_loop_returns_to_its_lease() -> None:
+    pool = HandlerPool()
+    share = pool.share()
+    released: list[bool] = []
+    with Lease(share, lambda: released.append(True)):
+        thread = pool.claim()
+        assert share.busy == 1
+        thread.give()
+        assert share.busy == 0
+        assert released == []
+    assert released == [True]
+    assert pool.permits.acquire(blocking=False)
 
 
 @pytest.mark.parametrize(("workers", "limit"), [(1, 1), (2, 1), (9, 4)])

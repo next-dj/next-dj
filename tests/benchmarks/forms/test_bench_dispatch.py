@@ -151,7 +151,9 @@ class TestBenchDispatchEndToEnd:
         assert isinstance(response, HttpResponseRedirect)
 
     @pytest.mark.benchmark(group="forms.dispatch")
-    def test_dispatch_invalid_form(self, tmp_path: Path, benchmark) -> None:
+    def test_dispatch_invalid_form_rerenders_origin(
+        self, tmp_path: Path, benchmark
+    ) -> None:
         """Invalid submission, so validation_failed fires and the origin re-renders."""
         page_file = tmp_path / "page.py"
         page_file.write_text("")

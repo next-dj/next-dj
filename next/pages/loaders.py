@@ -128,6 +128,7 @@ class AncestorStamps:
     watched: bool
     generation: int = -1
     stamps: tuple[int | None, ...] = ()
+    settled: bool = True
 
     @classmethod
     def begin(cls, file_path: Path) -> AncestorStamps:
@@ -150,7 +151,10 @@ class AncestorStamps:
         if module_stamps(self.paths) != stamps:
             generation = -1
         modules = tuple(None if load is None else load.module for load in loads)
-        return replace(self, generation=generation, stamps=stamps), modules
+        settled = all(map(trusted, stamps))
+        return replace(
+            self, generation=generation, stamps=stamps, settled=settled
+        ), modules
 
     def revalidated(self) -> AncestorStamps | None:
         """Return the stamps while no ancestor has reloaded, otherwise `None`.
@@ -159,9 +163,9 @@ class AncestorStamps:
         """
         watched = template_edits_watched()
         if (
-            self.version != _version.value
+            not self.settled
+            or self.version != _version.value
             or self.watched is not watched
-            or not all(map(trusted, self.stamps))
         ):
             return None
         if watched:

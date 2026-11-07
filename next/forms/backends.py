@@ -1,10 +1,11 @@
 """Backend abstractions and in-memory registry for form actions."""
 
 import hashlib
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast, override
 from weakref import WeakSet
 
@@ -82,11 +83,10 @@ def _tree_relative_key(resolved: str) -> str | None:
     base_dir = resolve_base_dir()
     if base_dir is None:
         return None
-    root = Path(_resolved_path_str(str(base_dir)))
-    candidate = Path(resolved)
-    if not candidate.is_relative_to(root):
+    root = _resolved_path_str(str(base_dir)).rstrip(os.sep) + os.sep
+    if not resolved.startswith(root):
         return None
-    return f":{candidate.relative_to(root).as_posix()}"
+    return f":{PurePath(resolved[len(root) :]).as_posix()}"
 
 
 def _action_keys(file_path: str, scope: str) -> tuple[str, str]:

@@ -121,23 +121,21 @@ class Lease:
 class PoolThread:
     """A claimed handler pool thread, given back when the handler on it returns."""
 
-    __slots__ = ("_executor", "_lease", "_permits", "_running")
+    __slots__ = ("_executor", "_lease", "_permits")
 
     def __init__(
         self,
         executor: ThreadPoolExecutor,
         permits: threading.BoundedSemaphore,
         lease: Lease | None,
-        running: set[asyncio.Task[object]],
     ) -> None:
         """Hold a taken permit, the lease it counts against and the pool to run on."""
         self._executor = executor
         self._permits = permits
         self._lease = lease
-        self._running = running
 
     def give(self) -> None:
-        """Return the thread to the pool and to the lease."""
+        """Return the thread to the pool and to the lease, on the event loop."""
         self._permits.release()
         if self._lease is not None:
             self._lease.give()
@@ -147,19 +145,25 @@ class PoolThread:
 
         A sync-looking handler that returns an awaitable is awaited, so `ok` means done.
         """
-        task = asyncio.create_task(run_pooled(self._executor, handler, event))
-        self._running.add(task)
-        task.add_done_callback(self._returned)
-        outcome = await asyncio.shield(task)
+        loop = asyncio.get_running_loop()
+        outcome = await run_pooled(self._executor, self._call, loop, handler, event)
         if inspect.isawaitable(outcome):
             await outcome
 
-    def _returned(self, task: asyncio.Task[object]) -> None:
-        """Give the thread back once the handler returned and retrieve its outcome."""
-        self._running.discard(task)
-        self.give()
-        with suppress(asyncio.CancelledError):
-            task.exception()
+    def _call[T](
+        self, loop: asyncio.AbstractEventLoop, handler: Callable[[T], object], event: T
+    ) -> object:
+        """Call the handler on the pool thread and give the thread back as it exits.
+
+        The thread outlives a cancelled await, so the permit comes back from here.
+        """
+        try:
+            return handler(event)
+        finally:
+            self._permits.release()
+            if self._lease is not None:
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(self._lease.give)
 
 
 class HandlerPool:
@@ -168,14 +172,13 @@ class HandlerPool:
     A slow handler fills only these threads, and one connection only its share of them.
     """
 
-    __slots__ = ("_running", "executor", "permits", "workers")
+    __slots__ = ("executor", "permits", "workers")
     workers: int
     executor: ThreadPoolExecutor
     permits: threading.BoundedSemaphore
 
     def __init__(self) -> None:
         """Size the pool like Django's default executor."""
-        self._running: set[asyncio.Task[object]] = set()
         self.reset()
 
     def reset(self) -> None:
@@ -202,7 +205,7 @@ class HandlerPool:
         if lease is not None and not lease.take():
             permits.release()
             raise PoolFullError
-        return PoolThread(self.executor, permits, lease, self._running)
+        return PoolThread(self.executor, permits, lease)
 
 
 handler_pool = HandlerPool()
