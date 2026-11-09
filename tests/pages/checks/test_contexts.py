@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Literal
+from unittest.mock import patch
 
 import pytest
 
@@ -35,6 +36,15 @@ def _returns_literal() -> Literal["x"]:
     return "x"
 
 
+class _UnanswerableCheck(type):
+    def __subclasscheck__(cls, subclass) -> bool:
+        raise TypeError
+
+
+class _UnanswerableMapping(metaclass=_UnanswerableCheck):
+    pass
+
+
 class TestReturnAnnotationHelpers:
     """The return-shape probe both the context and the metadata checks share."""
 
@@ -51,6 +61,11 @@ class TestReturnAnnotationHelpers:
     )
     def test_the_mismatch_is_read_off_the_resolved_hint(self, func, expected) -> None:
         assert annotation_mismatch(func) == expected
+
+    def test_a_subclass_probe_that_raises_reads_as_a_mismatch(self) -> None:
+        # A third-party ABC hook may raise TypeError from inside issubclass.
+        with patch("next.pages.checks.contexts.Mapping", _UnanswerableMapping):
+            assert annotation_mismatch(_returns_dict) == "dict"
 
 
 class TestStrayContexts:

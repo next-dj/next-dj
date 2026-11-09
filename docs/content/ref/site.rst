@@ -14,12 +14,13 @@ Site
 
 ``site_origin(request)`` answers the ``(scheme, host)`` pair every absolute URL of a request is built on, the declared ``URL`` first, then the ``domain`` of the current ``Site`` row, then the ``Host`` of the request.
 It keeps the answer on the request, and without a declared ``URL`` and without a request it raises ``SiteOriginError``, a ``ValueError`` whose ``url`` names the URL that stayed relative when one did.
-``site_url(request=None)`` answers the declared origin alone, the literal ``URL`` or what a callable ``URL`` answers for the request, and ``None`` without one or when the callable answers ``None``.
+``site_url(request=None)`` answers the declared origin alone, the literal ``URL`` or what a callable ``URL`` answers for the request, and ``None`` without one, when the callable answers ``None``, or when it fails.
 A callable ``URL`` is called once per request.
-One that raises keeps its own exception and one that answers no origin raises ``ImproperlyConfigured``, both contained as :ref:`topics-failure-containment` states, and ``site_url_failed(request)`` then answers true so the SEO routes answer 503.
+Under ``DEBUG`` or ``STRICT_LOADING`` a callable that raises fails with its own exception and one that answers no origin with ``ImproperlyConfigured``, otherwise both are contained as :ref:`topics-failure-containment` states.
+``site_url_failed(request)`` then answers true, so ``/sitemap.xml`` and a ``robots.py`` answer 503 while a static ``robots.txt`` is still served.
+``url_origin(value)`` is the validation the runtime and ``check_site_settings`` share, an ``http`` or ``https`` URL with a host and no path, query, or fragment, and ``url_rule(value)`` reads a setting value the same way for both.
 
-``url_origin(value)`` is the one validation both read, an ``http`` or ``https`` URL with a host and no path, query, or fragment, and ``url_rule(value)`` the reading of a setting value the runtime and ``check_site_settings`` share.
-``site_indexable(request=None)`` answers whether search engines may index the site for the request, ``"auto"`` reading ``DEBUG`` on every call, a bool standing as it is, and a callable receiving the request or ``None``, one that raises answering false.
+``site_indexable(request=None)`` answers whether search engines may index the site for the request, ``"auto"`` reading ``DEBUG`` on every call, a bool standing as it is, and a callable receiving the request or ``None``, one that raises answering false outside ``DEBUG`` and ``STRICT_LOADING``, where it raises.
 ``debug_closed()`` answers whether only ``DEBUG`` closes the site under ``"auto"``, the case where the sitemap and the robots file are still served under ``noindex`` for a preview, and ``site_closed_to_crawlers(request)`` whether the SEO routes serve the closed documents.
 ``indexable_without_request()`` is the answer the system checks read, a callable rule never called and read as open.
 
@@ -49,7 +50,7 @@ Checks
 It never calls either callable.
 ``check_site_url_for_deploy`` carries ``deploy=True`` and the ``seo`` tag and reports a missing ``URL`` unless ``SITE_ID`` pins a ``django.contrib.sites`` row, more sharply under ``ALLOWED_HOSTS = ["*"]``.
 The check on a closed site that still publishes a sitemap or a robots source lives in ``next.seo.checks``, see :doc:`seo`.
-The checks register through ``next.checks``, since ``next.pages`` imports ``next.site`` early, and :doc:`system-checks` lists their codes.
+The checks register through ``next.checks.catalog``, since ``next.pages`` imports ``next.site`` early, and :doc:`system-checks` lists their codes.
 
 .. automodule:: next.site.checks
    :members:

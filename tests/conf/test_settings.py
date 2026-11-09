@@ -7,13 +7,11 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from next.checks import (
-    check_next_components_configuration,
-    check_next_framework_unknown_top_level_keys,
-    check_next_pages_configuration,
-)
+from next.components.checks import check_next_components_configuration
 from next.conf import NextFrameworkSettings, next_framework_settings
+from next.conf.checks import check_next_framework_unknown_top_level_keys
 from next.conf.merge import merge_user_settings
+from next.urls.checks import check_next_pages_configuration
 
 
 class TestNextFrameworkSettingsDjangoIntegration:

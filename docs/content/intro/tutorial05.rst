@@ -159,7 +159,7 @@ Test validation failure
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 A failed validation does not produce a redirect.
-The pipeline re-renders the origin page with the bound form and a non-zero error count.
+The pipeline re-renders the origin page with the bound form, so the field errors appear in the response.
 The ``origin="/"`` tells the dispatcher which page to re-render.
 Append the failure test to ``tests/test_notes_actions.py``.
 

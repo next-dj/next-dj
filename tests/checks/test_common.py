@@ -8,7 +8,7 @@ from django.core.checks import run_checks
 from django.core.checks.registry import registry
 from django.test import override_settings
 
-from next.checks import _LAZY_SOURCES_BY_MODULE, NEXT, register_all, reset_check_caches
+from next.checks import NEXT
 from next.checks.common import (
     RegistrationSubject,
     RunMemo,
@@ -23,6 +23,7 @@ from next.deps.resolver import forget_dep_caches
 from next.pages.loaders import _page_roots, forget_page_roots
 from next.pages.watch import _page_backends_for_watch, _state, forget_watch_state
 from next.static.manager import forget_manager_page_roots, get_static_manager
+from next.testing import reset_check_caches
 from next.urls import PageRoot, RouterBackend, checks as urls_checks
 from next.urls.checks import check_reverse_name_collisions, check_url_patterns
 from tests.support import patch_checks_router_manager_with_routers, write_page
@@ -115,33 +116,10 @@ class TestRunMemo:
         assert memo.get(key, lambda: "after") == "after"
 
 
-class TestRegisterAll:
-    """`register_all` keeps the registered check set stable without server checks."""
-
-    def test_it_imports_exactly_the_modules_the_map_names(self) -> None:
-        with patch("next.checks.importlib.import_module") as spy:
-            register_all()
-
-        imported = [call.args[0] for call in spy.call_args_list]
-        assert imported == list(_LAZY_SOURCES_BY_MODULE)
-
-    def test_register_all_registers_same_check_set(self) -> None:
-        before = {
-            getattr(check, "__name__", None) for check in registry.registered_checks
-        }
-        register_all()
-        after = {
-            getattr(check, "__name__", None) for check in registry.registered_checks
-        }
-        assert after == before
-        assert len(after) == len(before)
-
-
 class TestNextTag:
     """The `next` tag selects only `next-dj` checks for `manage.py check`."""
 
     def test_next_tag_runs_next_checks(self) -> None:
-        register_all()
         with override_settings(NEXT_FRAMEWORK={"__unknown_top_level__": True}):
             messages = run_checks(tags=[NEXT])
         assert messages
@@ -149,11 +127,9 @@ class TestNextTag:
         assert all(message.id.startswith("next.") for message in messages)
 
     def test_unregistered_tag_runs_nothing(self) -> None:
-        register_all()
         assert run_checks(tags=["__not_a_real_tag__"]) == []
 
     def test_no_next_check_carries_compatibility_tag(self) -> None:
-        register_all()
         next_checks = [
             check
             for check in registry.registered_checks
@@ -258,7 +234,6 @@ class TestACheckRunLeavesTheLiveCachesWarm:
 
     def test_the_compiled_plan_cache_survives(self, live_caches) -> None:
         """The DI plans stay compiled, so the first request after a check is warm."""
-        register_all()
         resolver.resolve_dependencies(_injected_view)
         key = introspect_key(_injected_view)
         entry = resolver._plan_cache[key]
@@ -269,7 +244,6 @@ class TestACheckRunLeavesTheLiveCachesWarm:
 
     def test_the_page_root_memos_survive(self, live_caches) -> None:
         """Both page-root memos stay filled, so no walk asks the routers again."""
-        register_all()
         roots = _page_roots()
         static_roots = get_static_manager().page_roots()
         # An empty tuple is interned, so identity would pass a dropped memo too.
@@ -283,7 +257,6 @@ class TestACheckRunLeavesTheLiveCachesWarm:
 
     def test_the_watch_state_survives(self, live_caches) -> None:
         """The routers the watcher holds outlive a check run."""
-        register_all()
         with override_settings(DEBUG=False):
             _page_backends_for_watch()
             memo = _state.memo

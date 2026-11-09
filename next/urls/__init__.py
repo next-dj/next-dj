@@ -6,7 +6,7 @@
 from next.utils import PageRoot
 
 from . import checks, signals
-from .backends import FileRouterBackend, RouterBackend, RouterFactory
+from .backends import FileRouterBackend, RouterBackend
 from .errors import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
@@ -40,7 +40,6 @@ __all__ = [
     "QueryParamProvider",
     "ReservedURLParameterError",
     "RouterBackend",
-    "RouterFactory",
     "RouterManager",
     "TrieURLResolver",
     "URLParameterError",

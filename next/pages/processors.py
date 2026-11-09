@@ -39,8 +39,6 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     The merge depends on settings alone, so it is memoised until one of them changes.
     """
     configs = next_framework_settings.PAGE_BACKENDS
-    if not isinstance(configs, list):
-        configs = []
     from_next = [
         path
         for c in configs
@@ -59,12 +57,12 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
-def forget_context_processors(**kwargs) -> None:
+def forget_context_processors(**kwargs: object) -> None:
     """Drop the memoised processors so the next render rebuilds the list."""
     _get_context_processors.cache_clear()
 
 
-def forget_template_processors(*, setting: str, **kwargs) -> None:
+def forget_template_processors(*, setting: str, **kwargs: object) -> None:
     """Drop the memo when Django reports a `TEMPLATES` change.
 
     `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the merge.

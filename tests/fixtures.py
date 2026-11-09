@@ -15,7 +15,6 @@ from django.test import override_settings
 from django.utils.encoding import iri_to_uri
 
 from next import stamps, utils
-from next.checks import reset_check_caches
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.deps.objects import forget_object_rows
 from next.diagnostics import reset_failure_logs, watch_degraded
@@ -29,6 +28,7 @@ from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
 from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
+from next.testing import reset_check_caches
 from next.urls import URLPatternParser
 from tests.support import (
     OBJECT_PERMISSION_BACKENDS,

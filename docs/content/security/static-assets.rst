@@ -38,7 +38,7 @@ A finished ``<link>`` or ``<script>`` tag is spliced into the document past the 
 ``StaticFilesBackend`` therefore escapes the URL itself before formatting it into the ``css_tag``, ``js_tag``, and ``module_tag`` templates, and a reference carrying ``"`` or ``>`` renders as text inside the attribute instead of closing it.
 
 The escaping belongs to the renderer method, so a backend that overrides ``render_link_tag``, ``render_script_tag``, or ``render_module_tag`` takes the job on with it.
-Run an interpolated value through :func:`django.utils.html.escape` when the override builds its own markup, and keep that in mind for the SRI and nonce recipes below, whose short f-strings are written for readability rather than as a complete tag builder.
+Run an interpolated value through :func:`django.utils.html.escape` when the override builds its own markup, as the SRI recipe below does.
 
 Content hash
 ------------
@@ -65,14 +65,22 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
    from urllib.parse import urlsplit
 
    from django.contrib.staticfiles.storage import staticfiles_storage
+   from django.http import HttpRequest
+   from django.utils.html import escape
 
    from next.static import StaticFilesBackend
    from next.static.runtime import nonce_attr
 
    class SriBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None, nonce=None) -> str:
+       def render_link_tag(
+           self,
+           url: str,
+           *,
+           request: HttpRequest | None = None,
+           nonce: str | None = None,
+       ) -> str:
            integrity = self._integrity_for(url)
-           return f'<link rel="stylesheet" href="{url}" integrity="{integrity}" crossorigin{nonce_attr(nonce)}>'
+           return f'<link rel="stylesheet" href="{escape(url)}" integrity="{integrity}" crossorigin{nonce_attr(nonce)}>'
 
        def _integrity_for(self, url: str) -> str:
            base_path = urlsplit(staticfiles_storage.base_url).path

@@ -219,12 +219,12 @@ class TestArticleEdit:
             ),
         )
         assert response.status_code == 302
-        assert response.headers["Location"] == routing_doc.url
+        assert response.headers["Location"] == routing_doc.get_absolute_url()
 
         routing_doc.refresh_from_db()
         assert routing_doc.body_md == "Rewritten body of the article."
 
-        article_response = next_client.get(routing_doc.url)
+        article_response = next_client.get(routing_doc.get_absolute_url())
         assert "Rewritten body of the article." in article_response.content.decode()
 
     def test_get_edit_page_shows_article(
@@ -317,7 +317,7 @@ class TestArticleDeletion:
     def test_deleting_article_removes_url(
         self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        first = next_client.get(routing_doc.url)
+        first = next_client.get(routing_doc.get_absolute_url())
         assert first.status_code == 200
 
         slug = routing_doc.slug
@@ -593,7 +593,7 @@ class TestPageMetadata:
         self, next_client: NextClient, routing_doc: Article
     ) -> None:
         assert_metadata(
-            next_client.get(routing_doc.url),
+            next_client.get(routing_doc.get_absolute_url()),
             title=f"{routing_doc.title} · next.dj Wiki",
             description="Deep dive on the URL pipeline.",
             robots=None,
@@ -603,7 +603,7 @@ class TestPageMetadata:
         self, next_client: NextClient, routing_doc: Article, lifecycle_doc: Article
     ) -> None:
         assert_metadata(
-            next_client.get(lifecycle_doc.url),
+            next_client.get(lifecycle_doc.get_absolute_url()),
             description="Discusses every middleware stage.",
         )
 
@@ -612,7 +612,8 @@ class TestPageMetadata:
     ) -> None:
         article = make_article("long", body_md="**Word** " * 60)
         assert_metadata(
-            next_client.get(article.url), description=Truncator("Word " * 60).chars(160)
+            next_client.get(article.get_absolute_url()),
+            description=Truncator("Word " * 60).chars(160),
         )
 
     def test_an_article_without_a_paragraph_keeps_the_site_description(
@@ -620,7 +621,7 @@ class TestPageMetadata:
     ) -> None:
         article = make_article("heading-only", body_md="# Only a heading")
         assert_metadata(
-            next_client.get(article.url),
+            next_client.get(article.get_absolute_url()),
             description=(
                 "File-routed documentation beside database articles, one router."
             ),
@@ -630,9 +631,9 @@ class TestPageMetadata:
         self, next_client: NextClient, routing_doc: Article
     ) -> None:
         """Only the two `DArticle` contexts hit the table, the callable adds none."""
-        next_client.get(routing_doc.url)
+        next_client.get(routing_doc.get_absolute_url())
         with CaptureQueriesContext(connection) as captured:
-            next_client.get(routing_doc.url)
+            next_client.get(routing_doc.get_absolute_url())
         by_slug = [
             query["sql"]
             for query in captured.captured_queries
@@ -712,14 +713,16 @@ class TestSitemap:
             "https://wiki.example/",
             "https://wiki.example/docs/routing/",
             "https://wiki.example/docs/components/",
-            f"https://wiki.example{routing_doc.url}",
-            f"https://wiki.example{lifecycle_doc.url}",
+            f"https://wiki.example{routing_doc.get_absolute_url()}",
+            f"https://wiki.example{lifecycle_doc.get_absolute_url()}",
         }
 
     def test_an_article_carries_its_save_date_as_lastmod(
         self, next_client: NextClient, routing_doc: Article
     ) -> None:
-        lastmod = _sitemap(next_client)[f"https://wiki.example{routing_doc.url}"]
+        lastmod = _sitemap(next_client)[
+            f"https://wiki.example{routing_doc.get_absolute_url()}"
+        ]
         assert lastmod == routing_doc.updated_at.date().isoformat()
 
     def test_the_articles_page_through_the_database(

@@ -31,7 +31,7 @@ Define the row form and the formset.
            fields = ("title", "body")
            abstract = True
 
-   NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
+   NoteFormSet = formset_factory(NoteRowForm, extra=3, max_num=5, validate_max=True, can_delete=True)
 
 Register the action.
 
@@ -67,6 +67,7 @@ Render the formset.
 
    {% form "bulk_create" %}
      {{ form.management_form }}
+     {{ form.non_form_errors }}
      {% for row in form %}
        <fieldset>
          <legend>Row {{ forloop.counter }}</legend>
@@ -80,6 +81,7 @@ Render the formset.
 
 Always render ``{{ form.management_form }}`` before the row loop.
 ``can_delete=True`` adds the ``DELETE`` checkbox to every row, and the handler skips the rows the user marked, so the template renders it alongside the fields.
+``validate_max=True`` fails the whole set when more than ``max_num`` rows arrive, and ``{{ form.non_form_errors }}`` renders that failure above the rows.
 
 Clean up empty rows
 -------------------
@@ -113,6 +115,7 @@ Verification
 Submit the formset with two filled rows and one blank row.
 The handler saves the two filled rows and skips the blank one.
 A row that fails validation re-renders with errors on that row only.
+Post six rows, more than ``max_num=5`` allows, and confirm the page re-renders with the error from ``form.non_form_errors`` above the rows.
 
 See also
 --------

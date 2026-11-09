@@ -101,6 +101,7 @@ Gating markup
 
 ``{% #consented "<category>" %}`` renders its body for a visitor who granted the category, and the optional ``{% else %}`` branch for everyone else.
 A category that resolves blank renders the ``else`` branch and logs a warning at the FailureLog rate.
+A category ``CONSENT["CATEGORIES"]`` does not list is never granted, so the block always renders its ``else`` branch, and ``next.W091`` reports a literal one while a render under ``DEBUG`` logs it.
 
 .. code-block:: jinja
    :caption: shop/pages/lp/[campaign]/template.djx

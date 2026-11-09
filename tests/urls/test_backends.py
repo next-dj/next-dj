@@ -12,14 +12,9 @@ from django.urls import URLPattern, URLResolver, clear_url_caches
 from next.intercept import Intercept, intercepts
 from next.pages import page
 from next.testing import SignalRecorder, capture_signals, override_next_settings
-from next.urls import (
-    FileRouterBackend,
-    PageRoot,
-    RouterBackend,
-    RouterFactory,
-    router_manager,
-)
+from next.urls import FileRouterBackend, PageRoot, RouterBackend, router_manager
 from next.urls.backends import _installed_app_directories, _is_framework_app
+from next.urls.ports import RouterAccessImpl
 from next.urls.signals import intercept_registered, route_registered, router_reloaded
 from next.utils import forget_resolved_trees
 from tests.support import (
@@ -622,7 +617,7 @@ class TestSkipDirNames:
         entry = file_router_config_entry(pages_dir=tmp_path / "shell", dirs=["_drafts"])
 
         with override_next_settings(PAGE_BACKENDS=[entry]):
-            router = RouterFactory.create_backend(entry)
+            router = RouterAccessImpl().create_backend(entry)
 
             assert router.skip_dir_names() == frozenset({"_components", "_drafts"})
 
@@ -638,7 +633,7 @@ class TestSkipDirNames:
             override_settings(BASE_DIR=tmp_path),
             override_next_settings(PAGE_BACKENDS=[entry]),
         ):
-            router = RouterFactory.create_backend(entry)
+            router = RouterAccessImpl().create_backend(entry)
             before = [root.path for root in router.page_roots()]
             (tmp_path / "_drafts").mkdir()
             after = [root.path for root in router.page_roots()]
@@ -970,12 +965,12 @@ class TestWorkingDirectoryRoot:
         assert roots == [PageRoot(path=configured.resolve(), label="Root")]
 
 
-class TestRouterFactory:
-    """`RouterFactory.create_backend` resolves one entry and builds its router."""
+class TestRouterAccessCreateBackend:
+    """`RouterAccessImpl.create_backend` resolves one entry and builds its router."""
 
     def test_create_backend_builds_a_file_router_from_its_entry(self) -> None:
         """A complete entry produces a router carrying the values it named."""
-        router = RouterFactory.create_backend(
+        router = RouterAccessImpl().create_backend(
             file_router_config_entry(pages_dir_name="views", app_dirs=True)
         )
 
@@ -991,7 +986,7 @@ class TestRouterFactory:
         mock_s = Mock()
         with patch("next.utils.settings", mock_s):
             mock_s.BASE_DIR = "/tmp/next_base_str"
-            router = RouterFactory.create_backend(
+            router = RouterAccessImpl().create_backend(
                 file_router_config_entry(app_dirs=True)
             )
         assert isinstance(router, FileRouterBackend)
@@ -1011,22 +1006,22 @@ class TestRouterFactory:
         config = {**file_router_config_entry(app_dirs=True), "DIRS": dirs}
 
         with pytest.raises(ImproperlyConfigured, match="sequence of trees"):
-            RouterFactory.create_backend(config)
+            RouterAccessImpl().create_backend(config)
 
     def test_create_backend_without_a_backend_key(self) -> None:
         """An entry naming no backend is a misconfiguration like any other."""
         with pytest.raises(ImproperlyConfigured, match="BACKEND"):
-            RouterFactory.create_backend({})
+            RouterAccessImpl().create_backend({})
 
     def test_create_backend_unsupported(self) -> None:
         """An unimportable BACKEND path fails the way every backend family fails."""
         with pytest.raises(ImportError):
-            RouterFactory.create_backend({"BACKEND": "unsupported.backend"})
+            RouterAccessImpl().create_backend({"BACKEND": "unsupported.backend"})
 
     def test_create_backend_when_import_is_not_router_subclass(self) -> None:
         """An importable BACKEND path outside the family is a misconfiguration."""
         with pytest.raises(ImproperlyConfigured, match="RouterBackend"):
-            RouterFactory.create_backend({"BACKEND": "unittest.mock.MagicMock"})
+            RouterAccessImpl().create_backend({"BACKEND": "unittest.mock.MagicMock"})
 
     def test_create_backend_when_the_constructor_refuses_the_entry(self) -> None:
         """A router refusing the family contract is a bug that reaches the caller."""
@@ -1036,13 +1031,13 @@ class TestRouterFactory:
         }
 
         with pytest.raises(TypeError):
-            RouterFactory.create_backend(config)
+            RouterAccessImpl().create_backend(config)
 
     def test_create_backend_hands_the_entry_to_a_third_party_router(self) -> None:
         """A router of any other shape reads its own keys off the same entry."""
         config = {"BACKEND": "tests.support.routers.EntryRouter", "ROOTS": ["site"]}
 
-        router = RouterFactory.create_backend(config)
+        router = RouterAccessImpl().create_backend(config)
 
         assert isinstance(router, EntryRouter)
         assert router.config == config

@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -15,7 +14,8 @@ from next.pages.watch import (
     iter_page_backends_for_watch,
     iter_pages_roots_with_components_folder_names,
 )
-from next.urls import RouterFactory, router_manager
+from next.urls import router_manager
+from next.urls.ports import RouterAccessImpl
 from next.utils import resolved_tree
 from tests.support import (
     MalformedRootsRouter,
@@ -133,12 +133,6 @@ class TestGetTemplateDjxPathsForWatch:
 class TestIterPageBackendsForWatch:
     """One router per ``PAGE_BACKENDS`` entry, broken entries skipped."""
 
-    def test_no_backends_when_setting_is_not_a_list(self) -> None:
-        """A ``PAGE_BACKENDS`` that is not a list yields no router."""
-        mock_nf = SimpleNamespace(PAGE_BACKENDS={})
-        with patch("next.backends.next_framework_settings", mock_nf):
-            assert list(iter_page_backends_for_watch()) == []
-
     def test_non_dict_entries_are_skipped(self) -> None:
         """List entries that are not dicts name no backend."""
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict", None]}):
@@ -227,7 +221,7 @@ class TestWatchedRootsFollowThePageRoots:
             watched = _watched(entry)
             checked = [
                 root.path
-                for root in get_page_roots(RouterFactory.create_backend(entry))
+                for root in get_page_roots(RouterAccessImpl().create_backend(entry))
             ]
 
         assert watched == []
@@ -247,7 +241,7 @@ class TestWatchedRootsFollowThePageRoots:
         """A router that routes from elsewhere contributes no watch directory."""
         with (
             patch.object(
-                RouterFactory, "create_backend", return_value=RootPagesRouter([])
+                RouterAccessImpl, "create_backend", return_value=RootPagesRouter([])
             ),
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}]}
@@ -263,7 +257,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         """One backend that raises leaves the working one watched."""
         root = tmp_path / "shell"
         root.mkdir()
-        build = RouterFactory.create_backend
+        build = RouterAccessImpl().create_backend
 
         def broken_first(config: dict) -> object:
             if config["BACKEND"] == "broken.Backend":
@@ -271,7 +265,7 @@ class TestRouterFailuresNeverReachTheWatcher:
             return build(config)
 
         with (
-            patch.object(RouterFactory, "create_backend", side_effect=broken_first),
+            patch.object(RouterAccessImpl, "create_backend", side_effect=broken_first),
             override_settings(
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
@@ -293,7 +287,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         root.mkdir()
         with (
             patch.object(
-                RouterFactory,
+                RouterAccessImpl,
                 "create_backend",
                 return_value=RaisingComponentsRouter([root]),
             ),
@@ -313,7 +307,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         """Bare paths instead of `PageRoot` entries are dropped, not dereferenced."""
         root = tmp_path / "shell"
         root.mkdir()
-        build = RouterFactory.create_backend
+        build = RouterAccessImpl().create_backend
 
         def malformed_first(config: dict) -> object:
             if config["BACKEND"] == "broken.Backend":
@@ -321,7 +315,9 @@ class TestRouterFailuresNeverReachTheWatcher:
             return build(config)
 
         with (
-            patch.object(RouterFactory, "create_backend", side_effect=malformed_first),
+            patch.object(
+                RouterAccessImpl, "create_backend", side_effect=malformed_first
+            ),
             override_settings(
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
@@ -351,7 +347,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         root.mkdir()
         with (
             patch.object(
-                RouterFactory,
+                RouterAccessImpl,
                 "create_backend",
                 return_value=OddComponentsNameRouter([root]),
             ),
@@ -377,7 +373,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         """These helpers run per reloader tick, so a repeat must stay quiet."""
         with (
             patch.object(
-                RouterFactory, "create_backend", return_value=RaisingRootsRouter()
+                RouterAccessImpl, "create_backend", return_value=RaisingRootsRouter()
             ),
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
@@ -395,7 +391,7 @@ class TestRouterFailuresNeverReachTheWatcher:
     ) -> None:
         """A reconfigured project is diagnosed again rather than staying silent."""
         with patch.object(
-            RouterFactory, "create_backend", return_value=RaisingRootsRouter()
+            RouterAccessImpl, "create_backend", return_value=RaisingRootsRouter()
         ):
             with (
                 override_settings(
@@ -447,7 +443,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
         root.mkdir()
         with (
             patch.object(
-                RouterFactory, "create_backend", return_value=RootPagesRouter([root])
+                RouterAccessImpl, "create_backend", return_value=RootPagesRouter([root])
             ),
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}]}
@@ -500,7 +496,9 @@ class TestTheRoutersOutliveOneTick:
         with (
             override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
             patch.object(
-                RouterFactory, "create_backend", wraps=RouterFactory.create_backend
+                RouterAccessImpl,
+                "create_backend",
+                wraps=RouterAccessImpl().create_backend,
             ) as build,
         ):
             first = get_pages_directories_for_watch()
@@ -590,7 +588,9 @@ class TestTheRoutersOutliveOneTick:
         with (
             override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
             patch.object(
-                RouterFactory, "create_backend", wraps=RouterFactory.create_backend
+                RouterAccessImpl,
+                "create_backend",
+                wraps=RouterAccessImpl().create_backend,
             ) as build,
         ):
             get_pages_directories_for_watch()
@@ -638,7 +638,9 @@ class TestAWatchingProcessHoldsNoRouter:
         with (
             override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
             patch.object(
-                RouterFactory, "create_backend", wraps=RouterFactory.create_backend
+                RouterAccessImpl,
+                "create_backend",
+                wraps=RouterAccessImpl().create_backend,
             ) as build,
         ):
             first = get_pages_directories_for_watch()
@@ -723,7 +725,7 @@ class TestABrokenEntryIsBuiltAgain:
         root = tmp_path / "shell"
         root.mkdir()
         entry = file_router_config_entry(pages_dir=root)
-        build = RouterFactory.create_backend
+        build = RouterAccessImpl().create_backend
         attempts: list[dict] = []
 
         def failing_first(config: dict) -> object:
@@ -734,7 +736,7 @@ class TestABrokenEntryIsBuiltAgain:
 
         with (
             override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
-            patch.object(RouterFactory, "create_backend", side_effect=failing_first),
+            patch.object(RouterAccessImpl, "create_backend", side_effect=failing_first),
             caplog.at_level(logging.ERROR, logger="next.pages.watch"),
         ):
             first = get_pages_directories_for_watch()

@@ -141,7 +141,9 @@ def _template_message(
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_title_templates(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_title_templates(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Parse every title template under every language (`next.E099`, `next.W084`).
 
     The settings tier and each page's own dict are read, one finding per template.

@@ -100,7 +100,7 @@ Signup and the ``{"initial": {}}`` idiom
 
 ``SignupForm`` takes no ``request`` kwarg, but the factory must still return non-empty ``init_kwargs``.
 A factory that returns a bare class or an empty dict routes the dispatcher into its ``get_initial`` branch, and an allauth form has no ``get_initial``, so the request fails with a ``TypeError``.
-The neutral ``{"initial": {}}`` keeps construction on the factory path, the same idiom :doc:`use-formsets` documents for formsets.
+The neutral ``{"initial": {}}`` keeps construction on the factory path, see :ref:`topics-forms-actions` under Dynamic form classes.
 
 .. code-block:: python
    :caption: accounts/pages/signup/page.py
@@ -246,4 +246,4 @@ See also
 
    :doc:`/content/topics/forms/actions` for the factory and handler contracts.
    :doc:`/content/topics/forms/validation-rerender` for the invalid-path behaviour.
-   :doc:`use-formsets` for the non-empty ``init_kwargs`` idiom.
+   :doc:`/content/topics/forms/formsets` for the non-empty ``init_kwargs`` rule.

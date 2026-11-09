@@ -297,7 +297,7 @@ class TestSettingsReloadedIsLazy:
             manager._ensure_backends()
             assert len(manager._backends) == 1
             with patch("next.components.manager.load_backends") as load_backends_mock:
-                manager._invalidate()
+                manager.reset()
             load_backends_mock.assert_not_called()
             assert manager._backends == []
             assert manager._loaded is False
@@ -313,7 +313,7 @@ class TestSettingsReloadedIsLazy:
             manager._ensure_backends()
             assert manager.template_loader is not None
             assert manager._claim_router_walk_folder(Path("/tmp")) is True
-            manager._invalidate()
+            manager.reset()
         assert manager._component_renderer is None
         assert manager._walk_registered_folders == set()
 
@@ -403,7 +403,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
         folder = tmp_path / "_components"
         folder.mkdir()
         (folder / "a.djx").write_text("a")
-        components_manager._invalidate()
+        components_manager.reset()
 
         register_components_folder_from_router_walk(folder, tmp_path, "")
         register_components_folder_from_router_walk(folder, tmp_path, "")
@@ -1508,7 +1508,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.RouterFactory.create_backend",
+                "next.urls.ports.RouterAccessImpl.create_backend",
                 side_effect=ValueError("bad config"),
             ),
         ):
@@ -1713,7 +1713,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.RouterFactory.create_backend",
+                "next.urls.ports.RouterAccessImpl.create_backend",
                 return_value=RaisingRootsRouter(),
             ),
         ):
@@ -1740,7 +1740,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.RouterFactory.create_backend",
+                "next.urls.ports.RouterAccessImpl.create_backend",
                 return_value=RootPagesRouter([pages_root]),
             ),
         ):

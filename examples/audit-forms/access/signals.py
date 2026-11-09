@@ -16,7 +16,7 @@ from .models import AuditEntry
 
 @receiver(action_dispatched)
 def _on_action_dispatched(
-    action_name: str, duration_ms: float, response_status: int, **kwargs
+    action_name: str, duration_ms: float, response_status: int, **kwargs: object
 ) -> None:
     """Record one signal-sourced row per successful dispatch, once its writes commit.
 
@@ -36,7 +36,7 @@ def _on_action_dispatched(
 
 @receiver(form_validation_failed)
 def _on_form_validation_failed(
-    action_name: str, error_count: int, field_names: tuple[str, ...], **kwargs
+    action_name: str, error_count: int, field_names: tuple[str, ...], **kwargs: object
 ) -> None:
     """Record one signal-sourced row per validation failure, once its writes commit."""
     transaction.on_commit(
@@ -52,7 +52,9 @@ def _on_form_validation_failed(
 
 
 @receiver(form_access_denied)
-def _on_form_access_denied(action_name: str, layer: str, reason: str, **kwargs) -> None:
+def _on_form_access_denied(
+    action_name: str, layer: str, reason: str, **kwargs: object
+) -> None:
     """Record one signal-sourced row per denial of a dynamic permission hook.
 
     The denied step writes no draft, so this row is the only trace of the attempt.

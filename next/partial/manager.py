@@ -100,13 +100,13 @@ def _hash_mapping(hashed_files: "Mapping[str, str]") -> str:
     return digest[:_HASH_WIDTH]
 
 
-def forget_partial_backend(**kwargs) -> None:
+def forget_partial_backend(**kwargs: object) -> None:
     """Drop the cached backend and version so a reloaded config takes effect."""
     partial_backend_manager.reset()
     asset_version.cache_clear()
 
 
-def forget_asset_version(*, setting: str, **kwargs) -> None:
+def forget_asset_version(*, setting: str, **kwargs: object) -> None:
     """Drop the memoised version when the staticfiles configuration moves.
 
     `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the configuration.

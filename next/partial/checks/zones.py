@@ -72,7 +72,7 @@ _TAG_LABELS: Final[dict[type[Node], str]] = {
 
 
 @register(Tags.templates, NEXT)
-def check_duplicate_zone_names(*args, **kwargs) -> list[CheckMessage]:
+def check_duplicate_zone_names(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when two zones in one composed page share a name (`next.E060`)."""
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():
@@ -96,7 +96,7 @@ def check_duplicate_zone_names(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_zone_name_is_slug(*args, **kwargs) -> list[CheckMessage]:
+def check_zone_name_is_slug(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a zone name is not an ASCII slug (`next.E061`)."""
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():
@@ -116,7 +116,7 @@ def check_zone_name_is_slug(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_zone_not_in_loop(*args, **kwargs) -> list[CheckMessage]:
+def check_zone_not_in_loop(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a zone sits inside a `{% for %}` loop (`next.E062`)."""
     return _ancestor_check(
         ancestor=ForNode,
@@ -130,7 +130,7 @@ def check_zone_not_in_loop(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_zone_not_in_if(*args, **kwargs) -> list[CheckMessage]:
+def check_zone_not_in_if(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a zone sits in an `{% if %}` or a tag it cannot read (`next.E063`).
 
     A block tag of a module outside `django.` and `next.` may decide in code.
@@ -160,7 +160,7 @@ def _tag_label(node: Node) -> str:
 
 
 @register(Tags.templates, NEXT)
-def check_zone_not_in_has_perm(*args, **kwargs) -> list[CheckMessage]:
+def check_zone_not_in_has_perm(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a zone sits in `{% has_perm %}` or a guarding component (`next.E161`).
 
     The zone registry refuses such a zone, so a partial request for it is a 400.
@@ -211,7 +211,9 @@ def _ancestor_check(
 
 
 @register(Tags.templates, NEXT)
-def check_lazy_zone_has_placeholder(*args, **kwargs) -> list[CheckMessage]:
+def check_lazy_zone_has_placeholder(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a lazy zone declares no `{% placeholder %}` (`next.E064`)."""
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():
@@ -231,7 +233,9 @@ def check_lazy_zone_has_placeholder(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_with_directly_over_zone(*args, **kwargs) -> list[CheckMessage]:
+def check_with_directly_over_zone(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a `{% with %}` wraps a zone directly (`next.W067`)."""
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():
@@ -250,7 +254,9 @@ def check_with_directly_over_zone(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_context_zone_names_exist(*args, **kwargs) -> list[CheckMessage]:
+def check_context_zone_names_exist(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a `@context(zone=)` names an undeclared zone (`next.E078`).
 
     A full render runs every callable, so a misspelt zone looks healthy there.
@@ -309,10 +315,10 @@ def _zone_bound_contexts(
 
 
 @register(Tags.templates, NEXT)
-def check_no_zone_in_component(*args, **kwargs) -> list[CheckMessage]:
+def check_no_zone_in_component(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a component template declares a zone (`next.E065`)."""
     configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not configs:
         return []
     messages: list[CheckMessage] = []
     manager = get_components_manager()

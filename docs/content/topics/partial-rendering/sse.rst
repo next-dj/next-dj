@@ -102,7 +102,7 @@ The stream carries no HTML.
    :caption: a fan-out event
 
    event: next-patches
-   data: {"version":"9f3c2e1b","ops":[{"op":"refresh","zone":"poll-results"}],"assets":[],"form":null,"request_id":"1c9f…-r1","server_time":1792843200000,"topic":"poll:42","epoch":"9f2c41d07a3be851","seq":18}
+   data: {"version":"9f3c2e1b","ops":[{"op":"refresh","zone":"poll-results"}],"assets":[],"form":null,"request_id":"1c9f…-r1","server_time":1792843200000}
 
 Topic streams add ``topic``, ``epoch``, and ``seq`` beside ``server_time``, see :doc:`reference`.
 
@@ -220,7 +220,7 @@ Under ASGI a synchronous receiver runs off the event loop, so it may query the d
 
 
    @receiver(sse_stream_closed)
-   def log_stream_close(sender, **kwargs) -> None:
+   def log_stream_close(sender: type, **kwargs: object) -> None:
        logger.info(
            "stream closed after %.0fms, %d envelopes",
            kwargs["duration_ms"],

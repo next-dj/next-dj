@@ -267,7 +267,7 @@ wizard_backend_manager = SingleBackendManager(
 )
 
 
-def forget_wizard_backend(**kwargs) -> None:
+def forget_wizard_backend(**kwargs: object) -> None:
     """Drop the cached backend so a reloaded config takes effect."""
     wizard_backend_manager.reset()
 
@@ -338,7 +338,7 @@ class FormWizard:
         url_param: str = "step"
 
     @override
-    def __init_subclass__(cls, **kwargs) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
         _refuse_async_hooks(cls, WIZARD_HOOKS)
@@ -389,7 +389,8 @@ class FormWizard:
         return getattr(cls, "Meta", None)
 
     @classmethod
-    def _static_steps(cls) -> "list[tuple[str, type[DjangoForm]]]":
+    def static_steps(cls) -> "list[tuple[str, type[DjangoForm]]]":
+        """Return the steps declared on `Meta.steps`, ignoring `get_steps` overrides."""
         return list(getattr(cls._meta(), "steps", []) or [])
 
     @property
@@ -399,7 +400,7 @@ class FormWizard:
 
     def get_steps(self) -> "list[tuple[str, type[DjangoForm]]]":
         """Return the step list. Override for conditional steps."""
-        return self._static_steps()
+        return self.static_steps()
 
     def get_form_kwargs(self, step: str | None = None) -> dict[str, Any]:
         """Return extra kwargs for the `step` form. Override for cross-step inputs."""

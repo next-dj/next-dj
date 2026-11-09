@@ -55,7 +55,7 @@ Annotations
 ~~~~~~~~~~~
 
 Modules that participate in dependency resolution never use ``from __future__ import annotations``.
-This applies to ``page.py``, ``component.py``, every action handler, and every ``get_initial`` callable.
+This applies to ``page.py``, ``component.py``, every action handler, every ``get_initial`` and ``get_form_kwargs`` callable, and every ``deps.py`` that registers a named dependency.
 The DI resolver resolves the hints of a callable once through ``typing.get_type_hints``, and a stringified generic it cannot evaluate stays a string that ``typing.get_origin`` reads as ``None``.
 The provider contracts in ``next/deps/providers.py`` are exempt, because the resolver never introspects their annotations, so that module keeps the future import to defer its ``TYPE_CHECKING`` imports.
 
@@ -71,16 +71,15 @@ System checks
 
 Every check lives next to the subsystem it validates.
 The codes follow ``next.E<NNN>`` for errors and ``next.W<NNN>`` for warnings.
-A new check registers through ``next.checks.register_all``.
-A new check function lands in the area's checks and is added to ``_LAZY_SOURCES_BY_MODULE`` in ``next/checks/__init__.py`` so it resolves off ``next.checks``.
-That map is also what ``register_all`` walks, so a check in a new area reaches the registry by joining it and by nothing else.
-The area's checks are one module while one file holds them, and a package of one-word submodules once it does not, as in ``next/pages/checks/``, ``next/forms/checks/``, and ``next/partial/checks/``, the largest of the three.
-Every checks module is omitted from the coverage gate, so do not chase coverage there.
+A new check function lands in the area's checks and registers with ``@register`` when that module is imported.
+A new area's checks module joins the top-level imports and ``CHECK_MODULES`` in ``next/checks/catalog.py``, and ``tests/checks/test_catalog.py`` fails until it does.
+The area's checks are one module while one file holds them, and a package of one-word submodules once it does not, as in ``next/forms/checks/``, ``next/partial/checks/``, ``next/seo/checks/``, and ``next/pages/checks/``, the largest of the four.
+Every checks module is held to the coverage gate like any other module, and a branch no configuration reaches is removed.
 
-That map binds a core check alone.
+The catalogue binds a core check alone.
 A third-party package registers its checks the ordinary Django way, by decorating them with ``django.core.checks.register`` from a module its ``AppConfig.ready`` imports, and the framework neither knows nor needs to know about them.
 Decorating with ``@register(NEXT)`` from ``next.checks`` puts a third-party check under the ``next`` tag, so ``manage.py check --tag next`` reaches it beside the framework ones, which is the only coupling on offer.
-The difference is what ``_LAZY_SOURCES_BY_MODULE`` buys, a lazy re-export off ``next.checks`` and a place in the import walk, and neither is available or needed outside ``next/``.
+The difference is a place in ``next.checks.catalog``, which a package outside ``next/`` neither gets nor needs.
 
 Signals
 ~~~~~~~

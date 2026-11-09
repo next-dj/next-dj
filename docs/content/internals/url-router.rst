@@ -37,7 +37,7 @@ Modules
    ``RouterBackend`` is the abstract contract.
    Its concrete ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` methods form the route introspection contract described below.
    ``FileRouterBackend`` implements file based routing.
-   ``RouterFactory`` builds the router one entry names, for the callers that build one at a time.
+   A caller that builds one router at a time calls ``create_backend`` of the ``RouterAccess`` port, which resolves the entry through ``next.backends``.
 
 ``next.urls.parser``.
    Turns directory names into URL patterns.
@@ -46,7 +46,7 @@ Modules
 
 ``next.urls.manager``.
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
-   The module-level ``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps the lazy router and form-action pattern sequence.
+   The module-level ``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps the lazy sequence of CSRF, form-action, page, and SEO patterns.
    It is a ``Sequence`` rather than a ``list``, so a root URLconf hands it to ``include()`` and never concatenates or appends to it.
 
 ``next.urls.resolver``.
@@ -224,8 +224,8 @@ Long lived processes such as websocket subscribers listen for the signal to refr
 
 The manager also reloads on two signals of its own accord.
 A ``settings_reloaded`` receiver rebuilds the routers and drops the built URL resolver, so a new ``URL_RESOLVER`` or a new ``PAGE_BACKENDS`` list takes effect without a restart.
-A :data:`~django.test.signals.setting_changed` receiver rebuilds them whenever ``INSTALLED_APPS`` or ``ROOT_URLCONF`` moves, because a file router memoises the pattern list of each application tree and reads its ``pages()`` includes from the root URLconf, so it would otherwise serve the routes of the previous value.
-That second receiver is what makes :func:`~django.test.override_settings` over ``INSTALLED_APPS`` or ``ROOT_URLCONF`` produce the routes of the swapped value.
+A :data:`~django.test.signals.setting_changed` receiver rebuilds them whenever ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` moves, because a file router memoises the pattern list of each application tree, reads its ``pages()`` includes from the root URLconf, and places its relative ``DIRS`` roots under ``BASE_DIR``, so it would otherwise serve the routes of the previous value.
+That second receiver is what makes :func:`~django.test.override_settings` over ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` produce the routes of the swapped value.
 Both receivers call the notifying form, so each of them fires ``router_backend_loaded`` and ``router_reloaded`` as an explicit ``reload()`` does.
 
 Multiple backends

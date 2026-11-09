@@ -15,6 +15,7 @@ from .errors import (
     PageMetadataTemplateError,
     PageModuleImportError,
 )
+from .loaders import TemplateLoader
 from .manager import Page, context, page
 from .metadata import (
     RESET,
@@ -47,6 +48,7 @@ __all__ = [
     "PageModuleImportError",
     "Replace",
     "ResolvedMetadata",
+    "TemplateLoader",
     "checks",
     "context",
     "ld",

@@ -122,7 +122,7 @@ The ``done`` method
 ``done`` runs once after the last step validates.
 It receives ``request`` and the merged ``cleaned_data`` of every stored step, so the keys from each step form are flattened into one mapping.
 For a wizard whose steps are ModelForms over a single model, the merged dict maps straight onto a model constructor.
-A field declared by two steps merges to the last stored value.
+A field declared by two steps takes the value of the later step in the ``get_steps()`` order.
 Call ``self.get_cleaned_data_for_step(step)`` when the per-step value matters.
 It returns that step's stored dict, or ``None`` when the step has not been submitted.
 
@@ -375,12 +375,12 @@ The hook reads the accumulated data through ``self.get_all_cleaned_data()`` and 
    :caption: dropping the approval step for low-risk requests
 
    def get_steps(self):
-       steps = [("identity", IdentityStep), ("scope", ScopeStep)]
-       if self.get_all_cleaned_data().get("expires_in_days", 0) > 7:
-           steps.append(("approval", ApprovalStep))
+       steps = self.static_steps()
+       if self.get_all_cleaned_data().get("expires_in_days", 0) <= 7:
+           steps = [(name, form_class) for name, form_class in steps if name != "approval"]
        return steps
 
-When ``get_steps`` is not overridden it returns ``Meta.steps`` unchanged.
+When ``get_steps`` is not overridden it returns ``static_steps()``, a copy of ``Meta.steps``, and an override starts from that classmethod instead of repeating the declaration.
 The navigation helpers, the current-step resolution, and the final-step detection all read from ``get_steps``, so a conditional list flows through routing without extra wiring.
 ``done`` receives the merged data of the steps ``get_steps()`` lists at finish time only, in step order, so a step an edited answer dropped does not leak into ``done``.
 ``get_all_cleaned_data()`` itself still returns every stored step.
@@ -421,7 +421,7 @@ Add a ``[step]`` route segment or point ``Meta.url_param`` at the captured kwarg
 ``next.W057`` warns when a static ``Meta.steps`` form class is also registered as a standalone action, which the plain-Django-form step pattern avoids.
 ``next.W058`` warns when a static step declares a ``FileField`` or ``ImageField``, whose uploads do not survive the draft round trip.
 ``next.W059`` warns when two static steps declare the same field name, where ``get_all_cleaned_data()`` keeps the last value and ``get_cleaned_data_for_step`` gives per-step access.
-The static-step checks inspect ``Meta.steps`` only, so a ``get_steps`` override is not visible to them.
+The static-step checks read ``static_steps()``, so a ``get_steps`` override is not visible to them.
 See :doc:`/content/ref/system-checks` for their conditions, and run ``uv run python manage.py check`` after editing a wizard or its backend.
 
 See also

@@ -287,10 +287,6 @@ class TestBackendEntries:
         ):
             assert backend_entries(_LIST_SETTING) == [{"BACKEND": ALPHA}]
 
-    def test_non_list_value_returns_no_entries(self) -> None:
-        # FORM_WIZARD_BACKEND merges to a dict, never a list of entries.
-        assert backend_entries(_DICT_SETTING) == []
-
     def test_missing_key_returns_no_entries(self) -> None:
         assert backend_entries(_UNKNOWN_SETTING) == []
 

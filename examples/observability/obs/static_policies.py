@@ -1,7 +1,6 @@
 from collections.abc import Hashable
 
-from next.static import StaticAsset
-from next.static.collector import UrlDedup
+from next.static import StaticAsset, UrlDedup
 
 from .metrics import incr
 

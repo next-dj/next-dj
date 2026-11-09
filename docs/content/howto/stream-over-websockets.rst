@@ -25,7 +25,7 @@ Mount the socket
 
 The socket rechecks its session on the server while it stays open, so ``SESSION_ENGINE`` should store sessions on the server.
 The ``db``, ``cache``, ``cached_db``, and ``file`` engines work.
-The signed-cookie engine breaks the default ticket binding, and ``manage.py check`` reports it as ``next.W142``, see :ref:`topics-realtime-signed-cookie`.
+The signed-cookie engine breaks the default ticket binding, and ``WebSocketApp`` logs that as ``next.W142`` when it is created, while ``manage.py check`` reports it only once ``REALTIME['TRANSPORTS']`` lists ``"ws"``, see :ref:`topics-realtime-signed-cookie`.
 
 Wrap Django's HTTP ASGI application with ``next.realtime.application``.
 The helper serves the socket at ``REALTIME['WS_PATH']``, loads the Django session from the cookie, and validates the WebSocket Origin the way Django's CSRF check does.
@@ -78,18 +78,11 @@ See :ref:`ref-realtime-protocol` for every frame and close code.
        poll = get_object_or_404(Poll, pk=poll_id)
        return TopicStream(request, f"poll:{poll.pk}", authorize=can_subscribe_topic)
 
-The authorizer is a synchronous, importable function accepting ``(user, topic)`` that returns ``True`` to grant the topic, and any other value, a truthy one or an ``async def`` coroutine included, denies it.
+The authorizer is a synchronous, importable ``(user, topic)`` function that returns ``True`` to grant the topic.
 The ``polls.realtime.can_subscribe_topic`` above is an example of one that a project writes, and :doc:`/content/howto/stream-live-updates-with-sse` defines it together with the rest of the page.
-A stream without ``authorize`` never upgrades, because negotiation answers ``406`` with ``reason`` set to ``authorization`` and the page stays on SSE, where any visitor who can load the page subscribes.
-The socket calls the authorizer before joining the broker and then at most once per heartbeat interval, together with a recheck of the session.
-A revocation closes the socket within about two heartbeat intervals plus the callback's own latency.
-The close code is ``4401`` for a session problem and ``4403`` for a topic denial, each after an ``auth`` error frame.
-After ``4403`` the client falls back to SSE at once.
-After ``4401`` the client negotiates a fresh ticket once and falls back to SSE only when that fails.
-Over SSE a revoked session reconnects through the page guard and a topic denial ends the stream for good.
-The checks run on the shared thread pool rather than the single sync thread, so keep the callback's database work small.
-WebSocket negotiation returns ``406`` when ``authorize`` is missing or when the ``transform``, ``authorize``, or ``presence`` identify callback has no stable importable reference.
-The reply body names the cause in its ``reason`` field, and the client uses SSE.
+A stream without one, or with a ``transform``, ``authorize``, or ``presence`` callable that has no stable import path, answers negotiation with ``406`` and stays on SSE.
+The socket rechecks the authorizer on the shared thread pool rather than the single sync thread, so keep the callback's database work small.
+:ref:`topics-realtime` covers the rechecks, the close codes, and the fallback.
 
 Keep sensitive page data out of published topic payloads.
 Publish a ``refresh`` operation for private zones.
@@ -124,7 +117,7 @@ The command serves the application that ``ASGI_APPLICATION`` names, and falls ba
    ASGI_APPLICATION = "config.asgi.application"
 
 The command restarts on code changes through Django's own autoreloader and serves static files under ``DEBUG``.
-With ``staticfiles`` listed first, or without uvicorn, it is the WSGI ``runserver`` and clients stay on SSE.
+With ``staticfiles`` listed first, or with the default ``DEV_SERVER`` and no uvicorn, it is the WSGI ``runserver`` and clients stay on SSE.
 The command caps inbound frames at 64 KiB and turns off the protocol ping of uvicorn, because the socket checks the liveness of its peer itself.
 See :doc:`/content/ref/management` for the options.
 
@@ -272,12 +265,14 @@ The sketch below uses the ``websockets`` library.
    :caption: gateway.py
 
    import asyncio
+   import os
 
    import django
    from django.http import parse_cookie
    from websockets.asyncio.server import ServerConnection, serve
    from websockets.exceptions import ConnectionClosed
 
+   os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    django.setup()
 
    from next.realtime import TopicSocket
@@ -321,6 +316,7 @@ The sketch below uses the ``websockets`` library.
 
 The gateway checks the Origin itself, here through the ``origins`` argument of ``serve``.
 It runs in a process of its own.
+The ``next`` imports follow ``django.setup()`` because they need a configured Django.
 List ``"ws"`` in ``REALTIME['TRANSPORTS']`` in the project that renders the pages, and share ``SECRET_KEY``, the session store, and the broker with the gateway.
 A process that lists ``ws`` without mounting the socket logs one warning on the ``next.realtime.transports`` logger at its first negotiation, which is expected when a gateway serves ``WS_PATH``, and a logging filter on that logger silences it.
 ``send`` has to raise ``OSError`` once the peer is gone, and ``close`` has to tolerate a peer that already left.

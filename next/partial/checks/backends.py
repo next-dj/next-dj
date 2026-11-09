@@ -48,7 +48,9 @@ def partial_backends_active() -> bool:
 
 
 @register(NEXT)
-def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
+def check_partial_backends_is_a_list(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when `PARTIAL_BACKENDS` is not a list (`next.E067`).
 
     The settings layer silently drops a non-list value, so only this reports it.
@@ -71,7 +73,7 @@ def check_partial_backends_is_a_list(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_single_partial_backend(*args, **kwargs) -> list[CheckMessage]:
+def check_single_partial_backend(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when more than one partial protocol backend is configured (`next.W071`).
 
     Only the first valid PARTIAL_BACKENDS entry runs, any other is dead config.
@@ -90,7 +92,9 @@ def check_single_partial_backend(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
+def check_partial_backend_names_a_path(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a PARTIAL_BACKENDS entry omits its BACKEND key (`next.E073`).
 
     Such an entry falls back to the default backend, so the wire format never loads.
@@ -111,7 +115,9 @@ def check_partial_backend_names_a_path(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_partial_backend_sse_options(*args, **kwargs) -> list[CheckMessage]:
+def check_partial_backend_sse_options(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a backend's SSE options hold an unusable value (`next.E214`).
 
     The stream falls back to the default for such a value, so only this reports it.
@@ -163,7 +169,9 @@ def _sse_option_errors(index: int, sse: dict[str, object]) -> list[CheckMessage]
 
 
 @register(NEXT)
-def check_partial_backend_implements_stream_data(*args, **kwargs) -> list[CheckMessage]:
+def check_partial_backend_implements_stream_data(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a backend keeps the retired `sse_event` contract (`next.E215`).
 
     Such a class is abstract or has its override ignored, and nothing else says why.
@@ -211,7 +219,9 @@ def _backend_class(config: object) -> type[PartialProtocolBackend] | None:
 
 
 @register(NEXT)
-def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMessage]:
+def check_manifest_version_has_manifest_storage(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when manifest versioning has no manifest storage (`next.W069`).
 
     Without a hashing storage the guard silently never asks a client to reload.
@@ -233,7 +243,9 @@ def check_manifest_version_has_manifest_storage(*args, **kwargs) -> list[CheckMe
 
 
 @register(NEXT, deploy=True)
-def check_asset_version_moves_between_deploys(*args, **kwargs) -> list[CheckMessage]:
+def check_asset_version_moves_between_deploys(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when no deploy can move the partial asset version (`next.W083`).
 
     A development checkout matches by design, so it is a deployment audit only.

@@ -657,7 +657,7 @@ class TestDependencyCycleError:
         """Outside a resolve the message names the dependency alone."""
         ctx = _ctx()
         with pytest.raises(UnknownDependencyError) as exc_info:
-            DependencyResolver()._resolve_callable_dependency("nonexistent", ctx)
+            DependencyResolver().resolve_callable_dependency("nonexistent", ctx)
         assert exc_info.value.param_name is None
         assert str(exc_info.value) == (
             'Depends("nonexistent") names a dependency nothing registered. '
@@ -674,7 +674,7 @@ class TestDependencyCycleError:
         stack = []
         ctx = _ctx(cache=cache, stack=stack)
         with pytest.raises(DependencyCycleError) as exc_info:
-            r._resolve_callable_dependency("a", ctx)
+            r.resolve_callable_dependency("a", ctx)
         assert exc_info.value.cycle == ["a"]
 
     def test_cycle_a_depends_on_b_b_depends_on_a_raises(self) -> None:

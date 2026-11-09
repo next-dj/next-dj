@@ -111,23 +111,15 @@ def _validate_single_component_backend(
 
 
 @register(NEXT)
-def check_next_components_configuration(*args, **kwargs) -> list[CheckMessage]:
+def check_next_components_configuration(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Validate `COMPONENT_BACKENDS` shape in merged `NEXT_FRAMEWORK`."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return []
 
     backends = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(backends, list):
-        return [
-            Error(
-                "NEXT_FRAMEWORK['COMPONENT_BACKENDS'] must be a list of "
-                "backend configuration dictionaries.",
-                obj=settings,
-                id="next.E023",
-            )
-        ]
-
     if len(backends) == 0:
         return [
             Error(
@@ -161,11 +153,12 @@ def _checked_backends() -> tuple[ComponentsBackend, ...]:
 
 
 @register(NEXT)
-def check_duplicate_component_names(*args, **kwargs) -> list[CheckMessage]:
+def check_duplicate_component_names(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Check that no two components share a name within one route scope."""
     errors: list[CheckMessage] = []
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not next_framework_settings.COMPONENT_BACKENDS:
         return errors
     for backend in _checked_backends():
         seen: dict[tuple[Path, str, str], list[str]] = {}
@@ -245,11 +238,12 @@ def _order_decided_entries(
 
 
 @register(NEXT)
-def check_cross_root_component_name_conflicts(*args, **kwargs) -> list[CheckMessage]:
+def check_cross_root_component_name_conflicts(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Reject a root-scope name that only registration order resolves."""
     errors: list[CheckMessage] = []
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not next_framework_settings.COMPONENT_BACKENDS:
         return errors
     for backend in _checked_backends():
         for name, entries in sorted(_root_scope_entries(backend).items()):
@@ -311,11 +305,12 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
 
 
 @register(NEXT)
-def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
+def check_component_py_no_pages_context(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Check that `component.py` files do not use `context` from `next.pages`."""
     errors: list[CheckMessage] = []
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not next_framework_settings.COMPONENT_BACKENDS:
         return errors
     for backend in _checked_backends():
         for info in backend.iter_components():
@@ -337,13 +332,14 @@ def check_component_py_no_pages_context(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
+def check_component_module_imports(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Report a `component.py` that raises while importing (`next.E084`).
 
     An async callable refused at import reports as `next.E218`, which names it.
     """
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not next_framework_settings.COMPONENT_BACKENDS:
         return []
 
     errors: list[CheckMessage] = []
@@ -370,13 +366,14 @@ def check_component_module_imports(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_component_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
+def check_component_context_registration_files(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `@component.context` no component render collects (`next.E075`).
 
     A registration keys on the declaring file, so an imported helper binds elsewhere.
     """
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not isinstance(configs, list) or not configs:
+    if not next_framework_settings.COMPONENT_BACKENDS:
         return []
 
     for backend in _checked_backends():

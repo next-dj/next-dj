@@ -6,7 +6,7 @@ from next.components import get_component, render_component
 
 
 def render_fragment(
-    name: str, template_path: Path, request: HttpRequest | None = None, **props
+    name: str, template_path: Path, request: HttpRequest | None = None, **props: object
 ) -> str:
     """Render one component by name for a patch payload, resolved from the page path."""
     info = get_component(name, template_path)

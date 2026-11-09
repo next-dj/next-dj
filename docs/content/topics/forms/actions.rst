@@ -172,8 +172,8 @@ The dispatcher calls it through the dependency injector before the initial rende
 ``request`` follows the same annotation rule as ``on_valid`` above.
 A parameter whose name matches a captured URL segment is filled from the URL, so ``note_id`` above receives the ``note_id`` route kwarg.
 Any other parameter resolves through a registered provider, the same as on a handler.
-The base signatures carry no positional arguments of their own.
-``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
+``BaseForm.get_initial(cls)`` takes no parameters, and ``BaseModelForm.get_initial(cls, request=None, **url_kwargs)`` takes the request and the URL kwargs as keywords.
+An override that calls the default through ``super()`` passes the request on, see :ref:`topics-forms-modelforms`.
 Declare only the parameters an override actually reads.
 
 .. _topics-forms-actions-form-kwargs:

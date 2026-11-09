@@ -1,5 +1,6 @@
 from django.apps import apps
 from django.contrib import admin
+from django.contrib.admin.exceptions import NotRegistered
 from django.contrib.admin.options import ModelAdmin
 from django.core.exceptions import PermissionDenied
 from django.db.models import Model
@@ -14,17 +15,17 @@ LOGIN_URL = "/admin/login/"
 def resolve_model_admin(
     app_label: str, model_name: str
 ) -> tuple[type[Model], ModelAdmin]:
-    """Return `(model, ModelAdmin)` from `admin.site._registry`, or 404."""
+    """Return `(model, ModelAdmin)` registered on `admin.site`, or 404."""
     try:
         model = apps.get_model(app_label, model_name)
     except LookupError as exc:
         msg = str(exc)
         raise Http404(msg) from exc
-    # No public API exposes the registered map.
-    model_admin = admin.site._registry.get(model)
-    if model_admin is None:
+    try:
+        model_admin = admin.site.get_model_admin(model)
+    except NotRegistered as exc:
         msg = f"Model {app_label}.{model_name} is not registered with admin."
-        raise Http404(msg)
+        raise Http404(msg) from exc
     return model, model_admin
 
 

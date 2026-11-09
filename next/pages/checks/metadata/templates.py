@@ -121,7 +121,7 @@ class TemplateSearch:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_tag_rendered(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_tag_rendered(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when a page declares metadata its composition never renders (`next.W085`).
 
     The composed template and every component and include it reaches are searched.

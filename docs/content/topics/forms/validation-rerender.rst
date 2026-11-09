@@ -3,7 +3,7 @@
 Validation and re-render
 ========================
 
-When a submission fails validation, users keep what they typed and you write no re-render code.
+When a submission fails validation, users keep what they typed and the page needs no re-render code.
 A failing POST does not produce an error page.
 The dispatcher re-renders the origin page with the bound form, the cached dependencies, and a fresh CSRF token, so the page comes back with the entered values and field errors in place.
 This page explains the validation and re-render flow end to end.
@@ -88,7 +88,7 @@ See :doc:`backends` for the override signature and the bundled implementation.
 What survives re-render
 -----------------------
 
-One thing carries over from the initial render.
+One thing carries over from the dispatch into the re-render.
 
 Dependency cache.
    Read the per-request cache through ``next.deps.render_dep_cache(request)``.
@@ -98,7 +98,7 @@ Dependency cache.
    Django validation writes the posted values into that instance, so the dispatcher drops every cache entry that holds it, and the page contexts load the row afresh and show what is stored while the form keeps the posted values and its errors.
    A custom DI provider must therefore be idempotent across a render cycle.
 
-.. tip::
+.. note::
 
    A dependency shared between the action handler and a page context function resolves only once per request, so a failed validation never re-queries it.
    Register expensive lookups such as tenant queries and permission checks as named dependencies to get this caching for free.

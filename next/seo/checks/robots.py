@@ -65,7 +65,7 @@ def _single_source(url: str, paths: Sequence[Path]) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_single_sources(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_single_sources(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require one `/robots.txt` source across every page tree (`next.E114`)."""
     roots = loaded_seo_roots()
     errors: list[CheckMessage] = []
@@ -97,7 +97,7 @@ def _names_sitemap(text: str) -> bool:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_text_files(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_text_files(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate every static `robots.txt` (`next.E117`, `next.W098`).
 
     The files are served unchanged, so the framework cannot add a `Sitemap:` line.
@@ -244,7 +244,7 @@ def _listed_paths(roots: tuple[SeoRoot, ...]) -> set[str]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_robots_disallow(*args, **kwargs) -> list[CheckMessage]:
+def check_robots_disallow(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Compare the `Disallow` rules of static `*` groups with the listed URLs.
 
     `next.W095` flags a blocked listed URL, `next.W096` a blocked noindex page.

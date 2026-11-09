@@ -322,9 +322,7 @@ def shared_layouts() -> tuple[Path, ...]:
 
     It wraps every page, and a tuple keeps a caller from reordering the shared result.
     """
-    configs = next_framework_settings.PAGE_BACKENDS or []
-    if not isinstance(configs, list):
-        configs = []
+    configs = next_framework_settings.PAGE_BACKENDS
     candidates = (
         layout.resolve()
         for config in configs
@@ -335,7 +333,7 @@ def shared_layouts() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(candidates))
 
 
-def forget_shared_layouts(**kwargs) -> None:
+def forget_shared_layouts(**kwargs: object) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
     shared_layouts.cache_clear()
 
@@ -349,7 +347,7 @@ def _page_roots() -> tuple[Path, ...]:
     return tuple(get_pages_directories_for_watch())
 
 
-def forget_page_roots(**kwargs) -> None:
+def forget_page_roots(**kwargs: object) -> None:
     """Drop the memoised page trees so the next walk asks the routers again."""
     _page_roots.cache_clear()
     _ABOVE_TREE.clear()
@@ -357,7 +355,7 @@ def forget_page_roots(**kwargs) -> None:
         _version.value += 1
 
 
-def forget_app_page_roots(*, setting: str, **kwargs) -> None:
+def forget_app_page_roots(*, setting: str, **kwargs: object) -> None:
     """Drop the memoised page trees when the app list behind them moves.
 
     `settings_reloaded` misses `INSTALLED_APPS`, which the `APP_DIRS` trees follow.
@@ -882,7 +880,7 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
     return tuple(instances)
 
 
-def forget_registered_loaders(**kwargs) -> None:
+def forget_registered_loaders(**kwargs: object) -> None:
     """Drop cached loader instances on settings reload."""
     build_registered_loaders.cache_clear()
 

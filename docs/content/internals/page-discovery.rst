@@ -38,8 +38,8 @@ Modules
 -------
 
 ``next.pages.loaders``.
-   Registers template loaders such as ``DjxTemplateLoader``.
-   Each loader recognises one extension and produces a body string for a given page directory.
+   Holds the ``TemplateLoader`` contract, the loaders ``TEMPLATE_LOADERS`` names, the layout walk, and the page module memo.
+   Each loader claims a ``page.py`` path through ``can_load`` and produces its body string through ``load_template``.
 
 ``next.pages.manager``.
    A package whose ``__init__`` defines the ``Page`` coordinator that loads templates, collects context, composes layouts, renders, and builds the page ``URLPattern``.
@@ -199,7 +199,7 @@ The user-facing rules for layout discovery, the placeholder contract, and the co
 Body source priority
 --------------------
 
-``Page._resolve_page_body`` and ``_load_static_body`` in ``next.pages.manager`` pick the highest priority body source.
+``Page.resolve_page_body`` in ``next.pages.manager`` picks the highest priority body source, a ``render()`` first and otherwise the static body that ``Page._load_static_body`` reads from the ``template`` attribute or the first loader that claims the page.
 See :doc:`/content/topics/pages` for the full priority order and the ``next.W043`` conflict warning.
 
 Context resolution

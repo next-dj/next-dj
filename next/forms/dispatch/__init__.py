@@ -17,6 +17,7 @@ from django.http import (
 from next.deps import REQUEST_DEP_CACHE_ATTR, UnboundObjectError
 from next.deps.resolver import current_resolver
 from next.forms.errors import SessionRotationError
+from next.forms.formsets import error_field_names, error_message_count
 from next.forms.origin import resolve_origin
 from next.forms.signals import (
     action_dispatched,
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django import forms as django_forms
+    from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponseBase
 
     from next.forms.backends import ActionMeta, FormActionBackend
@@ -515,19 +517,18 @@ class _DispatchState:
             )
 
     def emit_form_validation_failed(
-        self, request: "HttpRequest", action_name: str, form: "django_forms.Form"
+        self, request: "HttpRequest", action_name: str, form: "BaseForm | BaseFormSet"
     ) -> None:
         """Send `form_validation_failed` when a receiver listens for this sender."""
         sender = self.signal_sender
         if form_validation_failed.has_listeners(sender):
-            error_count = sum(len(errors) for errors in form.errors.values())
             form_validation_failed.send(
                 sender=sender,
                 action_name=action_name,
                 uid=self.uid,
                 request=request,
-                error_count=error_count,
-                field_names=tuple(form.errors.keys()),
+                error_count=error_message_count(form),
+                field_names=error_field_names(form),
             )
 
     def emit_wizard_step_submitted(

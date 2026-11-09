@@ -152,7 +152,8 @@ A project can ship project-specific components alongside the shared kit.
    }
 
 At equal score a page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
-Roots are scanned in ``DIRS`` order, so an entry placed earlier in the list shadows a same-named component from a later entry.
+Two ``DIRS`` roots must not share a root-scope component name, because only registration order would decide between them, and ``manage.py check`` reports such a pair as ``next.E034``.
+Override a shared component from a page tree instead, or give the project component a name of its own.
 See :doc:`/content/internals/component-pipeline` for the scoring rule behind both outcomes.
 
 Hot reload

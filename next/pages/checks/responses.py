@@ -92,7 +92,9 @@ def _page_modules() -> Iterator[tuple[Path, object, object]]:
 
 
 @register(NEXT)
-def check_page_response_declarations(*args, **kwargs) -> list[CheckMessage]:
+def check_page_response_declarations(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Require a readable `cache` and `headers` in every `page.py` (`next.E131`)."""
     errors: list[CheckMessage] = []
     for page_path, cache, headers in _page_modules():
@@ -114,7 +116,7 @@ def check_page_response_declarations(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_csrf_delivery(*args, **kwargs) -> list[CheckMessage]:
+def check_csrf_delivery(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require `CSRF_DELIVERY` to name a delivery mode (`next.E132`)."""
     raw = getattr(settings, USER_SETTING, None)
     value = raw.get("CSRF_DELIVERY") if isinstance(raw, dict) else None
@@ -132,7 +134,9 @@ def check_csrf_delivery(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_csrf_endpoint_reversible(*args, **kwargs) -> list[CheckMessage]:
+def check_csrf_endpoint_reversible(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Require the token endpoint wherever a page may defer its token (`next.E148`).
 
     `auto` defers only on a page a shared cache may store, so it needs one such page.
@@ -216,7 +220,7 @@ def private_pages_warning(cause: str, check_id: str) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_csrf_in_session(*args, **kwargs) -> list[CheckMessage]:
+def check_csrf_in_session(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when `CSRF_USE_SESSIONS` makes every shared page private (`next.W121`)."""
     if not getattr(settings, "CSRF_USE_SESSIONS", False):
         return []
@@ -242,7 +246,7 @@ def _guarded(middleware: list[object]) -> bool:
 
 
 @register(NEXT)
-def check_conditional_get_order(*args, **kwargs) -> list[CheckMessage]:
+def check_conditional_get_order(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when a cookie may be set on a shared 304 (`next.W124`).
 
     `ConditionalGetMiddleware` copies a shared cache onto the 304 it builds.
@@ -338,7 +342,7 @@ def _mixed_languages() -> bool:
 
 
 @register(Tags.templates, NEXT)
-def check_shared_page_responses(*args, **kwargs) -> list[CheckMessage]:
+def check_shared_page_responses(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a shared page that sets the CSRF cookie or mixes languages."""
     warnings: list[CheckMessage] = []
     mixed = _mixed_languages()

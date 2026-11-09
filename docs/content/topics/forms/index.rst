@@ -5,7 +5,7 @@ Forms
 
 next.dj wraps Django forms with a registry, a stable POST endpoint, and a re-render pipeline that survives validation failures.
 This section walks every layer of the system from the page module down to the dispatch backend.
-Read :doc:`overview` first, then jump to the page that matches the part you are extending.
+Read :doc:`overview` first, then the page that matches the layer being extended.
 
 .. rubric:: Concepts
 

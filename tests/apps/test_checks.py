@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pkgutil
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.checks import Warning as DjangoWarning
@@ -64,3 +66,17 @@ class TestBuiltinTagLibrariesComplete:
         objs = {m.obj for m in messages}
         assert "next.templatetags.forms" not in objs
         assert "next.templatetags.partial" in objs
+
+    def test_discovery_skips_packages_and_modules_without_library(self) -> None:
+        infos = [
+            pkgutil.ModuleInfo(None, "nested", ispkg=True),
+            pkgutil.ModuleInfo(None, "plain", ispkg=False),
+        ]
+        with (
+            patch.object(checks.pkgutil, "iter_modules", return_value=infos),
+            patch.object(
+                checks, "import_module", return_value=SimpleNamespace()
+            ) as importer,
+        ):
+            assert checks._iter_tag_library_modules() == []
+        importer.assert_called_once_with("next.templatetags.plain")

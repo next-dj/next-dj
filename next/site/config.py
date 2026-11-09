@@ -127,7 +127,7 @@ def site_config() -> SiteConfig:
     )
 
 
-def forget_site_config(**kwargs) -> None:
+def forget_site_config(**kwargs: object) -> None:
     """Drop the memoised site identity, so a settings reload takes effect."""
     site_config.cache_clear()
 
@@ -295,6 +295,11 @@ def indexable_without_request() -> bool:
     return rule if isinstance(rule, bool) else True
 
 
+def url_declared_per_request() -> bool:
+    """Whether a callable `URL` answers the origin, so none exists outside a request."""
+    return callable(site_config().url)
+
+
 __all__ = [
     "SITE_KEYS",
     "SITE_ORIGIN_ATTR",
@@ -309,6 +314,7 @@ __all__ = [
     "site_origin",
     "site_url",
     "site_url_failed",
+    "url_declared_per_request",
     "url_origin",
     "url_rule",
 ]

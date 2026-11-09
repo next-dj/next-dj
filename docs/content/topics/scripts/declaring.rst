@@ -68,6 +68,7 @@ A ``Script`` takes these fields.
 
 A ``data-*`` attribute is how a vendor loader reads its configuration, Plausible its ``data-domain`` and a project adapter whatever it declares.
 The system checks report a script with neither ``src`` nor ``init``, a ``src`` that no finder answers, an ``init`` that would close its element, an attribute outside the list, and a category the settings do not list.
+At render time a staticfiles name the storage cannot resolve runs the script's ``init`` alone, or drops a script without one, and logs a warning, so the page still renders.
 
 Strategies
 ----------

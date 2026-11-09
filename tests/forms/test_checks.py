@@ -604,19 +604,6 @@ class TestCheckWizardStepActions:
         self._register(backend, with_step_action=False)
         assert check_wizard_step_actions() == []
 
-    def test_wizard_class_without_static_steps_is_skipped(self, monkeypatch) -> None:
-        """A wizard stub without `_static_steps` is ignored by the check."""
-        backend = self._isolated_backend(monkeypatch)
-        backend.register_action(
-            ActionRegistration(
-                name="w057_stub_wizard",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                wizard_class=type("StubWizard", (), {}),
-            )
-        )
-        assert check_wizard_step_actions() == []
-
     def test_factory_form_class_is_ignored(self, monkeypatch) -> None:
         """A callable form factory never matches a step class."""
         backend = self._isolated_backend(monkeypatch)
@@ -691,10 +678,6 @@ def _wizard_registration(name: str, wizard_class: type) -> ActionRegistration:
     )
 
 
-class _StepLessWizardStub:
-    """Wizard stand-in without the `_static_steps` hook."""
-
-
 class TestCheckWizardStepFileFields:
     """W058 warns about a FileField inside static steps."""
 
@@ -716,10 +699,6 @@ class TestCheckWizardStepFileFields:
             pytest.param(
                 _wizard_registration("clean_wizard", _CleanStepsWizard),
                 id="steps-without-file-fields",
-            ),
-            pytest.param(
-                _wizard_registration("stub_wizard", _StepLessWizardStub),
-                id="wizard-stub-without-static-steps",
             ),
             pytest.param(
                 ActionRegistration(
@@ -796,10 +775,6 @@ class TestCheckWizardStepFieldCollisions:
             pytest.param(
                 _wizard_registration("disjoint_wizard", _DisjointWizard),
                 id="steps-with-disjoint-fields",
-            ),
-            pytest.param(
-                _wizard_registration("stub_wizard", _StepLessWizardStub),
-                id="wizard-stub-without-static-steps",
             ),
             pytest.param(
                 ActionRegistration(

@@ -1139,7 +1139,7 @@ class TestAuthorizationOutcomeVirtualPage:
 
 
 class TestResolvePageBodyWithoutRender:
-    """`_resolve_page_body` falls to the static body for a module with no render."""
+    """`resolve_page_body` falls to the static body for a module with no render."""
 
     def test_module_without_render_resolves_its_static_body(
         self, page_instance, tmp_path
@@ -1149,7 +1149,7 @@ class TestResolvePageBodyWithoutRender:
         page_file.write_text('template = "<p>static</p>"')
 
         module = load_python_module_memo(page_file)
-        resolution = page_instance._resolve_page_body(page_file, module, dep_cache={})
+        resolution = page_instance.resolve_page_body(page_file, module, dep_cache={})
 
         assert resolution.body == "<p>static</p>"
         assert resolution.http_response is None
@@ -1161,7 +1161,7 @@ class TestResolvePageBodyWithoutRender:
         """A `template.djx`-only page has no module to carry a `render()`."""
         (tmp_path / "template.djx").write_text("<p>virtual</p>")
 
-        resolution = page_instance._resolve_page_body(
+        resolution = page_instance.resolve_page_body(
             tmp_path / "page.py", None, dep_cache={}
         )
 

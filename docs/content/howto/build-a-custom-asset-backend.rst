@@ -37,15 +37,13 @@ References authored in a template tag or a module list travel through ``resolve_
 
    import json
    import logging
+   from collections.abc import Mapping
    from pathlib import Path
-   from typing import TYPE_CHECKING, Any
+   from typing import Any
 
    from django.contrib.staticfiles.storage import staticfiles_storage
 
    from next.static import StaticFilesBackend
-
-   if TYPE_CHECKING:
-       from collections.abc import Mapping
 
    logger = logging.getLogger(__name__)
 
@@ -94,7 +92,7 @@ Read the Vite manifest
 A production build writes hashed filenames into ``dist/.vite/manifest.json``.
 The backend reads that file once, caches it, and looks up the built output.
 A missing manifest logs one warning and falls back to staticfiles so the dev workflow stays unblocked.
-The three methods below sit inside the ``ViteManifestBackend`` class body shown above, at the same indentation as ``register_file``.
+The four methods below sit inside the ``ViteManifestBackend`` class body shown above, at the same indentation as ``register_file``.
 The zero-argument ``super()`` call they use resolves only from there.
 
 .. code-block:: python
@@ -136,9 +134,13 @@ The zero-argument ``super()`` call they use resolves only from there.
            self._manifest_data = json.load(f)
        return self._manifest_data
 
+   def forget_urls(self) -> None:
+       super().forget_urls()
+       self._manifest_data = None
+
 ``_manifest_key`` builds the lookup key relative to ``VITE_ROOT`` and falls back to the bare filename.
 URL resolution delegates to ``staticfiles_storage`` so manifest storage, S3 storage, and CDN settings still apply to the hashed output.
-Override ``forget_urls`` to reset ``self._manifest_data`` alongside the base memo, so the parsed Vite manifest is dropped when the staticfiles storage is rebuilt.
+``forget_urls`` drops the parsed manifest with the base memo whenever the staticfiles storage is rebuilt.
 
 Register the kind
 ~~~~~~~~~~~~~~~~~

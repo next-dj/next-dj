@@ -96,7 +96,7 @@ def faulty(file_path: Path, loaded: LoadedPage) -> bool:
 
 
 @register(NEXT)
-def check_page_functions(*args, **kwargs) -> list[CheckMessage]:
+def check_page_functions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate each page module for `render` or `template`. Warn when empty."""
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
@@ -189,15 +189,13 @@ def _check_page_functions_in_directory(
     return errors, warnings
 
 
-def _active_body_sources(page_file: Path, module: types.ModuleType | None) -> list[str]:
+def _active_body_sources(page_file: Path, module: types.ModuleType) -> list[str]:
     """Return the body sources declared on `page_file` in priority order."""
     sources: list[str] = []
-    if module is not None:
-        if callable(getattr(module, "render", None)):
-            sources.append("render()")
-        template_attr = getattr(module, "template", None)
-        if isinstance(template_attr, str):
-            sources.append("template")
+    if callable(getattr(module, "render", None)):
+        sources.append("render()")
+    if isinstance(getattr(module, "template", None), str):
+        sources.append("template")
     sources.extend(
         loader.source_name
         for loader in build_registered_loaders()
@@ -207,7 +205,7 @@ def _active_body_sources(page_file: Path, module: types.ModuleType | None) -> li
 
 
 def _check_body_source_conflicts(
-    page_file: Path, module: types.ModuleType | None
+    page_file: Path, module: types.ModuleType
 ) -> CheckMessage | None:
     """Warn (`next.W043`) when more than one body source is declared for `page_file`."""
     sources = _active_body_sources(page_file, module)
@@ -241,7 +239,7 @@ def _page_import_error_message(page_path: Path, error: BaseException | None) -> 
 
 
 @register(Tags.templates, NEXT)
-def check_page_module_imports(*args, **kwargs) -> list[CheckMessage]:
+def check_page_module_imports(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report each `page.py` that raises while importing (`next.E017`).
 
     An async callable refused at import reports as `next.E218`, which names it.

@@ -125,7 +125,7 @@ def install() -> None:
     _install_builtins()
 
 
-def reinstall_builtins(*, setting: str, **kwargs) -> None:
+def reinstall_builtins(*, setting: str, **kwargs: object) -> None:
     """Reinstall the builtins when an override hands the engines a new `TEMPLATES`.
 
     Django rebuilds the engines from the new value, which carries no framework tags.

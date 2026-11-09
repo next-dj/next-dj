@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 def render_page(
-    file_path: Path | str, request: HttpRequest | None = None, /, **url_kwargs
+    file_path: Path | str, request: HttpRequest | None = None, /, **url_kwargs: object
 ) -> str:
     """Render the page at `file_path` and return its HTML string.
 

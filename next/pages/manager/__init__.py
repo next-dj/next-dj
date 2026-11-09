@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class _BodyResolution:
-    """The per-request outcome of `Page._resolve_page_body`.
+    """The per-request outcome of `Page.resolve_page_body`.
 
     `http_response` may stream, and a `dynamic` body has no source to render a zone.
     """
@@ -212,6 +212,10 @@ class Page(PageDeclarations):
         """Return the memoised metadata chain of `file_path`."""
         return chain_entry(self._metadata_registry, file_path)
 
+    def reset_metadata(self) -> None:
+        """Drop every metadata registration and the chain memo built from them."""
+        self._metadata_registry.reset()
+
     def metadata_registrations(self) -> MetadataRegistrations:
         """Return the registered callables and their misattributions."""
         return self._metadata_registry.registrations()
@@ -333,7 +337,7 @@ class Page(PageDeclarations):
                 return loader.load_template(file_path) or ""
         return ""
 
-    def _resolve_page_body(
+    def resolve_page_body(
         self,
         file_path: Path,
         module: types.ModuleType | None,
@@ -427,7 +431,7 @@ class Page(PageDeclarations):
             )
         return result
 
-    def _render_composed(
+    def render_composed(
         self,
         file_path: Path,
         body: str,
@@ -563,12 +567,12 @@ def reset_context_registry() -> None:
 
     Paired with the module memo reset so a re-executed `page.py` repopulates it.
     """
-    page._context_manager.reset()
+    page.contexts.reset()
 
 
 def reset_metadata_registry() -> None:
     """Clear the shared page-metadata registry, its chain memo and the settings tier."""
-    page._metadata_registry.reset()
+    page.reset_metadata()
     forget_metadata_scope()
 
 

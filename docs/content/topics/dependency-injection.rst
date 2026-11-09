@@ -436,7 +436,9 @@ A heavy column is deferred there with :meth:`~django.db.models.query.QuerySet.de
            return super().get_queryset().defer("body").select_related("owner")
 
    class Note(models.Model):
-       ...
+       owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+       title = models.CharField(max_length=200)
+       body = models.TextField()
 
        objects = NoteManager()
 
@@ -601,6 +603,7 @@ A custom provider that does not declare ``priority`` inherits the ``RegisteredPa
 The twelve built-in providers occupy the range ``0`` (object) through ``80`` (query string) and ``1000`` for the refusal of an unloaded ``DObject``, so the default keeps a custom provider after every one that fills a parameter.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
+A provider that needs a named dependency, the way ``DObject`` reads ``scope``, calls ``self.resolver.resolve_callable_dependency("scope", context, param=param)``, which shares the pass cache and the cycle guard of ``Depends("scope")``.
 
 Static verdicts
 ~~~~~~~~~~~~~~~

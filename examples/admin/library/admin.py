@@ -84,7 +84,7 @@ class ChapterAdmin(RowPermissionAdmin):
     list_filter = ("book",)
 
     def formfield_for_foreignkey(
-        self, db_field: ForeignKey, request: HttpRequest, **kwargs
+        self, db_field: ForeignKey, request: HttpRequest, **kwargs: object
     ) -> ModelChoiceField:
         """Offer only the books the user may change as a chapter's book."""
         if db_field.name == "book":

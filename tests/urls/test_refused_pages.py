@@ -4,7 +4,7 @@ import pytest
 from django.core.management import call_command
 from django.core.management.base import SystemCheckError
 
-from next.checks import reset_check_caches
+from next.testing import reset_check_caches
 from tests.support import installed_apps, write_app, write_urlconf
 
 

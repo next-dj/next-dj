@@ -93,7 +93,7 @@ Resolve and predicates
 ----------------------
 
 ``resolve_metadata(meta, request=...)`` turns a ``Metadata`` into the ``ResolvedMetadata`` of one response, and ``absolute_url(url, request=...)`` makes one URL absolute on ``site_origin(request)`` of :doc:`site`, the site URL, then the current ``Site`` row, then the request host, the same origin the sitemap and the robots file write on.
-``noindexed(meta, request=...)`` answers whether a page stays out of the index, by the site rule or its own robots, the one predicate the sitemap, the checks, and the robots header share.
+``noindexed(meta, request=...)`` answers whether a page stays out of the index, by the site rule or its own robots, for project code that needs the same answer the head renders.
 
 .. autofunction:: next.pages.metadata.resolve_metadata
 
@@ -146,7 +146,8 @@ Page accessors
 
 ``Page.metadata`` is the decorator behind ``@page.metadata``, with ``inherit=True`` running the callable for the descendants too.
 ``Page.static_metadata(path)`` returns a ``StaticMetadata`` pair, the ``Metadata`` readable without a request, ``DEFAULTS`` and every ``metadata`` dict of the page and its ancestors, and whether the schema refused that chain.
-A refused chain reads as ``DEFAULTS`` under ``noindex`` with the other robots directives of ``DEFAULTS`` kept, the pair reads as refused when ``DEFAULTS`` itself is refused, see :ref:`topics-failure-containment`.
+A refused chain reads as ``DEFAULTS`` under ``noindex``, with the other robots directives of ``DEFAULTS`` kept, see :ref:`topics-failure-containment`.
+The pair also reads as refused when ``DEFAULTS`` itself is refused.
 The metadata a request resolves is read from a rendered response, through ``assert_metadata`` of :doc:`testing`.
 ``metadata_declaration``, ``metadata_chain``, ``metadata_registrations``, and ``fold_metadata`` serve the checks, ``showmetadata``, and the ``meta`` patch verb as part of the cross-area contract of :doc:`pages`.
 

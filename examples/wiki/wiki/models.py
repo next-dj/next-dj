@@ -7,6 +7,8 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils.text import Truncator
 
+from next.urls import page_reverse
+
 
 SLUG_RE = r"^[a-z0-9][a-z0-9-]*$"
 RESERVED_SLUGS = frozenset({"docs", "articles", "search", "wiki"})
@@ -34,6 +36,10 @@ class Article(models.Model):
         """Human-friendly representation that uses the title."""
         return self.title
 
+    def get_absolute_url(self) -> str:
+        """Return the public URL of the published article."""
+        return page_reverse("wiki/[slug]", slug=self.slug)
+
     def clean(self) -> None:
         """Reject slugs that collide with file-route prefixes."""
         super().clean()
@@ -48,8 +54,3 @@ class Article(models.Model):
             if text and not text.startswith("#"):
                 return Truncator(text).chars(SUMMARY_CHARS)
         return ""
-
-    @property
-    def url(self) -> str:
-        """Absolute URL of the published article."""
-        return f"/wiki/{self.slug}/"

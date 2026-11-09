@@ -886,7 +886,7 @@ class TestPageRootsHaveKeysCheck:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "plugin.Backend"}]}
             ),
             patch(
-                "next.urls.RouterFactory.create_backend",
+                "next.urls.ports.RouterAccessImpl.create_backend",
                 return_value=RootPagesRouter([tree]),
             ),
         ):

@@ -7,6 +7,7 @@ Module summary
 --------------
 
 ``next.pages`` exposes the ``Page`` coordinator and its ``page`` singleton, which also carries the access declarations of a ``page.py``, the ``@context`` decorator, the ``Context`` and ``ContextResult`` value objects, the ``PageModuleImportError`` raised by a broken ``page.py`` and the ``PageContextShapeError`` raised by a keyless ``@context`` answering no mapping, and the ``checks`` and ``signals`` submodules.
+The ``TemplateLoader`` contract a custom body source subclasses is exported as well, see `Loaders`_ below.
 It also exposes the page metadata names a page module uses most, the ``ResolvedMetadata`` value, the ``MetadataDict`` input shape, the ``Replace`` and ``RESET`` markers, the ``ld`` nodes, the ``MetadataRenderer`` contract with its ``HtmlMetadataRenderer``, and the four ``PageMetadata*`` errors, see :doc:`metadata`.
 The ``CacheDict`` and ``HeadersDict`` shapes of the ``cache`` and ``headers`` a ``page.py`` declares, and the ``CacheControl`` value a ``cache`` normalises to, complete the surface, see `Response policy`_ below.
 
@@ -69,6 +70,8 @@ Fourteen ``Page`` methods and the ``contexts`` property carry no leading undersc
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
 They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
 ``register_template`` is called by ``composed_template_for`` on every cache miss and by no other area, so it serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
+``resolve_page_body`` and ``render_composed`` carry no underscore because the routed views of ``next.pages.manager.views`` call them, and ``reset_metadata`` because ``reset_metadata_registry`` and the test isolation helpers reset the registry through it.
+They follow the same underscore rule without the Stable tier's signature guarantee.
 
 Manager
 ~~~~~~~
@@ -95,7 +98,7 @@ Loaders
 
 ``TemplateLoader`` is the abstract contract for sourcing template text from a ``page.py`` path.
 
-.. autoclass:: next.pages.loaders.TemplateLoader
+.. autoclass:: next.pages.TemplateLoader
    :members:
 
 ``DjxTemplateLoader`` reads a sibling ``template.djx`` next to ``page.py``.
@@ -105,9 +108,8 @@ It is the only loader in the default ``TEMPLATE_LOADERS`` chain.
    :members:
 
 ``PythonTemplateLoader`` reads a ``template`` attribute defined inside ``page.py``.
-It is not registered by default.
-Add its dotted path to ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to enable it.
-The manager already consults ``module.template`` directly, so registering this loader changes nothing at render time and only affects how the ``next.W043`` conflict check reports the source.
+It is not registered by default, and the manager already consults ``module.template`` directly, so registering it changes nothing at render time.
+Registered, it counts the ``template`` attribute a second time, so ``next.W043`` warns on every ``page.py`` that sets a ``template`` string, and a project leaves it out of ``TEMPLATE_LOADERS``.
 
 .. autoclass:: next.pages.loaders.PythonTemplateLoader
    :members:

@@ -14,6 +14,7 @@ from next.seo.checks import (
     check_seo_sources_on_closed_site,
     check_sitemap_items_files,
 )
+from next.seo.checks.sources import imports_future_annotations
 from next.seo.registry import SitemapItemsEntry, sitemap_items_registry
 from tests.seo.sources import listed_elsewhere
 from tests.support import POSTS_ITEMS, check_ids, routed, write_tree
@@ -126,6 +127,17 @@ class TestModuleImports:
             [error] = check_seo_module_imports()
         assert error.id == "next.E110"
         assert error.obj == str(root / "robots.py")
+
+    @pytest.mark.parametrize(
+        "content",
+        [None, b"def broken(:\n", b"\xff\xfe\x00"],
+        ids=["missing", "syntax_error", "undecodable"],
+    )
+    def test_an_unreadable_source_imports_no_future(self, tmp_path, content) -> None:
+        source = tmp_path / "sitemap.py"
+        if content is not None:
+            source.write_bytes(content)
+        assert imports_future_annotations(source) is False
 
     def test_importing_modules_pass(self, tmp_path) -> None:
         root = write_tree(

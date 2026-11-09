@@ -1,13 +1,14 @@
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.core.checks.registry import registry as check_registry
+from django.template import TemplateDoesNotExist
 from django.test import override_settings
 
-from next.checks import reset_check_caches
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.pages.manager import page
@@ -18,6 +19,7 @@ from next.partial import (
     checks,
 )
 from next.partial.registry import register_patch_op
+from next.testing import reset_check_caches
 from tests.pages.checks.metadata.trees import (
     component_template,
     framework,
@@ -457,6 +459,21 @@ class TestComposedTemplateCompileCheck:
             messages = checks.check_composed_templates_compile()
         assert [m.obj for m in messages] == [str(page_file)]
 
+    @pytest.mark.parametrize(
+        "error",
+        [TemplateDoesNotExist("gone"), OSError("denied"), ValueError("bad")],
+        ids=["missing", "unreadable", "malformed"],
+    )
+    def test_a_template_that_cannot_be_read_is_left_to_the_render(
+        self, tmp_path: Path, error: Exception
+    ) -> None:
+        page_file = _page_dir(tmp_path, "unread")
+        with (
+            _composed_pages((page_file, "<p>x</p>")),
+            patch.object(page, "composed_template_for", side_effect=error),
+        ):
+            assert checks.check_composed_templates_compile() == []
+
 
 class TestComposedTemplateCompileRunsOnCheck:
     """`next.E072` runs on a plain `check`, as the other checks compile the tree too."""
@@ -475,6 +492,13 @@ class TestWithOverZoneCheck:
             '{% zone "z" %}<p>{{ greeting }}</p>{% endzone %}'
             "{% endwith %}"
         )
+        with _composed_pages((page_file, body)):
+            messages = checks.check_with_directly_over_zone()
+        assert [m.id for m in messages] == [checks.W_WITH_OVER_ZONE]
+
+    def test_whitespace_around_the_zone_still_counts(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "with_spaced")
+        body = '{% with a="1" %}\n  {% zone "z" %}{{ a }}{% endzone %}\n{% endwith %}'
         with _composed_pages((page_file, body)):
             messages = checks.check_with_directly_over_zone()
         assert [m.id for m in messages] == [checks.W_WITH_OVER_ZONE]
@@ -541,6 +565,23 @@ class TestContextZoneNameCheck:
         with _context_pages((page_file, source, body)):
             assert checks.check_context_zone_names_exist() == []
 
+    def test_an_unbound_context_beside_a_bound_one_is_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        page_file = _page_dir(tmp_path, "zone_mixed")
+        source = (
+            "from next.pages import page\n\n"
+            "@page.context('rows', zone='table')\n"
+            "def rows():\n"
+            "    return []\n\n"
+            "@page.context('title')\n"
+            "def title():\n"
+            "    return 'x'\n"
+        )
+        body = '{% zone "table" %}<p>{{ rows }}</p>{% endzone %}'
+        with _context_pages((page_file, source, body)):
+            assert checks.check_context_zone_names_exist() == []
+
     def test_keyless_context_on_a_page_without_zones(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "zone_none")
         source = (
@@ -598,14 +639,14 @@ class TestRepeatedFormKeyCheck:
 
 
 @contextmanager
-def _component(template_path: Path | None) -> Generator[None, None, None]:
-    """Point `next.E065` at a fake components manager with one component."""
+def _component(*template_paths: Path | None) -> Generator[None, None, None]:
+    """Point `next.E065` at a fake components manager with one component per path."""
     backend = FileComponentsBackend({"DIRS": [], "COMPONENTS_DIR": "_components"})
-    if template_path is not None:
+    for index, template_path in enumerate(template_paths):
         backend._registry.register(
             ComponentInfo(
-                name="card",
-                scope_root=template_path.parent,
+                name=f"card{index}",
+                scope_root=Path(),
                 scope_relative="",
                 template_path=template_path,
                 module_path=None,
@@ -641,6 +682,21 @@ class TestZoneInComponentCheck:
         component = tmp_path / "card.djx"
         component.write_text("<div>plain card</div>")
         with _component(component):
+            assert checks.check_no_zone_in_component() == []
+
+    def test_a_template_reached_twice_is_reported_once(self, tmp_path: Path) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text('<div>{% zone "inner" %}x{% endzone %}</div>')
+        with _component(component, component):
+            ids = [m.id for m in checks.check_no_zone_in_component()]
+        assert ids == [checks.E_ZONE_IN_COMPONENT]
+
+    def test_components_without_a_readable_template_are_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        undecodable = tmp_path / "broken.djx"
+        undecodable.write_bytes(b"\xff\xfe\x00{% zone ")
+        with _component(None, tmp_path / "missing.djx", undecodable):
             assert checks.check_no_zone_in_component() == []
 
     def test_no_component_backends_is_silent(self) -> None:
@@ -704,6 +760,12 @@ class TestFormBackendPartialAwareCheck:
 
     def test_unaware_override_warns(self) -> None:
         with _form_backends(_PartialUnawareBackend(), partial_active=True):
+            ids = [m.id for m in checks.check_form_backend_partial_aware()]
+        assert ids == [checks.W_FORM_BACKEND_NOT_AWARE]
+
+    def test_one_backend_class_warns_once(self) -> None:
+        backends = (_PartialUnawareBackend(), _PartialUnawareBackend())
+        with _form_backends(*backends, partial_active=True):
             ids = [m.id for m in checks.check_form_backend_partial_aware()]
         assert ids == [checks.W_FORM_BACKEND_NOT_AWARE]
 
@@ -775,6 +837,38 @@ class TestManifestVersionStorageCheck:
             STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}},
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
+
+    @pytest.mark.parametrize(
+        "storages",
+        [
+            None,
+            {"default": {"BACKEND": _PLAIN_STORAGE}},
+            {"staticfiles": "not-a-mapping"},
+            {"staticfiles": {"BACKEND": 5}},
+            {"staticfiles": {"BACKEND": "tests.nonexistent.Storage"}},
+        ],
+        ids=[
+            "not_a_mapping",
+            "no_staticfiles_alias",
+            "entry_not_a_mapping",
+            "backend_not_a_path",
+            "unimportable",
+        ],
+    )
+    def test_an_unreadable_storage_counts_as_no_manifest(
+        self, storages: object
+    ) -> None:
+        config = {
+            "BACKEND": "next.partial.JsonPartialProtocolBackend",
+            "OPTIONS": {"VERSION": "manifest"},
+        }
+        stand_in = SimpleNamespace(STORAGES=storages)
+        with (
+            override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": [config]}),
+            patch("next.partial.checks.backends.settings", stand_in),
+        ):
+            ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
+        assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
 
 
 class TestAssetVersionMovesBetweenDeploysCheck:

@@ -42,12 +42,13 @@ Discovery asks ``register_file`` for the URL of every discovered file on every r
 
    from django.dispatch import receiver
 
+   from next.static import StaticAsset
    from next.static.signals import asset_registered
 
-   asset_counts: Counter = Counter()
+   asset_counts: Counter[str] = Counter()
 
    @receiver(asset_registered)
-   def track_asset(sender, **kwargs) -> None:
+   def track_asset(sender: StaticAsset, **kwargs: object) -> None:
        asset_counts[sender.kind] += 1
 
 collector_finalized
@@ -64,10 +65,11 @@ A standalone zone render never fires this signal because its assets travel in th
 
    from django.dispatch import receiver
 
+   from next.static import StaticCollector
    from next.static.signals import collector_finalized
 
    @receiver(collector_finalized)
-   def count_assets(sender, **kwargs) -> None:
+   def count_assets(sender: StaticCollector, **kwargs: object) -> None:
        styles = sender.assets_in_slot("styles")
        scripts = sender.assets_in_slot("scripts")
        print(f"{len(styles)} styles, {len(scripts)} scripts")

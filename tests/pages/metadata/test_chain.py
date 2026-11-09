@@ -621,7 +621,7 @@ class TestContainedFailures:
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
         (leaf,) = write_page_chain(tmp_path, [("leaf", REFUSED)])
-        with patch.object(_failures, "_log") as log:
+        with patch.object(_failures, "emit") as log:
             entry = contained_chain(registry, leaf)
             contained_chain(registry, leaf)
         first, second = (call.args[4] for call in log.call_args_list)

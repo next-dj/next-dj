@@ -55,7 +55,7 @@ Modules
 ``next.partial.zone``.
    The ``{% zone %}`` tag, its ``ZoneOptions``, the ``ZoneNode`` that renders inline, and the ``ZonePartial`` that renders the body alone.
    ``ZonePartial`` pushes its own render-context state, which is what lets one zone body render outside the page render it was compiled in, and it delegates ``get_exception_info`` back to the page template so a ``DEBUG`` traceback still points at the real source.
-   ``ZoneNode.render`` wraps the body in the addressable marker element, and a lazy zone renders only its placeholder branch with the delivery attributes that tell the client to fetch the rest.
+   ``ZoneNode.render`` wraps the body in the addressable marker element, and a lazy zone renders only its placeholder branch inside a wrapper carrying ``data-next-lazy``, the hint that tells the client to fetch the rest.
 
 ``next.partial.registry``.
    Two unrelated records behind one address, ``ops`` for the patch verbs and ``zones`` for the zones of a compiled template.
@@ -113,7 +113,8 @@ A page is mounted under one view, built by ``unified_view`` in ``next.pages.mana
 
 A page whose body comes from files on disk takes the static branch, and a page with a ``render()`` function takes the resolving branch.
 Both branches do the same thing at the end.
-They read the ``PartialShaper`` slot, ask it for the intent, and hand off to ``zone_response`` when ``intent.zones`` is non-empty, otherwise they render the full page and stamp the partial ``Vary`` headers on the way out.
+They read the ``PartialShaper`` slot and ask it for the intent.
+A non-empty ``intent.zones`` hands off to ``zone_response``, and anything else renders the full page and stamps the partial ``Vary`` headers on the way out.
 
 The resolving branch resolves the page body first, so a ``render()`` that returns its own ``HttpResponse`` short-circuits before the partial branch is reached at all.
 It also passes the ``dynamic`` flag through, because a body a ``render()`` produced per request has no compiled zone source to re-render, which is the 400 the zone branch answers with.
@@ -172,7 +173,7 @@ The composed page template itself is memoised by ``next.pages``, and the composi
 A zone render therefore costs no template compile on a warm process.
 
 ``asset_version`` is a process-wide ``functools.cache``.
-Every partial response stamps it, and the resolution reads the pinned ``VERSION``, then ``STATIC_VERSION``, then the manifest branch that hashes the whole staticfiles path mapping, so it resolves once per configuration rather than once per request.
+Every partial response stamps it, and the resolution reads the pinned ``VERSION``, then ``STATIC_VERSION``, then the manifest branch, which reads the storage's ``manifest_hash`` and hashes the staticfiles path mapping only when the storage records none, so it resolves once per configuration rather than once per request.
 It is cleared on ``settings_reloaded`` and on a ``setting_changed`` naming ``STORAGES`` or ``STATIC_ROOT``, because the storage behind the manifest hash is configured on the Django half of the settings.
 
 The partial intent is memoised on the request object, so the page view, the dispatcher, and a template tag all read one parse.

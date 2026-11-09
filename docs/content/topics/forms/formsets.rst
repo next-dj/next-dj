@@ -189,6 +189,9 @@ Validation failure
 
 A failing validation re-renders the origin page with the bound formset in scope.
 Field errors render on each row through ``row.errors`` and non field errors render through ``form.non_form_errors``.
+A failure of the whole set, such as ``max_num``, ``min_num``, or a ``clean()`` across rows, fails the submission even when every row is valid, and its messages come back under ``__all__``.
+Under the partial runtime the form meta names every error by its wire name, ``form-1-title`` for a field of a row, ``form-1-__all__`` for the ``clean()`` of one row, and ``__all__`` for the set.
+It skips the rows marked ``DELETE``, as Django's own validation does.
 
 Validating an inline formset
 ----------------------------
@@ -261,10 +264,11 @@ Add form button
 Pair the formset with client side JS that clones the empty extra row.
 The framework processes whatever the management form reports.
 
-Partial save
-~~~~~~~~~~~~
+Saving only some rows
+~~~~~~~~~~~~~~~~~~~~~
 
-Save only the valid rows by iterating the formset and skipping rows whose ``cleaned_data`` is empty or carries a truthy ``DELETE``.
+The handler runs only when every row validates, so a set with one invalid row re-renders whole and saves nothing.
+Skip a blank extra row by its empty ``cleaned_data`` and a deleted row by its ``DELETE`` flag, as ``bulk_create_notes`` above does.
 
 See also
 --------

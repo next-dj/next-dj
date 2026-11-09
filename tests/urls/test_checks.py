@@ -1,7 +1,8 @@
 import sys
 from collections.abc import Iterator
+from operator import attrgetter
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -11,13 +12,12 @@ from django.test import override_settings
 from django.urls import NoReverseMatch, include, path, re_path
 from django.views import View
 
-from next.checks import reset_check_caches
 from next.deps import RESERVED_KEYS
 from next.deps.context import RECEIVER_NAMES
 from next.forms import RegistryFormActionBackend
 from next.forms.manager import form_action_manager
 from next.forms.uid import reverse_form_action
-from next.testing import override_next_settings
+from next.testing import override_next_settings, reset_check_caches
 from next.urls import PageRoot, RouterBackend
 from next.urls.checks import (
     _collect_url_patterns,
@@ -43,6 +43,7 @@ from tests.support import (
 )
 from tests.support.access import PAGE_HEAD, page_source
 from tests.support.cases.groupnames import CLASH_CASES, ClashCase
+from tests.support.cases.routers import PAGE_BACKEND_CASES, PageBackendCase
 
 
 def _write_virtual_page(tree: Path, route: str) -> Path:
@@ -473,6 +474,27 @@ class TestCollectUrlPatterns:
             ("y", False),
         ]
 
+    def test_a_missing_tree_yields_no_pattern(self, tmp_path) -> None:
+        assert (
+            _collect_url_patterns(tmp_path / "missing", "Root", [], reserved=[]) == []
+        )
+
+
+class TestCollectionFailures:
+    """A tree walk that raises is reported instead of crashing the run."""
+
+    def test_a_tree_that_fails_to_walk_is_e016(self, tmp_path) -> None:
+        write_page(tmp_path, "about")
+        with (
+            patch_checks_router_manager_with_routers(
+                routers=[_TreeRouter(root_trees=[tmp_path])]
+            ),
+            patch("next.urls.checks.scan_pages_tree", side_effect=OSError("denied")),
+        ):
+            messages = check_url_patterns(None)
+        assert check_ids(messages) == ["next.E016"]
+        assert "denied" in messages[0].msg
+
 
 class TestPagesConfigurationCodes:
     """Each `PAGE_BACKENDS` mistake carries a code of its own."""
@@ -482,12 +504,6 @@ class TestPagesConfigurationCodes:
         with override_settings(NEXT_FRAMEWORK=["not a dict"]):
             errors = check_next_pages_configuration()
         assert errors == []
-
-    def test_non_list_page_backends_is_e081(self) -> None:
-        mock_ns = SimpleNamespace(PAGE_BACKENDS="pages")
-        with patch("next.urls.checks.next_framework_settings", mock_ns):
-            errors = check_next_pages_configuration()
-        assert [e.id for e in errors] == ["next.E081"]
 
     def test_non_dict_page_backend_entry_is_e002(self) -> None:
         with override_settings(
@@ -518,6 +534,15 @@ class TestPagesConfigurationCodes:
         del entry["OPTIONS"]
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
             assert check_next_pages_configuration() == []
+
+    @pytest.mark.parametrize("case", PAGE_BACKEND_CASES, ids=attrgetter("id"))
+    def test_each_entry_mistake_carries_its_code(self, case: PageBackendCase) -> None:
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [case.entry]}):
+            assert tuple(check_ids(check_next_pages_configuration())) == case.expected
+
+    def test_an_empty_page_backends_list_is_e022(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": []}):
+            assert check_ids(check_next_pages_configuration()) == ["next.E022"]
 
     def test_non_string_pages_dir_is_e027(self) -> None:
         with override_settings(

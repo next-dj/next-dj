@@ -1,12 +1,16 @@
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from django.core.checks import Error, run_checks
 from django.test import Client
 
-from next.checks import reset_check_caches
+from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
+from next.pages.manager import page
 from next.seo import checks
 from next.seo.checks import roots as seo_roots
 from next.seo.checks.roots import (
+    checked_noindex,
     declares_sitemap,
     items_trails,
     loaded_seo_roots,
@@ -18,6 +22,7 @@ from next.seo.checks.roots import (
 )
 from next.seo.manager import seo_manager
 from next.seo.registry import sitemap_items_registry
+from next.testing import reset_check_caches
 from tests.seo.sources import CALLS
 from tests.support import POSTS_ITEMS, routed, write_tree
 
@@ -138,3 +143,19 @@ class TestServedRoutes:
             published = published_sources(roots)
         assert served == (True, True, True)
         assert published == ["a sitemap", "a robots.txt"]
+
+
+class TestCheckedNoindex:
+    """A metadata chain the schema refuses reads as noindex."""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            PageMetadataShapeError("page.py", "is bad"),
+            PageMetadataConflictError(Path()),
+        ],
+        ids=["shape", "conflict"],
+    )
+    def test_a_refused_chain_reads_as_noindex(self, tmp_path, error) -> None:
+        with patch.object(page, "metadata_chain", side_effect=error):
+            assert checked_noindex(tmp_path / "page.py") is True

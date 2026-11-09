@@ -89,7 +89,7 @@ def action(
 ) -> Callable[..., Any]:
     """Register a callable as a named form action, `transport="any"` admits the socket.
 
-    The guards run before origin resolution, `get_initial`, and form binding.
+    The guards run after origin resolution and before `get_initial` and form binding.
     """
     if isinstance(name, type):
         _record_class_misuse(name)

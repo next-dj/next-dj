@@ -87,7 +87,7 @@ Indexability
        ``manage.py check --deploy`` warns about ``False`` while the site still publishes a sitemap or a robots source.
    * - A callable
      - It answers true for the request, which is ``None`` where no request exists.
-       One that raises closes the site for the request, see below.
+       One that raises closes the site for the request outside ``DEBUG``, see below.
 
 A callable is the recipe for preview deployments that share the production settings.
 
@@ -110,7 +110,8 @@ A callable is the recipe for preview deployments that share the production setti
 
 A request for ``https://pr-42.preview.notes.example/`` renders ``noindex, nofollow`` on every page, while the production host renders the robots directives the pages declare.
 
-A callable that raises fails closed, so a broken rule never opens a preview host to search, and the request reads as not indexable.
+Outside ``DEBUG`` and ``STRICT_LOADING`` a callable that raises fails closed, so a broken rule never opens a preview host to search, and the request reads as not indexable.
+Under ``DEBUG`` or ``STRICT_LOADING`` it fails with its own exception, as a failing ``URL`` does.
 The answer is cached with the SEO responses per indexability, so a closed host never reads the copy an open one stored.
 
 A site closed to search

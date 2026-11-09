@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
+from . import checks
 from .config import NextFrameworkConfig
 
 
-__all__ = ["NextFrameworkConfig"]
+__all__ = ["NextFrameworkConfig", "checks"]

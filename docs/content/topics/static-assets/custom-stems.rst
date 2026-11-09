@@ -42,13 +42,14 @@ When to add a stem
 Add a stem when a project ships an asset under a filename that the default stems do not cover.
 
 - A ``page`` stem so that a project can name the page asset ``page.css`` instead of ``template.css``.
-- A ``vendor`` stem for third-party assets inside a component folder.
+- A ``vendor`` stem for a component folder whose third-party file has an extension no ``component`` file uses, such as a ``vendor.js`` beside ``component.css``.
 
 .. warning::
 
    Two stems of one role share one logical static path per extension, because the path is built from the directory and drops the stem.
    ``template.css`` and ``page.css`` in one directory collide on ``.css``, while ``vendor.js`` beside ``component.css`` does not.
    A directory holding both ``template.css`` and ``page.css`` therefore ships ``template.css`` only, the second file is dropped with a logged warning, and ``manage.py check`` reports ``next.E167``.
+   In a component folder the finder keeps one file of a colliding pair with no warning and no system check, so the clash surfaces only as the wrong file in the browser.
    Register an extra stem as a rename, not as an addition.
 
 Registering a stem
@@ -70,7 +71,7 @@ Register stems in ``AppConfig.ready``.
            default_stems.register("template", "page")
            default_stems.register("component", "vendor")
 
-After the registration, discovery picks up ``page.css`` and ``page.js`` next to ``template.djx``, and ``vendor.css`` inside a component folder.
+After the registration, discovery picks up ``page.css`` and ``page.js`` next to ``template.djx``, and ``vendor.js`` inside a component folder.
 
 The ``register`` method takes the role and the new stem.
 The role is created when it does not exist.
@@ -85,7 +86,7 @@ Stem and kind interaction
 -------------------------
 
 A new stem participates in every registered kind, so a registration combines with every kind extension automatically.
-A stem does not change ownership, so a ``vendor.css`` inside a component folder still belongs to the component and a ``page.css`` next to ``template.djx`` still belongs to the page.
+A stem does not change ownership, so a ``vendor.js`` inside a component folder still belongs to the component and a ``page.css`` next to ``template.djx`` still belongs to the page.
 See :doc:`/content/howto/add-a-custom-stem` for a worked example, and :doc:`asset-kinds` for pairing a stem with a custom kind.
 
 See also

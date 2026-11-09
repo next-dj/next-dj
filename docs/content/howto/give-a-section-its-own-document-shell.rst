@@ -39,7 +39,7 @@ Write the root layout
 ~~~~~~~~~~~~~~~~~~~~~
 
 The marker comes first in the file.
-Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, and blank text may stand before it.
+Only ``{% load %}`` tags, ``{% comment %}`` blocks, ``{# #}`` comments, ASCII whitespace, and a leading byte order mark may stand before it.
 
 .. code-block:: jinja
    :caption: notes/pages/embed/layout.djx

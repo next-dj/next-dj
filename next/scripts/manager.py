@@ -169,7 +169,7 @@ class ScriptsManager:
         held = self._trees.get(root)
         return self._tree_of(root) if held is None else held
 
-    def reset(self, **kwargs) -> None:
+    def reset(self, **kwargs: object) -> None:
         """Forget every tree, so the next render discovers them again.
 
         The sources are kept, and one whose file is unchanged is not executed again.
@@ -358,12 +358,12 @@ def _held_assets(
 scripts_manager = ScriptsManager()
 
 
-def forget_scripts(**kwargs) -> None:
+def forget_scripts(**kwargs: object) -> None:
     """Drop every discovered `scripts.py`, so a reload takes effect."""
     scripts_manager.reset()
 
 
-def forget_script_srcs(*, setting: str, **kwargs) -> None:
+def forget_script_srcs(*, setting: str, **kwargs: object) -> None:
     """Drop the memoised `src` URLs once the staticfiles storage is rebuilt."""
     if setting in MANIFEST_SETTINGS:
         scripts_manager.forget_srcs()

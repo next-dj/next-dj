@@ -1,12 +1,11 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.middleware.http import ConditionalGetMiddleware
 from django.middleware.security import SecurityMiddleware
 from django.test import override_settings
 
-from next.checks import reset_check_caches
 from next.pages.checks import (
     check_conditional_get_order,
     check_csrf_delivery,
@@ -16,10 +15,12 @@ from next.pages.checks import (
     check_shared_page_responses,
     responses,
 )
+from next.testing import reset_check_caches
 from tests.support import (
     FEED_URLCONF,
     I18N,
     I18N_URLCONF,
+    RootPagesRouter,
     check_ids,
     routed,
     write_page,
@@ -128,6 +129,31 @@ class TestSharedPages:
             override_settings(**LOCALE),
         ):
             assert check_shared_page_responses() == []
+
+    def test_one_language_mixes_nothing(self, tmp_path) -> None:
+        with (
+            routed(_tree(tmp_path, "template = 'x'\ncache = 60\n")),
+            override_settings(**{**LOCALE, "LANGUAGES": [("en", "English")]}),
+        ):
+            assert check_shared_page_responses() == []
+
+    def test_an_unrouted_token_endpoint_leaves_the_prefix_unknown(
+        self, tmp_path
+    ) -> None:
+        with (
+            routed(
+                _tree(tmp_path, "template = 'x'\ncache = 60\n"), urlconf=FEED_URLCONF
+            ),
+            override_settings(**LOCALE),
+        ):
+            assert check_shared_page_responses() == []
+
+    def test_a_page_two_routers_reach_is_read_once(self, tmp_path) -> None:
+        root = _tree(tmp_path, "template = 'x'\ncache = -1\n")
+        manager = MagicMock()
+        manager.backends = (RootPagesRouter([root]), RootPagesRouter([root]))
+        with patch.object(responses, "get_router_manager", return_value=(manager, [])):
+            assert check_ids(check_page_response_declarations()) == ["next.E131"]
 
 
 def _pages(tmp_path: Path, *sources: str) -> Path:

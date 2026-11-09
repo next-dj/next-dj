@@ -8,11 +8,7 @@ A form re-renders only the form that failed, a filter swaps only the result list
 The server authors every DOM operation and the client applies it.
 Selectors and swap strategies never cross the wire.
 
-Partial rendering works on a page that declares no zone at all.
-The default answer to an invalid submission re-renders the origin page and marks it ``extract: true``.
-The client trims the failed form out of that document and morphs it into place.
-The gain is a targeted DOM update at the render cost a full reload already pays.
-Wrapping the form in a ``{% zone %}`` trades that whole-page render for a slice, which is what :doc:`zones` weighs.
+A page with no zone still updates in place through the extract-morph default, whose cost :doc:`zones` weighs.
 
 Every form and link in this section is layered on the same ``POST`` then ``303`` then ``GET`` flow the framework already serves.
 An interaction the runtime intercepts therefore degrades to a full page cycle when JavaScript is off.

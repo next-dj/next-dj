@@ -72,7 +72,7 @@ def csrf_delivery() -> CsrfDelivery:
         return CsrfDelivery.AUTO
 
 
-def forget_csrf_delivery(**kwargs) -> None:
+def forget_csrf_delivery(**kwargs: object) -> None:
     """Drop the memoised delivery mode and endpoint URL after a settings reload."""
     csrf_delivery.cache_clear()
     _urls.clear()

@@ -96,7 +96,7 @@ def fail_loudly() -> bool:
     return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
 
 
-def reload_on_setting_changed(*, setting: str, **kwargs) -> None:
+def reload_on_setting_changed(*, setting: str, **kwargs: object) -> None:
     """Reload framework settings when Django reports a matching change."""
     if setting == USER_SETTING:
         next_framework_settings.reload()

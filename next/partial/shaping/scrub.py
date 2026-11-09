@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol, cast, override
 from django.core.exceptions import NON_FIELD_ERRORS
 from django.forms import BaseForm, BaseFormSet, FileField
 
+from next.forms.formsets import wire_errors
 from next.partial.envelope import FormMeta
 
 
@@ -140,25 +141,7 @@ def _scrub_errors(form: "BaseForm | BaseFormSet", requested: frozenset[str]) -> 
     walk.clear_cross_errors()
 
 
-def _error_count(form: "BaseForm | BaseFormSet") -> int:
-    """Return the number of surviving error messages after scrubbing."""
-    return sum(
-        len(messages)
-        for member in _pass_over(form).members()
-        for messages in member.form.errors.values()
-    )
-
-
 def _form_meta(uid: str, form: "BaseForm | BaseFormSet") -> FormMeta:
     """Build the machine-readable form meta from a bound form's errors."""
-    errors = _meta_errors(form)
+    errors = wire_errors(form)
     return FormMeta(uid=uid, valid=not errors, errors=errors)
-
-
-def _meta_errors(form: "BaseForm | BaseFormSet") -> dict[str, list[str]]:
-    """Return the errors of a form or a formset under their wire names."""
-    return {
-        member.wire_name(name): [str(message) for message in messages]
-        for member in _pass_over(form).members()
-        for name, messages in member.form.errors.items()
-    }

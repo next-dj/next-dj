@@ -7,7 +7,7 @@ from obs.models import MetricSnapshot
 class Command(BaseCommand):
     help = "Persist cached counters into the MetricSnapshot table."
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: object, **options: object) -> None:
         """Drain every counter, persist the snapshot, and clear the cache."""
         rows = flush()
         if not rows:

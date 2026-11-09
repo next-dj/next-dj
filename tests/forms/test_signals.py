@@ -29,6 +29,7 @@ from next.forms.wizard import (
 )
 from next.testing import SignalRecorder, capture_signals
 from tests.support import SignalSender
+from tests.support.cases.formset_errors import CrossRowFormSet, ErrorRow
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -486,6 +487,68 @@ class TestFormValidationFailedWiring:
         meta = form_action_manager.get_action_meta("simple_form")
         assert event.kwargs["uid"] == meta["uid"]
         assert event.kwargs["request"].path == url
+
+
+def _signal_rowset_factory() -> tuple[type[django_forms.BaseFormSet], dict]:
+    formset_class = django_forms.formset_factory(
+        ErrorRow, formset=CrossRowFormSet, extra=0, can_delete=True
+    )
+    return formset_class, {"initial": [{}]}
+
+
+def _save_rows(request: HttpRequest, form: django_forms.BaseFormSet) -> HttpResponse:
+    return HttpResponse(f"saved {form.total_form_count()} on {request.method}")
+
+
+@pytest.fixture()
+def signal_rows_action() -> Iterator[str]:
+    """Register a formset action and roll the registry back afterwards."""
+    backend = form_action_manager.default_backend
+    snapshot = backend.snapshot()
+    form_action_manager.register_action(
+        ActionRegistration(
+            name="signal_rows",
+            file_path=_FAKE_FILE,
+            scope="shared",
+            handler=_save_rows,
+            form_class=_signal_rowset_factory,
+        )
+    )
+    yield "signal_rows"
+    backend.restore(snapshot)
+
+
+@pytest.mark.django_db()
+class TestFormValidationFailedFormsetDispatch:
+    """``form_validation_failed`` reports a formset action's errors under wire names."""
+
+    def test_formset_invalid_post_emits_wire_names_without_deleted_rows(
+        self,
+        client_no_csrf,
+        capture_form_validation_failed: SignalRecorder,
+        signal_rows_action: str,
+    ) -> None:
+        """Non-form and row errors travel prefixed, a row marked DELETE is skipped."""
+        url = form_action_manager.get_action_url(signal_rows_action)
+        response = client_no_csrf.post(
+            url,
+            data={
+                ORIGIN_FIELD_NAME: "/",
+                "form-TOTAL_FORMS": "3",
+                "form-INITIAL_FORMS": "0",
+                "form-0-title": "ok",
+                "form-1-title": "x" * 30,
+                "form-2-title": "x" * 30,
+                "form-2-DELETE": "on",
+            },
+            follow=False,
+        )
+        assert response.status_code == 200
+        assert len(capture_form_validation_failed) == 1
+        kwargs = capture_form_validation_failed.events[0].kwargs
+        assert kwargs["action_name"] == "signal_rows"
+        assert kwargs["error_count"] == 2
+        assert kwargs["field_names"] == ("__all__", "form-1-title")
 
 
 class TestWizardSignalsImportable:

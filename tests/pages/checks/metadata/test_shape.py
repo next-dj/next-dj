@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from django.test import override_settings
@@ -308,6 +309,18 @@ class TestParentParameter:
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_metadata_parent_parameter() == []
 
+    def test_an_unreadable_signature_is_skipped(self, tmp_path: Path) -> None:
+        templated_page(
+            tmp_path,
+            "from next.pages import page\n\n"
+            "@page.metadata\n"
+            "def meta() -> dict:\n"
+            "    return {}\n\n"
+            "meta.__signature__ = 'unreadable'\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_metadata_parent_parameter() == []
+
 
 class TestUrlSchemes:
     """A foreign scheme fails the shape, so the fold carries only web URLs."""
@@ -344,6 +357,13 @@ class TestHreflangPatterns:
         self, tmp_path: Path
     ) -> None:
         metadata_page(tmp_path, '{"alternates": {"languages": True}}')
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_metadata_hreflang_patterns() == []
+
+    @override_settings(ROOT_URLCONF=I18N_URLCONF)
+    def test_the_prefix_is_read_once_for_many_pages(self, tmp_path: Path) -> None:
+        metadata_page(tmp_path, '{"alternates": {"languages": True}}')
+        metadata_page(tmp_path / "child", '{"alternates": {"languages": True}}')
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_metadata_hreflang_patterns() == []
 
@@ -396,6 +416,40 @@ class TestNoindexCanonical:
             patch_checks_router_manager(pages_directory=tmp_path),
         ):
             assert check_metadata_noindex_canonical() == []
+
+    def test_a_closed_site_makes_an_indexed_page_w088(self, tmp_path: Path) -> None:
+        metadata_page(tmp_path, '{"canonical": "https://other.example/x/"}')
+        with (
+            override_next_settings(SITE={"URL": BASE, "INDEXABLE": False}),
+            patch_checks_router_manager(pages_directory=tmp_path),
+        ):
+            assert check_ids(check_metadata_noindex_canonical()) == ["next.W088"]
+
+    def test_a_callable_indexable_is_never_called(self, tmp_path: Path) -> None:
+        metadata_page(
+            tmp_path,
+            '{"robots": {"index": False}, "canonical": "https://other.example/x/"}',
+        )
+        rule = MagicMock(side_effect=AssertionError)
+        with (
+            override_next_settings(SITE={"URL": BASE, "INDEXABLE": rule}),
+            patch_checks_router_manager(pages_directory=tmp_path),
+        ):
+            assert check_ids(check_metadata_noindex_canonical()) == ["next.W088"]
+        rule.assert_not_called()
+
+    def test_a_callable_url_is_silent_and_never_called(self, tmp_path: Path) -> None:
+        metadata_page(
+            tmp_path,
+            '{"robots": {"index": False}, "canonical": "https://other.example/x/"}',
+        )
+        rule = MagicMock(side_effect=AssertionError)
+        with (
+            override_next_settings(SITE={"URL": rule}),
+            patch_checks_router_manager(pages_directory=tmp_path),
+        ):
+            assert check_metadata_noindex_canonical() == []
+        rule.assert_not_called()
 
 
 class TestEnumValues:

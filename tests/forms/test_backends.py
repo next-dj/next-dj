@@ -17,6 +17,7 @@ from django.urls import (
     set_script_prefix,
 )
 
+from next.caches import DEFAULT_CACHE_SIZE
 from next.forms import (
     ActionOutcome,
     ActionOutcomeKind,
@@ -1174,22 +1175,22 @@ class TestActionUrlCache:
         backend = self._backend_with_action()
         backend.get_action_url("cached_action")
         backend.clear_registry()
-        assert backend._url_cache == {}
+        assert len(backend._url_cache) == 0
 
     def test_root_urlconf_change_drops_url_cache(self) -> None:
         """Overriding ROOT_URLCONF invalidates cached URLs."""
         backend = self._backend_with_action()
         backend.get_action_url("cached_action")
-        assert backend._url_cache != {}
+        assert len(backend._url_cache) > 0
         with override_settings(ROOT_URLCONF="next.urls"):
-            assert backend._url_cache == {}
+            assert len(backend._url_cache) == 0
 
     def test_unrelated_setting_change_keeps_url_cache(self) -> None:
         """Overriding an unrelated setting leaves cached URLs in place."""
         backend = self._backend_with_action()
         url = backend.get_action_url("cached_action")
         with override_settings(APPEND_SLASH=False):
-            assert backend._url_cache != {}
+            assert len(backend._url_cache) > 0
             assert backend.get_action_url("cached_action") == url
 
     def test_script_prefix_is_part_of_the_cache_key(self) -> None:
@@ -1203,6 +1204,17 @@ class TestActionUrlCache:
             clear_script_prefix()
         assert prefixed == f"/mounted{bare}"
         assert backend.get_action_url("cached_action") == bare
+
+    def test_url_cache_is_bounded_across_script_prefixes(self) -> None:
+        """Distinct script prefixes cannot grow the URL cache without limit."""
+        backend = self._backend_with_action()
+        try:
+            for i in range(DEFAULT_CACHE_SIZE + 1):
+                set_script_prefix(f"/mount{i}/")
+                backend.get_action_url("cached_action")
+        finally:
+            clear_script_prefix()
+        assert len(backend._url_cache) == DEFAULT_CACHE_SIZE
 
 
 class TestManagerClearRegistries:
@@ -1485,7 +1497,7 @@ class TestRegistryBackendSnapshotRestore:
         saved = backend.snapshot()
         _register(backend, "extra")
         backend.restore(saved)
-        assert backend._url_cache == {}
+        assert len(backend._url_cache) == 0
 
     def test_contract_default_hands_out_an_ignored_token(self) -> None:
         """A backend keeping no state of its own snapshots and restores nothing."""

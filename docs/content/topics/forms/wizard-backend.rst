@@ -237,8 +237,7 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 
 The framework reads ``FORM_WIZARD_BACKEND`` on first use, caches the instance for the process, and resets the cache when settings reload, so the constructor runs once.
 The test isolation helper :func:`next.testing.reset_form_registration_state` resets it between cases.
-The example stores plain JSON values only, so it suits step fields limited to strings, numbers, and dates.
-A step with model values needs the typed codec of ``SessionFormWizardBackend``.
+The example stores plain JSON values only, so a date or a ``Decimal`` comes back as a string and a step with typed or model values needs the codec of ``SessionFormWizardBackend``.
 A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
 
 Building the instance sends ``wizard_backend_loaded``.

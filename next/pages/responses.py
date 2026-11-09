@@ -501,7 +501,7 @@ def cookie_varies(request: HttpRequest | None) -> bool:
     return getattr(request, _COOKIE_VARY_ATTR, False) is True
 
 
-def forget_response_policies(**kwargs) -> None:
+def forget_response_policies(**kwargs: object) -> None:
     """Drop the memoised policies, so a settings reload takes effect."""
     _DECLARED.clear()
 

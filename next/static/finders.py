@@ -270,7 +270,7 @@ class _SettingsGeneration:
 _settings_generation = _SettingsGeneration()
 
 
-def forget_scans(**kwargs) -> None:
+def forget_scans(**kwargs: object) -> None:
     """Mark every held scan stale, so a reconfigure is walked again."""
     _settings_generation.bump()
 
@@ -439,7 +439,9 @@ class NextAppDirectoriesFinder(AppDirectoriesFinder):
     """
 
     @override
-    def __init__(self, app_names: Iterable[str] | None = None, *args, **kwargs) -> None:
+    def __init__(
+        self, app_names: Iterable[str] | None = None, *args: object, **kwargs: object
+    ) -> None:
         """Build the stock app storages, then drop the framework's own app."""
         super().__init__(app_names, *args, **kwargs)
         framework_app = _framework_app_name()

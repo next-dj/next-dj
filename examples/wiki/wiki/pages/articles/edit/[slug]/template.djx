@@ -1,5 +1,5 @@
 <div class="space-y-6">
-  <a href="{{ article.url }}"
+  <a href="{{ article.get_absolute_url }}"
      class="inline-block text-xs text-muted-foreground hover:text-foreground">
     ← Back to article
   </a>

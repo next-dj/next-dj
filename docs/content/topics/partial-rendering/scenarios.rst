@@ -31,10 +31,9 @@ The ``{% form %}`` tag already emits ``data-next-action="<uid>"`` and the hidden
 The default shape of an invalid submission is an extract-morph of the failed form addressed by its uid.
 The server re-renders the whole origin page and the client trims out the one form by ``data-next-action``.
 The neighbouring forms are named by no operation, so the runtime never touches them.
-This costs a full page render on the server, which :doc:`zones` explains and shows how to avoid.
+:doc:`zones` explains the full-page render this costs and the zone that avoids it.
 
-Wrapping a form in a zone trades the full render for a single-zone render.
-The zone is an optional optimisation, not required markup.
+A zone around the form is optional markup that renders that one zone instead.
 
 .. code-block:: jinja
    :caption: settings/template.djx with a zone
@@ -123,7 +122,6 @@ The response is always 200 to an authorized caller.
    }
 
 The form here carries no ``zone=``, so the validate response is an extract-morph of the whole step page addressed by the form uid, the same default :doc:`zones` describes.
-Wrapping the form in a zone trades that full render for a single-zone render.
 Errors are filtered to the field the request named, so the empty ``team`` field does not earn a premature required error.
 Cross-field non-field errors are always dropped, because a ``clean()`` belongs to the submit, not to a per-field blur.
 A file field is excluded from a validate request so a multipart upload is not re-sent on every blur.
@@ -327,7 +325,7 @@ A modal wizard that refreshes a list
 
 A home page carries a Start a new request button and a list of recent requests.
 Clicking the button opens a modal, the step content loads on open, and inside is an existing three-step wizard.
-A step error keeps the modal open, steps advance with no reload, drafts live in wizard storage.
+A step error keeps the modal open, and steps advance with no reload while drafts live in wizard storage.
 On the last step the request is created, the modal closes, and the list beneath it refreshes.
 There is no user JavaScript.
 
@@ -397,7 +395,7 @@ The dispatcher builds the next wizard and the unbound form of the next step, and
 
 A wizard advance pushes no history entry by default, in a layer or on a full page.
 ``PUSH_WIZARD_STEPS`` flips the global default and a wizard's ``Meta.push_steps`` overrides it per wizard, see :doc:`reference`.
-The per-uid mutation lock makes a double-click on Submit request impossible by construction, it lets exactly one fetch through.
+The per-uid mutation lock lets exactly one fetch through, so a double-click on Submit request sends one request.
 A session that expires mid-wizard returns a non-envelope response, and the runtime performs a full navigation to the login page.
 
 The two choreographies differ only in the last step, and :doc:`done-choreographies` compares them.
@@ -511,7 +509,7 @@ A ``lazy="revealed"`` zone waits for the viewport.
    X-Next-Zone: audit-table
 
 The response morphs the zone and carries the co-located assets of the components inside it.
-CSS loads before the morph, JS after, so the table cannot arrive without behaviour.
+CSS loads before the morph and JS is inserted after it, so the table renders styled and its scripts bind through ``onMount`` once they run.
 
 .. code-block:: json
    :caption: response body

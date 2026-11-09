@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import pytest
 
-from next.checks import reset_check_caches
 from next.scripts.checks import (
     check_consented_categories,
     check_consented_needs_consent,
@@ -15,6 +14,7 @@ from next.scripts.checks import (
     check_scripts_need_the_runtime,
     check_scripts_sources,
 )
+from next.testing import reset_check_caches
 from tests.scripts.trees import write_tree
 from tests.support import check_ids, routed, write_page
 

@@ -336,11 +336,11 @@ def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
     return meta
 
 
-def forget_action_urls(*, setting: str, **kwargs) -> None:
+def forget_action_urls(*, setting: str, **kwargs: object) -> None:
     """Drop cached action URLs when the URLconf is swapped under override_settings."""
     if setting == "ROOT_URLCONF":
         for backend in _url_caching_backends:
-            backend._url_cache.clear()
+            backend.forget_urls()
 
 
 def declaring_files(
@@ -374,7 +374,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
-        self._url_cache: dict[tuple[str, str], str] = {}
+        self._url_cache: BoundedCache[tuple[str, str], str] = BoundedCache()
 
     @override
     def clear_registry(self) -> None:
@@ -385,7 +385,11 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry = {}
         self._uid_to_name = {}
         self._name_index = {}
-        self._url_cache = {}
+        self._url_cache = BoundedCache()
+
+    def forget_urls(self) -> None:
+        """Drop every memoised action URL, reversed again on the next lookup."""
+        self._url_cache.clear()
 
     @override
     def snapshot(self) -> "RegistryBackendSnapshot":
@@ -414,7 +418,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry = dict(snapshot.registry)
         self._uid_to_name = dict(snapshot.uid_to_name)
         self._name_index = dict(snapshot.name_index)
-        self._url_cache = {}
+        self._url_cache = BoundedCache()
 
     @override
     def register_action(self, registration: ActionRegistration) -> None:

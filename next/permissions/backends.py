@@ -14,10 +14,10 @@ class ObjectPermissionBackend:
     The async twins run the predicates in a thread, since a predicate may query.
     """
 
-    def authenticate(self, *args, **kwargs) -> None:
+    def authenticate(self, *args: object, **kwargs: object) -> None:
         """Authenticate nobody, so another backend logs the user in."""
 
-    async def aauthenticate(self, *args, **kwargs) -> None:
+    async def aauthenticate(self, *args: object, **kwargs: object) -> None:
         """Authenticate nobody, so another backend logs the user in."""
 
     def has_perm(self, user_obj: object, perm: str, obj: object = None) -> bool:

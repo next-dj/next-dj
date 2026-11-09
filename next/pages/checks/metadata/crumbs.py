@@ -26,7 +26,9 @@ def declares_crumb(segment: Segment | None) -> bool:
 
 
 @register(NEXT)
-def check_route_group_breadcrumbs(*args, **kwargs) -> list[CheckMessage]:
+def check_route_group_breadcrumbs(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about a breadcrumb declared on a route group `page.py` (`next.W136`).
 
     A group serves the URL of its parent and gives no crumb, so the label is dropped.

@@ -4,10 +4,11 @@ from unittest.mock import patch
 from django.core.checks import Error, run_checks
 from django.test import override_settings
 
-from next.checks import NEXT, SEO, reset_check_caches
+from next.checks import NEXT, SEO
 from next.pages.checks.metadata import pages as metadata_pages
 from next.pages.checks.metadata.pages import loaded_metadata_pages
 from next.pages.manager import page
+from next.testing import reset_check_caches
 from tests.pages.checks.metadata.trees import (
     INHERITED_CALLABLE,
     metadata_page,

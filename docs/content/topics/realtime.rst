@@ -148,7 +148,8 @@ The page's regular access checks and dependency resolution run before the stream
 
 ``DUrl[str]`` reads the ``code`` segment of the URL, see :doc:`/content/topics/dependency-injection`.
 The backend subscription is selected from the request's WSGI or ASGI type.
-The broker wait timeout is the heartbeat interval of the transport, ``SSE.HEARTBEAT_SECONDS`` for SSE and ``REALTIME['HEARTBEAT']`` for a WebSocket, 25 seconds each by default, and later sections say heartbeat for whichever applies.
+The broker wait timeout is the heartbeat interval of the transport, ``SSE.HEARTBEAT_SECONDS`` for SSE and ``REALTIME['HEARTBEAT']`` for a WebSocket, 25 seconds each by default.
+The rest of this page calls either one the heartbeat.
 Each SSE timeout writes a heartbeat comment under WSGI and ASGI alike, and a WebSocket times its pings, access rechecks, and presence refreshes by its interval.
 Under WSGI, disconnect cleanup is best-effort at the next yield, write, or close.
 Under ASGI, a client that stops reading is dropped one to two heartbeats after a write to it blocks.
@@ -192,7 +193,7 @@ A ticket grants at most 64 topics and lives ``TICKET_MAX_AGE`` seconds, 60 by de
 A stream over more topics stays on SSE.
 It is signed from ``SECRET_KEY`` and also verifies under ``SECRET_KEY_FALLBACKS``, so a rotation that keeps the old key as a fallback leaves outstanding tickets valid, and dropping the old key invalidates them.
 The socket checks the request Origin before it accepts, and it rechecks the session and topic access before joining the broker and during the connection.
-WebSocket works best with a session engine that stores sessions on the server, and ``next.W142`` flags the signed-cookie engine under the default ticket binding, see `The signed-cookie session engine`_.
+WebSocket works best with a session engine that stores sessions on the server, and ``next.W142``, logged by ``WebSocketApp`` at startup, flags the signed-cookie engine under the default ticket binding, see `The signed-cookie session engine`_.
 The socket loads its session from the cookie at the handshake and on every recheck, so a session cache that evicts live entries closes sockets with ``4401``.
 Size the session cache for the open connections, or use the ``db`` or ``cached_db`` engine.
 
@@ -520,7 +521,7 @@ The ``upstream_received`` signal fires before each handler runs, with the handle
 Discovery
 ~~~~~~~~~
 
-Django imports the ``realtime`` module of every installed application at startup, the way the admin finds ``admin.py``, so handlers register by being defined there.
+The ``next`` application imports the ``realtime`` module of every installed application at startup, after every ``forms.py`` and before any ``signals.py``, the way Django's admin finds ``admin.py``, so handlers register by being defined there.
 ``NEXT_FRAMEWORK["REALTIME"]["HANDLERS"]`` replaces that search with an explicit list of dotted module names, and an empty list imports nothing.
 
 .. code-block:: python

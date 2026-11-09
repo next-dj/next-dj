@@ -167,7 +167,7 @@ A from-scratch backend overrides the hook so its actions participate in checks s
 
 The fragment shows only the storage and the hook.
 A from-scratch backend also implements the four abstract methods ``register_action``, ``get_action_url``, ``generate_urls``, and ``dispatch``, which fill and consume ``self._metas``.
-The yielded dicts carry the action ``name``, the target, the ``uid``, and the access ``guard``, the same shape ``get_meta`` returns.
+The yielded dicts carry the required ``name``, ``uid``, ``file_path``, and ``scope`` keys, the target, and the access ``guard``, the same shape ``get_meta`` returns.
 
 Verification
 ------------

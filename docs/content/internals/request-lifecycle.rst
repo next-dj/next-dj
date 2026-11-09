@@ -219,7 +219,7 @@ What is cached between requests
 Every stage above keeps a structure that outlives the response it served, and each of those structures carries the key that invalidates it.
 
 Route index.
-   The resolver holds a static route map and a segment trie built from the concatenated router and form-action pattern list, versioned by the counter pair those two managers bump.
+   The resolver holds a static route map and a segment trie built from the concatenated CSRF, form-action, page, and SEO pattern list, versioned by the three-part token of the router, form-action, and SEO route versions.
    See :doc:`url-router` for the index layout and for what a reload does to it.
 
 Page modules.

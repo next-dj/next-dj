@@ -3,8 +3,8 @@
 SEO quickstart
 ==============
 
-This page wires a site up from scratch in five steps, and every step links the topic that covers it in depth.
-The steps name the site, render the head, title a page, publish a sitemap, and add a robots file.
+This page wires a site up from scratch in six steps, and every step links the topic that covers it in depth.
+The steps name the site, render the head, title a page, build metadata from data, publish a sitemap, and add a robots file.
 
 .. contents::
    :local:

@@ -19,7 +19,6 @@ from next.seo.manager import seo_manager
 from next.testing import capture_signals, override_next_settings
 from next.urls import (
     FileRouterBackend,
-    RouterFactory,
     RouterManager,
     TrieURLResolver,
     router_manager,
@@ -33,6 +32,7 @@ from next.urls.manager import (
     reload_router_settings,
     seo_routes_version,
 )
+from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
 from tests.support import (
     NAMESPACED_URLCONF,
@@ -523,7 +523,7 @@ class TestGlobalInstances:
 
     def test_create_backend_real_execution(self) -> None:
         """A third-party backend is built from its entry without file-router fields."""
-        backend = RouterFactory.create_backend(
+        backend = RouterAccessImpl().create_backend(
             {"BACKEND": "tests.support.routers.EntryRouter"}
         )
 
@@ -1012,14 +1012,6 @@ class TestBuildUrlResolver:
 
 class TestRouterManagerNextPagesConfig:
     """``RouterManager._get_next_pages_config`` defensive branches."""
-
-    def test_non_list_default_page_backends_returns_empty_cached(self) -> None:
-        """When ``PAGE_BACKENDS`` is not a list, config is empty and cached."""
-        mock_nf = SimpleNamespace(PAGE_BACKENDS="not-a-list")
-        with patch("next.backends.next_framework_settings", mock_nf):
-            mgr = RouterManager()
-            assert mgr._get_next_pages_config() == []
-            assert mgr._get_next_pages_config() == []
 
     def test_an_entry_that_is_not_a_dict_is_no_entry(self) -> None:
         """A malformed entry never reaches the factory that would choke on it."""

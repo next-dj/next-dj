@@ -41,7 +41,8 @@ Consent
 -------
 
 ``Consent`` is the frozen value a visitor's choice reads as, ``granted`` holding ``necessary`` always and ``decided`` staying false until the visitor chooses.
-``allows(category)`` answers one category, false for a blank one, and reads a name of several space-separated categories as all of them, and a template reads ``consent.marketing`` through ``__getitem__``.
+``allows(category)`` answers one category, false for a blank one, and reads a name of several space-separated categories as all of them.
+A template reads ``consent.marketing`` through ``__getitem__``, which answers the same.
 ``joint_category(*names)`` builds the space-separated name of a script that waits for several categories.
 ``get_consent(request)`` answers the consent of a request, read once and kept to the configured categories, and ``consent_categories()`` the configured list with ``necessary`` first.
 

@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 
 
 @register(Tags.templates, NEXT)
-def check_composed_templates_compile(*args, **kwargs) -> list[CheckMessage]:
+def check_composed_templates_compile(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a composed page template fails to compile (`next.E072`).
 
     The zone checks skip such a page, so the error would otherwise surface as a 500.

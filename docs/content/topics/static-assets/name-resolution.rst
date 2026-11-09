@@ -143,6 +143,7 @@ When two page roots contain a file, the deepest one names it.
 A page collects the ``layout`` files of the layouts in its cut chain, see :ref:`topics-layouts-root`.
 Each layout takes its name from the deepest root that holds it, not from the root of the page, so the ``layout.css`` of a ``DIRS`` root reaches a page of an application tree under the key of the ``DIRS`` root.
 A layout under no root, or under a root with no key, serves no asset to a page inside a root.
+``manage.py check`` reports a layout under no root as ``next.W135`` when it carries co-located assets, so the files that never reach the page stay visible.
 A page outside every root keeps the fallback names, which come from the directory name of the layout.
 
 ``template`` role.
@@ -195,9 +196,19 @@ It is concrete on the base class and returns the reference unchanged, so a backe
 .. code-block:: python
    :caption: notes/backends.py
 
+   import json
+   from collections.abc import Mapping
+   from pathlib import Path
+   from typing import Any
+
    from next.static import StaticFilesBackend, static_name
 
    class BuildManifestBackend(StaticFilesBackend):
+       def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+           super().__init__(config)
+           manifest_path = Path(self.config["OPTIONS"]["MANIFEST_PATH"])
+           self._manifest: dict[str, str] = json.loads(manifest_path.read_text())
+
        def resolve_url(self, reference: str) -> str:
            name = static_name(reference)
            if name is None:
@@ -205,6 +216,7 @@ It is concrete on the base class and returns the reference unchanged, so a backe
            built = self._manifest.get(name)
            return built if built is not None else super().resolve_url(reference)
 
+The manifest is read once when the manager builds the backend, and :doc:`/content/howto/build-a-custom-asset-backend` shows a Vite manifest backend that reads it lazily and drops it through ``forget_urls``.
 ``next.static.static_name`` is what the default backend resolves through, and a custom lookup calls it and handles the ``None`` it answers for a reference that is already a URL, see :ref:`ref-static` for the full return contract.
 ``resolve_url`` and ``asset_url`` carry different jobs.
 ``resolve_url`` turns an authored reference into a public URL once per reference, while ``asset_url`` rewrites an already resolved URL on every render, which is where a per-request scheme belongs.

@@ -8,7 +8,7 @@ Module summary
 
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
 It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
-It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
+It also exposes the ``RouterManager`` that builds and owns them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError``, ``InvalidURLParameterError``, and ``ReservedURLParameterError`` refusals.
 
 It also exposes the ``page_reverse``, ``page_reverse_in``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, and ``pages``, which places one application page tree from a ``urls.py``.
@@ -291,8 +291,6 @@ Checks
 
       * - Error
         - Condition
-      * - ``next.E081``
-        - ``PAGE_BACKENDS`` is not a list.
       * - ``next.E022``
         - ``PAGE_BACKENDS`` is an empty list.
       * - ``next.E002``
@@ -323,7 +321,7 @@ Checks
         - An entry carries a key outside its allowed set, ``BACKEND``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, and ``PAGES_DIR`` for a file router, ``BACKEND`` alone otherwise.
 
 ``check_router_manager``.
-   Reports a router that cannot be built once per run.
+   Reports :ref:`next.E007 <ref-system-checks>` once per run for a router that cannot be built, since every check that walks the routers skips that failure silently.
 
 ``check_url_patterns``.
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
@@ -333,7 +331,6 @@ Checks
    Fails with :ref:`next.E152 <ref-system-checks>` when a page captures a name the ``pages()`` prefix of its tree captures already, naming the page and the prefix.
    Fails with :ref:`next.E082 <ref-system-checks>` for any other refusal the parser raises for a bracket segment, so a page the router left unrouted for a name the route compiler would reject is named at check time.
    Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
-   Reports :ref:`next.E014 <ref-system-checks>` when the conflict comparison itself raises.
 
 ``check_reserved_url_parameters``.
    Fails with :ref:`next.E217 <ref-system-checks>` when a bracket segment takes a name dependency injection reserves, such as ``form``, ``request`` or ``self``.

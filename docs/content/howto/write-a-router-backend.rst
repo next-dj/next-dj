@@ -173,7 +173,7 @@ Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manage
 
    @receiver(post_save, sender=Article)
    @receiver(post_delete, sender=Article)
-   def reload_router_on_article_change(**kwargs) -> None:
+   def reload_router_on_article_change(**kwargs: object) -> None:
        """Rebuild URL patterns whenever an article appears or disappears."""
        router_manager.reload()
 
@@ -194,4 +194,4 @@ See also
 
    :doc:`/content/howto/reload-routes-from-code` for the reload trigger on its own.
    :doc:`/content/topics/file-router` for the file discovery the subclass extends.
-   :doc:`/content/internals/url-router` for the manager and factory internals.
+   :doc:`/content/internals/url-router` for the manager internals and the ``RouterAccess`` port that builds one router from an entry.

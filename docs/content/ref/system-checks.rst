@@ -13,14 +13,17 @@ Eight of them are deployment checks and answer only to ``uv run python manage.py
 Check registration
 ------------------
 
-``next.checks.register_all`` runs during ``AppConfig.ready``.
-It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.server.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+Each subsystem ``checks`` module registers its checks with ``@register`` on import, and Django imports them all while it loads ``INSTALLED_APPS``.
+``next.apps`` imports ``next.apps.checks``, and ``next.checks.catalog`` imports every other one at module top level and lists them in ``CHECK_MODULES``, which ``NextFrameworkConfig.check_modules`` holds.
+The modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.server.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
 
-Each of these modules registers checks.
 ``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
+A check function is imported from its area's ``checks`` module, since ``next.checks`` itself holds only the ``NEXT`` and ``SEO`` tags and imports nothing of the framework.
+
+.. automodule:: next.checks.catalog
+   :members:
 
 Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 
@@ -68,7 +71,7 @@ The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
 
-``next.checks.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
+``next.testing.reset_check_caches`` drops every per-run check cache so the next run rebuilds from the current sources.
 The cached state covers the router manager with the ``page.py`` pass memoised on it, the components manager, the collected URL patterns, the page module memo, the context and metadata registries with the settings tier, and the seo sources with their items registry.
 It also covers the run memos of ``next.checks.common``, which hold the routed pages, their metadata folds, the composed page templates, and the discovered SEO roots so that the checks of one run share a single pass over the tree.
 ``next.pages.manager.reset_page_registrations`` and ``next.seo.manager.reset_seo_sources`` are the two area resets it calls.
@@ -97,7 +100,7 @@ Shared helpers
 ~~~~~~~~~~~~~~
 
 ``next.checks.common`` holds helpers reused across subsystem check modules.
-It is imported indirectly by those modules rather than by ``register_all``, and the router manager and the page-tree walk it passes on live in ``next.discovery``, outside this package, because production code reads them too.
+The area checks modules import it directly and ``next.checks.catalog`` reaches it only through them, while the router manager and the page-tree walk it passes on live in ``next.discovery``, outside this package, because production code reads them too.
 The unknown-key probe behind ``next.E035``, ``errors_for_unknown_keys``, lives in ``next.conf.checks``, the lowest layer every area's checks reach, and ``next.checks.common`` passes it on.
 ``raw_scope(name)`` answers a ``NEXT_FRAMEWORK`` scope as written, ``None`` where ``next.E076`` reports its shape, and ``takes_request(func)`` whether a callable setting can take the request alone, read off its signature without a call.
 ``RunMemo`` holds one value a check run builds once, kept while its key is the same object, and ``forget_run_memos`` drops every such value, which ``reset_check_caches`` calls.
@@ -281,6 +284,7 @@ One code stands for one condition, so silencing it through ``SILENCED_SYSTEM_CHE
 The ``Emitted by`` column names the module that builds the message, which for the four check packages is the submodule rather than the package.
 
 A code is never reused for another condition, so a silenced code keeps naming the condition it named.
+A retired code leaves these tables, and no check emits it again.
 
 Errors
 ~~~~~~
@@ -337,10 +341,6 @@ Errors
      - A page ``render`` attribute is not callable.
        The file routes no URL, and ``next.W128`` leaves its branch to this error even when the file passes access or context to the pages below.
      - ``next.pages.checks.modules``
-   * - ``next.E014``
-     - An error was raised while checking URL conflicts.
-       The comparison that raised is the one reporting ``next.E015``, so no duplicate route pair is named in that run however many the tree holds.
-     - ``next.urls.checks``
    * - ``next.E015``
      - The same URL pattern is defined in more than one location.
        When a conflicting source passes through a route group, the hint explains that a group leaves the URL, so two groups, or a group page and the page of its parent, serve one URL.
@@ -372,9 +372,6 @@ Errors
    * - ``next.E022``
      - ``PAGE_BACKENDS`` is empty.
      - ``next.urls.checks``
-   * - ``next.E023``
-     - ``COMPONENT_BACKENDS`` is not a list.
-     - ``next.components.checks``
    * - ``next.E024``
      - A file router entry is missing ``PAGES_DIR``.
      - ``next.urls.checks``
@@ -551,7 +548,7 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``DEPENDENCY_RESOLVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS`` as a dict.
+       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``CSRF_DELIVERY``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` as dicts.
        ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``FORM_ANCHOR_FILES``, ``FORM_WIZARD_BACKEND``, and ``JS_CONTEXT_SERIALIZER`` carry their own per-key checks, ``next.E067``, ``next.E044``, ``next.E052``, ``next.E051``, and ``next.W042``, so this probe leaves them out.
      - ``next.conf.checks``
    * - ``next.E077``
@@ -571,9 +568,6 @@ Errors
      - A ``COMPONENTS_DIR`` value is not a string.
        It carries its own code rather than sharing ``next.E027`` with ``PAGES_DIR``, for the same reason.
      - ``next.components.checks``
-   * - ``next.E081``
-     - ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` is not a list, so no page backend entry can be read.
-     - ``next.urls.checks``
    * - ``next.E082``
      - A route names a bracket parameter Django refuses as a route name, so the route reaches neither the URLconf nor the conflict map.
        The directory-level counterpart is ``next.E008``, which reads the same normalisation rule.
@@ -1260,6 +1254,7 @@ Warnings
    * - ``next.W088``
      - A ``noindex`` page points its canonical at another origin, which passes no signal.
        On a site closed to search every page reads as ``noindex``, so any cross-origin canonical triggers it.
+       A callable ``INDEXABLE`` reads as open and a callable ``URL`` leaves the origin unknown, so neither is called and a callable ``URL`` keeps the check silent.
      - ``next.pages.checks.metadata.shape``
    * - ``next.W089``
      - A ``SITEMAP_BACKENDS`` backend raises from ``sections(None)``, which the checks call without a request to compare its section names with the others, so ``next.E116`` cannot read its sections.

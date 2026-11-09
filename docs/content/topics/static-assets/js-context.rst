@@ -65,7 +65,8 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
 
 ``resolve_serializer`` reads the setting on every call and builds one instance per dotted path, which every render shares until the settings reload.
 When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
-A path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` too, so no page fails over it, see :ref:`topics-failure-containment`.
+Outside ``DEBUG`` and ``STRICT_LOADING`` a path that does not import, a class whose constructor raises, or an instance without ``dumps`` gives way to ``JsonJsContextSerializer`` with a logged error and a degraded render, see :ref:`topics-failure-containment`.
+Under ``DEBUG`` or ``STRICT_LOADING`` the same failure raises out of the render with a note naming ``JS_CONTEXT_SERIALIZER``.
 
 System checks
 ~~~~~~~~~~~~~
@@ -152,7 +153,7 @@ Key conflict policy
 Two context functions can mark the same key for serialisation.
 The collector resolves the conflict through a JS context policy.
 
-The framework ships four policies in ``next.static.collector``.
+The framework ships four policies exported from ``next.static``.
 Without ``JS_CONTEXT_POLICY`` the collector uses ``FirstWinsPolicy``.
 
 ``FirstWinsPolicy``.
@@ -178,7 +179,7 @@ Configure the policy through the first static backend ``OPTIONS``.
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
-                   "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
+                   "JS_CONTEXT_POLICY": "next.static.DeepMergePolicy",
                },
            }
        ]
@@ -188,8 +189,34 @@ The configured policy fires anywhere the same key reaches the collector twice, i
 Two ``@context`` decorators on the same page that register the same key resolve last-wins, because the second registration replaces the first in the page registry before ``JS_CONTEXT_POLICY`` ever sees the key.
 Pick distinct keys when both registrations live in the same module.
 
+Writing a policy
+----------------
+
+A custom policy implements the ``JsContextPolicy`` protocol exported from ``next.static``.
+The protocol has one method, ``merge(existing, key, value)``, which returns the updated context dict.
+
+.. code-block:: python
+   :caption: notes/policies.py
+
+   from typing import Any
+
+   class NamespacePolicy:
+       """Group conflicting keys under a per-key list."""
+
+       def merge(self, existing: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
+           current = existing.get(key)
+           if current is None:
+               existing[key] = value
+           elif isinstance(current, list):
+               current.append(value)
+           else:
+               existing[key] = [current, value]
+           return existing
+
+Point ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS`` at the dotted path of the class.
+
 Reserved payload keys
-~~~~~~~~~~~~~~~~~~~~~
+---------------------
 
 The framework owns six ``$``-prefixed keys of the init payload, ``$csrf``, ``$dev``, ``$chunks``, ``$realtime``, ``$scripts``, and ``$consent``, and claims them after the conflict policy has run.
 A project key of any of these names is dropped from the collected context on every automatically injected payload, whichever way the project registered it, together with the pre-encoded fragment and the per-key serializer that key recorded.
@@ -229,7 +256,7 @@ The runtime fetches the ``dev`` chunk only when ``$dev`` is true.
 ``$scripts`` and ``$consent`` carry the script manifest and the consent state, see :doc:`/content/ref/client-extras`.
 
 A chunk the static files storage cannot serve is left out of ``$chunks`` with a warning, and the render stays shareable since its HTML is complete, while ``next.W090`` reports the chunk at deploy.
-A render with no value to write leaves the key out of the payload altogether, so a production page carries no ``$dev`` key at all and an automatically injected payload carries the registered value in no environment.
+A reserved key the framework has no value for is left out of the payload, so a production page carries no ``$dev`` key, and a project value registered under a reserved name never reaches an automatically injected payload.
 A payload the project assembles itself under the ``MANUAL`` policy answers for its own filtering, see `Manual injection`_.
 
 A partial render honours the same ownership.
@@ -241,32 +268,6 @@ Reporting a collision
 The ``next.W075`` system check reports a registration under a reserved key at ``manage.py check`` and names the ``page.py`` or ``component.py`` that declares it, so the declaring module keeps its value by renaming the key.
 The check walks the keyed registrations only.
 A keyless ``serialize=True`` provider spreads the keys of the dict it returns at render time, so a collision hidden inside such a dict is invisible to ``manage.py check`` and surfaces on the client as a value that never arrives.
-
-Writing a policy
-----------------
-
-A custom policy implements the ``JsContextPolicy`` protocol from ``next.static.collector``.
-The protocol has one method, ``merge(existing, key, value)``, which returns the updated context dict.
-
-.. code-block:: python
-   :caption: notes/policies.py
-
-   from typing import Any
-
-   class NamespacePolicy:
-       """Group conflicting keys under a per-key list."""
-
-       def merge(self, existing: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
-           current = existing.get(key)
-           if current is None:
-               existing[key] = value
-           elif isinstance(current, list):
-               current.append(value)
-           else:
-               existing[key] = [current, value]
-           return existing
-
-Point ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS`` at the dotted path of the class.
 
 Reading on the client
 ---------------------
@@ -411,8 +412,8 @@ Pass the result of ``collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS
    :caption: notes/templatetags/notes_runtime.py
 
    from django.contrib.staticfiles.storage import staticfiles_storage
-   from django.template import Library
-   from django.utils.safestring import mark_safe
+   from django.template import Context, Library
+   from django.utils.safestring import SafeString, mark_safe
 
    from next.conf import next_framework_settings
    from next.static.nonce import resolve_nonce
@@ -427,7 +428,7 @@ Pass the result of ``collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS
 
 
    @register.simple_tag(takes_context=True)
-   def next_runtime(context):
+   def next_runtime(context: Context) -> SafeString:
        url = staticfiles_storage.url(NEXT_JS_STATIC_PATH)
        builder = NextScriptBuilder.from_options(
            url, next_framework_settings.NEXT_JS_OPTIONS

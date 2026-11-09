@@ -11,7 +11,7 @@ from next.pages.loaders import TemplateLoader
 
 
 @register(NEXT)
-def check_template_loaders(*args, **kwargs) -> list[CheckMessage]:
+def check_template_loaders(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate every `NEXT_FRAMEWORK['TEMPLATE_LOADERS']` entry."""
     try:
         configured = next_framework_settings.TEMPLATE_LOADERS

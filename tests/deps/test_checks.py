@@ -554,14 +554,11 @@ class TestComponentContexts:
         )
         assert check_ids(messages) == ["next.E156"]
 
-    @pytest.mark.parametrize(
-        "configs", [[], COMPONENT_BACKEND], ids=["empty", "not_a_list"]
-    )
     def test_no_component_backend_reads_no_component(
-        self, tmp_path: Path, component_registrations, configs: object
+        self, tmp_path: Path, component_registrations
     ) -> None:
         component._registry.register(tmp_path / "component.py", "card", _rows)
-        stand_in = next_framework_settings_stand_in(COMPONENT_BACKENDS=configs)
+        stand_in = next_framework_settings_stand_in(COMPONENT_BACKENDS=[])
         with patch("next.components.sources.next_framework_settings", stand_in):
             assert _run(tmp_path / "pages", check_object_component_contexts) == []
 

@@ -53,7 +53,7 @@ def nonce_active() -> bool:
     return any(middleware_listed(middleware, path) for path in CSP_MIDDLEWARE)
 
 
-def forget_nonce_setting(**kwargs) -> None:
+def forget_nonce_setting(**kwargs: object) -> None:
     """Clear the memoised `CSP_NONCE` value, so a settings reload takes effect."""
     nonce_enabled.cache_clear()
 

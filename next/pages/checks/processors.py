@@ -22,7 +22,7 @@ REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
 
 
 @register(Tags.templates, NEXT)
-def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
+def check_request_in_context(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Ensure `request` is in the template context (required for `{% form %}`)."""
     # Through the registry, so an `AppConfig` path in `INSTALLED_APPS` counts too.
     if not apps.is_installed("next"):
@@ -46,7 +46,9 @@ def check_request_in_context(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_context_processor_signature(*args, **kwargs) -> list[CheckMessage]:
+def check_context_processor_signature(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Report a context processor that takes no `request` parameter (`next.E040`)."""
     errors: list[CheckMessage] = []
     for backend_index, backend in _iter_page_backend_configs():
@@ -80,12 +82,9 @@ def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
 
     A project naming no backend is checked on the defaults it actually runs.
     """
-    configured = next_framework_settings.PAGE_BACKENDS
-    if not isinstance(configured, list):
-        return []
     return [
         (index, backend)
-        for index, backend in enumerate(configured)
+        for index, backend in enumerate(next_framework_settings.PAGE_BACKENDS)
         if isinstance(backend, dict)
     ]
 

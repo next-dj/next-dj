@@ -4,7 +4,7 @@ Project status
 ==============
 
 This page states what a project can rely on when it depends on next.dj.
-It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the supported Python and Django releases, who maintains it, the licence, and where a change reaches the reader.
+It covers the public API surface, the ``NEXT_FRAMEWORK`` settings contract, the supported Python and Django releases, who maintains and sponsors it, the licence, and where a change reaches the reader.
 
 .. contents::
    :local:
@@ -23,10 +23,17 @@ Every merge passes the coverage, typing, benchmark, and bundle budget gates, and
 Who maintains next.dj
 ---------------------
 
-The project is maintained through the repository by its contributors, and it carries no company backing and no funded support contract.
+The project is maintained through the repository by its contributors and sponsored by `Evrone <https://evrone.com>`_, and it carries no funded support contract.
 Issues, pull requests, and security advisories are read, and the time to a first response depends on maintainer availability rather than on a service level the project promises, which :repo:`CONTRIBUTING.md <blob/main/CONTRIBUTING.md>` states in the same terms.
 A report that carries a reproducible case is answered soonest, because triage is the step availability constrains most.
 A deployment that needs a guaranteed response time plans for reading the code itself, which the MIT licence permits without restriction.
+
+Sponsoring next.dj
+------------------
+
+Sponsorship is welcome.
+It funds maintainer time, the resource that triage, review, and the response time above depend on.
+A company or a person that wants to sponsor the project reaches the maintainers through a repository issue.
 
 What counts as public API
 -------------------------

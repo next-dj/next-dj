@@ -304,7 +304,7 @@ class TestRealtimePage:
         assert response.status_code == 302
         assert response["Location"] == "/realtime/"
         (message,) = published.messages
-        envelope = PartialEnvelope(message.envelope.as_dict())
+        envelope = PartialEnvelope.from_envelope(message.envelope)
         assert envelope.ops == [{"op": "refresh", "zone": REALTIME_TOTALS_ZONE}]
         assert sample("next_realtime_messages_published_total", family="obs") == 1
 

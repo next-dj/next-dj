@@ -91,7 +91,7 @@ _REALTIME_KEYS = frozenset(
 
 
 @register(NEXT)
-def check_realtime_settings(*args, **kwargs) -> list[CheckMessage]:
+def check_realtime_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report invalid realtime settings, missing dependencies and risky deployments.
 
     A missing `REALTIME` key still runs the checks against the defaults.
@@ -514,7 +514,7 @@ def _broker_class(broker: Mapping[str, object]) -> type[BrokerBackend] | None:
 
 
 @register(NEXT, deploy=True)
-def check_shared_broker(*args, **kwargs) -> list[CheckMessage]:
+def check_shared_broker(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when the broker keeps topics inside one process (`next.W149`)."""
     broker = scope_value("REALTIME", "BROKER")
     if not isinstance(broker, Mapping):
@@ -539,7 +539,7 @@ def check_shared_broker(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT, deploy=True)
-def check_broker_deployment(*args, **kwargs) -> list[CheckMessage]:
+def check_broker_deployment(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report the deploy warnings of the selected broker, `next.W151` for Redis."""
     broker = scope_value("REALTIME", "BROKER")
     if not isinstance(broker, Mapping):
@@ -554,7 +554,7 @@ def check_broker_deployment(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_upstream_handlers(*args, **kwargs) -> list[CheckMessage]:
+def check_upstream_handlers(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report handlers that can never match and pairs two handlers claim."""
     messages: list[CheckMessage] = [
         Error(_invalid_route(entry), obj=_handler_label(entry), id="next.E198")
@@ -599,7 +599,7 @@ def _handler_label(entry: Route) -> str:
 
 
 @register(Tags.urls, NEXT)
-def check_ticket_introspection(*args, **kwargs) -> list[CheckMessage]:
+def check_ticket_introspection(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Refuse a routed ticket introspection endpoint that no bearer token guards."""
     token = scope_value("REALTIME", "GATEWAY_TOKEN")
     if isinstance(token, str) and token:

@@ -17,7 +17,7 @@ _PAGE_MODULE_NAME = "page.py"
 
 
 @register(NEXT)
-def check_form_wizard_steps(*args, **kwargs) -> list[CheckMessage]:
+def check_form_wizard_steps(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a FormWizard declares no steps."""
     return [
         Error(
@@ -30,7 +30,7 @@ def check_form_wizard_steps(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_form_wizard_sessions(*args, **kwargs) -> list[CheckMessage]:
+def check_form_wizard_sessions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when wizard storage needs sessions without django.contrib.sessions."""
     if "django.contrib.sessions" in settings.INSTALLED_APPS:
         return []
@@ -62,7 +62,7 @@ def check_form_wizard_sessions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_wizard_step_actions(*args, **kwargs) -> list[CheckMessage]:
+def check_wizard_step_actions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when a wizard step class is also a registered standalone action.
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
@@ -79,10 +79,7 @@ def check_wizard_step_actions(*args, **kwargs) -> list[CheckMessage]:
         wizard_class = meta.get("wizard_class")
         if wizard_class is None:
             continue
-        static_steps = getattr(wizard_class, "_static_steps", None)
-        if static_steps is None:
-            continue
-        for step_name, step_class in static_steps():
+        for step_name, step_class in wizard_class.static_steps():
             action_name = action_names.get(step_class)
             if action_name is None:
                 continue
@@ -99,7 +96,7 @@ def check_wizard_step_actions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_wizard_url_param_route(*args, **kwargs) -> list[CheckMessage]:
+def check_wizard_url_param_route(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when a page-scoped wizard's page path lacks the url_param segment.
 
     Only page-module wizards are inspected, as the file path maps onto the route.
@@ -132,7 +129,9 @@ def check_wizard_url_param_route(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_wizard_step_file_fields(*args, **kwargs) -> list[CheckMessage]:
+def check_wizard_step_file_fields(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a static wizard step declares a FileField or ImageField.
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
@@ -142,10 +141,7 @@ def check_wizard_step_file_fields(*args, **kwargs) -> list[CheckMessage]:
         wizard_class = meta.get("wizard_class")
         if wizard_class is None:
             continue
-        static_steps = getattr(wizard_class, "_static_steps", None)
-        if static_steps is None:
-            continue
-        for step_name, step_class in static_steps():
+        for step_name, step_class in wizard_class.static_steps():
             base_fields = getattr(step_class, "base_fields", {})
             if not any(isinstance(field, FileField) for field in base_fields.values()):
                 continue
@@ -163,7 +159,9 @@ def check_wizard_step_file_fields(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_wizard_step_field_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_wizard_step_field_collisions(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when two static wizard steps declare the same field name.
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
@@ -173,11 +171,8 @@ def check_wizard_step_field_collisions(*args, **kwargs) -> list[CheckMessage]:
         wizard_class = meta.get("wizard_class")
         if wizard_class is None:
             continue
-        static_steps = getattr(wizard_class, "_static_steps", None)
-        if static_steps is None:
-            continue
         owners: dict[str, list[str]] = {}
-        for step_name, step_class in static_steps():
+        for step_name, step_class in wizard_class.static_steps():
             for field_name in getattr(step_class, "base_fields", {}):
                 owners.setdefault(field_name, []).append(step_name)
         for field_name, step_names in owners.items():

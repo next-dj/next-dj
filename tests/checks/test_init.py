@@ -7,10 +7,8 @@ import re
 import pytest
 
 import next.checks as checks_package
-from next.checks import _LAZY_ATTRIBUTES, _LAZY_SOURCES_BY_MODULE
 
 
-_EAGER = frozenset({"NEXT", "SEO", "register_all", "reset_check_caches"})
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent
 _CHECK_ID = re.compile(r"^next\.[EWI]\d+$")
 
@@ -53,7 +51,8 @@ def _check_id_literals() -> dict[str, set[str]]:
 _CHECK_ID_LITERALS = _check_id_literals()
 
 _RETIRED_IDS = frozenset(
-    {"next.E001", "next.E026", "next.E066", "next.E091", "next.E109"}
+    {"next.E001", "next.E014", "next.E023", "next.E026", "next.E066", "next.E081"}
+    | {"next.E091", "next.E109"}
     | {f"next.W{number:03d}" for number in range(3, 30)}
     | {f"next.W{number:03d}" for number in range(32, 42)}
     | {"next.W044", "next.W045"}
@@ -72,122 +71,26 @@ _CHECKS_REFERENCE = (
 _REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EWI]\d{3})``$", re.MULTILINE)
 
 
-def _defined_check_names(module_path: pathlib.Path) -> frozenset[str]:
-    tree = ast.parse(module_path.read_text(encoding="utf-8"))
-    return frozenset(
-        node.name
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name.startswith("check_")
-    )
+class TestLeafPackage:
+    """`next.checks` holds the shared tags and imports nothing of the framework."""
 
+    def test_all_is_the_two_tags(self) -> None:
+        assert checks_package.__all__ == ["NEXT", "SEO"]
 
-def _area_check_sources() -> dict[str, tuple[pathlib.Path, ...]]:
-    """Map each area's `checks` address to the files that define its checks.
+    def test_tags_keep_their_values(self) -> None:
+        assert (checks_package.NEXT, checks_package.SEO) == ("next", "seo")
 
-    A package `__init__` only re-exports, so the names live in the submodules below it.
-    """
-    flat = {
-        f"next.{path.parent.name}.checks": (path,)
-        for path in sorted(_NEXT_ROOT.glob("*/checks.py"))
-    }
-    packages = {
-        f"next.{path.parent.parent.name}.checks": tuple(
-            sorted(path.parent.rglob("*.py"))
-        )
-        for path in sorted(_NEXT_ROOT.glob("*/checks/__init__.py"))
-    }
-    return flat | packages
+    def test_package_imports_no_framework_module(self) -> None:
+        tree = ast.parse(pathlib.Path(inspect.getfile(checks_package)).read_text())
+        imported = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ]
+        assert imported == []
 
-
-def _checks_by_area_module() -> dict[str, frozenset[str]]:
-    found = {
-        module: frozenset[str]().union(*(_defined_check_names(p) for p in paths))
-        for module, paths in _area_check_sources().items()
-    }
-    return {module: names for module, names in found.items() if names}
-
-
-def _type_checking_imports() -> dict[str, frozenset[str]]:
-    tree = ast.parse(
-        (_NEXT_ROOT / "checks" / "__init__.py").read_text(encoding="utf-8")
-    )
-    guards = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Name)
-        and node.test.id == "TYPE_CHECKING"
-    ]
-    return {
-        node.module: frozenset(alias.name for alias in node.names)
-        for guard in guards
-        for node in guard.body
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
-
-
-class TestPublicSurface:
-    """`__all__` and `__dir__` describe the same names, eager plus lazy."""
-
-    def test_all_matches_dir(self) -> None:
-        assert checks_package.__dir__() == sorted(checks_package.__all__)
-
-    def test_all_is_sorted_and_unique(self) -> None:
-        listed = checks_package.__all__
-        assert listed == sorted(listed)
-        assert len(listed) == len(set(listed))
-
-    def test_all_is_the_eager_names_plus_the_lazy_map(self) -> None:
-        assert set(checks_package.__all__) == _EAGER | set(_LAZY_ATTRIBUTES)
-
-    def test_lazy_map_covers_every_area_checks_module(self) -> None:
-        assert dict(_checks_by_area_module()) == {
-            module: frozenset(names)
-            for module, names in _LAZY_SOURCES_BY_MODULE.items()
-        }
-
-    def test_type_checking_block_mirrors_the_lazy_map(self) -> None:
-        assert _type_checking_imports() == {
-            module: frozenset(names)
-            for module, names in _LAZY_SOURCES_BY_MODULE.items()
-        }
-
-    def test_lazy_module_keys_and_names_are_sorted(self) -> None:
-        modules = list(_LAZY_SOURCES_BY_MODULE)
-        assert modules == sorted(modules)
-        assert all(
-            list(names) == sorted(set(names))
-            for names in _LAZY_SOURCES_BY_MODULE.values()
-        )
-
-    def test_all_lists_no_private_name(self) -> None:
-        assert not [name for name in checks_package.__all__ if name.startswith("_")]
-
-    def test_lazy_map_declares_only_public_names(self) -> None:
-        assert not [name for name in _LAZY_ATTRIBUTES if name.startswith("_")]
-
-    def test_lazy_map_names_only_checks_modules(self) -> None:
-        assert all(module.endswith(".checks") for module in _LAZY_ATTRIBUTES.values())
-
-    @pytest.mark.parametrize("name", sorted(_LAZY_ATTRIBUTES))
-    def test_every_lazy_name_resolves(self, name: str) -> None:
-        assert getattr(checks_package, name) is not None
-
-    @pytest.mark.parametrize("name", sorted(_EAGER))
-    def test_every_eager_name_resolves(self, name: str) -> None:
-        assert getattr(checks_package, name) is not None
-
-    def test_unknown_name_raises_attribute_error(self) -> None:
-        with pytest.raises(AttributeError, match="no attribute 'nonexistent'"):
-            checks_package.__getattr__("nonexistent")
-
-
-class TestRetiredReExports:
-    """Private page helpers no longer resolve off the checks facade."""
-
-    @pytest.mark.parametrize("name", ["_load_python_module", "load_python_module_memo"])
-    def test_private_page_helper_is_gone(self, name: str) -> None:
-        assert not hasattr(checks_package, name)
+    def test_check_functions_no_longer_resolve_off_the_package(self) -> None:
+        assert not hasattr(checks_package, "check_next_pages_configuration")
 
 
 class TestCheckIdAllocation:

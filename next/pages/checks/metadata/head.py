@@ -344,7 +344,7 @@ def _viewport_errors(item: DeclaredSegment) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_head_tags(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_head_tags(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate links, icons, names and viewport of every declared segment.
 
     The ids are `next.E122` to `next.E126` and `next.W105` to `next.W107`.
@@ -382,7 +382,7 @@ def _underived_languages(og: OpenGraph) -> list[str]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_social_folds(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_social_folds(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about an og locale Open Graph cannot read (`next.W108`).
 
     A language with no `ll_CC` form renders no `og:locale`, reported once.
@@ -428,7 +428,7 @@ def _literal_test(key: str) -> TemplateSearch:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_head_literals(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_head_literals(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when a template writes the viewport or theme-color a fold declares.
 
     The id is `next.W109`, since the head would carry two tags that disagree.

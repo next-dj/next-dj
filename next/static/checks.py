@@ -138,11 +138,11 @@ def _check_single_backend(
 
 
 @register(NEXT)
-def check_static_backends(**kwargs) -> list[CheckMessage]:
+def check_static_backends(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the structure of `NEXT_FRAMEWORK['STATIC_BACKENDS']`."""
     messages: list[CheckMessage] = []
     configs = next_framework_settings.STATIC_BACKENDS
-    if not isinstance(configs, list) or len(configs) == 0:
+    if len(configs) == 0:
         messages.append(
             DjangoWarning(
                 "NEXT_FRAMEWORK['STATIC_BACKENDS'] is empty. The "
@@ -160,7 +160,9 @@ def check_static_backends(**kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_asset_kinds_are_loadable(*args, **kwargs) -> list[CheckMessage]:
+def check_asset_kinds_are_loadable(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about a registered kind the partial runtime cannot insert."""
     return [
         DjangoWarning(
@@ -186,7 +188,7 @@ _NAMED: Final = frozenset(
 def _rendering_backend() -> tuple[str, type[StaticBackend]]:
     """Return the backend every render takes its tags from, the first one that loads."""
     configs = next_framework_settings.STATIC_BACKENDS
-    for config in configs if isinstance(configs, list) else ():
+    for config in configs:
         if not isinstance(config, dict):
             continue
         path = config.get("BACKEND", DEFAULT_STATIC_BACKEND)
@@ -238,7 +240,7 @@ def _renderer_problem(backend: type[StaticBackend], name: str) -> str | None:
 
 
 @register(NEXT)
-def check_asset_renderers(*args, **kwargs) -> list[CheckMessage]:
+def check_asset_renderers(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a kind whose renderer the rendering backend cannot call (`next.E147`)."""
     path, backend = _rendering_backend()
     return [
@@ -267,7 +269,9 @@ def _loses_inline_bodies(kind: str) -> bool:
 
 
 @register(NEXT)
-def check_inline_asset_bodies_are_loadable(*args, **kwargs) -> list[CheckMessage]:
+def check_inline_asset_bodies_are_loadable(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about a kind whose inline bodies the partial runtime cannot insert."""
     return [
         DjangoWarning(
@@ -300,7 +304,9 @@ def _reserved_key_warning(origin: str, source_path: Path, key: str) -> CheckMess
 
 
 @register(NEXT)
-def check_reserved_js_context_keys(*args, **kwargs) -> list[CheckMessage]:
+def check_reserved_js_context_keys(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about a page or component context key the init payload reserves.
 
     Pages and components feed the same init payload, so both registries are walked.
@@ -323,7 +329,7 @@ def _serializer_warning(message: str, code: str) -> CheckMessage:
 
 
 @register(NEXT)
-def check_js_context_serializer(*args, **kwargs) -> list[CheckMessage]:
+def check_js_context_serializer(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate that `JS_CONTEXT_SERIALIZER` resolves to a protocol implementation."""
     message = _js_context_serializer_message()
     return [message] if message is not None else []
@@ -389,7 +395,7 @@ def _publishes_framework_package(path: object) -> bool:
 
 
 @register(NEXT)
-def check_app_directories_finder(*args, **kwargs) -> list[CheckMessage]:
+def check_app_directories_finder(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Refuse an app-directories finder that publishes the framework package."""
     return [
         Error(
@@ -419,7 +425,7 @@ def _templates() -> Iterable[tuple[str, object]]:
         for key in _RUNTIME_TEMPLATES:
             yield f"NEXT_JS_OPTIONS[{key!r}]", options.get(key)
     configs = next_framework_settings.STATIC_BACKENDS
-    for index, config in enumerate(configs if isinstance(configs, list) else ()):
+    for index, config in enumerate(configs):
         opts = config.get("OPTIONS") if isinstance(config, dict) else None
         if isinstance(opts, dict):
             for key in _BACKEND_TEMPLATES:
@@ -427,7 +433,7 @@ def _templates() -> Iterable[tuple[str, object]]:
 
 
 @register(NEXT)
-def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
+def check_nonce_templates(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a custom tag template with no `{nonce_attr}` (`next.W117`)."""
     if not nonce_active():
         return []
@@ -445,7 +451,7 @@ def check_nonce_templates(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
+def check_nonce_on_shared_pages(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn that an active CSP nonce makes shared-cache pages private (`next.W120`)."""
     if not nonce_active():
         return []
@@ -458,7 +464,9 @@ def check_nonce_on_shared_pages(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_colocated_name_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_colocated_name_collisions(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Reject two page-tree assets sharing one static name (`next.E167`)."""
     return [
         Error(
@@ -473,7 +481,7 @@ def check_colocated_name_collisions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_page_roots_have_keys(*args, **kwargs) -> list[CheckMessage]:
+def check_page_roots_have_keys(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a page tree with no static key, so it serves nothing (`next.W132`)."""
     return [
         DjangoWarning(
@@ -492,7 +500,9 @@ def check_page_roots_have_keys(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_layout_assets_above_trees(*args, **kwargs) -> list[CheckMessage]:
+def check_layout_assets_above_trees(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about co-located assets of a layout above every page tree (`next.W135`)."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -522,7 +532,7 @@ def check_layout_assets_above_trees(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_script_policy(*args, **kwargs) -> list[CheckMessage]:
+def check_script_policy(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require `NEXT_JS_OPTIONS["policy"]` to name an injection policy (`next.E130`).
 
     The builder reads it the way a render does, so the two cannot disagree.
@@ -552,7 +562,7 @@ def _template_fields(where: str) -> tuple[str, ...]:
 
 
 @register(NEXT)
-def check_tag_templates_format(*args, **kwargs) -> list[CheckMessage]:
+def check_tag_templates_format(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require every custom tag template to format with its fields (`next.E139`)."""
     errors: list[CheckMessage] = []
     for where, template in _templates():
@@ -598,7 +608,9 @@ def _bundle_problem(path: str) -> str | None:
 
 
 @register(NEXT, deploy=True)
-def check_runtime_bundles_deployed(*args, **kwargs) -> list[CheckMessage]:
+def check_runtime_bundles_deployed(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about a runtime bundle the deployed storage cannot serve (`next.W090`)."""
     return [
         DjangoWarning(

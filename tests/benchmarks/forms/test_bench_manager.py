@@ -81,6 +81,27 @@ class TestBenchManagerLookups:
         benchmark(run)
 
     @pytest.mark.benchmark(group="forms.manager")
+    def test_get_action_url_hit(self, benchmark) -> None:
+        """A repeated lookup is served from the reverse URL cache."""
+        manager = _make_populated_manager()
+        target = f"act_{_BULK // 2}"
+        manager.get_action_url(target)
+        benchmark(manager.get_action_url, target)
+
+    @pytest.mark.benchmark(group="forms.manager")
+    def test_get_action_url_cold(self, benchmark) -> None:
+        """A lookup after the URL cache is dropped pays the reverse."""
+        manager = _make_populated_manager()
+        target = f"act_{_BULK // 2}"
+        backend = manager.default_backend
+
+        def setup() -> tuple[tuple[str], dict[str, object]]:
+            backend.forget_urls()
+            return (target,), {}
+
+        benchmark.pedantic(manager.get_action_url, setup=setup, rounds=50)
+
+    @pytest.mark.benchmark(group="forms.manager")
     def test_get_action_url_miss_raise(self, benchmark) -> None:
         """A caught miss pays only the raise, with diagnostics deferred."""
         manager = _make_populated_manager()

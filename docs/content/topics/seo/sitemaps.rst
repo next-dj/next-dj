@@ -40,7 +40,7 @@ Static routes
 
 Every route of the tree without a bracket segment is listed automatically, reversed through ``page_reverse_in`` in the namespace of its tree at render time.
 A route whose static metadata is ``noindex`` is left out, because a sitemap invites the crawler to a page the tag then turns away.
-A route an anonymous visitor cannot reach is left out too, one whose access rule has a requirement and one that the default login closes because it declares nothing and no ``page.public()``, see :ref:`topics-access-default-login`.
+A route an anonymous visitor cannot reach is left out too, whether its access rule has a requirement or the default login closes it because it declares no rule and no ``page.public()``, see :ref:`topics-access-default-login`.
 A page whose ``page.py`` chain failed to import is left out as well.
 
 A route matching a glob in ``exclude`` is left out as well, and a glob matches the whole route, ``drafts/*`` for a subtree and ``admin`` for one page.
@@ -92,11 +92,11 @@ A row that none of these reverses is a ``TypeError`` naming the callable.
    def tags() -> list[SitemapEntry]:
        return [SitemapEntry(kwargs={"slug": slug}, changefreq="daily") for slug in ("python", "django")]
 
-The first argument is the route as the directory names spell it, and the same tree has to serve it, otherwise the build raises ``SitemapTrailError`` and ``manage.py check`` reports it ahead of time.
+The first argument is the trail, the route as the directory names spell it, and the same tree has to serve it, otherwise the build raises ``SitemapTrailError`` and ``manage.py check`` reports it ahead of time.
 An items callable, its ``kwargs=`` callable, a row of the wrong shape, a row that does not reverse, or a sitemap template that fails to render makes the sitemap answer 503 with ``Retry-After``, so a crawler comes back later rather than reading a 500, see :ref:`topics-failure-containment`.
 The callable is resolved through dependency injection like a ``@context`` callable, so ``Depends`` and a parameter annotated :class:`~django.http.HttpRequest` are available to it.
 A registration binds to the ``sitemap.py`` that runs the decorator, so the callable may live in a helper module and be registered as ``sitemap.items("notes/[int:note_id]")(notes)`` after its import.
-The decorator run anywhere else registers nothing, and two callables on one route keep only the later one, and the checks report both.
+A decorator run outside a ``sitemap.py`` registers nothing, two callables on one route keep only the later one, and ``manage.py check`` reports both cases.
 
 A route with an ``@sitemap.items`` callable is listed by that callable alone, so a static route named by one loses its automatic entry and takes the callable's ``lastmod``, ``changefreq``, and ``priority``.
 An ``exclude`` glob drops a callable's route as well, which the checks flag as a contradiction.
@@ -142,7 +142,7 @@ An attribute the file does not declare keeps the Django default, and ``manage.py
      - a number from 0 to 1
      - The ``<priority>`` of every URL without one of its own.
    * - ``exclude``
-     - a list of route globs
+     - a list of trail globs
      - Routes, those of an items callable included, matching a glob are left out.
    * - ``i18n``
      - a bool
@@ -190,4 +190,4 @@ See also
    :doc:`robots` for the ``Sitemap:`` line.
    :doc:`quickstart` for the first sitemap of a site.
    :doc:`/content/ref/seo` for ``sitemap``, ``SitemapEntry``, and the errors.
-   :repo:`wiki <tree/main/examples/wiki>` for items read off a table and :repo:`search-catalog <tree/main/examples/search-catalog>` for two dynamic routes behind ``cache``.
+   :repo:`wiki <tree/main/examples/wiki>` for items read off a table and :repo:`search-catalog <tree/main/examples/search-catalog>` for three dynamic routes listed through ``SitemapEntry`` behind ``cache``.

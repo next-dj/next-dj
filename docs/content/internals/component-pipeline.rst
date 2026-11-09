@@ -110,11 +110,10 @@ A page tree and a ``DIRS`` root sharing a name are decided by the origin dimensi
 Filter expression props
 -----------------------
 
-The ``{% component %}`` template tag accepts dynamic props through Django ``FilterExpression``.
+The ``{% component %}`` tag compiles each prop into a ``FilterExpression``, or into an ``Interpolation`` for a quoted string carrying ``{{ ... }}``, and the node resolves them against the calling context before it hands the dict to the renderer.
 A prop like ``title=note.title`` resolves against the surrounding template context at render time.
-A prop like ``title="Hello"`` stays a literal string.
-
-The renderer parses the props into a dict and forwards both the literal values and the surrounding scope into the component template.
+A prop like ``title="Hello"`` stays a literal string, and the node demotes it from safe so it autoescapes like any other value.
+The renderer forwards the resolved props and the surrounding scope into the component template.
 
 Component context resolution
 ----------------------------

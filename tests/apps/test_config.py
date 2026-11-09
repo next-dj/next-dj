@@ -21,6 +21,7 @@ from django.utils.autoreload import (
 
 import next as next_package
 from next.apps import autoreload as next_autoreload, components as next_components
+from next.checks.catalog import CHECK_MODULES
 from next.components import FileComponentsBackend, components_manager
 from next.conf.signals import settings_reloaded
 from next.deps import resolver
@@ -46,7 +47,7 @@ from next.seo.ports import SeoRoutesImpl
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.ports import StaticAssetsImpl
-from next.urls import RouterFactory, router_manager
+from next.urls import router_manager
 from next.urls.manager import seo_routes_version
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
@@ -111,6 +112,9 @@ def _component_backend_config(
 class TestNextFrameworkConfig:
     """Tests for NextFrameworkConfig.ready() behavior."""
 
+    def test_the_config_holds_the_check_catalogue(self) -> None:
+        assert apps.get_app_config("next").check_modules is CHECK_MODULES
+
     def test_ready_patches_stat_reloader(self) -> None:
         """After app load, django.utils.autoreload.StatReloader is NextStatReloader."""
         assert autoreload.StatReloader is NextStatReloader
@@ -170,7 +174,7 @@ class TestNextFrameworkConfig:
         """`runserver` boots through a backend that answers the wrong shape."""
         root = tmp_path / "shell"
         root.mkdir()
-        build = RouterFactory.create_backend
+        build = RouterAccessImpl().create_backend
 
         def malformed_first(config: dict) -> object:
             if config["BACKEND"] == "broken.Backend":
@@ -178,7 +182,9 @@ class TestNextFrameworkConfig:
             return build(config)
 
         with (
-            patch.object(RouterFactory, "create_backend", side_effect=malformed_first),
+            patch.object(
+                RouterAccessImpl, "create_backend", side_effect=malformed_first
+            ),
             override_settings(
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
@@ -198,7 +204,7 @@ class TestNextFrameworkConfig:
         """`runserver` boots through a third-party backend whose tree listing fails."""
         root = tmp_path / "shell"
         root.mkdir()
-        build = RouterFactory.create_backend
+        build = RouterAccessImpl().create_backend
 
         def broken_first(config: dict) -> object:
             if config["BACKEND"] == "broken.Backend":
@@ -206,7 +212,7 @@ class TestNextFrameworkConfig:
             return build(config)
 
         with (
-            patch.object(RouterFactory, "create_backend", side_effect=broken_first),
+            patch.object(RouterAccessImpl, "create_backend", side_effect=broken_first),
             override_settings(
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
@@ -441,7 +447,6 @@ class TestDependencyResolverInstall:
     """``ready()`` points the DI singleton at the configured resolver class."""
 
     STEPS: ClassVar[tuple[str, ...]] = (
-        "_register_checks",
         "apply_resolver_setting",
         "page_scan_slot",
         "partial_shaper_slot",
@@ -470,7 +475,6 @@ class TestDependencyResolverInstall:
             config.ready()
         made = [name for name, _args, _kwargs in recorder.mock_calls]
         assert made == [
-            "_register_checks",
             "apply_resolver_setting",
             "page_scan_slot.set",
             "partial_shaper_slot.set",

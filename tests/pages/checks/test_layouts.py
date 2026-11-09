@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from next.checks import check_layout_templates, check_root_marker_outside_layouts
 from next.checks.common import get_router_manager
+from next.pages.checks import check_layout_templates, check_root_marker_outside_layouts
 from next.pages.checks.layouts import iter_layout_ancestry
 from next.pages.placeholder import ROOT_MARKER
 from tests.support import check_ids, routed, write_page
@@ -188,6 +188,17 @@ class TestNestedDocument:
             assert check_layout_templates() == []
 
 
+class TestUnreadableLayout:
+    """A `layout.djx` that does not decode is left to the render that reads it."""
+
+    def test_an_undecodable_layout_is_skipped(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "")
+        (tmp_path / "layout.djx").write_bytes(b"\xff\xfe\x00{% template %}")
+
+        with routed(tmp_path):
+            assert check_layout_templates() == []
+
+
 class TestStrayMarker:
     """W134 reports a marker where only a layout.djx would read it."""
 
@@ -219,6 +230,15 @@ class TestStrayMarker:
         widget = tmp_path / "_components" / "widget"
         widget.mkdir(parents=True)
         (widget / "component.djx").write_text("<b>x</b>")
+
+        with routed(tmp_path):
+            assert check_root_marker_outside_layouts() == []
+
+    def test_a_component_without_a_template_is_skipped(self, tmp_path: Path) -> None:
+        write_page(tmp_path, "")
+        widget = tmp_path / "_components" / "widget"
+        widget.mkdir(parents=True)
+        (widget / "component.py").write_text("")
 
         with routed(tmp_path):
             assert check_root_marker_outside_layouts() == []

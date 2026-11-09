@@ -1,6 +1,6 @@
 """The site identity, its origin, name and indexability, read by every head and route.
 
-Checks register through `next.checks`, since `next.pages` imports this package early.
+Checks register through `next.checks.catalog`, as `next.pages` imports this early.
 """
 
 from .config import site_indexable, site_origin, site_url

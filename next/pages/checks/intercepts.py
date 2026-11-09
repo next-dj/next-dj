@@ -187,7 +187,7 @@ def _target_hint(hit: TreeIntercept) -> str:
 
 
 @register(NEXT)
-def check_intercept_targets(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_targets(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an intercept whose target its own tree does not route (`next.E170`).
 
     A body-less `page.py` only passes declarations down, so it targets nothing.
@@ -207,7 +207,7 @@ def check_intercept_targets(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_intercept_scope(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_scope(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a `(..)` intercept that climbs above its tree root (`next.E171`)."""
     errors: list[CheckMessage] = []
     for directory in tree_walk().directories:
@@ -234,7 +234,7 @@ def check_intercept_scope(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_nested_intercepts(*args, **kwargs) -> list[CheckMessage]:
+def check_nested_intercepts(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an intercept directory inside another intercept (`next.E172`)."""
     return [
         Error(
@@ -252,7 +252,7 @@ def check_nested_intercepts(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_intercept_render(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_render(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an intercept page that defines `render()` (`next.E175`).
 
     An intercept answers zone requests alone, which render its template and skip it.
@@ -305,7 +305,7 @@ def _kwarg_errors(served: ServedIntercept) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_intercept_url_kwargs(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_url_kwargs(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a URL kwarg an intercept sits under that its target lacks (`next.E176`).
 
     A zone request carries the target kwargs alone, and `next.E162` judges its `obj=`.
@@ -336,7 +336,9 @@ def _inert_declarations(served: ServedIntercept) -> list[str]:
 
 
 @register(NEXT)
-def check_intercept_inert_declarations(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_inert_declarations(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about what an intercept page declares in vain (`next.W138`).
 
     A zone response keeps the headers of its target, is never cached, gives no crumb.
@@ -362,7 +364,7 @@ def check_intercept_inert_declarations(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_intercept_layouts(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_layouts(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a `layout.djx` inside an intercept directory (`next.W139`)."""
     warnings: list[CheckMessage] = []
     seen: set[Path] = set()
@@ -390,7 +392,9 @@ def check_intercept_layouts(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_intercept_default_login(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_default_login(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about an intercept asking a login over a public target (`next.W140`).
 
     The stricter chain wins, so the modal answers a login redirect over an open page.

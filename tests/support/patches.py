@@ -173,6 +173,7 @@ def _imported_from(module: object, root: str) -> bool:
 
 # Every checks submodule binds `get_router_manager` at import, so patch each module.
 PAGES_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
+    "next.pages.checks.branches.get_router_manager",
     "next.pages.checks.composed.get_router_manager",
     "next.pages.checks.contexts.get_router_manager",
     "next.pages.checks.layouts.get_router_manager",

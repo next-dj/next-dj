@@ -110,14 +110,13 @@ def _drop[P](holder: list[P], provider: object) -> bool:
     return True
 
 
-def forget_dep_caches(**kwargs) -> None:
+def forget_dep_caches(**kwargs: object) -> None:
     """Drop the introspection memos, so a reloaded module leaves none behind.
 
     A saved `page.py` mints fresh function objects the memos would otherwise pin.
     """
     forget_introspection_caches()
-    resolver._plan_cache.clear()
-    resolver._leaf_dependencies.clear()
+    resolver.forget_caches()
 
 
 class DependencyResolver:
@@ -281,6 +280,11 @@ class DependencyResolver:
         self._leaf_dependencies.pop(name, None)
         return callable_dep
 
+    def forget_caches(self) -> None:
+        """Drop the compiled plans and leaf notes, recompiled on the next resolve."""
+        self._plan_cache.clear()
+        self._leaf_dependencies.clear()
+
     def get_dependency(self, name: str) -> Callable[..., Any] | None:
         """Return the callable bound to `name`, or None when nothing is bound."""
         return self._dependency_callables.get(name)
@@ -305,7 +309,7 @@ class DependencyResolver:
 
         return decorator
 
-    def _resolve_callable_dependency(
+    def resolve_callable_dependency(
         self,
         name: str,
         context: ResolutionContext,
@@ -433,25 +437,26 @@ class DependencyResolver:
         return result
 
     def resolve_dependencies(
-        self, func: Callable[..., Any], /, **context
+        self, func: Callable[..., Any], /, **context: object
     ) -> dict[str, Any]:
         """Resolve `func` from a loose kwargs mapping and build a context object.
 
         Reserved names are popped in place, leaving the URL kwargs in `**context`.
         """
-        cache_obj = context.pop("_cache", None)
-        request = context.pop("request", None)
-        form = context.pop("form", None)
-        cleaned_data = context.pop("cleaned_data", None)
-        context_data = context.pop("_context_data", None) or {}
-        stack = context.pop("_stack", None) or []
+        loose: dict[str, Any] = context
+        cache_obj = loose.pop("_cache", None)
+        request = loose.pop("request", None)
+        form = loose.pop("form", None)
+        cleaned_data = loose.pop("cleaned_data", None)
+        context_data = loose.pop("_context_data", None) or {}
+        stack = loose.pop("_stack", None) or []
         for reserved in _UNCLAIMED_RESERVED:
-            context.pop(reserved, None)
+            loose.pop(reserved, None)
 
         resolution_context = ResolutionContext(
             request=request,
             form=form,
-            url_kwargs=context,
+            url_kwargs=loose,
             context_data=context_data,
             cache=DependencyCache() if cache_obj is None else _as_cache(cache_obj),
             stack=stack,
@@ -527,6 +532,6 @@ def apply_resolver_setting() -> None:
     _holder._wrapped = cls()
 
 
-def reapply_resolver_setting(**kwargs) -> None:
+def reapply_resolver_setting(**kwargs: object) -> None:
     """Rebuild the resolver singleton when the framework settings change."""
     apply_resolver_setting()

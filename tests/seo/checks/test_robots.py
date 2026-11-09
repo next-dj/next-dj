@@ -9,7 +9,7 @@ from next.seo.checks import (
     check_seo_single_sources,
     check_seo_text_files,
 )
-from next.seo.checks.robots import route_paths
+from next.seo.checks.robots import route_path, route_paths
 from next.seo.checks.roots import loaded_seo_roots
 from tests.support import (
     NAMESPACED_URLCONF,
@@ -106,6 +106,13 @@ class TestTextFiles:
     ) -> None:
         root = write_tree(tmp_path / "pages", sitemap=sitemap, robots_txt=content)
         with routed(root):
+            assert check_seo_text_files() == []
+
+    def test_a_file_gone_since_the_scan_is_skipped(self, tmp_path) -> None:
+        root = write_tree(tmp_path / "pages", sitemap="", robots_txt=b"User-agent: *\n")
+        with routed(root):
+            loaded_seo_roots()
+            (root / "robots.txt").unlink()
             assert check_seo_text_files() == []
 
 
@@ -301,6 +308,10 @@ class TestRoutePaths:
         with patch("next.seo.checks.robots.get_converters", return_value=converters):
             paths = _paths(tmp_path, "about", "posts/[slug]", "items/[int:id]")
         assert paths == {"about": "/about/"}
+
+    @pytest.mark.parametrize("trail", ["[2fa]", "[int:a:b]"])
+    def test_a_trail_the_parser_refuses_has_no_path(self, trail: str) -> None:
+        assert route_path(trail) is None
 
     def test_a_trail_that_does_not_reverse_is_skipped(self, tmp_path: Path) -> None:
         with patch(

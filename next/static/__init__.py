@@ -6,9 +6,18 @@ from . import checks, signals
 from .assets import KindRegistry, StaticAsset, default_kinds, static_name
 from .backends import StaticBackend, StaticFilesBackend
 from .collector import (
+    DedupStrategy,
+    DeepMergePolicy,
+    FirstWinsPolicy,
+    HashContentDedup,
+    IdentityDedup,
+    JsContextPolicy,
+    LastWinsPolicy,
     PlaceholderRegistry,
     PlaceholderSlot,
+    RaiseOnConflictPolicy,
     StaticCollector,
+    UrlDedup,
     default_placeholders,
 )
 from .defaults import register_defaults
@@ -33,15 +42,23 @@ from .serializers import (
 
 __all__ = [
     "AssetDiscovery",
+    "DedupStrategy",
+    "DeepMergePolicy",
+    "FirstWinsPolicy",
+    "HashContentDedup",
+    "IdentityDedup",
+    "JsContextPolicy",
     "JsContextSerializer",
     "JsonJsContextSerializer",
     "KindRegistry",
+    "LastWinsPolicy",
     "NextAppDirectoriesFinder",
     "NextScriptBuilder",
     "NextStaticFilesFinder",
     "PlaceholderRegistry",
     "PlaceholderSlot",
     "PydanticJsContextSerializer",
+    "RaiseOnConflictPolicy",
     "ScriptInjectionPolicy",
     "StaticAsset",
     "StaticAssetNotFoundError",
@@ -50,6 +67,7 @@ __all__ = [
     "StaticCollector",
     "StaticFilesBackend",
     "StaticManager",
+    "UrlDedup",
     "checks",
     "collect_component_assets",
     "default_kinds",

@@ -161,7 +161,7 @@ Terms used throughout the next.dj documentation.
       See :doc:`/content/topics/forms/backends`.
 
    page
-      A directory under the page root with a ``page.py``, or a virtual route with only a ``template.djx``.
+      A directory under the page root whose ``page.py`` carries a body source, such as a ``render`` function, a ``template`` attribute, or a sibling ``template.djx``, or a virtual route with only a ``template.djx``.
 
    page metadata
       The title, the description, and the rest of the head a page declares through a ``metadata`` dict or a ``@page.metadata`` callable in ``page.py``, deep-merged down the page tree, resolved against the request, and rendered by ``{% metadata %}``.
@@ -253,7 +253,7 @@ Terms used throughout the next.dj documentation.
 
    provider
       A class that produces a value for a parameter.
-      Implements ``can_handle`` and ``resolve``.
+      It implements ``can_handle``, ``resolve``, and ``static_can_handle``, and a ``RegisteredParameterProvider`` subclass inherits a ``static_can_handle`` that returns ``None``.
 
    request cache
       The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.

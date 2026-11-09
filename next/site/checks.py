@@ -56,7 +56,7 @@ def _site_error(key: str, value: object, expected: str) -> CheckMessage:
 
 
 @register(NEXT, SEO)
-def check_site_settings(*args, **kwargs) -> list[CheckMessage]:
+def check_site_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the `SITE` values (`next.E129`) and its keys (`next.E035`)."""
     scope = raw_scope(_SCOPE)
     if scope is None:
@@ -100,7 +100,7 @@ def _site_row_pinned() -> bool:
 
 
 @register(NEXT, SEO, deploy=True)
-def check_site_url_for_deploy(*args, **kwargs) -> list[CheckMessage]:
+def check_site_url_for_deploy(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when a deployed site builds its absolute URLs from `Host` (W110, W122)."""
     scope = raw_scope(_SCOPE) or {}
     if scope.get("URL") is not None or _site_row_pinned():

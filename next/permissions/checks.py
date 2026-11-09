@@ -41,7 +41,7 @@ _BACKEND: Final = (
 
 
 @register(NEXT)
-def check_permission_predicates(*args, **kwargs) -> list[CheckMessage]:
+def check_permission_predicates(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a permission whose predicate cannot call its function (`next.E159`)."""
     return [
         Error(
@@ -61,7 +61,7 @@ def check_permission_predicates(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_permission_backend(*args, **kwargs) -> list[CheckMessage]:
+def check_permission_backend(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report registered permissions no configured backend answers (`next.E160`)."""
     if not permission_manager.registry or _BACKEND in listed_backends():
         return []
@@ -162,7 +162,7 @@ def _guard_places() -> dict[tuple[str, _Place], None]:
 
 
 @register(Tags.templates, NEXT)
-def check_permissions_known(*args, **kwargs) -> list[CheckMessage]:
+def check_permissions_known(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a permission name nothing grants, wherever written (`next.W127`).
 
     An action guard is read only once the project declares access, as it predates it.
@@ -190,7 +190,7 @@ def check_permissions_known(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_login_required_setting(*args, **kwargs) -> list[CheckMessage]:
+def check_login_required_setting(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about `LOGIN_REQUIRED` set false beside the login middleware (`next.W130`).
 
     The middleware asks the login anyway, so the setting turns nothing off.
@@ -226,7 +226,7 @@ def _missing_user() -> str | None:
 
 
 @register(NEXT)
-def check_login_required_auth(*args, **kwargs) -> list[CheckMessage]:
+def check_login_required_auth(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about `LOGIN_REQUIRED` on without auth or its middleware (`next.W131`).
 
     No request then carries a signed-in user, so the default login refuses everyone.

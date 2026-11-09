@@ -19,7 +19,7 @@ Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on ever
 A missing or stale token returns HTTP 403.
 
 The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
-If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
+If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of the Django ``TEMPLATES`` entry.
 An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
 
 Token delivery
@@ -72,7 +72,7 @@ The ``{% form %}`` tag is the supported way to render a form.
 It builds the dispatch URL, injects the CSRF token, and emits the hidden ``_next_form_origin`` field.
 A hand crafted ``<form>`` element bypasses these guarantees, so prefer the tag.
 
-When a hand crafted form is unavoidable, render the tag once and copy the generated markup, or keep the form inside a ``{% form %}`` block and add only the extra fields you need.
+When a hand crafted form is unavoidable, render the tag once and copy the generated markup, or keep the form inside a ``{% form %}`` block and add only the extra fields the form needs.
 
 A fully manual form sets ``_next_form_origin`` to the URL the page was rendered under with its query string, which ``{{ request.get_full_path }}`` produces, the same value the tag emits.
 A form rendered by a hand-written view outside the file router additionally needs the ``next_page_path`` attribute on that view before the error re-render works, see :ref:`topics-forms-templates-handwritten-views`.
@@ -98,7 +98,8 @@ Use ``DQuery[str]`` in the page context to read the value.
    The dispatch endpoint accepts only POST.
    A GET to ``/_next/form/<uid>/`` returns HTTP 405 for a registered action and HTTP 404 for an unknown one, with no CSRF check on the GET.
    The two status codes let the action surface be probed without a token.
-   This is intended, the 405 reveals only that a uid is registered and no handler runs on a GET, so do not place secrets in action uids.
+   This is intended.
+   The 405 reveals only that a uid is registered, no handler runs on a GET, and an action uid carries no secret.
 
 AJAX submissions
 ----------------

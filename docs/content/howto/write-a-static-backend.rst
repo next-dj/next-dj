@@ -53,12 +53,13 @@ When the URL itself must change per request, subclass ``StaticFilesBackend`` and
 .. code-block:: python
    :caption: notes/backends.py
 
+   from django.http import HttpRequest
    from notes.middleware import active_shard
 
    from next.static import StaticFilesBackend
 
    class ShardedCdnBackend(StaticFilesBackend):
-       def asset_url(self, url, *, request=None) -> str:
+       def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
            host = active_shard(request)
            return f"{host}{url}" if url.startswith("/") else url
 
@@ -91,6 +92,7 @@ The shipped multi-tenant example implements this pattern.
 .. code-block:: python
    :caption: notes/backends.py
 
+   from django.http import HttpRequest
    from notes.middleware import get_active_tenant
 
    from next.static import StaticFilesBackend
@@ -98,7 +100,7 @@ The shipped multi-tenant example implements this pattern.
    PREFIX_FORMAT = "/_t/{slug}"
 
    class TenantPrefixStaticBackend(StaticFilesBackend):
-       def asset_url(self, url, *, request=None) -> str:
+       def asset_url(self, url: str, *, request: HttpRequest | None = None) -> str:
            tenant = get_active_tenant(request) if request is not None else None
            if tenant is None or not url.startswith("/"):
                return url

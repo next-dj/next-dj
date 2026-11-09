@@ -35,6 +35,8 @@ A protocol backend that authors its own wire format carries the same fields unde
    * - ``form``
      - Always
      - The form meta of a submitted action, its ``uid``, ``valid`` flag and ``errors`` mapping, and ``null`` when the response answers no form.
+       The ``errors`` keys are field names with non-field errors under ``__all__``.
+       A formset prefixes each row, as in ``form-1-title`` and ``form-1-__all__``, keeps its own errors under ``__all__``, and skips a row marked for deletion.
    * - ``csrf``
      - A token rotation
      - The ``header`` and ``token`` pair the runtime switches to.
@@ -42,8 +44,6 @@ A protocol backend that authors its own wire format carries the same fields unde
    * - ``request_id``
      - A stream envelope
      - The id of the mutation the envelope echoes, which a subscriber matches against its echo ring to drop its own write, see :doc:`sse`.
-
-The JSON examples on this page omit ``assets`` and ``form`` when they are empty.
 
 Stream frames add transport metadata beside the envelope.
 ``server_time`` is an epoch timestamp in milliseconds on every ``next-patches`` frame.
@@ -185,11 +185,18 @@ A target carries exactly one address key, and the client resolves ``zone``, then
 ``zone`` names a ``data-next-zone`` wrapper and ``form`` names an action uid.
 ``field`` is a ``[uid, name]`` pair addressing one named input of a form by its uid.
 ``css`` is a raw selector, the escape hatch a bare layer shell relies on.
-No ``Patches`` builder method produces a field target, so a handler that needs one constructs the ``Patch`` by hand and appends it to the envelope.
+Every builder verb that takes a target mapping accepts a field target as written.
 
 .. code-block:: python
+   :caption: a handler building a field target
 
-   Patch(op="morph", target={"field": [uid, "email"]}, html=rendered_input)
+   from django.http import HttpRequest, HttpResponse
+
+   from next.partial import Patches
+
+   def morph_email(request: HttpRequest, uid: str, rendered_input: str) -> HttpResponse:
+       """Morph the email input of the form addressed by its uid."""
+       return Patches(request).morph({"field": [uid, "email"]}, rendered_input).response()
 
 A handler that returns ``None`` under the runtime also drains the pending :doc:`django.contrib.messages <django:ref/contrib/messages>` into ``toast`` patches, one per message, with the message level mapped to the toast variant.
 The drained variants are ``info``, ``success``, ``warning``, and ``error``, with ``debug`` mapped to ``info``.
@@ -306,7 +313,7 @@ A target off that origin is refused before any request leaves, with a ``partial:
      - Every unsafe method once the runtime holds a token
      - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload, from ``/_next/csrf/`` when the payload defers it, and from any later rotation meta, and the cookie is never read.
 
-An inline-validation POST carries an internal ``validate:<uid>`` value in ``X-Next-Zone`` instead of a declared zone, and the server ignores that name because no page declares it.
+An inline-validation POST sends ``X-Next-Zone`` only when its form carries ``data-next-target``, and otherwise the server answers with the extract default.
 A batch renders every declared name it carries and drops the rest, so one stale name never poisons a sweep.
 Only a batch in which no name is declared is a 400.
 

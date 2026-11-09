@@ -139,7 +139,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``
      - After a validate-only blur pass runs, always behind the action guard so unauthenticated validate traffic never reaches telemetry.
        ``field_names`` is the validated subset.
-       ``error_count`` is the number of fields that failed.
+       ``error_count`` is the number of error messages that survived the scrub, across every row of a formset.
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``

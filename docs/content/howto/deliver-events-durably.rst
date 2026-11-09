@@ -101,7 +101,7 @@ Django raises ``NotSupportedError`` on a database that lacks it, see :meth:`~dja
                if publish_batch(options["batch"]) == 0:
                    time.sleep(options["interval"])
 
-Run it as its own process next to the web workers with ``python manage.py publish_outbox``.
+Run it as its own process next to the web workers with ``uv run python manage.py publish_outbox``.
 The worker publishes with ``on_commit=False``, since its own transaction is the one that matters.
 A broker error rolls the batch back, so the rows stay pending.
 Configure the same shared broker as the web workers, see :doc:`fan-out-across-processes-with-redis`.

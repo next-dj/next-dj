@@ -247,7 +247,7 @@ See :ref:`topics-permissions-tree` for the order of the checks and the answer to
 Custom template loaders
 -----------------------
 
-The sibling ``template.djx`` loader is one implementation of the ``next.pages.loaders.TemplateLoader`` contract.
+The sibling ``template.djx`` loader is one implementation of the ``next.pages.TemplateLoader`` contract.
 Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support other file formats.
 
 .. code-block:: python
@@ -257,7 +257,7 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
 
    import markdown
 
-   from next.pages.loaders import TemplateLoader
+   from next.pages import TemplateLoader
 
    class MarkdownTemplateLoader(TemplateLoader):
        source_name = "template.md"
@@ -580,7 +580,7 @@ The pages subsystem contributes Django system checks.
 The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
 ``next.E012``.
-   The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, it declares no access, and it passes no context with ``inherit_context=True`` to the pages below.
+   The page module has neither a ``render`` function nor a ``template`` attribute, no registered loader can produce a body, it declares no access, it passes no context with ``inherit_context=True`` to the pages below, and no ``@action`` of its directory answers to it.
    A ``layout.djx`` beside or above it is no body, since it only wraps one.
 
 ``next.E013``.

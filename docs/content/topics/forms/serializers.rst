@@ -41,7 +41,7 @@ FormSpec.
    Top-level descriptor for rendering a form with optional sections.
    Includes a tuple of ``FormSectionSpec`` plus non field errors.
 
-Use these specs when you need to inspect a form structure from Python or to render in a custom template engine.
+Use these specs to inspect a form structure from Python or to render in a custom template engine.
 A spec describes a form rather than replacing it, so the handler keeps working with the bound Django form and only the rendering layer reads the spec.
 
 Building a spec
@@ -63,8 +63,9 @@ The module provides three constructor helpers.
 
 The second argument of ``form_spec`` is a Django admin style ``fieldsets`` sequence of ``(label, options)`` pairs.
 Each ``options`` mapping carries a ``fields`` list and an optional ``description``.
-A field the fieldsets never name is omitted from the resulting ``FormSpec`` entirely, matching the Django admin contract, so list every field you want rendered.
-Fieldsets that name no field at all are the exception, the leftover section then holds every field, the same shape ``fieldsets=None`` produces.
+A field the fieldsets never name is omitted from the resulting ``FormSpec`` entirely, matching the Django admin contract, so a fieldsets list names every field it renders.
+Fieldsets that name no field at all are the exception.
+Each still yields its own empty section, and one unlabelled section after them holds every field.
 Each helper returns a frozen instance ready to pass into a template.
 
 ``field_spec`` accepts an ``is_extra`` keyword argument that defaults to ``False``.
@@ -78,7 +79,7 @@ Using a spec in templates
 
 Specs are designed to render in any template engine because they expose stable, immutable attributes.
 Some members are still Django bound objects, such as ``FieldSpec.bound`` and ``FormsetSpec.management_form``.
-Use them when the standard ``{% form %}`` tag does not match the layout you want.
+Use them when the standard ``{% form %}`` tag does not match the layout a page needs.
 
 .. code-block:: jinja
    :caption: custom render

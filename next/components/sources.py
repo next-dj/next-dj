@@ -76,7 +76,7 @@ def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
             manager.register_router_walk_folder(folder, tree_root, scope_trail)
 
 
-def reset_components_manager_cache(**kwargs) -> None:
+def reset_components_manager_cache(**kwargs: object) -> None:
     """Drop the cached `ComponentsManager` so the next read rebuilds it."""
     _components_manager_cache.held = None
 
@@ -84,7 +84,7 @@ def reset_components_manager_cache(**kwargs) -> None:
 def components_listed() -> bool:
     """Return whether `COMPONENT_BACKENDS` lists a backend for a check to walk."""
     configs = next_framework_settings.COMPONENT_BACKENDS
-    return isinstance(configs, list) and bool(configs)
+    return bool(configs)
 
 
 def import_component_modules() -> tuple[Path, ...]:

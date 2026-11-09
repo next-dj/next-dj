@@ -138,7 +138,7 @@ def discover_page_registrations(
     return loaded
 
 
-def reset_router_manager_cache(**kwargs) -> None:
+def reset_router_manager_cache(**kwargs: object) -> None:
     """Drop the cached `RouterManager` and everything read off its routers.
 
     The scans, the imported pages and the contract answers go with it.

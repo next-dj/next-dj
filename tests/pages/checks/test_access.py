@@ -20,11 +20,12 @@ from next.forms.uid import ORIGIN_FIELD_NAME
 from next.pages.checks.access import (
     check_declaring_modules,
     check_public_beside_requirements,
+    passes_down,
 )
 from next.pages.checks.modules import check_page_functions, check_page_module_imports
 from next.pages.loaders import load_page_module, load_python_module_memo
 from next.permissions import DeclarationOutsideModuleError
-from next.permissions.access import declared_files
+from next.permissions.access import declare_public, declared_files
 from tests.support import routed, write_page
 from tests.support.access import (
     COMPONENTS,
@@ -94,6 +95,19 @@ class TestPublicBesideRequirements:
 
         with routed(root):
             assert _ids(check_public_beside_requirements()) == expected
+
+
+class TestPassesDown:
+    """`passes_down` tells a `page.py` that hands access or context to its subtree."""
+
+    def test_an_inherited_declaration_passes_down(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        declare_public(page_file, inherit=True)
+
+        assert passes_down(page_file) is True
+
+    def test_a_file_declaring_nothing_passes_nothing(self, tmp_path) -> None:
+        assert passes_down(tmp_path / "page.py") is False
 
 
 class TestDeclaringModules:

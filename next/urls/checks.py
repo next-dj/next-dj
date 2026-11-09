@@ -293,22 +293,14 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
 
 
 @register(NEXT)
-def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
+def check_next_pages_configuration(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`.
 
     A non-dict `NEXT_FRAMEWORK` is `next.E077` elsewhere, so the defaults are read here.
     """
     next_pages = next_framework_settings.PAGE_BACKENDS
-    if not isinstance(next_pages, list):
-        return [
-            Error(
-                "NEXT_FRAMEWORK['PAGE_BACKENDS'] must be a list of "
-                "configuration dictionaries.",
-                obj=settings,
-                id="next.E081",
-            )
-        ]
-
     if len(next_pages) == 0:
         return [
             Error(
@@ -329,7 +321,7 @@ def check_next_pages_configuration(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, Tags.templates, NEXT, SEO)
-def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
+def check_router_manager(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a router that fails to initialise (`next.E007`), once per check run.
 
     Router-walking checks skip the failure silently, so this carries every tag they use.
@@ -339,7 +331,7 @@ def check_router_manager(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT)
-def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
+def check_url_patterns(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -347,27 +339,14 @@ def check_url_patterns(*args, **kwargs) -> list[CheckMessage]:
 
     collected = _collect_all_patterns(router_manager)
     errors = list(collected.errors)
-
-    try:
-        _check_url_conflicts(collected.patterns, errors)
-    except (ValueError, TypeError) as e:
-        errors.append(
-            Error(
-                f"The URL patterns the routers produced could not be compared: {e}",
-                hint=(
-                    "A router answered a pattern that is not a Django URL pattern. "
-                    "Check the custom router named in PAGE_BACKENDS."
-                ),
-                obj=settings,
-                id="next.E014",
-            )
-        )
-
+    _check_url_conflicts(collected.patterns, errors)
     return errors
 
 
 @register(Tags.urls, NEXT)
-def check_reserved_url_parameters(*args, **kwargs) -> list[CheckMessage]:
+def check_reserved_url_parameters(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Report a bracket segment named after a reserved argument (`next.E217`)."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -376,7 +355,9 @@ def check_reserved_url_parameters(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT)
-def check_reverse_name_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_reverse_name_collisions(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Fail when two distinct routes collapse to the same reverse URL name."""
     errors: list[CheckMessage] = []
 
@@ -472,7 +453,9 @@ def _answered_by(match: ResolverMatch) -> str:
 
 
 @register(Tags.urls, NEXT)
-def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
+def check_framework_routes_reachable(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Report a framework endpoint that a view other than its own answers (`next.E149`).
 
     It compares views, not URL names, so a project view reusing the name fails.
@@ -505,7 +488,7 @@ def check_framework_routes_reachable(*args, **kwargs) -> list[CheckMessage]:
     return errors
 
 
-def reset_collected_patterns_cache(**kwargs) -> None:
+def reset_collected_patterns_cache(**kwargs: object) -> None:
     """Drop memoised collected patterns so the next check run recollects."""
     _collected_patterns.router_manager = None
     _collected_patterns.patterns = []

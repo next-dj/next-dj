@@ -209,6 +209,7 @@ The four abstract methods must all be present.
 
    from typing import Any
 
+   from django.contrib.auth.decorators import login_not_required
    from django.http import HttpRequest, HttpResponseBase, HttpResponseNotFound
    from django.urls import path, reverse
    from django.views.decorators.http import require_http_methods
@@ -236,7 +237,7 @@ The four abstract methods must all be present.
            return reverse("custom_form_action", kwargs={"uid": action_name})
 
        def generate_urls(self) -> list:
-           view = require_http_methods(["GET", "POST"])(self.dispatch)
+           view = login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
            return [path("_next/custom/<str:uid>/", view, name="custom_form_action")]
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
@@ -248,7 +249,7 @@ The four abstract methods must all be present.
 The skeleton keys its dispatch URL by the plain action name, where the bundled backend derives a hashed UID from the scope key and the name.
 Its meta leaves out the ``uid`` key, which a type checker reports and the pipeline tolerates, so the rendered forms carry no ``data-next-action`` attribute, as `get_meta and multi-backend routing`_ describes.
 The pipeline reads ``file_path`` and ``scope`` of every meta to find the owner rule of the action, so a backend must store both.
-The bundled backend wraps its dispatch view in ``require_http_methods(["GET", "POST"])`` so the endpoint rejects other verbs, and a from-scratch backend should restrict its own view the same way.
+The bundled backend wraps its dispatch view in ``login_not_required`` and ``require_http_methods(["GET", "POST"])``, because the pipeline applies the page rule and the default login itself, and a from-scratch backend wraps its own view the same way.
 
 ``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
 The bundled backend raises ``Http404`` explaining that the page which rendered the form may be stale after a rename or restart.
@@ -262,7 +263,7 @@ RegistryFormActionBackend
 ``RegistryFormActionBackend`` is the bundled implementation.
 It keeps an in memory registry, builds dispatch URLs of the form ``/_next/form/<uid>/``, and runs the validation pipeline through ``FormActionDispatch``.
 
-Subclass it to keep all of that behaviour and add your own step.
+Subclass it to keep all of that behaviour and add a step of the project's own.
 
 Its ``clear_registry()`` drops every registered action and resets the UID index, so a test session that registers overlapping action names can start from an empty registry.
 Production code never calls it.
@@ -364,7 +365,7 @@ A configuration whose entries all fail stays unloaded and is reread on the next 
 
 A test that registers extra actions on a live registry takes a snapshot first and restores it afterwards.
 ``form_action_manager.snapshot_actions()`` and ``form_action_manager.restore_actions(token)`` cover every configured backend and move the ``version`` token on the way back, so a cache keyed on it sees the rollback exactly as it sees a registration.
-They sit on the ``backend.snapshot()`` and ``backend.restore(token)`` contract members, which a backend of your own implements to be rolled back without reaching into its private state.
+They sit on the ``backend.snapshot()`` and ``backend.restore(token)`` contract members, which a project backend implements to be rolled back without reaching into its private state.
 Each token travels back to the backend that minted it, and a backend refuses a token it never handed out rather than applying half of it.
 
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.

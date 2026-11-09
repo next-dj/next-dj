@@ -3,13 +3,14 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from next.forms.formsets import error_message_count
 from next.partial.manager import partial_backend_manager
 from next.partial.patches import Patches
 from next.partial.signals import field_validated
 
 from .csrf import _csrf_rotated, _stamp_csrf
 from .responses import _envelope_response
-from .scrub import _error_count, _form_meta, _scrub_errors, _validate_targets
+from .scrub import _form_meta, _scrub_errors, _validate_targets
 from .targets import _form_zone, _origin_target, _zone_overrides
 
 
@@ -82,5 +83,5 @@ def _emit_field_validated(
         uid=action.uid,
         request=request,
         field_names=tuple(sorted(requested)),
-        error_count=_error_count(form),
+        error_count=error_message_count(form),
     )

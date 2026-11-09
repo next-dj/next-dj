@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 @contextlib.contextmanager
-def override_next_settings(**overrides) -> Iterator[None]:
+def override_next_settings(**overrides: object) -> Iterator[None]:
     """Merge `overrides` into `NEXT_FRAMEWORK` for the duration of the block.
 
     The merge is shallow, and `override_settings` fires the chain that reloads managers.

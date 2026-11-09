@@ -126,7 +126,7 @@ Any other registered kind works too, and the registry decides both the slot the 
    {% use_script "site/vendor.mjs" kind="module" %}
    {% use_script "https://cdn.example.com/inter.woff2" kind="font" %}
 
-The framework ships ``module`` and ships no ``font``, so the second line needs a project registration first, see :doc:`asset-kinds`.
+The framework ships ``module`` and ships no ``font``, so the second line needs a project registration with a preload renderer of its own first, see :doc:`asset-kinds`.
 A custom kind registered through ``KindRegistry.register`` then needs no template tag of its own.
 A kind that was never registered raises ``KeyError`` out of the render, so a typo surfaces on the first request instead of dropping the asset.
 

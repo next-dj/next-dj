@@ -236,6 +236,11 @@ TARGET_HINT_CASES: tuple[TargetHintCase, ...] = (
         "'feed/photo/[int:id]', which spells the same parameters differently",
     ),
     TargetHintCase(
+        "a_literal_sibling_of_the_same_depth",
+        (("feed/video/page.py", _ROUTED), ("feed/(.)photo/page.py", _ROUTED)),
+        "Point the marker at a directory that serves a page",
+    ),
+    TargetHintCase(
         "a_marker_one_level_short",
         (("photo/page.py", _ROUTED), ("feed/(.)photo/page.py", _ROUTED)),
         "Point the marker at a directory that serves a page",

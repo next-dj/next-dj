@@ -125,7 +125,7 @@ def restored_page_bound():
     yield
     PageCache._bound = bound
     for cache in list(PageCache._instances):
-        cache._maxsize = bound
+        cache.rebound(bound)
 
 
 def _fill(cache: PageCache[int, int], count: int) -> None:
@@ -171,8 +171,7 @@ class TestPageCache:
     def test_a_trim_stops_once_another_thread_emptied_the_cache(self) -> None:
         cache: PageCache[str, int] = PageCache()
         cache._entries = _EmptiedEntries(first=1, second=2)
-        cache._maxsize = 1
-        cache._trim()
+        cache.rebound(1)
         assert len(cache) == 2
 
 

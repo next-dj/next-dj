@@ -5,7 +5,8 @@ Where logic lives
 
 Inside one application every piece of domain logic has one place, chosen by what the logic touches.
 The rule is Django's own, and next.dj adds no layer, container, or base class on top of it.
-Two parts of it are a recommendation of next.dj rather than a Django convention, ``services.py`` as the home of the writes and the ``f(scope, *, ...)`` shape of its functions, and a project that keeps its writes elsewhere loses nothing the framework does.
+Two parts of it are a next.dj recommendation rather than a Django convention, ``services.py`` as the home of the writes and the ``f(scope, *, ...)`` shape of its functions.
+A project that keeps its writes elsewhere loses nothing the framework does.
 :doc:`project-layout` names the files, and this page decides which of them a function belongs in.
 
 .. contents::

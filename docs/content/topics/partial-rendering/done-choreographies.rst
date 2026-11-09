@@ -48,7 +48,7 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
    from django.http import Http404, HttpRequest, HttpResponse
 
    from next.forms import FormWizard
-   from next.partial import Patches, resolve_partial_origin
+   from next.partial import Patches, is_partial_request, resolve_partial_origin
 
    class AccessRequestWizard(FormWizard):
        def done(
@@ -56,20 +56,22 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
        ) -> HttpResponse:
            """Create the access request and patch the host page list in one response."""
            access_request = AccessRequest.objects.create(**cleaned_data)
-           origin = resolve_partial_origin(request)
-           if origin is None or origin.page_path is None:
-               raise Http404
-           return (
-               Patches(request)
-               .layer_close(result={"id": access_request.pk})
-               .morph(
+           patches = Patches(request).layer_close(result={"id": access_request.pk})
+           if is_partial_request(request):
+               origin = resolve_partial_origin(request)
+               if origin is None or origin.page_path is None:
+                   raise Http404
+               patches.morph(
                    zone="request-list",
                    page=origin.page_path,
                    url_kwargs=origin.url_kwargs,
                )
-               .toast("Request created", variant="success")
-               .response(fallback=f"/request/{access_request.pk}/audit/")
+           return patches.toast("Request created", variant="success").response(
+               fallback=f"/request/{access_request.pk}/audit/"
            )
+
+The ``is_partial_request`` guard keeps the morph out of a plain POST.
+Without ``X-Next-Origin`` the origin falls back to the posted wizard step, which declares no ``request-list`` zone, so an unguarded morph raises ``UnknownZoneError``.
 
 The last step answers with all three operations in one envelope.
 
@@ -127,7 +129,7 @@ The comparison
      - Close, list, and toast apply in one envelope
    * - Without the runtime
      - A 303 to ``fallback``, and the list zone never renders because ``done`` builds no morph of it
-     - A 303 to ``fallback`` too, but the response still renders the foreign zone into the envelope the redirect then discards
+     - A 303 to ``fallback``, because ``done`` builds the foreign morph only for a partial request
 
 The recommendation is accept and re-GET as the default.
 The deciding argument is not the round trip but the authorization and the decoupling.

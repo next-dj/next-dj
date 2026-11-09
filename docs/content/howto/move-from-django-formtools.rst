@@ -72,13 +72,14 @@ Navigation to an earlier step is a plain link to its URL, built with ``wizard.go
 formtools revalidates every form at the end and passes the instances into ``done``.
 The ``FormWizard`` persists each step's cleaned data through the backend as it validates, then passes one merged dict.
 Per-step access goes through ``get_cleaned_data_for_step``.
-A field declared by two steps merges to the last stored value, and the ``next.W059`` system check warns about such collisions.
+A field declared by two steps takes the value of the later step, and the ``next.W059`` system check warns about such collisions.
 
 Validation re-render is free
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An invalid step re-renders the page with the bound failing form under the same ``form`` variable the template already uses.
-There is no per-step template selection and no ``{{ wizard.form }}`` indirection, the one ``{% form %}`` block covers every step.
+There is no per-step template selection and no ``{{ wizard.form }}`` indirection.
+The one ``{% form %}`` block covers every step.
 
 Files in steps
 ~~~~~~~~~~~~~~

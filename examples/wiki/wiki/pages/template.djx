@@ -30,7 +30,7 @@
       <ul class="mt-3 space-y-2">
         {% for article in articles %}
           <li class="flex items-center justify-between rounded-md border border-border bg-card p-3 shadow-sm">
-            <a href="{{ article.url }}" class="text-base font-medium text-foreground hover:underline">
+            <a href="{{ article.get_absolute_url }}" class="text-base font-medium text-foreground hover:underline">
               {{ article.title }}
             </a>
             <a href="{% url 'next:page_articles_edit_slug' slug=article.slug %}"

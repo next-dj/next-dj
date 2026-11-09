@@ -3,7 +3,7 @@
 SEO pipeline
 ============
 
-The seo machinery has two halves, the metadata of one page from the ``page.py`` declarations to the head markup, and the crawler documents served from the sources at the top of every page root.
+The SEO machinery has two halves, the metadata of one page from the ``page.py`` declarations to the head markup, and the crawler documents served from the sources at the top of every page root.
 
 .. contents::
    :local:
@@ -235,7 +235,7 @@ Resets
 - ``forget_seo_sources``, the public receiver of ``next.seo.manager``, resets it on ``router_reloaded``, connected in ``ready()``, since a reload can change which roots exist.
 - The same receiver resets it on ``settings_reloaded``, since the backends, the site config, and the fingerprint read settings.
 - ``seo_manager.refresh()`` resets it while ``DEBUG`` watches template edits and a source file of any root appeared, went, or moved on disk, and every SEO view asks it first, so an edited source shows without a restart.
-- ``reset_check_caches`` and ``next.testing.reset_seo`` call ``reset_seo_sources``, which also drops the items registry, so a check run or a test after an in-place edit executes the sources again.
+- ``next.testing.reset_check_caches`` and ``next.testing.reset_seo`` call ``reset_seo_sources``, which also drops the items registry, so a check run or a test after an in-place edit executes the sources again.
 
 Autoreload
 ~~~~~~~~~~

@@ -727,6 +727,8 @@ The components subsystem contributes Django system checks.
 - ``next.E084`` reports a ``component.py`` that raised while importing, naming the exception type and its message.
   It runs on every ``manage.py check`` and imports every user module a backend holds.
   Fix whatever the module body raised, since the components of that module render without their Python context until it imports.
+- ``next.E031``, ``next.E032``, ``next.E033``, ``next.E055``, ``next.E056``, ``next.E057``, ``next.E079``, and ``next.E080`` validate the shape of each ``COMPONENT_BACKENDS`` entry.
+  See :doc:`/content/ref/system-checks` for the condition behind each id.
 
 Run them with ``uv run python manage.py check``.
 The full catalog lives in :doc:`/content/ref/system-checks`.

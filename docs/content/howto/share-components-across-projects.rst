@@ -17,7 +17,7 @@ This page is the shortest path and points ``COMPONENT_BACKENDS`` at one shared f
 Solution
 --------
 
-Place the shared components in one folder at the repository level and reference it from each project through ``COMPONENT_BACKENDS["DIRS"]``.
+Place the shared components in one folder at the repository level and list it in the ``DIRS`` of the ``COMPONENT_BACKENDS`` entry of each project.
 
 Walkthrough
 -----------
@@ -66,9 +66,7 @@ Add the shared directory to each project.
 Repeat the same block in ``projects/site/config/settings.py``.
 Each project now sees ``button``, ``card``, and every other component in the shared folder.
 
-``COMPONENTS_DIR`` names the folder the URL router treats as a component namespace and skips instead of turning into a URL segment.
-The key is required in every ``COMPONENT_BACKENDS`` entry, and ``next.E031`` reports an entry that omits it, while only the value of the first entry takes effect.
-It is unrelated to ``DIRS``, which is where this recipe puts the shared kit, so the value above is the name each project uses inside its own page tree.
+``COMPONENTS_DIR`` names the folder each project uses inside its own page tree and plays no part in ``DIRS``, see :ref:`components-folder-discovery`.
 
 Every ``component.py`` under a ``DIRS`` root is imported during component backend setup rather than on first use.
 That is what makes a ``@component.context`` visible from the first request, and it is the real cost of a shared UI kit, since each project pays the import of the whole kit at startup whether it renders one component or all of them.
@@ -103,8 +101,9 @@ A project can override a shared component by placing a component with the same n
 
    projects/admin/admin_app/pages/_components/button/component.djx
 
-The project-local version wins because the visibility resolver scores the project's page-tree root and a global ``DIRS`` root equally, then breaks the tie in favour of the page-tree component.
-A page-tree component shadows a same-name ``DIRS`` component at equal score, so the project's own copy overrides the shared one regardless of which root was registered first.
+The project copy wins because a page-tree component shadows a same-named ``DIRS`` component at equal score, whichever root was registered first.
+A component name is its directory name, so the override and the shared component publish their co-located assets under one static path, ``next/components/button.css``.
+The finder keeps one of the two files with no warning and no system check, so an override that ships its own ``component.css`` or ``component.js`` takes a name of its own.
 
 Static files
 ~~~~~~~~~~~~
