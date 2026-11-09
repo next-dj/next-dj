@@ -95,9 +95,11 @@ class TestBenchManagerLookups:
         target = f"act_{_BULK // 2}"
         backend = manager.default_backend
 
-        benchmark.pedantic(
-            manager.get_action_url, args=(target,), setup=backend.forget_urls, rounds=50
-        )
+        def setup() -> tuple[tuple[str], dict[str, object]]:
+            backend.forget_urls()
+            return (target,), {}
+
+        benchmark.pedantic(manager.get_action_url, setup=setup, rounds=50)
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_get_action_url_miss_raise(self, benchmark) -> None:
