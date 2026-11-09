@@ -50,7 +50,7 @@ class _RoutedPageView(Protocol):
     next_page_path: Path
     login_required: bool
 
-    def __call__(self, request: HttpRequest, **kwargs) -> HttpResponseBase: ...
+    def __call__(self, request: HttpRequest, **kwargs: object) -> HttpResponseBase: ...
 
 
 def unified_view(
@@ -82,7 +82,7 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
     The body is request-independent, so the view renders the compiled template.
     """
 
-    def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
+    def view(request: HttpRequest, **kwargs: object) -> HttpResponseBase:
         watch_degraded()
         dep_cache = render_dep_cache(request)
         denial = refusal(file_path, request, kwargs, dep_cache)
@@ -126,7 +126,7 @@ def _resolving_view(
     `broken_at_build` re-reads the module per request, a 404 once it has no body.
     """
 
-    def view(request: HttpRequest, **kwargs) -> HttpResponseBase:
+    def view(request: HttpRequest, **kwargs: object) -> HttpResponseBase:
         watch_degraded()
         if broken_at_build and not routed(file_path):
             raise Http404
@@ -139,7 +139,7 @@ def _resolving_view(
         )
         shaper = partial_shaper_slot.get()
         intent = shaper.intent(request)
-        resolution = page._resolve_page_body(
+        resolution = page.resolve_page_body(
             file_path, active_module, request, kwargs, dep_cache=dep_cache
         )
         built = resolution.http_response
@@ -168,7 +168,7 @@ def _resolving_view(
             return _finish_render_response(built, policy, request, file_path, shaper)
         body = resolution.body if resolution.body is not None else ""
         response = HttpResponse(
-            page._render_composed(file_path, body, request, kwargs, dep_cache=dep_cache)
+            page.render_composed(file_path, body, request, kwargs, dep_cache=dep_cache)
         )
         finish_response(response, policy, request, file_path)
         shaper.set_vary(response)

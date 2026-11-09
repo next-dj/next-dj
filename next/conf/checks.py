@@ -33,7 +33,9 @@ def errors_for_unknown_keys(
 
 
 @register(NEXT)
-def check_next_framework_unknown_top_level_keys(*args, **kwargs) -> list[CheckMessage]:
+def check_next_framework_unknown_top_level_keys(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Reject keys under `NEXT_FRAMEWORK` that are not defined in defaults."""
     raw = getattr(settings, USER_SETTING, None)
     if raw is None or not isinstance(raw, dict):
@@ -70,7 +72,9 @@ _SILENCE_HINT = (
 
 
 @register(NEXT)
-def check_next_framework_value_types(*args, **kwargs) -> list[CheckMessage]:
+def check_next_framework_value_types(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Report `NEXT_FRAMEWORK` values whose type the merge would silently drop.
 
     A non-dict `NEXT_FRAMEWORK` skips the per-key probes and carries its own id.

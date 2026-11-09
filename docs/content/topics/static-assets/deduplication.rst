@@ -17,7 +17,7 @@ The collector holds a dedup strategy.
 A strategy reduces a ``StaticAsset`` to a hashable key.
 The collector ignores any asset whose key was already recorded.
 
-The framework ships three strategies in ``next.static.collector``.
+The framework ships three strategies exported from ``next.static``.
 
 ``UrlDedup``.
    The default.
@@ -54,7 +54,7 @@ The static manager builds the collector per request and reads the strategy dotte
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
-                   "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+                   "DEDUP_STRATEGY": "next.static.HashContentDedup",
                },
            }
        ]
@@ -83,8 +83,7 @@ The protocol has one method, ``key``, which returns a hashable value.
 
    from collections.abc import Hashable
 
-   from next.static import StaticAsset
-   from next.static.collector import UrlDedup
+   from next.static import StaticAsset, UrlDedup
 
    class PathDedup:
        """Deduplicate URL assets by absolute source path."""

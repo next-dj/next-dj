@@ -3,7 +3,8 @@ from decimal import Decimal
 from typing import ClassVar, Self
 
 from django.db import models
-from django.urls import reverse
+
+from next.urls import page_reverse
 
 
 _SORT_ORDERINGS = {
@@ -104,9 +105,8 @@ class Product(models.Model):
 
     def get_absolute_url(self) -> str:
         """Return the detail page, addressed through the category of the product."""
-        return reverse(
-            "next:page_catalog_category_slug",
-            kwargs={"category": self.category.slug, "slug": self.slug},
+        return page_reverse(
+            "catalog/[category]/[slug]", category=self.category.slug, slug=self.slug
         )
 
 

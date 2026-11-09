@@ -82,8 +82,8 @@ Bootstrap
 ---------
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
-The hook calls ``register_all()`` to register the framework system checks.
-It then runs nineteen startup steps in a fixed order.
+The framework system checks are registered by then, since ``next.apps.config`` imports ``next.checks.catalog``.
+The hook runs nineteen startup steps in a fixed order.
 The first three connect every signal receiver of the framework, in three ordered tables for ``setting_changed``, ``settings_reloaded``, and ``router_reloaded``, each with a ``dispatch_uid`` of its module and qualified name, so no module connects a receiver at import time.
 ``reset_failure_logs`` runs first on ``settings_reloaded``, and the ``router_reloaded`` table drops every watch, page-root, dependency, object-row, SEO-source, hreflang, and scripts memo a router rebuild leaves stale.
 
@@ -169,9 +169,9 @@ Subsystem dependencies
 The dependency graph between subsystems is shallow.
 
 - ``next.conf`` sits at the bottom.
-  Its ``defaults`` and ``settings`` modules import nothing from the framework, its ``checks`` module reaches up to ``next.checks``, and its ``signals`` module reads a callable name from ``next.introspect``.
+  Its ``defaults`` and ``settings`` modules import nothing from the framework, its ``checks`` module reads the tags of the leaf ``next.checks``, and its ``signals`` module reads a callable name from ``next.introspect``.
 - ``next.deps`` sits at the bottom beside ``next.conf``.
-  It imports no subsystem, only the flat cross-area modules ``next.backends``, ``next.caches``, ``next.introspect``, and ``next.conf``, which is how the configured resolver class and the reload hook reach it.
+  Its runtime modules import no subsystem, only the flat cross-area modules ``next.backends``, ``next.caches``, and ``next.introspect``, and only its ``checks`` module reaches ``next.pages``, ``next.components``, ``next.forms``, and ``next.urls``.
 - ``next.permissions`` imports no model and keeps off Django's ``BaseBackend``, whose module imports the auth models, so ``AUTHENTICATION_BACKENDS`` can name its backend before the app registry is ready.
   It depends on ``next.conf`` and ``next.utils`` for the access rules, and only its ``checks`` module reaches ``next.pages``, ``next.components``, and ``next.forms``.
 - ``next.ports`` imports no subsystem at runtime and declares the protocols one subsystem calls another through.
@@ -189,7 +189,7 @@ The dependency graph between subsystems is shallow.
 - ``next.site`` depends on ``next.conf`` alone and ``next.csrf`` on ``next.conf`` and ``next.site``, so every area reads them without a cycle.
 - ``next.scripts`` depends on ``next.conf``, ``next.consent``, ``next.pages.watch``, and ``next.static``, and the static injector reaches it back through the ``PageScripts`` slot.
 - ``next.server`` depends on ``next.conf``, ``next.pages``, ``next.urls``, and ``next.components``, the subsystems whose trees it watches, and its ``asgi`` module serves the ``next.realtime`` application.
-- ``next.testing`` depends on the page, component, form, dependency, static, and partial subsystems to drive isolation and rendering helpers.
+- ``next.testing`` depends on the page, component, form, dependency, static, partial, URL, realtime, scripts, and SEO subsystems to drive isolation, rendering, and transport helpers.
 - ``next.apps`` depends on every subsystem.
   It is the Django-facing entry point that calls each subsystem's startup hook.
 
@@ -277,8 +277,8 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.discovery``
      - A single flat module holding the per-run router manager and the walk of the page trees it routes, read by the system checks, the component sources, and the page scan alike.
    * - ``next.checks``
-     - ``__init__`` aggregates system-check registration across every subpackage.
-       ``common`` provides shared helpers used by individual ``checks`` modules.
+     - ``__init__`` holds the shared ``NEXT`` and ``SEO`` tags and imports nothing of the framework.
+       ``catalog`` imports the ``checks`` of every area but ``next.apps``, and ``common`` provides shared helpers used by individual ``checks`` modules.
    * - ``next.templatetags``
      - ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``permissions``, ``scripts``.
 

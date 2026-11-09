@@ -180,7 +180,8 @@ See :doc:`/content/ref/template-tags` for the three outcomes.
 next.E084 on a component.py that fails to import
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A ``component.py`` raised while importing, so the component renders as an empty string, since the access it would have declared is unknown, and under ``next.conf.fail_loudly`` it raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
+A ``component.py`` raised while importing, so the access it would have declared is unknown and the component renders as an empty string.
+Under ``next.conf.fail_loudly``, which holds with ``DEBUG`` or ``STRICT_LOADING`` on, the render raises ``ComponentModuleImportError`` with the import failure as ``__cause__``.
 The report names the exception type and message, so fix the named error and the module loads.
 The check imports every discovered ``component.py`` and runs on a plain ``manage.py check``.
 See :doc:`/content/topics/components` for the closed render.
@@ -367,6 +368,7 @@ To inspect what the resolver would actually inject, use ``resolve_call`` from ``
 The snippet below resolves a callable shaped like ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.
 
 .. code-block:: python
+   :caption: probe.py
 
    from next.testing.deps import resolve_call
    from next.urls import DUrl
@@ -405,6 +407,7 @@ To swap a provider for the duration of a test, use ``override_provider`` from ``
 The context manager prepends the provider to the resolver list on entry and removes it on exit.
 
 .. code-block:: python
+   :caption: myapp/tests.py
 
    from django.test import TestCase
    from myapp.deps import TenantProvider
@@ -485,14 +488,13 @@ This is recommended in production to surface misconfigured processors immediatel
 To debug, disable ``STRICT_CONTEXT`` temporarily and read the logged warning to identify the offending processor.
 See :ref:`ref-settings` for the full description of this key.
 
-Components are not available at startup
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Component modules load at startup
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default ``LAZY_COMPONENT_MODULES = False``, which means ``component.py`` modules under configured component roots are imported during ``AppConfig.ready``.
-If a module raises an import error at startup, the server does not start.
-Set ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK`` to defer imports for those roots until first resolve.
-Components beside page routes may still load earlier when URL patterns are constructed.
-This hides some startup errors but surfaces them when the failing component or route branch is first touched.
+By default ``LAZY_COMPONENT_MODULES = False``, so ``AppConfig.ready`` imports every ``component.py`` under the configured component roots.
+A module that raises while importing never stops the server, because the loader logs ``Could not import component module`` and records the failure, which ``manage.py check`` reports as ``next.E084``.
+Set ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK`` to defer the imports of those roots until a component first resolves.
+A ``_components/`` folder inside a page tree still loads its modules while the URL patterns are built.
 
 Merged NEXT_FRAMEWORK settings are immutable
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

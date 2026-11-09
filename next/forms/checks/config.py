@@ -15,7 +15,9 @@ _FORM_ANCHOR_FILES_SETTINGS_KEY = "FORM_ANCHOR_FILES"
 
 
 @register(NEXT)
-def check_form_action_backends_configuration(*args, **kwargs) -> list[CheckMessage]:
+def check_form_action_backends_configuration(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Validate `FORM_ACTION_BACKENDS` shape and import paths."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -70,7 +72,7 @@ def _validate_single_form_action_backend(
 
 
 @register(NEXT)
-def check_form_wizard_backend(*args, **kwargs) -> list[CheckMessage]:
+def check_form_wizard_backend(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate `FORM_WIZARD_BACKEND` shape and import path."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -125,7 +127,7 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_form_anchor_files(*args, **kwargs) -> list[CheckMessage]:
+def check_form_anchor_files(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate that FORM_ANCHOR_FILES is None or a collection of strings."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):

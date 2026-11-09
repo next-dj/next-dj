@@ -25,7 +25,7 @@ The URL is pushed as the modal opens, so Back closes it even while its body is s
 A layer whose body fails to load, or that closes before the body arrives, replaces the URL back to the page underneath.
 
 ``data-next-confirm`` and ``data-next-layer`` combine on one link.
-The confirm gate is a capture-phase click handler, the layer opener is a bubble-phase one, so the confirm runs first regardless of install order.
+The confirm gate is a capture-phase click handler and the layer opener a bubble-phase one, so the confirm runs first regardless of install order.
 A cancelled confirm stops the click before it reaches the opener, so the layer never opens.
 An accepted confirm lets the click through and the layer opens.
 The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
@@ -169,8 +169,15 @@ A modal that shows a page's content takes the third form.
 .. code-block:: python
    :caption: page.py
 
-   def open_record(self, request: HttpRequest, record_id: int) -> HttpResponse:
+   from django.http import HttpRequest, HttpResponse
+
+   from next import action
+   from next.partial import Patches
+
+   @action("open_record")
+   def open_record(request: HttpRequest) -> HttpResponse:
        """Open the record's detail zone in a layer."""
+       record_id = int(request.POST["record_id"])
        return (
            Patches(request)
            .layer_open(href=f"/records/{record_id}/", zone="record")

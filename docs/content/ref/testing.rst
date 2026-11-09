@@ -20,7 +20,7 @@ Public API
 Pytest plugin
 ~~~~~~~~~~~~~
 
-``next.testing.plugin`` registers the ``next_pages``, ``next_components``, and ``next_clear_cache`` ini options and three fixtures, the autouse ``next_pages`` and ``next_cache_isolation`` and ``next_client``, once a project adds ``-p next.testing.plugin`` to its pytest ``addopts``.
+``next.testing.plugin`` registers the ``next_pages``, ``next_components``, and ``next_clear_cache`` ini options, the autouse ``next_pages`` and ``next_cache_isolation`` fixtures, and the ``next_client`` fixture, once a project adds ``-p next.testing.plugin`` to its pytest ``addopts``.
 
 .. automodule:: next.testing.plugin
    :members:
@@ -50,6 +50,7 @@ Isolation
 ``reset_form_registration_state`` additionally clears the registration diagnostics and the cached wizard backend.
 ``reset_scripts`` drops every discovered ``scripts.py`` and ``reset_seo`` the discovered SEO sources and the ``@sitemap.items`` registrations, for a test that rewrites a source, since outside ``DEBUG`` each one is read once.
 ``reset_failure_logs`` makes every failure the framework contained log again, for a test that asserts on a log record whatever ran before it.
+``reset_check_caches`` drops every per-run system-check cache, for a test that runs checks after rewriting the page or component tree in place, see :doc:`system-checks`.
 
 .. automodule:: next.testing.isolation
    :members:

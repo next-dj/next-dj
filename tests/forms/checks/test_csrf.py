@@ -7,12 +7,12 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.template import Template
 from django.test import override_settings
 
-from next.checks import reset_check_caches
 from next.forms import Form, FormWizard, action
 from next.forms.checks import check_shared_page_forms
 from next.forms.checks.csrf import _posts_bare
 from next.forms.manager import form_action_manager
 from next.forms.nodes import FormNode
+from next.testing import reset_check_caches
 from tests.support import check_ids, routed, write_page
 
 
@@ -226,3 +226,10 @@ class TestSharedPageForms:
         with routed(_tree(tmp_path, FORM_PAGE), CSRF_DELIVERY="lazy"):
             [warning] = check_shared_page_forms()
         assert "declares a cache a CDN may hold" in warning.msg
+
+    def test_eager_delivery_on_a_shared_page_without_forms_is_silent(
+        self, tmp_path
+    ) -> None:
+        source = "template = 'x'\ncache = 60\n"
+        with routed(_tree(tmp_path, source), CSRF_DELIVERY="eager"):
+            assert check_shared_page_forms() == []

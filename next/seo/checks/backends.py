@@ -44,7 +44,7 @@ def _entry_errors(index: int, entry: object) -> list[CheckMessage]:
 
 
 @register(NEXT, SEO)
-def check_seo_settings(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the `SEO` keys (`next.E035`) and its sitemap backends (`next.E120`)."""
     scope = raw_scope(SEO_SCOPE)
     if scope is None:

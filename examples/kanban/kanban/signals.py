@@ -25,7 +25,7 @@ def broadcast_board_change(
     form: django_forms.Form | None = None,
     request: HttpRequest | None = None,
     response_status: int = 200,
-    **kwargs,
+    **kwargs: object,
 ) -> None:
     """Ask every other tab of the board to refresh it once the change commits."""
     field = BOARD_ACTIONS.get(action_name)
@@ -39,7 +39,7 @@ def broadcast_board_change(
 
 @receiver(stream_unsubscribed, sender=TopicSocket)
 def release_socket_drags(
-    connection: TopicSocket, topics: tuple[str, ...] = (), **kwargs
+    connection: TopicSocket, topics: tuple[str, ...] = (), **kwargs: object
 ) -> None:
     """Tell every board a closed socket watched to drop the cards it still held."""
     detail = {"from": connection.connection_id}
@@ -63,7 +63,7 @@ def _dev_origin() -> str:
     return ""
 
 
-def inject_vite_dev_assets(sender: object, **kwargs) -> None:
+def inject_vite_dev_assets(sender: object, **kwargs: object) -> None:
     """Prepend the React Refresh preamble and the Vite HMR client before jsx modules."""
     origin = _dev_origin()
     if not origin or not _has_module_assets(sender):

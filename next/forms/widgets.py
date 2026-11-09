@@ -63,12 +63,18 @@ class ComponentWidget(django_forms.Widget):
         component_name: str,
         *,
         attrs: dict[str, Any] | None = None,
-        **component_kwargs,
+        **component_kwargs: object,
     ) -> None:
         """Store the target component name and its extra render kwargs."""
         self.component_name = component_name
         self.extra_kwargs = component_kwargs
         super().__init__(attrs)
+
+    def bind(self, frame: RenderFrame, errors: "ErrorList | None" = None) -> None:
+        """Bind `frame`, and `errors` when given, for the next render."""
+        self._frame = frame
+        if errors is not None:
+            self._errors = errors
 
     def _render_frame(self) -> "tuple[RenderFrame, str | Path]":
         """Return the frame of this render and the anchor it searches from.
@@ -204,9 +210,7 @@ def _bind_frame(
         if not isinstance(widget, ComponentWidget):
             continue
         # Django deep-copies widgets per form instance, so the frame stays per form.
-        widget._frame = frame
-        if with_errors:
-            widget._errors = form[field_name].errors
+        widget.bind(frame, form[field_name].errors if with_errors else None)
 
 
 _MISSING = object()

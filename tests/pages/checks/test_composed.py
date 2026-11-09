@@ -5,10 +5,10 @@ from django.core.checks import Error
 from django.template import Context
 from django.test import override_settings
 
-from next.checks import reset_check_caches
 from next.pages.checks import composed
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.manager import page
+from next.testing import reset_check_caches
 from tests.support import file_router_config_entry, routed, write_page
 
 

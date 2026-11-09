@@ -274,7 +274,7 @@ class TestStaticFastPathView:
 
         reference = Page()
         body = reference._load_static_body(page_file, module)
-        slow = reference._render_composed(
+        slow = reference.render_composed(
             page_file, body, request, {"title": "Hi"}, dep_cache={}
         )
         assert fast == slow
@@ -547,7 +547,7 @@ class TestZoneTickOnTheStaticBranch:
         page_file = build_nested_page(tmp_path, body=_ZONED_BODY)
         view = unified_view(page_instance, page_file)
 
-        with mock.patch.object(page_instance, "_resolve_page_body") as resolve:
+        with mock.patch.object(page_instance, "resolve_page_body") as resolve:
             response = view(build_zone_request("z"))
 
         assert resolve.call_count == 0

@@ -101,8 +101,8 @@ The shipped ``next.partial.JsonPartialProtocolBackend`` implements that contract
 ``PARTIAL_BACKENDS`` differs from the other backend lists in that only its first entry is active.
 ``FORM_WIZARD_BACKEND`` is singular rather than a list, so the key holds one configuration dict instead of a list of them.
 That shape puts it outside ``extend_default_backend``, which patches an entry of a backend list and rejects any other key.
-The settings merge overlays a user dict on the default dict key by key, so an entry that names only ``BACKEND`` keeps the default ``OPTIONS``.
-``manage.py check`` reports a bad shape, an unimportable path, or a class that does not subclass ``FormWizardBackend`` as ``next.E051``, and a misconfiguration that survives to the first wizard request raises :class:`~django.core.exceptions.ImproperlyConfigured` there rather than being skipped.
+A project value replaces the default dict whole, as :ref:`ref-settings-merge` describes, so an entry that sets only ``OPTIONS`` carries no ``BACKEND``.
+``manage.py check`` reports a value that is no dict as ``next.E051``, a missing or non-string ``BACKEND`` as ``next.E069``, a path that does not import as ``next.E070``, and a class outside the ``FormWizardBackend`` family as ``next.E071``, and a misconfiguration that survives to the first wizard request raises :class:`~django.core.exceptions.ImproperlyConfigured` there rather than being skipped.
 
 Beyond the abstract methods, a base class carries optional hooks whose defaults decline.
 
@@ -246,14 +246,16 @@ Implement the methods listed in the protocol and pass the class to the framework
    * - Protocol
      - Defined in
    * - Dedup strategy
-     - ``next.static.collector.DedupStrategy``
+     - ``next.static.DedupStrategy``
    * - JS context serializer
      - ``next.static.JsContextSerializer``
+   * - JS context conflict policy
+     - ``next.static.JsContextPolicy``
 
 Select a serializer implementation with the ``JS_CONTEXT_SERIALIZER`` setting.
 The setting defaults to ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
-``next.pages.loaders.TemplateLoader`` is an abstract base class rather than a protocol.
+``next.pages.TemplateLoader`` is an abstract base class rather than a protocol.
 Subclass it explicitly and register the subclass through ``TEMPLATE_LOADERS``.
 
 Protocols differ from backends in that they implement a single hook.
@@ -296,7 +298,7 @@ Use a strategy when the customisation is a single algorithm rather than a comple
 
 Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping, and the metadata renderer inside the ``METADATA`` scope.
 ``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``, and ``METADATA["RENDERER"]`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all four against the base class its key declares, the last one through its ``scope`` argument.
-A value that is not a string is dropped by the settings merge for any of the four, which leaves the default in place with no error, and :ref:`next.E076 <ref-system-checks>` reports the dropped value on ``manage.py check``.
+A value that is not a string is dropped by the settings merge for the three top-level keys, which leaves the default in place, and :ref:`next.E076 <ref-system-checks>` reports it on ``manage.py check``, while a non-string ``METADATA["RENDERER"]`` reaches the loader and is reported as ``next.E107``.
 
 ``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
 Swap it to change how a request path is matched against those patterns, for example to trade the default trie for a different index.
@@ -417,6 +419,7 @@ A backend answer read on every reloader tick or static lookup goes through ``Bac
 After the block, ``failed`` tells whether it contained one, and ``error`` holds the exception for a caller that memoises the failure.
 ``catch`` narrows the exceptions it contains, and only an ``Exception`` qualifies, so ``KeyboardInterrupt`` and ``SystemExit`` always propagate.
 A call site outside any view passes ``pass_through=()``, and ``detail`` draws message arguments from the exception while the key stays the one the caller passed.
+``warn(key, message, *args)`` logs a failure that carries no traceback at the same rate, and ``emit(level, key, message, args, exc_info=None)`` is the rate-limited write both reach, keyed as given rather than wrapped in a tuple, and the whole class stays framework-internal, as :doc:`/content/ref/utils` states.
 
 Choosing between mechanisms
 ---------------------------

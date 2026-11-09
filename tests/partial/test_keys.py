@@ -59,7 +59,7 @@ class TestSerializerEnvelopeShareKeys:
             csrf={"token": "t"},
             request_id="r1",
         )
-        view = PartialEnvelope(envelope.as_dict())
+        view = PartialEnvelope.from_envelope(envelope)
         assert view.version == "v1"
         assert view.op_verbs() == ["morph"]
         assert view.zone_targets() == ["list"]
@@ -75,7 +75,7 @@ class TestSerializerEnvelopeShareKeys:
             version="v1",
             ops=(Patch(op="morph", target={"form": "ab12"}, html="<form></form>"),),
         )
-        view = PartialEnvelope(envelope.as_dict())
+        view = PartialEnvelope.from_envelope(envelope)
         assert view.form_targets() == ["ab12"]
 
     def test_csrf_and_request_id_keys_match(self) -> None:
@@ -95,17 +95,17 @@ class TestProducersWriteTargetSelectorKeys:
             collector=default_manager.create_collector(),
         )
         _patch_zone(patches, "list", result, None)
-        view = PartialEnvelope(patches.envelope().as_dict())
+        view = PartialEnvelope.from_envelope(patches.envelope())
         assert view.zone_targets() == ["list"]
         assert view.targets() == [{keys.ZONE: "list"}]
 
     def test_morph_form_targets_form_selector_key(self) -> None:
         patches = Patches.versioned("v1").morph_form("ab12", "<form></form>")
-        view = PartialEnvelope(patches.envelope().as_dict())
+        view = PartialEnvelope.from_envelope(patches.envelope())
         assert view.form_targets() == ["ab12"]
         assert view.targets() == [{keys.FORM_SELECTOR: "ab12"}]
 
     def test_layer_open_seeds_zone_extras_key(self) -> None:
         patches = Patches.versioned("v1").layer_open(zone="cart")
-        view = PartialEnvelope(patches.envelope().as_dict())
+        view = PartialEnvelope.from_envelope(patches.envelope())
         assert view.ops[0][keys.ZONE] == "cart"

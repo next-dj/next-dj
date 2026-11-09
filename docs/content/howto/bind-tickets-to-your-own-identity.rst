@@ -35,7 +35,7 @@ It works under any ``SESSION_ENGINE``, yet it fits the signed-cookie engine, whe
        },
    }
 
-``manage.py check`` reports ``next.W142`` for the signed-cookie engine only while the binding is the default, so setting this key clears it.
+``next.W142`` flags the signed-cookie engine only while the binding is the default, so setting this key clears it, both in the log of ``WebSocketApp`` and in ``manage.py check`` with an explicit ``"ws"`` transport.
 The visitor cookie takes the path, domain, ``Secure`` flag, ``SameSite`` value, and lifetime of the session cookie, and it is always ``HttpOnly``.
 
 Write a binding
@@ -150,7 +150,7 @@ A stream receiver gets the same ``subject`` and ``user``.
 ``SignedCookieBinding`` on a server-side engine works, yet a logout in another tab does not close the open socket.
 It checks the auth hash, not whether the session exists.
 A password change or an inactive user closes the socket with ``4401``.
-``manage.py check`` reports ``next.W147`` for that pair.
+``WebSocketApp`` logs ``next.W147`` for that pair, and ``manage.py check`` reports it once ``TRANSPORTS`` lists ``"ws"``.
 Projects on the ``db``, ``cache``, ``cached_db``, or ``file`` engine keep the default binding, which closes the socket on logout.
 
 A view that issues tickets without ``TopicStream`` calls ``ticket_binding().respond(request, response)`` on its response, so a binding that sets a cookie, such as the visitor cookie, still sets it.

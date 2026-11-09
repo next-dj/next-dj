@@ -4,11 +4,11 @@ import pytest
 from django.core.checks import Tags
 from django.core.checks.registry import registry as check_registry
 
-import next.checks as facade
-from next.checks import NEXT, SEO, register_all, reset_check_caches
+from next.checks import NEXT, SEO
 from next.seo import checks
 from next.seo.manager import seo_manager
 from next.seo.registry import SitemapItemsEntry, sitemap_items_registry
+from next.testing import reset_check_caches
 from tests.support import routed, write_tree
 
 
@@ -25,17 +25,10 @@ class TestRegistration:
 
     @pytest.mark.parametrize("check", CHECKS, ids=[check.__name__ for check in CHECKS])
     def test_every_check_registers_under_the_seo_tag(self, check) -> None:
-        register_all()
         expected = TAGS.get(check.__name__, {Tags.urls, NEXT, SEO})
         assert set(check.tags) == expected
         assert check in (
             check_registry.registered_checks | check_registry.deployment_checks
-        )
-
-    def test_every_check_is_reachable_through_next_checks(self) -> None:
-        assert set(checks.__all__) <= set(facade.__all__)
-        assert all(
-            getattr(facade, name) is getattr(checks, name) for name in checks.__all__
         )
 
     def test_a_tree_without_sources_is_silent(self, tmp_path) -> None:

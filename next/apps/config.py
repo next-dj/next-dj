@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, override
+from typing import TYPE_CHECKING, ClassVar, Final, override
 
 from django.apps import AppConfig
 from django.core.signals import setting_changed
 
-from next.checks import register_all as _register_checks
+from next.checks.catalog import CHECK_MODULES
 from next.components.manager import forget_component_backends, forget_render_pipeline
 from next.components.sources import reset_components_manager_cache
 from next.conf.settings import reload_on_setting_changed
@@ -91,6 +91,7 @@ from . import autodiscover, autoreload, components, staticfiles, templates
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
 
     from django.dispatch import Signal
 
@@ -173,14 +174,14 @@ class NextFrameworkConfig(AppConfig):
 
     name = "next"
     verbose_name = "Next Django Framework"
+    check_modules: ClassVar[tuple[ModuleType, ...]] = CHECK_MODULES
 
     @override
     def ready(self) -> None:
-        """Register checks, connect every receiver, install hooks, compose the ports.
+        """Connect every receiver, compose the ports, then install the hooks.
 
         The resolver and the ports come before the installs, which import user modules.
         """
-        _register_checks()
         _connect(setting_changed, _SETTING_CHANGED)
         _connect(settings_reloaded, _SETTINGS_RELOADED)
         _connect(router_reloaded, _ROUTER_RELOADED)

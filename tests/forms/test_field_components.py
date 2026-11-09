@@ -9,6 +9,7 @@ from django.core.checks import Warning as DjangoWarning
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms import formset_factory
 from django.http import HttpRequest, HttpResponse
+from django.test import override_settings
 from django.utils.datastructures import MultiValueDict
 from django.utils.safestring import SafeString
 
@@ -704,6 +705,14 @@ class TestCheckComponentWidgetComponents:
         monkeypatch.setattr(form_action_manager, "_backends", [_BareBackend()])
         assert check_component_widget_components() == []
 
+    def test_action_without_any_anchor_is_skipped(self) -> None:
+        class _AnchorlessForm(django_forms.Form):
+            field = django_forms.CharField(widget=ComponentWidget("nope"))
+
+        register_page_action("anchorless_form", _AnchorlessForm, "")
+        with override_settings(BASE_DIR=None):
+            assert check_component_widget_components() == []
+
 
 class TestCheckComponentWidgetFieldTypes:
     """`check_component_widget_field_types` emits W055 for a mispaired widget."""
@@ -844,4 +853,11 @@ class TestCheckComponentWidgetFieldTypes:
                 handler=lambda *args: None,
             )
         )
+        assert check_component_widget_field_types() == []
+
+    def test_class_without_base_fields_is_skipped(self) -> None:
+        class _FormFactory:
+            pass
+
+        register_page_action("factory_types", _FormFactory, "/fake/page.py")
         assert check_component_widget_field_types() == []

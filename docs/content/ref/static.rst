@@ -9,6 +9,7 @@ Module summary
 ``next.static`` exposes the asset discovery, the request-scoped collector, and the configured static backends.
 It also exposes the kind, stem, and placeholder registries, the ``next.min.js`` script builder, the two staticfiles finders, and the JS context serializer.
 ``default_stems`` is the process-wide ``StemRegistry`` instance that discovery reads the co-located file names from, and a project registers a stem of its own on it, see :doc:`/content/howto/add-a-custom-stem`.
+It also re-exports the dedup strategies ``DedupStrategy``, ``UrlDedup``, ``HashContentDedup``, and ``IdentityDedup`` and the JS context policies ``JsContextPolicy``, ``FirstWinsPolicy``, ``LastWinsPolicy``, ``RaiseOnConflictPolicy``, and ``DeepMergePolicy``, see :doc:`/content/topics/static-assets/deduplication` and :doc:`/content/topics/static-assets/js-context`.
 ``next.static.runtime`` holds the script builder and the init payload keys, and ``next.static.nonce`` the CSP nonce every tag carries.
 ``static_name`` covers the reference shape rule, and ``StaticAssetNotFoundError`` and ``StaticAssetTraversalError`` name the two references the pipeline refuses, see :doc:`/content/topics/static-assets/name-resolution`.
 
@@ -96,7 +97,7 @@ Every builder method takes a ``nonce`` keyword, and the three templates take ``{
 
 The reserved init payload keys and the lazy chunks are described in :doc:`/content/topics/static-assets/js-context`.
 
-The CSRF payload and the header name are built by ``next.csrf``, see :doc:`site`.
+The CSRF payload and the header name are built by ``next.csrf``, see :doc:`csrf`.
 See :doc:`/content/topics/static-assets/js-context` for the ownership rule and the ``next.W075`` check that reports a collision.
 
 Nonce
@@ -132,8 +133,8 @@ Staticfiles finders
 ``NextStaticFilesFinder`` is the Django staticfiles finder for co-located assets.
 It maps assets such as ``template.css``, ``layout.js``, ``component.css``, and any registered stems to their source files under the ``next/`` staticfiles namespace.
 The ``layout`` and ``template`` files of a page tree are named after the key of the tree, see :ref:`topics-static-name-resolution-colocated`.
-Discovery on a request takes its layouts from the cut ``layout_chain`` of the page, while the finder walks every ``layout.djx`` under the roots, so a layout above every root serves no asset on either side.
-The finder visits paths sorted and keeps the first file when two share a name, logging a warning for the other.
+Discovery on a request takes its layouts from the cut ``layout_chain`` of the page, while the finder walks every ``layout.djx`` under the roots, so a layout above every root serves no asset on either side, which ``next.W135`` reports.
+For page-tree assets the finder visits paths sorted, keeps the first file when two share a name, and logs a warning for the other, while a component collision keeps one file silently.
 ``scan_page_tree_assets`` returns that mapping as a ``PageTreeScan``, and ``manage.py check`` reads it for ``next.E167``.
 It surfaces every such asset to ``collectstatic`` for production output, to ``manage.py findstatic``, and to the staticfiles view that serves files directly while ``DEBUG`` is true.
 Asset URLs themselves come from ``staticfiles_storage.url``, not from the finder.

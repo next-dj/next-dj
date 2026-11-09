@@ -107,7 +107,7 @@ def _lazy_private_forms(shared: set[Path]) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_shared_page_forms(*args, **kwargs) -> list[CheckMessage]:
+def check_shared_page_forms(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a page whose forms break the CSRF token delivery.
 
     A page a CDN may store is checked under every mode, a private one under `"lazy"`.

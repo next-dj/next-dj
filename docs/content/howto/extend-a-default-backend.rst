@@ -55,12 +55,14 @@ Call the helper with the setting name and the keys to override.
    }
 
 The helper returns the default ``PAGE_BACKENDS`` list with the first entry ``PAGES_DIR`` set to ``routes`` and every other key kept.
+Every default list holds one entry, so ``index`` stays ``0`` and any other value raises ``IndexError``.
 
 Override a nested OPTIONS key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Nested dicts such as ``OPTIONS`` are merged, not replaced.
 Adjacent keys survive.
+The merge goes one level deep, so a dict nested inside ``OPTIONS``, such as the ``SSE`` mapping of ``PARTIAL_BACKENDS``, is replaced whole.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -73,17 +75,6 @@ Adjacent keys survive.
            OPTIONS={"context_processors": ["notes.context_processors.tenant"]},
        )
    }
-
-Patch a specific entry
-~~~~~~~~~~~~~~~~~~~~~~
-
-The ``index`` keyword selects which entry of the default list to patch.
-The default is ``0``, the first entry.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   extend_default_backend("PAGE_BACKENDS", index=0, APP_DIRS=False)
 
 When to write the list by hand
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

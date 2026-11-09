@@ -91,7 +91,7 @@ A ``pages`` directory beside the working directory that no router routes is neit
 Every read of a router here is guarded, and the guard drops a value of the wrong type instead of passing it on.
 ``runserver`` boots, ``collectstatic`` runs, and the staticfiles finder answers even when a backend raises from ``page_roots`` or ``components_folder_name``, and equally when it answers the wrong shape.
 The failure costs that backend its trees and nothing else.
-It is logged per backend and subject at the FailureLog rate rather than per tick, see :ref:`topics-failure-containment`.
+It is logged per backend and subject at the ``FailureLog`` rate rather than per tick, see :ref:`topics-failure-containment`.
 
 - Each page root contributes a ``**/page.py`` spec.
 - Each page root paired with the name its router returns from ``components_folder_name`` contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
@@ -101,6 +101,7 @@ It is logged per backend and subject at the FailureLog rate rather than per tick
 Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
 Templates are re-read on render, and under ``DEBUG`` the page and component layers invalidate their cached compilation against the source mtime, so a saved edit shows up on the next request, while with ``DEBUG`` off it takes a restart.
+The reloader never restarts on an edit to an existing template, only on a template that appears or goes beside a ``page.py``.
 The tree-top sources, ``sitemap.py``, ``robots.py``, ``robots.txt``, and ``scripts.py``, are omitted as well, because they reload in process without restarting ``runserver``.
 While ``DEBUG`` is on, every SEO route compares the modification times of the SEO sources with the ones they were loaded at, every page render does the same for ``scripts.py``, and a file that appeared, went, or moved is read again on that request, see :doc:`seo-pipeline`.
 
@@ -119,7 +120,7 @@ Python module change.
 Route set change.
    ``NextStatReloader`` diffs the discovered route set on every tick.
    A per-tree signature of directory mtimes and directory count gates the rescan, so an unchanged tree reuses the cached route set.
-   A new or removed page directory calls ``notify_file_changed`` so Django restarts the process even when no watched file mtime changed.
+   A page directory that appears or goes, an intercepting page that appears or goes, and a ``template.djx`` that appears or goes beside a ``page.py`` call ``notify_file_changed``, so Django restarts the process even when no watched file mtime changed.
 
 A scan that raises ``OSError``, ``ImportError``, or ``ValueError`` costs that tick its route-set comparison.
 The reloader logs the reason at debug level, keeps the set collected by the previous tick, and carries on watching ``.py`` mtimes, so a tree that cannot be walked never stops the development server.

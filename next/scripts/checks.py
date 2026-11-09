@@ -47,7 +47,7 @@ def _sources() -> tuple[ScriptsSource, ...]:
 
 
 @register(NEXT)
-def check_scripts_sources(*args, **kwargs) -> list[CheckMessage]:
+def check_scripts_sources(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a `scripts.py` that fails or declares no `Script` (`next.E133`)."""
     messages: list[CheckMessage] = []
     for source in _sources():
@@ -75,7 +75,7 @@ def check_scripts_sources(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_script_names(*args, **kwargs) -> list[CheckMessage]:
+def check_script_names(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a script name declared twice in one tree (`next.E134`)."""
     messages: list[CheckMessage] = []
     for source in _sources():
@@ -96,7 +96,7 @@ def check_script_names(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_script_categories(*args, **kwargs) -> list[CheckMessage]:
+def check_script_categories(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a script in a category the list leaves out (`next.E140`).
 
     While `next.E135` reports the list itself, no script is reported against it.
@@ -168,7 +168,7 @@ def _script_problems(script: Script) -> list[tuple[str, str]]:
 
 
 @register(NEXT)
-def check_script_declarations(*args, **kwargs) -> list[CheckMessage]:
+def check_script_declarations(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a script with nothing to run or a part it cannot carry as declared."""
     return [
         Error(
@@ -187,7 +187,9 @@ def _needs_runtime(script: Script) -> bool:
 
 
 @register(NEXT)
-def check_scripts_need_the_runtime(*args, **kwargs) -> list[CheckMessage]:
+def check_scripts_need_the_runtime(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Report scripts only the runtime loads while it is not injected (`next.E138`)."""
     options = next_framework_settings.NEXT_JS_OPTIONS
     policy = options.get("policy") if isinstance(options, Mapping) else None
@@ -208,7 +210,7 @@ def check_scripts_need_the_runtime(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_gated_blocking_scripts(*args, **kwargs) -> list[CheckMessage]:
+def check_gated_blocking_scripts(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a gated blocking script consent renders on the client (W116)."""
     if server_render() is True:
         return []
@@ -233,7 +235,9 @@ def _renders_consented(nodelist: NodeList) -> bool:
 
 
 @register(Tags.templates, NEXT)
-def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
+def check_consented_needs_consent(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about `{% #consented %}` while `CONSENT` stays unset (`next.W123`).
 
     A partial response never carries `$consent`, so only the setting enables it.
@@ -263,7 +267,7 @@ def check_consented_needs_consent(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
+def check_consented_categories(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about `{% #consented %}` naming an unlisted category (`next.W091`).
 
     Only a literal name is read, and the message names the first page that renders it.
@@ -304,7 +308,7 @@ def check_consented_categories(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT, deploy=True)
-def check_script_deploy(*args, **kwargs) -> list[CheckMessage]:
+def check_script_deploy(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a script loaded over plain HTTP (`next.W118`)."""
     return [
         DjangoWarning(

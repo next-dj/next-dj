@@ -12,6 +12,7 @@ from next.pages.checks.metadata.head import viewport_pairs
 from next.pages.metadata import Viewport
 from next.pages.metadata.scope import SITE_SOURCE
 from tests.pages.checks.metadata.trees import (
+    INHERITED_CALLABLE,
     framework,
     metadata_page,
     scope,
@@ -343,5 +344,15 @@ class TestLiterals:
             pages,
             'metadata = {"viewport": "x"}\n\ndef render(request):\n    return "x"\n',
         )
+        with patch_checks_router_manager(pages_directory=pages):
+            assert check_metadata_head_literals() == []
+
+    def test_a_page_a_callable_rewrites_is_silent(self, tmp_path: Path) -> None:
+        pages = self._project(
+            tmp_path,
+            '<html><meta name="viewport" content="x">{% template %}</html>',
+            '{"viewport": "width=device-width"}',
+        )
+        templated_page(pages, INHERITED_CALLABLE)
         with patch_checks_router_manager(pages_directory=pages):
             assert check_metadata_head_literals() == []

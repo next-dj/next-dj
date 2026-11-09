@@ -73,7 +73,7 @@ def _sources(root: SeoRoot) -> Iterator[SeoSource]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_module_imports(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_module_imports(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require every Python SEO source to import (`next.E110`)."""
     roots = loaded_seo_roots()
     errors: list[CheckMessage] = []
@@ -87,7 +87,7 @@ def check_seo_module_imports(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_module_annotations(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_module_annotations(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Refuse deferred annotations in the Python SEO sources (`next.E119`).
 
     The dependency resolver reads the annotations of the callables of both sources.
@@ -218,7 +218,7 @@ def _items_conflicts(path: Path) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_module_attributes(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_module_attributes(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the module attributes of `sitemap.py` and `robots.py` (`next.E113`).
 
     Two `@sitemap.items` callables on one trail are `next.E128`.
@@ -234,7 +234,7 @@ def check_seo_module_attributes(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_items_files(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_items_files(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an `@sitemap.items` run outside the root `sitemap.py` (`next.E118`).
 
     Only the registrations the `sitemap.py` at the top of a routed tree runs are read.
@@ -270,7 +270,7 @@ def _sources_below(root: SeoRoot) -> Iterator[Path]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_sources_below_root(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about an SEO source below the top of its page tree (`next.W097`)."""
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -288,7 +288,9 @@ def check_seo_sources_below_root(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT, SEO, deploy=True)
-def check_seo_sources_on_closed_site(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_sources_on_closed_site(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a site closed to search still publishes for crawlers (`next.W111`).
 
     A private site without a sitemap or a robots.txt raises no warning.

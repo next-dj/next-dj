@@ -73,7 +73,7 @@ The component backend gets `site/_components` as a second `DIRS` entry. A compon
 
 `OPTIONS.context_processors` is the router's own extension point for per-page context processors. It merges with Django's `TEMPLATES[0].OPTIONS.context_processors`, entries from the router take priority, and duplicates are dropped.
 
-`TEMPLATE_LOADERS` is a list of dotted paths to `next.pages.loaders.TemplateLoader` subclasses. Supplying the key **replaces** the default `["next.pages.loaders.DjxTemplateLoader"]`, so the djx loader is listed explicitly to keep `template.djx` support.
+`TEMPLATE_LOADERS` is a list of dotted paths to `next.pages.TemplateLoader` subclasses. Supplying the key **replaces** the default `["next.pages.loaders.DjxTemplateLoader"]`, so the djx loader is listed explicitly to keep `template.djx` support.
 
 ### 2. One route for every post
 

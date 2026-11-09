@@ -5,14 +5,18 @@ Opt-in, since most Django tests expect module-level registrations to persist.
 
 from __future__ import annotations
 
+from next.checks.common import forget_run_memos
 from next.components.manager import components_manager
+from next.components.sources import reset_components_manager_cache
 from next.diagnostics import reset_failure_logs
+from next.discovery import reset_router_manager_cache
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
-from next.pages.manager import page
+from next.pages.manager import page, reset_page_registrations
 from next.scripts.manager import forget_scripts
 from next.seo.manager import reset_seo_sources
+from next.urls.checks import reset_collected_patterns_cache
 
 
 def reset_form_actions() -> None:
@@ -76,7 +80,21 @@ def reset_seo() -> None:
     reset_seo_sources()
 
 
+def reset_check_caches() -> None:
+    """Drop every per-run check cache so the next `manage.py check` reads from disk.
+
+    A test that rewrites the page or component tree in place needs this.
+    """
+    reset_router_manager_cache()
+    forget_run_memos()
+    reset_components_manager_cache()
+    reset_collected_patterns_cache()
+    reset_page_registrations()
+    reset_seo_sources()
+
+
 __all__ = [
+    "reset_check_caches",
     "reset_component_templates",
     "reset_components",
     "reset_failure_logs",

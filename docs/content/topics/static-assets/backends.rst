@@ -22,8 +22,13 @@ The read-only ``config`` property hands that entry back, and it is the supported
 .. code-block:: python
    :caption: notes/backends.py
 
+   from collections.abc import Mapping
+   from typing import Any
+
+   from next.static import StaticFilesBackend
+
    class CdnBackend(StaticFilesBackend):
-       def __init__(self, config=None) -> None:
+       def __init__(self, config: Mapping[str, Any] | None = None) -> None:
            super().__init__(config)
            opts = dict(self.config.get("OPTIONS") or {})
            self._cdn_host = opts.get("CDN_HOST", "")
@@ -123,8 +128,8 @@ The backend ships three renderer methods.
 - ``render_script_tag`` for the ``js`` kind.
 - ``render_module_tag`` for the ``module`` kind.
 
-Each method takes the URL and an optional ``request`` keyword.
-The default backend ignores ``request`` in every renderer and in ``asset_url``.
+Each method takes the URL and the optional ``request`` and ``nonce`` keywords, ``(self, url, *, request=None, nonce=None)``.
+The default backend ignores ``request`` in every renderer and in ``asset_url``, and writes ``nonce`` through ``{nonce_attr}``.
 
 All three escape ``str(url)`` through the standard library :func:`html.escape` before formatting it into their tag template.
 A finished ``<link>`` or ``<script>`` is spliced into the document past the template engine, so the engine never gets the chance to escape what the tag carries and the escaping has to live in the renderer.
@@ -176,8 +181,8 @@ The same keys on a second or third backend are ignored, so place the configured 
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
-                   "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
-                   "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
+                   "DEDUP_STRATEGY": "next.static.HashContentDedup",
+                   "JS_CONTEXT_POLICY": "next.static.DeepMergePolicy",
                },
            }
        ]
@@ -251,8 +256,29 @@ The static checks validate the backend configuration at startup.
 Run ``uv run python manage.py check`` after editing the backend list.
 The full list of static check codes lives in :doc:`/content/ref/system-checks`.
 
-The ``next.W031`` check validates the ``css_tag``, ``js_tag``, and ``module_tag`` templates.
-A template that carries no ``{url}`` placeholder raises the warning, because the rendered tag would carry no asset URL.
+``next.W030``.
+   An empty ``STATIC_BACKENDS`` list is a warning, because the framework falls back to ``StaticFilesBackend``.
+
+``next.E037``.
+   An entry that is not a dict is an error.
+
+``next.E092``.
+   A ``BACKEND`` value that is not a dotted string is an error.
+
+``next.E038``.
+   Two entries naming the same ``BACKEND`` are refused, so a second instance of one class is not a supported shape.
+
+``next.E036``.
+   A ``BACKEND`` path that does not import is an error.
+
+``next.E093``.
+   A ``BACKEND`` class outside the ``StaticBackend`` family is an error.
+
+``next.W031``.
+   A ``css_tag``, ``js_tag``, or ``module_tag`` template that carries no ``{url}`` placeholder raises the warning, because the rendered tag would carry no asset URL.
+
+``next.E139``.
+   A tag template that ``str.format`` cannot fill with its fields is an error, and the default tag renders in its place.
 
 See also
 --------

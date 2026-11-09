@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -11,6 +12,7 @@ from next.pages.checks.intercepts import (
     check_intercept_targets,
     check_intercept_url_kwargs,
     check_nested_intercepts,
+    routed_trails,
 )
 from tests.support import installed_apps, routed, write_app, write_page, write_urlconf
 from tests.support.access import PAGE_HEAD
@@ -37,6 +39,16 @@ def root(tmp_path: Path) -> Path:
 
 def _intercept(root: Path, trail: str, source: str = PAGE_HEAD) -> Path:
     return write_page(root, trail, source, body=zone_body("peek"))
+
+
+class TestRoutedTrails:
+    """`routed_trails` reads nothing when the routers fail to build."""
+
+    def test_no_router_manager_routes_no_trail(self) -> None:
+        with patch(
+            "next.pages.checks.intercepts.get_router_manager", return_value=(None, [])
+        ):
+            assert routed_trails() == {}
 
 
 class TestInterceptTargets:

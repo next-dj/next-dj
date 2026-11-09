@@ -25,6 +25,7 @@ from .html import (
     init_payload,
 )
 from .isolation import (
+    reset_check_caches,
     reset_component_templates,
     reset_components,
     reset_failure_logs,
@@ -107,6 +108,7 @@ __all__ = [
     "patch_static_collector",
     "render_component_by_name",
     "render_page",
+    "reset_check_caches",
     "reset_component_templates",
     "reset_components",
     "reset_failure_logs",

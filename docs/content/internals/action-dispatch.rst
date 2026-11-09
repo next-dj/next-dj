@@ -109,7 +109,7 @@ Modules
    ``FormActionManager`` delegates that to the shared ``load_backends`` helper every backend family uses.
 
 ``next.forms.errors``.
-   ``FormActionNotFoundError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError``, re-exported from the package.
+   ``FormActionNotFoundError``, ``SessionRotationError``, ``UnstorableWizardValueError``, and ``UnregisteredComponentError``, re-exported from the package.
 
 ``next.forms.base``.
    The form base classes, the ``__init_subclass__`` auto-registration gate, and the permission-hook presence flags the dispatcher reads.
@@ -142,7 +142,7 @@ Modules
    ``FormSpec``, ``FormsetSpec``, ``FormsetRowSpec``, ``FormSectionSpec``, ``FieldSpec`` plus the builders ``form_spec``, ``formset_spec``, ``field_spec``.
 
 ``next.forms.formsets``.
-   ``cleanup_extra_initial`` helper for blank extra rows.
+   ``cleanup_extra_initial`` for blank extra rows, and ``wire_errors`` with its two counters for the error names the signals and the partial envelope report.
 
 ``next.forms.transport``.
    The transports an action admits and the tunnel refusals ``http_only`` and ``rotation_refused``, see :ref:`topics-forms-actions-transport`.
@@ -198,7 +198,7 @@ Origin page authorization
 -------------------------
 
 The action endpoint is not the page URL, so the origin page's own view never runs on a submission and the pipeline asks that page directly instead.
-Immediately after ``resolve_origin``, and before a handler, a form, or a permission hook runs, the dispatcher calls ``authorization_outcome`` on the resolved page path with the posted origin URL and the typed URL kwargs of the origin.
+After ``resolve_origin``, the page tree rule, and the static guard, and before a handler, a form, or a permission hook runs, the dispatcher calls ``authorization_outcome`` on the resolved page path with the posted origin URL and the typed URL kwargs of the origin.
 The call runs the page's ``render()`` under the same injection the routed view uses, so a response it returns becomes the answer to the POST verbatim, while the body it returns is discarded because every render site behind the boundary composes from ``composed_template_for``.
 A page with no ``render()`` authorizes every submission, exactly as its own view serves every visitor.
 
@@ -233,7 +233,7 @@ Both hooks are dependency-injected through ``resolver.resolve_dependencies`` wit
 A return of ``None`` or ``True`` allows, ``False`` raises ``PermissionDenied``, an ``HttpResponse`` short-circuits, and any other type raises ``TypeError``.
 On a denial the dispatcher emits ``form_access_denied`` when a receiver is connected.
 A wizard enforces ``check_permissions`` once per step POST before the step binds, and the step form's ``has_object_permission`` is enforced per step after the step form binds and before ``is_valid``.
-A wizard step binds without ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step reads an unbound ``self.instance`` in that hook, not the URL-addressed target the standalone path loads.
+A wizard step binds without ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step reads a fresh unsaved ``self.instance`` in that hook, not the URL-addressed target the standalone path loads.
 The guide covers the authoring contract at :ref:`topics-forms-actions-dynamic-guards`.
 
 Validate-only short circuit

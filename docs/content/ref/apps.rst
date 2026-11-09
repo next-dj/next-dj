@@ -8,8 +8,9 @@ Module summary
 
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
-``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then runs nineteen startup steps in a fixed order.
+Importing ``next.apps`` registers the framework system checks, because the package imports its own ``checks`` and ``config.py`` imports ``next.checks.catalog``, which imports the ``checks`` of every other area.
+``NextFrameworkConfig.check_modules`` holds that catalogue, ``CHECK_MODULES``, and ``ready()`` leaves the checks alone.
+``NextFrameworkConfig.ready()`` runs nineteen startup steps in a fixed order.
 
 #. ``setting_changed`` receivers connected
 #. ``settings_reloaded`` receivers connected
@@ -31,7 +32,7 @@ It then runs nineteen startup steps in a fixed order.
 #. ``autodiscover.install()``
 #. ``components.install()``
 
-Every signal receiver of the framework is connected in the first three steps and nowhere else, none at import time.
+Every framework receiver of ``setting_changed``, ``settings_reloaded``, and ``router_reloaded`` is connected in the first three steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
 Each signal below lists its receivers in the order they run, and each is connected with ``dispatch_uid`` set to its module and qualified name, so a second ``ready`` call connects nothing twice.
 
 - ``setting_changed`` runs ``reload_on_setting_changed`` of ``next.conf.settings`` first, which rebuilds the merged ``NEXT_FRAMEWORK`` and sends ``settings_reloaded``, then the receivers that read Django settings directly, among them ``forget_app_page_roots``, ``reload_app_routers``, ``staticfiles.reinstall_finders``, and ``templates.reinstall_builtins``.

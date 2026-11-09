@@ -30,11 +30,11 @@ Each receiver is decorated with ``@receiver`` at module top level in ``notes/sig
    from next.urls import router_manager
 
    @receiver(post_save, sender=Note)
-   def reload_router_on_save(**kwargs) -> None:
+   def reload_router_on_save(**kwargs: object) -> None:
        router_manager.reload()
 
    @receiver(post_delete, sender=Note)
-   def reload_router_on_delete(**kwargs) -> None:
+   def reload_router_on_delete(**kwargs: object) -> None:
        router_manager.reload()
 
 The ``next`` application imports the ``signals.py`` of every installed app at startup, so the receivers need no ``AppConfig.ready`` code, see :ref:`topics-signals`.
@@ -56,11 +56,11 @@ Long lived processes that cache URL references can listen to ``router_reloaded``
    from next.urls.signals import router_reloaded
 
    @receiver(router_reloaded)
-   def drop_url_cache(**kwargs) -> None:
+   def drop_url_cache(**kwargs: object) -> None:
        my_cache.clear()
 
 A receiver that has to rebuild the routers again calls ``router_manager.reload(notify=False)``.
-That keyword skips the URL-cache clear and the signal, so the receiver does not re-enter itself.
+That keyword skips ``router_backend_loaded``, the intercept-table clear, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
 
 Verification
 ------------

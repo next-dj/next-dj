@@ -62,10 +62,11 @@ Use a server-side engine for a wizard that gathers data the visitor should not h
 Where the CSRF token ends up in HTML
 ------------------------------------
 
-The token reaches the page twice.
+On a page no shared cache may keep, the token reaches the HTML twice.
 Every ``{% form %}`` block emits the standard ``<input type="hidden" name="csrfmiddlewaretoken">``, and the page's inline ``Next._init`` payload carries a ``$csrf`` entry holding the header name and the token, which is how the client runtime signs an unsafe request without touching the cookie.
+A page whose ``cache`` lets a CDN keep it defers the token under ``CSRF_DELIVERY="auto"``, so its forms carry no hidden input and ``$csrf`` holds the URL of ``/_next/csrf/`` in place of the token, see :doc:`/content/topics/caching`.
 
-Both land in the document, so any script running on the page can read the token.
+Wherever the token lands in the document, any script running on the page can read it.
 ``CSRF_COOKIE_HTTPONLY`` therefore protects the cookie against theft by something outside the page, and it does not put the token out of reach of page scripts, see :doc:`csrf-and-forms` for the full cookie discussion.
 A page under XSS has already lost the token whatever that flag says, which is the reason the XSS entry in :doc:`overview` ranks above this one.
 

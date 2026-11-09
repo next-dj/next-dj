@@ -10,7 +10,7 @@ Receivers in the ``signals.py`` of an app connect at startup, before the first r
 Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) carries two shared keyword arguments.
 ``uid`` is the registry identity of the action, the same value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched.
-Read what you need from it inside the receiver and do not retain the object past the receiver call.
+Read the needed values from it inside the receiver and do not retain the object past the receiver call.
 
 .. contents::
    :local:
@@ -137,6 +137,8 @@ The sender is ``FormActionDispatch``.
 The payload carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
 ``error_count`` is the total number of error messages, including non-field errors raised from ``clean``.
 ``field_names`` is a tuple of the keys that failed, with non-field errors appearing under ``__all__``.
+For a formset the names carry the row prefix, such as ``form-1-title``, the non-form errors appear under ``__all__``, and a row's own ``clean`` errors under ``form-1-__all__``.
+Rows marked for deletion are skipped, as Django's own formset validation skips them.
 
 The dispatcher only builds the payload and sends the signal when at least one receiver is connected, so an unused signal costs nothing.
 

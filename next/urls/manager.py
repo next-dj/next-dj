@@ -157,7 +157,7 @@ class RouterManager:
 router_manager = RouterManager()
 
 
-def reload_router_settings(**kwargs) -> None:
+def reload_router_settings(**kwargs: object) -> None:
     """Rebuild router backends and drop the built URL resolver on settings reload.
 
     The slot keeps its identity so the outer include resolver picks up the replacement.
@@ -170,7 +170,7 @@ def reload_router_settings(**kwargs) -> None:
 _ROUTED_SETTINGS = frozenset({"BASE_DIR", "INSTALLED_APPS", "ROOT_URLCONF"})
 
 
-def reload_app_routers(*, setting: str, **kwargs) -> None:
+def reload_app_routers(*, setting: str, **kwargs: object) -> None:
     """Rebuild the routers when the apps, the URLconf or `BASE_DIR` behind them move.
 
     The rebuild bumps the version behind the lazy patterns and clears the URL caches.

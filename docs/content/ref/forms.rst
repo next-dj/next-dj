@@ -48,8 +48,9 @@ Advanced.
 Framework machinery.
    The wiring lives on the owning submodules and is not re-exported at the package level.
    ``FormActionDispatch`` lives in ``next.forms.dispatch``, whose ``build``, ``permissions``, ``responses``, and ``wizard`` submodules carry the pipeline bodies.
-   ``FormActionManager``, the ``form_action_manager`` instance, and ``build_form_namespace_for_action`` live in ``next.forms.manager``.
-   ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, and ``record_possible_collision`` live in ``next.forms.backends``.
+   ``FormActionManager``, the ``form_action_manager`` instance, ``build_form_namespace_for_action``, and ``resolve_component_anchor`` live in ``next.forms.manager``.
+   ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, ``record_possible_collision``, and ``declaring_files`` live in ``next.forms.backends``.
+   ``wire_errors``, ``error_message_count``, and ``error_field_names`` live in ``next.forms.formsets`` and name the errors of a form or a formset the way the signals and the partial form meta report them.
    The ``wizard_backend_manager`` instance lives in ``next.forms.wizard``.
    ``FormProvider`` and ``CleanedDataProvider`` live in ``next.forms.markers``.
    ``bind_component_widgets`` lives in ``next.forms.widgets``.
@@ -261,7 +262,8 @@ It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispa
 A file outside both keeps its absolute path.
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
-``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, and ``record_possible_collision`` all import from ``next.forms.backends`` directly.
+``declaring_files`` lists the files whose registered action carries a given name across the configured backends.
+``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, ``record_possible_collision``, and ``declaring_files`` all import from ``next.forms.backends`` directly.
 A custom backend stores ``transport`` under the same key of ``ActionMeta``, because the dispatch and the ``{% form %}`` tag read the transport from there and treat a missing key as ``"http"``.
 
 .. automodule:: next.forms.backends
@@ -338,7 +340,8 @@ Formset helpers
 ~~~~~~~~~~~~~~~
 
 The Django factories ``formset_factory``, ``modelformset_factory``, and ``inlineformset_factory`` re-export through ``next.forms`` unchanged.
-``cleanup_extra_initial`` is the framework addition, and the module forwards every other public ``django.forms.formsets`` name at runtime.
+``cleanup_extra_initial`` is the exported framework addition, and the module forwards every other public ``django.forms.formsets`` name at runtime.
+The module also holds ``wire_errors``, ``error_message_count``, and ``error_field_names``, the one walk behind the error names the signals and the partial form meta report, which stay outside its ``__all__``.
 
 .. automodule:: next.forms.formsets
    :members:

@@ -32,13 +32,7 @@ from next.pages import page
 from next.pages.checks.modules import check_page_module_imports
 from next.pages.ports import PageScanImpl
 from next.ports import PortSlot
-from next.urls import (
-    FileRouterBackend,
-    PageRoot,
-    RouterBackend,
-    RouterFactory,
-    RouterManager,
-)
+from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterManager
 from next.urls.dispatcher import scan_pages_tree
 from next.urls.ports import RouterAccessImpl
 from next.utils import walk_page_tree
@@ -701,7 +695,7 @@ class TestPageTreeSkipNames:
         ]
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": entries}):
-            router = RouterFactory.create_backend(entries[1])
+            router = RouterAccessImpl().create_backend(entries[1])
             routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
             assert "blog" not in page_tree_skip_names(router)
@@ -804,7 +798,7 @@ class TestPageTreeComponentFolders:
         entry = file_router_config_entry(pages_dir=tree, dirs=["_drafts"])
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterFactory.create_backend(entry)
+            router = RouterAccessImpl().create_backend(entry)
             assert list(iter_page_tree_component_folders(router)) == []
 
     def test_a_backend_naming_no_components_folder_reports_none(
@@ -885,7 +879,7 @@ class TestFileRouterWalkParity:
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterFactory.create_backend(entry)
+            router = RouterAccessImpl().create_backend(entry)
             checked = list(iter_scanned_page_pairs(router))
             routed = [
                 pair
@@ -909,7 +903,7 @@ class TestFileRouterWalkParity:
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterFactory.create_backend(entry)
+            router = RouterAccessImpl().create_backend(entry)
 
             assert page_tree_skip_names(router) == router._skip_dir_names
 
@@ -925,13 +919,13 @@ class TestFileRouterWalkParity:
                 "COMPONENTS_DIR": "widgets",
             }
         ]
-        plain = RouterFactory.create_backend(entry)
+        plain = RouterAccessImpl().create_backend(entry)
         plain_routes = [url for url, _page in iter_scanned_page_pairs(plain)]
 
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], "COMPONENT_BACKENDS": components}
         ):
-            router = RouterFactory.create_backend(entry)
+            router = RouterAccessImpl().create_backend(entry)
             routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
             assert page_tree_skip_names(router) == router._skip_dir_names

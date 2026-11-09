@@ -105,11 +105,11 @@ class PageCache[K, V](BoundedCache[K, V]):
                 return
             PageCache._bound = bound
             for cache in list(PageCache._instances):
-                cache._maxsize = bound
-                cache._trim()
+                cache.rebound(bound)
 
-    def _trim(self) -> None:
-        """Drop the oldest entries until the cache is within its bound."""
+    def rebound(self, bound: int) -> None:
+        """Hold at most `bound` entries from now on, dropping the oldest past it."""
+        self._maxsize = bound
         entries = self._entries
         while len(entries) > self._maxsize:
             try:

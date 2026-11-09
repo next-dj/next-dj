@@ -9,6 +9,7 @@ from django.test import RequestFactory
 from django.urls import set_script_prefix
 
 from next.forms.dispatch.responses import ActionOutcome, ActionOutcomeKind
+from next.forms.formsets import error_message_count
 from next.forms.manager import form_action_manager
 from next.partial import Patches, shape_partial
 from next.partial.envelope import Envelope
@@ -17,10 +18,8 @@ from next.partial.manager import partial_backend_manager
 from next.partial.shaping import ActionRef
 from next.partial.shaping.csrf import _CSRF_ROTATED_FLAG, _csrf_rotated, _stamp_csrf
 from next.partial.shaping.scrub import (
-    _error_count,
     _file_field_names,
     _form_meta,
-    _meta_errors,
     _scrub_errors,
     _validate_targets,
 )
@@ -153,13 +152,29 @@ class TestFormsetScrubbing:
     def test_meta_errors_are_prefixed(self) -> None:
         formset = _bound_formset()
         _scrub_errors(formset, frozenset({"form-0-email"}))
-        errors = _meta_errors(formset)
+        errors = _form_meta("uid", formset).errors
         assert list(errors) == ["form-0-email"]
+
+    def test_form_meta_deleted_row_errors_are_ignored(self) -> None:
+        factory = forms.formset_factory(_MemberForm, extra=0, can_delete=True)
+        formset = factory(
+            {
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-0-email": "bad",
+                "form-0-DELETE": "on",
+            }
+        )
+        formset.is_valid()
+        _scrub_errors(formset, frozenset({"form-0-email"}))
+        meta = _form_meta("uid", formset)
+        assert meta.valid is True
+        assert meta.errors == {}
 
     def test_error_count_sums_member_errors(self) -> None:
         formset = _bound_formset()
         _scrub_errors(formset, frozenset({"form-0-email"}))
-        assert _error_count(formset) == 1
+        assert error_message_count(formset) == 1
 
     def test_error_count_sums_every_message_of_a_member_field(self) -> None:
         class _Coded(forms.Form):
@@ -176,7 +191,7 @@ class TestFormsetScrubbing:
         )
         formset.is_valid()
         _scrub_errors(formset, frozenset({"form-0-code"}))
-        assert _error_count(formset) == 2
+        assert error_message_count(formset) == 2
 
 
 class TestPlainFormScrubbing:

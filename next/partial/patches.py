@@ -451,7 +451,7 @@ class Patches:
         self._ops.append(Patch(op="refresh", extras={keys.ZONE: zone}))
         return self
 
-    def context(self, **names) -> "Patches":
+    def context(self, **names: object) -> "Patches":
         """Merge named serialize provider values into the client context.
 
         Straight after a zone morph it merges into that morph's own context op.
@@ -680,7 +680,7 @@ class Patches:
             )
         return self
 
-    def op(self, name: str, **payload) -> "Patches":
+    def op(self, name: str, **payload: object) -> "Patches":
         """Emit a custom verb registered through `register_patch_op`.
 
         A built-in verb is refused because its typed method owns the wire keys.

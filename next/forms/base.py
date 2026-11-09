@@ -337,7 +337,7 @@ class _PermissionHooks:
     _has_object_permission: bool = False
 
     @override
-    def __init_subclass__(cls, **kwargs) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Stamp the per-subclass hook-presence flags via __func__ identity."""
         super().__init_subclass__(**kwargs)
         cls._has_check_permissions = _stamp_hook_flag(
@@ -373,7 +373,7 @@ class _FormKwargsHook:
     _has_get_form_kwargs: bool = False
 
     @override
-    def __init_subclass__(cls, **kwargs) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Stamp the per-subclass hook-presence flag via __func__ identity."""
         super().__init_subclass__(**kwargs)
         cls._has_get_form_kwargs = _stamp_hook_flag(
@@ -403,7 +403,7 @@ class BaseForm(_FormKwargsHook, _PermissionHooks, DjangoBaseForm):
     """Whether the class refused its async hooks, so registration skips them."""
 
     @override
-    def __init_subclass__(cls, **kwargs) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
         _refuse_async_hooks(cls, FORM_HOOKS)
@@ -435,7 +435,7 @@ class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
     """Whether the class refused its async hooks, so registration skips them."""
 
     @override
-    def __init_subclass__(cls, **kwargs) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
         _refuse_async_hooks(cls, FORM_HOOKS)
@@ -444,7 +444,7 @@ class BaseModelForm(_FormKwargsHook, _PermissionHooks, DjangoBaseModelForm):
 
     @classmethod
     def get_initial(
-        cls, request: HttpRequest | None = None, **url_kwargs
+        cls, request: HttpRequest | None = None, **url_kwargs: object
     ) -> dict[str, Any] | Model:
         """Return a model instance loaded from the URL, or an empty dict.
 

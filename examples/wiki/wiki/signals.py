@@ -10,6 +10,6 @@ from .models import Article
 
 @receiver(post_save, sender=Article)
 @receiver(post_delete, sender=Article)
-def reload_router_on_article_change(**kwargs) -> None:
+def reload_router_on_article_change(**kwargs: object) -> None:
     """Rebuild URL patterns whenever an article appears or disappears."""
     router_manager.reload()

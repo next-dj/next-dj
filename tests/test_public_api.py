@@ -16,6 +16,8 @@ from next.pages import context, page
 _CURATED = frozenset({"Depends", "action", "component", "context", "page"})
 
 AREA_EXPORTS: dict[str, frozenset[str]] = {
+    "next.apps": frozenset({"NextFrameworkConfig", "checks"}),
+    "next.checks": frozenset({"NEXT", "SEO"}),
     "next.consent": frozenset(
         {
             "NECESSARY",
@@ -71,6 +73,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "RESET",
             "Replace",
             "ResolvedMetadata",
+            "TemplateLoader",
             "checks",
             "context",
             "ld",
@@ -236,15 +239,23 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     "next.static": frozenset(
         {
             "AssetDiscovery",
+            "DedupStrategy",
+            "DeepMergePolicy",
+            "FirstWinsPolicy",
+            "HashContentDedup",
+            "IdentityDedup",
+            "JsContextPolicy",
             "JsContextSerializer",
             "JsonJsContextSerializer",
             "KindRegistry",
+            "LastWinsPolicy",
             "NextAppDirectoriesFinder",
             "NextScriptBuilder",
             "NextStaticFilesFinder",
             "PlaceholderRegistry",
             "PlaceholderSlot",
             "PydanticJsContextSerializer",
+            "RaiseOnConflictPolicy",
             "ScriptInjectionPolicy",
             "StaticAsset",
             "StaticAssetNotFoundError",
@@ -253,6 +264,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "StaticCollector",
             "StaticFilesBackend",
             "StaticManager",
+            "UrlDedup",
             "checks",
             "collect_component_assets",
             "default_kinds",
@@ -312,6 +324,7 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "patch_static_collector",
             "render_component_by_name",
             "render_page",
+            "reset_check_caches",
             "reset_component_templates",
             "reset_components",
             "reset_failure_logs",

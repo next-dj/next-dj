@@ -58,7 +58,7 @@ class RowPermissionAdmin(admin.ModelAdmin):
         obj: Model | None = None,
         *,
         change: bool = False,
-        **kwargs,
+        **kwargs: object,
     ) -> type[django_forms.ModelForm]:
         """Return the admin form with `RowPermissionForm` mixed in for this request."""
         base = super().get_form(request, obj, change=change, **kwargs)

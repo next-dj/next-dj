@@ -309,31 +309,10 @@ The teardown lives wherever the receiver should stop firing, such as a test fixt
 
    action_dispatched.disconnect(dispatch_uid="notes.log_dispatch")
 
-The ``SignalRecorder`` from ``next.testing.capture`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.
-
 Test helpers
 ------------
 
-The ``SignalRecorder`` from ``next.testing.capture`` captures events for assertions.
-Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
-
-.. code-block:: python
-   :caption: test using a recorder
-
-   from next.signals import action_dispatched
-   from next.testing.capture import SignalRecorder
-   from next.testing.client import NextClient
-
-   def test_emits_action(db) -> None:
-       with SignalRecorder(action_dispatched) as recorder:
-           NextClient().post_action("create_note", {"title": "Hello"}, origin="/")
-
-       assert len(recorder.events) == 1
-       assert recorder.first_for(action_dispatched).kwargs["action_name"] == "create_note"
-
-``SignalRecorder`` also provides ``events_for(signal)``, ``first_for(signal)``, and ``last_for(signal)`` for targeted access.
-
-See :doc:`/content/topics/testing` for the full testing surface.
+``SignalRecorder`` from ``next.testing`` records these signals in a test, and :ref:`topics-testing` covers the recorder and its wrappers.
 
 See also
 --------

@@ -196,7 +196,7 @@ The ``{% form "create_note_form" %}`` block in ``notes/pages/template.djx`` does
 The form carries no ``zone=`` argument, so a validation failure still re-renders the form in place with its errors, the default re-render from :doc:`tutorial04`.
 The handler drives the list update explicitly, only on success and only for a partial request.
 The create form is outside the zone, so the morph leaves it untouched and the submitted title stays in the input.
-Add a second op that re-renders the form when it should be cleared, see :doc:`/content/topics/partial-rendering/reference` for ``morph(form=...)``.
+When the form should be cleared, wrap it in a zone of its own and add ``.morph(zone="note-create")`` after the list morph, since a zone morph re-renders the form unbound, see :doc:`/content/topics/partial-rendering/zones`.
 
 Submit a note with a title and watch it appear at the top of the list with no reload.
 Submit with an empty title and the form re-renders its error in place, the list untouched.
@@ -316,7 +316,7 @@ The new note appears twice for a moment.
 
 The create form keeps the previous title.
    The morph targets the ``note-list`` zone and the form sits outside it, so nothing resets the inputs.
-   Append a second op that re-renders the form when the handler should clear it.
+   Wrap the form in a zone and add a second ``morph(zone=...)`` that re-renders it.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 

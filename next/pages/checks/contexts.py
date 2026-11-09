@@ -135,7 +135,7 @@ def _keyless_context_errors(
 
 
 @register(Tags.templates, NEXT)
-def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
+def check_context_functions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require a keyless `@context` callable to be annotated dict-like (`next.E029`)."""
     errors: list[CheckMessage] = []
     for entry in loaded_page_contexts():
@@ -144,7 +144,9 @@ def check_context_functions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
+def check_context_registration_files(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `@context` no page render collects (`next.E074`).
 
     A registration keys on the declaring file, so an imported helper binds elsewhere.
@@ -160,7 +162,7 @@ def check_context_registration_files(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_single_keyless_context(*args, **kwargs) -> list[CheckMessage]:
+def check_single_keyless_context(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a `page.py` with more than one keyless `@context` (`next.E018`).
 
     Keyless callables share one slot, so only the last survives and runs.

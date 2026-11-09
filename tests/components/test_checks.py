@@ -6,17 +6,16 @@ from django.core.checks import run_checks
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from next.checks import (
-    NEXT,
+from next.checks import NEXT
+from next.components import ComponentInfo, FileComponentsBackend
+from next.components.checks import (
     check_component_context_registration_files,
     check_component_module_imports,
     check_component_py_no_pages_context,
     check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
     check_next_components_configuration,
-    register_all,
 )
-from next.components import ComponentInfo, FileComponentsBackend
 from next.components.context import ComponentContextRegistry, component
 from next.components.manager import components_manager
 from next.components.sources import get_components_manager
@@ -448,7 +447,6 @@ class TestPageTreeComponentsReachTheChecks:
     def test_the_next_tag_run_reports_the_misattribution(self, tmp_path: Path) -> None:
         # The `next` tag excludes Django's URL check, so the check finds the folder.
         pages = self._write_project(tmp_path)
-        register_all()
 
         with (
             patch.object(component, "_registry", ComponentContextRegistry()),
@@ -469,7 +467,6 @@ class TestPageTreeComponentsReachTheChecks:
             "def greeting() -> str:\n"
             "    return 'hi'\n"
         )
-        register_all()
 
         with (
             patch.object(component, "_registry", ComponentContextRegistry()),
@@ -483,7 +480,6 @@ class TestPageTreeComponentsReachTheChecks:
         pages = self._write_project(tmp_path)
         template = pages / "_components" / "card" / "component.djx"
         template.write_text('<div>{% zone "inner" %}x{% endzone %}</div>\n')
-        register_all()
 
         with (
             patch.object(component, "_registry", ComponentContextRegistry()),
@@ -504,7 +500,6 @@ class TestPageTreeComponentsReachTheChecks:
             "def greeting() -> str:\n"
             "    return 'hi'\n"
         )
-        register_all()
 
         with (
             patch.object(component, "_registry", ComponentContextRegistry()),
@@ -519,7 +514,6 @@ class TestPageTreeComponentsReachTheChecks:
         # `card.djx` and `card/component.djx` share a scope, so order picks the render.
         pages = self._write_project(tmp_path)
         (pages / "_components" / "card.djx").write_text("<p>other card</p>\n")
-        register_all()
 
         with (
             patch.object(component, "_registry", ComponentContextRegistry()),
@@ -594,3 +588,101 @@ class TestComponentConfigurationCodes:
         with patch("next.components.checks.next_framework_settings", mock_ns):
             errors = check_next_components_configuration()
         assert [e.id for e in errors] == ["next.E080"]
+
+    @pytest.mark.parametrize(
+        ("backends", "expected"),
+        [
+            ([], ["next.E033"]),
+            ([{"DIRS": []}], ["next.E031", "next.E031"]),
+            (
+                [{"BACKEND": 1, "DIRS": [], "COMPONENTS_DIR": "_components"}],
+                ["next.E056"],
+            ),
+            (
+                [
+                    {
+                        "BACKEND": "pathlib.Path",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    }
+                ],
+                ["next.E055"],
+            ),
+            (
+                [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": "templates",
+                        "COMPONENTS_DIR": "_components",
+                    }
+                ],
+                ["next.E057"],
+            ),
+        ],
+        ids=["empty", "missing_keys", "non_string", "wrong_class", "dirs"],
+    )
+    def test_backend_shape_mistakes_carry_their_codes(
+        self, backends: object, expected: list[str]
+    ) -> None:
+        mock_ns = _stand_in(COMPONENT_BACKENDS=backends)
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            errors = check_next_components_configuration()
+        assert [e.id for e in errors] == expected
+
+
+class TestComponentChecksEdgeCases:
+    """Checks skip what they cannot read and stay quiet without backends."""
+
+    @pytest.mark.parametrize(
+        "check",
+        [
+            check_cross_root_component_name_conflicts,
+            check_component_context_registration_files,
+        ],
+    )
+    def test_no_configured_backends_reports_nothing(self, check) -> None:
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            assert check() == []
+
+    def test_route_scoped_names_are_left_out_of_the_root_scope_check(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        root = tmp_path.resolve()
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        for scope_root in (root, root / "nested"):
+            fake_backend._registry.register(
+                ComponentInfo("card", scope_root, "blog", None, None, True)
+            )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            assert check_cross_root_component_name_conflicts() == []
+
+    @pytest.mark.parametrize(
+        "content",
+        [b"\xff\xfe\x00broken", b"def broken(:\n"],
+        ids=["undecodable", "syntax_error"],
+    )
+    def test_unreadable_component_py_is_not_reported(
+        self, content: bytes, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        module_path = tmp_path / "component.py"
+        module_path.write_bytes(content)
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        fake_backend._registry.register(
+            ComponentInfo("bad", tmp_path, "", None, module_path, False)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            assert check_component_py_no_pages_context() == []
+
+    def test_missing_component_py_is_skipped(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        fake_backend = FileComponentsBackend(dict(min_component_config))
+        fake_backend._registry.register(
+            ComponentInfo("gone", tmp_path, "", None, tmp_path / "component.py", False)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            assert check_component_py_no_pages_context() == []

@@ -179,7 +179,7 @@ class Guard(Capture):
             exc.add_note(self._message % args if args else self._message)
             return False
         _DEGRADED.set(True)
-        self._log._log(logging.ERROR, self._key, self._message, args, exc)
+        self._log.emit(logging.ERROR, self._key, self._message, args, exc)
         return super()._held(exc)
 
 
@@ -226,7 +226,7 @@ class FailureLog:
         """Return whether a failure under `key` is logged now, recording it."""
         return self._due(key) is not None
 
-    def _log(
+    def emit(
         self,
         level: int,
         key: Hashable,
@@ -263,7 +263,7 @@ class FailureLog:
 
     def warn(self, key: Hashable, message: str, *args: object) -> None:
         """Log `message` for `key` at a bound rate, for a failure with no traceback."""
-        self._log(logging.WARNING, (key,), message, args)
+        self.emit(logging.WARNING, (key,), message, args)
 
 
 def reset_failure_logs(**kwargs: object) -> None:
@@ -301,7 +301,7 @@ class BackendReadLog(FailureLog):
         if capture.error is not None or not sound:
             key = (type(backend).__name__, subject)
             message = _MALFORMED if capture.error is None else _FAILED
-            self._log(logging.ERROR, key, message, key, capture.error)
+            self.emit(logging.ERROR, key, message, key, capture.error)
             return default
         return answer
 

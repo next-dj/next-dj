@@ -1,7 +1,10 @@
+import pytest
 from django import forms as django_forms
 from django.forms import formset_factory
 
 from next.forms import cleanup_extra_initial
+from next.forms.formsets import error_field_names, error_message_count, wire_errors
+from tests.support.cases.formset_errors import WIRE_ERRORS_CASES, WireErrorsCase
 
 
 class _Row(django_forms.Form):
@@ -41,3 +44,14 @@ class TestCleanupExtraInitial:
         formset = _RowFormset()
         cleanup_extra_initial(formset)
         assert all(f.initial == {} for f in formset.forms)
+
+
+class TestWireErrors:
+    """The wire-error walk keys errors the way Django's own validation counts them."""
+
+    @pytest.mark.parametrize("case", WIRE_ERRORS_CASES, ids=lambda case: case.id)
+    def test_wire_errors_case_matches_helpers(self, case: WireErrorsCase) -> None:
+        form = case.build()
+        assert wire_errors(form) == case.expected
+        assert error_field_names(form) == tuple(case.expected)
+        assert error_message_count(form) == sum(map(len, case.expected.values()))

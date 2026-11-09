@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, override
 from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 
-from next.backends import instantiate_backend, resolve_backend_class
 from next.caches import DEFAULT_CACHE_SIZE
 from next.conf import next_framework_settings
 from next.intercept import Intercept, intercepts
@@ -256,7 +255,7 @@ class FileRouterBackend(RouterBackend):
         Taken from the first `COMPONENT_BACKENDS` entry.
         """
         cbs = next_framework_settings.COMPONENT_BACKENDS
-        cb0 = cbs[0] if isinstance(cbs, list) and cbs else None
+        cb0 = cbs[0] if cbs else None
         if not isinstance(cb0, dict) or "COMPONENTS_DIR" not in cb0:
             msg = (
                 "A file router takes the folder it skips from COMPONENTS_DIR on "
@@ -538,21 +537,4 @@ class FileRouterBackend(RouterBackend):
         yield from dispatcher.walk(pages_path, on_intercept=on_intercept)
 
 
-class RouterFactory:
-    """Build one `RouterBackend` from one `PAGE_BACKENDS` entry.
-
-    `RouterManager` loads the list through `next.backends`, this is the watcher's build.
-    """
-
-    @classmethod
-    def create_backend(cls, config: Mapping[str, Any]) -> RouterBackend:
-        """Return the router named by `config['BACKEND']`, built from the entry.
-
-        Every router of the family takes the entry, so nothing here knows one of them.
-        """
-        return instantiate_backend(
-            resolve_backend_class(config, base=RouterBackend), config
-        )
-
-
-__all__ = ["FileRouterBackend", "RouterBackend", "RouterFactory"]
+__all__ = ["FileRouterBackend", "RouterBackend"]

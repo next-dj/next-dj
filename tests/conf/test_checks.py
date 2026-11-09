@@ -5,8 +5,8 @@ from django.conf import settings
 from django.core.checks import run_checks
 from django.test import override_settings
 
-from next.checks import NEXT, check_next_framework_value_types, register_all
-from next.conf.checks import _KEY_TYPES
+from next.checks import NEXT
+from next.conf.checks import _KEY_TYPES, check_next_framework_value_types
 from next.conf.settings import NextFrameworkSettings
 from next.forms.checks import (
     check_form_action_backends_configuration,
@@ -126,7 +126,6 @@ class TestValueTypeErrors:
         )
 
     def test_registered_check_reaches_manage_py_check_path(self) -> None:
-        register_all()
         with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": []}):
             messages = run_checks(tags=[NEXT])
         assert any(m.id == "next.E076" for m in messages)
@@ -218,7 +217,6 @@ class TestSilencing:
 
     def test_non_dict_setting_is_reported_by_one_check_only(self) -> None:
         """No second area repeats "NEXT_FRAMEWORK is not a dict" under its own id."""
-        register_all()
         with override_settings(NEXT_FRAMEWORK=["not a dict"]):  # type: ignore[arg-type]
             messages = run_checks(tags=[NEXT])
         assert [

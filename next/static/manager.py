@@ -394,7 +394,7 @@ def reset_default_manager() -> None:
     default_manager._wrapped = empty  # type: ignore[assignment]
 
 
-def forget_manager_page_roots(**kwargs) -> None:
+def forget_manager_page_roots(**kwargs: object) -> None:
     """Tell the default manager that a router reload changed the page roots.
 
     A manager not built yet reads them on first use, so nothing is built to invalidate.
@@ -403,7 +403,7 @@ def forget_manager_page_roots(**kwargs) -> None:
         default_manager.forget_page_roots()
 
 
-def forget_manager_backend_urls(**kwargs) -> None:
+def forget_manager_backend_urls(**kwargs: object) -> None:
     """Tell the default manager that the staticfiles storage was rebuilt.
 
     A manager not built yet holds no backend or memo, so nothing is built to invalidate.
@@ -412,12 +412,12 @@ def forget_manager_backend_urls(**kwargs) -> None:
         default_manager.forget_backend_urls()
 
 
-def forget_static_manager(**kwargs) -> None:
+def forget_static_manager(**kwargs: object) -> None:
     """Reset the default static manager when framework settings reload."""
     reset_default_manager()
 
 
-def forget_storage_state(*, setting: str, **kwargs) -> None:
+def forget_storage_state(*, setting: str, **kwargs: object) -> None:
     """Drop the derived state that a changed Django setting invalidates.
 
     `settings_reloaded` covers only `NEXT_FRAMEWORK`, not these Django settings.

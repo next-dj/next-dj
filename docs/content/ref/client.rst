@@ -151,7 +151,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
    * - ``partial:layer-opened``
      - ``{opener}``, the opening element, or ``null`` for a server-initiated open.
    * - ``partial:layer-accepted``
-     - ``{result}``, the accept result the closing side passed.
+     - ``{result}``, the accept result the closing side passed, or ``undefined`` for a close without one.
    * - ``partial:layer-dismissed``
      - ``{reason}``, one of ``escape``, ``backdrop``, ``popstate``, ``dismissed``, the ``returnValue`` of a ``<form method="dialog">`` close or ``dialog`` when it is empty, or the text a server dismiss carried.
    * - ``next:stream-state``
@@ -230,7 +230,7 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
    * - ``partial:layer-accepted``
      - The document
      - No
-     - The layer stack, on a close that carries a result.
+     - The layer stack, on every close that is not a dismissal, with or without a result.
    * - ``partial:layer-dismissed``
      - The document
      - No
@@ -623,7 +623,7 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
        So does a click the pagination rule of ``data-next-merge`` leaves to the browser, such as a Ctrl-click that opens the URL in a new tab.
    * - ``data-next-accepted``
      - Hand-written on the opening ``<a>``
-     - The layer stack, which re-fetches the named zone of the host page once the layer closes with a result.
+     - The layer stack, which re-fetches the named zone of the host page once the layer closes by accept, with or without a result.
    * - ``data-next-consented``
      - ``{% #consented %}``
      - The scripts chunk, which swaps the inert ``<template>`` carrying it for its body once the named category is granted.

@@ -920,16 +920,6 @@ class TestContextProcessors:
             processors = _get_context_processors()
             assert processors == []
 
-    def test_get_context_processors_routers_not_list(self, page_instance) -> None:
-        """When ``PAGE_BACKENDS`` is not a list, treat as no router config."""
-        mock_nf = SimpleNamespace(PAGE_BACKENDS={})
-        with (
-            patch("next.pages.processors.next_framework_settings", mock_nf),
-            override_settings(TEMPLATES=[]),
-        ):
-            processors = _get_context_processors()
-            assert processors == []
-
     def test_get_context_processors_no_context_processors(self, page_instance) -> None:
         """A backend that declares no processors contributes none."""
         config = [file_router_config_entry(app_dirs=True)]

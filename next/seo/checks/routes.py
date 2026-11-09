@@ -60,7 +60,7 @@ def _trail_address(trail: str, served: list[str]) -> str | None:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_route_collisions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a page directory named after an address the SEO sources serve (`next.E115`).
 
     The page answers its own path, so a visitor and a crawler reach two documents.
@@ -87,7 +87,9 @@ def check_seo_route_collisions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_seo_routes_at_host_root(*args, **kwargs) -> list[CheckMessage]:
+def check_seo_routes_at_host_root(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a served SEO path does not reach the framework view (`next.W094`).
 
     An include of `next.urls` under a prefix or `i18n_patterns()` moves the routes.

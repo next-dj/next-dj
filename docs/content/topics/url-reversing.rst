@@ -91,9 +91,9 @@ A second namespace exists when a ``pages()`` include places one application tree
        path("staff/", include("next.urls", namespace="staff")),
    ]
 
-The second ``include`` republishes the whole page tree and the form action endpoint under the new prefix.
-``next.urls`` exposes one pattern list that holds every routed page plus the dispatch endpoint, and both includes read that same list.
-Every page therefore answers on ``/<route>/`` and on ``/staff/<route>/``, and requests to ``/staff/_next/form/`` reach the dispatcher as well.
+The second ``include`` republishes the whole page tree, the form action and CSRF endpoints, and the SEO routes under the new prefix.
+``next.urls`` exposes one pattern list that holds every routed page beside the framework endpoints, and both includes read that same list.
+Every page therefore answers on ``/<route>/`` and on ``/staff/<route>/``, and requests to ``/staff/_next/form/`` and ``/staff/_next/csrf/`` reach the framework views as well.
 
 .. warning::
 

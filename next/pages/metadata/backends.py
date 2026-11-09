@@ -419,7 +419,7 @@ def _build_renderer() -> MetadataRenderer:
     return HtmlMetadataRenderer()
 
 
-def forget_metadata_renderer(**kwargs) -> None:
+def forget_metadata_renderer(**kwargs: object) -> None:
     """Drop the memoised renderer, so a settings reload takes effect."""
     _built_renderer.cache_clear()
 

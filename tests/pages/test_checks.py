@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -6,27 +7,25 @@ from django.test import override_settings
 from django.urls.converters import get_converters
 
 import next.pages.loaders as loaders_module
-from next.checks import (
+from next.conf import next_framework_settings as s
+from next.deps import RegisteredParameterProvider
+from next.pages.checks import (
     check_context_functions,
+    check_context_processor_signature,
+    check_context_reads_foreign_zone,
+    check_context_registration_files,
     check_layout_templates,
     check_page_functions,
     check_page_module_imports,
     check_pages_structure,
     check_request_in_context,
     check_single_keyless_context,
-    reset_check_caches,
-)
-from next.conf import next_framework_settings as s
-from next.deps import RegisteredParameterProvider
-from next.pages.checks import (
-    check_context_processor_signature,
-    check_context_reads_foreign_zone,
-    check_context_registration_files,
     check_template_loaders,
     check_unrouted_working_directory_pages,
 )
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
+from next.testing import reset_check_caches
 from next.urls import PageRoot, RouterBackend
 from tests.support import (
     PAGE_BODY_SOURCE_CASES,
@@ -40,6 +39,7 @@ from tests.support import (
     SkippingRouter,
     file_router,
     importable_dir,
+    next_framework_settings_stand_in,
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
     restored_provider_registry,
@@ -80,6 +80,12 @@ class TestRequestInContextCheck:
         settings.TEMPLATES = self._templates_without_request()
 
         assert [m.id for m in check_request_in_context()] == ["next.E019"]
+
+    def test_a_non_dict_engine_entry_is_skipped(self) -> None:
+        # Assigning TEMPLATES fires the engine rebuild, which a non-dict entry breaks.
+        stand_in = SimpleNamespace(TEMPLATES=["not a dict"])
+        with patch("next.pages.checks.processors.settings", stand_in):
+            assert check_request_in_context() == []
 
     def test_framework_not_installed_is_silent(self, settings) -> None:
         """A project without the framework app is none of this check's business."""
@@ -201,6 +207,24 @@ class TestMissingPageContentChecks:
 
 class TestMemoAndBrokenPages:
     """Memo reuse and the E017-only reporting of broken `page.py` files."""
+
+    def test_a_tree_that_fails_to_walk_is_e011(self, tmp_path) -> None:
+        with (
+            patch_checks_router_manager_with_routers(routers=[AppRootRouter(tmp_path)]),
+            patch(
+                "next.pages.checks.modules.walk_page_tree",
+                side_effect=OSError("denied"),
+            ),
+        ):
+            messages = check_page_functions(None)
+        assert [m.id for m in messages] == ["next.E011"]
+        assert "denied" in messages[0].msg
+
+    def test_a_missing_tree_is_skipped(self, tmp_path) -> None:
+        with patch_checks_router_manager_with_routers(
+            routers=[AppRootRouter(tmp_path / "missing")]
+        ):
+            assert check_page_functions(None) == []
 
     def test_broken_page_reports_no_e012(self, tmp_path) -> None:
         """A syntactically invalid page.py surfaces as E017 only, never E012."""
@@ -608,6 +632,15 @@ def _processor_without_request():
     return {}
 
 
+def _processor_without_signature(request):
+    return {}
+
+
+_processor_without_signature.__signature__ = "unreadable"  # type: ignore[attr-defined]
+
+_NOT_A_PROCESSOR = {}
+
+
 class TestContextProcessorSignature:
     """check_context_processor_signature warns when `request` is absent."""
 
@@ -752,6 +785,30 @@ class TestContextProcessorSignature:
     def test_non_dict_backend_entries_are_skipped(self) -> None:
         errors = check_context_processor_signature()
         assert errors == []
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "tests.pages.test_checks._NOT_A_PROCESSOR",
+            "tests.pages.test_checks._processor_without_signature",
+        ],
+        ids=["not_callable", "unreadable_signature"],
+    )
+    def test_an_uninspectable_processor_is_skipped(self, path: str) -> None:
+        backend = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "PAGES_DIR": "pages",
+            "OPTIONS": {"context_processors": [path]},
+        }
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
+            assert check_context_processor_signature() == []
+
+    def test_a_non_list_backend_setting_reports_nothing(self) -> None:
+        stand_in = next_framework_settings_stand_in(PAGE_BACKENDS="not a list")
+        with patch("next.pages.checks.processors.next_framework_settings", stand_in):
+            assert check_context_processor_signature() == []
 
 
 class _MultiRootRouter(RouterBackend):
@@ -1061,6 +1118,35 @@ class TestContextReadsForeignZone:
         )
         with patch_checks_router_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
+
+    def test_a_parameter_no_zone_binds_is_silent(self, tmp_path) -> None:
+        self._write_page(
+            tmp_path / "page.py",
+            "@page.context('count')\ndef count(title):\n    return title\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
+
+    def test_an_unreadable_signature_reads_no_parameter(self, tmp_path) -> None:
+        self._write_page(
+            tmp_path / "page.py",
+            "@page.context('count')\n"
+            "def count(entries):\n"
+            "    return len(entries)\n\n"
+            "count.__signature__ = 'unreadable'\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert check_context_reads_foreign_zone(None) == []
+
+    def test_a_route_the_parser_refuses_captures_nothing(self, tmp_path) -> None:
+        page_file = tmp_path / "[int:a:b]" / "page.py"
+        self._write_page(
+            page_file,
+            "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
+        )
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            messages = check_context_reads_foreign_zone(None)
+        assert [m.id for m in messages] == ["next.W077"]
 
 
 class TestSingleKeylessContext:
@@ -1653,6 +1739,43 @@ class TestUnroutedWorkingDirectoryPages:
         ):
             assert check_unrouted_working_directory_pages(None) == []
 
+    def test_a_non_list_backend_setting_names_no_candidate(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        self._write_unrouted_tree(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        stand_in = next_framework_settings_stand_in(PAGE_BACKENDS="not a list")
+
+        with (
+            patch("next.pages.checks.structure.next_framework_settings", stand_in),
+            patch_checks_router_manager_with_routers(routers=[RootPagesRouter([])]),
+        ):
+            assert check_unrouted_working_directory_pages(None) == []
+
+
+class TestPagesStructureWalk:
+    """`check_pages_structure` skips a missing tree and reports one it cannot walk."""
+
+    def test_a_missing_tree_is_skipped(self, tmp_path) -> None:
+        with patch_checks_router_manager_with_routers(
+            routers=[RootPagesRouter([tmp_path / "missing"])]
+        ):
+            assert check_pages_structure(None) == []
+
+    def test_a_tree_that_fails_to_walk_is_e088(self, tmp_path) -> None:
+        with (
+            patch_checks_router_manager_with_routers(
+                routers=[RootPagesRouter([tmp_path])]
+            ),
+            patch(
+                "next.pages.checks.structure._iter_routed_directories",
+                side_effect=OSError("denied"),
+            ),
+        ):
+            messages = check_pages_structure(None)
+        assert [m.id for m in messages] == ["next.E088"]
+        assert "denied" in messages[0].msg
+
 
 class TestBracketDirectoryNamesDjangoRefuses:
     """A bracket directory Django cannot compile is a report, not a traceback."""
@@ -1675,6 +1798,7 @@ class TestBracketDirectoryNamesDjangoRefuses:
             ("[2fa]", "Parameter name '2fa'"),
             ("[:pk]", "Use [param] or [type:param] format."),
             ("[int:]", "Use [param] or [type:param] format."),
+            ("[int:a:b]", "Use [param] or [type:param] format."),
         ],
         ids=[
             "unregistered_converter",
@@ -1683,6 +1807,7 @@ class TestBracketDirectoryNamesDjangoRefuses:
             "name_opening_with_a_digit",
             "empty_converter",
             "empty_name",
+            "two_converters",
         ],
     )
     def test_a_parameter_directory_django_refuses_reports_e008(

@@ -71,7 +71,7 @@ def _id_types(graph: list[object]) -> dict[str, set[str]]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_jsonld(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_jsonld(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate every declared JSON-LD node (`next.E127`) and each folded graph.
 
     One `@id` under two types in a folded graph earns `next.E101`.

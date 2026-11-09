@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, override
 
+from next.backends import instantiate_backend, resolve_backend_class
 from next.ports import RouterAccess
 
-from .backends import RouterFactory
+from .backends import RouterBackend
 from .manager import RouterManager
 from .parser import default_url_parser
 from .routes import page_route
@@ -18,7 +19,6 @@ from .routes import page_route
 if TYPE_CHECKING:
     from next.utils import PageRoot
 
-    from .backends import RouterBackend
     from .parser import URLPatternParser
 
 
@@ -28,7 +28,9 @@ class RouterAccessImpl(RouterAccess):
     @override
     def create_backend(self, config: dict[str, Any]) -> RouterBackend:
         """Return the router one `PAGE_BACKENDS` entry names."""
-        return RouterFactory.create_backend(config)
+        return instantiate_backend(
+            resolve_backend_class(config, base=RouterBackend), config
+        )
 
     @override
     def create_manager(self) -> RouterManager:

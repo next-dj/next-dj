@@ -233,7 +233,7 @@ Manual CSRF
 -----------
 
 The tag emits ``csrfmiddlewaretoken`` automatically on a page that renders its token eagerly, and leaves it out on a page that defers the token.
-Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
+Add Django's ``{% csrf_token %}`` manually only to a ``<form>`` element built by hand without the tag.
 A page that defers its token keeps ``{% csrf_token %}`` out of a hand-written form, because the token would then sit in HTML a shared cache keeps.
 A hand-crafted form must also include the ``_next_form_origin`` hidden field, because the dispatcher answers HTTP 400 to an action POST without it.
 Set it to the URL the page was rendered under with its query string, which ``{{ request.get_full_path }}`` produces, the same value the tag emits.

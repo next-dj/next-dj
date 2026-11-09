@@ -1,7 +1,7 @@
 from typing import ClassVar
 
 from django import forms as django_forms
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest
 from wiki.deps import DArticle
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.services import slug_taken, update_article
@@ -31,15 +31,14 @@ class ArticleEditForm(ModelForm):
         """Deny edits to a locked article keyed off the bound ``self.instance``."""
         return not self.instance.locked
 
-    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        """Persist edits to an existing article and redirect to its public URL."""
-        article = update_article(
+    def on_valid(self, request: HttpRequest) -> Article:
+        """Persist edits to an existing article and return it for the redirect."""
+        return update_article(
             article_id=self.instance.pk,
             slug=self.cleaned_data["slug"],
             title=self.cleaned_data["title"],
             body_md=self.cleaned_data["body_md"],
         )
-        return HttpResponseRedirect(article.url)
 
     def clean_slug(self) -> str:
         """Reject reserved prefixes and slugs taken by another article."""

@@ -239,7 +239,7 @@ class AdminInlineSpec:
         token = request.POST.get("_inline", "") if is_post else ""
         target_pk = request.POST.get("_inline_pk", "") if is_post else ""
         return [
-            cls(spec, inline)._section(token, target_pk)
+            cls(spec, inline).section(token, target_pk)
             for inline in spec.model_admin.get_inline_instances(request, spec.instance)
         ]
 
@@ -334,17 +334,19 @@ class AdminInlineSpec:
         form.is_valid()
         return form
 
-    def _row(self, obj: Model, post: QueryDict | None) -> RelatedRow:
+    def row(self, obj: Model, post: QueryDict | None) -> RelatedRow:
+        """Build the editing row of one child, bound to `post` when it is the target."""
         spec = form_spec(self._bind(obj, post))
         return RelatedRow(
             pk=obj.pk, fields=spec.sections[0].fields, errors=spec.non_field_errors
         )
 
-    def _section(self, token: str, target_pk: str) -> RelatedSection:
+    def section(self, token: str, target_pk: str) -> RelatedSection:
+        """Build the editing block of this inline, binding the row the POST targets."""
         active = self.token == token
         post = self.spec.request.POST
         rows = tuple(
-            self._row(obj, post if active and target_pk == str(obj.pk) else None)
+            self.row(obj, post if active and target_pk == str(obj.pk) else None)
             for obj in self.children()
         )
         add_spec = form_spec(
@@ -494,7 +496,7 @@ def _render_inline_row(inline: AdminInlineSpec, obj: Model) -> str:
         "inline_row",
         _CHANGE_TEMPLATE_PATH,
         inline.spec.request,
-        row=inline._row(obj, None),
+        row=inline.row(obj, None),
         token=inline.token,
         rights=inline.rights,
     )

@@ -6,7 +6,6 @@ from django.test import RequestFactory, override_settings
 from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy
 
-from next.checks import reset_check_caches
 from next.conf import next_framework_settings
 from next.diagnostics import QUIET_PERIOD, degraded, watch_degraded
 from next.pages import ld
@@ -23,6 +22,7 @@ from next.pages.metadata.scope import (
     site_segment,
     site_tier,
 )
+from next.testing import reset_check_caches
 from tests.support import next_framework_settings_stand_in
 
 

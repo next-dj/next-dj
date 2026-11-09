@@ -108,6 +108,7 @@ A keep node needs no id.
 With an id the child walk pairs it by hard match, without one it pairs by position, so a framework root the server renders with no stable id is preserved all the same.
 
 .. code-block:: html
+   :caption: an island root kept out of the morph
 
    <div data-chart data-next-keep></div>
 

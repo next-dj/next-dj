@@ -89,7 +89,7 @@ Set the serializer when context values include types beyond the standard JSON se
 .. note::
 
    ``PydanticJsContextSerializer`` requires the ``pydantic`` package, which is not a dependency of next.dj.
-   Install it separately (``pip install pydantic``) before enabling this serializer.
+   Install it with ``uv add pydantic`` before enabling this serializer.
    Without ``pydantic`` the serializer fails to build, so a production render falls back to the JSON serializer and logs the error, while ``DEBUG`` or ``STRICT_LOADING`` raises ``ImportError``.
 
 Page backends with context processors
@@ -198,7 +198,8 @@ Production names its origin in ``SITE["URL"]`` and keeps ``SITE["INDEXABLE"]`` a
 Template and asset staleness
 ----------------------------
 
-No ``NEXT_FRAMEWORK`` key controls this one, ``settings.DEBUG`` does, and it is the only behaviour difference between a warm cache and a cold one.
+``settings.DEBUG`` controls this behaviour rather than a ``NEXT_FRAMEWORK`` key.
+It is the only behaviour difference between a warm cache and a cold one.
 
 The composed-template cache, the compiled component template cache, and the co-located asset plans each hold a snapshot of what they read from disk.
 Every probe that compares that snapshot against the disk is gated on ``settings.DEBUG`` through the ``next.utils.template_edits_watched`` predicate.

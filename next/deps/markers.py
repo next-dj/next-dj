@@ -124,9 +124,7 @@ class DependsProvider(RegisteredParameterProvider):
             dep = param.name
 
         if isinstance(dep, str):
-            return self._resolver._resolve_callable_dependency(
-                dep, context, param=param
-            )
+            return self._resolver.resolve_callable_dependency(dep, context, param=param)
 
         if callable(dep):
             return call_factory(self._resolver, dep, factory_key(dep), context)
@@ -145,7 +143,7 @@ class DependsProvider(RegisteredParameterProvider):
             name = target
 
             def by_name(context: ResolutionContext) -> object:
-                return resolver._resolve_callable_dependency(name, context, param=param)
+                return resolver.resolve_callable_dependency(name, context, param=param)
 
             return by_name
 

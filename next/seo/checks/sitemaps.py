@@ -50,7 +50,7 @@ _SITEMAP_TEMPLATES: Final = ("sitemap.xml", "sitemap_index.xml")
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_items_trails(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_items_trails(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require every `@sitemap.items` trail to be routed by its tree (`next.E111`)."""
     roots = loaded_seo_roots()
     errors: list[CheckMessage] = []
@@ -81,7 +81,7 @@ def _missing_templates() -> list[str]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_sitemap_templates(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_templates(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Require the sitemap templates to load while a `sitemap.py` exists (`next.E112`).
 
     The XML comes from `django.contrib.sitemaps`, found only through `APP_DIRS`.
@@ -106,7 +106,7 @@ def check_sitemap_templates(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_section_labels(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when page trees share one sitemap section label (`next.W099`)."""
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -134,7 +134,7 @@ def check_sitemap_section_labels(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_dynamic_routes(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a dynamic route the sitemap neither lists nor excludes (`next.W092`).
 
     A route whose static metadata sets noindex is never listed, so it is skipped.
@@ -164,7 +164,7 @@ def check_sitemap_dynamic_routes(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_noindex_items(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_noindex_items(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when `@sitemap.items` lists a trail whose page is noindex (`next.W093`).
 
     A closed site is skipped, since it serves no sitemap and every page is noindex.
@@ -243,7 +243,7 @@ def _uses_language_prefixes() -> bool:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_i18n_options(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about i18n options without effect and oversized pages (W100, W101, W086).
 
     Without `i18n_patterns` every language reverses to one URL, listed once per code.
@@ -273,7 +273,7 @@ def check_sitemap_i18n_options(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_excluded_items(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_excluded_items(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when `@sitemap.items` names a trail `exclude` drops (`next.W102`)."""
     roots = loaded_seo_roots()
     warnings: list[CheckMessage] = []
@@ -340,7 +340,9 @@ def _backend_sections() -> tuple[list[tuple[str, str]], list[CheckMessage]]:
 
 
 @register(Tags.urls, NEXT, SEO)
-def check_sitemap_section_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_sitemap_section_collisions(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag two sources serving one sitemap section name (`next.E116`, `next.W089`).
 
     The first source keeps the name, so the second one is never listed.

@@ -40,8 +40,9 @@ The shared dialog component in the examples uses it, and it is the pattern that 
 Listen for next:mounted
 -----------------------
 
-The runtime fires ``next:mounted`` on every node it touches, after the operations apply and the JavaScript delta loads.
+The runtime fires ``next:mounted`` on every node it touches once the operations apply, after it inserts the JavaScript delta but before a URL or module script of that delta runs.
 Subscribe to it for initialisation that needs a specific element the moment it lands.
+A listener that lives in a script the same envelope brings misses that first mount, which ``Next.partial.onMount`` covers by catching up over the present document.
 
 .. code-block:: javascript
    :caption: per-element mount

@@ -274,7 +274,7 @@ class TestEnvelopeDecoding:
             assets=(Asset(kind="css", url="/a.css", load="link"),),
             form=FormMeta(uid="ab12", valid=True),
         )
-        view = PartialEnvelope(envelope.as_dict())
+        view = PartialEnvelope.from_envelope(envelope)
         assert view.version == "v1"
         assert view.op_verbs() == ["morph", "morph", "toast"]
         assert view.targets() == [{"zone": "list"}, {"form": "ab12"}, None]
@@ -335,6 +335,33 @@ class TestEnvelopeStrictness:
         )
         with pytest.raises(KeyError, match="errors"):
             view.form_meta()
+
+    def test_from_envelope_data_equals_as_dict(self) -> None:
+        envelope = Envelope(
+            version="v1", ops=(Patch(op="toast", extras={"text": "x"}),)
+        )
+        assert PartialEnvelope.from_envelope(envelope).data == envelope.as_dict()
+
+    def test_from_envelope_data_is_memoised_across_reads(self) -> None:
+        view = PartialEnvelope(envelope=Envelope(version="v1", ops=()))
+        assert view.data is view.data
+        view.data["extra"] = 1
+        assert view.data["extra"] == 1
+
+    def test_envelope_of_skips_the_dict_round_trip(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[object] = []
+        original = Envelope.from_dict
+
+        def spy(data: dict[str, object]) -> Envelope:
+            calls.append(data)
+            return original(data)
+
+        monkeypatch.setattr(Envelope, "from_dict", spy)
+        response = NextClient().get_zones("/zoned/", ("alpha",))
+        assert envelope_of(response).version == "0"
+        assert len(calls) == 1
 
     def test_raw_payload_stays_readable(self) -> None:
         assert PartialEnvelope({"ops": []}).data == {"ops": []}

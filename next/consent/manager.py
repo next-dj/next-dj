@@ -72,7 +72,7 @@ def server_render() -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def forget_consent_settings(**kwargs) -> None:
+def forget_consent_settings(**kwargs: object) -> None:
     """Drop the memoised backend and options, so a settings reload takes effect."""
     consent_backend_manager.reset()
     _built_backend.cache_clear()

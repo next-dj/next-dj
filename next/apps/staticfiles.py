@@ -30,7 +30,7 @@ def install() -> None:
     register_defaults()
 
 
-def reinstall_finders(*, setting: str, **kwargs) -> None:
+def reinstall_finders(*, setting: str, **kwargs: object) -> None:
     """Re-add the finders when an override replaces the configured list."""
     if setting == "STATICFILES_FINDERS":
         install()

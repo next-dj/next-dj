@@ -159,7 +159,9 @@ def renderer_errors() -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_settings_scope(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Validate the `METADATA` options, and the `DEFAULTS` tier like a page.
 
     A `Replace` in `DEFAULTS` has nothing to replace and earns `next.W104`.
@@ -172,7 +174,7 @@ def check_metadata_settings_scope(*args, **kwargs) -> list[CheckMessage]:
     segment, error = site_defaults(scope)
     if error is not None:
         errors.append(error)
-    elif segment is not None:
+    if segment is not None:
         errors.extend(segment_errors(segment, source=SITE_SOURCE, obj=settings))
         if segment.replaced:
             keys = ", ".join(sorted(segment.replaced))

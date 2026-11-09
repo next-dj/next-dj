@@ -115,13 +115,20 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
 .. code-block:: python
    :caption: notes/backends.py
 
+   from django.http import HttpRequest
    from django.utils.html import escape
 
    from next.static import StaticFilesBackend
    from next.static.runtime import nonce_attr
 
    class BabelBackend(StaticFilesBackend):
-       def render_babel_tag(self, url: str, *, request=None, nonce=None) -> str:
+       def render_babel_tag(
+           self,
+           url: str,
+           *,
+           request: HttpRequest | None = None,
+           nonce: str | None = None,
+       ) -> str:
            return f'<script type="text/babel" src="{escape(url)}"{nonce_attr(nonce)}></script>'
 
 A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.
@@ -171,7 +178,8 @@ Each of the three bundled renderer methods stands for one client insertion verb.
 
 The verb travels in the ``load`` field of the manifest entry, see :doc:`/content/topics/partial-rendering/reference`.
 A kind is loadable on a partial render when it registers one of those three renderers, whatever the kind is named.
-The ``jsx`` kind registered above with ``render_module_tag`` therefore loads on a partial render exactly as ``module`` does.
+The first ``jsx`` registration above, through ``render_module_tag``, therefore loads on a partial render exactly as ``module`` does.
+The ``render_babel_tag`` registration names none of the three, so its asset reaches the browser on a full-page render only.
 
 An inline body additionally needs the ``inline_tag`` that the renderer's verb builds, ``style`` for the ``link`` verb and ``script`` for the ``script`` verb, and a body without it reaches the browser on a full-page render only.
 The wire format of the ``load`` field and the client fallback live in the partial rendering reference.
@@ -207,9 +215,34 @@ The ``register`` method has the signature ``register(name, *, token)``.
 A repeated call with the same token is idempotent, and a repeated call with a different token raises ``ValueError``.
 
 Register a new slot when a kind should inject somewhere other than the built-in slots.
+The bundled ``render_link_tag`` writes ``rel="stylesheet"``, so a font kind names a renderer of its own.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from django.http import HttpRequest
+   from django.utils.html import escape
+
+   from next.static import StaticFilesBackend
+   from next.static.runtime import nonce_attr
+
+   class FontPreloadBackend(StaticFilesBackend):
+       def render_font_preload(
+           self,
+           url: str,
+           *,
+           request: HttpRequest | None = None,
+           nonce: str | None = None,
+       ) -> str:
+           return (
+               '<link rel="preload" as="font" type="font/woff2" crossorigin '
+               f'href="{escape(url)}"{nonce_attr(nonce)}>'
+           )
 
 .. code-block:: python
    :caption: notes/apps.py
+
+   from django.apps import AppConfig
 
    from next.static import default_kinds, default_placeholders
 
@@ -222,11 +255,13 @@ Register a new slot when a kind should inject somewhere other than the built-in 
                "font",
                extension=".woff2",
                slot="preload",
-               renderer="render_link_tag",
+               renderer="render_font_preload",
            )
 
 Register the slot before the kind that targets it.
 A kind whose ``slot`` names no registered slot collects into a bucket the manager never reads, so its assets vanish with no error and no warning.
+``FontPreloadBackend`` takes its place in ``STATIC_BACKENDS`` the way any backend does, see :doc:`backends`.
+A custom renderer carries no client insertion verb, so a font arrives on a full-page render only and ``next.W074`` reports the kind.
 
 The layout must contain the slot token, or a template tag that emits it, for the manager to find a place to inject.
 A module-level list named after the slot, such as ``preload = [...]`` in ``page.py``, registers names and URLs into it, see :ref:`topics-static-module-lists`.

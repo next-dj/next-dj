@@ -79,7 +79,9 @@ def access_in_use() -> bool:
 
 
 @register(NEXT)
-def check_public_beside_requirements(*args, **kwargs) -> list[CheckMessage]:
+def check_public_beside_requirements(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `public()` beside a requirement of the same `page.py` (`next.E163`).
 
     The requirement still binds the page, so the `public()` opens nothing.
@@ -132,7 +134,7 @@ def _segment_module(file_path: Path) -> bool:
 
 
 @register(NEXT)
-def check_declaring_modules(*args, **kwargs) -> list[CheckMessage]:
+def check_declaring_modules(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an access declaration bound to a file no endpoint reads (`next.E164`).
 
     A loader may run a `page.py` outside every tree, whose declarations guard nothing.

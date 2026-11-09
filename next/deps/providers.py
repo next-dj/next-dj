@@ -60,7 +60,7 @@ class RegisteredParameterProvider(ABC):
     priority: ClassVar[int] = 100
 
     @override
-    def __init_subclass__(cls, **kwargs) -> None:
+    def __init_subclass__(cls, **kwargs: object) -> None:
         """Register the concrete subclass for lazy instantiation by the resolver."""
         super().__init_subclass__(**kwargs)
         provider_registry.add(cls)

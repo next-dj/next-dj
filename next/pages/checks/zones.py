@@ -35,7 +35,9 @@ class _BoundProvider(NamedTuple):
 
 
 @register(Tags.templates, NEXT)
-def check_context_reads_foreign_zone(*args, **kwargs) -> list[CheckMessage]:
+def check_context_reads_foreign_zone(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a `@context` reads a key bound to a zone it misses (`next.W077`).
 
     A zone request not naming the bound zone skips the provider, the reader gets `None`.

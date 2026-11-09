@@ -11,7 +11,7 @@ You need page bodies to load from a filename other than the default sibling ``te
 Solution
 --------
 
-Subclass ``next.pages.loaders.TemplateLoader`` and implement ``can_load`` and ``load_template``.
+Subclass ``next.pages.TemplateLoader`` and implement ``can_load`` and ``load_template``.
 Register the dotted path in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
 Keep ``next.pages.loaders.DjxTemplateLoader`` in the chain when you still want ``template.djx`` support.
 
@@ -28,7 +28,7 @@ A loader whose ``source_name`` is empty is left out of that report.
 
    from pathlib import Path
 
-   from next.pages.loaders import TemplateLoader
+   from next.pages import TemplateLoader
 
    class MarkdownTemplateLoader(TemplateLoader):
        """Load sibling ``template.md`` files as plain text bodies."""

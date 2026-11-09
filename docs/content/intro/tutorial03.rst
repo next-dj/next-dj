@@ -23,7 +23,7 @@ Create the component folder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The :term:`component` backend looks for component folders under the configured root.
-:doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/pages/_components/note_card/``.
+The default ``COMPONENTS_DIR`` is ``_components``, as the settings block in :doc:`install` spells out, so a component named ``note_card`` lives at ``notes/pages/_components/note_card/``.
 The folder sits inside the page tree because the file router registers each ``_components/`` folder it walks past during page discovery.
 A ``_components/`` folder placed beside ``pages/`` rather than inside it is never discovered, and the ``{% component %}`` tag then reports the name it could not resolve.
 Under ``DEBUG`` the tag emits an HTML comment such as ``<!-- next: component 'note_card' not found (not-found) -->`` in place of the component, carrying a did-you-mean hint when a near name exists.

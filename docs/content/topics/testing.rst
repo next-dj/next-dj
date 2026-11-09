@@ -50,7 +50,7 @@ Every helper is importable from the ``next.testing`` package as well as from its
      - ``eager_load_pages``, ``eager_load_components``, ``clear_loaded_dirs``
      - Force-importing pages and components in a suite that skips the request cycle.
    * - ``isolation``
-     - ``reset_registries``, ``reset_components``, ``reset_form_actions``, ``reset_form_registration_state``, ``reset_page_cache``, ``reset_component_templates``, ``reset_scripts``, ``reset_seo``, ``reset_failure_logs``
+     - ``reset_registries``, ``reset_components``, ``reset_form_actions``, ``reset_form_registration_state``, ``reset_page_cache``, ``reset_component_templates``, ``reset_scripts``, ``reset_seo``, ``reset_failure_logs``, ``reset_check_caches``
      - Reloading backends and dropping caches after mutating settings, registries, or files on disk.
    * - ``metadata``
      - ``assert_metadata``
@@ -440,7 +440,8 @@ Pass ``HTTP_X_NEXT_VALIDATE="title"`` to drive the validate-only branch, ``HTTP_
 
 ``envelope_of(response)`` decodes a patch response into a ``PartialEnvelope``.
 It raises ``AssertionError`` when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
-``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+``PartialEnvelope`` wraps a raw mapping, or envelope objects through ``PartialEnvelope.from_envelope(envelope)`` or the keyword form ``PartialEnvelope(envelope=envelope)``, and exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+For a view built from objects, ``data`` serializes once and returns the same mapping on every read.
 ``zone_targets`` lists the zone of every op that addresses one, the ``zone`` a ``refresh`` names on itself included, so a published ``Patches(None).refresh(zone="results")`` reads as ``["results"]``.
 ``html_for_zone`` raises ``AssertionError`` when no op targets the named zone.
 See :doc:`/content/topics/partial-rendering/index` for the zone and patch model these helpers exercise.
@@ -479,6 +480,11 @@ Extra keyword arguments are forwarded to the underlying ``page.render`` call as 
        request = RequestFactory().get("/?debug=1")
        html = render_page("notes/pages/page.py", request)
        assert "Notes" in html
+
+``render_component_by_name`` renders one component the same way.
+It takes ``at``, the template path the component is referenced from, which is what drives which components are visible.
+The same path is seeded as the ambient template path of the body, so a nested ``{% component %}`` resolves from it too, and a ``context`` entry naming that key wins over the seed.
+Pass ``collector=`` a ``StaticCollector`` to capture the co-located assets of the component and of anything it nests.
 
 Capture signals
 ---------------
@@ -609,9 +615,6 @@ HTML utilities
 --------------
 
 ``next.testing.html`` provides assertions for inspecting rendered HTML fragments.
-``render_component_by_name`` takes ``at``, the template path the component is referenced from, which is what drives which components are visible.
-The same path is seeded as the ambient template path of the body, so a nested ``{% component %}`` resolves from it too, and a ``context`` entry naming that key wins over the seed.
-Pass ``collector=`` a ``StaticCollector`` to capture the co-located assets of the component and of anything it nests.
 
 .. code-block:: python
    :caption: html assertions
@@ -869,6 +872,7 @@ Pytest can run ``manage.py check`` as part of the suite.
 
 ``call_command("check")`` on its own raises only when a check reports an error, so a framework warning such as a shadowed component name passes silently.
 A suite that wants the warnings gated too passes ``fail_level="WARNING"``.
+A test that rewrites the page or component tree in place and runs the checks again calls ``reset_check_caches()`` from ``next.testing`` first, because the per-run check caches otherwise keep the tree the first run scanned.
 
 That run already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile.
 Eight framework checks are registered with ``deploy=True`` and stay out of it, because each describes a deployment rather than a development checkout.

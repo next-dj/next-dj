@@ -101,7 +101,7 @@ Checklist for settings and system checks.
    Read the code path that implements it (start from ``next/conf/defaults.py`` for settings).
    Write or update the canonical description in ``ref/settings.rst`` or ``ref/system-checks.rst``, then make every other mention a sentence-level cross-reference or a ``.. seealso::`` pointer.
    This prevents the divergence where ``ref/`` and ``deployment/`` describe the same flag with different meanings.
-   When you add or change a ``next.*.checks`` error or warning id, update the tables in ``ref/system-checks.rst`` in the same change.
+   When you add, change, or retire a ``next.*.checks`` error or warning id, update the tables in ``ref/system-checks.rst`` in the same change, and never reuse a retired code for another condition, as :doc:`/content/ref/system-checks` states.
 
 Version numbers and compatibility notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

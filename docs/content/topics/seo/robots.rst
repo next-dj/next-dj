@@ -137,5 +137,5 @@ See also
    :doc:`sitemaps` for the document the ``Sitemap:`` line points at.
    :doc:`quickstart` for the first robots file of a site.
    :doc:`/content/ref/seo` for ``RobotsRule`` and the ``next.seo.urls`` include.
-   :repo:`wiki <tree/main/examples/wiki>` for ``rules`` per request.
+   :repo:`wiki <tree/main/examples/wiki>` for a ``robots.py`` that keeps AI training crawlers out of the whole site.
    :repo:`shortener <tree/main/examples/shortener>` for a static ``robots.txt``.

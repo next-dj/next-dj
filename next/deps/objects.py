@@ -263,9 +263,7 @@ def _visible_row(
     cached = cache.get(key)
     if cached is not _CACHE_MISS:
         return cast("Model", cached)
-    scope = resolver._resolve_callable_dependency(
-        SCOPE_DEPENDENCY, context, param=param
-    )
+    scope = resolver.resolve_callable_dependency(SCOPE_DEPENDENCY, context, param=param)
     query = rows.visible_to(scope)
     try:
         for lookup in lookups:

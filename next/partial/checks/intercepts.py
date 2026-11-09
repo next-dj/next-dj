@@ -46,7 +46,7 @@ def _shared_with_target(
 
 
 @register(Tags.templates, NEXT)
-def check_intercept_zones_unique(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_zones_unique(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an intercept zone its target or a sibling intercept declares (`next.E173`).
 
     Of two intercepts sharing a zone the one later in file order never serves it.
@@ -120,7 +120,7 @@ def _body_error(
 
 
 @register(Tags.templates, NEXT)
-def check_intercept_bodies(*args, **kwargs) -> list[CheckMessage]:
+def check_intercept_bodies(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an intercept page with no template or no standalone zone (`next.E174`).
 
     A body-less `page.py` passing declarations down is spared, as `next.E012` spares it.

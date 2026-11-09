@@ -158,12 +158,12 @@ def x_default_url(pairs: Sequence[tuple[str, str]]) -> str | None:
     return dict(pairs).get(settings.LANGUAGE_CODE)
 
 
-def forget_translated_urls(**kwargs) -> None:
+def forget_translated_urls(**kwargs: object) -> None:
     """Drop the hreflang memo after a URLconf, router or language change."""
     _translated.clear()
 
 
-def forget_urlconf_translations(*, setting: str, **kwargs) -> None:
+def forget_urlconf_translations(*, setting: str, **kwargs: object) -> None:
     if setting in _URLCONF_SETTINGS:
         _translated.clear()
 

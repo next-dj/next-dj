@@ -78,7 +78,7 @@ Which symbols are safe to depend on
 
 Two rules define the public surface.
 First, anything exported from a top-level ``next.*`` package is safe to import, and so is any module the :doc:`/content/ref/index` pages document with an ``automodule`` entry.
-The ``next.testing`` submodules are documented that way, so :doc:`/content/intro/tutorial05` imports ``SignalRecorder`` from ``next.testing.capture`` and :doc:`/content/topics/testing` imports ``NextClient`` and ``eager_load_pages`` from ``next.testing.client`` and ``next.testing.loaders`` directly.
+The ``next.testing`` submodules are documented that way, so :doc:`/content/intro/tutorial05` imports ``SignalRecorder`` from ``next.testing.capture`` and :doc:`/content/topics/testing` imports ``NextClient`` from ``next.testing.client`` directly.
 
 Second, symbols whose names start with a single underscore are internal and may change without notice, even when they appear in a module ``__all__``.
 The underscore rule is binding and overrides any incidental re-export.

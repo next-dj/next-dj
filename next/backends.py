@@ -103,8 +103,6 @@ def instantiate_backend[T](klass: type[T], config: Mapping[str, Any]) -> T:
 def backend_entries(setting: str) -> list[dict[str, Any]]:
     """Return the dict entries under one list-valued framework settings key."""
     raw = getattr(next_framework_settings, setting, [])
-    if not isinstance(raw, list):
-        return []
     return [entry for entry in raw if isinstance(entry, dict)]
 
 

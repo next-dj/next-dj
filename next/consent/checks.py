@@ -127,7 +127,7 @@ def _server_render_errors(scope: Mapping[str, object]) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_consent_settings(*args, **kwargs) -> list[CheckMessage]:
+def check_consent_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the keys (E035), the render mode (E145) and the backend (E137)."""
     scope = raw_scope("CONSENT")
     if scope is None:
@@ -140,7 +140,7 @@ def check_consent_settings(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_consent_categories(*args, **kwargs) -> list[CheckMessage]:
+def check_consent_categories(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report an unusable category list (E135) and a name the cookie cannot carry."""
     return _listed_categories() + _unsafe_categories()
 
@@ -210,7 +210,7 @@ def _max_age_errors(options: Mapping[str, object]) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_consent_cookie_options(*args, **kwargs) -> list[CheckMessage]:
+def check_consent_cookie_options(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the cookie `samesite` (E150, W125) and `max_age` (E151) options."""
     scope = raw_scope("CONSENT")
     options = None if scope is None else _cookie_options(scope)
@@ -220,7 +220,7 @@ def check_consent_cookie_options(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT, deploy=True)
-def check_consent_cookie_secure(*args, **kwargs) -> list[CheckMessage]:
+def check_consent_cookie_secure(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when the session cookie is Secure and the consent cookie is not (W119)."""
     if not getattr(settings, "SESSION_COOKIE_SECURE", False):
         return []

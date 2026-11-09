@@ -44,7 +44,7 @@ GitHub Actions runs the same work split across jobs, and adds the documentation 
      - ``make lint-js``, ``make type-check-js``, ``make test-js-coverage``
      - ``test-js`` job
    * - Documentation
-     - ``make docs``
+     - ``make docs``, ``make docs-linkcheck``
      - ``docs`` job
    * - Documentation prose
      - ``make docs-lint``
@@ -69,27 +69,28 @@ Benchmarks run with ``-p no:randomly``, because a paired comparison needs the sa
 Test coverage
 -------------
 
-The suite runs with ``--cov=next`` and ``--cov-fail-under=100``, so a single uncovered line in ``next/`` fails the run.
+The suite runs with ``--cov=next`` and ``--cov-fail-under=100``, so a single uncovered line or branch in ``next/`` fails the run.
 The gate is identical locally and in continuous integration, which runs the suite against the installed wheel rather than the source tree.
 A ``[tool.coverage.paths]`` mapping collapses ``next/`` and ``*/site-packages/next/`` so the two runs report the same numbers.
 The ``test`` job starts a Redis service and sets ``REDIS_URL``, so ``tests/realtime/test_integration.py`` runs against a real server there, and a local run reaches it with ``REDIS_URL=redis://localhost:6379/0 make test``.
 
-Most system check modules are excluded from that gate.
-The ``omit`` list in ``pyproject.toml`` names ``next/checks/``, the ``checks.py`` of ``apps``, ``components``, ``conf``, ``consent``, ``realtime``, ``scripts``, ``server``, ``site``, and ``urls``, and the whole ``checks/`` package of ``forms``, ``pages``, ``partial``, and ``seo``.
-``next/static/checks.py`` is not in that list and stays inside the gate, so a static check still carries its own tests.
-The generic ``*/settings.py`` entry lifts ``next/conf/settings.py`` out of the gate as well, which is why new configuration logic belongs in another module of the ``conf`` area.
+Every system check module is measured like any other module, so each ``checks.py`` and ``checks/`` package of an area is held to the same gate.
+Coverage runs with ``branch = true``, so a branch no configuration can reach is removed rather than covered.
+The ``omit`` list in ``pyproject.toml`` names only tests, migrations, and the ``config/settings.py``, ``config/wsgi.py``, ``config/asgi.py``, and ``manage.py`` of example and test projects, so ``next/conf/settings.py`` stays inside the gate.
 
 Each example project carries its own gate.
 ``make test-examples`` requires a ``tests/`` directory or a ``tests.py`` file in every example that ships a ``manage.py``, and it runs each one with ``--cov-fail-under=100``.
 An example that is partly covered fails the build in the same way a partly covered core module does.
 
 The client runtime has a matching gate.
-``vitest.config.ts`` sets a threshold of 100 for lines, branches, functions, and statements over ``next/client/*.ts``, with ``next/client/adapters.ts`` excluded as the seam that wraps browser globals the test environment cannot model.
+``vitest.config.ts`` sets a threshold of 100 for lines, branches, functions, and statements over ``next/client/*.ts`` and ``next/client/entries/*.ts``, with ``next/client/adapters.ts`` excluded as the seam that wraps browser globals the test environment cannot model.
 
 Lint and static types
 ---------------------
 
 Ruff runs with ``select = ["ALL"]`` and a line length of 88, with the ignores and per-file rules declared in ``pyproject.toml``.
+Private access across an object boundary fails ``SLF001``, with the Django and stdlib protocol names such as ``_meta`` and ``_default_manager`` allowed through ``flake8-self.extend-ignore-names``.
+``ANN002`` and ``ANN003`` hold outside the tests, so variadics are annotated ``*args: object, **kwargs: object``.
 The ``lint`` job runs ``ruff check next/`` and ``ruff format --check next/``, so a formatting drift fails the same way a rule violation does.
 ``make lint`` covers ``next/``, ``tests/``, and ``examples/``, which is wider than the job, and keeping those directories clean avoids a surprise in review.
 

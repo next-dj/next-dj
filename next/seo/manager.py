@@ -179,7 +179,7 @@ class SeoManager(BackendListManager[SitemapBackend]):
         self._ensure_backends()
         return tuple(self._backends)
 
-    def reset(self, **kwargs) -> None:
+    def reset(self, **kwargs: object) -> None:
         """Clear the backends and every discovered source, and change the version.
 
         The mounted routes depend on the sources, so the URL caches are cleared too.
@@ -287,7 +287,7 @@ class SeoManager(BackendListManager[SitemapBackend]):
 seo_manager = SeoManager()
 
 
-def forget_seo_sources(**kwargs) -> None:
+def forget_seo_sources(**kwargs: object) -> None:
     """Reset the SEO manager, as the receiver of the settings and router reloads."""
     seo_manager.reset()
 

@@ -41,11 +41,12 @@ Layouts compose by string substitution
 The rejected alternative is Django template inheritance.
 A page rendered through ``{% extends %}`` names its parent in its own first line, which puts the layout chain back into the templates and defeats the filesystem rule the rest of the framework keeps.
 next.dj composes instead.
-The loader walks ancestor directories, reads each ``layout.djx``, and substitutes the page body into the single ``{% template %}`` slot the layout declares.
+The loader walks ancestor directories, reads each ``layout.djx``, and substitutes the page body into the single ``{% template %}`` placeholder the layout declares.
 
-The cost is one slot per layout and no override across the chain.
+The cost is one placeholder per layout and no override across the chain.
 A layout offers exactly one placeholder, the substitution fills it once, and a layout that declares no placeholder contributes nothing to the composed template.
 Composition produces one flat template rather than a parent and a child, so a page cannot override a named region of an ancestor the way ``{% block sidebar %}`` would, and there is no ``{{ block.super }}`` to call.
+
 The one override the chain allows is cutting it, a layout that opens with ``{% layout root %}`` stops composition there so a section brings its own document shell.
 A shared region that varies per page is expressed through ``@context`` and a component rather than through a block override.
 The head is the one region a page fills through data rather than markup, a ``metadata`` declaration in ``page.py`` that one ``{% metadata %}`` tag in the root layout renders, see :doc:`/content/topics/seo/metadata`.
@@ -84,8 +85,7 @@ Stable URLs
 
 The rejected alternative is a hand-written route name per view, which lets a name stay put while the path moves.
 Every page gets a stable URL name derived from its directory path instead, so a reader can reverse it without consulting a URL configuration file.
-The cost lands on refactoring.
-Moving a directory changes both the URL and its name, and every ``{% url %}`` call has to be updated to match.
+The cost is the rename cost stated under *Filesystem as a single source of truth*.
 
 Forms and form dispatch
 -----------------------

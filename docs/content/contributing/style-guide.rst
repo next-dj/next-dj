@@ -15,7 +15,7 @@ Language and tone
 
 The documentation is written in English.
 The voice is third person present tense.
-Avoid marketing tone, exclamation marks, and the words ``obviously``, ``simply``, ``just``.
+Avoid marketing tone, exclamation marks, and the words ``obviously``, ``simply``, ``just``, ``easily``, and ``of course``.
 
 Punctuation
 -----------

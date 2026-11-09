@@ -45,7 +45,7 @@ An area adds a module when it owns the concern, not to complete a template.
 
 ``dispatch.py``, ``markers.py``, ``providers.py``, ``signals.py``, ``checks.py``
    Appear when the area dispatches actions, declares frozen dataclass markers, provides dependencies, emits signals, or validates configuration.
-   ``checks.py`` becomes a package of one-word submodules once one file stops holding the area's checks, as it has in ``pages``, ``forms``, and ``partial``.
+   ``checks.py`` becomes a package of one-word submodules once one file stops holding the area's checks, as it has in ``pages``, ``forms``, ``partial``, and ``seo``, and either form joins the imports and ``CHECK_MODULES`` of ``next/checks/catalog.py``, which ``tests/checks/test_catalog.py`` enforces.
 
 The number of submodules differs widely between areas, so no area serves as a size template for another.
 

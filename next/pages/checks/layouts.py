@@ -142,7 +142,7 @@ def iter_layout_ancestry(router_manager: RouterManager) -> Iterator[Path]:
 
 
 @register(Tags.templates, NEXT)
-def check_layout_templates(*args, **kwargs) -> list[CheckMessage]:
+def check_layout_templates(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Check every `layout.djx` for its placeholder, root marker and document shell."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:
@@ -176,7 +176,9 @@ def _stray_marker_report(source: Path, kind: str) -> Iterator[CheckMessage]:
 
 
 @register(Tags.templates, NEXT)
-def check_root_marker_outside_layouts(*args, **kwargs) -> list[CheckMessage]:
+def check_root_marker_outside_layouts(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn about a root marker in a `template.djx` or component template."""
     router_manager, _init_errors = get_router_manager()
     if router_manager is None:

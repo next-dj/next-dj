@@ -28,6 +28,8 @@ Contributions are welcome. `next.dj` aims to make Django development accessible 
     <img src="./docs/_static/img/evrone_sponsored.svg" width="130px" alt="Sponsored by Evrone" />
 </a>
 
+Sponsorship is welcome. It funds maintainer time for triage and review. To sponsor next.dj, open an issue in the repository.
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

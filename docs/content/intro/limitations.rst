@@ -25,7 +25,7 @@ An async workload lives outside the routed page tree, behind a task queue or an 
 
 The one exception is the realtime layer.
 ``TopicStream`` provides broker-backed delivery over SSE and WebSocket, and its topic transforms and upstream handlers may be async, while ``PatchEventStream`` remains the manual source escape hatch.
-It refuses a sync source under ASGI and an async source under WSGI, because Django buffers a mismatched iterator fully before the first byte.
+``PatchEventStream`` refuses a sync source under ASGI and an async source under WSGI, because Django buffers a mismatched iterator fully before the first byte.
 See :doc:`/content/topics/partial-rendering/sse` for the source contract and the heartbeat options.
 
 No suspense, optional WebSockets
@@ -34,6 +34,7 @@ No suspense, optional WebSockets
 Zones are a lazy reveal and a poll, not an asynchronous streaming boundary.
 A ``lazy=`` zone fills through a later client round trip, and a ``poll=`` zone re-fetches on a client timer.
 A slow zone holds its response instead of streaming a placeholder, because there is no server-side suspense flush.
+
 Realtime offers WebSocket first when the process mounts the socket through the built-in ``WebSocketApp`` under ASGI, and SSE otherwise.
 Both transports carry server-authored notifications from server to client, and form actions remain the path for client mutations.
 The WebSocket also carries upstream events from the client to a registered handler and, for actions that opt in, a tunnel for form posts, so login, logout, and every action that sets a cookie keep the default ``transport="http"``.
@@ -58,19 +59,5 @@ There is no request-free resolution mode, so a background job that wants injecte
 What the model costs
 --------------------
 
-The sections above are boundaries the framework does not cross.
-The model also charges for what it does deliver, and the price lands in four places.
-
-A rename is a behaviour change.
-   Moving a directory moves the URL, the URL name, the layout chain, and the ``page.py`` chain that decides its access at once, and no static check finds a ``{% url %}`` call left pointing at the old name.
-
-A context name is a contract no tool checks.
-   Renaming a published key, or the parameter that reads it, breaks the link silently, because a parameter no provider handles resolves to its default and to ``None`` when it has none.
-
-A published context key shadows a URL segment of the same name.
-   The by-name provider runs ahead of the URL and query providers, so ``Depends("name")`` and ``DUrl["segment"]`` are the forms that survive both a rename and a collision.
-
-Registration happens on import.
-   A form action is live as soon as its module is imported, and its endpoint accepts a POST from any visitor until the class, its page, or a ``page.py`` above it declares a guard, which reaches further than a view behind a URL entry would.
-
-:doc:`/content/misc/design-philosophy` states the rejected alternative and the cost beside every principle.
+The model also charges for what it delivers, through a rename that moves a URL, a context name no tool checks, a context key that shadows a URL segment, and an action that is live from import.
+:doc:`/content/misc/design-philosophy` states each cost beside the principle that incurs it.

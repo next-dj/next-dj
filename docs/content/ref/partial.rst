@@ -69,7 +69,8 @@ API tiers
 
 The surface splits into tiers that describe the intended audience for each name.
 The lists below are representative.
-The autodoc blocks under `Public API`_ are the exhaustive surface of every name the tiers list, apart from the ``signals`` and ``checks`` submodules, which are documented on the pages `Signals`_ and `System checks`_ point at.
+The autodoc blocks under `Public API`_ cover the Stable and Advanced tiers and part of the framework machinery, and a machinery name without an entry of its own is listed here only.
+The ``signals`` and ``checks`` submodules are documented on the pages `Signals`_ and `System checks`_ point at.
 
 Stable.
    ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``, ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``, ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, ``LayerHrefWithoutZoneError``, and ``OriginUnavailableError``.
@@ -81,6 +82,7 @@ Advanced.
    ``shape_partial``, ``PartialProtocolBackend``, ``JsonPartialProtocolBackend``, and ``StreamMeta`` are imported from ``next.partial``.
    ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to ``morph(zone=, page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
+   ``DedupeMode``, the ``"key"`` or ``"id"`` literal that the ``dedupe=`` argument of ``append`` and ``prepend`` takes, lives in ``next.partial.patches``.
    ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
    The stream control frames and position Protocols live in ``next.partial.stream``.
    The custom-verb exceptions live in ``next.partial.errors``.
@@ -117,6 +119,8 @@ Detecting a partial request
 ``@context(..., zone="name")`` skips the provider call outright on a GET for another zone.
 ``zone_requested`` stays the in-body guard for a provider of a lazy zone, whose work has to be skipped on a full render too.
 
+``set_partial_vary`` in ``next.partial.headers`` stamps the ``VARY_HEADERS`` tuple on a response that a ``render()`` escape hatch builds itself.
+
 .. autofunction:: next.partial.is_partial_request
 
 .. autofunction:: next.partial.partial_intent
@@ -128,6 +132,10 @@ Detecting a partial request
 
 .. autoclass:: next.partial.headers.MergeMode
    :members:
+
+.. autofunction:: next.partial.headers.set_partial_vary
+
+.. autodata:: next.partial.headers.VARY_HEADERS
 
 Building patches
 ~~~~~~~~~~~~~~~~
@@ -174,6 +182,9 @@ See :doc:`/content/topics/partial-rendering/extending` for the end-to-end recipe
 
 .. autofunction:: next.partial.register_patch_op
 
+.. autoclass:: next.partial.registry.PatchOpRegistry
+   :members:
+
 Zones
 ~~~~~
 
@@ -199,7 +210,7 @@ Origin and authorization
 ``resolve_partial_origin`` is a thin helper that reads the host page that owns a zone out of the same-site ``X-Next-Origin`` header, falling back to the posted form origin, so a ``done`` step can hand the path to ``morph(zone=, page=)`` for a server out-of-band swap.
 The header is validated as sent, percent-encoded like the form origin, and its path is decoded the way Django builds ``request.path`` only once split from the query, so an encoded ``?`` stays in its segment.
 A header that is absent, invalid, or names no page yields to the form origin.
-It stays importable from ``next.partial`` but sits in the Advanced tier, the canonical done choreography addresses the foreign zone through ``morph(zone=, page=, url_kwargs=)``.
+It stays importable from ``next.partial`` in the Advanced tier, because only the page-addressed done choreography needs it and the default accept-and-re-GET choreography does not.
 ``OriginSource``, which discriminates the two sources, lives in ``next.partial.origin``.
 
 .. autofunction:: next.partial.resolve_partial_origin

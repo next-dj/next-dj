@@ -14,7 +14,9 @@ from .sources import iter_registered_actions
 
 
 @register(NEXT)
-def check_component_widget_components(*args, **kwargs) -> list[CheckMessage]:
+def check_component_widget_components(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a ComponentWidget names a component that does not resolve."""
     base = getattr(settings, "BASE_DIR", None)
     seen: set[str] = set()
@@ -47,7 +49,9 @@ def check_component_widget_components(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_component_widget_field_types(*args, **kwargs) -> list[CheckMessage]:
+def check_component_widget_field_types(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a ComponentWidget mispairs with a file field or a MultiValueField."""
     messages: list[CheckMessage] = []
     for meta in iter_registered_actions():

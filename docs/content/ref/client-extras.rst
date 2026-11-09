@@ -129,7 +129,7 @@ A vendor adapter counts page views from ``Next.navigation.current()`` and ``next
 The init payload
 ----------------
 
-The framework reserves four keys of the ``Next._init`` payload for this surface, beside ``$csrf`` and ``$dev``.
+The init payload carries four keys this surface reads, beside ``$csrf`` and ``$dev``, and :doc:`/content/topics/static-assets/js-context` lists every reserved key.
 
 .. list-table::
    :header-rows: 1
@@ -141,7 +141,7 @@ The framework reserves four keys of the ``Next._init`` payload for this surface,
      - The URLs of the lazy chunks through the staticfiles storage, see :doc:`/content/topics/static-assets/js-context`.
    * - ``$realtime``
      - ``{protocol, transports, content_type}``, the stream protocol advertised by the server and the selected partial response content type used by registered stream parse hooks.
-       The key is left out while ``sse`` is the only transport and the partial content type is the stock one, and the runtime then assumes those defaults.
+       The key is left out while ``sse`` is the only transport and the partial content type is the stock one, and the runtime then assumes those defaults, see :doc:`/content/topics/realtime`.
    * - ``$scripts``
      - The manifest, one ``{name, src?, init?, strategy, category, attrs, nonce?}`` per script the server did not write, in declaration order.
        The runtime drops an ``attrs`` name outside the set :doc:`/content/topics/scripts/declaring` lists.

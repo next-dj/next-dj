@@ -86,7 +86,7 @@ Signals
 Checks
 ------
 
-``next.seo.checks`` is a package, and importing it registers every check below under the ``seo`` tag beside ``next``.
+``next.seo.checks`` is a package, and importing it registers every check below under the ``seo`` tag beside ``next``, most of them under Django's ``urls`` tag as well.
 The codes each one reports and their conditions live in :doc:`system-checks`.
 
 .. csv-table::

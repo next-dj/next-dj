@@ -31,19 +31,9 @@ _IMPORTED_MODULE_SOURCE = "from next.forms import Form\n\n\n" + "\n".join(
 def _restore_action_registry():
     """Snapshot and restore the default backend registry around the bench."""
     backend = form_action_manager.default_backend
-    registry = dict(backend._registry)
-    uid_to_name = dict(backend._uid_to_name)
-    name_index = dict(backend._name_index)
-    url_cache = dict(backend._url_cache)
+    snapshot = backend.snapshot()
     yield
-    backend._registry.clear()
-    backend._registry.update(registry)
-    backend._uid_to_name.clear()
-    backend._uid_to_name.update(uid_to_name)
-    backend._name_index.clear()
-    backend._name_index.update(name_index)
-    backend._url_cache.clear()
-    backend._url_cache.update(url_cache)
+    backend.restore(snapshot)
 
 
 @pytest.fixture()

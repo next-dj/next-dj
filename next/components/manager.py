@@ -64,7 +64,8 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
         composite = CompositeComponentRenderer(ml, tl)
         self._component_renderer = ComponentRenderer([composite, simple])
 
-    def _reset_render_pipeline(self) -> None:
+    def forget_render_pipeline(self) -> None:
+        """Drop the template loader and renderer, rebuilt on next access."""
         self._template_loader = None
         self._component_renderer = None
 
@@ -87,9 +88,9 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
         self._ensure_render_pipeline()
         return cast("ComponentRenderer", self._component_renderer)
 
-    def _invalidate(self) -> None:
+    def reset(self) -> None:
         """Drop cached backends and the render pipeline, rebuilt on next access."""
-        self._reset_render_pipeline()
+        self.forget_render_pipeline()
         self._backends = []
         self._walk_registered_folders.clear()
         self._loaded = False
@@ -100,7 +101,7 @@ class ComponentsManager(BackendListManager[ComponentsBackend]):
 
         The render pipeline and router-walk claims go too. `notify=False` stays silent.
         """
-        self._invalidate()
+        self.reset()
         self._backends = load_backends(
             backend_entries("COMPONENT_BACKENDS"),
             base=ComponentsBackend,
@@ -173,18 +174,18 @@ def register_components_folder_from_router_walk(
     components_manager.register_router_walk_folder(folder, pages_root, scope_relative)
 
 
-def forget_component_backends(**kwargs) -> None:
+def forget_component_backends(**kwargs: object) -> None:
     """Drop cached component backends when framework settings reload."""
-    components_manager._invalidate()
+    components_manager.reset()
 
 
-def forget_render_pipeline(*, setting: str, **kwargs) -> None:
+def forget_render_pipeline(*, setting: str, **kwargs: object) -> None:
     """Drop the render pipeline when Django reports a `TEMPLATES` change.
 
     A compiled template pins its engine, and `settings_reloaded` skips `TEMPLATES`.
     """
     if setting == "TEMPLATES":
-        components_manager._reset_render_pipeline()
+        components_manager.forget_render_pipeline()
 
 
 __all__ = [

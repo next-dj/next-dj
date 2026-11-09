@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 def page_reverse(
-    path_template: str = "", /, *, namespace: str = app_name, **kwargs
+    path_template: str = "", /, *, namespace: str = app_name, **kwargs: object
 ) -> str:
     """Reverse a file-router page URL from its directory-tree template."""
     return _reverse(namespace, path_template, kwargs)
@@ -43,7 +43,7 @@ def _reverse(namespace: str, path_template: str, kwargs: dict[str, Any]) -> str:
 page_reverse_lazy = lazy(page_reverse, str)
 
 
-def with_query(base: str, **overrides) -> str:
+def with_query(base: str, **overrides: object) -> str:
     """Return `base` with its query string updated by `overrides`.
 
     A `None` or empty list drops its key and a non-empty one sets a multi-value key.

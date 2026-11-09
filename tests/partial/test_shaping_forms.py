@@ -1,8 +1,42 @@
-import pytest
+from collections.abc import Iterator
 
+import pytest
+from django import forms
+from django.http import HttpRequest, HttpResponse
+
+from next.forms import ActionRegistration
+from next.forms.manager import form_action_manager
 from next.partial.headers import CONTENT_TYPE
 from next.testing import NextClient, envelope_of
 from tests.support import action_uid
+from tests.support.cases.formset_errors import CrossRowFormSet, ErrorRow
+
+
+def _cross_row_rows() -> tuple[type[forms.BaseFormSet], dict]:
+    formset_class = forms.formset_factory(ErrorRow, formset=CrossRowFormSet, extra=0)
+    return formset_class, {"initial": [{}]}
+
+
+def _save_rows(request: HttpRequest, form: forms.BaseFormSet) -> HttpResponse:
+    return HttpResponse(f"saved {form.total_form_count()} on {request.method}")
+
+
+@pytest.fixture()
+def cross_row_action() -> Iterator[str]:
+    """Register a formset action whose own clean always fails, rolled back after."""
+    backend = form_action_manager.default_backend
+    snapshot = backend.snapshot()
+    form_action_manager.register_action(
+        ActionRegistration(
+            name="cross_row_rows",
+            file_path=__file__,
+            scope="shared",
+            handler=_save_rows,
+            form_class=_cross_row_rows,
+        )
+    )
+    yield "cross_row_rows"
+    backend.restore(snapshot)
 
 
 class TestInvalidEnvelopeAddressesOnlyTheFailedForm:
@@ -66,6 +100,27 @@ class TestInvalidFormMetaIsMachineReadable:
             "uid": action_uid("rename_board_form"),
             "valid": False,
             "errors": {"title": ["This field is required."]},
+        }
+
+
+class TestInvalidFormsetMetaCarriesNonFormErrors:
+    """A formset rejected only across rows still reports invalid form meta."""
+
+    def test_formset_non_form_failure_meta_is_invalid_with_all_key(
+        self, next_client: NextClient, cross_row_action: str
+    ) -> None:
+        response = next_client.post_action(
+            cross_row_action,
+            {"form-TOTAL_FORMS": "1", "form-INITIAL_FORMS": "0", "form-0-title": "ok"},
+            origin="/board_forms/",
+            partial=True,
+        )
+        assert response["X-Next-Form"] == "invalid"
+        meta = envelope_of(response).form_meta()
+        assert meta == {
+            "uid": action_uid(cross_row_action),
+            "valid": False,
+            "errors": {"__all__": ["Cross-row failure."]},
         }
 
 

@@ -14,7 +14,7 @@ from .nodes import forms_in_loop
 
 
 @register(Tags.templates, NEXT)
-def check_repeated_form_has_key(*args, **kwargs) -> list[CheckMessage]:
+def check_repeated_form_has_key(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when a looped `{% form %}` has no key or zone (`next.W070`)."""
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():
@@ -38,7 +38,9 @@ def check_repeated_form_has_key(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_form_backend_partial_aware(*args, **kwargs) -> list[CheckMessage]:
+def check_form_backend_partial_aware(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when partial rendering is on but a form backend is not aware (`next.W068`).
 
     An override of `shape_response` without the partial branch serves a full page.

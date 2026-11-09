@@ -117,7 +117,7 @@ def noindexed(meta: Metadata, *, request: HttpRequest | None = None) -> bool:
     return not site_indexable(request) or meta.noindex
 
 
-def forget_metadata_scope(**kwargs) -> None:
+def forget_metadata_scope(**kwargs: object) -> None:
     """Drop the memoised settings tier and options, so a reload takes effect."""
     site_tier.cache_clear()
     metadata_options.cache_clear()

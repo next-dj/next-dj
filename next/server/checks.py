@@ -16,7 +16,7 @@ _OWN_APP = "next"
 
 
 @register(NEXT)
-def check_dev_server(*args, **kwargs) -> list[CheckMessage]:
+def check_dev_server(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a `DEV_SERVER` path that names no `ASGIServer` class (`next.E212`)."""
     path = getattr(next_framework_settings, DEV_SERVER_KEY)
     if path == DEFAULTS[DEV_SERVER_KEY]:
@@ -36,7 +36,9 @@ def check_dev_server(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_runserver_override_order(*args, **kwargs) -> list[CheckMessage]:
+def check_runserver_override_order(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when an app above next ships the `runserver` that runs (`next.W148`).
 
     Django runs the command of the app listed first, so the override silently drops.

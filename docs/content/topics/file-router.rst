@@ -638,7 +638,7 @@ Each invocation then emits a ``router_reloaded`` signal with the manager class a
 A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
 
 A reload also happens without an explicit call.
-The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS`` or ``ROOT_URLCONF`` moves, because a file router caches its patterns per application name and reads its ``pages()`` includes from the root URLconf.
+The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` moves, because a file router caches its patterns per application name, reads its ``pages()`` includes from the root URLconf, and places its relative ``DIRS`` roots under ``BASE_DIR``.
 A test that swaps the application list or the URLconf with :func:`~django.test.override_settings` therefore gets the routes of the swapped value rather than the ones built before it.
 See :doc:`/content/internals/url-router` for the full reload order and :doc:`/content/ref/signals` for the signal payloads.
 
@@ -654,7 +654,7 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a ``page.py`` that declares no access has no render function, no template attribute, and no loader-backed source, a ``layout.djx`` beside or above it counting for none.
+- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a ``page.py`` has no render function, no template attribute, and no loader-backed source, declares no access, passes no ``inherit_context=True`` context down, and serves no action of its directory, a ``layout.djx`` beside or above it counting for none.
 - ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
   It compares full routes, the prefixes of ``pages()`` includes too, so two trees placed onto the same URL are reported as well.
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.

@@ -26,7 +26,7 @@ _MESSAGE_MIDDLEWARE = "django.contrib.messages.middleware.MessageMiddleware"
 
 
 @register(NEXT)
-def check_form_action_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_form_action_collisions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag two `@action` calls that share a name but come from different handlers."""
     return [
         Error(
@@ -41,7 +41,9 @@ def check_form_action_collisions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_shared_action_name_collisions(*args, **kwargs) -> list[CheckMessage]:
+def check_shared_action_name_collisions(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when one shared action name is declared by two different modules."""
     return [
         Error(
@@ -59,7 +61,7 @@ def check_shared_action_name_collisions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_forms_outside_base_dir(*args, **kwargs) -> list[CheckMessage]:
+def check_forms_outside_base_dir(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn when form classes are declared outside BASE_DIR."""
     return [
         DjangoWarning(
@@ -72,7 +74,9 @@ def check_forms_outside_base_dir(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_invalid_form_meta_scope(*args, **kwargs) -> list[CheckMessage]:
+def check_invalid_form_meta_scope(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when a form class Meta.scope or an @action scope is invalid."""
     class_errors: list[CheckMessage] = [
         Error(
@@ -94,7 +98,9 @@ def check_invalid_form_meta_scope(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_invalid_action_transport(*args, **kwargs) -> list[CheckMessage]:
+def check_invalid_action_transport(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when an @action transport or a form class Meta.transport is unknown."""
     return [
         Error(
@@ -108,7 +114,9 @@ def check_invalid_action_transport(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_action_applied_to_class(*args, **kwargs) -> list[CheckMessage]:
+def check_action_applied_to_class(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when @action decorator was applied to a class."""
     return [
         Error(
@@ -121,7 +129,9 @@ def check_action_applied_to_class(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_instance_from_url_unknown_field(*args, **kwargs) -> list[CheckMessage]:
+def check_instance_from_url_unknown_field(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when Meta.instance_from_url references a field absent on the model."""
     return [
         Error(
@@ -138,7 +148,9 @@ def check_instance_from_url_unknown_field(*args, **kwargs) -> list[CheckMessage]
 
 
 @register(NEXT)
-def check_instance_from_url_on_non_model_form(*args, **kwargs) -> list[CheckMessage]:
+def check_instance_from_url_on_non_model_form(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Error when Meta.instance_from_url is set on a class that is not a ModelForm."""
     return [
         Error(
@@ -151,7 +163,9 @@ def check_instance_from_url_on_non_model_form(*args, **kwargs) -> list[CheckMess
 
 
 @register(NEXT)
-def check_action_guard_permissions(*args, **kwargs) -> list[CheckMessage]:
+def check_action_guard_permissions(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when permission_required is declared without django.contrib.auth.
 
     Only the static `ActionGuard` is inspected, the per-request hooks run user code.
@@ -193,7 +207,7 @@ def _open_actions() -> dict[Path, list[str]]:
 
 
 @register(NEXT)
-def check_public_actions(*args, **kwargs) -> list[CheckMessage]:
+def check_public_actions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about an action of a page tree that nothing guards (`next.W129`).
 
     It waits for the project to declare access, and the default login or a guard counts.
@@ -236,7 +250,7 @@ def _render_guarded_actions() -> dict[Path, list[str]]:
 
 
 @register(NEXT)
-def check_render_guarded_actions(*args, **kwargs) -> list[CheckMessage]:
+def check_render_guarded_actions(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about actions a page `render()` guards with no declaration (`next.W150`)."""
     if login_by_default():
         return []
@@ -258,7 +272,9 @@ def check_render_guarded_actions(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_declarations_without_page(*args, **kwargs) -> list[CheckMessage]:
+def check_declarations_without_page(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `page.py` with no body whose declaration binds nothing (`next.E166`).
 
     An action beside the file answers to its rule, so a directory with one passes.
@@ -304,7 +320,7 @@ def _vain_reach(branch: EmptyBranch) -> str:
 
 
 @register(NEXT)
-def check_empty_branches(*args, **kwargs) -> list[CheckMessage]:
+def check_empty_branches(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a directory of a page tree with no page and no action (`next.W128`).
 
     One warning names the outermost such directory, since one fix there fills it all.
@@ -335,7 +351,9 @@ def _context_objects(source: Path) -> tuple[str, ...]:
 
 
 @register(NEXT)
-def check_component_action_objects(*args, **kwargs) -> list[CheckMessage]:
+def check_component_action_objects(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `component.py` action whose permission names a context (`next.E165`).
 
     A POST renders no component, so the context is never there and the action refuses.
@@ -370,7 +388,9 @@ def _declares_success_message(target: object) -> bool:
 
 
 @register(NEXT)
-def check_success_message_framework(*args, **kwargs) -> list[CheckMessage]:
+def check_success_message_framework(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when Meta.success_message is declared without the messages framework."""
     has_app = "django.contrib.messages" in settings.INSTALLED_APPS
     has_middleware = middleware_listed(settings.MIDDLEWARE or (), _MESSAGE_MIDDLEWARE)
@@ -405,7 +425,9 @@ def _cookie_messages() -> bool:
 
 
 @register(NEXT)
-def check_tunneled_cookie_messages(*args, **kwargs) -> list[CheckMessage]:
+def check_tunneled_cookie_messages(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a socket-capable action flashes messages into a cookie.
 
     A tunneled reply cannot set a new cookie, so a flashed message refuses it.

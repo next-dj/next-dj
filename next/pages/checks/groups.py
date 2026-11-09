@@ -63,7 +63,9 @@ def _name_error(directory: TreeDirectory) -> CheckMessage:
 
 
 @register(NEXT)
-def check_parenthesised_directory_names(*args, **kwargs) -> list[CheckMessage]:
+def check_parenthesised_directory_names(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a parenthesised directory name the router cannot read (`next.E169`).
 
     A name is a route group `(identifier)` or a valid intercept, nothing in between.
@@ -95,7 +97,7 @@ def _lone_child(directory: TreeDirectory) -> Path | None:
 
 
 @register(NEXT)
-def check_pointless_route_groups(*args, **kwargs) -> list[CheckMessage]:
+def check_pointless_route_groups(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a route group that wraps one directory and adds nothing (`next.W137`).
 
     The group leaves the URL, so without a layout, page or components it does nothing.

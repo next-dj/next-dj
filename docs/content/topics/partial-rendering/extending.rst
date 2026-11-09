@@ -251,9 +251,10 @@ The constructor receives the whole ``PARTIAL_BACKENDS`` entry and exposes its ``
 A topic stream frames each message through ``stream_data(envelope, meta)``, where ``meta`` is a ``StreamMeta`` of ``server_time``, ``topic``, ``epoch``, and ``seq``.
 The base class builds the SSE frame from it, so a codec overrides this one method for both transports.
 The example overrides ``stream_data`` to put the metadata where its parse hook reads it.
+The ``PARTIAL_BACKENDS`` entry then names ``wire.streaming.StreamingWrappedJsonBackend`` in place of the first class.
 
 .. code-block:: python
-   :caption: wire/backends.py, carrying stream metadata
+   :caption: wire/streaming.py, carrying stream metadata
 
    import json
 

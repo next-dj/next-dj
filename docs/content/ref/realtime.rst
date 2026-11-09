@@ -330,7 +330,7 @@ Both shipped brokers draw epochs in that form, and a broker whose epochs take an
 A stream over several topics writes no ``id``, because one id cannot hold a cursor per topic, so it resumes through the resync alone.
 
 Three methods are the override points.
-``PatchStreamWriter.event_id(frame)`` in ``next.partial.sse`` receives a message or ``skip`` frame as a ``StreamPosition``, or the ``StreamHello``, and returns its id, ``None`` by default, and the writer drops an id holding CR, LF, or NUL.
+``PatchStreamWriter.event_id(frame)`` in ``next.partial.sse`` receives a message or ``skip`` frame as a ``StreamPosition``, or the ``StreamHello``, both from ``next.partial.stream``, and returns its id, ``None`` by default, and the writer drops an id holding CR, LF, or NUL.
 ``TopicStream.event_id(frame)`` returns the ``<epoch>:<seq>`` form for a single-topic stream.
 ``TopicStream.replay_cursors(request)`` returns the mapping of topic to ``Position`` the stream replays from, so a subclass that writes its own ids reads them back there.
 The stream calls it once the instance is built, so an override can read ``self.topics``.
@@ -1292,7 +1292,8 @@ Signals
 ``message_published`` fires after the broker accepts a publication, with ``ephemeral`` true for an unnumbered presence snapshot.
 ``upstream_received`` fires before an upstream handler runs, with the ``Upstream`` it gets.
 ``upstream_rejected`` fires for every ``up`` frame that is not delivered, with the ``error`` of its ack as ``reason``.
-All of them go out robust, so a raising receiver is logged and never fails the publication or the event.
+``message_published``, ``upstream_received``, and ``upstream_rejected`` go out robust, so a raising receiver is logged and never fails the publication or the event.
+``broker_backend_loaded`` is sent plainly like every other backend-loaded signal, so a receiver that raises fails the first broker access.
 ``stream_subscribed`` and ``stream_unsubscribed`` bracket the life of every ``TopicStream`` and ``TopicSocket``, the second with the ``duration`` and an ``UnsubscribeReason``.
 See :doc:`signals` for their payloads and :doc:`/content/topics/signals` for receiver usage.
 

@@ -19,7 +19,7 @@ def broadcast_vote(
     action_name: str = "",
     form: django_forms.Form | None = None,
     request: HttpRequest | None = None,
-    **kwargs,
+    **kwargs: object,
 ) -> None:
     """Publish a results-zone refresh after the vote transaction commits."""
     if action_name != VOTE_ACTION_NAME or form is None:
@@ -43,7 +43,7 @@ def _has_module_assets(collector: StaticCollector) -> bool:
     return any(asset.kind == "vue" for asset in scripts)
 
 
-def inject_vite_dev_client(sender: StaticCollector, **kwargs) -> None:
+def inject_vite_dev_client(sender: StaticCollector, **kwargs: object) -> None:
     """Prepend the Vite dev client so HMR can attach on pages with Vue assets."""
     if not _has_module_assets(sender):
         return

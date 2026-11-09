@@ -10,7 +10,7 @@ register = template.Library()
 
 
 @register.simple_tag(takes_context=True)
-def querystring(context: dict[str, Any], **overrides) -> str:
+def querystring(context: dict[str, Any], **overrides: object) -> str:
     """Return `request.GET` as a query string with overrides applied, `None` drops."""
     request = context.get("request")
     if request is None:

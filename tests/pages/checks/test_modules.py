@@ -3,9 +3,10 @@ from unittest.mock import patch
 
 import pytest
 
-from next.checks import check_component_module_imports, check_page_module_imports
 from next.components import ComponentInfo, FileComponentsBackend
+from next.components.checks import check_component_module_imports
 from next.components.loading import ModuleLoader
+from next.pages.checks import check_page_module_imports
 from tests.support import patch_checks_components_manager, patch_checks_router_manager
 
 

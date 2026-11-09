@@ -111,7 +111,7 @@ Review these when the project publishes ``TopicStream`` updates.
 - Keep SSE available as the fallback transport and verify a route through the production proxy.
 - Keep authorization on the guarded stream page and provide a stable topic authorizer for WebSocket subscriptions, see :doc:`/content/howto/stream-over-websockets`.
 - Keep ``ALLOWED_HOSTS``, ``CSRF_TRUSTED_ORIGINS`` and ``SECURE_PROXY_SSL_HEADER`` accurate, because the WebSocket Origin check follows Django's CSRF rule.
-- Store sessions on the server, because ``next.W142`` reports the signed-cookie engine under the default ticket binding, see :ref:`topics-realtime-signed-cookie`.
+- Store sessions on the server, because ``next.W142``, logged by ``WebSocketApp`` at startup, reports the signed-cookie engine under the default ticket binding, see :ref:`topics-realtime-signed-cookie`.
 - Set ``REALTIME['GATEWAY_TOKEN']`` from the environment when a gateway outside Python calls the ticket introspection endpoint.
 - Run a load test against the shared broker before launch, see :ref:`deployment-capacity`.
 - Treat topic delivery as best-effort notification and send an event that must not be lost through an outbox table, see :doc:`/content/howto/deliver-events-durably`.
@@ -157,7 +157,17 @@ A clean exit is required for the deployment to proceed.
 
 The ``--deploy`` flag is what matters here, because the framework registers its deployment checks for that flag alone and a plain ``check`` never runs them.
 A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile, and the deployment run repeats them.
-``next.W083`` reports an asset version that never moves, ``next.W090`` a client runtime bundle or lazy chunk the static files storage cannot serve, ``next.W110`` and ``next.W122`` a missing ``SITE["URL"]``, ``next.W111`` a closed site that still publishes crawler documents, ``next.W118`` a script over plain HTTP, ``next.W119`` an insecure consent cookie, ``next.W149`` a process-local realtime broker, and ``next.W151`` a Redis subscription pool left unbounded.
+``manage.py check --deploy`` adds these framework warnings.
+
+- ``next.W083`` reports an asset version that never moves.
+- ``next.W090`` reports a client runtime bundle or lazy chunk the static files storage cannot serve.
+- ``next.W110`` reports a missing ``SITE["URL"]``.
+- ``next.W122`` reports a missing ``SITE["URL"]`` while ``ALLOWED_HOSTS`` holds ``'*'``.
+- ``next.W111`` reports a closed site that still publishes crawler documents.
+- ``next.W118`` reports a script over plain HTTP.
+- ``next.W119`` reports an insecure consent cookie.
+- ``next.W149`` reports a process-local realtime broker.
+- ``next.W151`` reports a Redis subscription pool left at the redis-py default of 100 connections.
 
 See :ref:`ref-system-checks` for the full catalog.
 

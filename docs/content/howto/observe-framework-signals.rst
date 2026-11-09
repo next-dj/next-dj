@@ -84,7 +84,7 @@ The keyword names are fixed by the framework.
 ``form_validation_failed`` carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
 
 ``form_access_denied`` carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
-It fires when the origin page or a dynamic permission hook denies a request, never on the static ``ActionGuard`` path, which makes it the signal to audit refused form submissions.
+It fires when the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission on the bound form denies a request, never on the static ``ActionGuard`` path, which makes it the signal to audit refused form submissions.
 See :ref:`topics-forms-signals-form-access-denied` for the full contract.
 The ``request`` value is the live ``HttpRequest`` of the dispatch, so a receiver reads it synchronously and never stores it past the call.
 

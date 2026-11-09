@@ -62,13 +62,20 @@ When the new kind needs a tag shape that the bundled methods do not produce, add
 .. code-block:: python
    :caption: notes/backends.py
 
+   from django.http import HttpRequest
    from django.utils.html import escape
 
    from next.static import StaticFilesBackend
    from next.static.runtime import nonce_attr
 
    class BabelBackend(StaticFilesBackend):
-       def render_babel_tag(self, url: str, *, request=None, nonce=None) -> str:
+       def render_babel_tag(
+           self,
+           url: str,
+           *,
+           request: HttpRequest | None = None,
+           nonce: str | None = None,
+       ) -> str:
            return f'<script type="text/babel" src="{escape(url)}"{nonce_attr(nonce)}></script>'
 
 A renderer method builds markup the template engine never sees, so an override escapes the URL itself rather than relying on the engine to do it.

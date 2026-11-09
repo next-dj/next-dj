@@ -30,7 +30,7 @@ How do I run the development server
 -----------------------------------
 
 Run ``uv run python manage.py runserver``.
-The autoreloader picks up new and changed page directories without a restart.
+The autoreloader restarts the server when a ``page.py`` changes or a page directory appears or goes, and a ``template.djx`` edit shows on the next render, so no manual restart is needed.
 
 How do I deploy in production
 -----------------------------

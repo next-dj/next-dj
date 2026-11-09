@@ -27,10 +27,24 @@ class PartialEnvelope:
     The payload is rebuilt into the producer's envelope objects, not a second wire read.
     """
 
-    def __init__(self, data: dict[str, Any]) -> None:
-        """Wrap the decoded envelope mapping, rebuilt on the first read of it."""
-        self.data = data
-        self._parsed: Envelope | None = None
+    def __init__(
+        self, data: dict[str, Any] | None = None, *, envelope: Envelope | None = None
+    ) -> None:
+        """Wrap a decoded envelope mapping, or the objects passed as `envelope`."""
+        self._data = data
+        self._parsed = envelope
+
+    @classmethod
+    def from_envelope(cls, envelope: Envelope) -> PartialEnvelope:
+        """Wrap envelope objects directly, skipping the mapping round trip."""
+        return cls(envelope=envelope)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        """Return the raw mapping, serialized once from the envelope when absent."""
+        if self._data is None:
+            self._data = self._envelope().as_dict()
+        return self._data
 
     def _envelope(self) -> Envelope:
         """Return the envelope objects behind the mapping, built once per view.
@@ -38,7 +52,7 @@ class PartialEnvelope:
         Deferred so an unread view costs nothing and a malformed one fails where read.
         """
         if self._parsed is None:
-            self._parsed = Envelope.from_dict(self.data)
+            self._parsed = Envelope.from_dict(self._data or {})
         return self._parsed
 
     def _addressed(self, selector: str) -> list[str]:
@@ -119,7 +133,7 @@ def envelope_of(response: HttpResponse) -> PartialEnvelope:
     if content_type != backend.content_type:
         msg = f"response is not a patch envelope, content type is {content_type!r}"
         raise AssertionError(msg)
-    return PartialEnvelope(backend.deserialize_envelope(response.content).as_dict())
+    return PartialEnvelope.from_envelope(backend.deserialize_envelope(response.content))
 
 
 class NextClient(Client):
@@ -138,7 +152,7 @@ class NextClient(Client):
         partial: bool | str | tuple[str, ...] = False,
         version: str | None = None,
         headers: dict[str, str] | None = None,
-        **extra,
+        **extra: object,
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` from the `origin` page to its URL.
 
@@ -156,7 +170,10 @@ class NextClient(Client):
             sent[ZONE] = ",".join(partial)
         if version is not None:
             sent[VERSION] = version
-        return cast("HttpResponse", self.post(url, data=payload, headers=sent, **extra))
+        forwarded: dict[str, Any] = extra
+        return cast(
+            "HttpResponse", self.post(url, data=payload, headers=sent, **forwarded)
+        )
 
     def get_action_url(
         self, action_name: str, *, page: str | PathLike[str] | None = None
@@ -171,7 +188,7 @@ class NextClient(Client):
         *,
         version: str | None = None,
         headers: dict[str, str] | None = None,
-        **extra,
+        **extra: object,
     ) -> HttpResponse:
         """GET `url` as a partial request for the named zones.
 
@@ -183,7 +200,8 @@ class NextClient(Client):
         sent[ZONE] = names
         if version is not None:
             sent[VERSION] = version
-        return cast("HttpResponse", self.get(url, headers=sent, **extra))
+        forwarded: dict[str, Any] = extra
+        return cast("HttpResponse", self.get(url, headers=sent, **forwarded))
 
 
 __all__ = ["NextClient", "PartialEnvelope", "envelope_of"]

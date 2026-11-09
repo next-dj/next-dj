@@ -6,7 +6,7 @@ Add a custom stem
 Problem
 -------
 
-You want discovery to pick up a file named ``page.css`` next to ``template.djx``, or ``vendor.js`` inside a component folder, in addition to the default stems.
+You want discovery to pick up a ``page.css`` next to ``template.djx`` in place of ``template.css``, or a ``vendor.js`` inside a component folder that holds no ``component.js``.
 
 Solution
 --------

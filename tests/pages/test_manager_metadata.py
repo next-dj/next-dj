@@ -8,7 +8,6 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.template.response import TemplateResponse
 from django.test import Client, RequestFactory, override_settings
 
-from next.checks import reset_check_caches
 from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.pages import Page, PageMetadataConflictError, page
 from next.pages.loaders import load_page_module
@@ -18,7 +17,7 @@ from next.pages.metadata.chain import MetadataThunk
 from next.pages.metadata.markers import Segment, TitleSpec
 from next.pages.metadata.registry import MetadataRegistrations
 from next.seeding import METADATA_KEY
-from next.testing import assert_metadata, override_next_settings
+from next.testing import assert_metadata, override_next_settings, reset_check_caches
 from tests.support import (
     WITH_BASE,
     attribution,

@@ -61,7 +61,7 @@ def uninstall() -> None:
         _state.watcher_connected = False
 
 
-def _watch_next_filesystem(sender: object, **kwargs) -> None:
+def _watch_next_filesystem(sender: object, **kwargs: object) -> None:
     for path, glob in iter_all_autoreload_watch_specs():
         sender.watch_dir(path, glob)  # type: ignore[attr-defined]
 

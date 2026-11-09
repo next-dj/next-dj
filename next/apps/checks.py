@@ -16,7 +16,9 @@ from .templates import _BUILTIN_MODULES, _DJANGO_BACKEND
 
 
 @register(Tags.templates, NEXT)
-def check_django_templates_backend_present(*args, **kwargs) -> list[CheckMessage]:
+def check_django_templates_backend_present(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when no DjangoTemplates engine carries the next-dj tags."""
     engines = getattr(settings, "TEMPLATES", [])
     if any(engine.get("BACKEND") == _DJANGO_BACKEND for engine in engines):
@@ -50,7 +52,9 @@ def _iter_tag_library_modules() -> list[str]:
 
 
 @register(Tags.templates, NEXT)
-def check_builtin_tag_libraries_complete(*args, **kwargs) -> list[CheckMessage]:
+def check_builtin_tag_libraries_complete(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a tag library is not registered as a builtin (`next.W063`).
 
     A module left out of `_BUILTIN_MODULES` installs into no engine, so its tags fail.

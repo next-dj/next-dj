@@ -67,7 +67,7 @@ def _forget_backends() -> None:
     _state.memo = None
 
 
-def forget_watch_state(**kwargs) -> None:
+def forget_watch_state(**kwargs: object) -> None:
     """Drop everything the watch layer holds, so a reconfiguration is read again."""
     _forget_backends()
     forget_resolved_trees()

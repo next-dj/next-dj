@@ -514,7 +514,7 @@ class TestMalformedRouterSurvival:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
             ),
             mock.patch(
-                "next.urls.RouterFactory.create_backend",
+                "next.urls.ports.RouterAccessImpl.create_backend",
                 return_value=MalformedRootsRouter([tree]),
             ),
         ):

@@ -36,7 +36,7 @@ _ARGS_FORMAT_HINT = "Use [[args]] format."
 
 
 @register(NEXT)
-def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
+def check_pages_structure(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Check each router's pages tree for layouts, naming, and structure."""
     errors: list[CheckMessage] = []
 
@@ -86,12 +86,9 @@ def check_pages_structure(*args, **kwargs) -> list[CheckMessage]:
 
 def _configured_pages_dir_names() -> list[str]:
     """Return the `PAGES_DIR` name every `PAGE_BACKENDS` entry declares."""
-    configured = next_framework_settings.PAGE_BACKENDS
-    if not isinstance(configured, list):
-        return []
     return [
         name
-        for entry in configured
+        for entry in next_framework_settings.PAGE_BACKENDS
         if isinstance(entry, dict) and isinstance(name := entry.get("PAGES_DIR"), str)
         if name
     ]
@@ -128,7 +125,9 @@ def _holds_a_page(directory: Path) -> bool:
 
 
 @register(NEXT)
-def check_unrouted_working_directory_pages(*args, **kwargs) -> list[CheckMessage]:
+def check_unrouted_working_directory_pages(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when a pages tree beside the process is routed by nobody (`next.W002`).
 
     Nothing else reports this, since the other checks only walk trees routers report.
@@ -308,9 +307,6 @@ def _converter_error(converter: str) -> str | None:
 
 def _parameter_syntax_error(param_str: str) -> str | None:
     """Return why a `[param]` directory names no route, or `None` when it does."""
-    if not _is_bracket_segment(param_str):
-        return _PARAMETER_FORMAT_HINT
-
     content = param_str[1:-1]
     if ":" not in content:
         name = content.strip()
@@ -330,9 +326,6 @@ def _args_syntax_error(args_str: str) -> str | None:
 
     The name is read unstripped, since Django allows no whitespace in a route parameter.
     """
-    if not _is_args_segment(args_str):
-        return _ARGS_FORMAT_HINT
-
     content = args_str[2:-2]
     if not content.strip():
         return _ARGS_FORMAT_HINT

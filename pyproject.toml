@@ -189,25 +189,10 @@ source = ["next"]
 omit = [
     "*/tests/*",
     "*/migrations/*",
-    "*/settings.py",
+    "*/config/settings.py",
     "*/manage.py",
     "*/config/wsgi.py",
     "*/config/asgi.py",
-    # core
-    "*/next/checks/*",
-    "*/next/conf/checks.py",
-    "*/next/pages/checks/*",
-    "*/next/urls/checks.py",
-    "*/next/components/checks.py",
-    "*/next/forms/checks/*",
-    "*/next/partial/checks/*",
-    "*/next/realtime/checks.py",
-    "*/next/apps/checks.py",
-    "*/next/seo/checks/*",
-    "*/next/site/checks.py",
-    "*/next/consent/checks.py",
-    "*/next/scripts/checks.py",
-    "*/next/server/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and
@@ -257,9 +242,6 @@ select = ["ALL"]
 ignore = [
     # Framework-specific ignores
     "CPY",    # copyright notices at the top of files are not used here
-    "SLF001", # private member access (framework code needs this)
-    "ANN002", # missing type annotation for *args
-    "ANN003", # missing type annotation for **kwargs
 
     # Docstring rule conflicts - choose one of each conflicting pair
     "D203",   # incorrect-blank-line-before-class (conflicts with D211)
@@ -281,6 +263,7 @@ ignore = [
 # `DEFAULTS` is open for third-party keys and every value carries the shape of its own
 # key, so the one accessor over all of them can name no return narrower than `Any`
 "next/conf/settings.py" = ["ANN401"]
+"next/apps/templates.py" = ["SLF001"]
 "examples/*" = [
     "ARG002",
     "D100", "D101", "D103", "D104", "D105", "D106",
@@ -291,17 +274,19 @@ ignore = [
 # `AppConfig.ready()` is the one place an app may import its receivers, and the
 # import exists for its side effect, so both rules are wrong for these files only.
 "examples/**/apps.py" = ["F401", "PLC0415"]
+"examples/admin/shadcn_admin/context_processors.py" = ["SLF001"]
 "tests/**/*.py" = ["D100", "D104"]
 "tests/pages/*" = ["INP001"]
 "tests/site_pages/*" = ["INP001"]
 "tests/forms/*" = ["INP001"]
 "{tests/**/*,examples/**/test*,examples/**/conftest}.py" = [
-    "ANN001", "ANN201", "ANN202",
+    "ANN001", "ANN002", "ANN003", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG003",
     "S101", "S105", "S106", "S108",
     "D100", "D101", "D102", "D103", "D104",
     "PLR2004", "PLR0913", "PLR0917",
     "E501", "FBT003",
+    "SLF001",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]
 
@@ -320,6 +305,18 @@ max-args = 7
 max-branches = 12
 max-returns = 6
 max-statements = 50
+
+[tool.ruff.lint.flake8-self]
+extend-ignore-names = [
+    "_meta",
+    "_default_manager",
+    "_state",
+    "_wrapped",
+    "_setup",
+    "_setupfunc",
+    "_getframe",
+    "_non_form_errors",
+]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -386,6 +383,3 @@ enable_error_code = [
 
 # only check next folder
 packages = ["next"]
-
-# ignore type checking for *args, **kwargs parameters
-disable_error_code = ["no-untyped-def"]

@@ -300,4 +300,4 @@ See also
    :doc:`/content/howto/require-login-on-pages` for a login on every page.
    :doc:`application-layout` for where a predicate sits beside ``visible_to(scope)`` and the services.
    :doc:`/content/security/actions` for the access an action owes to the tree it is declared in.
-   :doc:`/content/ref/system-checks` for ``next.E159`` to ``next.E164`` and ``next.W127`` to ``next.W131``.
+   :doc:`/content/ref/system-checks` for ``next.E159`` to ``next.E166`` and ``next.W127`` to ``next.W131``.

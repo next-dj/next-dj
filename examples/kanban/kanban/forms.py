@@ -49,7 +49,7 @@ class MoveCardForm(Form):
         transport = "any"
 
     def __init__(
-        self, *args, targets: QuerySet[Column] | None = None, **kwargs
+        self, *args: object, targets: QuerySet[Column] | None = None, **kwargs: object
     ) -> None:
         """Offer `targets` as the columns the card may land in, none without them."""
         super().__init__(*args, **kwargs)
@@ -96,7 +96,7 @@ class CreateCardForm(Form):
     )
 
     def __init__(
-        self, *args, columns: QuerySet[Column] | None = None, **kwargs
+        self, *args: object, columns: QuerySet[Column] | None = None, **kwargs: object
     ) -> None:
         """Offer `columns` as the columns a card may land in, none without them."""
         super().__init__(*args, **kwargs)

@@ -22,8 +22,9 @@ from next.deps.markers import unwrap_annotated
 from next.introspect import callable_name
 from next.pages.checks.contexts import annotation_mismatch, load_routed_pages
 from next.pages.manager import page
-from next.pages.metadata import Metadata, noindexed
+from next.pages.metadata import Metadata
 from next.site import site_url
+from next.site.config import indexable_without_request, url_declared_per_request
 
 from .links import foreign_origin
 from .pages import MetadataPage, folded_pages, loaded_metadata_pages
@@ -123,7 +124,7 @@ def _page_shape_errors(entry: MetadataPage) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_page_metadata_shape(*args, **kwargs) -> list[CheckMessage]:
+def check_page_metadata_shape(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the metadata dict of each routed page (`next.E102` to `next.E105`)."""
     pages = loaded_metadata_pages()
     errors: list[CheckMessage] = []
@@ -133,7 +134,9 @@ def check_page_metadata_shape(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_registration_files(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_registration_files(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `@page.metadata` no page render collects (`next.E106`)."""
     if load_routed_pages() is None:
         return []
@@ -146,7 +149,9 @@ def check_metadata_registration_files(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_callable_returns_mapping(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_callable_returns_mapping(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Require a `@page.metadata` callable to be annotated dict-like (`next.E108`)."""
     pages = loaded_metadata_pages()
     errors: list[CheckMessage] = []
@@ -184,7 +189,9 @@ def _parent_parameters(func: Callable[..., Any]) -> list[str]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_parent_parameter(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_parent_parameter(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `@page.metadata` parameter annotated `Metadata` (`next.E121`).
 
     Nothing injects the fold of the ancestors, since the chain merges it.
@@ -248,7 +255,7 @@ def _twitter_player_error(page_path: object, meta: Metadata) -> CheckMessage | N
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_enum_values(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the enum values and the player card (`next.E104`).
 
     The settings tier and each page's own dict are read, the player card on the fold.
@@ -265,7 +272,9 @@ def check_metadata_enum_values(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
+def check_metadata_hreflang_patterns(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Warn when `alternates.languages=True` has no `i18n_patterns()` (`next.W087`).
 
     Without a language prefix every code translates to the same URL.
@@ -296,13 +305,20 @@ def check_metadata_hreflang_patterns(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(Tags.templates, NEXT, SEO)
-def check_metadata_noindex_canonical(*args, **kwargs) -> list[CheckMessage]:
-    """Warn when a noindex page points its canonical at another origin (`next.W088`)."""
-    pages = loaded_metadata_pages()
+def check_metadata_noindex_canonical(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Warn when a noindex page points its canonical at another origin (`next.W088`).
+
+    A callable `INDEXABLE` or `URL` is never called here, as no request exists.
+    """
+    if url_declared_per_request():
+        return []
+    site_closed = not indexable_without_request()
     warnings: list[CheckMessage] = []
-    for entry, meta in folded_pages(pages):
+    for entry, meta in folded_pages(loaded_metadata_pages()):
         canonical = meta.canonical
-        if not isinstance(canonical, str) or not noindexed(meta):
+        if not isinstance(canonical, str) or not (site_closed or meta.noindex):
             continue
         if not foreign_origin(canonical, site_url()):
             continue

@@ -3,6 +3,10 @@
 Management commands
 ===================
 
+.. contents::
+   :local:
+   :depth: 1
+
 Module summary
 --------------
 
@@ -235,7 +239,7 @@ The command class extends the staticfiles ``runserver``, so a project command th
 Choosing the server
 ~~~~~~~~~~~~~~~~~~~
 
-With uvicorn installed it runs the system checks and the migration check as Django does, then serves the project over ASGI on the server ``NEXT_FRAMEWORK['DEV_SERVER']`` names, uvicorn by default.
+Once the server ``NEXT_FRAMEWORK['DEV_SERVER']`` names is installed, uvicorn by default, it runs the system checks and the migration check as Django does, then serves the project over ASGI on that server.
 The checks run before the command resolves the server, so a ``DEV_SERVER`` that names no server stops it with ``next.E212``, and under ``--skip-checks`` with a ``CommandError`` that names the path and ``next.E212``.
 The app is the one the ``ASGI_APPLICATION`` setting names by dotted path, the key Daphne and Channels read, since Django has no ASGI setting of its own.
 Without the setting it is ``next.realtime.application`` over :func:`~django.core.asgi.get_asgi_application`, which serves the realtime WebSocket at ``REALTIME['WS_PATH']`` and turns ``ws`` on for the process.
@@ -259,7 +263,7 @@ It leaves lifespan on uvicorn's ``auto``, since ``next.realtime.application`` an
 Fallback and application order
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Without uvicorn, or with ``--wsgi``, the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
+When the default ``DEV_SERVER`` finds no uvicorn, or with ``--wsgi``, the command is Django's ``runserver`` with the static serving of ``django.contrib.staticfiles``.
 
 Django runs the command of the application listed first in ``INSTALLED_APPS``, so ``next`` sits above ``django.contrib.staticfiles``, as Daphne asks of its own ``runserver``.
 Listed below it, ``manage.py runserver`` is the staticfiles command and serves WSGI, where the pages speak SSE, and ``next.W148`` reports the order while an ASGI server is installed.

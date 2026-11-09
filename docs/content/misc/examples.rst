@@ -8,13 +8,21 @@ Each runs on SQLite and in-process ``LocMemCache``, with no Docker and no extern
 Tailwind loads from the Play CDN through a shared ``page_head`` component every root layout calls, so a machine with no network renders the pages unstyled.
 That component renders the head through ``{% metadata %}``, and every example names itself in ``SITE["NAME"]``, declares its viewport and title template in ``METADATA["DEFAULTS"]``, and names its tab icon, a static ``icon.svg``, in the ``icons`` metadata key.
 ``manage.py check --deploy --tag seo`` passes clean in every example.
-The ``kanban`` and ``live-polls`` folders add a Vite toolchain on top of that and need Node installed.
+
+Shared conventions
+------------------
+
+The ``kanban`` and ``live-polls`` folders add a Vite toolchain and need Node installed.
 Every application keeps its pages in ``pages/`` and its page-tree components in ``pages/_components/``, and every example registers a project-level ``DIRS`` root in ``PAGE_BACKENDS``.
 The ``admin`` example also serves the components at the root of its ``shadcn_admin`` application through ``COMPONENT_BACKENDS`` ``DIRS``.
-Three of them show realtime, ``live-polls``, ``kanban`` and ``observability``, and each one is described in its row below.
+The :repo:`examples README <blob/main/examples/README.md>` carries the run commands and the conventions every folder follows.
+
+Realtime examples
+-----------------
+
+Three examples show realtime, ``live-polls``, ``kanban`` and ``observability``, and each one is described in its row of the catalog below.
 Their streams run over SSE on any server, and the WebSocket transport needs an ASGI server, so install ``uvicorn[standard]`` and start the project with ``manage.py runserver``, whose ``next`` override serves the WebSocket upgrade.
 That command wins only when ``next`` sits above ``django.contrib.staticfiles`` in ``INSTALLED_APPS``.
-The :repo:`examples README <blob/main/examples/README.md>` carries the run commands and the conventions every folder follows.
 
 Catalog
 -------

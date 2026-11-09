@@ -218,7 +218,7 @@ def _form_callables() -> Iterator[Callable[..., Any]]:
         if wizard_class is None:
             continue
         yield from _hooks(wizard_class, WIZARD_HOOKS)
-        for _step, step_class in wizard_class._static_steps():
+        for _step, step_class in wizard_class.static_steps():
             yield from _form_class_callables(step_class)
 
 
@@ -317,7 +317,7 @@ def _model_sites(sites: _ObjectSites) -> Iterator[tuple[type[Model], str]]:
 
 
 @register(NEXT)
-def check_object_managers(*args, **kwargs) -> list[CheckMessage]:
+def check_object_managers(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a `DObject` model whose manager defines no `visible_to` (`next.E153`)."""
     sites = object_sites()
     if sites is None:
@@ -420,7 +420,7 @@ def _page_run_messages(run: _PageRun) -> Iterator[CheckMessage]:
 
 
 @register(NEXT)
-def check_object_page_bindings(*args, **kwargs) -> list[CheckMessage]:
+def check_object_page_bindings(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a page `DObject` with no route kwarg (`next.W126`) or parent (`next.E154`).
 
     Each page is walked in its own render order, inherited ancestor callables first.
@@ -434,7 +434,7 @@ def check_object_page_bindings(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
+def check_object_form_parents(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a parent `DObject` on a form handler or hook (`next.E155`).
 
     Form dispatch resolves with no page context, so the parent is never there.
@@ -457,7 +457,9 @@ def check_object_form_parents(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
+def check_object_component_contexts(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
     """Flag a `DObject` on a `@component.context` callable (`next.E156`).
 
     A component resolves with no URL kwargs, so the lookup never finds its pk.
@@ -478,7 +480,7 @@ def check_object_component_contexts(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_object_scope(*args, **kwargs) -> list[CheckMessage]:
+def check_object_scope(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag `DObject` parameters with no `scope` dependency registered (`next.E157`).
 
     A project that declares no `DObject` needs no scope, so the check stays silent.
@@ -521,7 +523,7 @@ def _unbound_declaration(run: _PageRun, declaration: _ObjectDeclaration) -> Erro
 
 
 @register(NEXT)
-def check_object_declarations(*args, **kwargs) -> list[CheckMessage]:
+def check_object_declarations(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag an `obj=DObject[...]` whose kwarg a page under it lacks (`next.E162`).
 
     The kwarg is the `model_name` of the model, read like a `DObject` parameter's name.
@@ -539,7 +541,7 @@ def check_object_declarations(*args, **kwargs) -> list[CheckMessage]:
 
 
 @register(NEXT)
-def check_object_hints(*args, **kwargs) -> list[CheckMessage]:
+def check_object_hints(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Flag a `DObject` whose callable's type hints do not resolve (`next.E158`).
 
     The resolver refuses such a parameter on every call, so the check names it first.

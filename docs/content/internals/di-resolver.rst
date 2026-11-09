@@ -16,7 +16,7 @@ The resolver is the ``DependencyResolver`` the shared ``resolver`` holder of ``n
 It compiles each callable once into an injection plan and replays that plan on every call.
 Every page context function, every page render, and every component context function is invoked through the resolver.
 The form dispatch adds its own call sites.
-These are the form-class factory, ``get_initial``, the ``@action`` handler, ``on_valid``, and ``wizard.done``.
+These are the form-class factory, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, the ``@action`` handler, ``on_valid``, and ``wizard.done``.
 
 Pipeline
 --------
@@ -45,7 +45,8 @@ Modules
 
 ``next.deps.resolver``.
    ``DependencyResolver``, the ``resolver`` holder every reference points at, and the ``current_resolver`` accessor.
-   Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
+   Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters, and ``resolve_callable_dependency(name, context, *, param=None)`` to fill one named dependency with the cycle guard and the pass cache.
+   The ``dependency`` decorator stands on ``register_dependency``, beside the ``get_dependency``, ``unregister_dependency``, and ``dependencies`` accessors of the named-dependency table, and ``forget_caches`` drops the compiled plans when the ``forget_dep_caches`` receiver of ``router_reloaded`` calls it.
    ``resolver`` is a Django ``SimpleLazyObject`` holding nothing at import time, and the first read builds the class ``DEPENDENCY_RESOLVER`` names.
    ``apply_resolver_setting`` puts a fresh instance of the configured class behind that holder on every ``settings_reloaded``, and it returns early when the object already behind it has the configured class, so an unrelated reload keeps the resolver in force.
    A reference taken before a swap therefore reads the object that replaced it rather than going stale, which is what lets a framework module, a provider, and a test helper all import ``resolver`` once.
@@ -84,6 +85,9 @@ Modules
 
 ``next.deps.markers``.
    ``Depends``, ``DDependencyBase``, and the ``DependsProvider`` that resolves ``Depends`` markers.
+
+``next.deps.objects``.
+   ``DObject``, the ``ObjectProvider`` that loads a row through ``visible_to(scope)`` at priority ``0``, and the ``UnservedObjectProvider`` that refuses an unloaded ``DObject`` at priority ``1000``.
 
 ``next.deps.plan``.
    ``compile_plan``, the ``ParameterPlan`` entry, and the ``InjectionPlan`` tuple the resolver replays.
@@ -199,7 +203,6 @@ Two consequences flow from the cache.
 
 Provider results are never cached.
    The framework cache memoises named ``Depends("name")`` values and the rows ``DObject`` parameters load.
-   A provider result is never cached.
    A provider that must return one value per request keeps its own request-scoped store.
 
 Shared across the dispatch.

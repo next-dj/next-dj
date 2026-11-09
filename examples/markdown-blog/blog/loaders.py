@@ -6,7 +6,7 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
 from blog.markdown_template import render_markdown
-from next.pages.loaders import TemplateLoader
+from next.pages import TemplateLoader
 
 
 if TYPE_CHECKING:

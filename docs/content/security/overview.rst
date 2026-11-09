@@ -163,6 +163,7 @@ Presence puts what a visitor shows into the stream of everyone else.
 With ``presence=True`` the stream stores and sends a number only, and no data about people leaves the server.
 With an ``identify`` callable every subscriber of the topic that identifies its own members receives the whole mapping it returns for every attendee, in the ``members`` list of the ``next:presence`` event, so ``identify`` is the privacy boundary.
 The server cuts ``members`` from the event for a stream with ``presence=True`` or without presence, over SSE and WebSocket alike.
+
 Return only public fields such as a display name or a handle, and never an e-mail address, a primary key, or a permission.
 Only those who may open the stream see the attendance, because the event passes the page guard and the ``authorize`` callback like any message.
 The mapping is capped at ``REALTIME['PRESENCE']['MEMBER_BYTES']`` bytes and the list at ``REALTIME['PRESENCE']['SIZE']`` members.
@@ -173,6 +174,7 @@ The ticket is sent in the first socket frame, never in the URL, and carries the 
 A ticket is signed from ``SECRET_KEY`` and stays reusable until ``REALTIME['TICKET_MAX_AGE']``, see :doc:`/content/ref/realtime`.
 If the stream cannot be represented by stable importable callbacks, negotiation falls back to SSE.
 The default binding needs a server-side session engine, and ``next.W142`` reports the signed-cookie engine, see :ref:`topics-realtime-signed-cookie`.
+
 ``SignedCookieBinding`` serves the signed-cookie engine, keeps an open socket running after logout, and ``next.W147`` reports it next to a server-side engine.
 A handler sees an opaque ``subject`` digest of the identity and never the session key or another credential.
 Under the default binding the socket loads its session from the cookie and reads it without writing, so rotating ``SECRET_KEY`` with ``SECRET_KEY_FALLBACKS`` does not log an open socket out.
