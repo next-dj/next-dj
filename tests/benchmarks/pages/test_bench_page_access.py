@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
@@ -7,7 +8,12 @@ from django.core.exceptions import PermissionDenied
 from django.urls import resolve
 
 from next.pages.access import forget_page_access, refusal
-from tests.benchmarks.factories import STAND_IN_PK
+from tests.benchmarks.factories import (
+    REQUEST_ROUNDS,
+    REQUEST_WARMUP_ROUNDS,
+    STAND_IN_PK,
+    each_round,
+)
 from tests.support import PermissionHolder, QuietHolder, plain_get, routed, write_page
 from tests.support.access import PAGE_HEAD, write_guard
 
@@ -15,6 +21,8 @@ from tests.support.access import PAGE_HEAD, write_guard
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from django.http import HttpRequest
 
 
 _URL = f"/seg_0/{STAND_IN_PK}/seg_2/"
@@ -64,6 +72,13 @@ def _asked(asked: list[tuple[object, ...]]) -> list[tuple[object, ...]]:
     return [tuple(getattr(item, "pk", item) for item in call) for call in asked]
 
 
+def _holder(*perms: str) -> HttpRequest:
+    """Return the GET of a user holding `perms`, every one of `_HELD` when none."""
+    request = plain_get(_URL)
+    request.user = QuietHolder(*(perms or _HELD))
+    return request
+
+
 def _refused(view: Callable[..., object], request: object, kwargs: dict) -> bool:
     """Return whether `view` refuses `request` with a 403, as a timed call."""
     try:
@@ -91,8 +106,12 @@ class TestBenchPageAccess:
             response = match.func(request, **match.kwargs)
             assert response.status_code == 200
             assert _asked(request.user.asked) == _ASKED[shape]
-            request.user = QuietHolder(*_HELD)
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(_holder, **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.walltime()
     @pytest.mark.parametrize("shape", ["plain", "declared"])
@@ -110,11 +129,12 @@ class TestBenchPageAccess:
             match = resolve(_URL)
             assert match.func(request, **match.kwargs).status_code == 200
 
-            def forget() -> tuple[tuple[object, ...], dict[str, object]]:
-                forget_page_access()
-                return (request,), match.kwargs
-
-            benchmark.pedantic(match.func, setup=forget, rounds=200, iterations=1)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(_holder, before=forget_page_access, **match.kwargs),
+                rounds=200,
+                iterations=1,
+            )
 
     @pytest.mark.benchmark(group="pages.page_access")
     def test_declared_chain_refuses_a_missing_permission(
@@ -133,8 +153,13 @@ class TestBenchPageAccess:
                 ("auth.view_user",),
                 ("auth.change_user", STAND_IN_PK),
             ]
-            request.user = QuietHolder("auth.view_user")
-            assert benchmark(_refused, match.func, request, match.kwargs) is True
+            refused = benchmark.pedantic(
+                partial(_refused, match.func),
+                setup=each_round(partial(_holder, "auth.view_user"), match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
+            assert refused is True
 
 
 _PHOTO_URL = "/photo/3/"

@@ -14,6 +14,7 @@ from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeData
 
+from next.conf.router import router_enabled
 from next.diagnostics import INTENDED_EXCEPTIONS, FailureLog, type_name
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.forms.uid import validated_origin_path
@@ -25,8 +26,9 @@ from next.pages.metadata.scope import contain_site_refusal, site_segment
 from next.pages.visits import visit_request
 from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
+from next.static.collector import default_placeholders
 from next.static.manager import default_manager
-from next.static.runtime import RESERVED_PAYLOAD_KEYS
+from next.static.runtime import RESERVED_PAYLOAD_KEYS, html_finish
 from next.static.serializers import resolve_serializer
 from next.utils import redirect_or_fallback
 
@@ -48,9 +50,10 @@ from .errors import (
 from .headers import (
     CONTENT_TYPE,
     RESPONSE_VERSION,
+    VARY_HEADERS,
     is_partial_request,
     partial_intent,
-    set_partial_vary,
+    vary_on,
 )
 from .intercept import pick_intercept, refuse_access, refuse_intercept
 from .manager import asset_version, partial_backend_manager
@@ -67,6 +70,7 @@ if TYPE_CHECKING:
     from next.pages.metadata import Metadata, MetadataDict, ResolvedMetadata, Text
     from next.pages.metadata.dicts import Url
     from next.pages.metadata.markers import Segment
+    from next.static.collector import StaticCollector
 
     from .render import ZoneRenderResult
 
@@ -81,6 +85,7 @@ _META_PASSES: tuple[type[BaseException], ...] = (
 _SEE_OTHER = 303
 _NO_STORE = "private, no-store"
 _META_SOURCE = "Patches.meta"
+_STYLESHEET = "link"
 
 # Framework-owned bus events, refused to event() so an app cannot forge one.
 _RESERVED_EVENT_NAMES: frozenset[str] = frozenset({"ready", "context-updated"})
@@ -155,6 +160,12 @@ def _head_extras(resolved: "ResolvedMetadata") -> dict[str, object]:
     }
 
 
+def finished_zone(html: str) -> str:
+    """Return zone `html` through the active-link pass the response binds, if any."""
+    marks = html_finish.get()
+    return html if marks is None else marks(html)
+
+
 def _local_url(base: str | None, href: str) -> str:
     """Return the path and query of `href` resolved relative to `base`."""
     parts = urlsplit(urljoin(base or "/", href))
@@ -193,8 +204,9 @@ class Patches:
         self._origin: OriginMatch | None = None
         self._origin_resolved = False
         self._origin_authorized = False
-        self._render_contexts: dict[Path, dict[str, object]] = {}
+        self._origin_context: dict[str, object] | None = None
         self._zone_context_index: int | None = None
+        self._navigation: dict[str, Any] | None = None
 
     @classmethod
     def versioned(
@@ -326,7 +338,8 @@ class Patches:
             refuse_intercept(served, self._require_request(), self._origin_url_kwargs())
         result = self._render_zone(zone, overrides, served)
         self._collect_zone_assets(result)
-        self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        html = finished_zone(result.html[zone])
+        self._append_morph({keys.ZONE: zone}, html, extract=False)
         if context is False:
             return self
         data = self._zone_context(result)
@@ -362,7 +375,8 @@ class Patches:
             raise DynamicForeignPageError(foreign_path)
         result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
         self._collect_zone_assets(result)
-        self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
+        html = finished_zone(result.html[zone])
+        self._append_morph({keys.ZONE: zone}, html, extract=False)
         return self
 
     def _foreign_page_path(self, page: "Path | str") -> "Path":
@@ -485,6 +499,33 @@ class Patches:
         The caller owns serialization, as the zone-GET path does through the collector.
         """
         self._ops.append(Patch(op="context", extras={"data": dict(data)}))
+        return self
+
+    def replace_context(self, data: "Mapping[str, Any]") -> "Patches":
+        """Record a context patch that replaces the page-owned keys with wire values.
+
+        A navigation sends the whole context of the new page, so stale keys drop.
+        """
+        self._ops.append(
+            Patch(op="context", extras={"data": dict(data), keys.REPLACE: True})
+        )
+        return self
+
+    def head(self, resolved: "ResolvedMetadata") -> "Patches":
+        """Queue the meta op of a head already resolved by a page render."""
+        self._ops.append(Patch(op="meta", extras=_head_extras(resolved)))
+        return self
+
+    def navigation(self, fields: "Mapping[str, Any]") -> "Patches":
+        """Attach the top-level fields of a navigation envelope, `keys.NAVIGATION_KEYS`.
+
+        A key outside them raises, so a typo never reaches the wire unread.
+        """
+        unknown = sorted(set(fields) - set(keys.NAVIGATION_KEYS))
+        if unknown:
+            msg = f"navigation() got unknown fields {unknown}."
+            raise TypeError(msg)
+        self._navigation = dict(fields)
         return self
 
     def layer_open(
@@ -708,6 +749,7 @@ class Patches:
 
         An inline body carries no URL, so it never reaches the per-render hook.
         """
+        load = default_kinds.load(kind, inline=inline is not None)
         self._assets.append(
             Asset(
                 kind=kind,
@@ -715,7 +757,10 @@ class Patches:
                 if url
                 else url,
                 inline=inline,
-                load=default_kinds.load(kind, inline=inline is not None),
+                load=load,
+                scope=keys.PAGE_SCOPE
+                if load == _STYLESHEET and router_enabled()
+                else None,
             )
         )
         return self
@@ -739,6 +784,7 @@ class Patches:
             form=self._form,
             csrf=self._csrf,
             request_id=self._request_id,
+            navigation=self._navigation,
         )
 
     def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":
@@ -857,20 +903,15 @@ class Patches:
         return dict(match.url_kwargs) if match is not None else {}
 
     def _origin_render_context(self) -> dict[str, object]:
-        """Return the origin page render context, built once per builder."""
-        return self._page_render_context(self._resolve_page_path())
-
-    def _page_render_context(self, page_path: "Path") -> dict[str, object]:
-        """Return the render context of a page, built once per builder.
-
-        Memoised for `context()` and `morph(zone=...)`, copied as consumers mutate it.
-        """
-        context = self._render_contexts.get(page_path)
+        """Return a copy of the origin page render context, built once per builder."""
+        context = self._origin_context
         if context is None:
             context = page_manager.build_render_context(
-                page_path, self._require_request(), self._origin_url_kwargs()
+                self._resolve_page_path(),
+                self._require_request(),
+                self._origin_url_kwargs(),
             )
-            self._render_contexts[page_path] = context
+            self._origin_context = context
         return dict(context)
 
     def _render_zone(
@@ -879,7 +920,10 @@ class Patches:
         overrides: "Mapping[str, Any] | None",
         served: "Path | None" = None,
     ) -> "ZoneRenderResult":
-        """Render the named zone of the serving page, else of the origin page."""
+        """Render the named zone of the serving page, else of the origin page.
+
+        Only the context callables a zone GET of the zone runs are run for it.
+        """
         page_path = self._resolve_page_path() if served is None else served
         return render_zone(
             page_path,
@@ -887,11 +931,17 @@ class Patches:
             self._require_request(),
             url_kwargs=self._origin_url_kwargs(),
             overrides=dict(overrides) if overrides else None,
-            context_data=self._page_render_context(page_path),
+            stashed=served is not None,
         )
 
     def _serializable_names(self) -> frozenset[str]:
-        """Return the serialize=True provider names of the origin page."""
+        """Return the serialize=True provider names of the origin page.
+
+        A keyless provider spreads names only a run reveals, so it alone needs a build.
+        """
+        names = page_manager.contexts.serialized_names(self._resolve_page_path())
+        if names is not None:
+            return names
         js_context = self._origin_render_context().get(JS_CONTEXT_KEY, {})
         return frozenset(js_context) if isinstance(js_context, dict) else frozenset()
 
@@ -904,6 +954,19 @@ class Patches:
             self._record_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
             self._record_asset(kind, url)
+        return self
+
+    def page_assets(self, collector: "StaticCollector") -> "Patches":
+        """Record every asset a page render collected, its URLs already resolved.
+
+        A navigation sends the whole page manifest, the client loading only the new.
+        """
+        for slot in default_placeholders:
+            for asset in collector.assets_in_slot(slot.name):
+                if asset.inline is not None:
+                    self._record_asset(asset.kind, "", inline=asset.inline)
+                elif asset.url:
+                    self._record_asset(asset.kind, asset.url)
         return self
 
     def absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
@@ -968,13 +1031,14 @@ class PatchResponse(HttpResponse):
         content_type: str = CONTENT_TYPE,
         version: str | None = None,
         status: int = 200,
+        vary: tuple[str, ...] = VARY_HEADERS,
     ) -> None:
-        """Build the response from serialized envelope bytes."""
+        """Build the response from serialized envelope bytes, varied on `vary`."""
         super().__init__(content=body, content_type=content_type, status=status)
         if version is not None:
             self[RESPONSE_VERSION] = version
         self["Cache-Control"] = _NO_STORE
-        set_partial_vary(self)
+        vary_on(self, vary)
 
 
 __all__ = ["DedupeMode", "PatchResponse", "Patches"]

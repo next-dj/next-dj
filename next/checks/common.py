@@ -1,6 +1,6 @@
 """Shared helpers used by per-subpackage system-check modules.
 
-It also re-exports the discovery helpers and the `next.conf` unknown-key check.
+It also re-exports the discovery helpers and the `next.conf` key and shape errors.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
-from next.conf.checks import errors_for_unknown_keys
+from next.conf.checks import error_for_wrong_shape, errors_for_unknown_keys
 from next.conf.defaults import USER_SETTING
 from next.conf.imports import import_class_cached
 from next.discovery import (
@@ -229,6 +229,7 @@ __all__ = [
     "async_callable_error",
     "async_refusal",
     "discover_page_registrations",
+    "error_for_wrong_shape",
     "errors_for_unknown_keys",
     "first_visit",
     "forget_run_memos",

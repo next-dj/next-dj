@@ -825,9 +825,8 @@ _PROBES = (
     ),
     _Probe(
         _Leak(
-            "lazy",
-            f'{_GUARD}{{% zone "lzz" lazy="load" %}}SECRET{{% placeholder %}}wait'
-            f"{{% endzone %}}{_END}",
+            "reload-loading",
+            f'{_GUARD}{{% zone "lzz" reload="loading" %}}SECRET{{% endzone %}}{_END}',
             "lzz",
         ),
         400,

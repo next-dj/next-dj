@@ -22,6 +22,7 @@ VIDEO = "iframe[data-landing-video]"
 VIDEO_PLACEHOLDER = "[data-landing-video-placeholder]"
 THANKS = "[data-lead-thanks]"
 SEARCH = "#filter-q"
+SENTINEL_BELOW_THE_FOLD = {"width": 1280, "height": 360}
 
 SCRIPT_STATUS = "(name) => window.Next.scripts.status(name)"
 GTAG_PAGE_VIEWS = (
@@ -133,6 +134,7 @@ def test_a_partial_navigation_reports_one_more_page_view(
     page: Page, base_url: str, demo_data: None
 ) -> None:
     grant(page, base_url, "analytics")
+    page.set_viewport_size(SENTINEL_BELOW_THE_FOLD)
     open_page(page, f"{base_url}/catalog/")
     wait_for_status(page, "google-analytics", "rendered")
     page.wait_for_function(f"() => ({GTAG_PAGE_VIEWS})().length === 1")

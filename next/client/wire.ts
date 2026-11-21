@@ -3,18 +3,26 @@
 
 import {
   ACCEPT,
+  ATTR_BOUNDARY,
   CONTENT_TYPE,
+  EVENT_STREAM,
   HEADER_ACCEPT,
   HEADER_REQUEST_ID,
   HEADER_VERSION,
   HEADER_ZONE,
+  NAVIGATED_FLAG,
   REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
   REQUEST_TIMEOUT_MS,
+  STREAM_ACCEPT,
   bounded,
+  markBusy,
   newId,
+  now,
   pageKey,
   sameOrigin,
+  stamp,
+  stamped,
 } from "./protocol";
 import type { PartialError, WireTransport } from "./protocol";
 import {
@@ -29,9 +37,6 @@ import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
-// Kept apart from the version guard's flag in assets.ts, so neither clears the other.
-const NAVIGATED_FLAG = "next:partial:navigated";
-
 /** How one request ended, the value Next.partial.submit and Next.partial.fetch resolve. */
 export interface Outcome {
   status: "ok" | "invalid" | "error" | "dropped";
@@ -40,12 +45,37 @@ export interface Outcome {
   envelope?: Envelope;
   error?: PartialError;
   location?: string;
+  boundaries?: string[];
 }
 
 export const none = (status: Outcome["status"]): Outcome => ({
   status,
   applied: false,
 });
+
+export interface Settled {
+  zones: string[];
+  boundaries: string[];
+  status: Outcome["status"];
+}
+
+function faultOf({ status, error }: Outcome): string | null | undefined {
+  if (status === "dropped") return undefined;
+  if (status !== "error") return null;
+  return error?.kind === "timeout" || error?.kind === "network" ? error.kind : "error";
+}
+
+const zonesOf = (request: WireRequest): string[] => [
+  ...new Set(
+    request.zone
+      ?.split(",")
+      .map((zone) => zone.trim())
+      .filter(Boolean),
+  ),
+];
+
+export const zoneKey = (url: string, zone: string): string =>
+  `${url.split("?")[0]} ${zone}`;
 
 /** Fetch stand-in so vitest can drive requests deterministically. */
 export type FetchAdapter = (input: string, init: RequestInit) => Promise<Response>;
@@ -103,6 +133,8 @@ export interface WireRequest {
   transport?: WireTransport;
   wait?: boolean | "latest";
   navigate?: boolean;
+  background?: boolean;
+  boundaries?: Element[];
 }
 
 /** What a recognised envelope arrives with, read by name like ApplyOptions. */
@@ -115,13 +147,22 @@ export interface EnvelopeOptions {
   page: string | undefined;
   // The page a mutation was submitted from.
   owner: string | undefined;
-  isCurrent: () => boolean;
+  zones: string[];
+  isCurrent: (zone?: string) => boolean;
 }
 
 export type EnvelopeHandler = (
   raw: unknown,
   options: EnvelopeOptions,
 ) => Promise<Applied>;
+
+export interface StreamTake {
+  signal: AbortSignal;
+  open: () => void;
+  land: (body: string, parse: () => unknown) => Promise<Outcome>;
+}
+
+export type StreamReader = (response: Response, take: StreamTake) => Promise<Outcome>;
 
 /** Turns a foreign content-type body into a JSON-ish envelope before apply. */
 export type ParseHook = (response: Response, body: string) => unknown;
@@ -158,6 +199,8 @@ export interface WireDeps {
     init: RequestInit,
     csrf?: string,
   ) => Promise<Response | string | undefined> | undefined;
+  resolveZone?: (name: string, root: ParentNode, page?: string) => Element | null;
+  reader?: () => StreamReader | undefined;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -182,10 +225,13 @@ export class Wire {
   readonly #rememberRequestId: (id: string) => void;
   readonly #forgetRequestId: (id: string) => void;
   readonly #tunnel: NonNullable<WireDeps["tunnel"]>;
+  readonly #resolveZone: NonNullable<WireDeps["resolveZone"]>;
+  readonly #reader: NonNullable<WireDeps["reader"]>;
 
   // Latest-wins per-target GET queues and the per-uid mutation lock. A queue holds
   // only its in-flight request, so a key is removed once it settles or is aborted.
   readonly #queues = new Map<string, AbortController>();
+  readonly #claims = new Map<string, (zone: string) => void>();
   readonly #busy = new Map<string, ((go: boolean) => void)[]>();
   readonly #parseHooks = new Map<string, ParseHook>();
 
@@ -206,6 +252,8 @@ export class Wire {
     this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
     this.#forgetRequestId = deps.forgetRequestId ?? (() => undefined);
     this.#tunnel = deps.tunnel ?? (() => undefined);
+    this.#resolveZone = deps.resolveZone ?? (() => null);
+    this.#reader = deps.reader ?? (() => undefined);
   }
 
   /** Abort every in-flight request and drop all state, for vitest isolation. */
@@ -248,10 +296,27 @@ export class Wire {
 
   /** Shape, queue or lock, send, and classify a single request. */
   async fetch(request: WireRequest): Promise<Outcome> {
+    const zones = zonesOf(request);
+    const boundaries = (request.boundaries ?? []).flatMap(
+      (el) => el.getAttribute(ATTR_BOUNDARY) ?? [],
+    );
+    let status: Outcome["status"] = "error";
+    try {
+      const outcome = await this.#send(request, zones);
+      status = outcome.status;
+      boundaries.push(...(outcome.boundaries ?? []));
+      return outcome;
+    } finally {
+      if (this.#active())
+        this.#dispatch("partial:settled", { zones, boundaries, status });
+    }
+  }
+
+  async #send(request: WireRequest, zones: string[]): Promise<Outcome> {
     if (!this.#active()) return none("dropped");
     const target = sameOrigin(request.url, this.#document);
     if (target === undefined) {
-      return this.#fail({
+      return this.#fail(zones, {
         kind: "network",
         url: request.url,
         error: new Error("cross-origin request refused"),
@@ -261,7 +326,7 @@ export class Wire {
     const safe = SAFE_METHODS.has(method);
     const uid = request.uid;
     // An abortable POST (inline validation) queues like a safe GET, taking no lock.
-    let release: (() => void) | undefined;
+    let unlock: (() => void) | undefined;
     if (!safe && !request.abortable && uid !== undefined) {
       // A second submit is dropped while busy, so a double click sends one fetch.
       const busy = this.#busy.get(uid);
@@ -275,7 +340,7 @@ export class Wire {
       if (!this.#active()) return none("dropped");
       const waiters = busy ?? [];
       if (!busy) this.#busy.set(uid, waiters);
-      release = () => {
+      unlock = () => {
         const next = waiters.shift();
         if (next) next(true);
         else this.#busy.delete(uid);
@@ -283,21 +348,84 @@ export class Wire {
     }
     // Queued before a token wait, so a submit can still abort its own validation.
     const queueKey = this.#queueKey(request, safe);
+    const background = request.background === true;
+    if (background && queueKey !== undefined && this.#queues.has(queueKey))
+      return none("dropped");
     const entry = queueKey !== undefined ? this.#enqueue(queueKey) : undefined;
+    const claiming = safe && request.queue === undefined;
+    const page =
+      safe && request.zone !== undefined
+        ? pageKey(request.url, this.#document)
+        : undefined;
+    const held = new Map<string, (fault?: string | null) => void>();
+    const lose = (zone: string): void => {
+      held.get(zone)?.();
+      held.delete(zone);
+      if (held.size === 0) entry?.abort();
+    };
+    const targets = [...(request.boundaries ?? [])];
+    const release = markBusy(targets);
+    const free = (fault?: string | null): void => {
+      release(fault);
+      for (const [zone, settle] of held) {
+        settle(fault);
+        const key = zoneKey(request.url, zone);
+        if (this.#claims.get(key) === lose) this.#claims.delete(key);
+      }
+    };
+    entry?.signal.addEventListener("abort", () => free(), { once: true });
+    let started = 0;
+    const isCurrent = (zone?: string): boolean =>
+      (zone === undefined || held.has(zone)) &&
+      this.#active() &&
+      entry?.signal.aborted !== true &&
+      !request.boundaries?.some((el) => stamped(el) > started);
+    let fault: string | null | undefined;
     try {
+      for (const zone of zones) {
+        const key = zoneKey(request.url, zone);
+        const owner = claiming ? this.#claims.get(key) : undefined;
+        if (background && owner !== undefined) continue;
+        owner?.(zone);
+        const el = this.#resolveZone(zone, this.#document, page);
+        if (el !== null) targets.push(el);
+        held.set(zone, markBusy([el], background));
+        if (claiming) this.#claims.set(key, lose);
+      }
+      if (held.size === 0 && zones.length > 0) return none("dropped");
+      if (!background) targets.forEach(stamp);
+      started = now();
       let csrf = this.#csrf.current();
+      let outcome: Outcome | undefined;
       // A deferred token is fetched inside the lock, so a double submit fetches once.
       if (!safe && csrf?.token === undefined && csrf?.url !== undefined) {
         const ensured = await this.#ensureCsrf();
-        if (ensured === null) return none("error");
         // Told apart by the header, as a DOMException is not an Error in every realm.
-        if (!("header" in ensured))
-          return this.#fail({ kind: "csrf", url: request.url, error: ensured });
-        csrf = ensured;
+        if (ensured === null) outcome = none("error");
+        else if ("header" in ensured) csrf = ensured;
+        else {
+          outcome = this.#fail(zones, {
+            kind: "csrf",
+            url: request.url,
+            error: ensured,
+          });
+        }
       }
-      return await this.#run(request, target, method, csrf, queueKey, entry);
+      outcome ??= await this.#run(
+        request,
+        zones,
+        target,
+        method,
+        csrf,
+        entry,
+        isCurrent,
+        page,
+      );
+      fault = faultOf(outcome);
+      return outcome;
     } finally {
-      release?.();
+      unlock?.();
+      free(fault);
       if (queueKey !== undefined && this.#queues.get(queueKey) === entry) {
         this.#queues.delete(queueKey);
       }
@@ -347,7 +475,7 @@ export class Wire {
       return safe || request.abortable === true ? request.queue : undefined;
     }
     if (request.zone === undefined) return undefined;
-    if (safe) return `${request.url.split("?")[0]} ${request.zone}`;
+    if (safe) return zoneKey(request.url, request.zone);
     return request.abortable === true ? request.zone : undefined;
   }
 
@@ -362,16 +490,14 @@ export class Wire {
 
   async #run(
     request: WireRequest,
+    zones: string[],
     target: string,
     method: string,
     csrf: CsrfPayload | undefined,
-    queueKey: string | undefined,
     entry: AbortController | undefined,
+    isCurrent: (zone?: string) => boolean,
+    page: string | undefined,
   ): Promise<Outcome> {
-    const isCurrent = (): boolean =>
-      this.#active() &&
-      entry?.signal.aborted !== true &&
-      (queueKey === undefined || this.#queues.get(queueKey) === entry);
     if (!isCurrent()) return none("dropped");
     // Snapshot the dirty counter before the request is sent. A field touched after
     // this point is dirty relative to the response it will receive.
@@ -383,7 +509,7 @@ export class Wire {
     });
     // One signal ends the request on its deadline or a supersede, armed after a tunnel.
     const deadline = new AbortController();
-    let disarm: (() => void) | undefined;
+    let disarm = (): void => undefined;
     // A before-request listener may already have aborted the queue.
     if (entry?.signal.aborted === true) deadline.abort();
     entry?.signal.addEventListener("abort", () => deadline.abort(), { once: true });
@@ -391,7 +517,7 @@ export class Wire {
     // dropped connection can reject the body read after the headers arrived.
     let own: string | undefined;
     try {
-      const headers = this.#headers(request, method, csrf);
+      const headers = this.headers(request, method, csrf);
       // A true mutation carries a ring id so the SSE bridge suppresses its own echo.
       if (
         !SAFE_METHODS.has(method) &&
@@ -414,7 +540,7 @@ export class Wire {
           : undefined;
       if (typeof tunneled === "string" && request.abortable !== true) {
         if (own !== undefined) this.#forgetRequestId(own);
-        const failed = this.#fail({
+        const failed = this.#fail(zones, {
           kind: "undelivered",
           url: request.url,
           reason: tunneled,
@@ -431,109 +557,124 @@ export class Wire {
       if (!isCurrent()) return none("dropped");
       return await this.#classify(
         request,
+        zones,
         target,
         method,
         response,
         snapshot,
         isCurrent,
+        page,
+        deadline.signal,
+        () => {
+          disarm();
+          disarm = this.#arm(deadline);
+        },
       );
     } catch (error) {
       // A request past its deadline may have committed, so its echo must refresh too.
       const reason = deadline.signal.reason as Error | undefined;
       if (reason?.name === "TimeoutError") {
         if (own !== undefined) this.#forgetRequestId(own);
-        return this.#fail({ kind: "network", url: request.url, error: reason });
+        return this.#fail(zones, { kind: "timeout", url: request.url, error: reason });
       }
       // An AbortError means the request was superseded, so nothing is reported.
       if (isAbortError(error) || entry?.signal.aborted === true) return none("dropped");
       if (own !== undefined) this.#forgetRequestId(own);
-      return this.#fail({ kind: "network", error });
+      return this.#fail(zones, { kind: "network", error });
     } finally {
-      disarm?.();
+      disarm();
     }
   }
 
-  #fail(error: PartialError): Outcome {
+  #fail(zones: string[], failure: PartialError): Outcome {
+    const error = { ...failure, zones };
     this.#dispatch("partial:error", error);
     return { ...none("error"), error };
   }
 
   async #classify(
     request: WireRequest,
+    zones: string[],
     target: string,
     method: string,
     response: Response,
     snapshot: number,
-    isCurrent: () => boolean,
+    isCurrent: (zone?: string) => boolean,
+    page: string | undefined,
+    signal: AbortSignal,
+    open: () => void,
   ): Promise<Outcome> {
+    const safe = SAFE_METHODS.has(method);
+    const navigates = request.boundaries === undefined && (response.redirected || safe);
     // A 409 on a safe method means an asset version mismatch with an empty body. The
     // runtime then does a full visit of the current URL and nothing else.
-    if (response.status === 409 && SAFE_METHODS.has(method)) {
-      this.#navigate(response.url || target);
-      return none("ok");
-    }
+    if (response.status === 409 && safe && navigates)
+      return this.#fallbackNavigate(zones, response.url || target);
     const crashed = response.status >= 500;
-    // Only a safe zone GET names a page. Mutations keep the unscoped resolve.
-    const page =
-      SAFE_METHODS.has(method) && request.zone !== undefined
-        ? pageKey(request.url, this.#document)
-        : undefined;
     const contentType = response.headers.get("content-type") ?? "";
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
+    const read = baseType === EVENT_STREAM ? this.#reader() : undefined;
     // A mutation never navigates to its own endpoint, that would answer 405
     const foreign =
       !crashed &&
       hook === undefined &&
-      (baseType !== CONTENT_TYPE || response.redirected);
-    const navigates = response.redirected || SAFE_METHODS.has(method);
+      ((baseType !== CONTENT_TYPE && read === undefined) || response.redirected);
     if (foreign && (response.redirected || (response.status < 400 && navigates)))
       return request.navigate === false
         ? { ...none("ok"), location: response.url || target }
-        : this.#fallbackNavigate(response.url || target);
+        : this.#fallbackNavigate(zones, response.url || target);
+    // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
+    // is a parse error rather than an unhandled rejection of a fire-and-forget fetch.
+    const land = async (body: string, parse: () => unknown): Promise<Outcome> => {
+      try {
+        const raw = parse();
+        // Cleared once the body parses, so a later non-envelope reply on this page
+        // navigates once more.
+        this.#session.remove(NAVIGATED_FLAG);
+        const { envelope, ok, stale, nodes } = await this.#onEnvelope(raw, {
+          response,
+          snapshot,
+          key: request.key,
+          page,
+          owner: request.owner,
+          zones,
+          isCurrent,
+        });
+        if (stale === true) return none("dropped");
+        nodes?.forEach(stamp);
+        const invalid = envelope.form?.valid === false;
+        return {
+          status: invalid ? "invalid" : response.status < 400 ? "ok" : "error",
+          applied: ok,
+          envelope,
+          errors: invalid ? envelope.form.errors : undefined,
+        };
+      } catch (error) {
+        return this.#fail(zones, { kind: "parse", body, error });
+      }
+    };
+    if (read !== undefined && !crashed) return read(response, { signal, open, land });
     const body = await response.text();
     if (!isCurrent()) return none("dropped");
     if (crashed || foreign) {
-      const failed = this.#fail({ kind: "http", status: response.status, body });
-      if (foreign && navigates) this.#fallbackNavigate(response.url || target);
+      const failed = this.#fail(zones, { kind: "http", status: response.status, body });
+      if (foreign && navigates) this.#fallbackNavigate(zones, response.url || target);
       return failed;
     }
-    // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
-    // is a parse error rather than an unhandled rejection of a fire-and-forget fetch.
-    try {
-      const raw: unknown = hook !== undefined ? hook(response, body) : JSON.parse(body);
-      // Cleared once the body parses, so a later non-envelope reply on this page
-      // navigates once more.
-      this.#session.remove(NAVIGATED_FLAG);
-      const { envelope, ok, stale } = await this.#onEnvelope(raw, {
-        response,
-        snapshot,
-        key: request.key,
-        page,
-        owner: request.owner,
-        isCurrent,
-      });
-      if (stale === true) return none("dropped");
-      const invalid = envelope.form?.valid === false;
-      return {
-        status: invalid ? "invalid" : response.status < 400 ? "ok" : "error",
-        applied: ok,
-        envelope,
-        errors: invalid ? envelope.form.errors : undefined,
-      };
-    } catch (error) {
-      return this.#fail({ kind: "parse", body, error });
-    }
+    return land(body, () =>
+      hook !== undefined ? hook(response, body) : JSON.parse(body),
+    );
   }
 
   // Guarded so a page that keeps replying with a non-envelope (login redirect, WAF
-  // stub, maintenance) cannot loop navigation, since a `lazy="load"` zone requests
+  // stub, maintenance) cannot loop navigation, since a `defer="load"` trigger requests
   // again on every page. The first navigates and sets the flag, and a second while it
   // is set fires a partial:error and leaves the page in place.
-  #fallbackNavigate(url: string): Outcome {
+  #fallbackNavigate(zones: string[], url: string): Outcome {
     if (this.#session.get(NAVIGATED_FLAG) === "1") {
       this.#session.remove(NAVIGATED_FLAG);
-      return this.#fail({
+      return this.#fail(zones, {
         kind: "network",
         error: new Error("zone answered non-envelope after a navigation"),
       });
@@ -545,14 +686,10 @@ export class Wire {
 
   // Headers, not a plain record, so a caller writing a name in another case still
   // matches the runtime's header of that name and each header is set exactly once.
-  #headers(
-    request: WireRequest,
-    method: string,
-    csrf: CsrfPayload | undefined,
-  ): Headers {
+  headers(request: WireRequest, method: string, csrf?: CsrfPayload): Headers {
     const headers = new Headers({
       [REQUEST_FLAG]: "1",
-      [HEADER_ACCEPT]: ACCEPT,
+      [HEADER_ACCEPT]: method === "GET" && this.#reader() ? STREAM_ACCEPT : ACCEPT,
       ...request.headers,
     });
     // The version is sent only after the client has read one from an envelope, so

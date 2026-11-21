@@ -2,7 +2,10 @@ import logging
 
 import pytest
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
+from django.core.handlers.exception import response_for_exception
 from django.http import Http404
+from django.http.multipartparser import MultiPartParserError
+from django.test import RequestFactory
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.conf.signals import settings_reloaded
@@ -13,8 +16,11 @@ from next.diagnostics import (
     Capture,
     FailureLog,
     degraded,
+    degraded_status,
     exception_text,
+    mark_degraded,
     reset_failure_logs,
+    status_kept,
     watch_degraded,
 )
 from next.testing import override_next_settings
@@ -249,6 +255,26 @@ class TestFailureLog:
         assert caplog.records == []
         assert degraded() is False
 
+    def test_a_malformed_multipart_body_keeps_the_django_400(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        """A block reading an unparsable upload lets Django answer it, unlogged here."""
+        settings.DEBUG = False
+        watch_degraded()
+        request = RequestFactory().generic(
+            "POST", "/", b"x", content_type="multipart/form-data"
+        )
+        with (
+            caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"),
+            pytest.raises(MultiPartParserError) as info,
+            failures.guard("items", "items() raised"),
+        ):
+            request.POST.get("name")
+
+        assert caplog.records == []
+        assert degraded() is False
+        assert response_for_exception(request, info.value).status_code == 400
+
     def test_an_empty_pass_through_contains_an_intended_exception(
         self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
     ) -> None:
@@ -335,6 +361,7 @@ class TestFailureLog:
             PermissionDenied,
             SuspiciousOperation,
             BadRequest,
+            MultiPartParserError,
         }
 
 
@@ -423,6 +450,56 @@ class TestQuietPeriod:
             "was last logged."
         )
 
+    def test_extra_rides_on_the_record_beside_the_count(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            failures.emit(logging.ERROR, "a", "failed %s", ("x",), extra={"tag": 1})
+
+        (record,) = caplog.records
+        assert record.tag == 1
+        assert record.suppressed == 0
+
+    def test_a_quiet_level_logs_each_left_out_occurrence(
+        self, failures: FailureLog, clock: _Clock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG, logger="next.tests.diagnostics"):
+            for tag in (1, 2, 3):
+                failures.emit(
+                    logging.ERROR,
+                    "a",
+                    "failed %s",
+                    ("x",),
+                    _BOOM,
+                    extra={"tag": tag},
+                    quiet=logging.DEBUG,
+                )
+            clock.now += QUIET_PERIOD
+            failures.emit(
+                logging.ERROR, "a", "failed %s", ("x",), extra={"tag": 4}, quiet=10
+            )
+
+        assert [(r.levelno, r.tag) for r in caplog.records] == [
+            (logging.ERROR, 1),
+            (logging.DEBUG, 2),
+            (logging.DEBUG, 3),
+            (logging.ERROR, 4),
+        ]
+        assert caplog.records[1].getMessage() == "failed x"
+        assert caplog.records[1].exc_info is not None
+        assert caplog.records[3].getMessage() == (
+            "failed x The same failure occurred 2 more times since it was last logged."
+        )
+
+    def test_without_a_quiet_level_a_left_out_occurrence_logs_nothing(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG, logger="next.tests.diagnostics"):
+            failures.emit(logging.ERROR, "a", "failed", ())
+            failures.emit(logging.ERROR, "a", "failed", ())
+
+        assert len(caplog.records) == 1
+
     def test_first_failure_answers_at_the_same_rate(
         self, failures: FailureLog, clock: _Clock
     ) -> None:
@@ -482,4 +559,73 @@ class TestDegraded:
         with pytest.raises(RuntimeError) as info:
             _contained(failures, "items")
         del info.value.__notes__
+        assert degraded() is False
+
+
+class TestDegradedStatus:
+    """A contained failure may give the response a status, kept until the next watch."""
+
+    def test_a_clean_render_has_no_status(self) -> None:
+        watch_degraded()
+
+        assert degraded_status() is None
+        assert degraded() is False
+
+    def test_a_plain_mark_degrades_without_a_status(self) -> None:
+        watch_degraded()
+        mark_degraded()
+
+        assert degraded() is True
+        assert degraded_status() is None
+        watch_degraded()
+
+    def test_a_status_mark_degrades_with_its_status(self) -> None:
+        watch_degraded()
+        mark_degraded(500)
+
+        assert degraded() is True
+        assert degraded_status() == 500
+        watch_degraded()
+
+    def test_a_later_plain_mark_keeps_the_status(self) -> None:
+        watch_degraded()
+        mark_degraded(500)
+        mark_degraded()
+
+        assert degraded_status() == 500
+        watch_degraded()
+
+    def test_the_watch_drops_the_status(self) -> None:
+        mark_degraded(500)
+        watch_degraded()
+
+        assert degraded_status() is None
+
+
+class TestStatusKept:
+    """A block keeps the status its contained failures set off the response."""
+
+    def test_a_status_set_inside_degrades_without_it(self) -> None:
+        watch_degraded()
+        with status_kept():
+            mark_degraded(500)
+
+        assert degraded() is True
+        assert degraded_status() is None
+        watch_degraded()
+
+    def test_a_status_set_before_survives_the_block(self) -> None:
+        watch_degraded()
+        mark_degraded(503)
+        with status_kept():
+            mark_degraded(500)
+
+        assert degraded_status() == 503
+        watch_degraded()
+
+    def test_a_clean_block_leaves_the_render_clean(self) -> None:
+        watch_degraded()
+        with status_kept():
+            pass
+
         assert degraded() is False

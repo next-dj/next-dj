@@ -32,8 +32,8 @@ def stat_value(page: Page, label: str) -> Locator:
 
 
 def save_toggles(page: Page) -> None:
-    with page.expect_navigation():
-        page.get_by_role("button", name="Save toggles").click()
+    page.get_by_role("button", name="Save toggles").click()
+    expect(page.get_by_role("alert")).to_have_text("Flag toggles saved.")
 
 
 def deny_save(page: Page, probe: PageProbe) -> None:

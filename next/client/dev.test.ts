@@ -13,18 +13,18 @@ const win = globalThis as unknown as {
 
 it("hands the dev channel to the runtime as it evaluates", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-  document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="soon"></div>';
+  document.body.innerHTML = '<div data-next-zone="z" data-next-defer="soon"></div>';
   win.Next._init({ $dev: true });
   // The diagnostics are attached once the loaded chunk resolves, then check the page.
   await Promise.resolve();
-  expect(warn).toHaveBeenCalledWith(expect.stringContaining('data-next-lazy="soon"'));
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('data-next-defer="soon"'));
 });
 
 it("keeps the first dev channel when a second copy of the chunk hands one over", async () => {
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const second = { attrs: vi.fn() };
   win.Next._land("dev", second);
-  document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="soon"></div>';
+  document.body.innerHTML = '<div data-next-zone="z" data-next-defer="soon"></div>';
   win.Next._init({ $dev: true });
   await Promise.resolve();
   expect(second.attrs).not.toHaveBeenCalled();

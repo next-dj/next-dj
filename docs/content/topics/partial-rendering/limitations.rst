@@ -14,11 +14,10 @@ The boundaries below follow from that shape, and each one names where the model 
 Zones render synchronously
 --------------------------
 
-A zone renders standalone over the full page context in one synchronous pass.
-There is no server-side suspense flush, so a slow zone holds the response rather than streaming a placeholder and a later patch.
-A ``lazy=`` zone defers its first render behind a placeholder, but the deferral is a separate client-driven round trip, not a server-held stream.
-That round trip is the runtime's, so a page without it shows the placeholder and nothing more.
-A lazy zone is the one zone mode with no server-rendered fallback, and content that has to reach a reader without JavaScript renders inline instead.
+A zone renders standalone over the full page context in one synchronous pass, and it always renders inline on the first paint.
+A slow zone therefore holds its response, and a slow part of it that should not is a component with a ``loading.djx`` inside the zone.
+A component deferred with ``load``, ``visible`` or ``manual`` fills through a later client round trip, so a page without the runtime shows its loading content and nothing more.
+Content that has to reach a reader without JavaScript renders inline instead.
 
 Some operations exist only in an envelope
 -----------------------------------------

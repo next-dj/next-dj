@@ -257,6 +257,7 @@ The dispatcher builds the payload and sends the signal only when at least one re
        )
 
 A receiver runs inside the dispatch, so keep it cheap.
+It runs outside any transaction the dispatch opened, after a refusal on the bound row has rolled back, so a row it writes and a :func:`~django.db.transaction.on_commit` hook it registers persist.
 ``uid`` and ``request`` follow the shared contract described at the top of this page.
 
 .. _topics-forms-signals-form-backend-loaded:

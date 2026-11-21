@@ -4,14 +4,8 @@ import pytest
 from blog.posts import load_post
 from django.contrib.staticfiles import finders
 
-from next.testing import (
-    assert_has_class,
-    assert_metadata,
-    assert_missing_class,
-    find_anchor,
-    init_payload,
-    parse_sitemap,
-)
+from next.router import CutKind
+from next.testing import assert_metadata, find_anchor, init_payload, parse_sitemap
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +51,16 @@ class TestIndex:
         assert "Small posts, plain Markdown" in body
         assert "© " in body
         assert "you are at <code>/</code>" in body
+
+    def test_a_navigation_between_posts_keeps_both_layouts(self, next_client) -> None:
+        step = next_client.navigate("/posts/hello-world/", origin="/posts/welcome/")
+        assert step.kind is CutKind.SLOT
+        assert len(step.kept) == 2
+        assert step.envelope is not None
+        assert "Hello, world" in step.envelope.html_for_zone("post-header")
+        footer = step.envelope.html_for_zone("site-footer")
+        assert "you are at <code>/posts/hello-world/</code>" in footer
+        assert "Small posts" in step.envelope.html_for_zone("tagline")
 
 
 class TestPost:
@@ -120,19 +124,15 @@ class TestShareButton:
 
 
 class TestActiveNav:
-    """The shared nav_link component toggles active state via request.resolver_match."""
+    """The router marks the current link of the main nav, which `nav_link` styles."""
 
     @pytest.mark.parametrize("case", NAV_CASES, ids=lambda case: case.id)
-    def test_nav_highlights_the_visited_page(self, next_client, case: NavCase) -> None:
+    def test_nav_marks_the_visited_page(self, next_client, case: NavCase) -> None:
         body = next_client.get(case.path).content.decode()
-        assert_has_class(
-            find_anchor(body, href=case.active_href, text=case.active_text),
-            "font-semibold",
-        )
-        assert_missing_class(
-            find_anchor(body, href=case.inactive_href, text=case.inactive_text),
-            "font-semibold",
-        )
+        active = find_anchor(body, href=case.active_href, text=case.active_text)
+        inactive = find_anchor(body, href=case.inactive_href, text=case.inactive_text)
+        assert 'aria-current="page"' in active
+        assert "data-next-current" not in inactive
 
 
 class TestPageMetadata:

@@ -10,15 +10,10 @@ from django.contrib.sessions.backends.signed_cookies import (
 from django.core.checks import CheckMessage, Warning as DjangoWarning
 
 from next.conf.scopes import scope_value
+from next.identity import TicketBinding, session_store_class
 from next.utils import middleware_listed
 
-from .binding import (
-    SessionBinding,
-    SignedCookieBinding,
-    TicketBinding,
-    binding_class,
-    session_store_class,
-)
+from .binding import SessionBinding, SignedCookieBinding, binding_class
 
 
 _SESSION_MIDDLEWARE = "django.contrib.sessions.middleware.SessionMiddleware"

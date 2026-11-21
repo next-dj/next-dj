@@ -53,19 +53,34 @@ A shared page renders nothing about the visitor.
 A layout that reads ``request.user``, a ``@context`` that reads the session, a template that sets a cookie, a CSP nonce, or consent rendered on the server makes the response personal, and the framework then sends it ``private`` and logs one warning per page.
 A request that carries an ``Authorization`` header is answered ``private`` as well.
 Only a ``GET`` or a ``HEAD`` carries the declared cache at all, so a ``POST`` the page answers is never shared.
-Move the account menu into a lazy zone, which the browser fetches with its own cookies after the cached page loads.
+Move the account menu into a component that loads on its own request, which the browser sends with its own cookies after the cached page loads.
 
 .. code-block:: jinja
    :caption: site/pages/layout.djx
 
    <header>
      <a href="/">Acme</a>
-     {% zone "account" lazy="load" %}
-       {% if request.user.is_authenticated %}<a href="/account/">{{ request.user }}</a>{% else %}<a href="/login/">Sign in</a>{% endif %}
-     {% placeholder %}
-       <span class="account-slot"></span>
-     {% endzone %}
+     {% component "account_menu" %}
    </header>
+
+.. code-block:: python
+   :caption: site/pages/_components/account_menu/component.py
+
+   from next import component
+
+   component.defer("load")
+
+.. code-block:: jinja
+   :caption: site/pages/_components/account_menu/component.djx
+
+   {% if request.user.is_authenticated %}<a href="/account/">{{ request.user }}</a>{% else %}<a href="/login/">Sign in</a>{% endif %}
+
+.. code-block:: jinja
+   :caption: site/pages/_components/account_menu/loading.djx
+
+   <span class="account-slot"></span>
+
+The shared page carries only the ``loading.djx``, and the menu renders on the request the browser makes for it.
 
 A ``Consent`` parameter reads an undecided visitor on a shared page, and gated scripts wait for the runtime, so consent never varies the cached HTML.
 ``CONSENT["SERVER_RENDER"] = True`` gives that up, and every shared page whose HTML then follows the consent cookie is sent with ``Cache-Control: private``.
@@ -83,7 +98,7 @@ Every zone response and every envelope carries ``Cache-Control: private, no-stor
    * - Rule
      - Why
    * - Bypass the cache when the request carries ``X-Next-Request``.
-     - Zone GETs, lazy zones, polls, and the token fetch send it.
+     - Zone GETs, deferred components, polls, and the token fetch send it.
    * - Bypass the cache for ``/_next/``.
      - The form dispatch and the token endpoint are never shared.
    * - Leave cookies out of the cache key and honour the origin ``Cache-Control``.
@@ -104,7 +119,8 @@ Verification
    curl -sI -H "X-Next-Request: 1" -H "X-Next-Zone: account" https://acme.example/pricing/ | grep -i cache-control
    uv run python manage.py check
 
-The full page answers the declared ``Cache-Control``, no ``Set-Cookie``, and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and the zone request answers ``private, no-store``.
+The full page answers the declared ``Cache-Control``, no ``Set-Cookie``, and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version, X-Next-Boundary, X-Next-Navigate, X-Next-Layouts, X-Next-Prefetch``, and the zone request answers ``private, no-store``.
+The ``Vary`` of every other response kind is listed in :ref:`topics-partial-rendering-reference-vary`.
 Submit the form with the browser's network panel open, and one ``GET /_next/csrf/`` precedes the ``POST``.
 A shared page that is made private logs ``declares a shared cache, but its response follows the visitor through a cookie, the session, the CSRF token, the consent, a CSP nonce or the Authorization header, so it is sent with Cache-Control: private.``, naming the file.
 

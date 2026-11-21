@@ -5,11 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Final, override
 
 from django.apps import AppConfig
+from django.contrib.auth.signals import user_logged_in, user_logged_out
 from django.core.signals import setting_changed
+from django.db.backends.signals import connection_created
 
 from next.checks.catalog import CHECK_MODULES
 from next.components.manager import forget_component_backends, forget_render_pipeline
 from next.components.sources import reset_components_manager_cache
+from next.compression.manager import forget_compression
 from next.conf.settings import reload_on_setting_changed
 from next.conf.signals import settings_reloaded
 from next.consent.manager import forget_consent_settings
@@ -45,23 +48,33 @@ from next.pages.processors import forget_context_processors, forget_template_pro
 from next.pages.responses import forget_response_policies
 from next.pages.watch import forget_watch_state
 from next.partial.manager import forget_asset_version, forget_partial_backend
-from next.partial.ports import PartialShaperImpl
 from next.permissions.access import forget_login_default
 from next.ports import (
     action_owners_slot,
+    async_bridge_slot,
+    deferrals_slot,
     form_routes_slot,
     page_scan_slot,
     page_scripts_slot,
-    partial_shaper_slot,
     realtime_negotiation_slot,
     router_access_slot,
+    router_stamp_slot,
     seo_routes_slot,
     static_assets_slot,
+    thread_wait_slot,
+    zone_marking_slot,
 )
 from next.realtime.asgi import forget_trusted_origins
 from next.realtime.manager import forget_realtime_broker
 from next.realtime.ports import RealtimeNegotiationImpl
 from next.realtime.transports import forget_transports
+from next.router.manager import forget_router, forget_router_entry
+from next.router.navigation import (
+    action_marking,
+    clear_on_login,
+    clear_on_logout,
+    stamp,
+)
 from next.scripts.manager import forget_script_srcs, forget_scripts
 from next.scripts.ports import PageScriptsImpl
 from next.seo.manager import forget_seo_sources
@@ -76,6 +89,11 @@ from next.static.manager import (
 from next.static.nonce import forget_nonce_setting
 from next.static.ports import StaticAssetsImpl
 from next.static.serializers import forget_serializer
+from next.suspense import drive, serve_until
+from next.suspense.assembly import inline_sink
+from next.suspense.connections import forget_detection
+from next.suspense.manager import forget_suspense_backends
+from next.transactions import cover_new_connection
 from next.urls.checks import reset_collected_patterns_cache
 from next.urls.manager import (
     reload_app_routers,
@@ -84,7 +102,7 @@ from next.urls.manager import (
 )
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
-from next.utils import forget_app_holdings
+from next.utils import forget_app_holdings, forget_middleware_classes
 
 from . import autodiscover, autoreload, components, staticfiles, templates
 
@@ -110,6 +128,7 @@ _SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
     reload_app_routers,
     forget_script_srcs,
     forget_login_default,
+    forget_router_entry,
     staticfiles.reinstall_finders,
     templates.reinstall_builtins,
 )
@@ -137,6 +156,8 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_partial_backend,
     forget_serializer,
     forget_scans,
+    forget_suspense_backends,
+    forget_detection,
     forget_nonce_setting,
     forget_static_manager,
     reset_collected_patterns_cache,
@@ -144,8 +165,11 @@ _SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
     forget_seo_sources,
     forget_scripts,
     forget_consent_settings,
+    forget_compression,
     forget_realtime_broker,
     forget_transports,
+    forget_router,
+    forget_middleware_classes,
 )
 
 # A reload from code keeps the settings, so memos derived from old routers drop.
@@ -185,13 +209,20 @@ class NextFrameworkConfig(AppConfig):
         _connect(setting_changed, _SETTING_CHANGED)
         _connect(settings_reloaded, _SETTINGS_RELOADED)
         _connect(router_reloaded, _ROUTER_RELOADED)
+        _connect(user_logged_in, (clear_on_login,))
+        _connect(user_logged_out, (clear_on_logout,))
+        _connect(connection_created, (cover_new_connection,))
         apply_resolver_setting()
+        async_bridge_slot.set(drive)
+        thread_wait_slot.set(serve_until)
+        deferrals_slot.set(inline_sink)
         action_owners_slot.set(ActionOwnersImpl())
         form_routes_slot.set(form_action_manager)
         page_scan_slot.set(PageScanImpl())
-        partial_shaper_slot.set(PartialShaperImpl())
         realtime_negotiation_slot.set(RealtimeNegotiationImpl())
         router_access_slot.set(RouterAccessImpl())
+        router_stamp_slot.set(stamp)
+        zone_marking_slot.set(action_marking)
         page_scripts_slot.set(PageScriptsImpl())
         seo_routes_slot.set(SeoRoutesImpl())
         seo_routes_version.move()

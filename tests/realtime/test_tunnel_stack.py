@@ -673,20 +673,24 @@ def test_tunneled_login_keeps_an_anonymous_browser_session(
     assert SESSION_KEY not in SessionStore(key).load()
 
 
-@pytest.mark.parametrize("atomic", [True, False])
-def test_atomic_requests_roll_back_what_ran_before_the_rotation(
-    app: ASGI3Application, ticket: SocketTicket, csrf: tuple[str, str], *, atomic: bool
+@pytest.mark.parametrize("atomic_requests", [True, False])
+def test_a_refused_rotation_rolls_back_what_ran_before_it(
+    app: ASGI3Application,
+    ticket: SocketTicket,
+    csrf: tuple[str, str],
+    *,
+    atomic_requests: bool,
 ) -> None:
     secret, token = csrf
     data = {"csrfmiddlewaretoken": token}
     database = connections.settings["default"]
-    with patch.dict(database, {"ATOMIC_REQUESTS": atomic}):
+    with patch.dict(database, {"ATOMIC_REQUESTS": atomic_requests}):
         answer = async_to_sync(_tunnel)(
             app, ticket, _frame(_url("tunnel_login"), data), secret=secret
         )
     created = get_user_model().objects.filter(username="tunnel-user").exists()
     assert answer == _ROTATED
-    assert created is not atomic
+    assert not created
 
 
 def test_caught_rotation_still_refuses_the_reply(

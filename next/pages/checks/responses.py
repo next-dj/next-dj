@@ -53,6 +53,7 @@ _COOKIELESS_MIDDLEWARE: Final = frozenset(
         "django.middleware.clickjacking.XFrameOptionsMiddleware",
         "django.middleware.csp.ContentSecurityPolicyMiddleware",
         "next.site.middleware.RobotsHeaderMiddleware",
+        "next.middleware.CompressionMiddleware",
     }
 )
 """Middleware known to set no cookie, so it may sit above `ConditionalGetMiddleware`.

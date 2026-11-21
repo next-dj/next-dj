@@ -34,6 +34,10 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "SITE": {},
     "SEO": {},
     "CONSENT": {},
+    "TRANSACTIONS": {},
+    "DEFER": {},
+    "COMPRESSION": {},
+    "ROUTER": {},
     "STATIC_VERSION": "2026.9.19",
 }
 
@@ -59,6 +63,8 @@ class TestValueTypeErrors:
             ("NEXT_JS_OPTIONS", []),
             ("METADATA", []),
             ("SEO", []),
+            ("TRANSACTIONS", []),
+            ("DEFER", []),
             ("STATIC_VERSION", 42),
         ],
         ids=[
@@ -74,6 +80,8 @@ class TestValueTypeErrors:
             "dict_key_given_list",
             "dict_key_given_list_metadata",
             "dict_key_given_list_seo",
+            "dict_key_given_list_transactions",
+            "dict_key_given_list_defer",
             "optional_str_key_given_int",
         ],
     )

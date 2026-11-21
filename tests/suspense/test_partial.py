@@ -1,0 +1,535 @@
+import asyncio
+import json
+import time
+import zlib
+from collections.abc import AsyncGenerator, Generator
+from typing import override
+from unittest import mock
+
+import pytest
+from asgiref.sync import sync_to_async
+from django.http import HttpRequest
+from django.test import AsyncRequestFactory, RequestFactory
+
+from next.compression import OPT_OUT
+from next.defer import Addressing, BoundaryOptions, DeferMode, ErrorKind, Site
+from next.partial.backends import JsonPartialProtocolBackend
+from next.partial.envelope import Envelope, Patch
+from next.partial.sse import sse_heartbeat_seconds
+from next.suspense import PartialStream, page_stream_closed, page_stream_opened
+from next.suspense.assembly import _Source
+from next.suspense.coordinator import Machine, Totals
+from next.suspense.markers import Caps, Job, Outcome, Rendered
+from next.suspense.partial import CACHE_CONTROL, CONTENT_TYPE, frame
+from next.suspense.policy import StreamSlot, open_streams
+from next.suspense.render import Delta
+from next.suspense.response import Admitted, Payloads, Piece, errored, shell, wrappers
+from next.suspense.session import BoundarySession
+from next.testing import capture_signals
+from next.testing.streaming import _events
+
+
+_SITE = Site(Addressing.COMPONENT, "card", DeferMode.STREAM, "page.html")
+_MACHINERY = "machinery"
+
+pytestmark = pytest.mark.django_db
+
+
+class _Batches:
+    """The batches a test lists, failing after the last one when asked to.
+
+    `failed` stands for a failed coordinator owing `owed`, `None` failing to render it.
+    """
+
+    def __init__(
+        self, *batches: tuple[Piece, ...], fail: bool = False, failed: bool = False
+    ) -> None:
+        self.batches = batches
+        self.fail = fail
+        self.failed = failed
+        self.owed: tuple[Piece, ...] | None = ()
+        self.closed = False
+        self.idle: float | None = None
+        self.totals: Totals | None = Totals(late=1, shed=2)
+        self.pinned: str | None = None
+
+    def lane(self) -> str | None:
+        return self.pinned
+
+    def unsettled(self) -> tuple[Piece, ...]:
+        if self.owed is None:
+            raise RuntimeError(_MACHINERY)
+        return self.owed
+
+    def run(
+        self, *, idle: float | None = None
+    ) -> Generator[tuple[Piece, ...], None, None]:
+        self.idle = idle
+        try:
+            yield from self.batches
+            if self.fail:
+                raise RuntimeError(_MACHINERY)
+        finally:
+            self.closed = True
+
+    async def arun(self) -> AsyncGenerator[tuple[Piece, ...], None]:
+        try:
+            for batch in self.batches:
+                await asyncio.sleep(0)
+                yield batch
+            if self.fail:
+                raise RuntimeError(_MACHINERY)
+        finally:
+            self.closed = True
+
+
+type _Held = dict[str, tuple[str | None, str]]
+
+
+def _queued(session: BoundarySession[Delta], key: str) -> Job[Delta]:
+    """Queue a job of `key` that renders ready content, failing to its error UI."""
+    job = Job(
+        id=session.next_id(),
+        key=key,
+        site=_SITE,
+        options=BoundaryOptions(),
+        deadline=session.deadline,
+        fallback=lambda error: Rendered("<p>failed</p>", Delta(), kind=error),
+        run=lambda: Rendered("<p>ok</p>", Delta()),
+    )
+    session.queue(job)
+    return job
+
+
+def _piece(kind: ErrorKind | None = None) -> tuple[Piece, _Held]:
+    """Return one settled piece and the loading wrapper the envelope carried."""
+    session = BoundarySession[Delta].open(Caps.from_settings())
+    job = Job(
+        id=session.next_id(),
+        key="k",
+        site=_SITE,
+        options=BoundaryOptions(),
+        deadline=session.deadline,
+        fallback=lambda error: Rendered("<p>failed</p>", Delta(), kind=error),
+        run=lambda: Rendered("", Delta()),
+    )
+    html = shell(job.id, "div", "k", None, "<p>wait</p>")
+    rendered = Rendered("<p>ok</p>" if kind is None else "", Delta(), kind=kind)
+    return Piece(job, Outcome(job.id, rendered)), wrappers(html, session.seal)
+
+
+class _Flaky(Payloads):
+    """Payloads whose first `fails` mappings raise, as a frame that cannot be built."""
+
+    def __init__(self, request: HttpRequest, held: _Held, fails: int) -> None:
+        super().__init__(request, shell=held, collector=None)
+        self.fails = fails
+
+    @override
+    def written(self, piece: Piece) -> dict[str, object]:
+        if self.fails:
+            self.fails -= 1
+            raise RuntimeError(_MACHINERY)
+        return super().written(piece)
+
+
+def _stream(
+    *batches: tuple[Piece, ...],
+    held: _Held | None = None,
+    fail: bool = False,
+    failed: bool = False,
+    fails: int = 0,
+    deadline: float | None = None,
+    envelope: Envelope | None = None,
+    request: HttpRequest | None = None,
+    compress: bool = True,
+    slot: StreamSlot | None = None,
+) -> tuple[PartialStream, _Batches]:
+    asked = RequestFactory().get("/") if request is None else request
+    source = _Batches(*batches, fail=fail, failed=failed)
+    stream = PartialStream(
+        asked,
+        envelope or Envelope("v", (Patch("morph", {"zone": "z"}, "<p>wait</p>"),)),
+        source,
+        _Flaky(asked, held or {}, fails),
+        deadline=time.monotonic() + 10 if deadline is None else deadline,
+        admitted=Admitted(slot, reason="partial-stream"),
+        compress=compress,
+    )
+    return stream, source
+
+
+def _decoded(writes: list[bytes]) -> list[tuple[str, dict[str, object]]]:
+    body = b"".join(writes).decode()
+    return [(name, json.loads(data)) for name, data in _events(body)]
+
+
+def _data(written: str) -> str:
+    return written.split("\n")[1].removeprefix("data: ")
+
+
+class TestFrame:
+    """One event holds its JSON on one `data:` line whatever the payload carries."""
+
+    def test_line_breaks_inside_a_payload_stay_escaped(self) -> None:
+        text = "a\nb\r\ndata: evil\n\nevent: end\n" + chr(0x2028) + chr(0x2029)
+        written = frame("patch", {"html": text}).decode()
+        assert written.count("\n") == 3
+        assert written.startswith("event: patch\ndata: {")
+        assert written.endswith("}\n\n")
+        assert "\r" not in written
+        assert _events(written) == [("patch", _data(written))]
+        assert json.loads(_data(written)) == {"html": text}
+
+
+class TestPartialStream:
+    """The body writes the hello and the envelope, a patch per boundary, then the end."""
+
+    def test_the_headers_mark_a_private_event_stream(self) -> None:
+        stream, _ = _stream()
+        stream.close()
+        assert stream["Content-Type"] == CONTENT_TYPE
+        assert stream["Cache-Control"] == CACHE_CONTROL
+        assert CACHE_CONTROL == "private, no-cache, no-store, no-transform"
+        assert stream["X-Accel-Buffering"] == "no"
+        assert {"Accept", "Accept-Encoding", "X-Next-Request"} <= {
+            name.strip() for name in stream["Vary"].split(",")
+        }
+        assert not stream.has_header("Content-Length")
+
+    def test_the_frames_follow_the_batches(self) -> None:
+        piece, held = _piece()
+        stream, source = _stream((piece,), held=held)
+        with capture_signals(page_stream_closed) as recorder:
+            writes = list(stream)
+            stream.close()
+        assert len(writes[0]) == 1024
+        assert writes[0].startswith(
+            b'event: hello\ndata: {"protocol":2,"streamed":true}'
+        )
+        assert b"retry:" not in b"".join(writes)
+        assert b"\nid:" not in b"".join(writes)
+        events = _decoded(writes)
+        assert [name for name, _ in events] == ["hello", "patch", "patch", "end"]
+        assert set(events[1][1]) == {"e"}
+        assert events[2][1]["z"] == piece.outcome.id
+        assert events[2][1]["s"] == "ready"
+        assert events[-1][1] == {"code": "complete"}
+        assert source.closed is True
+        (event,) = recorder.events
+        assert event.kwargs["partial"] is True
+        assert event.kwargs["aborted"] is False
+        assert (event.kwargs["sent"], event.kwargs["late"]) == (1, 1)
+
+    def test_an_idle_batch_writes_a_heartbeat(self) -> None:
+        piece, held = _piece()
+        stream, source = _stream((), (piece,), held=held)
+        writes = list(stream)
+        stream.close()
+        assert writes[1] == b": ping\n\n"
+        assert source.idle == sse_heartbeat_seconds()
+        assert [name for name, _ in _decoded(writes)] == [
+            "hello",
+            "patch",
+            "patch",
+            "end",
+        ]
+
+    def test_a_long_envelope_is_not_padded(self) -> None:
+        envelope = Envelope("v", (Patch("morph", {"zone": "z"}, "x" * 2000),))
+        stream, _ = _stream(envelope=envelope)
+        first = next(iter(stream))
+        stream.close()
+        assert not first.endswith(b"  \n\n")
+        assert first.endswith(b"}\n\n")
+
+    def test_another_item_is_framed_as_the_writer_frames_it(self) -> None:
+        stream, _ = _stream()
+        stream.close()
+        assert stream._event_frame(Envelope("v")).startswith(b"event: next-patches")
+
+    def test_a_machinery_failure_ends_with_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        stream, _ = _stream(fail=True)
+        with caplog.at_level("ERROR", logger="next.suspense"):
+            writes = list(stream)
+        assert _decoded(writes)[-1] == ("end", {"code": "error"})
+        assert caplog.text.count("The stream of a page failed") == 1
+
+    def test_a_coordinator_failure_settles_the_rest_before_the_end(self) -> None:
+        ready, held = _piece()
+        lost, lost_held = _piece()
+        stream, source = _stream((ready,), held={**held, **lost_held}, failed=True)
+        source.owed = (errored(lost),)
+        with capture_signals(page_stream_closed) as recorder:
+            writes = list(stream)
+            stream.close()
+        events = _decoded(writes)
+        assert [name for name, _ in events] == [
+            "hello",
+            "patch",
+            "patch",
+            "patch",
+            "end",
+        ]
+        assert (events[2][1]["z"], events[2][1]["s"]) == (ready.outcome.id, "ready")
+        settled = events[3][1]
+        assert (settled["z"], settled["s"], settled["k"]) == (
+            lost.outcome.id,
+            "error",
+            "error",
+        )
+        assert "<p>failed</p>" in json.dumps(settled["e"])
+        assert events[-1] == ("end", {"code": "error"})
+        assert writes[-1].startswith(b"event: patch")
+        (event,) = recorder.events
+        assert (event.kwargs["sent"], event.kwargs["failed"]) == (2, 1)
+        assert event.kwargs["aborted"] is False
+
+    def test_owed_frames_that_fail_still_end_the_stream(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        stream, source = _stream(failed=True)
+        source.owed = None
+        with caplog.at_level("ERROR", logger="next.suspense"):
+            events = _decoded(list(stream))
+        assert [name for name, _ in events] == ["hello", "patch", "end"]
+        assert events[-1] == ("end", {"code": "error"})
+        assert caplog.text.count("The stream of a page failed") == 1
+
+    def test_a_frame_that_fails_settles_its_boundary_as_an_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        piece, held = _piece()
+        stream, _ = _stream((piece,), held=held, fails=1)
+        with caplog.at_level("ERROR", logger="next.suspense"):
+            events = _decoded(list(stream))
+        settled = events[2][1]
+        assert (settled["z"], settled["s"], settled["k"]) == (
+            piece.outcome.id,
+            "error",
+            "error",
+        )
+        assert "<p>failed</p>" in json.dumps(settled["e"])
+        assert events[-1] == ("end", {"code": "error"})
+        assert caplog.text.count("A frame of a stream failed to build") == 1
+
+    def test_a_second_failure_is_contained_without_a_second_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        piece, held = _piece()
+        stream, source = _stream((piece,), held=held, fails=1)
+        source.owed = None
+        with caplog.at_level("ERROR", logger="next.suspense"):
+            events = _decoded(list(stream))
+        assert [name for name, _ in events] == ["hello", "patch", "patch", "end"]
+        assert events[-1] == ("end", {"code": "error"})
+        assert len(caplog.records) == 1
+
+    def test_an_error_frame_that_fails_too_ends_the_stream(self) -> None:
+        piece, held = _piece()
+        stream, source = _stream((piece,), (piece,), held=held, fails=2)
+        events = _decoded(list(stream))
+        assert [name for name, _ in events] == ["hello", "patch", "end"]
+        assert events[-1] == ("end", {"code": "error"})
+        assert source.closed is True
+
+    def test_an_opening_no_byte_spells_raises_before_any_header(self) -> None:
+        envelope = Envelope("v", (Patch("morph", {"zone": "z"}, "x\ud800y"),))
+        before = open_streams.open
+        with pytest.raises(UnicodeEncodeError):
+            _stream(envelope=envelope)
+        assert open_streams.open == before
+
+    def test_the_stream_serialises_as_the_json_envelope_does(self) -> None:
+        envelope = Envelope("v", (Patch("morph", {"zone": "z"}, "jos\u00e9 \u2028"),))
+        stream, _ = _stream(envelope=envelope)
+        first = next(iter(stream))
+        stream.close()
+        body = JsonPartialProtocolBackend().serialize_envelope(envelope)
+        assert b'"e":' + body + b"}" in first
+
+    def test_a_coded_stream_still_marks_itself_no_transform(self) -> None:
+        piece, held = _piece()
+        request = RequestFactory().get("/", HTTP_ACCEPT_ENCODING="gzip")
+        stream, _ = _stream((piece,), held=held, request=request)
+        assert stream["Content-Encoding"] == "gzip"
+        assert "no-transform" in stream["Cache-Control"]
+        writes = list(stream)
+        stream.close()
+        assert _decoded([zlib.decompress(b"".join(writes), 31)])[-1] == (
+            "end",
+            {"code": "complete"},
+        )
+
+    def test_a_real_coordinator_whose_machine_fails_settles_every_boundary(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        session = BoundarySession[Delta].open(Caps.from_settings())
+        jobs = [_queued(session, key) for key in ("first", "second")]
+        held = wrappers(
+            "".join(shell(job.id, "div", job.key, None, "<p>wait</p>") for job in jobs),
+            session.seal,
+        )
+        request = RequestFactory().get("/")
+        broken = mock.patch.object(Machine, "finished", side_effect=RuntimeError("x"))
+        with broken, caplog.at_level("ERROR", logger="next.suspense"):
+            source = _Source(session, request)
+            stream = PartialStream(
+                request,
+                Envelope("v", (Patch("morph", {"zone": "z"}, "<p>wait</p>"),)),
+                source,
+                Payloads(request, shell=held, collector=None),
+                deadline=session.deadline,
+            )
+            events = _decoded(list(stream))
+            stream.close()
+        settled = [(data["z"], data["s"], data["k"]) for _, data in events[2:-1]]
+        assert settled == [(job.id, "error", "error") for job in jobs]
+        assert events[-1] == ("end", {"code": "error"})
+        assert source.failed is True
+        assert caplog.text.count("The driver of a response's deferred jobs failed") == 1
+
+    def test_a_timeout_past_the_deadline_ends_with_deadline(self) -> None:
+        piece, held = _piece(ErrorKind.TIMEOUT)
+        stream, _ = _stream((piece,), held=held, deadline=time.monotonic())
+        events = _decoded(list(stream))
+        assert (events[2][1]["s"], events[2][1]["k"]) == ("error", "timeout")
+        assert events[-1] == ("end", {"code": "deadline"})
+
+    def test_a_timeout_before_the_deadline_still_completes(self) -> None:
+        piece, held = _piece(ErrorKind.TIMEOUT)
+        stream, _ = _stream((piece,), held=held)
+        assert _decoded(list(stream))[-1] == ("end", {"code": "complete"})
+
+    def test_an_unread_stream_closed_frees_its_slot_unannounced(self) -> None:
+        before = open_streams.open
+        stream, _ = _stream(slot=open_streams.acquire(100))
+        assert open_streams.open == before + 1
+        with capture_signals(page_stream_opened, page_stream_closed) as recorder:
+            stream.close()
+            stream.close()
+        assert open_streams.open == before
+        assert recorder.events == []
+
+    def test_the_opening_is_announced_as_the_body_starts(self) -> None:
+        piece, held = _piece()
+        stream, source = _stream((piece,), held=held)
+        source.pinned = "atomic"
+        with capture_signals(page_stream_opened, page_stream_closed) as recorder:
+            assert recorder.events == []
+            list(stream)
+            stream.close()
+        opened, closed = recorder.events
+        assert opened.signal is page_stream_opened
+        assert opened.kwargs["request_lane"] == "atomic"
+        assert opened.kwargs["reason"] == "partial-stream"
+        assert opened.kwargs["partial"] is True
+        assert closed.kwargs["aborted"] is False
+
+    def test_closing_mid_stream_frees_the_slot_once(self) -> None:
+        piece, held = _piece()
+        before = open_streams.open
+        stream, _ = _stream((piece,), held=held, slot=open_streams.acquire(100))
+        with capture_signals(page_stream_closed) as recorder:
+            iterator = iter(stream)
+            next(iterator)
+            during = open_streams.open
+            stream.close()
+        assert during == before + 1
+        assert open_streams.open == before
+        assert [event.kwargs["aborted"] for event in recorder.events] == [True]
+
+    def test_a_page_opting_out_keeps_the_stream_plain(self) -> None:
+        request = RequestFactory().get("/", HTTP_ACCEPT_ENCODING="gzip")
+        stream, _ = _stream(request=request, compress=False)
+        stream.close()
+        assert not stream.has_header("Content-Encoding")
+        assert getattr(stream, OPT_OUT) is False
+
+
+class TestAsyncPartialStream:
+    """Under ASGI the body runs on the server loop with the same frames."""
+
+    def test_the_frames_follow_the_batches(self) -> None:
+        piece, held = _piece()
+
+        async def consume() -> tuple[PartialStream, list[bytes]]:
+            stream, _ = _stream(
+                (piece,), held=held, request=AsyncRequestFactory().get("/")
+            )
+            writes = [part async for part in stream]
+            await sync_to_async(stream.close)()
+            return stream, writes
+
+        stream, writes = asyncio.run(consume())
+        assert stream.is_async is True
+        assert [name for name, _ in _decoded(writes)] == [
+            "hello",
+            "patch",
+            "patch",
+            "end",
+        ]
+
+    def test_a_suspended_body_closes_on_the_loop(self) -> None:
+        piece, held = _piece()
+        before = open_streams.open
+
+        async def abandon() -> tuple[int, bool]:
+            stream, source = _stream(
+                (piece,),
+                held=held,
+                request=AsyncRequestFactory().get("/"),
+                slot=open_streams.acquire(100),
+            )
+            body = stream.__aiter__()
+            await anext(body)
+            await anext(body)
+            during = open_streams.open
+            await sync_to_async(stream.close)()
+            async with asyncio.timeout(5):
+                others = asyncio.all_tasks() - {asyncio.current_task()}
+                await asyncio.gather(*others, return_exceptions=True)
+            return during, source.closed
+
+        with capture_signals(page_stream_closed) as recorder:
+            during, closed = asyncio.run(abandon())
+        assert closed is True
+        assert during == before + 1
+        assert open_streams.open == before
+        assert [event.kwargs["aborted"] for event in recorder.events] == [True]
+
+    def test_a_failure_settles_on_the_request_thread(self) -> None:
+        piece, held = _piece()
+        lost, lost_held = _piece()
+
+        async def consume() -> list[bytes]:
+            stream, source = _stream(
+                (piece,),
+                held={**held, **lost_held},
+                failed=True,
+                fails=1,
+                request=AsyncRequestFactory().get("/"),
+            )
+            source.owed = (errored(lost),)
+            return [part async for part in stream]
+
+        events = _decoded(asyncio.run(consume()))
+        assert [(data.get("z"), data.get("s")) for _, data in events[2:4]] == [
+            (piece.outcome.id, "error"),
+            (lost.outcome.id, "error"),
+        ]
+        assert events[-1] == ("end", {"code": "error"})
+
+    def test_a_negotiated_coding_compresses_each_write(self) -> None:
+        piece, held = _piece()
+        request = AsyncRequestFactory().get("/", headers={"Accept-Encoding": "gzip"})
+
+        async def consume() -> tuple[PartialStream, list[bytes]]:
+            stream, _ = _stream((piece,), held=held, request=request)
+            return stream, [part async for part in stream]
+
+        stream, writes = asyncio.run(consume())
+        assert stream["Content-Encoding"] == "gzip"
+        assert writes[0][:2] == b"\x1f\x8b"

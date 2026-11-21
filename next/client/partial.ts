@@ -4,12 +4,14 @@ import { Applier, mountNodes } from "./apply";
 import type {
   Applied,
   ApplyDeps,
+  ApplyOptions,
   Envelope,
   HistoryAdapter,
   MountCallback,
   OpHandler,
+  Target,
 } from "./apply";
-import { Wire, none } from "./wire";
+import { Wire, none, zoneKey } from "./wire";
 import type {
   Clock,
   CsrfPayload,
@@ -18,15 +20,17 @@ import type {
   Navigate,
   Outcome,
   ParseHook,
+  StreamReader,
   WireRequest,
 } from "./wire";
 import { createDirtyTracker } from "./dirty";
+import type { Bounds } from "./morph";
 import { createLayers } from "./layers";
 import type { DialogAdapter, LayerStack, PopStateAdapter } from "./layers";
 import { createAssets } from "./assets";
 import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
-import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
+import type { ConfirmAdapter, DeferArm, IntersectionAdapter } from "./triggers";
 import type { EventSourceAdapter, Sse, SseFactory, VisibilityAdapter } from "./sse";
 import type { SocketTransport, WebSocketAdapter, WsTransportFactory } from "./ws";
 import { createCsrf } from "./csrf";
@@ -43,8 +47,12 @@ import {
   ORIGIN_FIELD,
   currentUrl,
   fire,
+  isBusy,
+  markBusy,
   matching,
+  now,
   requestTimeout,
+  stamped,
 } from "./protocol";
 import type { Diagnostics, WireTransport } from "./protocol";
 import type { StreamMeta } from "./stream";
@@ -59,6 +67,7 @@ export interface PartialDeps {
   ws?: LazyModule<WsTransportFactory>;
   csrf: LazyModule<CsrfMint>;
   poll: LazyModule<PollFactory>;
+  defer: LazyModule<DeferArm>;
 }
 
 /** The injectable platform seams, each overridable by the test harness. */
@@ -108,8 +117,8 @@ export interface SubmitAction {
 
 /** The public `Next.partial` surface plus its underscore-prefixed test seams. */
 export interface PartialSurface {
-  apply(raw: unknown): Envelope;
-  fetch(request: WireRequest): Promise<Outcome>;
+  apply(raw: unknown, options?: ApplyOptions): Envelope;
+  fetch(request: WireRequest | Element): Promise<Outcome>;
   submit(target: HTMLFormElement | SubmitAction): Promise<Outcome>;
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
@@ -128,6 +137,21 @@ export interface PartialSurface {
   /** Configure the adapters and rebuild the wire and applier. */
   _configure(adapters: PartialAdapters): void;
   _reset(): void;
+  _mark: typeof markBusy;
+  _busy: typeof isBusy;
+  _stamped: typeof stamped;
+  _now: typeof now;
+  _fire: (
+    event: string,
+    detail: Record<string, unknown>,
+    cancelable?: boolean,
+  ) => boolean | void;
+  _reader?: StreamReader | undefined;
+  _slot?: ((target: Target) => Bounds | undefined) | undefined;
+  _pop?: (() => string | undefined) | undefined;
+  _headers(headers: Record<string, string>): Headers;
+  _parse(contentType: string, body: string): unknown;
+  _sweep(): void;
 }
 
 // A dev-only adapter object swaps nothing in, so it must not cost a rebuild.
@@ -205,7 +229,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   // A page with no stream never fetches the bridge.
   const stream: StreamSurface = {
     scan(root) {
-      if (matching(root, `[${ATTR_STREAM}]`).length === 0) return;
+      if (matching(root, `[${ATTR_STREAM}]:not([${ATTR_STREAM}=""])`).length === 0)
+        return;
       const started = epoch;
       withBridge((factory) => {
         if (started === epoch) live(factory).scan(root);
@@ -258,15 +283,20 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   // Each deps object spreads the adapters first, since a module reads only the seams
   // it names, and the runtime's own keys follow so an adapter cannot shadow them.
   function navigationDeps(adapters?: PartialAdapters) {
-    return { ...adapters, dispatch: deps.dispatch, history };
+    return {
+      ...adapters,
+      dispatch: deps.dispatch,
+      history,
+      answer: () => surface._pop?.(),
+    };
   }
 
   // Every runtime event fires on the document and the bus alike. The wire, assets and
   // stream report through here, the other modules fire both themselves.
   function announce(adapters?: PartialAdapters) {
     const doc = adapters?.document ?? document;
-    return (event: string, detail: Record<string, unknown>): void =>
-      fire(doc, deps.dispatch, event, detail);
+    return (event: string, detail: Record<string, unknown>, cancelable?: boolean) =>
+      fire(doc, deps.dispatch, event, detail, cancelable);
   }
 
   function assetsDeps(adapters?: PartialAdapters) {
@@ -292,6 +322,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       mount: { run: runMount },
       refresh: (request) => void wire.fetch(request),
       here: () => currentUrl(adapters?.document ?? document),
+      slot: (target) => surface._slot?.(target),
     };
   }
 
@@ -309,7 +340,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   function triggerDeps(adapters?: PartialAdapters) {
     return {
       ...adapters,
-      fetch: (request: WireRequest) => void wire.fetch(request),
+      fetch: (request: WireRequest) => wire.fetch(request),
       abort: (key: string) => wire.abort(key),
       // The owning page of an element, so a base-page zone keeps GETting the
       // host URL while a modal layer holds the address bar.
@@ -323,6 +354,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       history: navigation.asHistory(),
       diagnostics: readDiagnostics,
       poll: deps.poll,
+      defer: deps.defer,
     };
   }
 
@@ -347,7 +379,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       parse: (body: string) => wire.parseStream(contentType, body),
       fetch: (request: WireRequest) => wire.fetch(request),
       cancel: (request: { url: string; zone: string }) =>
-        wire.abort(`${request.url.split("?")[0]} ${request.zone}`),
+        wire.abort(zoneKey(request.url, request.zone)),
       dispatch: announce(adapters),
       pageUrl: (el: Element) => layers.urlFor(el),
     };
@@ -360,20 +392,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       ...adapters,
       active: () => wireGeneration === generation,
       dispatch: announce(adapters),
-      onEnvelope: (
-        raw: unknown,
-        { snapshot, key, page, owner, isCurrent }: EnvelopeOptions,
-      ) =>
+      onEnvelope: (raw: unknown, options: EnvelopeOptions) =>
         new Promise<Applied>((done) => {
           // A mutation scopes no zones, but its meta op belongs to the submitting page.
-          const envelope = applier.apply(raw, {
-            snapshot,
-            key,
-            page,
-            owner,
-            done,
-            isCurrent,
-          });
+          const envelope = applier.apply(raw, { ...options, done });
           // A csrf meta rotates the token so the next mutation submits the fresh
           // one, not just the forms already in the document.
           if (envelope.csrf) surface.setCsrf(envelope.csrf);
@@ -391,6 +413,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       forgetRequestId: (id: string) => stream.forget(id),
       tunnel: (target: string, init: RequestInit, header?: string) =>
         wsTransport?.http(target, init, header),
+      resolveZone: (name: string, root: ParentNode, page?: string) =>
+        layers.resolveZone(name, root, page),
+      reader: () => (deps.context().$stream === true ? surface._reader : undefined),
     };
   }
 
@@ -405,11 +430,13 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   }
 
   const surface: PartialSurface = {
-    apply(raw) {
-      return applier.apply(raw);
+    apply(raw, options) {
+      return applier.apply(raw, options);
     },
     fetch(request) {
-      return wire.fetch(request);
+      return request instanceof Element
+        ? Promise.resolve(none("dropped"))
+        : wire.fetch(request);
     },
     async submit(target) {
       if (target instanceof HTMLFormElement)
@@ -467,7 +494,6 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       assets.seed();
       runMount(document);
       mounted = true;
-      triggers.ready();
     },
     _configure(adapters) {
       dev = adapters.dev ?? false;
@@ -523,6 +549,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       mounted = false;
       csrf._reset();
     },
+    _mark: markBusy,
+    _busy: isBusy,
+    _stamped: stamped,
+    _now: now,
+    _fire: announce(),
+    _headers: (headers) => wire.headers({ url: "", headers }, "GET"),
+    _parse: (contentType, body) => wire.parseStream(contentType, body),
+    _sweep: () => triggers.sweep(),
   };
 
   return surface;

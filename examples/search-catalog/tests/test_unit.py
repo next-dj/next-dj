@@ -1,6 +1,5 @@
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from catalog.demo import seed_demo
@@ -31,8 +30,6 @@ _KEY_CHANGES = {
     "price_max": Decimal(50),
     "in_stock": True,
     "sort": "price_desc",
-    "page": 2,
-    "per_page": 10,
     "category": "electronics",
 }
 
@@ -48,16 +45,10 @@ def _resolve_page(rf, query: str) -> PageRequest:
     return PageProvider().resolve(_param(None), SimpleNamespace(request=request))
 
 
-def _search(
-    *,
-    page: int = 1,
-    per_page: int = 100,
-    category: str | None = None,
-    **filters: object,
-) -> dict[str, Any]:
-    """Run `cached_search` with the given `Filters` fields, paging and category slug."""
+def _search(*, category: str | None = None, **filters: object) -> list[Product]:
+    """Run `cached_search` with the given `Filters` fields and category slug."""
     scope = Category.objects.get(slug=category) if category else None
-    return cached_search(Filters(**filters), page, per_page, category=scope)
+    return cached_search(Filters(**filters), category=scope)
 
 
 class TestDemoData:
@@ -136,23 +127,28 @@ class TestProductQuerySet:
 
 
 class TestCachedSearch:
-    """Cover the cached, paginated search behind both listing pages."""
+    """Cover the cached search behind both listing pages."""
+
+    def test_the_rows_come_back_whole_and_in_the_asked_order(self, demo_data) -> None:
+        """Return every match unpaged, so a pager cuts any window from one entry."""
+        rows = _search(sort="price_asc")
+        assert rows == list(Product.objects.matching(Filters(sort="price_asc")))
+        assert len(rows) == Product.objects.count()
 
     def test_category_scopes_the_results(self, demo_data) -> None:
         """Return only the products of the category passed in."""
-        payload = _search(sort="price_asc", category="books")
+        rows = _search(sort="price_asc", category="books")
         books = set(Product.objects.filter(category__slug="books"))
         assert books != set(Product.objects.all())
-        assert set(payload["products"]) == books
-        assert payload["total"] == len(books)
+        assert set(rows) == books
 
     def test_repeat_search_reads_from_the_cache(
         self, demo_data, django_assert_num_queries
     ) -> None:
         """Answer an identical search from the cache without touching the database."""
-        first = _search(sort="price_asc", per_page=5)
+        first = _search(sort="price_asc")
         with django_assert_num_queries(0):
-            second = _search(sort="price_asc", per_page=5)
+            second = _search(sort="price_asc")
         assert second == first
 
     @pytest.mark.parametrize(
@@ -160,7 +156,7 @@ class TestCachedSearch:
     )
     def test_cache_key_tells_each_field_apart(self, demo_data, field, value) -> None:
         """Serve a fresh search, not the cached one, when a single field changes."""
-        base = {"sort": "price_asc", "per_page": 5}
+        base = {"sort": "price_asc"}
         changed = {**base, field: value}
         first = _search(**base)
         second = _search(**changed)
@@ -354,15 +350,17 @@ class TestZoneSets:
     def test_listing_zones_join_into_a_partial_target(self) -> None:
         """Encode the all-products set as one comma-delimited target value."""
         assert zone_target(LISTING_ZONES) == (
-            "catalog-results,catalog-more,catalog-count,catalog-pager,catalog-chips"
+            "catalog-results,catalog-count,catalog-results-more,"
+            "catalog-results-less,catalog-chips"
         )
 
-    def test_category_zones_drop_the_append_sentinel(self) -> None:
-        """Leave `catalog-more` out of the paginated category listing."""
+    def test_category_zones_swap_the_sentinel_for_the_pager(self) -> None:
+        """Paginate the category listing instead of growing it on scroll."""
         assert zone_target(CATEGORY_ZONES) == (
             "catalog-results,catalog-count,catalog-pager,catalog-chips"
         )
-
-    def test_category_set_is_a_subset_of_the_listing_set(self) -> None:
-        """Keep both listings on the same zone vocabulary."""
-        assert set(CATEGORY_ZONES) < set(LISTING_ZONES)
+        assert set(LISTING_ZONES) ^ set(CATEGORY_ZONES) == {
+            "catalog-results-more",
+            "catalog-results-less",
+            "catalog-pager",
+        }

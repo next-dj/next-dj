@@ -144,8 +144,8 @@ class TestRegistryRecords:
 def _zoned_template() -> Template:
     source = (
         'x {% zone "first" %}<p>{{ a }}</p>{% endzone %} '
-        '{% zone "second" tag="tbody" lazy="load" %}'
-        "body{% placeholder %}ph{% endzone %}"
+        '{% zone "second" tag="tbody" reload="loading" %}'
+        "body{% endzone %}"
     )
     return Template(source)
 
@@ -158,12 +158,12 @@ class TestZonesOf:
         assert set(zones) == {"first", "second"}
         assert isinstance(zones["first"], ZoneInfo)
 
-    def test_carries_tag_and_lazy(self) -> None:
+    def test_carries_tag_and_reload(self) -> None:
         zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].tag == "div"
-        assert zones["first"].lazy is None
+        assert zones["first"].options.reload == "keep"
         assert zones["second"].tag == "tbody"
-        assert zones["second"].lazy == "load"
+        assert zones["second"].options.reload == "loading"
 
     def test_carries_no_poll_without_the_kwarg(self) -> None:
         zones = zones_of(_zoned_template(), _PAGE)
@@ -178,20 +178,19 @@ class TestZonesOf:
     def test_zone_info_carries_structured_options(self) -> None:
         zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].options == ZoneOptions()
-        assert zones["second"].options == ZoneOptions(tag="tbody", lazy="load")
+        assert zones["second"].options == ZoneOptions(tag="tbody", reload="loading")
 
     def test_zone_info_scalars_delegate_to_options(self) -> None:
         zones = zones_of(_zoned_template(), _PAGE)
         info = zones["second"]
-        assert info.lazy == info.options.lazy
         assert info.poll == info.options.poll
         assert info.tag == info.options.tag
 
-    def test_zone_info_options_carry_the_delivery_attrs(self) -> None:
+    def test_zone_info_options_carry_the_wrapper_attrs(self) -> None:
         template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
         info = zones_of(template, _PAGE)["z"]
         assert info.options == ZoneOptions(poll=5000)
-        assert info.options.delivery_attrs == ' data-next-poll="5000"'
+        assert info.options.attrs == ' data-next-poll="5000"'
 
     def test_empty_template_has_no_zones(self) -> None:
         assert zones_of(Template("plain {{ x }}"), _PAGE) == {}
@@ -238,15 +237,6 @@ class TestZoneInfoNested:
         zones = zones_of(_nested_template(), _PAGE)
         assert zones["outer"].nested == frozenset({"inner", "deep"})
 
-    def test_placeholder_branch_stays_out(self) -> None:
-        template = Template(
-            '{% zone "host" lazy="load" %}body{% placeholder %}'
-            '{% zone "ph" %}x{% endzone %}{% endzone %}'
-        )
-        zones = zones_of(template, _PAGE)
-        assert set(zones) == {"host", "ph"}
-        assert zones["host"].nested == frozenset()
-
     def test_plain_zone_map_carries_empty_nested(self) -> None:
         zones = zones_of(_zoned_template(), _PAGE)
         assert zones["first"].nested == frozenset()
@@ -264,14 +254,14 @@ class TestZoneRegisteredSignal:
         names = sorted(str(event.kwargs["zone_name"]) for event in recorded)
         assert names == ["first", "second"]
 
-    def test_sends_lazy_and_poll_kwargs(self) -> None:
+    def test_sends_poll_and_reload_kwargs(self) -> None:
         with capture_signals(zone_registered) as recorded:
             zones_of(Template('{% zone "z" poll="5s" %}b{% endzone %}'), _PAGE)
         assert len(recorded) == 1
         event = recorded.first_for(zone_registered)
         assert event.kwargs["zone_name"] == "z"
-        assert event.kwargs["lazy"] is None
         assert event.kwargs["poll"] == 5000
+        assert event.kwargs["reload"] == "keep"
 
     def test_quiet_without_receivers(self) -> None:
         assert zones_of(_zoned_template(), _PAGE)

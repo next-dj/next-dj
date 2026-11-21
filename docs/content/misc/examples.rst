@@ -55,7 +55,7 @@ The table runs roughly in order of how much it assumes.
      - :doc:`/content/topics/components`, :doc:`/content/topics/signals`
    * - :repo:`audit-forms <tree/main/examples/audit-forms>`
      - Records an audit trail of every submission through two independent channels, a custom form action backend and receivers on ``action_dispatched`` and ``form_validation_failed``.
-       Runs a multi-step wizard inside a modal layer above a lazily loaded audit table.
+       Runs a multi-step wizard inside a modal layer above an audit log that pages by cursor through a ``KeysetPager``, with totals that load when they scroll into view.
        Opens three intercepting routes as modals over the real pages, a ``(.)request/[int:access_request]/audit/`` peek with a polling zone inside the modal, a ``(...)`` peek of the same request from ``/admin/audit/``, and a receipt modal over a target whose body is a ``render()`` function.
        Titles its pages, keeps the wizard and the audit pages ``noindex``, and titles a request audit by its primary key through ``@page.metadata``, so no personal data reaches a tab title.
      - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`, :doc:`/content/topics/partial-rendering/index`, :ref:`topics-file-router-intercepts`
@@ -64,11 +64,13 @@ The table runs roughly in order of how much it assumes.
        Carries one title template across the layouts, a self canonical that drops the filter query, a ``meta`` patch after a preset filter, and a ``sitemap.py`` over categories and products.
        Shows the marketing side as well, a category landing a CDN may cache, structured data on the product pages, third-party scripts in ``scripts.py`` behind a consent banner with hand-written vendor adapters, and ``{% #consented %}`` embeds.
        Opens a product as a quick view modal over the listing through a ``(.)[slug]`` intercept.
+       Pages the product list through a pager with a ``{% more %}`` sentinel that sets ``prune`` and ``url``, so a long list drops its top batches and a shared address restores the window, and a ``previous=`` tag above the list loads the earlier batches back.
      - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`, :doc:`/content/topics/seo/social-and-canonical`, :doc:`/content/topics/scripts/index`, :doc:`/content/howto/write-a-vendor-adapter`, :ref:`topics-file-router-intercepts`
    * - :repo:`wiki <tree/main/examples/wiki>`
      - Serves articles out of the database through a hybrid router that rebuilds its routes on a signal, with a search zone that answers as the visitor types and an editor that previews Markdown live.
        Titles and describes each article through a ``@page.metadata`` callable that reuses the row its context resolved, marks the editing pages ``noindex``, lists the articles through a lazy ``QuerySet`` sitemap dated per row, and keeps crawlers out of the search pages through a ``robots.py``.
        Previews an article over the search results through a ``(..)wiki`` intercept.
+       Its search zone declares ``reload="loading"``, so a slow search shows its ``loading.search-results.djx`` in place of the results while it reloads.
      - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/robots`, :ref:`topics-file-router-intercepts`
    * - :repo:`multi-tenant <tree/main/examples/multi-tenant>`
      - Resolves a tenant from a request header in middleware, rewrites every co-located asset URL per tenant on top of the staticfiles names it inherits, stamps a deploy build id into those URLs, and shares a header and footer across page roots.
@@ -92,7 +94,7 @@ The table runs roughly in order of how much it assumes.
        Opens the embed snippet as a modal over the vote page through a ``(.)embed`` intercept.
      - :doc:`/content/topics/realtime`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/howto/stream-over-websockets`, :doc:`/content/howto/count-down-to-a-server-deadline`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`, :ref:`topics-file-router-intercepts`
    * - :repo:`observability <tree/main/examples/observability>`
-     - Watches a running project through one receiver per signal group, refreshing a dashboard from polling and lazy zones and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.
+     - Watches a running project through one receiver per signal group, refreshing a dashboard from polling zones, a component that loads on its own request, and a patch verb of its own, with a custom components backend, a custom deduplication strategy, a serializer swapped both globally and per decorator, and an opt-in hashed-manifest profile.
        Exports Prometheus metrics from the signals of the realtime streams.
        Keeps the whole dashboard ``noindex`` from one root ``metadata`` dict and titles each stats page.
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`
@@ -113,9 +115,11 @@ Shared assets
 
 * :repo:`_shared <tree/main/examples/_shared>`.
   A shadcn-inspired component palette every example consumes through ``COMPONENT_BACKENDS`` ``DIRS``, with its design tokens in one stylesheet.
+  Its ``nav_link`` computes no active state of its own and styles the ``aria-current="page"`` mark the framework writes on navigation links through Tailwind's ``aria-[current=page]:`` variant, and its ``bar`` variant also styles the ``data-next-current="ancestor"`` mark through ``data-[next-current=ancestor]:``, see :doc:`/content/topics/router/active-links`.
 * :repo:`_template <tree/main/examples/_template>`.
   The skeleton every example is copied from, Django's own ``startproject`` and ``startapp`` output with the canonical next.dj files, the shared UI kit, and the test scaffold.
   Its application tree answers under ``/myapp/`` through ``path("myapp/", pages("myapp"))``, and ``LoginRequiredMiddleware`` closes its pages and the Django admin beside them.
+  Its ``MIDDLEWARE`` also lists ``next.middleware.CompressionMiddleware`` directly below ``SecurityMiddleware``, as every example copied from it does, see :doc:`/content/ref/compression`.
   It runs and passes its tests while demonstrating nothing beyond the starter, and its README names the commands that produce it, see :ref:`intro-install-project`.
 
 See also

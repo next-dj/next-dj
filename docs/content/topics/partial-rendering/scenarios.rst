@@ -208,29 +208,56 @@ Pagination and infinite scroll
 The same catalogue appends its next page of results to the list when the user scrolls to the end, with no reload and no duplicate rows.
 Without the runtime pagination stays honest links.
 
+A pager cuts the product rows into the window the query string asks for.
+A context callable names it in an ``Annotated[Paging, <pager>]`` parameter and returns the ``Window`` of ``page.paginate()``.
+
+.. code-block:: python
+   :caption: catalog/page.py
+
+   from typing import Annotated
+
+   from catalog.models import Product
+
+   from next import context
+   from next.partial import NumberPager, Paging, Window
+
+   pager = NumberPager(per_page=20)
+
+   @context("products")
+   def products(page: Annotated[Paging, pager]) -> Window[Product]:
+       return page.paginate(Product.objects.order_by("pk"))
+
 A zone declared with ``tag="ul"`` becomes the ``<ul>`` itself.
 A wrapper ``<div>`` inside a ``<ul>`` would be dropped by the HTML parser, so a list zone names the list element directly.
+The template loops over the window, and the ``{% more %}`` tag after the zone takes the same window and renders the sentinel.
 
 .. code-block:: jinja
    :caption: catalog/template.djx with infinite scroll
 
    {% zone "catalog-results" tag="ul" %}
-     {% for product in page_obj %}
+     {% for product in products %}
        <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
      {% endfor %}
-     {% if page_obj.has_next %}
-       <li id="results-sentinel">
-         <a href="{% querystring page=page_obj.next_page_number %}"
-            data-next-target="catalog-results" data-next-merge="append"
-            data-next-lazy="revealed">
-           Show more
-         </a>
-       </li>
-     {% endif %}
    {% endzone %}
 
-``has_next`` and ``next_page_number`` are the ``Page`` API again, and Django's built-in ``querystring`` tag keeps the active filters while it swaps the page number.
-A table uses ``tag="tbody"`` for the same reason.
+   {% more zone="catalog-results" next=products %}Show more{% empty %}End of results.{% endmore %}
+
+The tag reads the token of the next batch off the window, here the number of the next page, and renders its ``{% empty %}`` branch when the window has none.
+The tag declares a zone named ``catalog-results-more`` that holds a real link, so the zone is addressable like any ``{% zone %}`` of the template.
+
+.. code-block:: html
+   :caption: the rendered sentinel on ``/catalog/?q=ban``
+
+   <div data-next-zone="catalog-results-more"><a href="?q=ban&amp;page=2"
+     data-next-key="catalog-results-more"
+     data-next-target="catalog-results,catalog-results-more"
+     data-next-merge="append" data-next-defer="visible">Show more</a></div>
+
+The link keeps the active query string and replaces only the page number.
+It lives outside the results zone on purpose, since a merge adds incoming rows at the end of the zone and a marker that must stay last cannot ride inside the list.
+On the last page the zone holds the ``{% empty %}`` branch in a ``<div>`` with the same ``data-next-key`` instead of the link.
+
+A table uses ``tag="tbody"`` for the same reason a list uses ``tag="ul"``.
 
 .. code-block:: jinja
    :caption: a table zone
@@ -244,17 +271,17 @@ A table uses ``tag="tbody"`` for the same reason.
      {% endzone %}
    </table>
 
-When the sentinel enters the viewport the runtime sends the merge intent.
+When the sentinel enters the viewport the runtime sends the merge intent for both zones the link names.
 
 .. code-block:: http
    :caption: request
 
    GET /catalog/?q=ban&page=2 HTTP/1.1
    X-Next-Request: 1
-   X-Next-Zone: catalog-results
+   X-Next-Zone: catalog-results,catalog-results-more
    X-Next-Merge: append
 
-The server reads the merge intent and answers with an ``append`` patch instead of a morph.
+The server reads the merge intent and answers with one ``append`` patch per zone instead of a morph.
 
 .. code-block:: json
    :caption: response body
@@ -263,16 +290,44 @@ The server reads the merge intent and answers with an ``append`` patch instead o
      "version": "9f3c2e1b",
      "ops": [
        {"op": "append", "target": {"zone": "catalog-results"}, "dedupe": "key",
-        "html": "<li data-next-key=\"41\">…</li>…<li id=\"results-sentinel\">…</li>"}
+        "html": "<li data-next-key=\"41\">…</li>…"},
+       {"op": "append", "target": {"zone": "catalog-results-more"}, "dedupe": "key",
+        "html": "<a href=\"?q=ban&amp;page=3\" data-next-key=\"catalog-results-more\" …>Show more</a>"}
      ]
    }
 
-Dedup by ``data-next-key`` and ``id`` replaces the old sentinel with the new one and guards against duplicate rows under a race.
+Dedup by ``data-next-key`` replaces the old link with the new one and guards against duplicate rows under a race.
 The response carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version`` so a shared cache never hands an append envelope to a client that asked for a morph.
-Changing the search query is the morph of the same zone from the previous scenario, which resets the accumulated list on its own.
-Dropping the ``data-next-lazy="revealed"`` attribute leaves the same link click-driven, which gives button pagination from the same code.
+Changing the search query morphs both zones, which resets the accumulated list on its own.
+The runtime tells the two apart by the link alone, as a request counts as a page of the list only when its URL is the ``href`` of the link and its zones are exactly the ``catalog-results,catalog-results-more`` of its ``data-next-target``.
+The filter form may therefore list the same zones in any order beside others, and its request neither stamps rows nor prunes them nor writes ``restore=1`` into the address.
+``mode="manual"`` drops the ``data-next-defer="visible"`` attribute and leaves the same link click-driven, which gives button pagination from the same code.
 
-Without the runtime the sentinel is a plain link and the click navigates to ``?page=2`` through the pagination component.
+``prune=`` and ``url=`` on the tag keep a long scroll bounded and its address shareable.
+
+.. code-block:: jinja
+   :caption: a pruned list that records its position
+
+   {% more zone="catalog-results" next=products prune=40 url="replace" %}Show more{% empty %}End of results.{% endmore %}
+
+After each batch the runtime writes ``?page=N&restore=1`` into the address bar, and once the list holds more than 40 rows it drops whole batches from the top.
+A shared address ``?page=8&restore=1`` restores a scrolled list.
+The window then runs from page ``max(1, 8 - MAX_RESTORE + 1)`` to page 8, where ``MAX_RESTORE`` is ``DEFER["MORE"]["MAX_RESTORE"]``, ten by default, so a large page number costs ten pages at most.
+The pager reads the whole window in one slice that runs one row past it, which tells it whether a next batch follows without a count.
+A header that shows the total builds the pager with ``count=True`` and reads ``products.count``.
+The sentinel of a restored window carries the tokens of its batches as ``data-next-backs``, so the runtime knows which batch each restored row belongs to and the first prune drops the oldest batch alone.
+A second tag above the list links the batch before the window.
+On the first page it renders its ``{% empty %}`` branch with a hidden link beside it, which the runtime shows once a prune drops the first rows.
+
+.. code-block:: jinja
+   :caption: the link above the list
+
+   {% more zone="catalog-results" previous=products %}Show earlier{% endmore %}
+
+It declares the zone ``catalog-results-less`` and prepends the earlier page on a click, so the same link serves a restored window and a plain ``?page=3`` visit, with or without the runtime.
+A list that gains rows while a visitor scrolls it pages by a cursor instead of a page number, see :doc:`/content/howto/page-a-list-by-cursor`.
+
+Without the runtime the sentinel is a plain link and the click navigates to ``?q=ban&page=2``.
 
 A live stream
 -------------
@@ -439,6 +494,7 @@ The last step answers with a close and a toast.
    }
 
 The runtime closes the layer, fires accept, and by ``data-next-accepted="request-list"`` sends a second GET for the list.
+The attribute takes a comma-separated list of zones, so ``data-next-accepted="request-list,request-count"`` refreshes both in that one GET.
 
 .. code-block:: http
    :caption: re-GET of the list
@@ -451,79 +507,62 @@ The runtime closes the layer, fires accept, and by ``data-next-accepted="request
 The wizard never knows about the list, the list never knows about the wizard, and the opening link binds them.
 Without the runtime the button navigates to the full step page, steps advance with a 302 between step pages, and the last step redirects to the ``fallback`` audit page.
 
-Lazy zones
-----------
+A table that loads when it scrolls into view
+--------------------------------------------
 
 A heavy audit table does not need to render on the first page paint.
-A lazy zone renders only its placeholder up front and fetches its body after load or when it enters the viewport, so the expensive query never runs for nothing.
+The table becomes a component that loads later, so the first paint ships its loading content and the expensive query runs only on the component's own request.
+A kind filter above the table reloads it, so the call sits in a zone the filter addresses, and the zone itself always renders inline.
 
 .. code-block:: jinja
    :caption: admin/audit/template.djx
 
-   {% zone "audit-table" lazy="revealed" %}
-     <table>
-       <thead>…</thead>
-       <tbody>
-         {% for entry in entries %}
-           {% component "audit_row" %}
-         {% endfor %}
-       </tbody>
-     </table>
-   {% placeholder %}
-     {% component "skeleton" rows=6 %}
+   <form method="get" data-next-target="audit-table" data-next-trigger="change">…</form>
+   {% zone "audit-table" %}
+     {% component "audit_table" kind=active_kind %}
    {% endzone %}
 
-The body of a lazy zone does not run on the full render, only the placeholder branch does.
-Bind the provider to the zone with ``zone=`` and guard the expensive data with ``zone_requested``, so the query runs only when the lazy body is actually rendered.
+The component declares how it is delivered and which props its later request renders from.
+It reads its rows in its own context function, because a component that loads on a later request renders from its declared props alone.
 
 .. code-block:: python
-   :caption: admin/audit/page.py
+   :caption: _components/audit_table/component.py
 
    from audit.models import AuditEntry
-   from django.http import HttpRequest
 
-   from next import context
-   from next.partial import zone_requested
+   from next import component
 
-   @context("entries", zone="audit-table")
-   def entries(request: HttpRequest) -> list[AuditEntry] | None:
-       """Load audit rows only when the lazy zone is rendered."""
-       if not zone_requested(request, "audit-table"):
-           return None
-       return list(AuditEntry.objects.all()[:100])
+   component.defer("visible", props=("kind",))
 
-The two checks work together rather than replacing each other.
-``zone=`` saves the call on a GET for another zone of the same page, a poll tick of a neighbour among them.
-``zone_requested`` stays the source of truth for the full render, which carries no zone batch and runs every page callable.
-A forgotten ``zone_requested`` guard runs the expensive provider on every full render even though the lazy body is never painted, which defeats the point of marking the zone lazy.
-The :doc:`zones` page calls out the same trap.
 
-A ``lazy="load"`` zone is batched into one GET on ``ready``.
-A ``lazy="revealed"`` zone waits for the viewport.
+   @component.context("entries")
+   def entries(kind: str) -> list[AuditEntry]:
+       rows = AuditEntry.objects.all()
+       return list((rows.filter(kind=kind) if kind else rows)[:100])
+
+The ``loading.djx`` beside it holds what the first paint shows, and ``component.djx`` holds the table.
+
+.. code-block:: jinja
+   :caption: _components/audit_table/loading.djx
+
+   {% component "skeleton" rows=6 %}
+
+``visible`` waits until the wrapper enters the viewport, ``load`` fetches as soon as the runtime is ready, and ``manual`` waits for a ``data-next-fetch`` control inside the loading content.
+The wrapper carries a signed token of the declared props, and the browser sends it back on the page URL.
 
 .. code-block:: http
    :caption: request
 
    GET /admin/audit/ HTTP/1.1
    X-Next-Request: 1
-   X-Next-Zone: audit-table
+   X-Next-Zone: b-3f9a2c
+   X-Next-Boundary: …the token…
 
-The response morphs the zone and carries the co-located assets of the components inside it.
-CSS loads before the morph and JS is inserted after it, so the table renders styled and its scripts bind through ``onMount`` once they run.
+The response renders the component alone and swaps it into its wrapper with its co-located assets.
+A change of the kind filter morphs the zone, which puts the loading content back with the new ``kind``, and the table fetches itself again.
 
-.. code-block:: json
-   :caption: response body
-
-   {
-     "version": "9f3c2e1b",
-     "ops": [
-       {"op": "morph", "target": {"zone": "audit-table"},
-        "html": "<div data-next-zone=\"audit-table\">…the table…</div>"}
-     ],
-     "assets": [{"kind": "css", "url": "/static/access/audit_row.css", "load": "link"}]
-   }
-
-Critical content must not be marked lazy, because the placeholder is all a no-JavaScript client ever sees.
+The rows never run on the full render, so no ``zone_requested`` guard is needed.
+Critical content does not belong in a component that loads later, because the loading content is all a no-JavaScript client ever sees.
 
 See also
 --------

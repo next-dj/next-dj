@@ -1,10 +1,13 @@
+import threading
 import types
 from pathlib import Path
 
 import pytest
 
+from next.caches import LruCache
 from next.components.loading import (
     _CACHE_MISS,
+    Loaded,
     ModuleCache,
     ModuleLoader,
     last_load_error,
@@ -100,24 +103,97 @@ class TestAFailingComponentModuleDegradesTheRender:
 
 
 class TestAsyncComponentRender:
-    """An `async def render` in a `component.py` is refused when the module loads."""
+    """The load records an `async def render`, and refuses an async generator one."""
 
-    def test_async_render_is_recorded_as_the_load_error(self, tmp_path: Path) -> None:
+    def test_async_render_loads_and_is_recorded(self, tmp_path: Path) -> None:
         path = tmp_path / "component.py"
         path.write_text("async def render():\n    return 'hi'\n")
+        loader = ModuleLoader()
 
-        assert ModuleLoader().load(path) is None
+        module, awaiting = loader.loaded(path)
+        assert module is not None
+        assert last_load_error(path) is None
+        assert awaiting is True
+
+    def test_async_generator_render_is_recorded_as_the_load_error(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "component.py"
+        path.write_text("async def render():\n    yield 'hi'\n")
+
+        assert ModuleLoader().loaded(path) == (None, False)
         error = last_load_error(path)
         assert isinstance(error, AsyncCallableError)
-        assert 'component.py render "render"' in str(error)
+        assert "is an async generator" in str(error)
 
     def test_sync_render_loads(self, tmp_path: Path) -> None:
         path = tmp_path / "component.py"
         path.write_text("def render():\n    return 'hi'\n")
 
-        module = ModuleLoader().load(path)
+        module, awaiting = ModuleLoader().loaded(path)
         assert module is not None
         assert last_load_error(path) is None
+        assert awaiting is False
+
+    def test_a_reload_without_the_async_render_forgets_it(self, tmp_path: Path) -> None:
+        path = tmp_path / "component.py"
+        path.write_text("async def render():\n    return 'hi'\n")
+        cache = ModuleCache()
+        ModuleLoader(cache).load(path)
+        assert cache.entry(path)[1] is True
+
+        cache.clear()
+        assert cache.entry(path) is _CACHE_MISS
+        path.write_text("def render():\n    return 'hi'\n")
+        ModuleLoader(cache).load(path)
+        assert cache.entry(path)[1] is False
+
+    def test_a_store_over_an_async_entry_drops_its_mark(self, tmp_path: Path) -> None:
+        path = tmp_path / "component.py"
+        cache = ModuleCache()
+        cache.set(path, None, awaiting=True)
+        cache.set(path, None)
+        assert cache.entry(path) == (None, False)
+
+
+class _PausingOrder(LruCache[Path, Loaded]):
+    """An LRU order that pauses its writer right after an entry is published."""
+
+    def __init__(self) -> None:
+        """Start with the writer free to publish."""
+        super().__init__(128)
+        self.published = threading.Event()
+        self.read = threading.Event()
+
+    def __setitem__(self, key: Path, value: Loaded) -> None:
+        super().__setitem__(key, value)
+        self.published.set()
+        assert self.read.wait(5)
+
+
+class TestAPublishedModuleCarriesItsFlag:
+    """A render on another thread never sees an async module without its flag."""
+
+    def test_a_reader_between_publish_and_return_sees_the_flag(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "component.py"
+        path.write_text("async def render():\n    return 'hi'\n")
+        cache = ModuleCache()
+        order = _PausingOrder()
+        cache._order = order
+        loader = ModuleLoader(cache)
+        writer = threading.Thread(target=loader.load, args=(path,))
+        writer.start()
+        try:
+            assert order.published.wait(5)
+            module, awaiting = loader.loaded(path)
+        finally:
+            order.read.set()
+            writer.join(5)
+
+        assert module is not None
+        assert awaiting is True
 
 
 class TestModuleCacheSentinel:

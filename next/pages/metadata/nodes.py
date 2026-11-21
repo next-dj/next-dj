@@ -10,6 +10,8 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 
 from next.diagnostics import FailureLog, type_name
+from next.pages.layouts import META, seal_region
+from next.paths import ANCESTOR_MARK, PAGE_MARK
 from next.seeding import METADATA_KEY
 
 from .backends import metadata_renderer
@@ -28,7 +30,6 @@ if TYPE_CHECKING:
 _failures: Final = FailureLog(logging.getLogger(__name__))
 
 _NAV: Final = '<nav aria-label="Breadcrumb"><ol>{}</ol></nav>'
-_CURRENT: Final = ' aria-current="page"'
 
 
 class _Resolved(NamedTuple):
@@ -82,17 +83,17 @@ class MetadataNode(Node):
             kind.__name__,
             detail=type_name,
         ):
-            return renderer.render(resolved)
+            return seal_region(context, META, renderer.render(resolved))
         return ""
 
 
 def _crumb(crumb: Breadcrumb) -> SafeString:
-    current = SafeString(_CURRENT) if crumb.current else ""
+    """Render one crumb with the marks the active-link pass gives its link."""
+    text = PAGE_MARK if crumb.current else ANCESTOR_MARK if crumb.ancestor else ""
+    mark = SafeString(text)
     if crumb.url is None:
-        return format_html("<li{}>{}</li>", current, crumb.label)
-    return format_html(
-        '<li><a href="{}"{}>{}</a></li>', crumb.url, current, crumb.label
-    )
+        return format_html("<li{}>{}</li>", mark, crumb.label)
+    return format_html('<li><a href="{}"{}>{}</a></li>', crumb.url, mark, crumb.label)
 
 
 def render_breadcrumbs(crumbs: Iterable[Breadcrumb]) -> SafeString:

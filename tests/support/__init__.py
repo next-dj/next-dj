@@ -186,12 +186,7 @@ from tests.support.permissions import (
     owns_group,
     restored_permissions,
 )
-from tests.support.ports import (
-    IntentOnlyShaper,
-    call_shape,
-    parameter_shape,
-    port_methods,
-)
+from tests.support.ports import call_shape, parameter_shape, port_methods
 from tests.support.routers import (
     ENTRY_ROUTER,
     AppRootRouter,
@@ -315,7 +310,6 @@ __all__ = [
     "EntryRouter",
     "FinderInstallCase",
     "GuardedTenantForm",
-    "IntentOnlyShaper",
     "LayoutConfigCase",
     "MalformedRootsRouter",
     "MetadataMergeCase",

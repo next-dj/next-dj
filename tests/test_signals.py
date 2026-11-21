@@ -7,6 +7,7 @@ from django.dispatch import Signal
 
 from next import signals as framework_signals
 from next.components import signals as component_signals
+from next.compression import signals as compression_signals
 from next.consent import signals as consent_signals
 from next.forms import signals as form_signals
 from next.partial import signals as partial_signals
@@ -22,6 +23,7 @@ from next.urls import signals as url_signals
 
 _SIGNAL_AREAS = (
     component_signals,
+    compression_signals,
     consent_signals,
     form_signals,
     partial_signals,
@@ -52,6 +54,7 @@ CACHED_SIGNALS = frozenset(framework_signals.__all__) - UNCACHED_SIGNALS
 BACKEND_LOADED_SIGNALS = frozenset(
     {
         "component_backend_loaded",
+        "compression_backend_loaded",
         "consent_backend_loaded",
         "form_backend_loaded",
         "partial_backend_loaded",

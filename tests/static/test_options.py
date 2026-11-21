@@ -53,6 +53,10 @@ class TestCreateCollectorDefaults:
         collector = manager.create_collector()
         assert isinstance(collector._js_policy, FirstWinsPolicy)
 
+    def test_bundles_resolve_through_the_manager(self) -> None:
+        manager = StaticManager()
+        assert manager.create_collector().bundle_url == manager.chunk_url
+
 
 class TestCreateCollectorWithOptions:
     """With OPTIONS the collector uses the configured strategies."""

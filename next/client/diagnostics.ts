@@ -15,11 +15,11 @@ import {
   pollInterval,
 } from "./protocol";
 import type { Diagnostics } from "./protocol";
-import { LAZY_ATTR, MERGE_ATTR, POLL_ATTR } from "./triggers";
+import { DEFER_ATTR, MERGE_ATTR, POLL_ATTR } from "./triggers";
 
 // The accepted values of the checked attributes, so a typo is reported during
 // development instead of being ignored. The merge values match the server.
-const LAZY_VALUES = new Set(["load", "revealed"]);
+const DEFER_VALUES = new Set(["load", "visible", "manual"]);
 const MERGE_VALUES = new Set(["append", "prepend"]);
 
 // A non-list field is dropped whole, so the per-entry counters cannot report it.
@@ -139,9 +139,9 @@ function warnPollZone(value: string): void {
 
 // Warn on hand-written values the runtime ignores.
 function validateAttrs(root: ParentNode): void {
-  for (const el of matching(root, `[${LAZY_ATTR}]`)) {
-    const value = attrOf(el, LAZY_ATTR);
-    if (!LAZY_VALUES.has(value)) warnAttr(LAZY_ATTR, value, LAZY_VALUES);
+  for (const el of matching(root, `[${DEFER_ATTR}]`)) {
+    const value = attrOf(el, DEFER_ATTR);
+    if (!DEFER_VALUES.has(value)) warnAttr(DEFER_ATTR, value, DEFER_VALUES);
   }
   for (const el of matching(root, `[${MERGE_ATTR}]`)) {
     const value = attrOf(el, MERGE_ATTR);

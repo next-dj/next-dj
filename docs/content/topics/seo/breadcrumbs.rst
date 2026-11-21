@@ -83,10 +83,11 @@ The tag
      {% template %}
    </article>
 
-The markup is ``<nav aria-label="Breadcrumb"><ol>`` with one ``<li>`` per crumb, a link where the crumb has a URL and ``aria-current="page"`` on the current one, every label escaped.
+The markup is ``<nav aria-label="Breadcrumb"><ol>`` with one ``<li>`` per crumb, a link where the crumb has a URL, every label escaped, ``aria-current="page" data-next-current="page"`` on the current crumb and ``data-next-current="ancestor"`` on each ancestor link but a home path such as ``/`` or a language root.
+The crumbs compare paths as the active-link pass does, so the trail renders the same with ``ROUTER["CURRENT"]`` on or off.
 A page without crumbs renders nothing.
 
-``{% breadcrumbs as crumbs %}`` binds the tuple of ``Breadcrumb`` values to ``crumbs`` instead of rendering, each with ``label``, ``url``, and ``current``, for markup of the project's own.
+``{% breadcrumbs as crumbs %}`` binds the tuple of ``Breadcrumb`` values to ``crumbs`` instead of rendering, each with ``label``, ``url``, ``current``, and ``ancestor``, for markup of the project's own.
 
 .. code-block:: jinja
    :caption: blog/pages/posts/layout.djx

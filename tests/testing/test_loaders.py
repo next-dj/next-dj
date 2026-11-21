@@ -1,3 +1,6 @@
+import importlib
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -55,6 +58,34 @@ def counted_ping():
 """
 
 
+_PACKAGED_PAGE = """
+from next.forms import Form, action
+
+
+class ContactForm(Form):
+    pass
+
+
+@action("send")
+def send() -> None:
+    return None
+"""
+_PACKAGE = "collision_app"
+
+
+@pytest.fixture()
+def packaged_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Write a page tree inside an importable package and drop its modules after."""
+    package = tmp_path / _PACKAGE
+    _write_page(package / "__init__.py", "")
+    _write_page(package / "contact" / "__init__.py", "")
+    _write_page(package / "contact" / "page.py", _PACKAGED_PAGE)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    yield package
+    for name in [name for name in sys.modules if name.startswith(_PACKAGE)]:
+        del sys.modules[name]
+
+
 class TestEagerLoadPages:
     """eager_load_pages imports page.py modules under the directory."""
 
@@ -103,6 +134,18 @@ class TestEagerLoadPages:
         assert error is None
         assert module is not None
         assert CONTEXT_CALLS == ["counted"]
+        assert collisions == []
+
+    def test_a_page_imported_by_its_dotted_path_is_no_collision(
+        self, packaged_page: Path
+    ) -> None:
+        with (
+            override_settings(BASE_DIR=packaged_page.parent),
+            isolated_form_registries(),
+        ):
+            eager_load_pages(packaged_page)
+            importlib.import_module(f"{_PACKAGE}.contact.page")
+            collisions = check_form_action_collisions()
         assert collisions == []
 
     def test_clear_loaded_dirs_allows_reload(self, tmp_path: Path) -> None:

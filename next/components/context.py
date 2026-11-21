@@ -9,26 +9,42 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, overload
 
 from next.caches import BoundedCache
-from next.deps import RESERVED_KEYS
+from next.defer import DeferMode, WrapperTag
+from next.deps import RESERVED_KEYS, AsyncDependencyError
 from next.introspect import (
     MisattributedContext,
     MisattributionLog,
     callable_name,
     declared_file,
     defining_file,
-    refuse_async,
+    is_async_callable,
+    is_coroutine_callable,
     registering_file,
     registering_site,
 )
 from next.permissions.access import declaring, require_login, require_permission
 from next.utils import resolved_tree
 
+from .deferral import defer_declarations
+
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from next.static.serializers import JsContextSerializer
+
+
+def awaits(func: Callable[..., Any]) -> bool:
+    """Return whether `func` is a coroutine function, refusing an async generator.
+
+    A generator would hand the render a stream nobody iterates, so it never registers.
+    """
+    if not is_async_callable(func):
+        return False
+    if not is_coroutine_callable(func):
+        raise AsyncDependencyError(func)
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +58,10 @@ class ContextFunction:
     key: str | None
     serialize: bool = False
     serializer: JsContextSerializer | None = None
+    is_async: bool = False
+
+
+type ContextLookup = tuple[tuple[ContextFunction, ...], bool]
 
 
 class ComponentContextRegistry:
@@ -53,9 +73,7 @@ class ComponentContextRegistry:
         self._misattributions = MisattributionLog()
         self._version = 0
         # Bounded because a render may spell a component path no earlier render did.
-        self._lookup_cache: BoundedCache[Path, tuple[ContextFunction, ...]] = (
-            BoundedCache()
-        )
+        self._lookup_cache: BoundedCache[Path, ContextLookup] = BoundedCache()
         self._lookup_version = 0
 
     @property
@@ -104,7 +122,7 @@ class ComponentContextRegistry:
         serializer: JsContextSerializer | None = None,
     ) -> None:
         """Register `func` under `key` for `component_path`, rejecting reserved keys."""
-        refuse_async(func, "@component.context callable")
+        is_async = awaits(func)
         path = resolved_tree(component_path)
 
         if isinstance(key, str) and key in RESERVED_KEYS:
@@ -129,7 +147,11 @@ class ComponentContextRegistry:
                 raise ValueError(msg)
 
         entry = ContextFunction(
-            func=func, key=key, serialize=serialize, serializer=serializer
+            func=func,
+            key=key,
+            serialize=serialize,
+            serializer=serializer,
+            is_async=is_async,
         )
         if component_registry.get(key) == entry:
             # Re-registering an identical entry leaves the memo valid.
@@ -144,7 +166,11 @@ class ComponentContextRegistry:
             self._bump()
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
-        """Return a tuple of registered context functions for `component_path`.
+        """Return a tuple of registered context functions for `component_path`."""
+        return self.lookup(component_path)[0]
+
+    def lookup(self, component_path: Path) -> ContextLookup:
+        """Return the context functions of `component_path` and whether any is async.
 
         Memoised per path spelling until the registry version moves.
         """
@@ -156,8 +182,9 @@ class ComponentContextRegistry:
             return cached
         resolved = resolved_tree(component_path)
         functions = tuple(self._registry.get(resolved, {}).values())
-        self._lookup_cache[component_path] = functions
-        return functions
+        found = (functions, any(entry.is_async for entry in functions))
+        self._lookup_cache[component_path] = found
+        return found
 
     def _is_same_function(
         self, func1: Callable[..., Any], func2: Callable[..., Any]
@@ -245,9 +272,43 @@ class ComponentContextManager:
         name = _context_name(obj)
         require_permission(declaring(registering_site()), perm, name)
 
+    def defer(
+        self,
+        mode: DeferMode | str = DeferMode.STREAM,
+        *,
+        timeout: float | str | None = None,
+        props: tuple[str, ...] = (),
+        tag: str | WrapperTag | None = WrapperTag.SITE,
+        parallel: bool | None = None,
+        tokens: Mapping[str, object] | None = None,
+    ) -> None:
+        """Deliver this component as a boundary in `mode`, with the options given.
+
+        `next.E222` reports an option outside its shape, which declares nothing.
+        """
+        defer_declarations.defer(
+            registering_site(),
+            {
+                "mode": mode,
+                "timeout": timeout,
+                "props": props,
+                "tag": tag,
+                "parallel": parallel,
+                "tokens": tokens,
+            },
+        )
+
+    def props(self, *names: str) -> None:
+        """Declare the props a reload or a retry of this component renders from."""
+        defer_declarations.props(registering_site(), names)
+
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         """Return context callables registered for this `component.py` path."""
         return self._registry.get_functions(component_path)
+
+    def lookup(self, component_path: Path) -> ContextLookup:
+        """Return the context callables of this path and whether any one is async."""
+        return self._registry.lookup(component_path)
 
 
 component = ComponentContextManager()
@@ -258,6 +319,8 @@ __all__ = [
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ContextFunction",
+    "ContextLookup",
+    "awaits",
     "component",
     "context",
 ]

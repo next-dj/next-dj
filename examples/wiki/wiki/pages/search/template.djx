@@ -15,7 +15,7 @@
     </div>
   </form>
 
-  {% zone "search-results" %}
+  {% zone "search-results" reload="loading" %}
     {% if query %}
       {% #component "section" title="File-backed results" %}
         {% #slot "content" %}

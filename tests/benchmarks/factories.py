@@ -5,22 +5,30 @@ from typing import TYPE_CHECKING, Self
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
+from django.test import RequestFactory
 
 from next.components.info import ComponentInfo
 from next.deps.objects import SCOPE_DEPENDENCY
 from next.partial import Envelope, Patches
+from next.partial.headers import LAYOUTS, NAVIGATE, ORIGIN, REQUEST_FLAG, SEC_FETCH_SITE
 from next.realtime import Message
 from tests.support import bound_dependency
 
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Iterator
+    from collections.abc import Callable, Coroutine, Iterator
     from pathlib import Path
+
+    from django.http import HttpRequest
 
     from next.realtime import BrokerBackend, MemoryBroker, RedisBroker
 
 
 _DEFAULT_LEAF_BODY = "def render(request):\n    return 'x'\n"
+_CSRF_SECRET = "s" * 32
+
+REQUEST_ROUNDS = 2000
+REQUEST_WARMUP_ROUNDS = 200
 
 
 def build_pages_tree(
@@ -91,6 +99,67 @@ def build_layout_page(
     if template is not None:
         (directory / "template.djx").write_text(template)
     return directory / "page.py"
+
+
+def build_component(
+    root: Path,
+    name: str,
+    *,
+    body: str,
+    module: str | None = None,
+    loading: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Write the component `name` under `root`, a `loading.djx` making it deferred."""
+    folder = root / "_components" / name
+    folder.mkdir(parents=True)
+    (folder / "component.djx").write_text(body)
+    for file_name, text in (
+        ("component.py", module),
+        ("loading.djx", loading),
+        ("error.djx", error),
+    ):
+        if text is not None:
+            (folder / file_name).write_text(text)
+
+
+def threaded_get(path: str) -> HttpRequest:
+    """Return a GET as a threaded WSGI server hands it over, so its page may stream."""
+    return RequestFactory().get(path, **{"wsgi.multithread": True})
+
+
+def router_get(path: str, origin: str, layouts: str) -> HttpRequest:
+    """Return the GET the client router sends for a link on the `origin` page."""
+    headers = {
+        REQUEST_FLAG: "1",
+        NAVIGATE: "1",
+        LAYOUTS: layouts,
+        ORIGIN: origin,
+        SEC_FETCH_SITE: "same-origin",
+    }
+    return RequestFactory().get(path, headers=headers)
+
+
+def each_round(
+    build: Callable[[], HttpRequest],
+    *rest: object,
+    before: Callable[[], object] | None = None,
+    **kwargs: object,
+) -> Callable[[], tuple[tuple[object, ...], dict[str, object]]]:
+    """Return a pedantic `setup` handing every round a request nothing has read yet.
+
+    A reused request answers from what the round before held on it. Each one carries
+    the CSRF secret of a returning visitor, where the CSRF middleware leaves it.
+    """
+
+    def setup() -> tuple[tuple[object, ...], dict[str, object]]:
+        if before is not None:
+            before()
+        request = build()
+        request.META["CSRF_COOKIE"] = _CSRF_SECRET
+        return (request, *rest), kwargs
+
+    return setup
 
 
 class StandInRows:

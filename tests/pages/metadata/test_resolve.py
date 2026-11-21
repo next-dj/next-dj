@@ -1054,6 +1054,44 @@ class TestBreadcrumbUrls:
         assert crumbs == (Breadcrumb("Home", "/", current=True),)
         reversed_.assert_called_once_with("page_", urlconf=None, kwargs=None)
 
+    @pytest.mark.parametrize(
+        ("path", "url"),
+        [
+            ("/a=b;c/", "/a=b;c/"),
+            ("/a%3Db/", "/a=b/"),
+            ("/blog/", "/blog"),
+            ("/blog/café/", "/blog/caf%C3%A9/"),
+        ],
+        ids=["sub_delims", "encoded_sub_delim", "trailing_slash", "non_ascii"],
+    )
+    def test_the_current_crumb_follows_the_link_rule(self, path, url) -> None:
+        request = _request(path)
+        request.resolver_match = ResolverMatch(handler_declared_here, (), {})
+        meta = Metadata(breadcrumbs=(Crumb("Here", "here"),))
+        with patch("next.pages.metadata.resolve.reverse", return_value=url):
+            crumbs = resolve_metadata(meta, request=request).breadcrumbs
+        assert crumbs == (Breadcrumb("Here", url, current=True),)
+
+    @override_settings(**I18N, ROOT_URLCONF=I18N_PREFIXED_URLCONF)
+    def test_an_ancestor_is_marked_unless_it_is_a_home(self) -> None:
+        request = _request("/de/blog/post/")
+        request.resolver_match = ResolverMatch(handler_declared_here, (), {})
+        meta = Metadata(
+            breadcrumbs=(
+                Crumb("Home", ""),
+                Crumb("Blog", "blog"),
+                Crumb("Post", "blog/post"),
+            )
+        )
+        urls = ["/de/", "/de/blog/", "/de/blog/post/"]
+        with patch("next.pages.metadata.resolve.reverse", side_effect=urls):
+            crumbs = resolve_metadata(meta, request=request).breadcrumbs
+        assert crumbs == (
+            Breadcrumb("Home", "/de/"),
+            Breadcrumb("Blog", "/de/blog/", ancestor=True),
+            Breadcrumb("Post", "/de/blog/post/", current=True),
+        )
+
 
 class TestMountedTreeBreadcrumbs:
     """A crumb inside a `pages()` tree reverses under its prefix and its kwargs."""
@@ -1077,6 +1115,7 @@ class TestMountedTreeBreadcrumbs:
 
         assert [crumb.url for crumb in crumbs] == ["/", "/ops/", "/ops/4/"]
         assert [crumb.current for crumb in crumbs] == [False, False, True]
+        assert [crumb.ancestor for crumb in crumbs] == [False, True, False]
 
     @pytest.mark.parametrize(
         ("prefix", "head"),

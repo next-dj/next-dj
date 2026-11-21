@@ -11,6 +11,7 @@ _SAMPLES: dict[str, list[object] | dict[str, set[object]]] = {
     "invalid_meta_scope": [("BadScopeForm", "global")],
     "invalid_action_scope": [("bad_handler", "global")],
     "invalid_transport": [("@action 'bad_handler'", "ws")],
+    "invalid_atomic": [("@action 'bad_handler'", "atomic must be True or False")],
     "instance_from_url_unknown_field": [("SomeForm", "auth.Group", "missing")],
     "instance_from_url_on_non_model_form": ["PlainForm"],
     "action_collisions": {"dup": {("mod.a", "handler_a")}},

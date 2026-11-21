@@ -10,10 +10,8 @@ import pytest
 from django.http import Http404, HttpRequest
 from django.template import Template
 from django.test import override_settings
-from django.urls import path as url_path
 
 import next.pages.loaders as loaders_module
-from next.caches import PageCache
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutTemplateLoader,
@@ -23,16 +21,16 @@ from next.pages.loaders import (
     build_registered_loaders,
     load_python_module_memo,
 )
-from next.pages.manager.views import fit_page_caches
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
+from next.testing import override_next_settings
+from next.views import page_view
 from tests.support import (
     PAGE_RENDER_CASES,
     PageRenderCase,
     attribution,
     build_page_request,
     handler_declared_here,
-    unified_view,
 )
 
 
@@ -523,24 +521,74 @@ class TestContextMisattribution:
         assert instance.contexts.misattributed() == ()
 
 
-class TestFitPageCaches:
-    """The page caches are sized by the distinct pages a list of patterns mounts."""
+def _silent_processor(request) -> None:
+    return None
 
-    def test_each_page_is_counted_once(
-        self, page_instance, tmp_path, url_parser, monkeypatch: pytest.MonkeyPatch
+
+def _failing_processor(request) -> dict[str, object]:
+    return {"theme": request.META["HTTP_X_THEME"]}
+
+
+def _theme_processor(request) -> dict[str, object]:
+    return {"theme": "dark"}
+
+
+def _processors(*names: str) -> list[dict]:
+    return [
+        {
+            "BACKEND": "django.template.backends.django.DjangoTemplates",
+            "OPTIONS": {"context_processors": [f"{__name__}.{n}" for n in names]},
+        }
+    ]
+
+
+async def _rows() -> list[int]:
+    return [1]
+
+
+@pytest.fixture(params=["sync", "async"])
+def processed_page(request, page_instance, tmp_path) -> tuple[Page, Path]:
+    """Return a page whose context builds on the sync path or through an async one."""
+    page_file = tmp_path / "page.py"
+    page_file.write_text('template = "ok"\n')
+    if request.param == "async":
+        page_instance.contexts.register_context(page_file, "rows", _rows)
+    return page_instance, page_file
+
+
+class TestContextProcessorOutcomes:
+    """A context processor merges a dict and nothing else, its failure logged."""
+
+    def test_a_processor_returning_no_dict_adds_nothing(self, processed_page) -> None:
+        instance, page_file = processed_page
+        with override_settings(
+            TEMPLATES=_processors("_silent_processor", "_theme_processor")
+        ):
+            context = instance.build_render_context(page_file, build_page_request())
+        assert context["theme"] == "dark"
+        assert None not in context
+
+    def test_a_failing_processor_is_logged_and_skipped(
+        self, processed_page, caplog
     ) -> None:
-        patterns: list[object] = [url_path("plain/", HttpRequest), "marker"]
-        for name in ("a", "b"):
-            (tmp_path / name).mkdir()
-            (tmp_path / name / "template.djx").write_text("x")
-            file_path = tmp_path / name / "page.py"
-            patterns.append(
-                page_instance.create_url_pattern(name, file_path, url_parser)
-            )
-        patterns.append(patterns[-1])
-        with patch.object(PageCache, "fit") as fit:
-            fit_page_caches(patterns)
-        fit.assert_called_once_with(2)
+        instance, page_file = processed_page
+        with override_settings(
+            TEMPLATES=_processors("_failing_processor", "_theme_processor")
+        ):
+            context = instance.build_render_context(page_file, build_page_request())
+        assert context["theme"] == "dark"
+        assert "Error in context processor _failing_processor" in caplog.text
+
+    def test_a_failing_processor_raises_under_strict_context(
+        self, processed_page
+    ) -> None:
+        instance, page_file = processed_page
+        with (
+            override_settings(TEMPLATES=_processors("_failing_processor")),
+            override_next_settings(STRICT_CONTEXT=True),
+            pytest.raises(KeyError, match="HTTP_X_THEME"),
+        ):
+            instance.build_render_context(page_file, build_page_request())
 
 
 class TestLayoutIntegration:
@@ -561,7 +609,9 @@ class TestLayoutIntegration:
         template_file.write_text(template_content)
 
         page_file = sub_dir / "page.py"
-        pattern = page_instance.create_url_pattern("test", page_file, url_parser)
+        pattern = page_instance.create_url_pattern(
+            "test", page_file, url_parser, page_view
+        )
 
         assert pattern is not None
         result = page_instance.render(page_file, url_kwargs={"title": "Test"})
@@ -655,185 +705,6 @@ class TestLoadPythonModule:
         assert hasattr(result, "template")
 
 
-class TestUnifiedViewBodyResolution:
-    """`_create_unified_view` resolves the body via render > template > template.djx."""
-
-    @pytest.fixture(autouse=True)
-    def _isolate(self):
-        page._templates.composed.clear()
-        page._templates.composed_sources.clear()
-        yield
-        page._templates.composed.clear()
-        page._templates.composed_sources.clear()
-
-    def test_template_attribute_with_ancestor_layout_composes(
-        self, page_instance, tmp_path
-    ) -> None:
-        """`template = "..."` flows through an ancestor `layout.djx`."""
-        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text('template = "<h1>attr body</h1>"')
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        body = response.content.decode()
-        assert "<html><body>" in body
-        assert "<h1>attr body</h1>" in body
-        assert "</body></html>" in body
-
-    def test_render_returning_str_with_ancestor_layout_composes(
-        self, page_instance, tmp_path
-    ) -> None:
-        """`render()` returning a string flows through the ancestor layout."""
-        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text(
-            "def render(request, **kwargs):\n    return '<p>rendered</p>'\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        body = response.content.decode()
-        assert "<html><body>" in body
-        assert "<p>rendered</p>" in body
-
-    def test_render_returning_httpresponse_bypasses_layout(
-        self, page_instance, tmp_path
-    ) -> None:
-        """`render()` returning HttpResponse is returned verbatim, no layout."""
-        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text(
-            "from django.http import HttpResponse\n"
-            "def render(request, **kwargs):\n"
-            "    return HttpResponse('raw', status=201)\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        assert response.status_code == 201
-        assert response.content == b"raw"
-        assert "<html>" not in response.content.decode()
-
-    def test_render_returning_redirect_bypasses_layout(
-        self, page_instance, tmp_path
-    ) -> None:
-        """`HttpResponseRedirect` (an HttpResponse subclass) is returned verbatim."""
-        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text(
-            "from django.http import HttpResponseRedirect\n"
-            "def render(request, **kwargs):\n"
-            "    return HttpResponseRedirect('/target/')\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        assert response.status_code == 302
-        assert response["Location"] == "/target/"
-
-    def test_render_returning_jsonresponse_bypasses_layout(
-        self, page_instance, tmp_path
-    ) -> None:
-        """`JsonResponse` (an HttpResponse subclass) is returned verbatim."""
-        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text(
-            "from django.http import JsonResponse\n"
-            "def render(request, **kwargs):\n"
-            "    return JsonResponse({'ok': True})\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        assert response["Content-Type"].startswith("application/json")
-        assert response.content == b'{"ok": true}'
-
-    @pytest.mark.parametrize(
-        "return_value",
-        ["None", "{'x': 1}", "[1, 2]", "42"],
-        ids=["None", "dict", "list", "int"],
-    )
-    def test_render_returning_non_str_non_response_raises(
-        self, page_instance, tmp_path, return_value
-    ) -> None:
-        """`render()` returning anything other than str/HttpResponse raises TypeError."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            f"def render(request, **kwargs):\n    return {return_value}\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        with pytest.raises(TypeError, match="must return str or HttpResponse"):
-            view(build_page_request())
-
-    def test_render_raising_propagates(self, page_instance, tmp_path) -> None:
-        """`render()` raising an exception propagates to the caller."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            "def render(request, **kwargs):\n    raise RuntimeError('boom')\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        with pytest.raises(RuntimeError, match="boom"):
-            view(build_page_request())
-
-    def test_priority_render_wins_over_template_attr(
-        self, page_instance, tmp_path
-    ) -> None:
-        """When both render() and template attr exist, render() wins."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            'template = "<p>from-attr</p>"\n'
-            "def render(request, **kwargs):\n"
-            "    return '<p>from-render</p>'\n"
-        )
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        assert b"from-render" in response.content
-        assert b"from-attr" not in response.content
-
-    def test_priority_template_attr_wins_over_template_djx(
-        self, page_instance, tmp_path
-    ) -> None:
-        """When both template attr and template.djx exist, attr wins."""
-        (tmp_path / "template.djx").write_text("<p>from-djx</p>")
-        page_file = tmp_path / "page.py"
-        page_file.write_text('template = "<p>from-attr</p>"')
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        assert b"from-attr" in response.content
-        assert b"from-djx" not in response.content
-
-    def test_empty_body_with_layout_renders_layout_shell(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A page with no body source still renders the ancestor layout's shell."""
-        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text("")
-
-        view = unified_view(page_instance, page_file)
-        response = view(build_page_request())
-        body = response.content.decode()
-        assert "<html><body>" in body
-        assert "</body></html>" in body
-
-
 _BROKEN_SYNTAX = "def render( invalid syntax {\n"
 _BROKEN_IMPORT = "import missing_dep_xyz\n"
 
@@ -854,7 +725,9 @@ class TestBrokenPageImportView:
         page_dir.mkdir(exist_ok=True)
         page_file = page_dir / "page.py"
         page_file.write_text(source)
-        pattern = page_instance.create_url_pattern("broken", page_file, url_parser)
+        pattern = page_instance.create_url_pattern(
+            "broken", page_file, url_parser, page_view
+        )
         assert pattern is not None
         return page_file, pattern
 
@@ -873,9 +746,11 @@ class TestBrokenPageImportView:
         ok_file.write_text('template = "<p>ok body</p>"\n')
 
         broken_pattern = page_instance.create_url_pattern(
-            "broken", broken_file, url_parser
+            "broken", broken_file, url_parser, page_view
         )
-        ok_pattern = page_instance.create_url_pattern("ok", ok_file, url_parser)
+        ok_pattern = page_instance.create_url_pattern(
+            "ok", ok_file, url_parser, page_view
+        )
 
         assert broken_pattern is not None
         assert ok_pattern is not None
@@ -917,7 +792,9 @@ class TestBrokenPageImportView:
         ok_dir.mkdir()
         ok_file = ok_dir / "page.py"
         ok_file.write_text('template = "<p>ok body</p>"\n')
-        ok_pattern = page_instance.create_url_pattern("ok", ok_file, url_parser)
+        ok_pattern = page_instance.create_url_pattern(
+            "ok", ok_file, url_parser, page_view
+        )
         assert ok_pattern is not None
 
         with override_settings(DEBUG=True):
@@ -996,7 +873,9 @@ class TestBrokenPageImportView:
         page_dir.mkdir()
         page_file = page_dir / "page.py"
         page_file.write_text('template = "<p>ok</p>"\n')
-        pattern = page_instance.create_url_pattern("later", page_file, url_parser)
+        pattern = page_instance.create_url_pattern(
+            "later", page_file, url_parser, page_view
+        )
         assert pattern is not None
 
         stamp = page_file.stat().st_mtime + 10
@@ -1016,7 +895,9 @@ class TestBrokenPageImportView:
         page_dir.mkdir()
         page_file = page_dir / "page.py"
         page_file.write_text("def render(request):\n    return '<p>ok</p>'\n")
-        pattern = page_instance.create_url_pattern("dyn", page_file, url_parser)
+        pattern = page_instance.create_url_pattern(
+            "dyn", page_file, url_parser, page_view
+        )
         assert pattern is not None
 
         stamp = page_file.stat().st_mtime + 10
@@ -1035,7 +916,9 @@ class TestBrokenPageImportView:
         ok_dir.mkdir()
         ok_file = ok_dir / "page.py"
         ok_file.write_text("def render(request):\n    return '<p>dyn body</p>'\n")
-        ok_pattern = page_instance.create_url_pattern("dyn", ok_file, url_parser)
+        ok_pattern = page_instance.create_url_pattern(
+            "dyn", ok_file, url_parser, page_view
+        )
         assert ok_pattern is not None
 
         with override_settings(DEBUG=True):

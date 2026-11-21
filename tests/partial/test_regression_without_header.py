@@ -1,5 +1,6 @@
 import copy
 
+import pytest
 from django.conf import settings
 from django.test import Client, override_settings
 
@@ -67,6 +68,7 @@ class TestPageGetWithoutPartialSwitch:
         assert without["Content-Type"] == baseline["Content-Type"]
 
 
+@pytest.mark.django_db()
 class TestInvalidFormPostWithoutPartialSwitch:
     """An invalid form POST without the switch keeps its full-page rerender."""
 

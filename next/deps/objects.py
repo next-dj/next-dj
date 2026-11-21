@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 import types
+from collections.abc import Hashable
+from functools import partial
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -29,7 +31,8 @@ from django.http import Http404
 
 from .cache import _CACHE_MISS, DependencyCache, render_dep_cache
 from .context import ResolutionContext
-from .errors import UnboundObjectError
+from .errors import MissingKeyError, UnboundObjectError
+from .loader import Loader
 from .markers import DDependencyBase, unwrap_annotated
 from .providers import RegisteredParameterProvider
 from .resolver import current_resolver
@@ -37,12 +40,12 @@ from .resolver import current_resolver
 
 if TYPE_CHECKING:
     import inspect
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from django.db.models import QuerySet
     from django.http import HttpRequest
 
-    from .plan import ParameterFiller
+    from .plan import AsyncParameterFiller, ParameterFiller
     from .resolver import DependencyResolver
 
 
@@ -230,6 +233,70 @@ def _rows(model: type[Model]) -> _Rows:
 def forget_object_rows(**kwargs: object) -> None:
     """Drop the memoised `visible_to` hooks, so a reload reads every manager again."""
     _rows_of.clear()
+    _visible_loaders.clear()
+
+
+class _Identity:
+    """A scope no hash takes, which the row loader tells apart by identity."""
+
+    __slots__ = ("scope",)
+
+    def __init__(self, scope: object) -> None:
+        """Hold the scope `visible_to` receives."""
+        self.scope = scope
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        """Match the wrapper of the very same scope."""
+        return isinstance(other, _Identity) and other.scope is self.scope
+
+    @override
+    def __hash__(self) -> int:
+        """Hash the identity of the scope."""
+        return id(self.scope)
+
+
+def _scope_key(scope: object) -> Hashable:
+    """Return `scope` as a loader key part, by identity when it cannot be hashed."""
+    try:
+        hash(scope)
+    except TypeError:
+        return _Identity(scope)
+    return scope
+
+
+type _VisibleKey = tuple[Hashable, object]
+
+_visible_loaders: dict[type[Model], Loader[_VisibleKey, Model]] = {}
+
+
+def visible_rows(model: type[Model]) -> Loader[_VisibleKey, Model]:
+    """Return the loader of the rows of `model` a scope sees, keyed by scope and pk.
+
+    A key holds the scope as `_scope_key` returns it and a pk `to_python` normalised.
+    """
+    loader = _visible_loaders.get(model)
+    if loader is None:
+        loader = _visible_loaders.setdefault(
+            model, Loader(partial(_fetch_visible, model))
+        )
+    return loader
+
+
+def _fetch_visible(
+    model: type[Model], keys: Sequence[_VisibleKey]
+) -> dict[_VisibleKey, Model]:
+    """Fetch the rows each scope sees, one `visible_to(scope)` query per scope."""
+    visible_to = _rows(model).visible_to
+    wanted: dict[Hashable, list[object]] = {}
+    for scope, pk in keys:
+        wanted.setdefault(scope, []).append(pk)
+    found: dict[_VisibleKey, Model] = {}
+    for scope, pks in wanted.items():
+        held = scope.scope if isinstance(scope, _Identity) else scope
+        for row in visible_to(held).filter(pk__in=pks):
+            found.setdefault((scope, row.pk), row)
+    return found
 
 
 def _primary_key(
@@ -320,6 +387,43 @@ def _object_filler(
         return _visible_row(
             rows, key, resolver, context, param, {parent: owner}, {"pk": pk}
         )
+
+    return fill
+
+
+def _async_object_filler(
+    resolver: DependencyResolver, param: inspect.Parameter, model: type[Model]
+) -> AsyncParameterFiller:
+    """Return the call that batches the row of `model` with the other rows of a request.
+
+    It shares the cache key of the sync filler, so both readers get one instance.
+    """
+    name = param.name
+    to_python: Callable[[object], object] = model._meta.pk.to_python
+    rows = _rows(model)
+    loader = visible_rows(model)
+
+    async def fill(context: ResolutionContext) -> object:
+        url_kwargs = context.url_kwargs
+        try:
+            raw = url_kwargs[name]
+        except KeyError:
+            raise UnboundObjectError(name, name, available=url_kwargs) from None
+        pk = _primary_key(rows, to_python, raw)
+        key = _row_key(rows, pk)
+        cache = context.cache
+        cached = cache.get(key)
+        if cached is not _CACHE_MISS:
+            return cached
+        scope = await resolver.aresolve_callable_dependency(
+            SCOPE_DEPENDENCY, context, param=param
+        )
+        try:
+            found = await loader.load((_scope_key(scope), pk))
+        except MissingKeyError:
+            raise Http404(rows.not_found) from None
+        cache.set(key, found)
+        return found
 
     return fill
 
@@ -460,6 +564,17 @@ class ObjectProvider(RegisteredParameterProvider):
             raise TypeError(msg)
         model, parent = target
         return _object_filler(self._resolver, param, model, parent)
+
+    @override
+    def compile_aresolve(self, param: inspect.Parameter) -> AsyncParameterFiller | None:
+        """Batch a row with no parent through the scoped row loader of its model.
+
+        A parented row and a shape `compile_resolve` refuses stay on the sync filler.
+        """
+        target = object_target(param.annotation)
+        if target is None or target[1] is not None:
+            return None
+        return _async_object_filler(self._resolver, param, target[0])
 
 
 def _unserved(param: inspect.Parameter) -> ImproperlyConfigured:

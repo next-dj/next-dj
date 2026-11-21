@@ -19,6 +19,13 @@ _BUNDLES = (
     "next.csrf.min.js",
     "next.poll.min.js",
     "next.dev.min.js",
+    "next.defer.min.js",
+    "next.reload.min.js",
+    "next.more.min.js",
+    "next.reader.min.js",
+    "next.router.min.js",
+    "next.history.min.js",
+    "next.intent.min.js",
 )
 
 

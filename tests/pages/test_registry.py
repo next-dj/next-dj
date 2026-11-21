@@ -1,3 +1,4 @@
+import asyncio
 import functools
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -10,6 +11,7 @@ from next.deps import DependencyResolver
 from next.errors import AsyncCallableError
 from next.pages import Context, Page, PageContextShapeError
 from next.pages.context import ContextByDefaultProvider
+from next.pages.graph import blaming
 from next.pages.registry import PageContextEntry, PageContextRegistry, ZoneBinding
 from next.static import StaticCollector
 from tests.support import inspect_parameter, record_path_calls
@@ -623,6 +625,32 @@ class TestPageContextRegistrySerialize:
         result = registry.collect_context(path)
         assert result.js_context["shared"] == "from_dict"
 
+    def test_serialized_names_match_the_full_run(self, registry, tmp_path) -> None:
+        """The static names equal the js_context keys a full run publishes."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "own", lambda: 1, serialize=True, zone="z")
+        registry.register_context(path, "shared", lambda: 2, serialize=True)
+        registry.register_context(path, "plain", lambda: 3)
+        registry.register_context(path, None, lambda: {"spread": 4})
+        names = registry.serialized_names(path)
+        assert names == frozenset({"own", "shared"})
+        assert names == frozenset(registry.collect_context(path).js_context)
+
+    def test_serialized_names_are_unknown_for_a_keyless_spread(
+        self, registry, tmp_path
+    ) -> None:
+        """A keyless serialized callable leaves the names to a run."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "own", lambda: 1, serialize=True)
+        registry.register_context(path, None, lambda: {"spread": 2}, serialize=True)
+        assert registry.serialized_names(path) is None
+
+    def test_serialized_names_of_an_unregistered_page_are_empty(
+        self, registry, tmp_path
+    ) -> None:
+        """A page with no callable serializes nothing."""
+        assert registry.serialized_names(tmp_path / "page.py") == frozenset()
+
     def test_js_context_empty_when_no_serialize(self, registry, tmp_path) -> None:
         """js_context is empty when no context function uses serialize=True."""
         path = tmp_path / "page.py"
@@ -769,6 +797,15 @@ class TestContextRegistryVersion:
         context_manager.reset()
 
         assert context_manager.version > before
+
+    def test_every_write_reports_to_the_change_callback(self, test_file_path) -> None:
+        writes: list[int] = []
+        registry = PageContextRegistry(on_change=lambda: writes.append(1))
+
+        registry.register_context(test_file_path, "k", lambda: "v")
+        registry.reset()
+
+        assert writes == [1, 1]
 
     def test_reset_drops_the_inherited_chain(self, context_manager, tmp_path) -> None:
         """A collected chain does not survive the registry it came from."""
@@ -1207,15 +1244,142 @@ class TestInheritedResolution:
         assert result.js_context == {"brand": "keyed", "tagline": "t"}
 
 
-class TestAsyncContextRefusal:
-    """An async `@context` callable is refused before it is registered."""
+class TestAsyncContext:
+    """An `async def` `@context` registers with its colour, an async generator not."""
 
-    def test_register_context_refuses_async(
+    def test_register_context_records_a_coroutine_function(
         self, context_manager, test_file_path
     ) -> None:
         async def rows() -> list[int]:
             return [1]
 
+        context_manager.register_context(test_file_path, "rows", rows)
+
+        assert context_manager._context_registry[test_file_path]["rows"].is_async
+        assert context_manager.awaits(test_file_path) is True
+
+    def test_a_sync_page_does_not_await(self, context_manager, test_file_path) -> None:
+        context_manager.register_context(test_file_path, "rows", lambda: [1])
+
+        assert context_manager.awaits(test_file_path) is False
+
+    def test_register_context_refuses_an_async_generator(
+        self, context_manager, test_file_path
+    ) -> None:
+        async def rows():
+            yield 1
+
         with pytest.raises(AsyncCallableError, match='@context callable "rows"'):
             context_manager.register_context(test_file_path, "rows", rows)
         assert context_manager._context_registry == {}
+
+    def test_acollect_context_reads_the_request_cache_by_default(
+        self, context_manager, test_file_path
+    ) -> None:
+        async def rows() -> list[int]:
+            return [1]
+
+        context_manager.register_context(test_file_path, "rows", rows)
+
+        result = asyncio.run(context_manager.acollect_context(test_file_path))
+
+        assert result.context_data == {"rows": [1]}
+
+
+_ROOT = Path("/blame/page.py")
+_LEAF = Path("/blame/mid/leaf/page.py")
+
+
+class TestFailureBlame:
+    """A failed sync collection names the inherited group the failure came from."""
+
+    def test_the_level_of_each_inherited_group_is_its_distance_up(self) -> None:
+        registry = PageContextRegistry()
+        registry.register_context(_ROOT, "nav", lambda: 1, inherit_context=True)
+        registry.register_context(_ROOT.parent / "mid" / "page.py", "x", lambda: 2)
+
+        assert registry.inherited_levels(_LEAF) == (2,)
+
+    def test_an_inherited_failure_names_its_group(self) -> None:
+        registry = PageContextRegistry()
+
+        def nav() -> str:
+            msg = "nav"
+            raise ValueError(msg)
+
+        registry.register_context(_ROOT, "nav", nav, inherit_context=True)
+
+        with blaming() as blamed, pytest.raises(ValueError, match="nav"):
+            registry.collect_context(_LEAF)
+
+        assert blamed.group == 0
+
+    def test_an_inherited_keyless_shape_error_names_its_group(self) -> None:
+        registry = PageContextRegistry()
+        registry.register_context(_ROOT, None, lambda: ["a"], inherit_context=True)
+
+        with blaming() as blamed, pytest.raises(PageContextShapeError):
+            registry.collect_context(_LEAF)
+
+        assert blamed.group == 0
+
+    def test_a_failure_of_the_page_leaves_the_page_blamed(self) -> None:
+        registry = PageContextRegistry()
+
+        def own() -> str:
+            msg = "own"
+            raise ValueError(msg)
+
+        registry.register_context(_ROOT, "nav", lambda: 1, inherit_context=True)
+        registry.register_context(_LEAF, "own", own)
+
+        with blaming() as blamed, pytest.raises(ValueError, match="own"):
+            registry.collect_context(_LEAF)
+
+        assert blamed.group == -1
+
+
+class TestDeclaredGuard:
+    """`@context(guard=...)` records whether a gated callable runs before the shell."""
+
+    def test_a_declaration_reaches_the_entry_and_the_graph(self) -> None:
+        registry = PageContextRegistry()
+        path = Path("/guard/page.py")
+        registry.register_context(path, "product", lambda: 1)
+        before = registry.version
+
+        registry.declare_guard(path, "product", guard=True)
+
+        assert registry._context_registry[path]["product"].guard is True
+        assert registry.graph(path).steps[0].guard is True
+        assert registry.version == before + 1
+
+    def test_the_same_declaration_again_moves_nothing(self) -> None:
+        registry = PageContextRegistry()
+        path = Path("/guard/page.py")
+        registry.register_context(path, "product", lambda: 1)
+        registry.declare_guard(path, "product", guard=False)
+        before = registry.version
+
+        registry.declare_guard(path, "product", guard=False)
+
+        assert registry.version == before
+
+    def test_an_unknown_callable_is_ignored(self) -> None:
+        registry = PageContextRegistry()
+        before = registry.version
+
+        registry.declare_guard(Path("/guard/page.py"), "missing", guard=True)
+
+        assert registry.version == before
+
+    def test_the_decorator_declares_the_guard(self) -> None:
+        manager = Page()
+
+        @manager.context("product", guard=True)
+        def product() -> int:
+            return 1
+
+        registry = manager.contexts._context_registry
+        assert registry[Path(__file__)]["product"].guard is True
+        assert registry[Path(__file__)]["product"].func is product

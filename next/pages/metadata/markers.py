@@ -316,6 +316,7 @@ class Breadcrumb:
     label: Text
     url: str | None
     current: bool = False
+    ancestor: bool = False
 
 
 class Breadcrumbs:

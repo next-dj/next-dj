@@ -34,6 +34,7 @@ from next.urls.manager import (
 )
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import router_reloaded
+from next.views import page_view
 from tests.support import (
     NAMESPACED_URLCONF,
     EntryRouter,
@@ -486,7 +487,7 @@ class TestGlobalInstances:
         )
 
         pattern = page.create_url_pattern(
-            "test/[[args]]", render_module_path, router._url_parser
+            "test/[[args]]", render_module_path, router._url_parser, page_view
         )
         assert pattern is not None
 
@@ -504,13 +505,13 @@ class TestGlobalInstances:
         )
 
         pattern = page.create_url_pattern(
-            "test/[[args]]", render_module_path, router._url_parser
+            "test/[[args]]", render_module_path, router._url_parser, page_view
         )
         assert pattern is not None
 
         view_func = pattern.callback
         with pytest.raises(TypeError, match="must return str or HttpResponse"):
-            view_func(Mock(), other_param="value")
+            view_func(RequestFactory().get("/test/"), other_param="value")
 
     def test_generate_root_urls_returns_empty_when_base_dir_none(self) -> None:
         """BASE_DIR None yields no root URLs."""
@@ -605,7 +606,9 @@ class TestGlobalInstances:
         router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
-            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
+            pattern = page.create_url_pattern(
+                "test", temp_file, router._url_parser, page_view
+            )
             assert pattern is not None
             assert hasattr(pattern, "callback")
             assert hasattr(pattern, "name")
@@ -616,7 +619,9 @@ class TestGlobalInstances:
         router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
-            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
+            pattern = page.create_url_pattern(
+                "test", temp_file, router._url_parser, page_view
+            )
 
             view_func = pattern.callback
             response = view_func(RequestFactory().get("/"), name="John")
@@ -631,7 +636,9 @@ class TestGlobalInstances:
         router = file_router()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
-            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
+            pattern = page.create_url_pattern(
+                "test", temp_file, router._url_parser, page_view
+            )
 
             view_func = pattern.callback
             response = view_func(
@@ -647,7 +654,7 @@ class TestGlobalInstances:
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern(
-                "test/[[args]]", temp_file, router._url_parser
+                "test/[[args]]", temp_file, router._url_parser, page_view
             )
 
             view_func = pattern.callback
@@ -661,7 +668,9 @@ class TestGlobalInstances:
         router = file_router()
 
         with named_temp_py('some_variable = "test"') as temp_file:
-            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
+            pattern = page.create_url_pattern(
+                "test", temp_file, router._url_parser, page_view
+            )
             assert pattern is None
 
     def test_create_url_pattern_spec_from_file_location_returns_none(self) -> None:
@@ -670,7 +679,7 @@ class TestGlobalInstances:
 
         with patch("importlib.util.spec_from_file_location", return_value=None):
             pattern = page.create_url_pattern(
-                "test", Path("/nonexistent/file.py"), router._url_parser
+                "test", Path("/nonexistent/file.py"), router._url_parser, page_view
             )
             assert pattern is None
 
@@ -683,7 +692,7 @@ class TestGlobalInstances:
 
         with patch("importlib.util.spec_from_file_location", return_value=mock_spec):
             pattern = page.create_url_pattern(
-                "test", Path("/some/file.py"), router._url_parser
+                "test", Path("/some/file.py"), router._url_parser, page_view
             )
             assert pattern is None
 

@@ -19,9 +19,10 @@ SENTINEL_BELOW_THE_FOLD = {"width": 1280, "height": 360}
 
 RESULTS = "[data-next-zone='catalog-results'] li"
 COUNT = "[data-next-zone='catalog-count']"
-SENTINEL = "#results-sentinel"
-SHOW_MORE = "a#results-sentinel"
-END_MARKER = "#results-sentinel[data-catalog-end]"
+SENTINEL = "[data-next-key='catalog-results-more']"
+SHOW_MORE = "a[data-next-key='catalog-results-more']"
+END_MARKER = "[data-next-key='catalog-results-more'] [data-catalog-end]"
+SHOW_EARLIER = "a[data-next-key='catalog-results-less']:not([hidden])"
 SEARCH = "#filter-q"
 HELP = "[data-filter-help]"
 SEARCH_CHIP = "[data-active-filter='q']"
@@ -203,6 +204,44 @@ def test_the_sentinel_walks_the_pages_once_and_then_retires(
     assert "q=iph" in settled[4]
     expect(page.locator(RESULTS)).to_have_count(1)
     expect(page.locator(END_MARKER)).to_have_count(1)
+
+
+def test_scrolling_records_the_window_and_a_reload_restores_it(
+    page: Page, base_url: str, demo_data: None
+) -> None:
+    open_listing(page, base_url)
+
+    page.locator(SENTINEL).scroll_into_view_if_needed()
+    expect(page.locator(RESULTS)).to_have_count(12)
+    expect(page).to_have_url(f"{base_url}/catalog/?page=2&restore=1")
+
+    page.reload()
+    wait_for_runtime(page)
+    expect(page.locator(RESULTS)).to_have_count(12)
+    expect(page.locator(FIRST_CARD)).to_contain_text("iPhone 15")
+    expect(page.locator(SHOW_EARLIER)).to_have_count(0)
+
+
+def test_a_deep_link_grows_upward_on_demand(
+    page: Page, base_url: str, demo_data: None, next_probe: PageProbe
+) -> None:
+    page.set_viewport_size(SENTINEL_BELOW_THE_FOLD)
+    page.goto(f"{base_url}/catalog/?page=3")
+    wait_for_runtime(page)
+    expect(page.locator(RESULTS)).to_have_count(6)
+
+    page.locator(SHOW_EARLIER).click()
+    expect(page.locator(RESULTS)).to_have_count(12)
+    expect(page.locator(SHOW_EARLIER)).to_have_attribute("href", "?page=1")
+
+    page.locator(SHOW_EARLIER).click()
+    expect(page.locator(RESULTS)).to_have_count(18)
+    expect(page.locator(FIRST_CARD)).to_contain_text("iPhone 15")
+    expect(page.locator(SHOW_EARLIER)).to_have_count(0)
+    fetched = [
+        response.url.split("/catalog/")[1] for response in next_probe.partial_requests()
+    ]
+    assert fetched[:2] == ["?page=2", "?page=1"]
 
 
 def test_the_slash_hotkey_focuses_the_search_field(

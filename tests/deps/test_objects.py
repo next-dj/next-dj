@@ -1,16 +1,21 @@
+import asyncio
 import inspect
-from collections.abc import Callable, Generator
+import time
+from collections.abc import Callable, Generator, Sequence
+from contextvars import copy_context
 from pathlib import Path
 from typing import Annotated, Literal, get_args, get_origin
 
 import pytest
+from asgiref.sync import async_to_sync
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, Group, Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.sessions.models import Session
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
 from django.http import Http404, HttpRequest
-from django.test import Client
+from django.test import Client, override_settings
 
 from next.deps import (
     DependencyResolver,
@@ -20,7 +25,10 @@ from next.deps import (
     UnknownDependencyError,
     objects,
 )
+from next.deps.cache import RequestMemo, request_memo
+from next.deps.context import ResolutionContext
 from next.deps.introspect import cached_type_hints
+from next.deps.loader import counted_job
 from next.deps.objects import (
     SCOPE_DEPENDENCY,
     ObjectProvider,
@@ -28,7 +36,9 @@ from next.deps.objects import (
     object_target,
     scoped_row,
     url_row,
+    visible_rows,
 )
+from next.deps.scope import RequestScope
 from next.pages.context import ContextByNameProvider
 from next.pages.loaders import _load_python_module
 from next.testing import make_resolution_context
@@ -45,6 +55,7 @@ from tests.support import (
 
 
 PARENT = "permissions"
+_HELD = 3600.0
 
 UNRESOLVED_MODEL_SOURCE = """
 from __future__ import annotations
@@ -908,3 +919,149 @@ class TestUnservedObject:
                 match='DObject parameter "group" reached no provider',
             ):
                 fresh.resolve_dependencies(_group, group=_RAW)
+
+
+def _gathered(
+    resolver: DependencyResolver,
+    func: Callable[..., object],
+    contexts: Sequence[ResolutionContext],
+) -> list[object]:
+    """Call `func` once per context concurrently on the async path of one request.
+
+    Each call is a counted job, so the batch closes once all of them wait on a key, and
+    the window is held out of reach, so a slow machine never closes it first.
+    """
+
+    async def scenario() -> list[object]:
+        scope = RequestScope()
+        request_memo.set(RequestMemo(scope))
+        deadline = time.monotonic() + _HELD
+
+        async def job(context: ResolutionContext) -> object:
+            with counted_job(scope, deadline):
+                return await resolver.acall(func, context)
+
+        try:
+            return await asyncio.gather(
+                *(job(context) for context in contexts), return_exceptions=True
+            )
+        finally:
+            await scope.close()
+
+    framework = {**settings.NEXT_FRAMEWORK, "DEFER": {"BATCH_WINDOW": _HELD}}
+    with override_settings(NEXT_FRAMEWORK=framework):
+        return copy_context().run(async_to_sync(scenario))
+
+
+def _at(**url_kwargs: object) -> ResolutionContext:
+    return make_resolution_context(url_kwargs=url_kwargs)
+
+
+@pytest.mark.django_db()
+class TestAsyncFiller:
+    """On the async path the rows of one request load in one scoped `pk__in` query."""
+
+    def test_distinct_rows_of_many_consumers_take_one_query(
+        self, tenant_resolver, editors, django_assert_num_queries
+    ) -> None:
+        groups = [
+            editors,
+            *(Group.objects.create(name=f"auth:{index}") for index in range(4)),
+        ]
+        contexts = [_at(group=str(group.pk)) for group in groups]
+        with django_assert_num_queries(1):
+            found = _gathered(tenant_resolver, _group, contexts)
+        assert found == groups
+
+    def test_a_hidden_or_missing_row_answers_404_beside_a_visible_one(
+        self, tenant_resolver, editors, outsiders, django_assert_num_queries
+    ) -> None:
+        contexts = [
+            _at(group=editors.pk),
+            _at(group=outsiders.pk),
+            _at(group=MISSING_PK),
+        ]
+        with django_assert_num_queries(1):
+            visible, hidden, missing = _gathered(tenant_resolver, _group, contexts)
+        assert visible == editors
+        for refused in (hidden, missing):
+            assert isinstance(refused, Http404)
+            assert str(refused) == NO_GROUP
+
+    def test_the_sync_and_async_paths_share_the_cached_row(
+        self, tenant_resolver, editors, django_assert_num_queries
+    ) -> None:
+        context = _at(group=editors.pk)
+        with django_assert_num_queries(1):
+            [loaded] = _gathered(tenant_resolver, _group, [context])
+            synced = tenant_resolver.resolve(_group, context)["group"]
+            [again] = _gathered(tenant_resolver, _group, [context])
+        assert synced is loaded
+        assert again is loaded
+
+    def test_a_malformed_pk_and_a_missing_kwarg_fail_as_on_the_sync_path(
+        self, tenant_resolver, tenant_scope, django_assert_num_queries
+    ) -> None:
+        contexts = [_at(group="abc"), _at(slug="a")]
+        with django_assert_num_queries(0):
+            malformed, unbound = _gathered(tenant_resolver, _group, contexts)
+        assert isinstance(malformed, Http404)
+        assert isinstance(unbound, UnboundObjectError)
+        assert "(captured: slug)" in str(unbound)
+        assert tenant_scope.calls == 0
+
+    def test_an_unhashable_scope_is_told_apart_by_identity(
+        self,
+        resolver_class,
+        scoped_models,
+        editors,
+        monkeypatch,
+        django_assert_num_queries,
+    ) -> None:
+        monkeypatch.setattr(
+            Group._default_manager,
+            "visible_to",
+            lambda scope: Group.objects.filter(name__startswith=f"{scope[0]}:"),
+        )
+        tenant = ["auth"]
+        fresh = resolver_class()
+        fresh.dependency(SCOPE_DEPENDENCY)(lambda: tenant)
+        reviewers = Group.objects.create(name="auth:reviewers")
+        contexts = [_at(group=editors.pk), _at(group=reviewers.pk)]
+        with django_assert_num_queries(1):
+            found = _gathered(fresh, _group, contexts)
+        assert found == [editors, reviewers]
+
+
+@pytest.mark.usefixtures("scoped_models")
+class TestAsyncCompile:
+    """Only a `DObject` with no parent takes the batched async filler."""
+
+    @pytest.mark.parametrize(
+        ("annotation", "batched"),
+        [
+            pytest.param(DObject[Group], True, id="row"),
+            pytest.param(DObject[Group, PARENT], False, id="parented"),
+            pytest.param(DObject[Group] | None, False, id="union"),
+            pytest.param("DObject[Group]", False, id="unresolved"),
+        ],
+    )
+    def test_the_async_filler(self, annotation: object, *, batched: bool) -> None:
+        provider = ObjectProvider(DependencyResolver())
+        filler = provider.compile_aresolve(inspect_parameter("group", annotation))
+        assert callable(filler) is batched
+
+    def test_a_scope_is_keyed_by_value_or_else_by_identity(self) -> None:
+        tenant = ["auth"]
+        key = objects._scope_key(tenant)
+        assert objects._scope_key("auth") == "auth"
+        assert key == objects._scope_key(tenant)
+        assert hash(key) == hash(objects._scope_key(tenant))
+        assert key != objects._scope_key(["auth"])
+        assert key != tenant
+
+    def test_a_router_reload_drops_the_row_loaders(self) -> None:
+        held = visible_rows(Group)
+        assert visible_rows(Group) is held
+        router_reloaded.send(sender=type(self))
+        assert visible_rows(Group) is not held

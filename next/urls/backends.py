@@ -25,6 +25,7 @@ from next.utils import (
     resolve_base_dir,
     resolved_tree,
 )
+from next.views import page_view
 
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
@@ -514,7 +515,9 @@ class FileRouterBackend(RouterBackend):
         A refused page stays unrouted rather than abort the URLconf, so the checks run.
         """
         try:
-            return page.create_url_pattern(trail, file_path, self._url_parser)
+            return page.create_url_pattern(
+                trail, file_path, self._url_parser, page_view
+            )
         except self._url_parser.parameter_error as exc:
             logger.warning(
                 "%s The page is not routed, and manage.py check reports it.", exc

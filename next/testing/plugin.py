@@ -5,11 +5,18 @@ Enabled with `-p next.testing.plugin` since entry points import before pytest-co
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from django.core.cache import cache
 
+from .boundaries import boundary_errors
 from .client import NextClient
 from .loaders import eager_load_components, eager_load_pages
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 PAGES_INI = "next_pages"
@@ -65,4 +72,17 @@ def next_client() -> NextClient:
     return NextClient()
 
 
-__all__ = ["next_cache_isolation", "next_client", "next_pages", "pytest_addoption"]
+@pytest.fixture()
+def rendered_boundary_errors() -> Iterator[None]:
+    """Render the error UI of every contained failure instead of re-raising it."""
+    with boundary_errors("render"):
+        yield
+
+
+__all__ = [
+    "next_cache_isolation",
+    "next_client",
+    "next_pages",
+    "pytest_addoption",
+    "rendered_boundary_errors",
+]

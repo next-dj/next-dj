@@ -17,6 +17,7 @@ from next.urls.backends import _installed_app_directories, _is_framework_app
 from next.urls.ports import RouterAccessImpl
 from next.urls.signals import intercept_registered, route_registered, router_reloaded
 from next.utils import forget_resolved_trees
+from next.views import page_view
 from tests.support import (
     NAMESPACED_URLCONF,
     EntryRouter,
@@ -490,7 +491,9 @@ class TestFileRouterBackend:
             "def render(request, args):\n    return 'response-' + args\n"
         )
 
-        pattern = page.create_url_pattern("test/[[args]]", page_py, router._url_parser)
+        pattern = page.create_url_pattern(
+            "test/[[args]]", page_py, router._url_parser, page_view
+        )
         assert pattern is not None
         assert pattern.callback is not None
         response = pattern.callback(RequestFactory().get("/"), args="arg1/arg2/arg3")

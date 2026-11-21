@@ -3,7 +3,7 @@
 {% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj catalog" brand_href="/" brand_icon="🔍" %}
-    {% #slot "actions" %}
+    {% #slot "nav" %}
       {% component "nav_link" url_name="next:page_catalog" label="All products" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}

@@ -629,6 +629,7 @@ _BARE_TEMPLATES = {
     "NEXT_JS_OPTIONS": {
         "script_tag_template": '<script src="{url}"></script>',
         "init_template": "<script{nonce_attr}>Next._init({payload});</script>",
+        "chunk_template": "<script>(self.$nx||=[]).push({payload})</script>",
     },
     "STATIC_BACKENDS": [
         {
@@ -660,9 +661,10 @@ class TestNonceTemplatesCheck:
             NEXT_FRAMEWORK=_BARE_TEMPLATES, MIDDLEWARE=_CSP_MIDDLEWARE
         ):
             messages = check_nonce_templates()
-        assert check_ids(messages) == ["next.W117", "next.W117"]
+        assert check_ids(messages) == ["next.W117"] * 3
         assert "NEXT_JS_OPTIONS['script_tag_template']" in messages[0].msg
-        assert "STATIC_BACKENDS[0]['OPTIONS']['js_tag']" in messages[1].msg
+        assert "NEXT_JS_OPTIONS['chunk_template']" in messages[1].msg
+        assert "STATIC_BACKENDS[0]['OPTIONS']['js_tag']" in messages[2].msg
 
     def test_the_default_templates_are_silent(self) -> None:
         with override_settings(MIDDLEWARE=_CSP_MIDDLEWARE):
@@ -744,6 +746,7 @@ class TestTagTemplatesFormatCheck:
         framework = {
             "NEXT_JS_OPTIONS": {
                 "init_template": "<script>{payload}{</script>",
+                "chunk_template": "<script>push({payload}, '{url}')</script>",
                 "preload_template": "<link {rel} href='{url}'>",
                 "script_tag_template": "",
             },
@@ -753,14 +756,39 @@ class TestTagTemplatesFormatCheck:
         }
         with override_settings(NEXT_FRAMEWORK=framework):
             errors = check_tag_templates_format()
-        assert check_ids(errors) == ["next.E139"] * 3
+        assert check_ids(errors) == ["next.E139"] * 4
         assert "NEXT_JS_OPTIONS['preload_template']" in errors[0].msg
         assert "{url}, {nonce_attr}" in errors[0].msg
         assert "KeyError: 'rel'" in errors[0].msg
         assert "NEXT_JS_OPTIONS['init_template']" in errors[1].msg
         assert "{payload}, {nonce_attr}" in errors[1].msg
-        assert "STATIC_BACKENDS[0]['OPTIONS']['css_tag']" in errors[2].msg
+        assert "NEXT_JS_OPTIONS['chunk_template']" in errors[2].msg
+        assert "{payload}, {nonce_attr}" in errors[2].msg
+        assert "KeyError: 'url'" in errors[2].msg
+        assert "STATIC_BACKENDS[0]['OPTIONS']['css_tag']" in errors[3].msg
         assert "Double every literal brace" in errors[0].hint
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "<script{nonce_attr} data-c='{payload}'>{payload}</script>",
+            "<div>{payload}</div><script{nonce_attr}></script>",
+        ],
+    )
+    def test_a_chunk_payload_outside_script_text_is_refused(
+        self, template: str
+    ) -> None:
+        framework = {"NEXT_JS_OPTIONS": {"chunk_template": template}}
+        with override_settings(NEXT_FRAMEWORK=framework):
+            [error] = check_tag_templates_format()
+        assert error.id == "next.E139"
+        assert "outside the text of a <script> element" in error.msg
+
+    def test_a_chunk_payload_in_script_text_passes(self) -> None:
+        template = "<SCRIPT{nonce_attr} type='module'>$nx.push({payload})</SCRIPT >"
+        framework = {"NEXT_JS_OPTIONS": {"chunk_template": template}}
+        with override_settings(NEXT_FRAMEWORK=framework):
+            assert check_tag_templates_format() == []
 
 
 class TestRuntimeBundlesDeployedCheck:
@@ -784,7 +812,7 @@ class TestRuntimeBundlesDeployedCheck:
     def test_an_unbuilt_runtime_is_w090_and_the_dev_chunk_is_not_asked(self) -> None:
         with patch.object(checks_module.finders, "find", return_value=[]) as find:
             warnings = check_runtime_bundles_deployed()
-        assert check_ids(warnings) == ["next.W090"] * 6
+        assert check_ids(warnings) == ["next.W090"] * 13
         assert warnings[0].msg.startswith("next/next.min.js: no static files finder")
         assert "collectstatic" in warnings[0].hint
         asked = [call.args[0] for call in find.call_args_list]

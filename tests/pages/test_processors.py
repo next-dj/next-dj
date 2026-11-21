@@ -5,7 +5,7 @@ from django.http import HttpRequest
 from django.test import override_settings
 
 from next.conf.signals import settings_reloaded
-from next.pages.processors import _get_context_processors
+from next.pages.processors import _get_context_processors, context_processors
 from tests.support import file_router_config_entry
 
 
@@ -50,6 +50,10 @@ def router_settings():
 
 class TestContextProcessorsMemo:
     """The merged processor list is built once per configuration."""
+
+    def test_the_public_accessor_reads_the_memo(self, router_settings) -> None:
+        with patch("next.pages.processors.import_callable", return_value=_processor):
+            assert context_processors() is _get_context_processors()
 
     def test_a_series_of_calls_builds_the_list_once(self, router_settings) -> None:
         """The second call hands back the very list the first one built."""

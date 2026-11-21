@@ -3,10 +3,13 @@
 Zones
 =====
 
+A page region that actions and polls address is a zone and is always inline.
+Anything deferred, streamed or loaded later is a component with ``loading.djx``, or a page with ``loading.djx``.
+
 A zone is an optimisation, not required markup.
 Partial rendering works on pages with no zones at all.
 This page explains what a zone buys and what the default costs without one.
-It then covers zone assets, lazy zones, polling, the wrapper element, the keying rule for dynamic list rows, and the placements the checks reject.
+It then covers zone assets, polling, what a zone shows while it reloads, the wrapper element, the keying rule for dynamic list rows, and the placements the checks reject.
 The JSON examples on this page omit the empty ``assets`` and ``form`` keys, see :doc:`reference`.
 
 .. contents::
@@ -99,30 +102,11 @@ A ``morph(zone=)`` from a handler ships it the same way.
 The :doc:`extending` page covers both.
 A zone declared inside the body of another renders as part of that body, so a standalone render of the outer zone also runs the context functions bound to the inner one.
 
-Lazy zones
-----------
-
-A zone defers its body when the tag carries ``lazy="load"`` or ``lazy="revealed"``.
-The full render paints only the ``{% placeholder %}`` branch, and the wrapper carries ``data-next-lazy`` with the trigger.
-
-.. code-block:: jinja
-   :caption: a lazy zone
-
-   {% zone "audit-table" lazy="revealed" %}
-     {% include "audit/table.djx" %}
-   {% placeholder %}
-     <p>Loading the audit log</p>
-   {% endzone %}
-
-The ``load`` zones of a page arrive in one batched zone GET once the runtime is ready, and a ``revealed`` zone waits until it enters the viewport.
-The placeholder branch is required, and ``next.E064`` reports a lazy zone without one.
-The body of a lazy zone never renders on the full page, yet its providers still run there unless they guard themselves with ``zone_requested``, see :doc:`scenarios`.
-
 Poll a zone on an interval
 --------------------------
 
 A zone polls itself when the tag carries a ``poll=`` interval.
-The body renders inline on the first paint, and the runtime re-GETs the zone on the interval through the same zone request a lazy load uses.
+The body renders inline on the first paint, and the runtime re-GETs the zone on the interval through the same zone request an action or a filter uses.
 
 .. code-block:: jinja
    :caption: a polling zone
@@ -132,21 +116,58 @@ The body renders inline on the first paint, and the runtime re-GETs the zone on 
    {% endzone %}
 
 The interval reads ``5s``, ``1500ms``, or a bare number of milliseconds.
-An interval below one second or above the browser timer ceiling fails when the template compiles, the same failure as a malformed literal or an unknown ``lazy=`` trigger.
+An interval below one second or above the browser timer ceiling fails when the template compiles, the same failure as a malformed literal or an unknown option.
 
 The wrapper carries ``data-next-poll`` with the resolved milliseconds on the full render.
-A partial response for the zone keeps the interval on its wrapper and drops only the lazy hint, so the live element stays the source of truth across morphs.
+A partial response for the zone keeps the interval on its wrapper, so the live element stays the source of truth across morphs.
 Zones that share an interval batch into one zone request per owning page.
 A hidden tab holds no poll timers.
 On its return to the foreground each zone refetches only when its own interval elapsed while hidden, and otherwise the countdown resumes with the remaining time.
 A brief flicker between tabs therefore fetches nothing, and switching windows does not storm the server.
-A polling zone shows its body, so it cannot also be ``lazy=``.
-The two modes are exclusive and combining them is a compile error.
 A context function tagged ``@context(..., zone="name")`` does not run on a foreign poll tick.
 A poll GET runs the zone-less callables plus the ones bound to the polled zone, see :doc:`/content/topics/context`.
 
 The interval is a client timer, so a page without the runtime shows the body of the first paint and never refreshes it.
 A polling zone is therefore an enhancement over what the page already renders rather than the only path to the value, and a page that has to stay fresh without JavaScript keeps a plain reload control beside the zone.
+
+What a zone shows while it reloads
+----------------------------------
+
+A zone carries ``data-next-busy`` and ``aria-busy`` while a request reloads it, whether an action, a filter, a poll, or a stream asked for it.
+``reload=`` decides what the zone shows in the meantime.
+
+``reload="keep"``, the default, keeps the current content on screen, marked busy, until the new content arrives.
+A component boundary inside the zone that held ready content keeps it as well until its own content lands, so a fast reload never flashes a skeleton.
+
+``reload="loading"`` shows loading content once the request outlasts ``delay=``, 150 milliseconds unless the tag names another duration such as ``"300ms"`` or ``"1s"``.
+``delay=`` belongs to ``reload="loading"`` alone, and a zone that keeps its content refuses it when the template compiles.
+Every component boundary inside the zone shows its own ``loading.djx``.
+The zone itself shows its reload skeleton when it has one, a file named ``loading.<zone>.djx`` beside the template that declares the zone.
+
+.. code-block:: jinja
+   :caption: pages/catalog/template.djx
+
+   {% zone "catalog-results" tag="tbody" reload="loading" delay="300ms" %}
+     {% for product in page_obj %}
+       <tr data-next-key="{{ product.pk }}">…</tr>
+     {% endfor %}
+   {% endzone %}
+
+.. code-block:: jinja
+   :caption: pages/catalog/loading.catalog-results.djx
+
+   {% for _ in "xxxxx" %}<tr><td colspan="4" class="skeleton"></td></tr>{% endfor %}
+
+The skeleton belongs to the template beside it, a ``template.djx``, a ``layout.djx`` or a ``component.djx``, and is never inherited by a directory below.
+It never renders on the first paint, because a zone always renders inline, and only ``reload="loading"`` uses it.
+A page whose zone uses ``reload="loading"`` ships the skeleton once per response, rendered with the zone's context inside ``<template data-next-loading="<zone>">``, and ships the ``loading.djx`` of every ``defer="inline"`` component inside the zone the same way, named by its boundary key.
+Without the file, a zone with no component boundary inside stays busy only.
+The loading content never replaces a part of the zone that holds the focused element or a field the user changed.
+A replaced part keeps its measured height as ``min-height`` while the loading content shows, so the page below it does not jump, and ``data-next-reserve="off"`` on the zone or on an element around it lets the part shrink to the loading content instead.
+``next.E232`` reports a ``loading.<zone>.djx`` whose template declares no zone of that name.
+
+A zone is not an error boundary, so there is no ``error.<zone>.djx``.
+A failure inside the zone falls to the nearest page or component ``error.djx``.
 
 The wrapper element
 -------------------
@@ -168,6 +189,19 @@ Here ``page_obj`` is a Django :class:`~django.core.paginator.Page`, published by
 A ``Page`` iterates over its own rows, so the loop reads it directly.
 A table zone names ``tag="tbody"`` for the same reason, shown in the pagination scenario of :doc:`scenarios`.
 The wrapper carries ``data-next-zone`` regardless of the tag, so the zone stays addressable.
+
+The wrapper also takes the HTML global attributes, ``aria-*``, and ``data-*`` as quoted literals, so it can be the sticky or flex element of a layout itself.
+
+.. code-block:: jinja
+   :caption: a sticky header zone
+
+   {% zone "site-header" tag="header" class="sticky top-0 flex" aria-label="Site" %}
+     {% include "header.djx" %}
+   {% endzone %}
+
+A zone render writes the same attributes, so a refresh keeps them.
+The hand-written router and toast attributes of :doc:`/content/ref/client` pass too, so a zone can be a ``data-next-nav`` container whose links the router marks, or the ``data-next-toasts`` tray the ``toast`` op fills, and so does ``data-next-reserve="off"``, the only value it takes.
+Every other ``data-next-*`` name stays reserved for the runtime, since the runtime writes it on the wrapper or reads it to decide how the zone reloads.
 
 Key your dynamic list rows
 --------------------------
@@ -254,18 +288,17 @@ A standalone request answers 400 ``unknown zone`` and ``Patches.morph_zone`` rai
      - ``next.W067``
      - A warning, since the bindings are invisible to a standalone render.
        Move them into a context provider or inside the zone body.
-   * - A ``lazy=`` zone has a ``{% placeholder %}`` branch that holds something.
-     - ``next.E064``
-     - A branch of whitespace alone is reported, because the check reads the significant nodes.
    * - A zone belongs to a page, not a component.
      - ``next.E065``
-     - A ``{% zone %}`` in a component template is rejected.
+     - A ``{% zone %}`` in a component template is rejected, and a component that loads later or shows a loading UI does so through its own ``loading.djx``.
+   * - A ``loading.<zone>.djx`` sits beside the template that declares the zone.
+     - ``next.E232``
+     - A file whose zone the template beside it does not declare never renders.
    * - A zone name is an ASCII slug of letters, digits, hyphens, or underscores.
      - ``next.E061``
      - The name travels in the ``X-Next-Zone`` header, which is latin-1.
 
-A ``{% placeholder %}`` inside a zone that declares no ``lazy=`` never reaches a check.
-It raises ``TemplateSyntaxError`` when the template compiles, since such a zone shows its body and never renders the branch.
+An unknown option or an invalid value of ``tag=``, ``poll=``, ``reload=``, ``delay=`` or ``data-next-reserve`` never reaches a check, since it raises ``TemplateSyntaxError`` when the template compiles.
 See :doc:`/content/ref/system-checks` for the full list and the check codes.
 
 See also

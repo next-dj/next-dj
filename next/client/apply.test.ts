@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
-import type { Asset, AssetBridge, Envelope } from "./apply";
+import type {
+  Asset,
+  AssetBridge,
+  BeforeApply,
+  Envelope,
+  MountRegistry,
+  Target,
+} from "./apply";
+import type { Bounds } from "./morph";
 import { createNavigation } from "./navigation";
 import { createDiagnostics } from "./diagnostics";
 import { stubBridge } from "./test-doubles";
@@ -1316,6 +1324,66 @@ describe("Applier lifecycle events", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
   });
 
+  it("drops the ops aimed at a zone a newer request took and applies the rest", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a">a0</div><div data-next-zone="b">b0</div>';
+    const { applier, dispatched } = makeApplier();
+    const asked: (string | undefined)[] = [];
+    const noted: unknown[] = [];
+    applier.defineOp("note", (patch) => noted.push(patch.text));
+    applier.apply(
+      envelope([
+        { op: "inner", target: { zone: "a" }, html: "a1" },
+        { op: "inner", target: { zone: "b" }, html: "b1" },
+        { op: "note", text: "saved" },
+      ]),
+      { zones: ["a", "b"], isCurrent: (zone) => (asked.push(zone), zone !== "a") },
+    );
+    expect(document.querySelector('[data-next-zone="a"]')!.textContent).toBe("a0");
+    expect(document.querySelector('[data-next-zone="b"]')!.textContent).toBe("b1");
+    expect(noted).toEqual(["saved"]);
+    expect(asked).toEqual([undefined, "a", "b"]);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail).toMatchObject({
+      ok: true,
+      nodes: [document.querySelector('[data-next-zone="b"]')],
+    });
+  });
+
+  it("drops the ops whose target sits inside a lost zone and keeps page-level ops", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a"><p id="inside">i0</p></div><p id="outside">o0</p>';
+    const { applier, merged } = makeApplier();
+    applier.apply(
+      envelope([
+        { op: "inner", target: { css: "#inside" }, html: "i1" },
+        { op: "inner", target: { css: "#outside" }, html: "o1" },
+        { op: "context", data: { saved: true } },
+      ]),
+      { zones: ["a", "gone"], isCurrent: (zone) => zone === undefined },
+    );
+    expect(document.getElementById("inside")!.textContent).toBe("i0");
+    expect(document.getElementById("outside")!.textContent).toBe("o1");
+    expect(merged).toEqual([{ saved: true }]);
+  });
+
+  it("names the zones of the request on an op error, none when it named none", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate" }]), { zones: ["cart", "list"] });
+    applier.apply(envelope([{ op: "frobnicate" }]));
+    applier.defineOp("boom", () => {
+      throw new Error("op blew up");
+    });
+    applier.apply(envelope([{ op: "boom" }]), { zones: ["cart"] });
+    const errors = dispatched.filter((d) => d.event === "partial:error");
+    expect(errors.map((d) => d.detail.zones)).toEqual([
+      ["cart", "list"],
+      undefined,
+      ["cart"],
+    ]);
+    expect("zones" in errors[1]!.detail).toBe(false);
+  });
+
   it("names the nodes the ops touched on applied", () => {
     document.body.innerHTML = '<div data-next-zone="z"></div><p id="gone"></p>';
     const { applier, dispatched } = makeApplier();
@@ -1341,6 +1409,196 @@ describe("Applier lifecycle events", () => {
     });
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
+  });
+
+  it("names the boundaries a batch will touch on before-apply", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><div id="b1" data-next-boundary="b1"></div></div>' +
+      '<p id="p" data-next-boundary="b2"></p><p id="q"></p>';
+    const [b1, p] = ["b1", "p"].map((id) => document.getElementById(id));
+    const { applier, dispatched } = makeApplier();
+    let seen: Element[] = [];
+    document.addEventListener(
+      "partial:before-apply",
+      (event) => (seen = (event as CustomEvent<BeforeApply>).detail.boundaries),
+      { once: true },
+    );
+    applier.apply(
+      envelope([
+        { op: "inner", target: { zone: "z" }, html: "new" },
+        { op: "inner", target: { css: "#p" }, html: "p" },
+        { op: "inner", target: { css: "#q" }, html: "q" },
+        { op: "context", data: {} },
+      ]),
+    );
+    expect(seen).toEqual([b1, p]);
+    const before = dispatched.find((d) => d.event === "partial:before-apply")!.detail;
+    expect(before).not.toHaveProperty("nodes");
+    expect(before.hold).toEqual(expect.any(Function));
+  });
+
+  it("resolves the boundaries only when a listener reads them", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><div id="b1" data-next-boundary="b1"></div></div>';
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
+    const before = dispatched.find((d) => d.event === "partial:before-apply")!.detail;
+    expect(Object.getOwnPropertyDescriptor(before, "boundaries")).toHaveProperty(
+      "get",
+      expect.any(Function),
+    );
+    expect(before.boundaries).toEqual([]);
+  });
+
+  it("names no boundary when the batch touches none", () => {
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
+    const before = dispatched.find((d) => d.event === "partial:before-apply")!.detail;
+    expect(before.boundaries).toEqual([]);
+  });
+});
+
+describe("Applier before-apply hold", () => {
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<div data-next-zone="a">a0</div><div data-next-zone="b">b0</div>';
+  });
+
+  const text = (name: string): string | null =>
+    document.querySelector(`[data-next-zone="${name}"]`)!.textContent;
+  const note = (value: string): unknown => envelope([{ op: "note", text: value }]);
+
+  function heldApplier() {
+    const made = makeApplier();
+    const noted: unknown[] = [];
+    made.applier.defineOp("note", (patch) => noted.push(patch.text));
+    return { ...made, noted };
+  }
+
+  interface Taken {
+    resume: () => void;
+    hold: () => () => void;
+  }
+
+  function holdNext(): Taken {
+    const taken: Taken = { resume: () => undefined, hold: () => () => undefined };
+    document.addEventListener(
+      "partial:before-apply",
+      (event) => {
+        const { hold } = (event as CustomEvent<BeforeApply>).detail;
+        taken.hold = hold;
+        taken.resume = hold();
+      },
+      { once: true },
+    );
+    return taken;
+  }
+
+  it("queues held batches and applies them in order on resume", () => {
+    const { applier, dispatched, noted } = heldApplier();
+    const taken = holdNext();
+    applier.apply(note("first"));
+    applier.apply(note("second"));
+    expect(noted).toEqual([]);
+    expect(dispatched.map((d) => d.event)).toEqual([
+      "partial:before-apply",
+      "partial:before-apply",
+    ]);
+    taken.resume();
+    expect(noted).toEqual(["first", "second"]);
+    taken.resume();
+    applier.apply(note("third"));
+    expect(noted).toEqual(["first", "second", "third"]);
+  });
+
+  it("drops a held batch whose request was superseded before the resume", () => {
+    const { applier, dispatched, noted } = heldApplier();
+    const taken = holdNext();
+    let current = true;
+    applier.apply(note("first"));
+    applier.apply(note("stale"), { isCurrent: () => current });
+    applier.apply(note("third"));
+    current = false;
+    taken.resume();
+    expect(noted).toEqual(["first", "third"]);
+    const applied = dispatched.filter((d) => d.event === "partial:applied");
+    expect(applied.map((d) => d.detail.stale)).toEqual([undefined, true, undefined]);
+  });
+
+  it("runs the before hook once the holds release, right ahead of the ops", () => {
+    const { applier, noted } = heldApplier();
+    const taken = holdNext();
+    const seen: unknown[][] = [];
+    applier.apply(note("first"), { before: () => seen.push([...noted]) });
+    expect(seen).toEqual([]);
+    taken.resume();
+    expect(seen).toEqual([[]]);
+    expect(noted).toEqual(["first"]);
+  });
+
+  it("skips the before hook of a batch a newer request superseded", () => {
+    const { applier, noted } = heldApplier();
+    const before = vi.fn();
+    applier.apply(note("stale"), { isCurrent: () => false, before });
+    expect(before).not.toHaveBeenCalled();
+    expect(noted).toEqual([]);
+  });
+
+  it("waits for every hold taken on one event", () => {
+    const { applier, noted } = heldApplier();
+    const resumes: (() => void)[] = [];
+    for (let i = 0; i < 2; i += 1) {
+      document.addEventListener(
+        "partial:before-apply",
+        (event) => resumes.push((event as CustomEvent<BeforeApply>).detail.hold()),
+        { once: true },
+      );
+    }
+    applier.apply(note("x"));
+    resumes[0]!();
+    resumes[0]!();
+    expect(noted).toEqual([]);
+    resumes[1]!();
+    expect(noted).toEqual(["x"]);
+  });
+
+  it("stops the drain when a hold opens between two held batches", () => {
+    const { applier, noted } = heldApplier();
+    const taken = holdNext();
+    applier.apply(note("first"));
+    applier.apply(note("second"));
+    let again: () => void = () => undefined;
+    document.addEventListener("partial:applied", () => (again = taken.hold()), {
+      once: true,
+    });
+    taken.resume();
+    expect(noted).toEqual(["first"]);
+    again();
+    expect(noted).toEqual(["first", "second"]);
+  });
+
+  it("keeps a cancelled batch out of the held queue", () => {
+    const { applier, noted } = heldApplier();
+    const taken = holdNext();
+    applier.apply(note("first"));
+    document.addEventListener("partial:before-apply", (e) => e.preventDefault(), {
+      once: true,
+    });
+    applier.apply(note("cancelled"));
+    taken.resume();
+    expect(noted).toEqual(["first"]);
+  });
+
+  it("drops open holds and held batches on reset", () => {
+    const { applier } = makeApplier();
+    const taken = holdNext();
+    applier.apply(envelope([{ op: "inner", target: { zone: "a" }, html: "a1" }]));
+    applier._reset();
+    applier.apply(envelope([{ op: "inner", target: { zone: "b" }, html: "b1" }]));
+    expect(text("b")).toBe("b1");
+    taken.resume();
+    expect(text("a")).toBe("a0");
   });
 });
 
@@ -1889,7 +2147,10 @@ describe("Applier layer, toast, and url verbs", () => {
         calls.push({ verb: "open", args: [opener, href, zone] }),
       close: (detail) => calls.push({ verb: "close", args: [detail] }),
       head: (patch, page) => calls.push({ verb: "head", args: [patch, page] }),
-      toast: (text, variant) => calls.push({ verb: "toast", args: [text, variant] }),
+      toast: (text, variant) => {
+        calls.push({ verb: "toast", args: [text, variant] });
+        return document.createElement("div");
+      },
     });
     const history = {
       push: (href: string) => calls.push({ verb: "push", args: [href] }),
@@ -2008,6 +2269,26 @@ describe("Applier layer, toast, and url verbs", () => {
     expect(calls).toEqual([{ verb: "toast", args: ["saved", "info"] }]);
   });
 
+  it("the toast item the stack returns joins the mount pass and the applied nodes", () => {
+    const item = document.createElement("div");
+    document.body.append(item);
+    const run = vi.fn<MountRegistry["run"]>();
+    let nodes: unknown;
+    const applier = new Applier({
+      dispatch: (event, detail) => {
+        if (event === "partial:applied") nodes = detail.nodes;
+      },
+      mergeContext: () => undefined,
+      document,
+      layers: () => stubBridge({ toast: () => item }),
+      mount: { run },
+    });
+    applier.apply(envelope([{ op: "toast", text: "saved" }]));
+    item.remove();
+    expect(run.mock.calls).toEqual([[item]]);
+    expect(nodes).toEqual([item]);
+  });
+
   it("url pushes by default and replaces on the explicit action", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(
@@ -2086,6 +2367,23 @@ describe("Applier page-scoped zone resolve", () => {
     const { applier, pages } = makeRecordingApplier();
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
     expect(pages).toEqual([undefined]);
+  });
+
+  it("resolves the boundaries of before-apply only when read, against the same page", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><i data-next-boundary="b"></i></div>';
+    const { applier, pages } = makeRecordingApplier();
+    const read: Element[][] = [];
+    document.addEventListener(
+      "partial:before-apply",
+      (event) => read.push((event as CustomEvent<BeforeApply>).detail.boundaries),
+      { once: true },
+    );
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]), {
+      page: "/host/",
+    });
+    expect(read).toEqual([[expect.objectContaining({ tagName: "I" })]]);
+    expect(pages).toEqual(["/host/", "/host/"]);
   });
 });
 
@@ -2234,5 +2532,227 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
     expect(mounted).toEqual(["b", "a"]);
 
     document.removeEventListener("next:mounted", onMount);
+  });
+});
+
+describe("Applier boundary target", () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="b-1" data-next-boundary="b-1">old</div>';
+  });
+
+  it("resolves a boundary target by element id", () => {
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([{ op: "inner", target: { boundary: "b-1" }, html: "new" }]),
+    );
+    expect(document.getElementById("b-1")!.textContent).toBe("new");
+  });
+
+  it("leaves the document alone when the boundary id is absent", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(
+      envelope([{ op: "inner", target: { boundary: "b-9" }, html: "new" }]),
+    );
+    expect(document.getElementById("b-1")!.textContent).toBe("old");
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("names a failed op by the boundary it aimed at", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "nope", target: { boundary: "b-1" } }]));
+    const error = dispatched.find((d) => d.event === "partial:error")!.detail;
+    expect(error.target).toBe('boundary "b-1"');
+  });
+});
+
+describe("Applier morph of a boundary", () => {
+  it("replaces the children of a plain wrapper and keeps the wrapper itself", () => {
+    document.body.innerHTML =
+      '<p id="before"></p><div id="b-1" class="shell" data-next-boundary="b-1" ' +
+      'data-next-token="t" data-next-state="loading"><i>loading</i></div>' +
+      '<p id="after"></p>';
+    const wrapper = document.getElementById("b-1")!;
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { boundary: "b-1" },
+          html: '<section class="card">one</section><section>two</section>',
+        },
+      ]),
+    );
+    expect(document.getElementById("b-1")).toBe(wrapper);
+    expect(wrapper.innerHTML).toBe(
+      '<section class="card">one</section><section>two</section>',
+    );
+    expect(wrapper.getAttribute("class")).toBe("shell");
+    expect(wrapper.getAttribute("data-next-token")).toBe("t");
+    expect(wrapper.getAttribute("data-next-state")).toBe("loading");
+    expect(document.getElementById("before")).not.toBeNull();
+    expect(document.getElementById("after")).not.toBeNull();
+  });
+
+  it("morphs an adopted root itself into the element the reply carries", () => {
+    document.body.innerHTML =
+      '<ul><li id="b-1" class="skeleton" data-next-boundary="b-1" data-next-adopted>' +
+      '<i>wait</i></li><li id="next"></li></ul>';
+    const root = document.getElementById("b-1")!;
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { boundary: "b-1" },
+          html: '<li id="b-1" class="row" data-next-adopted><b>done</b></li>',
+        },
+      ]),
+    );
+    expect(document.getElementById("b-1")).toBe(root);
+    expect(root.outerHTML).toBe(
+      '<li id="b-1" class="row" data-next-adopted=""><b>done</b></li>',
+    );
+    expect(document.getElementById("next")).not.toBeNull();
+  });
+});
+
+describe("Applier slot and body targets", () => {
+  const PAGE =
+    '<nav><div id="chrome" data-next-boundary="c" data-next-state="loading"></div>' +
+    '</nav><!--s--><main id="m"><p id="old">old</p></main><!--/s-->';
+
+  function slotted(slot?: (target: Target) => Bounds | undefined) {
+    const dispatched: Dispatched[] = [];
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: () => undefined,
+      document,
+      ...(slot === undefined ? {} : { slot }),
+    });
+    return { applier, dispatched };
+  }
+
+  function markers(target: Target): Bounds | undefined {
+    if (target.body) return [document.body, null, null];
+    if (target.slot !== "L1") return undefined;
+    const [start, end] = [...document.body.childNodes].filter(
+      (node) => node.nodeType === Node.COMMENT_NODE,
+    );
+    return [document.body, start!, end!];
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = PAGE;
+  });
+
+  it("morphs between the markers the slot hook resolves and mounts the run", () => {
+    const { applier, dispatched } = slotted(markers);
+    const main = document.getElementById("m");
+    const seen: string[][] = [];
+    document.addEventListener(
+      "partial:before-apply",
+      (event) => {
+        const { boundaries } = (event as CustomEvent<BeforeApply>).detail;
+        seen.push(boundaries.map((el) => el.id));
+      },
+      { once: true },
+    );
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { slot: "L1" },
+          html:
+            '<main id="m"><div id="b1" data-next-boundary="k"></div></main>' +
+            "<script>window.__slot = 1</script>",
+        },
+      ]),
+    );
+    expect(document.getElementById("m")).toBe(main);
+    expect(document.getElementById("old")).toBeNull();
+    expect(document.querySelector("main script")).toBeNull();
+    expect(document.body.innerHTML).toContain("<!--/s-->");
+    expect(seen).toEqual([[]]);
+    const applied = dispatched.find((d) => d.event === "partial:applied")!;
+    expect(applied.detail.nodes).toEqual([main]);
+  });
+
+  it("lists only the boundaries inside the slot run", () => {
+    document.body.innerHTML = PAGE.replace(
+      '<p id="old">old</p>',
+      '<div id="in" data-next-boundary="i"></div>',
+    );
+    const { applier } = slotted(markers);
+    const seen: string[][] = [];
+    document.addEventListener(
+      "partial:before-apply",
+      (event) => {
+        const { boundaries } = (event as CustomEvent<BeforeApply>).detail;
+        seen.push(boundaries.map((el) => el.id));
+      },
+      { once: true },
+    );
+    applier.apply(envelope([{ op: "morph", target: { slot: "L1" }, html: "" }]));
+    expect(seen).toEqual([["in"]]);
+  });
+
+  it("morphs the children of the body for a body target the hook resolves", () => {
+    const nav = document.querySelector("nav");
+    const morph = { op: "morph", target: { body: true }, html: "<nav></nav><p>b</p>" };
+    slotted().applier.apply(envelope([morph]));
+    expect(document.body.innerHTML).toBe(PAGE);
+    slotted(markers).applier.apply(envelope([morph]));
+    expect(document.querySelector("nav")).toBe(nav);
+    expect(document.body.innerHTML).toBe("<nav></nav><p>b</p>");
+  });
+
+  it("leaves the page alone for a slot nothing resolves", () => {
+    for (const { applier } of [slotted(), slotted(markers)]) {
+      applier.apply(
+        envelope([{ op: "morph", target: { slot: "L9" }, html: "<main>x</main>" }]),
+      );
+      expect(document.body.innerHTML).toBe(PAGE);
+    }
+  });
+
+  it("hands the response of the request to before-apply", () => {
+    const { applier } = slotted();
+    const response = new Response("");
+    const seen: unknown[] = [];
+    document.addEventListener(
+      "partial:before-apply",
+      (event) => seen.push((event as CustomEvent<BeforeApply>).detail.response),
+      { once: true },
+    );
+    applier.apply(envelope([]), { response });
+    expect(seen).toEqual([response]);
+  });
+});
+
+describe("Applier keeps data scripts", () => {
+  it("strips every script but an inert data block", () => {
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "inner",
+          target: { zone: "z" },
+          html:
+            '<script id="a">1</script><script id="b" type="module">2</script>' +
+            '<script id="c" type=" text/JavaScript ">3</script>' +
+            '<script id="d" type="application/json">{}</script>' +
+            '<script id="e" type="application/ld+json">{}</script>' +
+            '<script id="f" type="speculationrules">{}</script>' +
+            '<script id="g" type="importmap">{}</script>' +
+            '<script id="h" type="">4</script>' +
+            '<script id="i" type="text/x-template"><p></p></script>' +
+            '<script id="j" type="application/vnd.app+JSON">{}</script>' +
+            '<script id="k" type="text/vbscript">5</script>',
+        },
+      ]),
+    );
+    const kept = [...document.querySelectorAll("script")].map((el) => el.id);
+    expect(kept).toEqual(["d", "e", "i", "j"]);
   });
 });

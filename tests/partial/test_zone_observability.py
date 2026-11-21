@@ -14,7 +14,8 @@ from next.pages.loaders import load_python_module_memo
 from next.partial import zone_requested
 from next.partial.registry import zones_of
 from next.partial.registry.zones import _zone_cache
-from next.partial.zone import ZONE_ATTR, ZoneNode
+from next.partial.zone import ZONE_ATTR, ZoneNode, render_zone_body
+from next.views.pages import unified_view
 
 
 _PAGE = Path("/srv/pages/page.py")
@@ -45,22 +46,58 @@ def _partial_of(source: str, engine: Engine) -> tuple[Template, ZoneNode]:
 class TestStandaloneDebugContract:
     """A standalone zone render keeps an honest DEBUG traceback."""
 
-    def test_template_debug_during_through_bind_template(self) -> None:
+    def test_template_debug_during_through_the_passed_page_template(self) -> None:
         engine = _debug_engine()
         template, node = _partial_of(
             'head {% zone "z" %}<p>{{ bad }}</p>{% endzone %} tail', engine
         )
-        partial = node.partial
-
-        # a full render first binds the page template the partial delegates to
-        template.render(Context({"bad": "ok"}))
-        assert partial.page_template is not None
 
         with pytest.raises(ValueError, match="boom-standalone") as exc_info:
-            partial.render(Context({"bad": _Boom("boom-standalone")}))
+            node.partial.render(
+                Context({"bad": _Boom("boom-standalone")}), page_template=template
+            )
+
+        debug = vars(exc_info.value)["template_debug"]
+        assert debug["during"] == "{{ bad }}"
+
+    def test_render_zone_body_forwards_the_page_template(self) -> None:
+        engine = _debug_engine()
+        template, node = _partial_of(
+            '{% zone "z" %}<p>{{ bad }}</p>{% endzone %}', engine
+        )
+
+        with pytest.raises(ValueError, match="boom-body") as exc_info:
+            render_zone_body(
+                node.partial,
+                node.name,
+                node.options,
+                Context({"bad": _Boom("boom-body")}),
+                page_template=template,
+            )
 
         debug = exc_info.value.template_debug  # type: ignore[attr-defined]
         assert debug["during"] == "{{ bad }}"
+
+    def test_a_nested_zone_failure_shows_the_page_source(self) -> None:
+        engine = _debug_engine()
+        template, outer = _partial_of(
+            '{% zone "outer" %}<p>{% zone "inner" %}{{ bad }}{% endzone %}</p>'
+            "{% endzone %}",
+            engine,
+        )
+
+        with pytest.raises(ValueError, match="boom-nested") as exc_info:
+            render_zone_body(
+                outer.partial,
+                outer.name,
+                outer.options,
+                Context({"bad": _Boom("boom-nested")}),
+                page_template=template,
+            )
+
+        debug = exc_info.value.template_debug
+        assert debug["during"] == "{{ bad }}"
+        assert debug["name"] == template.origin.name
 
     def test_standalone_binds_template_name(self) -> None:
         engine = _debug_engine()
@@ -81,7 +118,6 @@ class TestUnboundZoneDebugDoesNotCrash:
             '{% zone "z" %}<p>{{ bad }}</p>{% endzone %}', engine
         )
         partial = node.partial
-        assert partial.page_template is None
 
         with pytest.raises(ValueError, match="boom-unbound") as exc_info:
             partial.render(Context({"bad": _Boom("boom-unbound")}))
@@ -97,6 +133,34 @@ class TestUnboundZoneDebugDoesNotCrash:
         with pytest.raises(ValueError, match="empty-debug") as exc_info:
             node.partial.render(Context({"bad": _Boom("empty-debug")}))
         assert exc_info.value.template_debug == {}  # type: ignore[attr-defined]
+
+
+class TestZonePartialKeepsNoRenderState:
+    """A render leaves the shared partial as compiled, whatever thread runs it."""
+
+    def test_a_full_render_writes_nothing_on_the_partial(self) -> None:
+        engine = _debug_engine()
+        template, node = _partial_of(
+            'head {% zone "z" %}<p>{{ v }}</p>{% endzone %} tail', engine
+        )
+        compiled = dict(vars(node.partial))
+
+        template.render(Context({"v": "ok"}))
+        node.partial.render(Context({"v": "ok"}), page_template=template)
+
+        assert vars(node.partial) == compiled
+
+    def test_a_full_render_lends_no_page_template_to_a_later_one(self) -> None:
+        engine = _debug_engine()
+        template, node = _partial_of(
+            'head {% zone "z" %}<p>{{ bad }}</p>{% endzone %} tail', engine
+        )
+        template.render(Context({"bad": "ok"}))
+
+        with pytest.raises(ValueError, match="no-carry") as exc_info:
+            node.partial.render(Context({"bad": _Boom("no-carry")}))
+
+        assert vars(exc_info.value)["template_debug"] == {}
 
 
 class TestWrapperTagContexts:
@@ -116,22 +180,6 @@ class TestWrapperTagContexts:
         assert out == (
             f'<select><optgroup {ZONE_ATTR}="opts"><option>q</option></optgroup></select>'
         )
-
-
-class TestLazyZoneBodyIsInert:
-    """A lazy zone emits only its placeholder, never the body."""
-
-    @pytest.mark.parametrize("trigger", ["load", "revealed"])
-    def test_heavy_body_var_absent_from_output(self, trigger: str) -> None:
-        source = (
-            f'{{% zone "z" lazy="{trigger}" %}}'
-            "<table>{{ heavy }}</table>"
-            "{% placeholder %}<div>loading</div>{% endzone %}"
-        )
-        out = Template(source).render(Context({"heavy": "MUST-NOT-APPEAR"}))
-        assert "MUST-NOT-APPEAR" not in out
-        assert "<table>" not in out
-        assert "<div>loading</div>" in out
 
 
 def _write_zone_page(directory: Path, body: str) -> Path:
@@ -186,7 +234,7 @@ class TestRegistryIsolatedFromGetPath:
             tmp_path, 'a {% zone "z" %}<p>{{ t }}</p>{% endzone %} b'
         )
         module = load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, module)
+        view = unified_view(page_instance, page_file, module)
         response = view(_make_request())
         assert b'<div data-next-zone="z">' in response.content
         assert len(_zone_cache) == 0
@@ -198,7 +246,7 @@ class TestRegistryIsolatedFromGetPath:
             tmp_path, '{% zone "z" %}<p>{{ t }}</p>{% endzone %}'
         )
         module = load_python_module_memo(page_file)
-        view = page_instance._create_unified_view(page_file, module)
+        view = unified_view(page_instance, page_file, module)
         view(_make_request())
         assert len(_zone_cache) == 0
 

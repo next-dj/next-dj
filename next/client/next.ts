@@ -3,7 +3,7 @@
 
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
-import type { Envelope } from "./apply";
+import type { BeforeApply, Envelope } from "./apply";
 import { createScriptsLoader, lazyChunk } from "./chunks";
 import type { ChunkDeps, Lazy, ScriptsChunk, ScriptsFactory } from "./chunks";
 import type { ConsentChange } from "./consent";
@@ -12,9 +12,11 @@ import type { CsrfMint } from "./csrf";
 import type { SseFactory } from "./sse";
 import type { PollFactory } from "./poll";
 import type { WsTransportFactory } from "./ws";
+import type { DeferArm } from "./triggers";
 import type { NavigatedDetail, NavigationState } from "./navigation";
-import { scriptNonce } from "./protocol";
+import { ATTR_STATE, markBusy, scriptNonce } from "./protocol";
 import type { Diagnostics, PartialError } from "./protocol";
+import type { Settled } from "./wire";
 
 /** The client context store, shared by _init, the context op, and csrf meta. */
 export type NextContext = Readonly<Record<string, unknown>>;
@@ -22,12 +24,12 @@ export type NextContext = Readonly<Record<string, unknown>>;
 export type { PartialError, PartialErrorKind } from "./protocol";
 
 export type { NavigatedDetail, NavigationAction, NavigationState } from "./navigation";
-export type { Asset, AssetLoad, Envelope, FormMeta, Patch } from "./apply";
+export type { Asset, AssetLoad, BeforeApply, Envelope, FormMeta, Patch } from "./apply";
 export type { ConsentChange } from "./consent";
 export type { ScriptsChunk } from "./chunks";
 export type { ScriptStatus } from "./scripts";
 export type { StreamMeta } from "./sse";
-export type { Outcome } from "./wire";
+export type { Outcome, Settled } from "./wire";
 export type { SubmitAction } from "./partial";
 
 /** The module each single-module chunk registers through Next._land, by chunk name. */
@@ -38,6 +40,7 @@ interface NextModules {
   csrf: CsrfMint;
   poll: PollFactory;
   dev: Diagnostics;
+  defer: DeferArm;
 }
 
 /** The lazily fetched chunks Next.ready awaits, keyed by name. */
@@ -58,7 +61,7 @@ export interface NextEventMap {
     method: string;
     intent: { zone?: string; uid?: string };
   };
-  "partial:before-apply": { envelope: Envelope };
+  "partial:before-apply": BeforeApply;
   // ok is false when any op threw or named an unknown verb, and stale when a newer
   // request superseded the envelope. nodes are the roots the mount pass ran over.
   "partial:applied": {
@@ -68,6 +71,7 @@ export interface NextEventMap {
     stale?: true;
   };
   "partial:error": PartialError;
+  "partial:settled": Settled;
   "partial:layer-opened": { opener: HTMLElement | null };
   "partial:layer-accepted": { result: unknown };
   "partial:layer-dismissed": { reason: string };
@@ -78,7 +82,7 @@ export interface NextEventMap {
     state: "connecting" | "open" | "closed";
     code?: string;
   };
-  "next:toast": { text: string; variant: string };
+  "next:toast": { text: string; variant: string; element: Element };
   "next:navigated": NavigatedDetail;
   "next:consent": ConsentChange;
   "next:script-loaded": { name: string };
@@ -127,6 +131,13 @@ const record = ({ target, type }: Event): void => {
 };
 document.addEventListener("load", record, true);
 document.addEventListener("error", record, true);
+addEventListener("load", () => {
+  if (
+    document.querySelector("[data-next-streamed]") &&
+    (window.$nx ?? []).push === [].push
+  )
+    markBusy([...document.querySelectorAll(`[${ATTR_STATE}=loading]`)])("incomplete");
+});
 
 /** The window-exposed runtime facade, a static class since there is one per page. */
 class Next {
@@ -143,7 +154,7 @@ class Next {
 
   // One loader per chunk. The dev chunk is fetched only when the payload has $dev.
   static #modules = Object.fromEntries(
-    ["scripts", "stream", "ws", "csrf", "poll", "dev"].map((key) => [
+    ["scripts", "stream", "ws", "csrf", "poll", "dev", "defer"].map((key) => [
       key,
       lazyChunk(Next.#chunk, key),
     ]),
@@ -157,6 +168,7 @@ class Next {
     ws: Next.#modules.ws,
     csrf: Next.#modules.csrf,
     poll: Next.#modules.poll,
+    defer: Next.#modules.defer,
   });
 
   /** Consent per category, set once the scripts chunk has loaded. */
@@ -256,9 +268,11 @@ class Next {
   }
 
   // A merge replaces the store with a new object, leaving earlier snapshots intact.
+  // JSON has no undefined, so a merge reads an undefined value as a deletion.
   static #mergeContext(data: Record<string, unknown>): void {
     const changed = Object.keys(data);
-    Next.#context = { ...Next.#context, ...data };
+    const all = Object.entries({ ...Next.#context, ...data });
+    Next.#context = Object.fromEntries(all.filter(([, value]) => value !== undefined));
     Next.#bus.emit("context-updated", { context: Next.#context, changed });
   }
 }

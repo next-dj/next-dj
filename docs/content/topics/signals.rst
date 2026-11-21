@@ -143,6 +143,36 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``partial_backend_loaded``
      - Partial
      - After the partial protocol backend is created from its configuration entry.
+   * - ``boundary_failed``
+     - Boundaries
+     - Once per failure an error boundary contained, before its ``error.djx`` renders.
+   * - ``boundary_rendered``
+     - Boundaries
+     - Once per deferred job of a response, as its outcome is spliced into the page.
+   * - ``boundary_side_effect``
+     - Boundaries
+     - Once per kind of request state a deferred job wrote, a session, a session key, messages, or a CSRF secret.
+   * - ``boundary_token_rejected``
+     - Boundaries
+     - Once per refused boundary token, with the reason the client is never told.
+   * - ``page_stream_opened``
+     - Boundaries
+     - Before the first byte of a streamed page or streamed partial response.
+   * - ``page_stream_closed``
+     - Boundaries
+     - When the body of a streamed page or streamed partial response ends, or its reader left.
+   * - ``navigation_rendered``
+     - Router
+     - Once per client router navigation or prefetch the page view rendered, with the cut it chose.
+   * - ``prefetch_shed``
+     - Router
+     - Once per prefetch refused with ``429`` while the pool queue lags.
+   * - ``router_cleared``
+     - Router
+     - Once per request whose response tells the client router to drop what it holds, after a login, a logout, a changed session key, or a ``router_clear`` call.
+   * - ``compression_backend_loaded``
+     - Compression
+     - Once per compression codec backend the manager builds.
    * - ``broker_backend_loaded``
      - Realtime
      - After the configured realtime broker is created on first use.
@@ -182,6 +212,26 @@ Every settings-driven backend family announces its load through a ``*_backend_lo
 The forms and static signals have dedicated topic pages with worked receiver examples, see :doc:`/content/topics/forms/signals` and :doc:`/content/topics/static-assets/signals`.
 The partial-rendering stream signals appear in context in :doc:`/content/topics/partial-rendering/sse`.
 The realtime stream signals and their payloads are covered in :ref:`ref-signals-stream-lifecycle`.
+
+The three router signals share the sender ``next.router.navigation.Routing``, and each carries the ``request``.
+``navigation_rendered`` adds ``page_path``, ``purpose``, ``cut``, ``kept``, ``diverged_at``, ``reason``, and ``streamed``, ``prefetch_shed`` adds ``page_path`` and ``waited_ms``, and ``router_cleared`` adds ``reason``.
+A receiver of ``navigation_rendered`` that counts body morphs and hard loads finds the layouts that never persist, see :doc:`router/layouts`.
+
+.. code-block:: python
+   :caption: shop/signals.py
+
+   import logging
+
+   from django.dispatch import receiver
+
+   from next.signals import navigation_rendered
+
+   logger = logging.getLogger(__name__)
+
+   @receiver(navigation_rendered)
+   def log_divergence(sender, cut, diverged_at, reason, page_path, **kwargs) -> None:
+       if cut != "slot" and reason is not None:
+           logger.info("%s cut at %s for %s", page_path, diverged_at, reason)
 
 Receiver patterns
 -----------------
@@ -246,7 +296,7 @@ Failure contract
 ~~~~~~~~~~~~~~~~
 
 A receiver that raises takes the sender down with it.
-Every signal in the catalog above is sent with ``Signal.send`` except ``settings_reloaded``, the two SSE stream signals, and the realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed``.
+Every signal in the catalog above is sent with ``Signal.send`` except ``settings_reloaded``, the two SSE stream signals, the three router signals, and the realtime signals ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed``.
 ``Signal.send`` offers a raising receiver no isolation, so the exception leaves the send and reaches whatever the framework was doing.
 An exception from a ``page_rendered`` receiver therefore surfaces as a failed page render, one from an ``action_dispatched`` receiver as a failed form dispatch, and one from a ``component_rendered`` receiver as a failed component.
 Django runs receivers in connection order and stops at the first failure, so a receiver that raises also keeps every receiver behind it from running.
@@ -273,10 +323,11 @@ A receiver is an observation point, and its failure should cost an observation r
        except (KeyError, OSError):
            logger.exception("page_rendered receiver failed")
 
-``settings_reloaded``, ``sse_stream_opened``, ``sse_stream_closed``, and the five realtime signals named above are the exceptions.
+``settings_reloaded``, ``sse_stream_opened``, ``sse_stream_closed``, the three router signals, and the five realtime signals named above are the exceptions.
 ``settings_reloaded`` is sent with ``Signal.send_robust``, so every receiver runs even after one raises, and the framework re-raises the first error once the chain is done.
 A settings reload has to reach every manager that cached something from ``NEXT_FRAMEWORK``, and leaving the managers behind a failed receiver holding stale state would be worse than the error itself.
 The two stream signals go through ``Signal.send_robust``, or ``Signal.asend_robust`` on an asynchronous stream, and Django logs a raising receiver and drops its error, so an observer never ends the stream it watches.
+The three router signals go through ``Signal.send_robust`` the same way, and only while a receiver is connected, so an observer never fails the navigation or the response it watches.
 The five realtime signals go out with ``Signal.send_robust``, or ``Signal.asend_robust`` from an event loop, and a raising receiver is logged on the ``next.realtime.signals`` logger while the publication, the upstream event, or the stream goes on.
 From an event loop, and from ``apublish`` for ``message_published``, their synchronous receivers run on the shared thread pool wrapped in ``close_old_connections``, so a receiver that queries the database never holds a connection past its call.
 

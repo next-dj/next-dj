@@ -105,6 +105,20 @@ def build_post_request(mock_http_request, *, origin: str = "/") -> HttpRequest:
     return mock_http_request(method="POST", POST=post, FILES=None)
 
 
+class DecliningShaper:
+    """Shaper that leaves every outcome and every validate pass to the default."""
+
+    def shape(self, backend, request, outcome) -> None:
+        del backend, request, outcome
+
+    def validate(self, backend, request, form, *, action_name, uid, wizard) -> None:
+        del backend, request, form, action_name, uid, wizard
+
+
+DECLINING_SHAPER = f"{__name__}.{DecliningShaper.__qualname__}"
+"""The dotted path an `OPTIONS["SHAPER"]` entry names `DecliningShaper` by."""
+
+
 class GuardedTenantForm(Form):
     """A view hook plus get_initial and on_valid share one Depends provider."""
 

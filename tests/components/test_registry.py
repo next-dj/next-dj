@@ -1,3 +1,5 @@
+import gc
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -12,6 +14,14 @@ from next.components import (
     ComponentVisibilityResolver,
     component_extra_roots_from_config,
 )
+from next.components.deferral import DeferDeclarations
+from next.components.info import (
+    BoundaryFiles,
+    boundary_files,
+    paths_from_component_info,
+)
+from next.components.loading import ModuleLoader
+from next.components.registry import DeferredComponents, ErrorFiles, may_defer
 
 
 class TestComponentRegistry:
@@ -110,6 +120,280 @@ class TestComponentScanner:
         (tmp_path / "empty_dir").mkdir()
         scanner = ComponentScanner()
         assert scanner.scan_directory(tmp_path, tmp_path, "") == []
+
+
+class TestBoundaryFiles:
+    """The `loading.djx` and `error.djx` a composite component holds."""
+
+    def _composite(self, root: Path, *files: str) -> ComponentInfo:
+        directory = root / "widget"
+        directory.mkdir()
+        (directory / "component.djx").write_text("<p>w</p>")
+        for name in files:
+            (directory / name).write_text("<p>x</p>")
+        [info] = ComponentScanner().scan_directory(root, root, "")
+        return info
+
+    def test_a_component_with_neither_file_holds_none(self, tmp_path: Path) -> None:
+        assert self._composite(tmp_path).files is None
+
+    @pytest.mark.parametrize(
+        ("files", "loading", "error"),
+        [
+            (("loading.djx",), True, False),
+            (("error.djx",), False, True),
+            (("loading.djx", "error.djx"), True, True),
+        ],
+    )
+    def test_the_scan_records_each_file_present(
+        self, tmp_path: Path, files: tuple[str, ...], loading, error
+    ) -> None:
+        info = self._composite(tmp_path, *files)
+        directory = tmp_path / "widget"
+        assert info.files == BoundaryFiles(
+            directory / "loading.djx" if loading else None,
+            directory / "error.djx" if error else None,
+        )
+
+    def test_a_directory_named_like_a_file_is_no_boundary_file(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "loading.djx").mkdir()
+        assert boundary_files(tmp_path) is None
+
+    def test_a_simple_component_has_no_files(self, tmp_path: Path) -> None:
+        (tmp_path / "loading.djx").write_text("<p>x</p>")
+        info = ComponentInfo("card", tmp_path, "", tmp_path / "card.djx", None, True)
+        assert info.files is None
+        assert info.current_files() is None
+
+    def test_a_composite_without_a_source_has_no_files(self, tmp_path: Path) -> None:
+        info = ComponentInfo("card", tmp_path, "", None, None, False)
+        assert info.current_files() is None
+
+    def test_a_module_only_composite_reads_its_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "error.djx").write_text("<p>x</p>")
+        info = ComponentInfo(
+            "card", tmp_path, "", None, tmp_path / "component.py", False
+        )
+        assert info.current_files() == BoundaryFiles(None, tmp_path / "error.djx")
+
+    def test_the_watched_paths_include_the_boundary_files(self, tmp_path: Path) -> None:
+        info = self._composite(tmp_path, "loading.djx", "error.djx")
+        directory = (tmp_path / "widget").resolve()
+        assert paths_from_component_info(info) == {
+            directory / "component.djx",
+            directory / "loading.djx",
+            directory / "error.djx",
+        }
+
+    def test_the_watched_paths_skip_a_missing_boundary_file(
+        self, tmp_path: Path
+    ) -> None:
+        info = self._composite(tmp_path, "error.djx")
+        assert (
+            tmp_path / "widget" / "error.djx"
+        ).resolve() in paths_from_component_info(info)
+        assert len(paths_from_component_info(info)) == 2
+
+
+class TestRefreshFiles:
+    """`ComponentRegistry.refresh_files` swaps in the files on disk now."""
+
+    def _registered(
+        self, tmp_path: Path, *names: str
+    ) -> tuple[ComponentRegistry, list[ComponentInfo]]:
+        for name in names or ("widget",):
+            directory = tmp_path / name
+            directory.mkdir()
+            (directory / "component.djx").write_text("<p>w</p>")
+        registry = ComponentRegistry()
+        registry.register_many(
+            ComponentScanner().scan_directory(tmp_path, tmp_path, "")
+        )
+        return registry, list(registry.get_all())
+
+    def test_unchanged_files_keep_the_entries_and_the_version(
+        self, tmp_path: Path
+    ) -> None:
+        registry, infos = self._registered(tmp_path)
+        version = registry.version
+        assert registry.refresh_files() is False
+        assert list(registry.get_all()) == infos
+        assert registry.version == version
+
+    def test_a_file_that_appears_is_swapped_in(self, tmp_path: Path) -> None:
+        registry, [info] = self._registered(tmp_path)
+        version = registry.version
+        loading = tmp_path / "widget" / "loading.djx"
+        loading.write_text("<p>x</p>")
+        assert registry.refresh_files() is True
+        [fresh] = registry.get_all()
+        assert fresh.files == BoundaryFiles(loading, None)
+        assert fresh.name == info.name
+        assert list(registry) == [fresh]
+        assert registry.version == version + 1
+        assert registry.refresh_files() is False
+
+    def test_a_file_that_goes_is_swapped_out(self, tmp_path: Path) -> None:
+        (tmp_path / "widget").mkdir()
+        (tmp_path / "widget" / "error.djx").write_text("<p>x</p>")
+        (tmp_path / "widget" / "component.djx").write_text("<p>w</p>")
+        registry = ComponentRegistry()
+        registry.register_many(
+            ComponentScanner().scan_directory(tmp_path, tmp_path, "")
+        )
+        (tmp_path / "widget" / "error.djx").unlink()
+        assert registry.refresh_files() is True
+        assert [info.files for info in registry.get_all()] == [None]
+
+    def test_only_the_changed_entry_is_replaced(self, tmp_path: Path) -> None:
+        registry, infos = self._registered(tmp_path, "a", "b")
+        (tmp_path / "b" / "error.djx").write_text("<p>x</p>")
+        registry.refresh_files()
+        before = {info.name: info for info in infos}
+        after = {info.name: info for info in registry.get_all()}
+        assert after["a"] is before["a"]
+        assert after["b"] is not before["b"]
+        assert after["b"].files is not None
+        assert [info.name for info in registry.get_all()] == [i.name for i in infos]
+
+    def test_a_swap_an_earlier_refresh_applied_is_not_applied_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry, _ = self._registered(tmp_path)
+        (tmp_path / "widget" / "error.djx").write_text("<p>x</p>")
+        real = ComponentInfo.current_files
+        raced: list[bool] = []
+
+        def racing(entry: ComponentInfo) -> BoundaryFiles | None:
+            if not raced:
+                raced.append(False)
+                raced[0] = registry.refresh_files()
+            return real(entry)
+
+        monkeypatch.setattr(ComponentInfo, "current_files", racing)
+        version = registry.version
+        assert registry.refresh_files() is False
+        assert raced == [True]
+        assert registry.version == version + 1
+        [fresh] = registry.get_all()
+        assert fresh.files is not None
+
+    def test_concurrent_refreshes_agree(self, tmp_path: Path) -> None:
+        registry, _ = self._registered(tmp_path, "a", "b", "c")
+        for name in ("a", "c"):
+            (tmp_path / name / "loading.djx").write_text("<p>x</p>")
+        barrier = threading.Barrier(8)
+        answers: list[bool] = []
+
+        def refresh() -> None:
+            barrier.wait()
+            answers.append(registry.refresh_files())
+
+        threads = [threading.Thread(target=refresh) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert answers.count(True) >= 1
+        assert len(registry) == 3
+        assert {info.name: info.files is not None for info in registry} == {
+            "a": True,
+            "b": False,
+            "c": True,
+        }
+        assert sorted(registry._by_name) == ["a", "b", "c"]
+
+
+class TestErrorFiles:
+    """Every live registry reports whether a component of it holds an `error.djx`."""
+
+    @pytest.fixture()
+    def tracked(self, monkeypatch: pytest.MonkeyPatch) -> ErrorFiles:
+        fresh = ErrorFiles()
+        monkeypatch.setattr("next.components.registry.error_files", fresh)
+        return fresh
+
+    def _info(self, root: Path, name: str, *, error: bool) -> ComponentInfo:
+        files = BoundaryFiles(None, root / name / "error.djx") if error else None
+        return ComponentInfo(
+            name, root, "", root / name / "component.djx", None, True, files=files
+        )
+
+    def test_a_fresh_tracker_holds_none(self) -> None:
+        assert ErrorFiles().held is False
+
+    def test_a_count_holds_until_it_drops_to_zero(self) -> None:
+        tracker = ErrorFiles()
+        registry = ComponentRegistry()
+        tracker.note(registry, 2)
+        assert tracker.held is True
+        tracker.note(registry, 0)
+        assert tracker.held is False
+
+    def test_a_forgotten_registry_holds_none(self) -> None:
+        tracker = ErrorFiles()
+        registry = ComponentRegistry()
+        tracker.note(registry, 1)
+        tracker.forget(id(registry))
+        assert tracker.held is False
+
+    def test_a_component_without_an_error_file_holds_none(
+        self, tracked: ErrorFiles, tmp_path: Path
+    ) -> None:
+        registry = ComponentRegistry()
+        registry.register(self._info(tmp_path, "a", error=False))
+        registry.register_many([self._info(tmp_path, "b", error=False)])
+        assert tracked.held is False
+
+    def test_register_and_clear(self, tracked: ErrorFiles, tmp_path: Path) -> None:
+        registry = ComponentRegistry()
+        registry.register(self._info(tmp_path, "a", error=True))
+        assert tracked.held is True
+        registry.clear()
+        assert tracked.held is False
+
+    def test_register_many_counts_every_error_file(
+        self, tracked: ErrorFiles, tmp_path: Path
+    ) -> None:
+        registry = ComponentRegistry()
+        registry.register_many(
+            [
+                self._info(tmp_path, "a", error=True),
+                self._info(tmp_path, "b", error=False),
+            ]
+        )
+        assert tracked.held is True
+        assert registry._error_files == 1
+
+    def test_refresh_follows_the_files_on_disk(
+        self, tracked: ErrorFiles, tmp_path: Path
+    ) -> None:
+        (tmp_path / "widget").mkdir()
+        (tmp_path / "widget" / "component.djx").write_text("<p>w</p>")
+        registry = ComponentRegistry()
+        registry.register_many(
+            ComponentScanner().scan_directory(tmp_path, tmp_path, "")
+        )
+        assert tracked.held is False
+        error = tmp_path / "widget" / "error.djx"
+        error.write_text("<p>x</p>")
+        assert registry.refresh_files() is True
+        assert tracked.held is True
+        error.unlink()
+        assert registry.refresh_files() is True
+        assert tracked.held is False
+
+    def test_a_registry_that_goes_away_holds_none(
+        self, tracked: ErrorFiles, tmp_path: Path
+    ) -> None:
+        registry = ComponentRegistry()
+        registry.register(self._info(tmp_path, "a", error=True))
+        assert tracked.held is True
+        del registry
+        gc.collect()
+        assert tracked.held is False
 
 
 class TestComponentExtraRootsFromConfig:
@@ -488,3 +772,103 @@ class TestTheResolvedPathMemoKeysOnTheCallerSpelling:
         reg.register(ComponentInfo("badge", real, "", real / "badge.djx", None, True))
 
         assert set(res.resolve_visible(template)) == {"badge", "card"}
+
+
+class TestDeferredComponents:
+    """Whether any component can defer, by its files, its module or a call site."""
+
+    @pytest.fixture()
+    def tracked(self, monkeypatch: pytest.MonkeyPatch) -> DeferredComponents:
+        fresh = DeferredComponents()
+        monkeypatch.setattr("next.components.registry.deferred_components", fresh)
+        return fresh
+
+    def _info(
+        self, root: Path, name: str, *, loading: bool = False, module: bool = False
+    ) -> ComponentInfo:
+        files = BoundaryFiles(root / name / "loading.djx", None) if loading else None
+        module_path = root / name / "component.py" if module else None
+        return ComponentInfo(
+            name,
+            root,
+            "",
+            root / name / "component.djx",
+            module_path,
+            True,
+            files=files,
+        )
+
+    def test_a_loading_file_holds_until_the_registry_clears(
+        self, tracked: DeferredComponents, tmp_path: Path
+    ) -> None:
+        registry = ComponentRegistry()
+        registry.register(self._info(tmp_path, "plain"))
+        assert tracked.held is False
+        registry.register(self._info(tmp_path, "card", loading=True))
+        assert tracked.held is True
+        registry.clear()
+        assert tracked.held is False
+
+    def test_a_module_declaring_a_mode_holds(
+        self, tracked: DeferredComponents, tmp_path: Path, monkeypatch
+    ) -> None:
+        store = DeferDeclarations()
+        store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
+        store.props((tmp_path / "bare" / "component.py", True), ())
+        monkeypatch.setattr("next.components.registry.defer_declarations", store)
+        registry = ComponentRegistry()
+        registry.register_many([self._info(tmp_path, "bare", module=True)])
+        assert tracked.held is False
+        registry.register_many([self._info(tmp_path, "card", module=True)])
+        assert tracked.held is True
+        assert registry._deferring == 1
+
+    def test_a_loading_file_beside_a_declared_mode_counts_once(
+        self, tracked: DeferredComponents, tmp_path: Path, monkeypatch
+    ) -> None:
+        store = DeferDeclarations()
+        store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
+        monkeypatch.setattr("next.components.registry.defer_declarations", store)
+        registry = ComponentRegistry()
+        registry.register(self._info(tmp_path, "card", loading=True, module=True))
+        assert tracked.held is True
+        assert registry._deferring == 1
+
+    def test_may_defer_raises_the_flag_for_good(
+        self, tracked: DeferredComponents
+    ) -> None:
+        may_defer()
+        may_defer()
+        assert (tracked.held, tracked.declared) == (True, True)
+
+    def test_a_committed_mode_raises_the_flag_before_any_render(
+        self, tracked: DeferredComponents, tmp_path: Path
+    ) -> None:
+        module_path = tmp_path / "card" / "component.py"
+        module_path.parent.mkdir()
+        module_path.write_text(
+            "from next.components import component\ncomponent.defer()\n"
+        )
+        ModuleLoader().load(module_path)
+        assert tracked.held is True
+
+    def test_a_declaration_holds_for_good(self, tracked: DeferredComponents) -> None:
+        registry = ComponentRegistry()
+        tracked.declare()
+        tracked.note(registry, 0)
+        assert tracked.held is True
+        assert tracked.declared is True
+
+    def test_refresh_follows_a_new_loading_file(
+        self, tracked: DeferredComponents, tmp_path: Path
+    ) -> None:
+        (tmp_path / "widget").mkdir()
+        (tmp_path / "widget" / "component.djx").write_text("<p>w</p>")
+        registry = ComponentRegistry()
+        registry.register_many(
+            ComponentScanner().scan_directory(tmp_path, tmp_path, "")
+        )
+        assert tracked.held is False
+        (tmp_path / "widget" / "loading.djx").write_text("<p>.</p>")
+        assert registry.refresh_files() is True
+        assert tracked.held is True

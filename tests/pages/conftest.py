@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from next.deps import provider_registry
 from next.pages.signals import (
     context_registered,
     metadata_registered,
@@ -10,6 +11,7 @@ from next.pages.signals import (
     template_loaded,
 )
 from next.testing import SignalRecorder, capture_signals
+from tests.support import restored_provider_registry
 
 
 @pytest.fixture()
@@ -46,3 +48,16 @@ def root(tmp_path: Path) -> Path:
     directory = tmp_path / "pages"
     directory.mkdir()
     return directory
+
+
+@pytest.fixture()
+def framework_providers() -> Generator[None, None, None]:
+    """Keep only the providers the framework ships, dropping the ones tests declared.
+
+    A provider a test declares stays registered, and a context graph reads it as unknown.
+    """
+    with restored_provider_registry():
+        provider_registry.replace(
+            [cls for cls in provider_registry if cls.__module__.startswith("next.")]
+        )
+        yield

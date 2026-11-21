@@ -4,13 +4,12 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from django.core.exceptions import PermissionDenied
 from django.test import override_settings
 
 from next.caches import BoundedCache
-from next.pages import Page
-from next.pages.loaders import load_python_module_memo
-from next.partial.headers import VARY_HEADERS
+from next.pages import Page, page
+from next.pages.graph import Blame
+from next.pages.loaders import NO_BOUNDARIES, load_python_module_memo, page_boundaries
 from next.stamps import RACY_MTIME_WINDOW_NS, stat_mtime_ns, trusted
 from next.testing import envelope_of
 from tests.support import (
@@ -310,17 +309,6 @@ class TestStaticFastPathView:
 
         assert view(build_page_request()).content == b"<html><h1>body</h1></html>"
 
-    def test_page_without_a_module_takes_the_static_branch(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A template-only page with no ``page.py`` serves from the cache too."""
-        page_file = tmp_path / "page.py"
-        (tmp_path / "template.djx").write_text("<p>virtual</p>")
-
-        view = page_instance._create_unified_view(page_file, None)
-        assert view(build_page_request()).content == b"<p>virtual</p>"
-        assert page_file in page_instance._templates.composed
-
     def test_recompose_reads_the_current_template_attribute(
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
@@ -512,112 +500,6 @@ class TestRenderContextPathPrecompute:
         assert view(build_page_request()).content == expected
 
 
-class TestZoneTickOnTheStaticBranch:
-    """A zone GET of a page without ``render()`` resolves no body of its own."""
-
-    def test_the_first_tick_reads_the_body_once(
-        self, page_instance, tmp_path, monkeypatch
-    ) -> None:
-        """Only the composition opens ``template.djx``, nothing reads it twice."""
-        page_file = build_nested_page(tmp_path, body=_ZONED_BODY)
-        view = unified_view(page_instance, page_file)
-        reads = record_path_calls(monkeypatch, "read_text", path_under(tmp_path))
-
-        response = view(build_zone_request("z"))
-
-        assert response.status_code == 200
-        assert reads.count(page_file.parent / "template.djx") == 1
-
-    def test_a_warm_tick_opens_no_file(
-        self, page_instance, tmp_path, monkeypatch
-    ) -> None:
-        """The second tick serves the cached composition without a read."""
-        page_file = build_nested_page(tmp_path, body=_ZONED_BODY)
-        view = unified_view(page_instance, page_file)
-        view(build_zone_request("z"))
-        reads = record_path_calls(monkeypatch, "read_text", path_under(tmp_path))
-
-        response = view(build_zone_request("z"))
-
-        assert reads == []
-        assert envelope_of(response).html_for_zone("z") == _ZONE_HTML
-
-    def test_a_tick_never_enters_body_resolution(self, page_instance, tmp_path) -> None:
-        """Nothing about a static body depends on the request, so it is not resolved."""
-        page_file = build_nested_page(tmp_path, body=_ZONED_BODY)
-        view = unified_view(page_instance, page_file)
-
-        with mock.patch.object(page_instance, "resolve_page_body") as resolve:
-            response = view(build_zone_request("z"))
-
-        assert resolve.call_count == 0
-        assert response.status_code == 200
-        assert envelope_of(response).html_for_zone("z") == _ZONE_HTML
-        assert b"a <" not in response.content
-
-
-class TestZoneTickOnTheResolvingBranch:
-    """A ``render()`` page keeps its per-request semantics on a zone tick."""
-
-    def test_render_runs_once_per_tick(self, page_instance, tmp_path) -> None:
-        """The body resolution the 400 rests on happens exactly once."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            "calls = 0\n\n\ndef render(request):\n"
-            "    global calls\n"
-            "    calls += 1\n"
-            "    return '<p>dynamic</p>'\n"
-        )
-        module = load_python_module_memo(page_file)
-
-        response = unified_view(page_instance, page_file)(build_zone_request("z"))
-
-        assert response.status_code == 400
-        assert module.calls == 1
-
-    def test_a_zone_in_a_dynamic_body_is_a_bad_request(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A body built per request has no compiled source to render a zone from."""
-        page_file = _build_dynamic_page(
-            tmp_path, returns="'{% zone \"z\" %}x{% endzone %}'"
-        )
-
-        response = unified_view(page_instance, page_file)(build_zone_request("z"))
-
-        assert response.status_code == 400
-        assert response.content == b"zone in dynamic body"
-
-    def test_a_render_redirect_short_circuits_the_tick(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A redirect is returned for the tick before the shaper is consulted."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            "from django.http import HttpResponseRedirect\n\n\n"
-            "def render(request):\n    return HttpResponseRedirect('/login/')\n"
-        )
-
-        response = unified_view(page_instance, page_file)(build_zone_request("z"))
-
-        assert response.status_code == 302
-        assert response["Location"] == "/login/"
-
-    def test_a_render_denial_short_circuits_the_tick(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A guard raising inside ``render()`` reaches the tick untouched."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text(
-            "from django.core.exceptions import PermissionDenied\n\n\n"
-            "def render(request):\n    raise PermissionDenied\n"
-        )
-        view = unified_view(page_instance, page_file)
-
-        with pytest.raises(PermissionDenied):
-            view(build_zone_request("z"))
-
-
 class TestTemplateStalenessGate:
     """Source staleness is stat-checked only where template edits are watched."""
 
@@ -790,7 +672,7 @@ class TestTemplateRegistryBound:
 
         assert_bounded_by_insert_age(
             install,
-            page_instance._layout_skeleton_for,
+            page_instance.layout_skeleton,
             [_build_dynamic_page(tmp_path / name) for name in ("a", "b", "c")],
         )
 
@@ -825,75 +707,37 @@ class TestTemplateRegistryBound:
         assert template.source == source
 
 
-class TestFullPageResponseDeclaresItsNegotiation:
-    """A full page renders under the request headers the partial layer reads."""
-
-    def test_the_static_branch_varies_on_every_partial_header(
-        self, page_instance, tmp_path
-    ) -> None:
-        page_file = build_nested_page(tmp_path)
-
-        response = unified_view(page_instance, page_file)(build_page_request())
-
-        varied = {value.strip() for value in response.headers["Vary"].split(",")}
-        assert set(VARY_HEADERS) <= varied
-
-    def test_the_render_branch_varies_on_every_partial_header(
-        self, page_instance, tmp_path
-    ) -> None:
-        page_file = _build_dynamic_page(tmp_path / "dynamic")
-
-        response = unified_view(page_instance, page_file)(build_page_request())
-
-        varied = {value.strip() for value in response.headers["Vary"].split(",")}
-        assert set(VARY_HEADERS) <= varied
+class Stop(BaseException):
+    """A non-`Exception` failure no boundary contains."""
 
 
-_RENDER_ARGUMENT_NAMES = (
-    "dep_cache",
-    "file_path",
-    "namespace",
-    "requested_zones",
-    "url_kwargs",
-)
+def _stop() -> str:
+    raise Stop
 
 
-class TestRenderArgumentNamesAsUrlKwargs:
-    """A URL kwarg named after a render pipeline argument reaches the page intact."""
+class TestBoundaryChainLayers:
+    """The chain rides the layer it composed with, a lookup only without one."""
 
-    @pytest.mark.parametrize("name", _RENDER_ARGUMENT_NAMES)
-    def test_a_static_page_renders_the_value(
-        self, page_instance, tmp_path, name
-    ) -> None:
-        page_file = build_nested_page(tmp_path, body=f"<h1>{{{{ {name} }}}}</h1>")
-        view = unified_view(page_instance, page_file)
-
-        response = view(build_page_request(), **{name: "v"})
-
-        assert response.content.decode() == "<html><main><h1>v</h1></main></html>"
-
-    @pytest.mark.parametrize("name", _RENDER_ARGUMENT_NAMES)
-    def test_a_dynamic_page_receives_the_value(
-        self, page_instance, tmp_path, name
-    ) -> None:
+    def test_a_held_skeleton_without_a_chain_looks_it_up(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
-        page_file.write_text(
-            f"def render({name}: str) -> str:\n    return '<p>' + {name}\n"
-        )
-        view = unified_view(page_instance, page_file)
+        page_instance = Page()
+        page_instance._templates.skeleton[page_file] = "held"
 
-        response = view(build_page_request(), **{name: "v"})
+        text, chain = page_instance.layout_skeleton(page_file)
 
-        assert response.content.decode() == "<p>v"
+        assert text == "held"
+        assert chain is page_boundaries(page_file)
 
-    @pytest.mark.parametrize("name", _RENDER_ARGUMENT_NAMES)
-    def test_a_zone_tick_renders_the_value(self, page_instance, tmp_path, name) -> None:
-        body = f'{{% zone "z" %}}<p>{{{{ {name} }}}}</p>{{% endzone %}}'
-        page_file = build_nested_page(tmp_path, body=body)
-        view = unified_view(page_instance, page_file)
+    def test_a_registered_template_drops_its_chain(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_instance = Page()
+        page_instance._templates.composed_chains[page_file] = NO_BOUNDARIES
 
-        response = view(build_zone_request("z"), **{name: "v"})
+        page_instance.register_template(page_file, "<p>x</p>")
 
-        assert envelope_of(response).html_for_zone("z") == (
-            '<div data-next-zone="z"><p>v</p></div>'
-        )
+        assert page_file not in page_instance._templates.composed_chains
+        assert page_instance.composed_chain(page_file) is page_boundaries(page_file)
+
+    def test_a_base_exception_undoes_the_work_and_propagates(self, tmp_path) -> None:
+        with pytest.raises(Stop):
+            page._contained(NO_BOUNDARIES, tmp_path / "page.py", Blame(), _stop)

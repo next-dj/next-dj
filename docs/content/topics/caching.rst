@@ -167,7 +167,7 @@ A shared campaign page
 ----------------------
 
 A campaign page is the typical shared page, and three practices keep it shared.
-Its layout reads no ``request.user``, and an account menu moves into a lazy zone the browser fetches with its own cookies, see :doc:`/content/howto/cache-pages-on-a-cdn`.
+Its layout reads no ``request.user``, and an account menu moves into a component deferred with ``load``, which the browser fetches with its own cookies, see :doc:`/content/howto/cache-pages-on-a-cdn`.
 A form on it posts through the runtime, which fetches the deferred token, and ``Meta.requires_runtime = True`` on the form records that choice, so the check that warns about forms needing JavaScript stays quiet for it.
 A paid-traffic variant of the page stays out of the index and points at the organic page, so the two never compete.
 
@@ -207,7 +207,7 @@ Partial responses
 -----------------
 
 Many CDNs ignore ``Vary``, so a cached zone response would reach a visitor who asked for the full page at the same URL.
-Every zone response therefore carries ``Cache-Control: private, no-store`` with the ``headers`` of its page, a lazy zone, a 400 or 409 refusal and every patch envelope an action answers included, and a stream carries ``no-cache, no-transform``.
+Every zone response therefore carries ``Cache-Control: private, no-store`` with the ``headers`` of its page, the response of a deferred component, a 400 or 409 refusal and every patch envelope an action answers included, and a stream carries ``no-cache, no-transform``.
 A denial by the access rule of the page itself is the response a plain GET of the URL gets.
 A ``render()`` response to a zone GET gets the same ``private, no-store`` unless it sets its own ``Cache-Control``, and a zone whose render contained a failure gets it whatever it sets.
 

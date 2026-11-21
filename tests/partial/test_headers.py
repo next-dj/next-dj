@@ -1,17 +1,22 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
+from django.utils.cache import patch_vary_headers
 
 from next.partial import is_partial_request, partial_intent
 from next.partial.headers import (
     ACCEPT,
     CONTENT_TYPE,
+    STREAM_ACCEPT,
     VARY_HEADERS,
     MergeMode,
     PartialIntent,
+    accepts_event_stream,
     set_partial_vary,
+    set_stream_vary,
+    vary_on,
 )
 from next.testing import NextClient
 
@@ -125,13 +130,12 @@ class TestPartialIntentMemoised:
 
     def test_parses_only_once(self) -> None:
         request = MagicMock(spec=HttpRequest)
-        headers = MagicMock()
-        headers.get.return_value = None
-        request.headers = headers
+        meta = MagicMock()
+        meta.get.return_value = None
+        request.META = meta
         partial_intent(request)
         partial_intent(request)
-        first_call = headers.get.call_args_list
-        assert len(first_call) == 1
+        assert meta.get.call_count == 1
 
 
 class TestNonPartialIntentShared:
@@ -178,6 +182,42 @@ class TestVaryHeaders:
         assert "X-Next-Merge" in response["Vary"]
 
 
+class TestVaryOn:
+    """`vary_on` leaves the `Vary` value `patch_vary_headers` leaves, computed once."""
+
+    @pytest.mark.parametrize(
+        "held", [None, "", "Cookie", "cookie, ACCEPT", "*", "Accept-Encoding,Cookie"]
+    )
+    @pytest.mark.parametrize(
+        "names", [("Cookie",), ("Accept", "X-Next-Origin"), ("*",), VARY_HEADERS]
+    )
+    def test_it_merges_as_django_does(
+        self, held: str | None, names: tuple[str, ...]
+    ) -> None:
+        fast, slow = HttpResponse(), HttpResponse()
+        if held is not None:
+            fast["Vary"] = slow["Vary"] = held
+        vary_on(fast, names)
+        patch_vary_headers(slow, names)
+        assert fast["Vary"] == slow["Vary"]
+
+    def test_a_repeated_merge_is_not_computed_again(self) -> None:
+        names = ("X-Vary-On-Once",)
+        vary_on(HttpResponse(), names)
+        with patch("next.partial.headers.patch_vary_headers") as merged:
+            response = HttpResponse()
+            vary_on(response, names)
+        merged.assert_not_called()
+        assert response["Vary"] == "X-Vary-On-Once"
+
+    def test_a_held_value_is_not_written_again(self) -> None:
+        response = HttpResponse()
+        vary_on(response, ("Cookie",))
+        response.headers = MagicMock(wraps=response.headers)
+        vary_on(response, ("Cookie",))
+        response.headers.__setitem__.assert_not_called()
+
+
 class TestZoneResponseVary:
     """A zone GET response stamps the protective partial Vary header."""
 
@@ -197,3 +237,94 @@ class TestProtocolConstants:
 
     def test_accept_lists_vendor_mime_first(self) -> None:
         assert ACCEPT.startswith("application/vnd.next.patches+json")
+
+
+class TestAcceptsEventStream:
+    """An explicit `text/event-stream` above zero and no lower than JSON asks for one."""
+
+    @pytest.mark.parametrize(
+        ("accept", "streams"),
+        [
+            pytest.param(STREAM_ACCEPT, True, id="the-client-default"),
+            pytest.param("TEXT/EVENT-STREAM", True, id="any-case"),
+            pytest.param("text/event-stream;charset=utf-8", True, id="other-params"),
+            pytest.param(
+                "application/json;q=0.5, text/event-stream;q=0.5", True, id="a-tie"
+            ),
+            pytest.param(
+                "text/event-stream;q=0.8, application/json;q=0.2", True, id="ranked"
+            ),
+            pytest.param(
+                "text/event-stream, text/event-stream;q=0", True, id="first-listed"
+            ),
+            pytest.param(
+                "application/json, text/event-stream;q=0.1", False, id="json-ranked"
+            ),
+            pytest.param(
+                "application/json, text/event-stream", True, id="equal-implicit"
+            ),
+            pytest.param("text/event-stream;q=bad", False, id="unreadable-q"),
+            pytest.param("text/event-stream;q=2", False, id="q-above-one"),
+            pytest.param("text/event-stream;q=nan", False, id="q-not-a-number"),
+            pytest.param(
+                "text/event-stream, application/json;q=bad", True, id="bad-json-q"
+            ),
+            pytest.param("text/event-stream;q=0", False, id="refused"),
+            pytest.param(
+                "text/event-stream; q=0.0, application/json", False, id="zero"
+            ),
+            pytest.param("*/*", False, id="wildcard"),
+            pytest.param("text/*", False, id="type-wildcard"),
+            pytest.param("application/json", False, id="json-only"),
+            pytest.param("", False, id="empty"),
+        ],
+    )
+    def test_the_ranking_decides(self, accept: str, *, streams: bool) -> None:
+        request = RequestFactory().get("/", HTTP_ACCEPT=accept)
+        assert accepts_event_stream(request) is streams
+
+    def test_a_request_without_accept_reads_none(self) -> None:
+        assert accepts_event_stream(RequestFactory().get("/")) is False
+
+
+class TestStreamVary:
+    """`set_stream_vary` adds `Accept`, keeping what the response already varies on."""
+
+    def test_accept_joins_the_partial_headers(self) -> None:
+        response = HttpResponse()
+        set_partial_vary(response)
+        set_stream_vary(response)
+        varied = [name.strip() for name in response["Vary"].split(",")]
+        assert varied == [*VARY_HEADERS, "Accept"]
+
+
+class TestNavigationIntent:
+    """A navigation names itself, its declared layouts and a prefetch."""
+
+    def test_a_navigation(self) -> None:
+        request = _request_with_headers(
+            **{
+                "X-Next-Request": "1",
+                "X-Next-Navigate": "1",
+                "X-Next-Layouts": "a.b",
+                "X-Next-Prefetch": "1",
+            }
+        )
+        intent = partial_intent(request)
+        assert (intent.navigate, intent.layouts, intent.prefetch) == (True, "a.b", True)
+
+    def test_layouts_and_prefetch_need_the_navigation(self) -> None:
+        request = _request_with_headers(
+            **{"X-Next-Request": "1", "X-Next-Layouts": "a.b", "X-Next-Prefetch": "1"}
+        )
+        intent = partial_intent(request)
+        assert (intent.navigate, intent.layouts, intent.prefetch) == (
+            False,
+            None,
+            False,
+        )
+
+    def test_the_navigation_headers_are_varied(self) -> None:
+        assert {"X-Next-Navigate", "X-Next-Layouts", "X-Next-Prefetch"} <= set(
+            VARY_HEADERS
+        )

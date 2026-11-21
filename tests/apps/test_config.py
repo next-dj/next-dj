@@ -11,6 +11,7 @@ import pytest
 from django.apps import apps
 from django.conf import settings
 from django.core.signals import setting_changed
+from django.db.backends.signals import connection_created
 from django.test import override_settings
 from django.urls import Resolver404, resolve
 from django.utils import autoreload
@@ -29,12 +30,11 @@ from next.deps.introspect import _signature_cache
 from next.pages import loaders as pages_loaders
 from next.pages.ports import PageScanImpl
 from next.pages.watch import get_pages_directories_for_watch
-from next.partial.ports import PartialShaperImpl
 from next.ports import (
     PortSlot,
+    async_bridge_slot,
     page_scan_slot,
     page_scripts_slot,
-    partial_shaper_slot,
     realtime_negotiation_slot,
     router_access_slot,
     seo_routes_slot,
@@ -47,6 +47,9 @@ from next.seo.ports import SeoRoutesImpl
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.ports import StaticAssetsImpl
+from next.suspense import drive
+from next.suspense.assembly import inline_sink
+from next.suspense.connections import connection_sources
 from next.urls import router_manager
 from next.urls.manager import seo_routes_version
 from next.urls.ports import RouterAccessImpl
@@ -70,7 +73,6 @@ if TYPE_CHECKING:
 _PROCESS_SLOTS = (
     page_scan_slot,
     page_scripts_slot,
-    partial_shaper_slot,
     realtime_negotiation_slot,
     router_access_slot,
     seo_routes_slot,
@@ -448,8 +450,10 @@ class TestDependencyResolverInstall:
 
     STEPS: ClassVar[tuple[str, ...]] = (
         "apply_resolver_setting",
+        "async_bridge_slot",
+        "thread_wait_slot",
+        "deferrals_slot",
         "page_scan_slot",
-        "partial_shaper_slot",
         "realtime_negotiation_slot",
         "router_access_slot",
         "page_scripts_slot",
@@ -476,8 +480,10 @@ class TestDependencyResolverInstall:
         made = [name for name, _args, _kwargs in recorder.mock_calls]
         assert made == [
             "apply_resolver_setting",
+            "async_bridge_slot.set",
+            "thread_wait_slot.set",
+            "deferrals_slot.set",
             "page_scan_slot.set",
-            "partial_shaper_slot.set",
             "realtime_negotiation_slot.set",
             "router_access_slot.set",
             "page_scripts_slot.set",
@@ -495,9 +501,6 @@ class TestDependencyResolverInstall:
         ("slot_name", "subject", "implementation"),
         [
             pytest.param("page_scan_slot", "page scan port", PageScanImpl, id="scan"),
-            pytest.param(
-                "partial_shaper_slot", "partial shaper", PartialShaperImpl, id="shaper"
-            ),
             pytest.param(
                 "realtime_negotiation_slot",
                 "realtime negotiation port",
@@ -536,6 +539,26 @@ class TestDependencyResolverInstall:
             config.ready()
         assert isinstance(slot.get(), implementation)
 
+    def test_ready_binds_the_bridge_before_discovery_can_fail(self) -> None:
+        """A component imported by discovery may already bridge async code."""
+        config = apps.get_app_config("next")
+        slot = PortSlot("async bridge port")
+        with (
+            patch("next.apps.config.async_bridge_slot", slot),
+            patch.object(next_components, "install", side_effect=RuntimeError("boom")),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            config.ready()
+        assert slot.get() is drive
+
+    def test_ready_binds_the_deferrals_sink(self) -> None:
+        """A deferred component of a render outside the page view reaches the sink."""
+        config = apps.get_app_config("next")
+        slot = PortSlot("deferrals port")
+        with patch("next.apps.config.deferrals_slot", slot):
+            config.ready()
+        assert slot.get() is inline_sink
+
     def test_a_second_ready_rebinds_the_ports_without_doubling_the_wiring(self) -> None:
         """Django readies an app once, but a test process calls `ready` repeatedly."""
         config = apps.get_app_config("next")
@@ -547,12 +570,12 @@ class TestDependencyResolverInstall:
         assert [type(slot.get()) for slot in _PROCESS_SLOTS] == [
             PageScanImpl,
             PageScriptsImpl,
-            PartialShaperImpl,
             RealtimeNegotiationImpl,
             RouterAccessImpl,
             SeoRoutesImpl,
             StaticAssetsImpl,
         ]
+        assert async_bridge_slot.get() is drive
 
     def test_ready_bumps_the_seo_routes_version(self) -> None:
         """URL patterns built before the SEO port was bound lack the SEO routes."""
@@ -596,12 +619,18 @@ class TestReceiversConnectInReady:
     """Every invalidation receiver is wired by `ready()`, once, never at import time."""
 
     @pytest.mark.parametrize(
-        "signal", [setting_changed, settings_reloaded, router_reloaded]
+        "signal",
+        [setting_changed, settings_reloaded, router_reloaded, connection_created],
     )
     def test_a_second_ready_adds_no_receiver(self, signal) -> None:
         before = _live_count(signal)
         apps.get_app_config("next").ready()
         assert _live_count(signal) == before
+
+    def test_a_settings_reload_drops_the_detected_sources(self) -> None:
+        connection_sources()
+        settings_reloaded.send(sender=None)
+        assert connection_sources.cache_info().currsize == 0
 
     def test_no_module_connects_a_receiver_at_import_time(self) -> None:
         connected = [

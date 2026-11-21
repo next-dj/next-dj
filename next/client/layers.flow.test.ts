@@ -308,6 +308,44 @@ describe("layer flow through the partial surface", () => {
     expect(item.textContent).toBe("<script>alert(1)</script>");
   });
 
+  it("a toast op lands in the page tray and runs the mount pass over its item once", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="chrome"><div data-next-toasts id="tray"></div></div>';
+    partial.ready();
+    const enhanced: Element[] = [];
+    partial.onMount("[data-next-toast]", (el) => enhanced.push(el));
+    const mounted: EventTarget[] = [];
+    const onMounted = (event: Event): void => void mounted.push(event.target!);
+    let detail: unknown;
+    const onToast = (event: Event): void =>
+      void (detail = (event as CustomEvent).detail);
+    document.addEventListener("next:mounted", onMounted);
+    document.addEventListener("next:toast", onToast);
+    partial.apply(envelope([{ op: "toast", text: "Saved", variant: "success" }]));
+    document.removeEventListener("next:mounted", onMounted);
+    document.removeEventListener("next:toast", onToast);
+    const item = document.querySelector("#tray > [data-next-toast]")!;
+    expect(document.querySelectorAll("[data-next-toasts]")).toHaveLength(1);
+    expect(enhanced).toEqual([item]);
+    expect(mounted).toEqual([item]);
+    expect(detail).toEqual({ text: "Saved", variant: "success", element: item });
+  });
+
+  it("a zone morph that drops a toast from the page tray fires next:removed on it", () => {
+    const chrome =
+      '<div data-next-zone="chrome"><div data-next-toasts id="tray"></div></div>';
+    document.body.innerHTML = chrome;
+    partial.apply(envelope([{ op: "toast", text: "Saved" }]));
+    const item = document.querySelector("#tray > [data-next-toast]")!;
+    const removed: EventTarget[] = [];
+    const onRemoved = (event: Event): void => void removed.push(event.target!);
+    document.addEventListener("next:removed", onRemoved);
+    partial.apply(zoneMorph("chrome", chrome));
+    document.removeEventListener("next:removed", onRemoved);
+    expect(removed).toEqual([item]);
+    expect(item.isConnected).toBe(false);
+  });
+
   it("marks the initiator and target busy for the open request and releases the pair", async () => {
     const opener = document.createElement("a");
     document.body.append(opener);
@@ -338,6 +376,7 @@ describe("layer flow through the partial surface", () => {
       kind: "http",
       status: 403,
       body: "<html>403</html>",
+      zones: ["z"],
     });
   });
 
@@ -480,22 +519,6 @@ describe("layer flow through the partial surface", () => {
       expect(calls[0]!.url).toBe(`${location.origin}/photo/7/`);
       expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("comments");
       expect(headerOf(calls[0]!, "X-Next-Origin")).toBeNull();
-    });
-
-    it("a lazy load zone in the layer body GETs the layer URL with its zone and no origin", async () => {
-      window.history.replaceState(null, "", "/feed/");
-      respond = (call) =>
-        headerOf(call, "X-Next-Zone") === "photo-modal"
-          ? envelopeResponse(
-              photoBody('<div data-next-zone="comments" data-next-lazy="load"></div>'),
-            )
-          : envelopeResponse(zoneMorphBody("none", "<div></div>"));
-      await partial.layers.open(null, "/photo/7/", "photo-modal");
-      await flush();
-      expect(calls).toHaveLength(2);
-      expect(calls[1]!.url).toBe(`${location.origin}/photo/7/`);
-      expect(headerOf(calls[1]!, "X-Next-Zone")).toBe("comments");
-      expect(headerOf(calls[1]!, "X-Next-Origin")).toBeNull();
     });
 
     it("a poll tick of a zone in the layer GETs the layer URL with its zone and no origin", async () => {

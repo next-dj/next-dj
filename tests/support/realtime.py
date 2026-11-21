@@ -18,10 +18,10 @@ from django.test import AsyncRequestFactory, RequestFactory
 from django.utils.module_loading import import_string
 from fakeredis.commands_mixins import server_mixin
 
+from next.identity import session_store_class
 from next.partial import Envelope, Patches
 from next.realtime import TopicStream, WebSocketApp
 from next.realtime.backends import BrokerBackend, MemoryBroker
-from next.realtime.binding import session_store_class
 from next.realtime.messages import Message, Position
 from next.realtime.redis import RedisBroker
 from next.realtime.roster import PresenceSchedule, Scheduler

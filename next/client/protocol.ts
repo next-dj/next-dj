@@ -4,6 +4,8 @@
 /** The envelope content-type. Must match the server exactly. */
 export const CONTENT_TYPE = "application/vnd.next.patches+json";
 export const ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9";
+export const EVENT_STREAM = "text/event-stream";
+export const STREAM_ACCEPT = `${EVENT_STREAM}, application/json;q=0.9`;
 
 /** The intent and negotiation headers a partial request stamps. */
 export const REQUEST_FLAG = "X-Next-Request";
@@ -90,6 +92,77 @@ export const ATTR_KEY = "data-next-key";
 export const ATTR_STREAM = "data-next-stream";
 export const ATTR_POLL = "data-next-poll";
 export const ATTR_TRANSPORT = "data-next-transport";
+export const ATTR_BUSY = "data-next-busy";
+export const ATTR_STATE = "data-next-state";
+export const ATTR_ERROR = "data-next-error";
+export const ATTR_BOUNDARY = "data-next-boundary";
+export const ATTR_ASSET = "data-next-asset";
+
+// Kept apart from the version guard's flag in assets.ts, so neither clears the other.
+export const NAVIGATED_FLAG = "next:partial:navigated";
+
+let tick = 0;
+const stamps = new WeakMap<Element, number>();
+export const stamp = (el: Element): void => void stamps.set(el, ++tick);
+export const stamped = (el: Element | null): number =>
+  el ? Math.max(stamps.get(el) ?? 0, stamped(el.parentElement)) : 0;
+export const now = (): number => tick;
+
+export const streaming = (doc: Document): boolean =>
+  doc.querySelector("[data-next-streamed]") !== null;
+
+export function duration(raw: string | null | undefined): number | undefined {
+  const match = /^(\d+)(m?s)?$/.exec(raw ?? "");
+  return match ? Number(match[1]) * (match[2] === "s" ? 1000 : 1) : undefined;
+}
+
+type Hold = [count: number, state: string | null, error: string | null];
+
+const holds = new WeakMap<Element, Hold>();
+
+function put(el: Element, name: string, value: string | null): void {
+  if (value === null) el.removeAttribute(name);
+  else el.setAttribute(name, value);
+}
+
+export const isBusy = (el: Element): boolean => holds.has(el);
+
+export function markBusy(
+  elements: readonly (Element | null)[],
+  quiet?: boolean,
+): (fault?: string | null) => void {
+  const marked = elements.flatMap((el): [Element, Hold][] => {
+    if (el === null) return [];
+    let held = holds.get(el);
+    if (held === undefined) {
+      held = [0, el.getAttribute(ATTR_STATE), el.getAttribute(ATTR_ERROR)];
+      holds.set(el, held);
+      el.removeAttribute(ATTR_ERROR);
+      if (held[1] !== null && held[1] !== "ready")
+        el.setAttribute(ATTR_STATE, "loading");
+    }
+    held[0] += 1;
+    el.setAttribute(ATTR_BUSY, "");
+    if (!quiet) el.setAttribute("aria-busy", "true");
+    return [[el, held]];
+  });
+  return (fault) => {
+    for (const [el, held] of marked.splice(0)) {
+      if ((held[0] -= 1) > 0) continue;
+      holds.delete(el);
+      el.removeAttribute(ATTR_BUSY);
+      el.removeAttribute("aria-busy");
+      if (fault === undefined) {
+        put(el, ATTR_STATE, held[1]);
+        put(el, ATTR_ERROR, held[2]);
+      } else {
+        const kind = el.getAttribute(ATTR_ERROR) ?? fault;
+        put(el, ATTR_STATE, kind === null ? "ready" : "error");
+        put(el, ATTR_ERROR, kind);
+      }
+    }
+  };
+}
 
 /** The transport a request may ride, `any` letting a POST go over the open socket. */
 export type WireTransport = "http" | "any";
@@ -100,14 +173,17 @@ export const REFUSAL_STALE = "stale";
 export const REFUSAL_HTTP_ONLY = "http_only";
 
 /** A partial:error, a discriminated union so a listener branches on kind. */
-export type PartialError =
+export type PartialError = (
   | { kind: "network"; url?: string; error: unknown }
+  | { kind: "timeout"; url: string; error: unknown }
   | { kind: "http"; status: number; body: string }
   | { kind: "parse"; body: string; error: unknown }
   | { kind: "op"; op: string; target?: string; error: unknown }
   | { kind: "asset"; url?: string; error: unknown }
   | { kind: "csrf"; url?: string; error: unknown }
-  | { kind: "undelivered"; url: string; reason: string };
+  | { kind: "undelivered"; url: string; reason: string }
+  | { kind: "incomplete"; boundaries: string[] }
+) & { zones?: string[] };
 
 /** The discriminant of PartialError, aliased for listeners that switch on it. */
 export type PartialErrorKind = PartialError["kind"];
@@ -170,9 +246,11 @@ export function fire(
   dispatch: (event: string, detail: Record<string, unknown>) => void,
   event: string,
   detail: Record<string, unknown>,
-): void {
-  doc.dispatchEvent(new CustomEvent(event, { detail }));
+  cancelable = false,
+): boolean {
+  const passed = doc.dispatchEvent(new CustomEvent(event, { detail, cancelable }));
   dispatch(event, detail);
+  return passed;
 }
 
 /**
@@ -212,4 +290,13 @@ export function addZone(
   const zones = batches.get(url);
   if (zones === undefined) batches.set(url, [zone]);
   else zones.push(zone);
+}
+
+export function blank(
+  data: Record<string, unknown>,
+  context: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  for (const name of Object.keys(context))
+    if (!name.startsWith("$") && !(name in data)) data[name] = undefined;
+  return data;
 }

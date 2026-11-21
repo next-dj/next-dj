@@ -256,17 +256,6 @@ describe("layer stack", () => {
     expect(item?.textContent).toBe("<img src=x onerror=alert(1)>");
   });
 
-  it("busy marks initiator and target and releases them", () => {
-    const a = document.createElement("button");
-    const b = document.createElement("div");
-    const release = layers.busy(a, b);
-    expect(a.getAttribute("aria-busy")).toBe("true");
-    expect(b.hasAttribute("data-next-busy")).toBe(true);
-    release();
-    expect(a.hasAttribute("aria-busy")).toBe(false);
-    expect(b.hasAttribute("data-next-busy")).toBe(false);
-  });
-
   it("a delegated click on a layer link opens without breaking no-JS links", () => {
     const detach = layers.install(document);
     const plain = document.createElement("a");
@@ -443,6 +432,37 @@ describe("layer stack", () => {
     expect(hosts).toHaveLength(1);
     expect(hosts[0]!.children).toHaveLength(1);
     expect(hosts[0]!.textContent).toBe("two");
+  });
+
+  it("puts a toast into the tray the page renders and builds none of its own", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="chrome"><div data-next-toasts id="tray"></div></div>';
+    const item = layers.toast("saved", "success");
+    expect(document.querySelectorAll("[data-next-toasts]")).toHaveLength(1);
+    expect(item.parentElement!.id).toBe("tray");
+  });
+
+  it("prefers a tray inside the top layer over the page tray", async () => {
+    document.body.innerHTML = '<div data-next-toasts id="page"></div>';
+    await layers.open(null, "/w/", "z");
+    const modalTray = document.createElement("div");
+    modalTray.setAttribute("data-next-toasts", "");
+    document.querySelector('dialog [data-next-zone="z"]')!.append(modalTray);
+    expect(layers.toast("saved", "info").parentElement).toBe(modalTray);
+  });
+
+  it("returns the toast item and carries it on the next:toast detail", () => {
+    const item = layers.toast("saved", "success");
+    const event = dispatched.find((d) => d.event === "next:toast");
+    expect(item.getAttribute("data-next-toast")).toBe("success");
+    expect(event?.detail).toEqual({ text: "saved", variant: "success", element: item });
+  });
+
+  it("_reset leaves a tray the page rendered in place", () => {
+    document.body.innerHTML = '<div data-next-toasts id="tray"></div>';
+    layers.toast("hi", "info");
+    layers._reset();
+    expect(document.getElementById("tray")).not.toBeNull();
   });
 
   it("ignores a click whose target is not an Element", () => {

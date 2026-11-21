@@ -13,6 +13,7 @@ from django.template.response import SimpleTemplateResponse
 from django.test import Client, RequestFactory, override_settings
 from django.utils.functional import SimpleLazyObject
 
+from next.compression.manager import MIDDLEWARE, OPT_OUT
 from next.csrf import token_deferred
 from next.pages import CacheDict, HeadersDict, page
 from next.pages.errors import PageMetadataShapeError
@@ -29,6 +30,7 @@ from next.pages.responses import (
     cookie_varies,
     finish_response,
     headers_problems,
+    mark_bound_render,
     mark_personal_render,
     personal_render,
     prepare_page_render,
@@ -852,6 +854,7 @@ class TestCacheMethods:
             response = Client().head("/")
         assert response["Cache-Control"] == "public"
 
+    @pytest.mark.django_db()
     def test_a_post_carries_no_cache(self, tmp_path) -> None:
         with routed(self._root(tmp_path)):
             response = Client().post("/")
@@ -866,6 +869,7 @@ class TestCacheMethods:
         assert "Cookie" not in response["Vary"]
         assert "csrftoken" not in response.cookies
 
+    @pytest.mark.django_db()
     @pytest.mark.parametrize("method", ["post", "put", "patch", "delete", "options"])
     def test_any_other_method_on_a_static_page_carries_no_cache(
         self, tmp_path, method
@@ -947,6 +951,42 @@ class TestZoneAndPatchResponses:
         assert response.status_code == 400
         assert response["Cache-Control"] == "private, no-store"
         assert response["X-Team"] == "web"
+
+
+class TestCompressOptOut:
+    """`page.compress(False)` marks the page and its zone answers uncompressed."""
+
+    SOURCE = (
+        "from next.pages import page\n\n"
+        "page.compress(False)\n\n"
+        "template = '{% zone \"box\" %}<p>x</p>{% endzone %}'\n"
+    )
+
+    def test_the_page_and_its_zone_carry_the_opt_out(self, tmp_path) -> None:
+        with routed(_tree(tmp_path, ("", self.SOURCE))):
+            client = NextClient()
+            full = client.get("/")
+            zone = client.get_zones("/", "box")
+        assert getattr(full, OPT_OUT) is False
+        assert getattr(zone, OPT_OUT) is False
+
+    def test_the_middleware_leaves_an_opted_out_page_plain(self, tmp_path) -> None:
+        source = self.SOURCE.replace("<p>x</p>", "<p>x</p>" * 400)
+        middleware = [MIDDLEWARE, *settings.MIDDLEWARE]
+        with (
+            routed(_tree(tmp_path, ("", source))),
+            override_settings(MIDDLEWARE=middleware),
+        ):
+            response = NextClient().get("/", headers={"Accept-Encoding": "gzip"})
+        assert "Content-Encoding" not in response
+
+    def test_a_page_without_the_call_keeps_compression(self, tmp_path) -> None:
+        policy = ResponsePolicy()
+        response = finish_response(
+            HttpResponse("x"), policy, build_page_request(), tmp_path / "page.py"
+        )
+        assert policy.compress is True
+        assert getattr(response, OPT_OUT, True) is True
 
 
 class TestOneDependencyCache:
@@ -1469,3 +1509,37 @@ class TestPrivateWarningRate:
             Client().get("/")
         records = [r for r in caplog.records if "Cache-Control: private" in r.message]
         assert [record.suppressed for record in records] == [0, 1]
+
+
+class TestBoundRender:
+    """A render that minted a visitor-bound token is sent private."""
+
+    def test_an_uncached_page_turns_private(self, tmp_path) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        request = RequestFactory().get("/")
+        mark_bound_render(request)
+        response = finish_response(
+            HttpResponse("x"), ResponsePolicy(), request, file_path
+        )
+        assert response["Cache-Control"] == "private"
+        assert personal_render(request)
+
+    def test_a_lazy_render_that_mints_turns_private_after_it(self, tmp_path) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        request = RequestFactory().get("/")
+        response = SimpleTemplateResponse(engines["django"].from_string("x"))
+        finish_response(response, ResponsePolicy(), request, file_path)
+        mark_bound_render(request)
+        response.render()
+        assert response["Cache-Control"] == "private"
+
+    def test_a_failed_response_keeps_its_headers(self, tmp_path) -> None:
+        file_path = write_page(tmp_path, "", "template = 'x'\n")
+        request = RequestFactory().get("/")
+        mark_bound_render(request)
+        response = HttpResponse("x", status=404)
+        finish_response(response, ResponsePolicy(), request, file_path)
+        assert "Cache-Control" not in response
+
+    def test_no_request_marks_nothing(self) -> None:
+        mark_bound_render(None)

@@ -57,6 +57,11 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
+def context_processors() -> list[Callable[[Any], dict[str, Any]]]:
+    """Return the context processors a page render runs, in the order it runs them."""
+    return _get_context_processors()
+
+
 def forget_context_processors(**kwargs: object) -> None:
     """Drop the memoised processors so the next render rebuilds the list."""
     _get_context_processors.cache_clear()

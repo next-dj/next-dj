@@ -15,13 +15,14 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.utils.functional import SimpleLazyObject, empty
 
+from next.identity import request_subject, session_user
 from next.partial.sse import PatchStreamWriter, sse_heartbeat_seconds
 from next.partial.stream import StreamEnd, StreamHello, StreamSkip, stream_hello
 from next.utils import positive_number
 
 from .access import Access, AccessCheck, TopicAuthorizer
 from .attendance import Identifier, aattend, aattending, attend, attending
-from .binding import request_subject, session_user, ticket_binding
+from .binding import SUBJECT_SALT, ticket_binding
 from .delivery import atransformed, transformed
 from .errors import BrokerConnectionError
 from .lifecycle import StreamLifecycle
@@ -363,7 +364,7 @@ class TopicStream(PatchStreamWriter):
 
     def _subject(self) -> str:
         """Return the request's opaque subject, read only when identify takes it."""
-        return request_subject(self._request)
+        return request_subject(self._request, ticket_binding(), SUBJECT_SALT)
 
     def _snapshots(self, read: Callable[[str], Presence]) -> list[Message]:
         """Return the unnumbered snapshots a new subscriber gets right after hello."""

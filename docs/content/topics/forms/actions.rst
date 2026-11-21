@@ -628,6 +628,46 @@ The UID is derived, never stored in a template by hand.
 A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
 Only out-of-band references to a stale UID break.
 
+.. _topics-forms-actions-transactions:
+
+Transactions
+------------
+
+An action runs inside one transaction on each alias of ``TRANSACTIONS["ALIASES"]``, because a ``POST`` follows the method rule of next.dj views with or without ``ATOMIC_REQUESTS``, see ``TRANSACTIONS`` in :doc:`/content/ref/settings`.
+The dispatch runs the page rules, the guards, and ``check_permissions`` before it opens the transaction and commits it once the response object exists, so a refused request opens none, an exception rolls the work back, and a returned response commits it whatever its status.
+The form binds inside the transaction, so ``get_initial``, a ``form_class`` factory, the permissions checked on the bound row, and ``has_object_permission`` see the row the handler writes, and a ``select_for_update()`` in ``get_initial`` holds its lock until the commit.
+A check that must lock its row therefore belongs to ``has_object_permission``, and its refusal sends ``form_access_denied`` after the rollback, so a receiver that writes an audit row keeps it.
+A row the page rule loaded from the URL kwargs is read before the transaction and reused through the dependency cache, so a handler that locks it reloads it with ``select_for_update()``.
+A form that fails validation re-renders its origin page inside the same transaction.
+A :func:`~django.db.transaction.on_commit` hook registered inside the action fires when that transaction commits, after the handler returned, and not at the moment it is registered.
+
+A handler that does slow work outside the database, such as a sleep to a constant response time, an outbound HTTP call, or sending mail, holds a pooled connection inside an open transaction for as long as that work runs.
+Such an action opts out with ``Meta.atomic = False`` on a ``Form``, ``ModelForm``, or ``FormWizard``, or with ``atomic=False`` on ``@action``, and runs in autocommit, where an ``on_commit`` hook fires at once.
+
+.. code-block:: python
+   :caption: accounts/pages/password-reset/page.py
+
+   from accounts.mail import send_reset_link
+   from django.http import HttpRequest, HttpResponseRedirect
+
+   import next.forms
+
+   class PasswordResetForm(next.forms.Form):
+       email = next.forms.EmailField()
+
+       class Meta:
+           atomic = False
+
+       def on_valid(self, request: HttpRequest):
+           send_reset_link(self.cleaned_data["email"])
+           return HttpResponseRedirect("/password-reset/sent/")
+
+``Meta.atomic`` takes the values of ``atomic=``, ``True``, ``False``, ``None``, or an ``AtomicOverride`` of ``next.transactions`` that names its own ``aliases``, and it is read once when the class registers.
+Like the guard keys, it survives subclassing through the inherited ``Meta``.
+An ``@action(form_class=F)`` that passes no ``atomic=`` takes ``F.Meta.atomic``, an abstract or mixin form class included, and an ``atomic=`` on the decorator wins over it.
+Any other value applies nothing, leaves the action on the method rule, and is reported as ``next.E240``.
+``page.atomic()`` decides for the page view of its ``page.py`` alone and never for the actions the page declares, so each action carries its own choice.
+
 .. _topics-forms-actions-requires-runtime:
 
 Forms that post through the runtime alone
@@ -661,7 +701,7 @@ Posting over the WebSocket tunnel
 A page that holds a realtime WebSocket can submit a form through it, see :ref:`topics-realtime`.
 An action answers over plain HTTP unless it opts in with ``transport="any"``.
 The default is ``"http"``, because a socket cannot set a cookie.
-An opted-in action that rotates or flushes the session over the tunnel, such as a login or a logout, raises ``SessionRotationError`` before the store writes, rolls back an ``ATOMIC_REQUESTS`` transaction, drops what it wrote to the session, and answers ``421`` with ``X-Next-Transport: session``, so the client reloads the page, see :ref:`topics-realtime-tunnel`.
+An opted-in action that rotates or flushes the session over the tunnel, such as a login or a logout, raises ``SessionRotationError`` before the store writes, rolls back its request transaction, drops what it wrote to the session, and answers ``421`` with ``X-Next-Transport: session``, so the client reloads the page, see :ref:`topics-realtime-tunnel`.
 
 .. code-block:: python
    :caption: rooms/pages/rooms/[slug:code]/page.py

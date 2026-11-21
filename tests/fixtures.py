@@ -26,7 +26,6 @@ from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
 from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
-from next.ports import partial_shaper_slot
 from next.server import NextStatReloader
 from next.testing import reset_check_caches
 from next.urls import URLPatternParser
@@ -34,7 +33,6 @@ from tests.support import (
     OBJECT_PERMISSION_BACKENDS,
     TICK_NS,
     CountingWizardBackend,
-    IntentOnlyShaper,
     build_mock_http_request,
     install_visibility_hooks,
     isolated_form_registries,
@@ -268,21 +266,6 @@ def reloader_tick_scenario(request):
     reloader = NextStatReloader()
     with tick_scenario(name, reloader) as payload:
         yield reloader, payload
-
-
-@pytest.fixture()
-def intent_only_shaper():
-    """Bind a shaper that refuses to shape, restore the real one after.
-
-    The slot is process-global, so the previous implementation is put back, not dropped.
-    """
-    bound = partial_shaper_slot.get()
-    shaper = IntentOnlyShaper()
-    partial_shaper_slot.set(shaper)
-    try:
-        yield shaper
-    finally:
-        partial_shaper_slot.set(bound)
 
 
 @pytest.fixture()

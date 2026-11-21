@@ -21,8 +21,9 @@ from django.db import close_old_connections
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import RequestFactory
 
+from next.identity import session_store_class
 from next.realtime.backends import MemoryBroker
-from next.realtime.binding import session_store_class, ticket_binding
+from next.realtime.binding import ticket_binding
 from next.realtime.frames import Refusal, Reply, UpstreamError
 from next.realtime.manager import broker_manager
 from next.realtime.messages import Message

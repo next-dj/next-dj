@@ -24,6 +24,7 @@ from django.utils.translation import get_language, to_locale
 from next.conf import next_framework_settings
 from next.diagnostics import FailureLog, exception_text
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
+from next.paths import PAGE_MARK, Homes, normal_path, path_mark
 from next.ports import router_access_slot
 from next.site import SiteOriginError, site_indexable, site_origin
 from next.site.headers import CLOSED_ROBOTS
@@ -555,17 +556,22 @@ def _linked_crumbs(
     path: str,
     urlconf: str | None,
 ) -> tuple[Breadcrumb, ...]:
-    """Reverse the crumbs against `match`, the one at the request `path` current."""
+    """Reverse the crumbs against `match`, each marked by the rule of the link pass."""
     if match is None:
         return tuple(Breadcrumb(crumb.label, None) for crumb in crumbs)
     template = next_framework_settings.URL_NAME_TEMPLATE
-    own = escape_uri_path(path)
+    own = normal_path(escape_uri_path(path))
     outer = _outer_kwargs(match, template)
+    homes = Homes()
     linked: list[Breadcrumb] = []
     for crumb in crumbs:
         url = _crumb_url(crumb.trail, match, template, urlconf, outer)
+        mark = "" if url is None else path_mark(normal_path(url), own, homes)
+        current = mark == PAGE_MARK
         linked.append(
-            Breadcrumb(crumb.label, url, current=url is not None and url == own)
+            Breadcrumb(
+                crumb.label, url, current=current, ancestor=bool(mark) and not current
+            )
         )
     return tuple(linked)
 

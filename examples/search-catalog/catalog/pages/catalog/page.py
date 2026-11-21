@@ -1,13 +1,18 @@
-from catalog.deps import DFilters, DPage
-from catalog.models import Category
+from typing import Annotated
+
+from catalog.deps import DEFAULT_PER_PAGE, DFilters
+from catalog.models import Category, Product
 from catalog.services import brands, cached_search, list_categories
 from catalog.zones import LISTING_ZONES, zone_target
 
 from next import context
 from next.pages import MetadataDict
+from next.partial import NumberPager, Paging, Window
 
 
 metadata: MetadataDict = {"title": "All products", "canonical": True}
+
+listing = NumberPager(per_page=DEFAULT_PER_PAGE, count=True)
 
 
 @context("filter_zones")
@@ -19,10 +24,10 @@ def filter_zones() -> str:
     return zone_target(LISTING_ZONES)
 
 
-@context("page_obj")
-def page_obj(filters: DFilters, page: DPage) -> dict:
-    """Return the cached search payload for the all-products listing."""
-    return cached_search(filters, page.number, page.per_page)
+@context("products")
+def products(filters: DFilters, page: Annotated[Paging, listing]) -> Window[Product]:
+    """Return the window of the cached search the listing shows or restores."""
+    return page.paginate(cached_search(filters))
 
 
 @context("all_categories")

@@ -10,7 +10,9 @@ from django.core.exceptions import AppRegistryNotReady
 from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
+from django.utils.module_loading import import_string
 
+from next.conf.signals import settings_reloaded
 from next.errors import InvalidDirsError
 from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
@@ -25,6 +27,7 @@ from next.utils import (
     classify_dirs_entries,
     exec_module_file,
     forget_app_holdings,
+    forget_middleware_classes,
     int_between,
     is_dynamic_trail,
     is_int,
@@ -34,6 +37,7 @@ from next.utils import (
     is_within,
     join_trail,
     load_tree_source,
+    middleware_installed,
     middleware_listed,
     non_negative_number,
     page_roots_shape_error,
@@ -1102,7 +1106,7 @@ class TestMiddlewareDetection:
         assert is_middleware("csp.missing.CSPMiddleware", "csp.missing.CSPMiddleware")
         assert not is_middleware(self.LOCALE, "csp.missing.CSPMiddleware")
 
-    def test_an_entry_fixed_after_a_failed_import_matches(
+    def test_an_entry_fixed_after_a_failed_import_matches_after_a_reload(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.syspath_prepend(tmp_path)
@@ -1113,13 +1117,56 @@ class TestMiddlewareDetection:
             "class Late(LocaleMiddleware):\n    pass\n"
         )
         importlib.invalidate_caches()
+        assert not is_middleware(entry, self.LOCALE)
+        settings_reloaded.send(sender=None)
         assert is_middleware(entry, self.LOCALE)
         sys.modules.pop("late_locale_middleware")
+
+    def test_a_failed_import_runs_once_per_settings_load(self) -> None:
+        entry = "missing.once.Middleware"
+        with patch("next.utils.import_string", wraps=import_string) as imported:
+            assert not is_middleware(entry, self.LOCALE)
+            assert not is_middleware(entry, self.LOCALE)
+        tried = [call for call in imported.call_args_list if call.args == (entry,)]
+        assert len(tried) == 1
 
     def test_a_list_holding_a_match_lists_the_base(self) -> None:
         assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)
         assert not middleware_listed(["a.B"], self.LOCALE)
         assert not middleware_listed([], self.LOCALE)
+
+
+class TestInstalledMiddleware:
+    """What `settings.MIDDLEWARE` lists is asked once per list the setting holds."""
+
+    LOCALE = "django.middleware.locale.LocaleMiddleware"
+
+    def test_one_list_is_scanned_once_per_base(self) -> None:
+        with override_settings(MIDDLEWARE=[self.LOCALE]):
+            assert middleware_installed(self.LOCALE) is True
+            with patch("next.utils.middleware_listed") as listed:
+                assert middleware_installed(self.LOCALE) is True
+            listed.assert_not_called()
+
+    def test_another_list_is_scanned_again(self) -> None:
+        with override_settings(MIDDLEWARE=[self.LOCALE]):
+            assert middleware_installed(self.LOCALE) is True
+            with override_settings(MIDDLEWARE=[]):
+                assert middleware_installed(self.LOCALE) is False
+            assert middleware_installed(self.LOCALE) is True
+
+    def test_an_unset_list_holds_nothing(self) -> None:
+        with override_settings(MIDDLEWARE=None):
+            assert middleware_installed(self.LOCALE) is False
+
+    def test_a_framework_settings_reload_scans_again(self) -> None:
+        with override_settings(MIDDLEWARE=[self.LOCALE]):
+            assert middleware_installed(self.LOCALE) is True
+            forget_middleware_classes()
+            with patch("next.utils.middleware_listed", return_value=False) as listed:
+                assert middleware_installed(self.LOCALE) is False
+            listed.assert_called_once()
+            forget_middleware_classes()
 
 
 class TestRedirectOrFallback:

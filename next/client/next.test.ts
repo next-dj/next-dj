@@ -513,6 +513,27 @@ describe("Next.partial namespace", () => {
     });
     off();
   });
+
+  it("removes the keys a merge sets to undefined", () => {
+    win.Next._init({ page: "home", user: "alice" });
+    const received: Record<string, unknown>[] = [];
+    const off = win.Next.on("context-updated", (payload) => {
+      received.push(payload);
+    });
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [{ op: "context", data: { page: undefined, poll: 7 } }],
+      assets: [],
+      form: null,
+    });
+    expect("page" in win.Next.context).toBe(false);
+    expect(win.Next.context).toEqual({ user: "alice", poll: 7 });
+    expect(received[0]).toEqual({
+      context: { user: "alice", poll: 7 },
+      changed: ["page", "poll"],
+    });
+    off();
+  });
 });
 
 describe("Next.use", () => {
@@ -742,20 +763,8 @@ describe("Next.consent and Next.scripts", () => {
   });
 
   it("mounts revealed markup the way it mounts morphed markup", async () => {
-    const calls: string[] = [];
     win.Next.partial._reset();
-    win.Next.partial._configure({
-      document,
-      navigate: () => {},
-      fetch: async (url, init) => {
-        calls.push(
-          `${new URL(url).pathname} ${new Headers(init.headers).get("X-Next-Zone")}`,
-        );
-        return new Response('{"version":"v1","ops":[]}', {
-          headers: { "content-type": "application/vnd.next.patches+json" },
-        });
-      },
-    });
+    win.Next.partial._configure({ document, navigate: () => {} });
     const mounted: string[] = [];
     const embeds: Element[] = [];
     const onMounted = (event: Event): void => {
@@ -766,7 +775,7 @@ describe("Next.consent and Next.scripts", () => {
     document.cookie = "next_consent=2:marketing:1700000000; path=/";
     document.body.innerHTML =
       '<template data-next-consented="marketing"><div class="embed" ' +
-      'data-next-zone="player" data-next-lazy="load"></div></template>' +
+      'data-next-zone="player"></div></template>' +
       "<a>allow</a><!--/next-consented-->";
     win.Next._init({ $consent: { categories: ["necessary", "marketing"] } });
     document.removeEventListener("next:mounted", onMounted);
@@ -774,7 +783,6 @@ describe("Next.consent and Next.scripts", () => {
     await Promise.resolve();
     expect(mounted).toEqual(["embed"]);
     expect(embeds).toHaveLength(1);
-    expect(calls).toEqual([`${location.pathname} player`]);
     win.Next.partial._reset();
   });
 
@@ -876,5 +884,49 @@ describe("the dev chunk", () => {
     win.Next._init({});
     win.Next._land("dev", diagnostics);
     expect(diagnostics.attrs).not.toHaveBeenCalled();
+  });
+});
+
+describe("a streamed page whose reader never ran", () => {
+  const state = (id: string): (string | null)[] => {
+    const el = document.getElementById(id)!;
+    return [
+      el.getAttribute("data-next-state"),
+      el.getAttribute("data-next-error"),
+      el.getAttribute("aria-busy"),
+    ];
+  };
+
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<div id="b-1" data-next-state="loading" aria-busy="true"></div>' +
+      '<div id="b-2" data-next-state="ready"></div>';
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    document.documentElement.removeAttribute("data-next-streamed");
+    delete window.$nx;
+  });
+
+  it("marks what is still loading incomplete on the window load", () => {
+    document.documentElement.setAttribute("data-next-streamed", "");
+    delete window.$nx;
+    window.dispatchEvent(new Event("load"));
+    expect(state("b-1")).toEqual(["error", "incomplete", null]);
+    expect(state("b-2")).toEqual(["ready", null, null]);
+  });
+
+  it("leaves the boundaries to a reader that took over the queue", () => {
+    document.documentElement.setAttribute("data-next-streamed", "");
+    window.$nx = [];
+    window.$nx.push = () => 0;
+    window.dispatchEvent(new Event("load"));
+    expect(state("b-1")).toEqual(["loading", null, "true"]);
+  });
+
+  it("leaves a page that was not streamed alone", () => {
+    window.dispatchEvent(new Event("load"));
+    expect(state("b-1")).toEqual(["loading", null, "true"]);
   });
 });

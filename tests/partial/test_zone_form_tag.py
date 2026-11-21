@@ -7,6 +7,8 @@ from next.testing import NextClient, envelope_of
 _VALIDATE_HEADER = f"HTTP_{VALIDATE.upper().replace('-', '_')}"
 _EMAIL_ERROR = "Enter a valid email address."
 
+pytestmark = pytest.mark.django_db
+
 
 class TestPlainFormInsideATagRenderedZone:
     """A zone body rendering its form through `{% form %}` gets the bound form."""
@@ -60,7 +62,6 @@ class TestPlainFormInsideATagRenderedZone:
         assert _EMAIL_ERROR in html
 
 
-@pytest.mark.django_db()
 class TestWizardStepInsideATagRenderedZone:
     """A wizard step re-rendered through `{% form %}` keeps its bound step form."""
 

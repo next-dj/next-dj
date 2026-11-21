@@ -13,6 +13,7 @@ from next.forms.decorators import action as action_decorator
 from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
 from next.forms.registration import registration_diagnostics
+from next.transactions import AtomicOverride
 from tests.support import attribution, handler_declared_here
 
 
@@ -392,3 +393,146 @@ class TestBaseFormGetInitial:
         request.POST = {"_next_form_origin": "/groups/my-slug/"}
         result = _form_action_context_callable(FormWithName)(request)
         assert result.form.initial.get("slug") == "my-slug"
+
+
+def _atomic_handler(request: HttpRequest) -> HttpResponseRedirect:
+    return HttpResponseRedirect("/")
+
+
+class TestActionOptions:
+    """``@action`` refuses a keyword it does not take, as a plain function would."""
+
+    def test_a_misspelled_option_raises_type_error(self) -> None:
+        with pytest.raises(
+            TypeError,
+            match=r"^action\(\) got an unexpected keyword argument 'form_klass'$",
+        ):
+            action_decorator("misspelled_option", form_klass=Form)
+        assert form_action_manager.default_backend.get_meta("misspelled_option") is None
+
+    def test_the_first_unknown_option_is_named(self) -> None:
+        with pytest.raises(TypeError, match="'atomik'"):
+            action_decorator("two_unknown", scope="shared", atomik=True, trnsport="any")
+
+
+class TestActionAtomic:
+    """``@action(atomic=...)`` stores the transaction choice on the action metadata."""
+
+    def test_no_choice_stores_nothing(self) -> None:
+        action_decorator("atomic_unset")(_atomic_handler)
+        meta = form_action_manager.default_backend.get_meta("atomic_unset")
+        assert meta is not None
+        assert "atomic" not in meta
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (True, AtomicOverride(atomic=True)),
+            (False, AtomicOverride(atomic=False)),
+            (
+                AtomicOverride(atomic=True, aliases=["default"]),
+                AtomicOverride(atomic=True, aliases=("default",)),
+            ),
+            (
+                AtomicOverride(atomic=True, aliases="all"),
+                AtomicOverride(atomic=True, aliases="all"),
+            ),
+        ],
+    )
+    def test_a_usable_choice_is_stored(
+        self, value: object, expected: AtomicOverride
+    ) -> None:
+        action_decorator("atomic_set", atomic=value)(_atomic_handler)
+        meta = form_action_manager.default_backend.get_meta("atomic_set")
+        assert meta is not None
+        assert meta["atomic"] == expected
+
+    @pytest.mark.parametrize(
+        ("value", "fragment"),
+        [
+            ("yes", "atomic must be True, False, None or an AtomicOverride"),
+            (AtomicOverride(atomic=1), "atomic must be True or False"),
+            (AtomicOverride(atomic=True, aliases="default"), "aliases must be"),
+        ],
+    )
+    def test_an_unusable_choice_is_recorded_and_dropped(
+        self, value: object, fragment: str
+    ) -> None:
+        action_decorator("atomic_bad", atomic=value)(_atomic_handler)
+        owner, problem = registration_diagnostics.invalid_atomic[-1]
+        assert "_atomic_handler" in owner
+        assert fragment in problem
+        meta = form_action_manager.default_backend.get_meta("atomic_bad")
+        assert meta is not None
+        assert "atomic" not in meta
+
+
+class _QuietForm(Form):
+    """An abstract form whose actions run in autocommit."""
+
+    email = forms.EmailField()
+
+    class Meta:
+        abstract = True
+        atomic = False
+
+
+class _QuietMixin(_QuietForm):
+    """A form that inherits `Meta.atomic` through the inherited `Meta`."""
+
+    class Meta(_QuietForm.Meta):
+        abstract = True
+
+
+class _MisfitForm(Form):
+    """An abstract form whose `Meta.atomic` is no usable choice."""
+
+    class Meta:
+        abstract = True
+        atomic = "yes"
+
+
+class TestActionInheritsMetaAtomic:
+    """``@action(form_class=F)`` without ``atomic=`` takes ``F.Meta.atomic``."""
+
+    @pytest.mark.parametrize("form_class", [_QuietForm, _QuietMixin])
+    def test_the_form_class_decides_without_an_atomic_option(
+        self, form_class: type[Form]
+    ) -> None:
+        action_decorator("inherits_atomic", form_class=form_class)(_atomic_handler)
+        meta = form_action_manager.default_backend.get_meta("inherits_atomic")
+        assert meta is not None
+        assert meta["atomic"] == AtomicOverride(atomic=False)
+
+    def test_the_atomic_option_wins(self) -> None:
+        action_decorator("overrides_atomic", form_class=_QuietForm, atomic=True)(
+            _atomic_handler
+        )
+        meta = form_action_manager.default_backend.get_meta("overrides_atomic")
+        assert meta is not None
+        assert meta["atomic"] == AtomicOverride(atomic=True)
+
+    def test_an_explicit_none_keeps_the_method_rule(self) -> None:
+        action_decorator("method_rule_atomic", form_class=_QuietForm, atomic=None)(
+            _atomic_handler
+        )
+        meta = form_action_manager.default_backend.get_meta("method_rule_atomic")
+        assert meta is not None
+        assert "atomic" not in meta
+
+    def test_a_factory_form_class_declares_nothing(self) -> None:
+        action_decorator("factory_atomic", form_class=lambda: _QuietForm)(
+            _atomic_handler
+        )
+        meta = form_action_manager.default_backend.get_meta("factory_atomic")
+        assert meta is not None
+        assert "atomic" not in meta
+
+    def test_an_unusable_meta_atomic_is_recorded_and_dropped(self) -> None:
+        action_decorator("misfit_atomic", form_class=_MisfitForm)(_atomic_handler)
+        owner, problem = registration_diagnostics.invalid_atomic[-1]
+        assert owner == "Meta.atomic of '_MisfitForm'"
+        assert "atomic must be True, False, None or an AtomicOverride" in problem
+        meta = form_action_manager.default_backend.get_meta("misfit_atomic")
+        assert meta is not None
+        assert "atomic" not in meta

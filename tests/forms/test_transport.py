@@ -1,5 +1,6 @@
 import copy
 import pickle
+from contextlib import suppress
 from importlib import import_module
 from typing import Any, ClassVar, cast
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from django.contrib.auth import (
     alogout,
     get_user_model,
 )
+from django.contrib.auth.models import Group
 from django.contrib.sessions.backends.base import SessionBase
 from django.db import connection, connections, transaction
 from django.http import (
@@ -29,7 +31,7 @@ from django.template import Context, Template
 from django.test import AsyncClient, RequestFactory, override_settings
 from django.urls import ResolverMatch
 
-from next.forms import Form, FormWizard, SessionRotationError, action
+from next.forms import Form, FormWizard, PermissionOutcome, SessionRotationError, action
 from next.forms.checks import (
     actions as action_checks,
     check_invalid_action_transport,
@@ -40,6 +42,7 @@ from next.forms.registration import registration_diagnostics
 from next.forms.transport import (
     DISPATCHED_SCOPE_KEY,
     MISDIRECTED,
+    ROTATION,
     TRANSPORT_HEADER,
     TRANSPORT_SCOPE_KEY,
     DispatchMark,
@@ -471,3 +474,49 @@ class TestDiscardSession:
         request = RequestFactory().post("/")
         discard_session(request)
         assert not hasattr(request, "session")
+
+
+class SocketSwallowingForm(Form):
+    """A tunneled form whose check rotates the session, swallows it and refuses."""
+
+    class Meta:
+        """Admits the tunnel."""
+
+        transport = "any"
+
+    @classmethod
+    def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
+        with suppress(SessionRotationError):
+            request.session.cycle_key()
+        return HttpResponse(status=403)
+
+
+@action("socket_swallow_write", transport="any")
+def socket_swallow_write(request: HttpRequest) -> HttpResponse:
+    Group.objects.create(name="tunnel-write")
+    with suppress(SessionRotationError):
+        request.session.cycle_key()
+    return HttpResponse("written")
+
+
+def _tunneled(name: str) -> HttpResponseBase:
+    request = RequestFactory().post("/", {ORIGIN_FIELD_NAME: "/"})
+    request.scope = {TRANSPORT_SCOPE_KEY: "ws"}
+    request.session = import_module(settings.SESSION_ENGINE).SessionStore()
+    return form_action_manager.default_backend.dispatch(request, _meta(name)["uid"])
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSwallowedRotation:
+    """A rotation the action swallows is refused and rolls its transaction back."""
+
+    def test_one_swallowed_by_a_refusing_check_is_refused(self) -> None:
+        response = _tunneled("socket_swallowing_form")
+        assert response.status_code == MISDIRECTED
+        assert response[TRANSPORT_HEADER] == ROTATION
+
+    def test_one_swallowed_by_the_handler_rolls_its_write_back(self) -> None:
+        response = _tunneled("socket_swallow_write")
+        assert response.status_code == MISDIRECTED
+        assert response[TRANSPORT_HEADER] == ROTATION
+        assert not Group.objects.filter(name="tunnel-write").exists()

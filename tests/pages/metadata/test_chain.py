@@ -1,3 +1,4 @@
+import asyncio
 import threading
 import time
 from collections.abc import Callable, Generator
@@ -25,6 +26,7 @@ from next.pages.metadata import RESET, OpenGraph, Robots
 from next.pages.metadata.chain import (
     REFUSED_ROBOTS,
     ChainEntry,
+    FoldedMetadata,
     MetadataDeclaration,
     MetadataOrigin,
     MetadataThunk,
@@ -1023,6 +1025,31 @@ class TestThunk:
         (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
         thunk = MetadataThunk(registry, leaf, None, {}, {})
         assert thunk.folded() is thunk.fold({})
+
+    def test_an_async_fold_of_a_static_chain_reads_the_memo(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
+        thunk = MetadataThunk(registry, leaf, None, {}, {})
+        entry = contained_chain(registry, leaf)
+
+        assert asyncio.run(thunk.afold(entry, {})) is entry.folded
+
+    def test_an_async_fold_awaits_the_callable_against_the_context(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        async def meta(user: str, slug: str) -> dict[str, str]:
+            return {"title": f"{user} {slug}"}
+
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+        registry.register(leaf, meta)
+        thunk = MetadataThunk(registry, leaf, None, {"slug": "post"}, {})
+        entry = contained_chain(registry, leaf)
+
+        folded = asyncio.run(thunk.afold(entry, {"user": "Ann"}))
+
+        assert folded.title == "Ann post"
+        assert FoldedMetadata(thunk, folded).folded() is folded
 
 
 class TestRouteGroups:

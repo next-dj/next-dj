@@ -25,6 +25,7 @@ from kanban.signals import release_socket_drags
 
 from next import realtime
 from next.realtime import Upstream, presence
+from next.router import CutKind
 from next.testing import (
     NextClient,
     SseReader,
@@ -544,6 +545,14 @@ class TestInheritedHeaderCount:
         response = next_client.get(f"/board/{board.pk}/{suffix}")
         assert response.status_code == 200
         assert "active boards" in response.content.decode()
+
+    def test_a_navigation_keeps_the_shell_and_refreshes_the_count(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        step = next_client.navigate(f"/board/{board.pk}/", origin="/")
+        assert step.kind is CutKind.SLOT
+        assert step.envelope is not None
+        assert "1 active boards" in step.envelope.html_for_zone("account")
 
 
 class TestCdnCachePolicy:

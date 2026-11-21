@@ -4,6 +4,9 @@ from next.partial.headers import CONTENT_TYPE
 from next.testing import NextClient, envelope_of
 
 
+pytestmark = pytest.mark.django_db
+
+
 class TestInvalidPartialEnvelope:
     """An invalid partial POST returns one extract-morph of the failed form."""
 
@@ -83,7 +86,6 @@ class TestCsrfMetaRidesEveryShape:
         assert "csrf" not in envelope_of(response).data
 
 
-@pytest.mark.django_db()
 class TestWizardAdvanceMorphsTheNextStepZone:
     """A partial step advance morphs the master zone of the next step."""
 
@@ -123,7 +125,6 @@ class TestWizardAdvanceMorphsTheNextStepZone:
         assert "url" not in envelope_of(response).op_verbs()
 
 
-@pytest.mark.django_db()
 class TestWizardAdvancePushesHistoryWhenOptedIn:
     """A wizard with `Meta.push_steps` adds a `url.push` to the advance."""
 

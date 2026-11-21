@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 
+from next.deps import DependencyResolver
 from next.introspect import defining_file
+from next.pages.context import Context, ContextByDefaultProvider, ContextByNameProvider
 from next.pages.registry import PageContextRegistry
-from tests.support import counting_provider, routed, write_page
+from tests.support import counting_provider, inspect_parameter, routed, write_page
 
 
 class TestZoneScopedContext:
@@ -248,3 +250,26 @@ class TestInheritedContextThroughGroups:
             outside = client.get("/other/").content.decode().strip()
 
         assert (inside, outside) == ("dash=from-group", "other=none")
+
+
+class TestContextProviderBlocking:
+    """Only a callable `Context` source sends its parameter to a thread."""
+
+    @pytest.mark.parametrize(
+        ("source", "blocks"),
+        [
+            pytest.param(None, False, id="own-name"),
+            pytest.param("title", False, id="named-key"),
+            pytest.param(42, False, id="constant"),
+            pytest.param(lambda: "x", True, id="callable"),
+        ],
+    )
+    def test_by_default_blocks_for_a_callable_source(self, source, blocks) -> None:
+        """A key or a constant reads memory, a factory runs user code."""
+        provider = ContextByDefaultProvider(DependencyResolver())
+        param = inspect_parameter("value", default=Context(source))
+        assert provider.static_blocking(param) is blocks
+
+    def test_by_name_never_blocks(self) -> None:
+        """A value already in `context_data` is filled on the loop."""
+        assert ContextByNameProvider().static_blocking(inspect_parameter("x")) is False

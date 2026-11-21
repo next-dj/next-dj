@@ -37,7 +37,7 @@ jobs:
         NEXT_DJ_SKIP_JS_BUILD: "1"
       run: uv build
     - name: Export locked dev requirements
-      run: uv export --no-hashes --group dev --format requirements-txt --no-emit-project --output-file dist/requirements-dev.txt
+      run: uv export --no-hashes --group dev --extra crypto --extra brotli --format requirements-txt --no-emit-project --output-file dist/requirements-dev.txt
     - name: Export locked e2e requirements
       run: uv export --no-hashes --only-group e2e --format requirements-txt --no-emit-project --output-file dist/requirements-e2e.txt
     - name: Upload dist artifact
@@ -168,7 +168,7 @@ jobs:
     - name: Check the gzip budget of the runtime and each lazy chunk
       run: |
         status=0
-        for entry in next:16384 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048; do
+        for entry in next:18432 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048 next.defer:2048 next.reload:2048 next.more:2048 next.reader:2048 next.router:4096 next.history:4096 next.intent:4096; do
           name="${entry%%:*}.min.js"
           budget="${entry##*:}"
           bytes=$(gzip -nc "next/static/next/${name}" | wc -c)

@@ -60,6 +60,33 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
      - After a file is registered with a backend and added to the collector.
+   * - ``boundary_failed``
+     - The ``next.boundaries.contain`` function
+     - ``id``, ``name``, ``addressing``, ``kind``, ``digest``, ``exception``, ``request``
+     - Once per failure an error boundary contained, after it was logged or handed to ``ERRORS["REPORTER"]`` and before its ``error.djx`` renders.
+       ``addressing`` is ``"component"`` for a component boundary, ``kind`` is the ``ErrorKind`` before ``ERRORS["KINDS"]`` hides it, and ``id`` is the boundary id its wrapper carries.
+       ``request`` may be ``None`` outside a request.
+       A deferred job that raised past its own boundary is announced the same way once its error UI renders, with the wire id of its wrapper.
+   * - ``boundary_rendered``
+     - ``next.suspense.Job``
+     - ``id``, ``name``, ``addressing``, ``mode``, ``state``, ``kind``, ``lane``, ``placement``, ``reason``, ``queue_ms``, ``run_ms``, ``request``
+     - Once per deferred job of a response, on the request thread, as its outcome is spliced into the page, a nested job after its parent.
+       ``state`` is ``"ready"`` or ``"error"``, ``kind`` the ``ErrorKind`` of an error and ``None`` otherwise, ``lane`` the ``Lane`` the job ran on and ``None`` for one that never started.
+       ``placement`` is the ``Placement`` that chose the lane and ``reason`` its rule or verdict, such as ``atomic`` or ``explore``.
+       ``queue_ms`` is the time the job waited for its lane and ``run_ms`` the time its body ran.
+       ``request`` may be ``None`` for a render outside a request.
+   * - ``boundary_side_effect``
+     - ``next.suspense.Job``
+     - ``id``, ``kind``, ``request``
+     - Once per kind of request state a deferred job wrote, beside a warning on the ``next.suspense`` logger.
+       ``kind`` is ``"session"`` for a session write, ``"session-key"`` for a new session key, ``"messages"`` for messages read and marked used, and ``"csrf"`` for a CSRF secret the job rotated, as ``rotate_token()`` does.
+       Jobs share the request, so such writes are unsupported, and the signal names the job that made them.
+   * - ``boundary_token_rejected``
+     - The token backend class
+     - ``reason``, ``request``, ``component``
+     - Once per refused request, garbage included, beside a log record on the ``next.suspense`` logger at a bounded rate, so a receiver must stay cheap or it amplifies a flood.
+       ``reason`` is a ``TokenRejection``, one of ``malformed``, ``signature``, ``expired``, ``version``, ``binding``, ``url_mismatch``, ``too_large``, and ``storage_miss``, and ``component`` the component the server resolved the request to.
+       The client is told only whether the token expired, so the reason reaches logs and receivers alone.
    * - ``collector_finalized``
      - The static collector
      - ``page_path``, ``request``
@@ -126,6 +153,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``infos``
      - After a batch of components is registered.
        ``infos`` is the tuple of added components.
+   * - ``compression_backend_loaded``
+     - The codec backend class
+     - ``config``, ``instance``
+     - After one ``COMPRESSION["BACKENDS"]`` entry is instantiated, when the compression manager first needs its codecs and again once the ``COMPRESSION`` mapping changes.
+       A path that names no backend is skipped without it.
    * - ``consent_backend_loaded``
      - The consent backend class
      - ``config``, ``instance``
@@ -146,6 +178,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - When the access rule of the page tree, the origin page, a dynamic permission hook, or a registered permission checked on the bound form denies a request, never on the static guard path.
        ``layer`` is ``"page"``, ``"view"``, or ``"object"``, and a registered permission refused on the bound form is ``"object"`` with ``"denied"``.
        ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``, and a ``"page"`` denial is ``"denied"`` for a refused access rule or an origin outside the directory of an owner page with a ``render()``, a route with no page included, and ``"response"`` for a ``render()`` that answered.
+       It is sent outside any transaction of the dispatch, once a refusal on the bound row has rolled back, so a receiver's writes and its :func:`~django.db.transaction.on_commit` hooks persist.
    * - ``form_backend_loaded``
      - The form action backend class
      - ``config``, ``instance``
@@ -178,13 +211,47 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``file_path``, ``inherit``
      - After a ``@page.metadata`` callable is attached to a page module.
        ``inherit`` is the flag the registration carried.
+   * - ``navigation_rendered``
+     - ``next.router.navigation.Routing``
+     - ``page_path``, ``purpose``, ``cut``, ``kept``, ``diverged_at``, ``reason``, ``streamed``, ``request``
+     - Once per client router navigation or prefetch the page view rendered and answered with an envelope, never for one refused or answered before any render.
+       ``purpose`` is ``navigation`` or ``prefetch``, ``cut`` is ``slot``, ``body`` or ``visit``, and ``kept`` the ids of the layouts kept on screen, outer first.
+       ``diverged_at`` names the first layout that did not match, ``reason`` why, ``id``, ``digest``, ``head`` or ``declaration``, or ``clear`` for a response that clears the router and so keeps no layout, and both are ``None`` when every layout matched.
+       ``streamed`` is ``True`` when deferred boundaries follow the envelope as an event stream.
    * - ``page_rendered``
      - ``Page``
-     - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``
+     - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``, ``purpose``
      - After ``Page.render`` produces HTML and injects static assets.
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
+       ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigation``, ``prefetch`` or ``speculation``, so a page-view counter skips a prefetch with one comparison.
        Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
+   * - ``page_stream_declined``
+     - ``next.suspense.StreamPolicy``
+     - ``delivery``, ``reason``, ``transport_reason``, ``partial``, ``request``
+     - Once per page or partial response whose deferred jobs are assembled inline, as the first deferred call of the render is decided.
+       ``delivery`` is ``Delivery.INLINE``, ``reason`` the row of the delivery policy that held the stream back, such as ``buffered`` or ``sync-worker``, and ``transport_reason`` the fact behind the answer of the transport, such as ``wsgi.multithread`` or a buffering mark.
+       A ``HEAD`` request, a router prefetch, and a streamed response send nothing.
+       Fired only when a receiver for ``StreamPolicy`` is connected.
+   * - ``page_stream_opened``
+     - ``next.suspense.StreamingPageResponse``, or ``next.suspense.PartialStream`` for a partial response
+     - ``page_path``, ``delivery``, ``reason``, ``boundaries``, ``request_lane``, ``partial``, ``request``
+     - Once per streamed page or streamed partial response, when the server starts reading its body and before the first byte is written.
+       A response closed or dropped before its body starts sends neither this signal nor ``page_stream_closed``.
+       ``partial`` is ``True`` for a zone, poll, layer or boundary reload answered as an event stream.
+       ``delivery`` is ``Delivery.STREAM`` and ``reason`` the policy's reason for it.
+       ``boundaries`` is a tuple of ``(name, mode)`` pairs, one per boundary of the shell, the pairs the ``X-Next-Boundaries`` debug header lists.
+       ``request_lane`` is the request-lane rule that pins a job of the page, such as ``atomic``, and ``None`` when no rule does.
+       It is read as the body starts, once the transactions the view closed have committed, so it names the lane the jobs run on.
+       Under ASGI it is sent through ``asend_robust`` from the server loop.
+   * - ``page_stream_closed``
+     - ``next.suspense.StreamingPageResponse``, or ``next.suspense.PartialStream`` for a partial response
+     - ``page_path``, ``sent``, ``failed``, ``late``, ``shed``, ``duration_ms``, ``aborted``, ``partial``, ``request``
+     - Once per streamed page or streamed partial response when its body ends, after the closing tags or the ``end`` event are written or when the reader left.
+       ``sent`` counts the chunks or boundary frames written and ``failed`` those settled as an error, ``late`` and ``shed`` count the jobs that missed the deadline or were shed.
+       ``aborted`` is ``True`` when the reader left before the end or the jobs were cancelled.
+       Under ASGI it is sent through ``asend_robust`` from the server loop, unless the server closed the response from a thread, which sends it there.
+       The response owns the stream slot counted against ``MAX_STREAMS`` from the moment the view admits it, and releases it exactly once, as the body ends, as the response closes, or as a response never read is garbage collected.
    * - ``partial_backend_loaded``
      - The partial protocol backend class
      - ``config``, ``instance``
@@ -193,6 +260,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``PatchOpRegistry``
      - ``name``
      - After a custom patch verb is registered through ``register_patch_op``.
+   * - ``prefetch_shed``
+     - ``next.router.navigation.Routing``
+     - ``page_path``, ``waited_ms``, ``request``
+     - Once per client router prefetch answered ``429`` before any render, because the oldest job in the pool queue waited past ``QUEUE_TIMEOUT``.
+       ``waited_ms`` is that wait.
    * - ``provider_registered``
      - The ``RegisteredParameterProvider`` subclass
      - none
@@ -206,6 +278,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``config``, ``instance``
      - After one ``PAGE_BACKENDS`` entry is instantiated, once per entry on every manager reload.
        A ``reload(notify=False)`` builds the backends without sending it.
+   * - ``router_cleared``
+     - ``next.router.navigation.Routing``
+     - ``reason``, ``request``
+     - Once per request whose response tells the client router to drop its snapshots and its prefetched answers with ``X-Next-Router: clear``, sent from ``router_clear`` even while the router is off.
+       ``reason`` is ``login`` or ``logout`` from the auth signals, ``session`` for a session key that changed during the request, or what ``router_clear(request, reason)`` passed, ``policy`` by default.
    * - ``router_reloaded``
      - The router manager class
      - none
@@ -232,10 +309,12 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - When a patch event stream ends, its source exhausted or the client gone.
        ``envelopes_sent`` counts envelope frames yielded to Django's response iterator.
        It does not confirm network delivery after a disconnect.
+       A streamed partial response sends ``page_stream_closed`` instead.
    * - ``sse_stream_opened``
      - The concrete stream class
      - ``request``
      - When iteration starts and the first stream frame is about to be sent.
+       A streamed partial response sends ``page_stream_opened`` instead.
    * - ``static_backend_loaded``
      - The static backend class
      - ``config``, ``instance``
@@ -266,14 +345,14 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        ``cleaned_data`` is a copy of that step's validated data.
    * - ``zone_registered``
      - The compiled page template class
-     - ``template``, ``zone_name``, ``lazy``, ``poll``
+     - ``template``, ``zone_name``, ``poll``, ``reload``
      - Once per zone of a compiled composed template, when its named zones are first read.
-       ``lazy`` is the trigger string or ``None``, ``poll`` the interval in milliseconds or ``None``.
+       ``poll`` is the interval in milliseconds or ``None``, ``reload`` is ``"keep"`` or ``"loading"``.
    * - ``zone_rendered``
      - ``ZoneRenderResult``
      - ``zone_name``, ``page_path``, ``request``, ``duration_ms``
      - After a zone body renders for a partial request.
-       ``duration_ms`` times the zone render.
+       ``duration_ms`` times the render of that zone's body alone, without the context build, and the timer runs only while a receiver is connected.
 
 .. _ref-signals-stream-lifecycle:
 
@@ -431,6 +510,12 @@ Configuration
 ~~~~~~~~~~~~~
 
 .. automodule:: next.conf.signals
+   :members:
+
+Router
+~~~~~~
+
+.. automodule:: next.router.signals
    :members:
 
 See also

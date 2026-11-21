@@ -3,7 +3,6 @@ import json
 from typing import Any
 
 from django.core.cache import cache
-from django.core.paginator import Paginator
 
 from .models import Category, Filters, Lead, Product
 
@@ -12,9 +11,7 @@ CACHE_KEY_PREFIX = "catalog.search."
 CACHE_TTL = 60
 
 
-def _cache_key(
-    filters: Filters, page: int, per_page: int, category_pk: int | None
-) -> str:
+def _cache_key(filters: Filters, category_pk: int | None) -> str:
     """Build a stable hash-based cache key for the given filter set."""
     payload: dict[str, Any] = {
         "q": filters.q,
@@ -23,8 +20,6 @@ def _cache_key(
         "price_max": str(filters.price_max) if filters.price_max is not None else None,
         "in_stock": filters.in_stock,
         "sort": filters.sort,
-        "page": page,
-        "per_page": per_page,
         "category": category_pk,
     }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -32,32 +27,21 @@ def _cache_key(
 
 
 def cached_search(
-    filters: Filters, page: int, per_page: int, *, category: Category | None = None
-) -> dict[str, Any]:
-    """Return a paginated search payload, reading from the cache when possible.
+    filters: Filters, *, category: Category | None = None
+) -> list[Product]:
+    """Return every product a filter set selects, reading from the cache when possible.
 
-    The page slice is a list so the cached payload keeps no lazy queryset.
+    The rows are cached unpaged, so one entry serves every window a pager cuts.
     """
-    key = _cache_key(filters, page, per_page, category.pk if category else None)
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
-    qs = Product.objects.matching(filters)
-    if category is not None:
-        qs = qs.filter(category=category)
-    paginator = Paginator(qs, per_page)
-    page_obj = paginator.get_page(page)
-    payload: dict[str, Any] = {
-        "products": list(page_obj.object_list),
-        "total": paginator.count,
-        "page": page_obj.number,
-        "num_pages": paginator.num_pages,
-        "per_page": per_page,
-        "has_next": page_obj.has_next(),
-        "has_prev": page_obj.has_previous(),
-    }
-    cache.set(key, payload, CACHE_TTL)
-    return payload
+    key = _cache_key(filters, category.pk if category else None)
+    rows = cache.get(key)
+    if rows is None:
+        matched = Product.objects.matching(filters)
+        if category is not None:
+            matched = matched.filter(category=category)
+        rows = list(matched)
+        cache.set(key, rows, CACHE_TTL)
+    return rows
 
 
 def featured_products(count: int) -> list[Product]:

@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from collections.abc import AsyncIterable
-from typing import TYPE_CHECKING, Any, Final, TypeGuard, cast, override
+from typing import TYPE_CHECKING, Any, ClassVar, Final, TypeGuard, cast, override
 
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
@@ -24,14 +24,21 @@ from .stream import StreamEnd, StreamHello, StreamMeta, StreamSkip
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+    from collections.abc import (
+        AsyncGenerator,
+        AsyncIterator,
+        Awaitable,
+        Callable,
+        Iterable,
+        Iterator,
+    )
     from typing import Protocol
 
     from django.http import HttpRequest
 
     from .backends import PartialProtocolBackend
     from .patches import Patches
-    from .stream import StreamPosition
+    from .stream import StreamPatch, StreamPosition
 
     class _TopicMessage(Protocol):
         @property
@@ -47,8 +54,16 @@ if TYPE_CHECKING:
         def epoch(self) -> str: ...
 
     type ControlFrame = StreamHello | StreamSkip | StreamEnd
+    type EventItem = Patches | Envelope | _TopicMessage | ControlFrame | StreamPatch
     type PatchItem = (
-        Patches | Envelope | _TopicMessage | StreamHello | StreamSkip | StreamEnd | None
+        Patches
+        | Envelope
+        | _TopicMessage
+        | StreamHello
+        | StreamSkip
+        | StreamEnd
+        | StreamPatch
+        | None
     )
     PatchSource = Iterable[PatchItem] | AsyncIterable[PatchItem]
 
@@ -124,6 +139,9 @@ class PatchStreamWriter(StreamingHttpResponse):
     Django buffers a mismatched sync/async iterator, so the constructor refuses it.
     """
 
+    heartbeat_frame: ClassVar[bytes] = _HEARTBEAT_FRAME
+    """The comment frame written while the source has nothing to send."""
+
     def __init__(
         self,
         request: "HttpRequest",
@@ -191,7 +209,7 @@ class PatchStreamWriter(StreamingHttpResponse):
 
     def _build_content(
         self, source: "PatchSource"
-    ) -> "Iterator[bytes] | AsyncIterator[bytes]":
+    ) -> "Iterator[bytes] | AsyncGenerator[bytes, None]":
         """Return a sync or async byte stream matching the source kind."""
         if isinstance(source, AsyncIterable):
             return self._async_stream(source)
@@ -205,10 +223,10 @@ class PatchStreamWriter(StreamingHttpResponse):
         sent = 0
         try:
             self._announce_opened()
-            yield self._retry_frame()
+            yield self._opening_frame()
             for item in source:
                 if item is None:
-                    yield _HEARTBEAT_FRAME
+                    yield self.heartbeat_frame
                     continue
                 frame = self._event_frame(item)
                 if not isinstance(item, _CONTROL_FRAMES):
@@ -232,7 +250,7 @@ class PatchStreamWriter(StreamingHttpResponse):
 
     async def _async_stream(
         self, source: "AsyncIterable[PatchItem]"
-    ) -> "AsyncIterator[bytes]":
+    ) -> "AsyncGenerator[bytes, None]":
         """Yield SSE bytes for an async source, interleaving heartbeats.
 
         One pull task is held across heartbeats so the generator is never re-entered.
@@ -253,7 +271,7 @@ class PatchStreamWriter(StreamingHttpResponse):
             await self._aannounce_opened()
             if self._heartbeat_seconds > 0:
                 watch = stall.start(self._heartbeat_seconds, drop)
-            frame = self._retry_frame()
+            frame = self._opening_frame()
             while True:
                 stall.hold()
                 yield frame
@@ -262,7 +280,7 @@ class PatchStreamWriter(StreamingHttpResponse):
                     task = asyncio.ensure_future(iterator.__anext__())
                 done, _ = await asyncio.wait({task}, timeout=self._heartbeat_seconds)
                 if not done:
-                    frame = _HEARTBEAT_FRAME
+                    frame = self.heartbeat_frame
                     continue
                 try:
                     patches = task.result()
@@ -271,7 +289,7 @@ class PatchStreamWriter(StreamingHttpResponse):
                 finally:
                     task = None
                 if patches is None:
-                    frame = _HEARTBEAT_FRAME
+                    frame = self.heartbeat_frame
                     continue
                 frame = self._event_frame(patches)
                 if not isinstance(patches, _CONTROL_FRAMES):
@@ -306,9 +324,7 @@ class PatchStreamWriter(StreamingHttpResponse):
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                 await aclose()
 
-    def _event_frame(
-        self, item: "Patches | Envelope | _TopicMessage | ControlFrame"
-    ) -> bytes:
+    def _event_frame(self, item: "EventItem") -> bytes:
         """Serialize a patch envelope or stream control object as an SSE frame."""
         backend = partial_backend_manager.get()
         if isinstance(item, StreamHello):
@@ -378,6 +394,10 @@ class PatchStreamWriter(StreamingHttpResponse):
         sender = type(self)
         if sse_stream_opened.has_listeners(sender):
             await sse_stream_opened.asend_robust(sender=sender, request=self._request)
+
+    def _opening_frame(self) -> bytes:
+        """Return the first frame of the stream, the `retry` hint of a reconnecting."""
+        return self._retry_frame()
 
     def _retry_frame(self) -> bytes:
         """Return the leading SSE `retry` hint frame."""

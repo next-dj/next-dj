@@ -47,6 +47,19 @@ class TestNextStatReloader:
             next(gen)
             mock_snapshot.assert_called()
 
+    def test_each_tick_refreshes_the_component_boundary_files(self) -> None:
+        """A component `error.djx` that appears is seen on the next tick."""
+        reloader = NextStatReloader()
+        with (
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch("next.server.autoreload.refresh_component_files") as refresh,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+
+        assert refresh.call_count == 2
+
     @pytest.mark.parametrize(
         ("reloader_tick_scenario", "num_ticks", "expect"),
         [

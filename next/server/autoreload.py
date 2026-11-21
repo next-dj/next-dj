@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, override
 
 from django.utils.autoreload import StatReloader
 
+from next.components import refresh_component_files
 from next.pages.loaders import has_body
 from next.pages.watch import get_pages_directories_for_watch
 from next.urls.dispatcher import scan_pages_tree
@@ -107,9 +108,13 @@ class NextStatReloader(StatReloader):
 
     @override
     def tick(self) -> Generator[None, None, None]:
-        """Recompute routes, compare to the previous tick, then delegate."""
+        """Recompute routes, compare to the previous tick, then delegate.
+
+        Each tick also swaps in the component boundary files, which no render stats.
+        """
         parent_ticker = super().tick()
         while True:
+            refresh_component_files()
             try:
                 routes = self._collect_routes()
             except (OSError, ImportError, ValueError) as e:

@@ -171,11 +171,11 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `flash_messages` | None (drains `django.contrib.messages` off the request and maps each level tag onto an `alert` variant) | None |
 | `table` | `extra`, `wrapper_extra` | `content` (write raw `<thead>`/`<tbody>`/`<tr>` inside) |
 | `nav` | `extra` | `content` |
-| `nav_link` | `url_name` (Django named route) **or** `url` (literal), `url_kwargs`, `url_args`, `active_when` (substring match against `resolver_match.view_name`), `label`, `variant` (tabs/pills/bar), `extra` | `content` (falls back to `{{ label }}`) |
+| `nav_link` | `url_name` (Django named route) **or** `url` (literal), `url_kwargs`, `url_args`, `label`, `variant` (tabs/pills/bar), `extra` | `content` (falls back to `{{ label }}`) |
 | `page_header` | `eyebrow`, `title`, `description`, `extra` | `description` (falls back to `<p>{{ description }}</p>`), `actions` |
 | `stat_card` | `label`, `value`, `hint`, `extra` | `value` (falls back to `{{ value }}`) |
 | `empty_state` | `icon`, `title`, `description`, `extra` | `actions` |
-| `app_shell` | `brand`, `brand_href`, `brand_icon`, `main_extra`, `header_visible` | `brand` (falls back to brand text + icon + href chrome), `nav`, `actions`, `content`, `page_footer` |
+| `app_shell` | `brand`, `brand_href`, `brand_icon`, `main_extra` | `brand` (falls back to brand text + icon + href chrome), `nav` (rendered inside `<nav aria-label="Main">` when filled), `actions`, `content`, `page_footer` |
 | `dropdown` | `label`, `extra` | `trigger`, `items` |
 | `dialog` | `id`, `title`, `description`, `extra` | `content`, `footer` |
 | `markdown_preview` | `source` (raw Markdown rendered server-side for first paint), `label` (defaults to `Live preview`) | None |
@@ -215,10 +215,15 @@ A form field with a server-side error and a Django widget passed in as the contr
 {% /component %}
 ```
 
-Active-state navigation (works with namespaced URL names too):
+Active-state navigation. The framework marks every link inside a `<nav>`, a `[role=navigation]` or a `[data-next-nav]` element on each full page, `aria-current="page" data-next-current="page"` for the current path and `data-next-current="ancestor"` for a segment prefix of it. `nav_link` computes no state, each variant is one class string that styles those marks through Tailwind's `aria-[current=page]:` variant, and the `bar` variant styles the ancestor mark through `data-[next-current=ancestor]:` as well, so a section link stays lit on every page below it. The link must sit in a navigation container, which the `nav` slot of `app_shell` and the `nav` component both provide:
 
 ```django
-{% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="Admin" variant="bar" %}
+{% #component "app_shell" brand="My app" brand_href="/" %}
+  {% #slot "nav" %}
+    {% component "nav_link" url_name="next:page_admin" label="Admin" variant="bar" %}
+  {% /slot %}
+  {% #slot "content" %}{% template %}{% /slot %}
+{% /component %}
 ```
 
 Inject an extra tag into the page head:

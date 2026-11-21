@@ -4,7 +4,10 @@ import types
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from next.deps.cache import render_dep_cache
+from next.diagnostics import status_kept
 from next.pages import page
+from next.pages.boundaries import Caught, boundary_scope
 
 from .origin import resolve_origin
 
@@ -16,6 +19,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from .backends import FormActionBackend
+    from .wizard import FormWizard
 
 
 def _form_fallback_html(form: "BaseForm | BaseFormSet | None") -> str:
@@ -44,6 +48,7 @@ def render_form_page_with_errors(
     """Render the page template for `page_file_path` with a bound form in context.
 
     Dispatch authorized the page first, so the re-render never decides who may see what.
+    A failure a page boundary contains renders its error UI, at the form flow's status.
     """
     file_path = page_file_path
     action_name = params.action_name
@@ -56,13 +61,37 @@ def render_form_page_with_errors(
     if not template.source:
         return _form_fallback_html(form)
 
+    chain = page.composed_chain(file_path)
+    with status_kept(), boundary_scope(chain):
+        built = page.guarded_context(file_path, request, params.url_kwargs, chain=chain)
+        if isinstance(built, Caught):
+            return page.render_caught(
+                file_path,
+                built,
+                request,
+                params.url_kwargs,
+                dep_cache=render_dep_cache(request),
+                chain=chain,
+            )
+        _bind_form(built, request, params, meta.get("wizard_class"))
+        rendered, _collector = page.render_with_static_assets(
+            file_path, template, built, request=request
+        )
+    return rendered
+
+
+def _bind_form(
+    context_data: dict[str, object],
+    request: "HttpRequest",
+    params: ErrorRenderParams,
+    wizard_class: "type[FormWizard] | None",
+) -> None:
+    """Put the bound form, its wizard and the overrides into `context_data`."""
+    form = params.form
     url_kwargs = params.url_kwargs
     overrides = params.overrides or {}
-
-    context_data = page.build_render_context(file_path, request, url_kwargs)
     if form is not None:
         namespace = types.SimpleNamespace(form=form)
-        wizard_class = meta.get("wizard_class")
         # An overridden wizard is bound to its step, a rebuild would use the old origin.
         if wizard_class is not None and "wizard" not in overrides:
             origin_match = resolve_origin(request)
@@ -72,14 +101,9 @@ def render_form_page_with_errors(
             )
             namespace.wizard = wizard
             context_data["wizard"] = wizard
-        context_data[action_name] = namespace
+        context_data[params.action_name] = namespace
         context_data["form"] = form
     context_data.update(overrides)
-
-    rendered, _collector = page.render_with_static_assets(
-        file_path, template, context_data, request=request
-    )
-    return rendered
 
 
 __all__ = ["ErrorRenderParams", "render_form_page_with_errors"]

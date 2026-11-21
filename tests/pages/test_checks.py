@@ -541,15 +541,28 @@ def get_context_data() -> str:
         assert len(errors) == 1
         assert errors[0].id == "next.E029"
 
-    def test_async_keyless_context_is_e218_not_e029(self, tmp_path) -> None:
-        """An `async def` keyless `@context` stops the import, so E218 names it."""
+    def test_async_keyless_context_reads_its_awaited_annotation(self, tmp_path) -> None:
+        """An `async def` keyless `@context` loads, and its result type must be a dict."""
+        (tmp_path / "page.py").write_text("""
+from next.pages import context
+
+@context
+async def get_context_data() -> str:
+    return {}
+        """)
+
+        with patch_checks_router_manager(pages_directory=tmp_path):
+            assert [m.id for m in check_context_functions(None)] == ["next.E029"]
+
+    def test_async_generator_keyless_context_is_e218_not_e029(self, tmp_path) -> None:
+        """An async generator keyless `@context` stops the import, so E218 names it."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
 
 @context
 async def get_context_data() -> str:
-    return {}
+    yield {}
         """)
 
         with patch_checks_router_manager(pages_directory=tmp_path):
@@ -629,6 +642,26 @@ def _processor_with_request(request):
 
 
 def _processor_without_request():
+    return {}
+
+
+def _processor_with_any_name(_request):
+    return {"tagline": "x"}
+
+
+def _processor_with_varargs(*args):
+    return {}
+
+
+def _processor_with_an_optional_extra(request, extra=None):
+    return {}
+
+
+def _processor_keyword_only(*, request):
+    return {}
+
+
+def _processor_with_two_required(request, extra):
     return {}
 
 
@@ -804,6 +837,29 @@ class TestContextProcessorSignature:
         }
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
             assert check_context_processor_signature() == []
+
+    @pytest.mark.parametrize(
+        ("name", "errors"),
+        [
+            ("_processor_with_any_name", []),
+            ("_processor_with_varargs", []),
+            ("_processor_with_an_optional_extra", []),
+            ("_processor_keyword_only", ["next.E040"]),
+            ("_processor_with_two_required", ["next.E040"]),
+        ],
+    )
+    def test_django_calls_the_processor_positionally(
+        self, name: str, errors: list[str]
+    ) -> None:
+        backend = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "PAGES_DIR": "pages",
+            "OPTIONS": {"context_processors": [f"tests.pages.test_checks.{name}"]},
+        }
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
+            assert [e.id for e in check_context_processor_signature()] == errors
 
     def test_a_non_list_backend_setting_reports_nothing(self) -> None:
         stand_in = next_framework_settings_stand_in(PAGE_BACKENDS="not a list")

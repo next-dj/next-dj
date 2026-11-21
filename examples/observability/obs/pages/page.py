@@ -17,7 +17,7 @@ scripts = [
 def totals() -> dict[str, int]:
     """Return the headline counters every overview tile reads from.
 
-    The `zone=` binding keeps the four aggregations off the lazy `busiest-pages` GET.
+    The `zone=` binding keeps the four aggregations off a GET of any other zone.
     """
     return {
         "pages_rendered": metrics.total_for_kind("pages.rendered"),

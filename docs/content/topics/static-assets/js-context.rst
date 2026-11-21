@@ -419,6 +419,7 @@ Pass the result of ``collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS
    from next.static.nonce import resolve_nonce
    from next.static.runtime import (
        CHUNK_STATIC_PATHS,
+       LISTED_CHUNK_KEYS,
        NEXT_JS_STATIC_PATH,
        RESERVED_PAYLOAD_KEYS,
        NextScriptBuilder,
@@ -438,8 +439,8 @@ Pass the result of ``collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS
            reserved=RESERVED_PAYLOAD_KEYS
        )
        chunks = {
-           name: staticfiles_storage.url(path)
-           for name, path in CHUNK_STATIC_PATHS.items()
+           name: staticfiles_storage.url(CHUNK_STATIC_PATHS[name])
+           for name in LISTED_CHUNK_KEYS
        }
        nonce = resolve_nonce(context.get("request"))
        return mark_safe(
@@ -456,7 +457,8 @@ Pass the result of ``collector.js_context_payload(reserved=RESERVED_PAYLOAD_KEYS
 A payload built this way carries no other reserved entry, because the static manager writes ``$csrf``, ``$dev``, ``$scripts``, and ``$consent`` only under ``AUTO``, so a page injected by hand runs no consent-gated script and no deferred CSRF.
 A payload built from ``js_context()`` alone also keeps a project key of a reserved name, which is why the example reads ``js_context_payload`` instead.
 
-The example adds ``$chunks`` from ``CHUNK_STATIC_PATHS``, since without it the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, WebSocket, CSRF, poll, and diagnostics chunks never load.
+The example adds ``$chunks`` for the keys of ``LISTED_CHUNK_KEYS``, since without it the runtime has no URL for any lazy chunk, so ``Next.ready("scripts")`` rejects and the stream, WebSocket, CSRF, poll, and diagnostics chunks never load.
+``CHUNK_STATIC_PATHS`` also holds the declared bundles ``defer``, ``reload``, ``more``, and ``reader``, which a page loads by its own ``<script>`` tag and which never belong in ``$chunks``.
 ``init_script`` appends the ``$realtime`` entry of ``realtime_offer()`` from ``next.static.runtime`` whenever the payload carries ``$chunks``.
 A payload without ``$chunks`` therefore leaves the runtime on Server-Sent Events under the stock content type, even when the project enables the ``ws`` transport or a custom protocol backend.
 ``Next.ready`` waits for ``Next._init``, so a layout that never emits the init script leaves every ``Next.ready`` call pending.

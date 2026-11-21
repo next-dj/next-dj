@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
@@ -7,7 +8,12 @@ from django.http import HttpResponse
 
 from next.pages.manager import page as page_singleton
 from next.pages.responses import finish_response, response_policy
-from tests.benchmarks.factories import build_layout_page
+from tests.benchmarks.factories import (
+    REQUEST_ROUNDS,
+    REQUEST_WARMUP_ROUNDS,
+    build_layout_page,
+    each_round,
+)
 from tests.support import plain_get, unified_view
 
 
@@ -68,6 +74,11 @@ class TestBenchResponsePolicy:
         request = plain_get("/")
         try:
             view(request)
-            benchmark(view, request)
+            benchmark.pedantic(
+                view,
+                setup=each_round(partial(plain_get, "/")),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
         finally:
             page_singleton.clear_template_caches()

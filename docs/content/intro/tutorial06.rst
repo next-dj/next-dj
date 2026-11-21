@@ -328,5 +328,5 @@ The Notes application is complete and live.
 .. seealso::
 
    :doc:`whatsnext` lists where to go next, by topic.
-   :doc:`/content/topics/partial-rendering/index` covers zones, patches, modals, lazy zones, and the SSE bridge.
+   :doc:`/content/topics/partial-rendering/index` covers zones, patches, modals, components that load later, and the SSE bridge.
    :doc:`/content/topics/partial-rendering/scenarios` walks seven partial-rendering tasks from markup to handler.

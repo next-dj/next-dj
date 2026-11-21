@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -8,6 +8,7 @@ import next.partial.render as render_module
 from next.partial import UnknownZoneError, ZoneRenderResult, render_zone
 from next.partial.signals import zone_rendered
 from next.partial.zone import POLL_ATTR, ZONE_ATTR
+from next.testing import capture_signals
 from tests.support import counting_provider, plain_get
 
 
@@ -88,10 +89,16 @@ class TestRenderZoneBatch:
         result = render_zone(ZONED_PAGE, ("alpha",), _request())
         assert "hi" in result.html["alpha"]
 
-    def test_lazy_zone_renders_real_body_without_lazy_hint(self) -> None:
+    def test_a_loading_reload_zone_keeps_its_reload_attributes(self) -> None:
         result = render_zone(ZONED_PAGE, ("later",), _request())
-        assert result.html["later"] == f'<div {ZONE_ATTR}="later"><p>later hi</p></div>'
-        assert "data-next-lazy" not in result.html["later"]
+        assert result.html["later"] == (
+            f'<div {ZONE_ATTR}="later" data-next-reload="loading" '
+            'data-next-delay="300"><p>later hi</p></div>'
+        )
+
+    def test_a_zone_get_leaves_the_skeleton_stash_on_the_page(self) -> None:
+        result = render_zone(ZONED_PAGE, ("later",), _request())
+        assert "data-next-loading" not in result.html["later"]
 
     def test_poll_zone_delivery_keeps_the_poll_interval(self) -> None:
         result = render_zone(ZONED_PAGE, ("ticker",), _request())
@@ -187,6 +194,23 @@ class TestZoneRenderedSignal:
         result = render_zone(ZONED_PAGE, ("alpha",), _request())
         assert result.html
 
+    def test_each_zone_reports_its_own_render_time(self) -> None:
+        clock = [10.0, 10.004, 20.0, 20.25]
+        with (
+            patch.object(render_module, "perf_counter", side_effect=clock),
+            capture_signals(zone_rendered) as recorded,
+        ):
+            render_zone(ZONED_PAGE, ("alpha", "beta"), _request())
+        durations = {
+            event.kwargs["zone_name"]: event.kwargs["duration_ms"] for event in recorded
+        }
+        assert durations == {"alpha": pytest.approx(4.0), "beta": pytest.approx(250.0)}
+
+    def test_no_clock_reads_without_receivers(self) -> None:
+        with patch.object(render_module, "perf_counter") as clock:
+            render_zone(ZONED_PAGE, ("alpha", "beta"), _request())
+        clock.assert_not_called()
+
 
 class TestRenderZoneScopedContext:
     """A zone GET runs the providers of its own zones plus the zone-less ones."""
@@ -247,3 +271,32 @@ class TestRenderZoneNestedContext:
         page_file, _calls = nested_zone_page
         result = render_zone(page_file, ("deep", "away", "inner"), _request())
         assert list(result.html) == ["away", "inner"]
+
+
+class TestAssembledZoneBody:
+    """A zone body of a deferring project settles its jobs inside its boundaries."""
+
+    def _settle(self, render, *, collector, request) -> str:
+        return f"@{render()}@"
+
+    def test_the_body_settles_alone(self) -> None:
+        with patch.object(render_module, "render_deferred", self._settle):
+            html = render_module._assembled(None, Mock(), _request(), lambda: "b")
+        assert html == "@b@"
+
+    def test_the_body_settles_inside_its_page_boundaries(self) -> None:
+        def around(render) -> str:
+            return f"[{render()}]"
+
+        with patch.object(render_module, "render_deferred", self._settle):
+            html = render_module._assembled(around, Mock(), _request(), lambda: "b")
+        assert html == "@[b]@"
+
+    def test_a_deferring_project_renders_every_zone_through_it(
+        self, monkeypatch: pytest.MonkeyPatch, nested_zone_page
+    ) -> None:
+        page_file, _calls = nested_zone_page
+        monkeypatch.setattr(render_module, "defers", Mock(return_value=True))
+        with patch.object(render_module, "render_deferred", self._settle):
+            result = render_zone(page_file, ("away",), _request())
+        assert result.bodies["away"].startswith("@")

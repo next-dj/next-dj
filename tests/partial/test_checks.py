@@ -1,5 +1,7 @@
+import inspect
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
+from functools import partialmethod
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -9,6 +11,7 @@ from django.core.checks.registry import registry as check_registry
 from django.template import TemplateDoesNotExist
 from django.test import override_settings
 
+from next import forms as next_forms
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.pages.manager import page
@@ -401,37 +404,25 @@ class TestZoneInGuardedComponentPart:
         assert 'the component "guarded"' in messages[1].msg
 
 
-class TestLazyPlaceholderCheck:
-    """`next.E064` fires when a lazy zone has no `{% placeholder %}`."""
-
-    def test_lazy_without_placeholder(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "lazy_bad")
-        body = '{% zone "z" lazy="load" %}<p>{{ a }}</p>{% endzone %}'
-        with _composed_pages((page_file, body)):
-            ids = [m.id for m in checks.check_lazy_zone_has_placeholder()]
-        assert ids == [checks.E_LAZY_WITHOUT_PLACEHOLDER]
-
-    def test_lazy_with_placeholder_is_silent(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "lazy_ok")
-        body = (
-            '{% zone "z" lazy="load" %}<p>{{ a }}</p>'
-            "{% placeholder %}<div>loading</div>{% endzone %}"
-        )
-        with _composed_pages((page_file, body)):
-            assert checks.check_lazy_zone_has_placeholder() == []
-
-
 class TestComposedTemplateCompileCheck:
     """`next.E072` fires when a composed page template fails to compile."""
 
-    def test_placeholder_without_lazy_errors(self, tmp_path: Path) -> None:
+    def test_a_placeholder_branch_is_an_unknown_tag(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "broken")
         body = '{% zone "z" %}<p>{{ a }}</p>{% placeholder %}<p>p</p>{% endzone %}'
         with _composed_pages((page_file, body)):
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
         assert str(page_file) in messages[0].msg
-        assert "placeholder requires lazy=" in messages[0].msg
+        assert "Invalid block tag on line 1: 'placeholder'" in messages[0].msg
+
+    def test_a_lazy_option_is_unknown(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "lazy")
+        body = '{% zone "z" lazy="load" %}<p>{{ a }}</p>{% endzone %}'
+        with _composed_pages((page_file, body)):
+            messages = checks.check_composed_templates_compile()
+        assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+        assert "got an unknown option 'lazy'" in messages[0].msg
 
     def test_healthy_page_is_silent(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "compiles")
@@ -678,9 +669,31 @@ class TestZoneInComponentCheck:
             ids = [m.id for m in checks.check_no_zone_in_component()]
         assert ids == [checks.E_ZONE_IN_COMPONENT]
 
-    def test_component_without_zone_is_silent(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("source", "tag"),
+        [
+            ('{%zone "inner" %}x{% endzone %}', "zone"),
+            ('{% more zone="rows" next=n %}x{% endmore %}', "more"),
+            ('{%more zone="rows" previous=n%}x{% endmore %}', "more"),
+        ],
+    )
+    def test_every_tag_declaring_a_zone_is_reported(
+        self, tmp_path: Path, source: str, tag: str
+    ) -> None:
         component = tmp_path / "card.djx"
-        component.write_text("<div>plain card</div>")
+        component.write_text(f"<div>{source}</div>")
+        with _component(component):
+            [message] = checks.check_no_zone_in_component()
+        assert message.id == checks.E_ZONE_IN_COMPONENT
+        assert f"declares a zone through a {{% {tag} %}} tag" in message.msg
+
+    @pytest.mark.parametrize(
+        "source",
+        ["<div>plain card</div>", "{% zones %}", "{% more_items %}", "{% moreover %}"],
+    )
+    def test_component_without_zone_is_silent(self, tmp_path: Path, source) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text(source)
         with _component(component):
             assert checks.check_no_zone_in_component() == []
 
@@ -704,6 +717,77 @@ class TestZoneInComponentCheck:
         settings_ns.COMPONENT_BACKENDS = []
         with patch("next.partial.checks.zones.next_framework_settings", settings_ns):
             assert checks.check_no_zone_in_component() == []
+
+    def test_the_message_points_at_component_boundaries(self, tmp_path: Path) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text('{% zone "inner" %}x{% endzone %}')
+        with _component(component):
+            [message] = checks.check_no_zone_in_component()
+        assert "around the component call" in message.msg
+        assert "a loading.djx beside it" in message.msg
+
+
+def _skeleton_errors(root: Path) -> list[tuple[str, str]]:
+    """Return the `next.E232` errors under `root` as (id, file name) pairs."""
+    return [
+        (m.id, Path(str(m.obj)).name)
+        for m in checks.check_zone_skeletons_have_zones()
+        if str(m.obj).startswith(str(root))
+    ]
+
+
+class TestZoneSkeletonCheck:
+    """`next.E232` fires on a `loading.<zone>.djx` whose template lacks the zone."""
+
+    def test_a_skeleton_of_a_declared_zone_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        (page_file.parent / "loading.rows.djx").write_text("S")
+        with _composed_pages((page_file, '{% zone "rows" %}x{% endzone %}')):
+            assert _skeleton_errors(tmp_path) == []
+
+    def test_a_skeleton_of_an_undeclared_zone_errors(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        (page_file.parent / "loading.rowz.djx").write_text("S")
+        (page_file.parent / "loading.djx").write_text("L")
+        with _composed_pages((page_file, '{% zone "rows" %}x{% endzone %}')):
+            messages = [
+                m
+                for m in checks.check_zone_skeletons_have_zones()
+                if str(m.obj).startswith(str(tmp_path))
+            ]
+        assert [m.id for m in messages] == [checks.E_SKELETON_ZONE_UNKNOWN]
+        assert 'zone "rowz"' in messages[0].msg
+        assert messages[0].obj == str(page_file.parent / "loading.rowz.djx")
+
+    def test_a_layout_holds_the_skeletons_of_its_own_zones(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "layout.djx").write_text(
+            '{% zone "nav" %}n{% endzone %}{% template %}'
+        )
+        (tmp_path / "loading.nav.djx").write_text("S")
+        (tmp_path / "loading.rows.djx").write_text("S")
+        page_file = _page_dir(tmp_path, "rows")
+        with _composed_pages((page_file, '{% zone "rows" %}x{% endzone %}')):
+            errors = _skeleton_errors(tmp_path)
+        assert errors == [(checks.E_SKELETON_ZONE_UNKNOWN, "loading.rows.djx")]
+
+    def test_an_inline_page_template_declares_its_zones(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "inline")
+        (page_file.parent / "loading.pz.djx").write_text("S")
+        source = "template = '{% zone \"pz\" %}x{% endzone %}'\n"
+        with _context_pages((page_file, source, "")):
+            assert _skeleton_errors(tmp_path) == []
+
+    def test_a_component_skeleton_needs_the_zone_in_its_template(
+        self, tmp_path: Path
+    ) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text("<div>card</div>")
+        (tmp_path / "loading.card.djx").write_text("S")
+        with _component(component):
+            errors = _skeleton_errors(tmp_path)
+        assert errors == [(checks.E_SKELETON_ZONE_UNKNOWN, "loading.card.djx")]
 
 
 @pytest.mark.usefixtures("restored_op_registry")
@@ -731,6 +815,128 @@ class _PartialUnawareBackend(RegistryFormActionBackend):
         """Serve a full page regardless of the partial switch."""
         del request, outcome
         return object()
+
+
+class _ShaperConsultingBackend(RegistryFormActionBackend):
+    """Backend whose override asks its shaper before its own envelope."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Return what the shaper builds, an empty page when it declines."""
+        shaped = self.shaper.shape(self, request, outcome)
+        return shaped if shaped is not None else object()
+
+
+class _DeferringBackend(RegistryFormActionBackend):
+    """Backend whose override restamps the response the base hook built."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Stamp an audit header on the base response."""
+        response = super().shape_response(request, outcome)
+        response["X-Audited"] = "1"
+        return response
+
+
+class _DeferringToUnawareBackend(_PartialUnawareBackend):
+    """Backend deferring to a parent whose override never consults the shaper."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the parent override."""
+        return super().shape_response(request, outcome)
+
+
+class _NamedBaseBackend(RegistryFormActionBackend):
+    """Backend whose override calls the base hook by its class name."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the base hook named outright."""
+        return FormActionBackend.shape_response(self, request, outcome)
+
+
+class _ModuleNamedBaseBackend(RegistryFormActionBackend):
+    """Backend whose override names the base hook through its module."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the base hook named through `next.forms`."""
+        return next_forms.FormActionBackend.shape_response(self, request, outcome)
+
+
+class _NamedUnawareBaseBackend(_PartialUnawareBackend):
+    """Backend naming a parent whose override never consults the shaper."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the parent override named outright."""
+        return _PartialUnawareBackend.shape_response(self, request, outcome)
+
+
+class _AuditMixin:
+    """Mixin restamping whatever the next class in the MRO answers."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Stamp an audit header on the response the next class builds."""
+        response = super().shape_response(request, outcome)
+        response["X-Audited"] = "1"
+        return response
+
+
+class _NamedMixinBackend(_AuditMixin, RegistryFormActionBackend):
+    """Backend naming a mixin that defers to the base hook."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the mixin named outright."""
+        return _AuditMixin.shape_response(self, request, outcome)
+
+
+def _shaping_hook(backend, request: object, outcome: object) -> object:
+    """Return what the shaper builds, an empty page when it declines."""
+    shaped = backend.shaper.shape(backend, request, outcome)
+    return shaped if shaped is not None else object()
+
+
+class _RenamedReceiverBackend(RegistryFormActionBackend):
+    """Backend whose hook calls its instance by another name than self."""
+
+    shape_response = _shaping_hook
+
+
+class _GetattrShaperBackend(RegistryFormActionBackend):
+    """Backend whose override reads the shaper through `getattr`."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Return what the shaper builds, an empty page when it has none."""
+        shaper = getattr(self, "shaper", None)
+        shaped = shaper.shape(self, request, outcome) if shaper is not None else None
+        return shaped if shaped is not None else object()
+
+
+def _full_page(backend: object, request: object, outcome: object) -> object:
+    """Serve a full page regardless of the partial switch."""
+    del backend, request, outcome
+    return object()
+
+
+class _SourcelessHookBackend(RegistryFormActionBackend):
+    """Backend whose hook is no function, so its source is not inspected."""
+
+    shape_response = partialmethod(_full_page)
+
+
+class _StaticHookBackend(RegistryFormActionBackend):
+    """Backend whose hook is a static method, which sees no instance shaper."""
+
+    @staticmethod
+    def shape_response(request: object, outcome: object) -> object:
+        """Serve a full page regardless of the partial switch."""
+        del request, outcome
+        return object()
+
+
+class _ClassHookBackend(RegistryFormActionBackend):
+    """Backend whose hook is a class method, which reads no instance shaper."""
+
+    @classmethod
+    def shape_response(cls, request: object, outcome: object) -> object:
+        """Ask the class attribute, which is no shaper instance."""
+        return cls.shaper.shape(cls, request, outcome)
 
 
 @contextmanager
@@ -773,8 +979,52 @@ class TestFormBackendPartialAwareCheck:
         with _form_backends(_PartialUnawareBackend(), partial_active=False):
             assert checks.check_form_backend_partial_aware() == []
 
+    def test_the_warning_names_the_shaper(self) -> None:
+        with _form_backends(_PartialUnawareBackend(), partial_active=True):
+            (message,) = checks.check_form_backend_partial_aware()
+        assert "without consulting self.shaper" in message.msg
+
+    @pytest.mark.parametrize(
+        "backend_class",
+        [
+            pytest.param(_ShaperConsultingBackend, id="reads-the-shaper"),
+            pytest.param(_DeferringBackend, id="defers-to-the-base"),
+            pytest.param(_NamedBaseBackend, id="names-the-base"),
+            pytest.param(_ModuleNamedBaseBackend, id="names-the-base-by-module"),
+            pytest.param(_NamedMixinBackend, id="names-a-deferring-mixin"),
+            pytest.param(_RenamedReceiverBackend, id="renamed-receiver"),
+            pytest.param(_GetattrShaperBackend, id="getattr-shaper"),
+            pytest.param(_SourcelessHookBackend, id="no-function-source"),
+        ],
+    )
+    def test_an_override_reaching_the_shaper_is_silent(self, backend_class) -> None:
+        with _form_backends(backend_class(), partial_active=True):
+            assert checks.check_form_backend_partial_aware() == []
+
+    @pytest.mark.parametrize(
+        "backend_class",
+        [
+            pytest.param(_DeferringToUnawareBackend, id="defers-to-an-unaware-parent"),
+            pytest.param(_NamedUnawareBaseBackend, id="names-an-unaware-parent"),
+            pytest.param(_StaticHookBackend, id="static-method"),
+            pytest.param(_ClassHookBackend, id="class-method"),
+        ],
+    )
+    def test_an_override_missing_the_shaper_warns(self, backend_class) -> None:
+        with _form_backends(backend_class(), partial_active=True):
+            ids = [m.id for m in checks.check_form_backend_partial_aware()]
+        assert ids == [checks.W_FORM_BACKEND_NOT_AWARE]
+
+    def test_an_override_without_readable_source_is_silent(self) -> None:
+        """A check that cannot read the override does not guess at a warning."""
+        with (
+            _form_backends(_PartialUnawareBackend(), partial_active=True),
+            patch.object(inspect, "getsource", side_effect=OSError("no source")),
+        ):
+            assert checks.check_form_backend_partial_aware() == []
+
     def test_inherited_shape_response_is_silent(self) -> None:
-        # a subclass without its own shape_response inherits the partial-aware base
+        """A subclass without its own shape_response inherits the base hook."""
         assert _PartialUnawareBackend.shape_response is not (
             FormActionBackend.shape_response
         )
@@ -1041,8 +1291,7 @@ class TestChecksSilentOnValidComposite:
         page_file = _page_dir(tmp_path, "valid")
         body = (
             '{% zone "header" %}<h1>{{ title }}</h1>{% endzone %}'
-            '{% zone "feed" lazy="revealed" %}<ul>{{ items }}</ul>'
-            "{% placeholder %}<p>loading</p>{% endzone %}"
+            '{% zone "feed" reload="loading" %}<ul>{{ items }}</ul>{% endzone %}'
         )
         with _composed_pages((page_file, body)):
             assert checks.check_duplicate_zone_names() == []
@@ -1050,8 +1299,8 @@ class TestChecksSilentOnValidComposite:
             assert checks.check_zone_not_in_loop() == []
             assert checks.check_zone_not_in_if() == []
             assert checks.check_zone_not_in_has_perm() == []
-            assert checks.check_lazy_zone_has_placeholder() == []
             assert checks.check_with_directly_over_zone() == []
+            assert checks.check_zone_skeletons_have_zones() == []
 
 
 _ZONE_CHECKS = (
@@ -1060,8 +1309,8 @@ _ZONE_CHECKS = (
     checks.check_zone_not_in_loop,
     checks.check_zone_not_in_if,
     checks.check_repeated_form_has_key,
-    checks.check_lazy_zone_has_placeholder,
     checks.check_with_directly_over_zone,
+    checks.check_zone_skeletons_have_zones,
 )
 
 

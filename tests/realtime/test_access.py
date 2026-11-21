@@ -19,9 +19,8 @@ from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 
-from next.realtime import binding as binding_module
+from next.identity import read_only_store, session_user, stored_session
 from next.realtime.access import Access, AccessCheck
-from next.realtime.binding import session_user, stored_session
 from next.realtime.limits import heartbeat_seconds
 from next.realtime.pool import run_detached
 from tests.support.realtime import ServerClock, signed_in_session
@@ -576,7 +575,7 @@ def test_read_only_store_drops_every_write() -> None:
     session.create()
     key = session.session_key
     stored = _stored_rows()
-    store = binding_module._read_only(SessionStore)(key)
+    store = read_only_store(SessionStore)(key)
     store["note"] = "changed"
     store.save()
     store.delete()
@@ -592,7 +591,7 @@ class _Engines:
 
 def test_read_only_store_keeps_the_signing_salt_of_a_nested_engine() -> None:
     engine = _Engines.SessionStore
-    assert binding_module._read_only(engine)().key_salt == engine().key_salt
+    assert read_only_store(engine)().key_salt == engine().key_salt
 
 
 @pytest.fixture(params=_ENGINES)

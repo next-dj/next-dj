@@ -8,9 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin, override
 
-from .cache import _IN_PROGRESS
+from next.introspect import is_async_callable, is_coroutine_callable
+
+from .cache import _CACHE_MISS, _IN_PROGRESS
 from .errors import DependencyCycleError
+from .introspect import cached_signature
 from .providers import RegisteredParameterProvider
+from .runner import bridge
 
 
 if TYPE_CHECKING:
@@ -18,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from .context import ResolutionContext
-    from .plan import ParameterFiller
+    from .plan import AsyncParameterFiller, ParameterFiller
     from .resolver import DependencyResolver
 
 
@@ -50,15 +54,15 @@ def marker_origin(annotation: object) -> object:
 
 
 def factory_key(factory: object) -> str:
-    """Return the dotted identity a callable `Depends` is tracked under.
+    """Return the key a callable `Depends` is memoised and cycle-checked under.
 
-    A factory has no registered name, so its address stands in on the stack.
+    The address keeps apart factories sharing a path, as lambdas or two bound methods.
     """
     qualname = getattr(factory, "__qualname__", "")
     if not qualname:
         return f"{type(factory).__qualname__}@{id(factory):x}"
     module = getattr(factory, "__module__", "") or ""
-    return f"{module}.{qualname}"
+    return f"{module}.{qualname}@{id(getattr(factory, '__self__', factory)):x}"
 
 
 def call_factory(
@@ -67,20 +71,74 @@ def call_factory(
     key: str,
     context: ResolutionContext,
 ) -> object:
-    """Call a factory `Depends` under the cycle guards the named form owns.
+    """Call a factory `Depends` once per cache, under the guards of the named form.
 
-    Without them two factories naming each other raise `RecursionError`.
+    A failure is not stored, so the next consumer calls the factory again.
     """
+    cache = context.cache
+    found = cache.get(key)
+    if found is not _CACHE_MISS:
+        if found is _IN_PROGRESS:
+            raise DependencyCycleError([*context.stack, key])
+        return found
     stack = context.stack
-    if key in stack or context.cache.get(key) is _IN_PROGRESS:
-        raise DependencyCycleError([*stack, key])
+    if key in stack:
+        raise DependencyCycleError([*stack[stack.index(key) :], key])
     stack.append(key)
-    context.cache.mark_in_progress(key)
+    cache.mark_in_progress(key)
     try:
-        return factory(**resolver.resolve(factory, context))
+        value = factory(**resolver.resolve(factory, context))
+    except BaseException:
+        cache.unmark_in_progress(key)
+        raise
     finally:
         stack.pop()
-        context.cache.unmark_in_progress(key)
+    cache.set(key, value)
+    return value
+
+
+def call_leaf(
+    factory: Callable[[], object], key: str, context: ResolutionContext
+) -> object:
+    """Call a factory `Depends` with nothing to inject once per cache.
+
+    Nothing to inject cannot re-enter, so it takes no stack or in-progress mark.
+    """
+    cache = context.cache
+    found = cache.get(key)
+    if found is not _CACHE_MISS:
+        if found is _IN_PROGRESS:
+            raise DependencyCycleError([*context.stack, key])
+        return found
+    value = factory()
+    cache.set(key, value)
+    return value
+
+
+def injects_nothing(resolver: DependencyResolver, factory: Callable[..., Any]) -> bool:
+    """Return whether the sync `factory` has no parameter the resolver would fill."""
+    if is_async_callable(factory):
+        return False
+    try:
+        parameters = cached_signature(factory).parameters.values()
+    except (ValueError, TypeError):
+        return True
+    return all(resolver.skips(param) for param in parameters)
+
+
+def bridge_factory(
+    resolver: DependencyResolver,
+    factory: Callable[..., Any],
+    key: str,
+    context: ResolutionContext,
+) -> object:
+    """Call an async factory `Depends` from the sync path, a finished one read back."""
+    found = context.cache.get(key)
+    if found is not _CACHE_MISS and found is not _IN_PROGRESS:
+        return found
+    return bridge(
+        f"dependency {key}", lambda: resolver.acall_factory(factory, key, context)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +185,8 @@ class DependsProvider(RegisteredParameterProvider):
             return self._resolver.resolve_callable_dependency(dep, context, param=param)
 
         if callable(dep):
+            if is_coroutine_callable(dep):
+                return bridge_factory(self._resolver, dep, factory_key(dep), context)
             return call_factory(self._resolver, dep, factory_key(dep), context)
 
         return dep
@@ -150,6 +210,19 @@ class DependsProvider(RegisteredParameterProvider):
         if callable(target):
             factory = target
             key = factory_key(factory)
+            if is_coroutine_callable(factory):
+
+                def by_bridge(context: ResolutionContext) -> object:
+                    return bridge_factory(resolver, factory, key, context)
+
+                return by_bridge
+
+            if injects_nothing(resolver, factory):
+
+                def by_leaf(context: ResolutionContext) -> object:
+                    return call_leaf(factory, key, context)
+
+                return by_leaf
 
             def by_callable(context: ResolutionContext) -> object:
                 return call_factory(resolver, factory, key, context)
@@ -162,3 +235,50 @@ class DependsProvider(RegisteredParameterProvider):
             return constant
 
         return by_constant
+
+    @override
+    def static_blocking(self, param: inspect.Parameter) -> bool:
+        """Block for a name or a factory running user code, not for a constant."""
+        target = _marker_target(param)
+        return isinstance(target, str) or callable(target)
+
+    @override
+    def compile_aresolve(self, param: inspect.Parameter) -> AsyncParameterFiller | None:
+        """Await a name or a factory whose call reaches async code, once per plan.
+
+        One reaching none stays a sync filler, so its whole call shares a segment.
+        """
+        target = _marker_target(param)
+        resolver = self._resolver
+
+        if isinstance(target, str):
+            name = target
+            if not resolver.awaits_dependency(name):
+                return None
+
+            async def by_name(context: ResolutionContext) -> object:
+                return await resolver.aresolve_callable_dependency(
+                    name, context, param=param
+                )
+
+            return by_name
+
+        if callable(target):
+            factory = target
+            key = factory_key(factory)
+            if not resolver.awaits(factory, key=key):
+                return None
+
+            async def by_callable(context: ResolutionContext) -> object:
+                return await resolver.acall_factory(factory, key, context)
+
+            return by_callable
+
+        return None
+
+
+def _marker_target(param: inspect.Parameter) -> object:
+    """Return what the `Depends` default of `param` names, its own name when bare."""
+    marker: Depends = param.default
+    dep = marker.dependency
+    return param.name if dep is None else dep

@@ -1,5 +1,5 @@
 <article class="prose prose-slate max-w-none">
-  <p class="text-xs uppercase tracking-wide text-slate-500">Documentation · {{ section }}</p>
+  <p class="text-xs uppercase tracking-wide text-slate-500">Documentation · routing</p>
   <h1>Routing</h1>
 
   <p>

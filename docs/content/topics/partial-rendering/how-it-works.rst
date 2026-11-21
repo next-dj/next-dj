@@ -32,7 +32,7 @@ The request
 -----------
 
 An interaction issues a partial request instead of a full navigation.
-A form submit, an auto-submitting filter, a paginating link, a lazy zone entering the viewport, and a Server-Sent Events message all reach the same pipeline.
+A form submit, an auto-submitting filter, a paginating link, a deferred component entering the viewport, and a Server-Sent Events message all reach the same pipeline.
 
 .. code-block:: http
    :caption: request

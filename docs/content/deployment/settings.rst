@@ -144,7 +144,7 @@ Realtime
    }
 
 Set ``BROKER`` to ``RedisBroker``, because the default ``MemoryBroker`` reaches subscribers of one process only.
-Until it does, ``manage.py check --deploy`` reports ``next.W149``.
+Until it does, ``manage.py check --deploy`` reports ``next.W149`` for a project that uses realtime.
 The ``max_connections`` and ``SUBSCRIBE_MAX_CONNECTIONS`` values are placeholders.
 The subscription pool needs one connection per open stream of the process, and the command pool one per Redis call the process runs at once, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
 

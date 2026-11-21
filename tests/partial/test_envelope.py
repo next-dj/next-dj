@@ -45,6 +45,12 @@ class TestAssetAsDict:
         asset = Asset(kind="module", url="/a.mjs", load="module")
         assert asset.as_dict() == {"kind": "module", "url": "/a.mjs", "load": "module"}
 
+    def test_scope_travels_when_set(self) -> None:
+        asset = Asset(kind="css", url="/a.css", load="link", scope="page")
+        wire = asset.as_dict()
+        assert wire == {"kind": "css", "url": "/a.css", "load": "link", "scope": "page"}
+        assert Asset.from_dict(wire) == asset
+
 
 class TestEnvelopeAsDict:
     """The envelope wire form carries ops and meta with stable keys."""
@@ -104,3 +110,19 @@ class TestPatchReservedKeys:
             Patch(op="x", extras={"target": 1, "op": 2, "html": 3})
         assert exc.value.keys == frozenset({"op", "target", "html"})
         assert "html, op, target" in str(exc.value)
+
+
+class TestNavigationFields:
+    """A navigation envelope adds its fields at the top level, in wire order."""
+
+    def test_the_fields_round_trip(self) -> None:
+        envelope = Envelope(
+            version="v",
+            navigation={"shared": False, "layouts": [["a", "b", None]], "root": "a"},
+        )
+        data = envelope.as_dict()
+        assert list(data)[-3:] == ["layouts", "root", "shared"]
+        assert Envelope.from_dict(data) == envelope
+
+    def test_another_envelope_reads_no_fields(self) -> None:
+        assert Envelope.from_dict(Envelope(version="v").as_dict()).navigation is None

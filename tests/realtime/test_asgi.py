@@ -263,7 +263,8 @@ def test_authenticate_loads_the_logged_in_user_read_only() -> None:
     key = session.session_key
     stored = dict(SessionStore(key).load())
     with override_settings(
-        SECRET_KEY="rotated", SECRET_KEY_FALLBACKS=["test-secret-key"]
+        SECRET_KEY="rotated",
+        SECRET_KEY_FALLBACKS=["test-secret-key-not-for-production"],
     ):
         handshake = asyncio.run(
             WebSocketApp().authenticate(

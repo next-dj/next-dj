@@ -10,14 +10,20 @@ from typing import TYPE_CHECKING, Any, Protocol, override
 
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
-from django.template import Context as DjangoTemplateContext, Template
+from django.template import (
+    Context as DjangoTemplateContext,
+    Origin,
+    Template,
+    TemplateSyntaxError,
+)
 from django.utils.functional import SimpleLazyObject
 
 from next.caches import DEFAULT_CACHE_SIZE, LruCache
 from next.conf import fail_loudly
-from next.deps import render_dep_cache
-from next.deps.cache import DependencyCache
+from next.deps import ResolutionContext, render_dep_cache
+from next.deps.cache import DependencyCache, request_memo
 from next.deps.resolver import current_resolver
+from next.introspect import callable_name
 from next.permissions.access import check, declared
 from next.permissions.errors import UnknownAccessObjectError
 from next.seeding import (
@@ -31,8 +37,10 @@ from next.seeding import (
 from next.stamps import fresh, snapshot
 from next.utils import template_edits_watched
 
+from .boundary import current_attempt
+from .bridge import bridge
 from .context import component
-from .errors import ComponentModuleImportError
+from .errors import ComponentContextConflictError, ComponentModuleImportError
 from .loading import last_load_error
 
 
@@ -70,6 +78,11 @@ _RESERVED_CONTEXT_KEYS = frozenset(
 )
 
 SLOT_KEY_PREFIX = "slot_"
+
+
+def _compiled_template(text: str, path: Path) -> Template:
+    """Return `text` compiled as the template at `path`, which its nodes name."""
+    return Template(text, origin=Origin(str(path)), name=str(path))
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +128,18 @@ class ComponentTemplateLoader:
         source = self.load_source(info)
         if source is None:
             return None
-        return Template(source.text)
+        return _compiled_template(source.text, source.path)
+
+    def load_file(self, path: Path) -> Template | None:
+        """Return the template compiled from the file at `path`, `None` when unreadable.
+
+        It reads the `error.djx` beside a component, which `ComponentInfo` names.
+        """
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        return _compiled_template(text, path)
 
     def clear(self) -> None:
         """Do nothing, because this loader holds no compiled state."""
@@ -123,11 +147,15 @@ class ComponentTemplateLoader:
 
 @dataclass(frozen=True, slots=True)
 class _CompiledTemplate:
-    """A compiled template with the file it came from and the stamp of that file."""
+    """A compiled template with the file it came from and the stamp of that file.
+
+    A file that does not compile holds no template and the message of its failure.
+    """
 
     source_path: Path
     stamp: int
-    template: Template
+    template: Template | None
+    failure: str = ""
 
 
 # The template and module files that define one component.
@@ -177,6 +205,31 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
         return self._compile(key, info)
 
     @override
+    def load_file(self, path: Path) -> Template | None:
+        """Return the template compiled from `path`, reused until the file changes.
+
+        A syntax error is kept as well, so a broken file is not parsed per failure.
+        """
+        key = (path, None)
+        entry = self._compiled.get(key)
+        if entry is not None and self._is_fresh(entry):
+            if entry.template is None:
+                raise TemplateSyntaxError(entry.failure)
+            return entry.template
+        stamp = snapshot(path)
+        try:
+            template = super().load_file(path)
+        except TemplateSyntaxError as exc:
+            if stamp is not None:
+                self._store(key, _CompiledTemplate(path, stamp, None, str(exc)))
+            raise
+        if template is None or stamp is None:
+            self._drop(key)
+            return template
+        self._store(key, _CompiledTemplate(path, stamp, template))
+        return template
+
+    @override
     def clear(self) -> None:
         """Drop every compiled template."""
         with self._lock:
@@ -192,7 +245,7 @@ class CachedComponentTemplateLoader(ComponentTemplateLoader):
             self._drop(key)
             return None
 
-        template = Template(source.text)
+        template = _compiled_template(source.text, source.path)
         # A subclass may read a file `ComponentInfo` does not name, so stat it here.
         stamp = stamps.get(source.path)
         if stamp is None:
@@ -252,20 +305,22 @@ def _is_slot_key(key: object) -> bool:
 
 
 def _reject_collisions(
-    info: ComponentInfo, data: dict[Any, Any], guarded: frozenset[str]
+    info: ComponentInfo,
+    data: dict[Any, Any],
+    guarded: frozenset[str],
+    func: Callable[..., Any] | None = None,
 ) -> None:
     """Refuse a keyless dict that would silently overwrite a guarded name."""
     if data.keys().isdisjoint(guarded) and not any(_is_slot_key(key) for key in data):
         return
-
-    conflicts = sorted(key for key in data if key in guarded or _is_slot_key(key))
-    names = ", ".join(repr(key) for key in conflicts)
-    msg = (
-        f"Component {info.name!r} context returns {names}, reserved by the render "
-        "path or by a prop of the calling tag. Register the value under an "
-        "explicit @component.context key."
+    conflicts = tuple(
+        sorted(key for key in data if key in guarded or _is_slot_key(key))
     )
-    raise ValueError(msg)
+    function = "" if func is None else callable_name(func)
+    raise ComponentContextConflictError(info.name, function, conflicts)
+
+
+_UNRUN: Any = object()
 
 
 class _ContextRun:
@@ -335,30 +390,95 @@ class _ContextRun:
         for key, value, serializer in self.serialized:
             collector.add_js_context(key, value, serializer=serializer)
 
-    def _run(self, ctx_func: ContextFunction) -> None:
-        """Run one context function and merge or store what it returns."""
-        context_data = self.context_data
-        resolved = current_resolver().resolve_with_template_context(
-            ctx_func.func,
-            request=self.request,
-            template_context=context_data,
-            _cache=self.cache,
-            _stack=self.stack,
-        )
+    def _run(self, ctx_func: ContextFunction, result: object = _UNRUN) -> None:
+        """Run one context function, or take the `result` it awaited, and store it."""
+        if result is _UNRUN:
+            resolved = current_resolver().resolve_with_template_context(
+                ctx_func.func,
+                request=self.request,
+                template_context=self.context_data,
+                _cache=self.cache,
+                _stack=self.stack,
+            )
+            result = ctx_func.func(**resolved)
         if ctx_func.key is None:
-            data = ctx_func.func(**resolved)
-            if isinstance(data, dict):
-                _reject_collisions(self.info, data, self.guarded)
-                context_data.update(data)
+            if isinstance(result, dict):
+                _reject_collisions(self.info, result, self.guarded, ctx_func.func)
+                self.context_data.update(result)
                 if ctx_func.serialize:
                     self.serialized.extend(
-                        (k, v, ctx_func.serializer) for k, v in data.items()
+                        (k, v, ctx_func.serializer) for k, v in result.items()
                     )
-        else:
-            result = ctx_func.func(**resolved)
-            context_data[ctx_func.key] = result
-            if ctx_func.serialize:
-                self.serialized.append((ctx_func.key, result, ctx_func.serializer))
+            return
+        self.context_data[ctx_func.key] = result
+        if ctx_func.serialize:
+            self.serialized.append((ctx_func.key, result, ctx_func.serializer))
+
+
+def _resolution_context(
+    request: HttpRequest | None,
+    context_data: Mapping[str, Any],
+    cache: DependencyCache,
+    stack: list[str],
+) -> ResolutionContext:
+    """Return the context a template-context resolve builds, for the async path."""
+    return ResolutionContext(
+        request=request,
+        form=context_data.get("form"),
+        url_kwargs={},
+        context_data=context_data,
+        cache=cache,
+        stack=stack,
+    )
+
+
+class _BridgedContextRun(_ContextRun):
+    """A context run holding an async function, bridged from its first to its last.
+
+    The sync functions around that span run on the rendering thread with no hop.
+    """
+
+    __slots__ = ()
+
+    @override
+    def run_to(self, key: str | None = None) -> None:
+        """Run the functions in order until the one under `key`, one bridge at most."""
+        functions = self.functions
+        end = self._end(key)
+        awaited = [i for i in range(self.position, end) if functions[i].is_async]
+        if awaited:
+            self._run_through(awaited[0])
+            last = awaited[-1] + 1
+            bridge(self.info, lambda: self._arun_through(last))
+        self._run_through(end)
+
+    def _end(self, key: str | None) -> int:
+        """Return the index past the next function under `key`, or past the last one."""
+        functions = self.functions
+        if key is not None:
+            for index in range(self.position, len(functions)):
+                if functions[index].key == key:
+                    return index + 1
+        return len(functions)
+
+    def _run_through(self, end: int) -> None:
+        """Run the functions before index `end` on this thread, in order."""
+        functions = self.functions
+        while self.position < end:
+            ctx_func = functions[self.position]
+            self.position += 1
+            self._run(ctx_func)
+
+    async def _arun_through(self, end: int) -> None:
+        functions = self.functions
+        active = current_resolver()
+        while self.position < end:
+            ctx_func = functions[self.position]
+            self.position += 1
+            context = _resolution_context(
+                self.request, self.context_data, self.cache, self.stack
+            )
+            self._run(ctx_func, await active.acall(ctx_func.func, context))
 
 
 def _context_run(
@@ -368,9 +488,11 @@ def _context_run(
     request: HttpRequest | None,
 ) -> _ContextRun | None:
     """Return a run over the context functions of `info`, `None` when it has none."""
-    functions = component.get_functions(module_path)
+    functions, awaiting = component.lookup(module_path)
     if not functions:
         return None
+    if awaiting:
+        return _BridgedContextRun(info, context_data, request, functions)
     return _ContextRun(info, context_data, request, functions)
 
 
@@ -411,7 +533,12 @@ def _granted(
             return context_data[name]
         raise UnknownAccessObjectError(name, module_path)
 
-    return check(getattr(request, "user", None), rule, lookup) is None
+    if check(getattr(request, "user", None), rule, lookup) is not None:
+        return False
+    attempt = current_attempt.get()
+    if attempt is not None and attempt.info is info:
+        attempt.granted = True
+    return True
 
 
 def _unloaded(module_path: Path) -> str:
@@ -423,6 +550,21 @@ def _unloaded(module_path: Path) -> str:
     if error is not None and fail_loudly():
         raise ComponentModuleImportError(module_path) from error
     return ""
+
+
+def render_error_template(
+    info: ComponentInfo,
+    template: Template,
+    context_data: Mapping[str, Any],
+    request: HttpRequest | None,
+) -> str:
+    """Render the `error.djx` of `info` with the anchor and request its body gets."""
+    context_dict = dict(context_data)
+    _stamp_component_anchor(info, context_dict)
+    if request is not None:
+        context_dict[REQUEST_KEY] = request
+        _merge_csrf_context(context_dict, request)
+    return template.render(DjangoTemplateContext(context_dict))
 
 
 class ComponentRenderStrategy(Protocol):
@@ -494,12 +636,30 @@ class CompositeComponentRenderer:
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
     ) -> str:
-        """Render `info` via `component.py:render` or fall back to the template."""
+        """Render `info` via `component.py:render` or fall back to the template.
+
+        Under a request scope the instance resolves in a layer of its own render unit.
+        """
+        memo = request_memo.get()
+        if memo is None:
+            return self._render(info, context_data, request)
+        token = request_memo.set(memo.instance())
+        try:
+            return self._render(info, context_data, request)
+        finally:
+            request_memo.reset(token)
+
+    def _render(
+        self,
+        info: ComponentInfo,
+        context_data: Mapping[str, Any],
+        request: HttpRequest | None,
+    ) -> str:
         module_path = info.module_path
         if module_path is None:
             return ""
 
-        module = self._module_loader.load(module_path)
+        module, awaiting = self._module_loader.loaded(module_path)
         if module is None:
             return _unloaded(module_path)
 
@@ -507,6 +667,8 @@ class CompositeComponentRenderer:
         if callable(render_func):
             if not _granted(info, context_data, request):
                 return ""
+            if awaiting:
+                return self._render_bridged(info, render_func, context_data, request)
             return self._render_with_function(render_func, context_data, request)
 
         return self._render_with_template(info, module_path, context_data, request)
@@ -531,6 +693,20 @@ class CompositeComponentRenderer:
 
         result = render_func(**resolved)
 
+        if isinstance(result, HttpResponse):
+            return result.content.decode()
+        return str(result)
+
+    def _render_bridged(
+        self,
+        info: ComponentInfo,
+        render_func: Callable[..., Any],
+        context_data: Mapping[str, Any],
+        request: HttpRequest | None,
+    ) -> str:
+        """Await an `async def render` inside one bridge, its arguments resolved too."""
+        context = _resolution_context(request, context_data, DependencyCache(), [])
+        result = bridge(info, lambda: current_resolver().acall(render_func, context))
         if isinstance(result, HttpResponse):
             return result.content.decode()
         return str(result)
@@ -599,4 +775,5 @@ __all__ = [
     "CompositeComponentRenderer",
     "SimpleComponentRenderer",
     "TemplateSource",
+    "render_error_template",
 ]

@@ -23,6 +23,9 @@ They walk through the checklist, the static file pipeline, the server choice, an
 :doc:`wsgi-asgi`
    Choosing a server, wiring next.dj into it, and estimating capacity for realtime streams.
 
+:doc:`platforms`
+   Serverless and platform hosts, the facts that decide whether a page streams, and how to verify it.
+
 .. toctree::
    :hidden:
    :maxdepth: 1
@@ -31,3 +34,4 @@ They walk through the checklist, the static file pipeline, the server choice, an
    settings
    static-files
    wsgi-asgi
+   platforms

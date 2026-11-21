@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import enum
 import functools
 import logging
 import re
@@ -19,11 +20,13 @@ from django.template.response import SimpleTemplateResponse
 from django.utils.cache import patch_cache_control, patch_vary_headers
 
 from next.caches import PageCache
+from next.conf.compression import OPT_OUT
 from next.conf.settings import fail_loudly
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token, nonce_minted
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
-from next.diagnostics import FailureLog, degraded
+from next.diagnostics import FailureLog, degraded, degraded_status
+from next.pages.compression import page_compress
 from next.pages.loaders import AncestorStamps
 from next.pages.metadata.markers import NOINDEX_DIRECTIVES, Metadata, robots_directives
 from next.pages.metadata.resolve import published_metadata, robots_contents
@@ -290,12 +293,14 @@ def headers_problems(value: object) -> list[str]:
 class ResponsePolicy:
     """The cache, headers and robots header of one page response, set before render.
 
-    `robots` is the static `X-Robots-Tag`, used when no head was rendered.
+    `robots` is the static `X-Robots-Tag` used when no head was rendered, and a false
+    `compress` keeps every response of the page out of next.dj compression.
     """
 
     cache: CacheControl | None = None
     headers: tuple[tuple[str, str], ...] = ()
     robots: str | None = None
+    compress: bool = True
 
     @property
     def shared(self) -> bool:
@@ -345,12 +350,15 @@ def _read_declared(page: Page, file_path: Path) -> _Declared:
         (name, header) for name, header in merged.values() if header is not None
     )
     static = page.static_metadata(file_path)
-    uncached = ResponsePolicy(None, headers, _static_robots(static.metadata))
+    compress = page_compress(file_path) is not False
+    uncached = ResponsePolicy(
+        None, headers, _static_robots(static.metadata), compress=compress
+    )
     return _Declared(
         ancestors=ancestors,
         policy=replace(uncached, cache=cache_control(own)),
         uncached=uncached,
-        zone=ResponsePolicy(headers=headers),
+        zone=ResponsePolicy(headers=headers, compress=compress),
         dynamic=own if callable(own) else None,
         refused=static.refused,
     )
@@ -452,8 +460,42 @@ def _dynamic_cache(
     return NO_STORE
 
 
+class Purpose(enum.StrEnum):
+    """Why a page view rendered, which `request.next.purpose` names."""
+
+    DOCUMENT = "document"
+    NAVIGATION = "navigation"
+    PREFETCH = "prefetch"
+    SPECULATION = "speculation"
+
+
+@dataclass(frozen=True, slots=True)
+class RequestInfo:
+    """What next.dj tells user code about the request a page view serves."""
+
+    purpose: Purpose = Purpose.DOCUMENT
+
+
+NEXT_ATTR: Final = "next"
+"""The request attribute a page view sets, read by user code as `request.next`."""
+
+_INFOS: Final = {purpose: RequestInfo(purpose) for purpose in Purpose}
+
+
+def mark_purpose(request: HttpRequest, purpose: Purpose) -> None:
+    """Set `request.next` to the shared info of `purpose`."""
+    setattr(request, NEXT_ATTR, _INFOS[purpose])
+
+
+def purpose_of(request: object) -> Purpose:
+    """Return the purpose `request.next` names, a document when no view set one."""
+    info = getattr(request, NEXT_ATTR, None)
+    return info.purpose if isinstance(info, RequestInfo) else Purpose.DOCUMENT
+
+
 _SHARED_RENDER_ATTR: Final = "_next_shared_render"
 _PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
+_BOUND_RENDER_ATTR: Final = "_next_bound_render"
 _COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
 
 
@@ -488,6 +530,19 @@ def mark_personal_render(request: HttpRequest | None) -> None:
 def personal_render(request: HttpRequest | None) -> bool:
     """Whether this render put visitor-specific content into its HTML."""
     return getattr(request, _PERSONAL_RENDER_ATTR, False) is True
+
+
+def mark_bound_render(request: HttpRequest | None) -> None:
+    """Mark a render that minted a token bound to its visitor, sent private always."""
+    mark_personal_render(request)
+    if request is not None:
+        setattr(request, _BOUND_RENDER_ATTR, True)
+
+
+def _bound_private(response: HttpResponseBase, request: HttpRequest) -> None:
+    """Send a response holding a visitor-bound token private when nothing else did."""
+    if getattr(request, _BOUND_RENDER_ATTR, False) is True and _carries_cache(response):
+        patch_cache_control(response, private=True)
 
 
 def vary_on_cookie(request: HttpRequest | None) -> None:
@@ -620,6 +675,7 @@ def _after_render(
     cookies = response.cookies
     if isinstance(cookies, SharedCookies) and _personal(request, response):
         cookies.take_private()
+    _bound_private(response, request)
 
 
 def _carries_cache(response: HttpResponseBase) -> bool:
@@ -685,9 +741,14 @@ def _static_robots(meta: Metadata) -> str | None:
 
 
 def _stamp_headers(response: HttpResponseBase, policy: ResponsePolicy) -> None:
-    """Add the `headers` of the page, keeping every header the response already set."""
+    """Add the `headers` of the page, keeping every header the response already set.
+
+    A page that opts out of compression marks the response for every compressor.
+    """
     for name, value in policy.headers:
         response.headers.setdefault(name, value)
+    if not policy.compress:
+        setattr(response, OPT_OUT, False)
 
 
 def _seal(
@@ -710,6 +771,9 @@ def _seal(
         patch_vary_headers(response, ("Cookie",))
     if degraded():
         _hold_degraded(response)
+        status = degraded_status()
+        if status is not None:
+            response.status_code = status
 
 
 def finish_response[R: HttpResponseBase](
@@ -722,6 +786,7 @@ def finish_response[R: HttpResponseBase](
     _stamp_headers(response, policy)
     if policy.cache is not None and not degraded():
         _apply_cache(response, policy.cache, request, file_path)
+    _bound_private(response, request)
     if isinstance(response, SimpleTemplateResponse) and not response.is_rendered:
         response.add_post_render_callback(
             functools.partial(_after_render, policy, request)
@@ -755,10 +820,13 @@ __all__ = [
     "CDN_HEADERS",
     "CSP_HEADERS",
     "FORBIDDEN_HEADERS",
+    "NEXT_ATTR",
     "NO_STORE",
     "CacheControl",
     "CacheDict",
     "HeadersDict",
+    "Purpose",
+    "RequestInfo",
     "ResponsePolicy",
     "SharedCookies",
     "cache_control",
@@ -771,11 +839,14 @@ __all__ = [
     "headers_problems",
     "is_header_name",
     "is_header_value",
+    "mark_bound_render",
     "mark_personal_render",
+    "mark_purpose",
     "mark_shared_render",
     "never_store",
     "personal_render",
     "prepare_page_render",
+    "purpose_of",
     "response_policy",
     "robots_tag",
     "shared_render",

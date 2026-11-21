@@ -1,18 +1,19 @@
 import functools
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 import pytest
 from django.http import HttpRequest
 
 from next.deps import (
+    AsyncDependencyError,
     DependencyCycleError,
     DependencyResolver,
     Depends,
     UnknownDependencyError,
     resolver,
 )
-from next.deps.cache import _IN_PROGRESS
-from next.deps.markers import DependsProvider, call_factory, factory_key
+from next.deps.cache import _CACHE_MISS, DependencyCache
+from next.deps.markers import DependsProvider, call_factory, call_leaf, factory_key
 from next.testing import make_resolution_context
 from tests.support import _ctx, _minimal_resolver, bound_dependency, inspect_parameter
 
@@ -305,11 +306,60 @@ def _mutual_factories() -> tuple[Callable[..., str], Callable[..., str]]:
     return alpha, beta
 
 
+def _returning(value: int) -> Callable[[], int]:
+    def make() -> int:
+        return value
+
+    return make
+
+
+class _Counter:
+    """Factories bound to one object, counting how often any of them runs."""
+
+    def __init__(self) -> None:
+        """Start with no call counted."""
+        self.calls = 0
+
+    def make(self) -> int:
+        self.calls += 1
+        return self.calls
+
+    def make_themed(self, theme: str = Depends("theme")) -> str:
+        self.calls += 1
+        return f"{theme}-{self.calls}"
+
+    def fail(self) -> int:
+        self.calls += 1
+        msg = "factory failed"
+        raise RuntimeError(msg)
+
+    def fail_themed(self, theme: str = Depends("theme")) -> str:
+        self.calls += 1
+        msg = f"factory failed for {theme}"
+        raise RuntimeError(msg)
+
+
 class TestFactoryKey:
     """A callable `Depends` is tracked under the address that stands in for a name."""
 
-    def test_a_named_function_is_keyed_by_its_dotted_path(self) -> None:
-        assert factory_key(_built) == f"{__name__}._built"
+    def test_a_named_function_is_keyed_by_its_dotted_path_and_address(self) -> None:
+        assert factory_key(_built) == f"{__name__}._built@{id(_built):x}"
+
+    def test_two_lambdas_of_one_module_are_keyed_apart(self) -> None:
+        """Both carry the path `<module>.<lambda>`, and one key would share one value."""
+        first, second = [lambda: 1, lambda: 2]
+
+        assert factory_key(first) != factory_key(second)
+
+    def test_two_closures_of_one_maker_are_keyed_apart(self) -> None:
+        assert factory_key(_returning(1)) != factory_key(_returning(2))
+
+    def test_a_method_is_keyed_by_the_object_it_is_bound_to(self) -> None:
+        """Each attribute read binds a fresh method, so its own address would not do."""
+        one, other = _Counter(), _Counter()
+
+        assert factory_key(one.make) == factory_key(one.make)
+        assert factory_key(one.make) != factory_key(other.make)
 
     def test_a_callable_without_a_qualname_falls_back_to_its_address(self) -> None:
         """`functools.partial` carries no `__qualname__`, and a plan still needs a key."""
@@ -360,6 +410,16 @@ class TestCallableDependsCycle:
             factory_key(alpha),
         ]
 
+    def test_a_key_on_the_stack_of_an_unmarked_cache_is_refused(self) -> None:
+        """An async consumer pushes its key unmarked, so a segment copy sees no mark."""
+        key = factory_key(_built)
+        context = make_resolution_context(stack=["outer", key, "inner"])
+
+        with pytest.raises(DependencyCycleError) as caught:
+            call_factory(DependencyResolver(), _built, key, context)
+
+        assert caught.value.cycle == [key, "inner", key]
+
     def test_a_key_already_in_progress_on_the_cache_is_refused(self) -> None:
         """A second pass on one context is the cycle the stack alone cannot see."""
         context = make_resolution_context()
@@ -369,8 +429,10 @@ class TestCallableDependsCycle:
         with pytest.raises(DependencyCycleError):
             call_factory(DependencyResolver(), _built, key, context)
 
-    def test_a_finished_factory_leaves_the_stack_and_the_cache_clean(self) -> None:
-        """The guards unwind, so the same factory resolves again further down."""
+    def test_a_finished_factory_leaves_the_stack_clean_and_its_value_cached(
+        self,
+    ) -> None:
+        """The guards unwind and the value stays, so a second call reads it back."""
         instance = DependencyResolver()
         instance.dependency("theme")(lambda: "dark")
         context = make_resolution_context()
@@ -381,4 +443,149 @@ class TestCallableDependsCycle:
 
         assert first == second == "built-dark"
         assert context.stack == []
-        assert context.cache.get(key) is not _IN_PROGRESS
+        assert context.cache.get(key) == "built-dark"
+
+
+class _Uninspectable:
+    """A callable whose signature `inspect` refuses to read."""
+
+    __signature__ = "unreadable"
+
+    def __call__(self) -> str:
+        return "made"
+
+
+async def _agen_factory() -> AsyncIterator[int]:
+    yield 1
+
+
+def _themed_resolver() -> DependencyResolver:
+    instance = DependencyResolver()
+    instance.dependency("theme")(lambda: "dark")
+    return instance
+
+
+def _consumers(factory: Callable[..., object]) -> tuple[Callable[..., object], ...]:
+    """Three callables of one render naming `factory`, the last one twice."""
+
+    def first(value: object = Depends(factory)) -> object:
+        return value
+
+    def second(value: object = Depends(factory)) -> object:
+        return value
+
+    def both(a: object = Depends(factory), b: object = Depends(factory)) -> object:
+        return (a, b)
+
+    return first, second, both
+
+
+def _render(
+    instance: DependencyResolver, callables: tuple[Callable[..., object], ...]
+) -> list[dict[str, object]]:
+    """Resolve `callables` in order against one cache, as one page render does."""
+    cache = DependencyCache()
+    return [instance.resolve_dependencies(func, _cache=cache) for func in callables]
+
+
+class TestFactoryMemo:
+    """A factory `Depends` runs once per resolution cache, as a named one does."""
+
+    @pytest.mark.parametrize(
+        ("method", "made"),
+        [("make", 1), ("make_themed", "dark-1")],
+        ids=["leaf", "injected"],
+    )
+    def test_every_consumer_of_one_render_reads_one_call(self, method, made) -> None:
+        counter = _Counter()
+        results = _render(_themed_resolver(), _consumers(getattr(counter, method)))
+
+        assert results == [{"value": made}, {"value": made}, {"a": made, "b": made}]
+        assert counter.calls == 1
+
+    def test_the_uncompiled_resolve_calls_the_factory_once_per_cache(self) -> None:
+        counter = _Counter()
+        provider = DependsProvider(resolver=_themed_resolver())
+        param = inspect_parameter("value", default=Depends(counter.make_themed))
+        context = make_resolution_context()
+
+        values = [provider.resolve(param, context) for _ in range(3)]
+
+        assert values == ["dark-1"] * 3
+        assert counter.calls == 1
+
+    def test_one_method_bound_at_two_sites_shares_its_value(self) -> None:
+        counter = _Counter()
+
+        def first(value: object = Depends(counter.make)) -> object:
+            return value
+
+        def second(value: object = Depends(counter.make)) -> object:
+            return value
+
+        assert _render(DependencyResolver(), (first, second)) == [{"value": 1}] * 2
+        assert counter.calls == 1
+
+    @pytest.mark.parametrize(
+        "method", ["fail", "fail_themed"], ids=["leaf", "injected"]
+    )
+    def test_a_failing_factory_is_called_again_by_the_next_consumer(
+        self, method
+    ) -> None:
+        """No failure is stored, as for a named dependency on the sync path."""
+        counter = _Counter()
+        factory = getattr(counter, method)
+        instance = _themed_resolver()
+        cache = DependencyCache()
+
+        for func in _consumers(factory)[:2]:
+            with pytest.raises(RuntimeError, match="factory failed"):
+                instance.resolve_dependencies(func, _cache=cache)
+
+        assert counter.calls == 2
+        assert cache.get(factory_key(factory)) is _CACHE_MISS
+
+    def test_factories_sharing_a_path_keep_their_own_values(self) -> None:
+        one, other = _Counter(), _Counter()
+        first, second = [lambda: "first", lambda: "second"]
+        low_factory, high_factory = _returning(1), _returning(2)
+
+        def page(
+            low: object = Depends(low_factory),
+            high: object = Depends(high_factory),
+            mine: object = Depends(one.make),
+            theirs: object = Depends(other.make),
+            left: object = Depends(first),
+            right: object = Depends(second),
+        ) -> object:
+            return None
+
+        assert DependencyResolver().resolve_dependencies(page) == {
+            "low": 1,
+            "high": 2,
+            "mine": 1,
+            "theirs": 1,
+            "left": "first",
+            "right": "second",
+        }
+
+    def test_a_leaf_meeting_its_own_mark_is_a_cycle(self) -> None:
+        context = make_resolution_context()
+        key = factory_key(_returning(1))
+        context.cache.mark_in_progress(key)
+
+        with pytest.raises(DependencyCycleError):
+            call_leaf(_returning(1), key, context)
+
+    def test_an_async_generator_factory_is_refused_rather_than_called(self) -> None:
+        def page(value: object = Depends(_agen_factory)) -> object:
+            return value
+
+        with pytest.raises(AsyncDependencyError):
+            DependencyResolver().resolve_dependencies(page)
+
+    def test_a_factory_with_an_unreadable_signature_is_called_bare(self) -> None:
+        def page(value: object = Depends(_Uninspectable())) -> object:
+            return value
+
+        assert _render(DependencyResolver(), (page, page)) == [{"value": "made"}] * 2

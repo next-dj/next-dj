@@ -154,6 +154,20 @@ next/static/next/next.poll.min.js
 next/static/next/next.poll.min.js.map
 next/static/next/next.dev.min.js
 next/static/next/next.dev.min.js.map
+next/static/next/next.defer.min.js
+next/static/next/next.defer.min.js.map
+next/static/next/next.reload.min.js
+next/static/next/next.reload.min.js.map
+next/static/next/next.more.min.js
+next/static/next/next.more.min.js.map
+next/static/next/next.reader.min.js
+next/static/next/next.reader.min.js.map
+next/static/next/next.router.min.js
+next/static/next/next.router.min.js.map
+next/static/next/next.history.min.js
+next/static/next/next.history.min.js.map
+next/static/next/next.intent.min.js
+next/static/next/next.intent.min.js.map
 coverage/
 
 # sphinx docs build outputs

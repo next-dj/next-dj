@@ -14,11 +14,7 @@ Each slot is bound in ``NextFrameworkConfig.ready()`` and never rebuilt on a set
 ``PortSlot`` is the shared holder every port uses.
 It is built with the subject its message names, and it starts unbound and raises :class:`~django.core.exceptions.ImproperlyConfigured` naming that subject when read before the app finished starting, which is the type the system checks already report as a configuration error.
 
-``PartialShaper`` shapes page and form responses for partial requests.
-The parsed ``PartialIntent`` of ``next.partial.headers`` travels between its methods, so a shape method never re-reads the request headers.
-``next.pages`` and ``next.forms`` read ``partial_shaper_slot`` on the request path, first to ask whether a request is partial at all and then to shape the response when it is.
-Neither subsystem imports ``next.partial``.
-``intent`` answers what the headers ask for, ``zone_response``, ``shape_response``, and ``shape_validate`` each build one envelope, and ``set_vary`` declares the request headers a response was negotiated on, which a full page and a zone envelope answering one URL both need for a shared cache to tell them apart.
+The page view in ``next.views`` sits above ``next.partial`` and calls it directly, and a form backend answers through the ``ResponseShaper`` its ``OPTIONS["SHAPER"]`` entry names, a dotted path ``next.forms`` imports only when a backend first shapes a response, see :doc:`forms`.
 
 ``PageScan`` is the page-tree scan the checks and the discovery helpers run, a single ``load_scanned_page_modules`` that executes every routed ``page.py`` and answers the ones that loaded.
 ``next.pages.scan`` reads the router manager from ``next.discovery``, so discovery reaches the scan back through ``page_scan_slot`` rather than through an import that would close the loop.
@@ -54,6 +50,33 @@ The forms area imports ``next.pages``, which loads the URL checks, so those chec
 ``next.realtime`` and ``next.partial`` import the static runtime, so the runtime reads ``realtime_negotiation_slot`` rather than importing either back.
 ``transports`` answers the enabled transports in preference order, and ``content_types`` answers the content type of the active partial backend next to the stock one.
 
+``AsyncBridge`` runs an awaitable, or a factory of one, to completion from sync code and answers its result.
+``next.suspense`` sits above the areas that render components, resolve dependencies, and dispatch forms, so those areas reach its driver through ``async_bridge_slot`` rather than importing it.
+The driver keeps one long-lived event loop and serves every thread-sensitive call of the awaited work on the calling thread, so ORM access inside the work shares the connection and the transaction of the sync code around it.
+Callers go through ``run_bridged``, which reads the slot through ``peek`` and falls back to :func:`~asgiref.sync.async_to_sync` when no driver is bound, correct but slower, since outside a server it starts an event loop per call.
+An inline component with an ``async def`` part and a sync caller of an ``async def`` named dependency or ``Depends`` factory both run through it.
+
+``ThreadWait`` blocks the calling thread until a :class:`~concurrent.futures.Future` is done, and on a thread the driver serves it runs the thread-sensitive calls queued for that thread while it waits.
+``next.suspense`` sits above ``next.deps``, so a ``Loader`` waiting for a batch on the request thread reaches the driver through ``thread_wait_slot``, an ORM batch is a sync function the waiting thread may run itself, and an ``async def`` batch function refuses every thread-sensitive call.
+Callers go through ``wait_served``, which falls back to a plain blocking wait when no implementation is bound, the same wait a pool thread gets from the bound one.
+
+``DeferralSink`` takes a deferred component call whose template context holds no sink of its own, and answers the text the render holds in its place.
+``next.suspense`` sits above the template tags and the render paths, so a component call and a render reach the assembled-inline sink through ``deferrals_slot`` rather than importing it.
+``queue`` queues a job into the session of the response a ``deferring`` block opened and answers the loading wrapper, and outside such a block it renders the call in place.
+``inline`` renders the call in place inside its settled wrapper.
+``assembled`` runs one render inside a ``deferring`` block, runs the jobs the render queued in parallel, and answers the render with every outcome spliced into its wrapper, the assets of each job merged into the collector before injection.
+Callers go through ``render_deferred``, which renders plainly when no sink is bound.
+A page render, a zone GET, a form re-render, a ``Patches`` context, and a ``next.testing`` render all reach it, while a page view opens its own block with the sink that asks the delivery policy.
+When no sink is bound, a deferred component renders in place behind its error boundary, without a wrapper.
+
+``RouterStamp`` sets the ``X-Next-Router`` directives of the client router on a response, the ``clear`` a login, a logout, or a cycled session key sends among them.
+``next.router`` sits above ``next.forms``, so a form or ``@action`` response reaches it through ``router_stamp_slot`` rather than importing it.
+Callers go through ``stamp_router``, which leaves the response untouched when no stamp is bound.
+
+``ZoneMarking`` binds the active-link pass over the zone HTML an action response renders, so the zones it re-renders are marked for the page the form lives on.
+``next.router`` sits above ``next.forms`` here as well, so the action dispatch opens the block through ``zone_marking_slot`` rather than importing the router.
+Callers go through ``marked_zones``, which opens a block that marks nothing when no marking is bound.
+
 ``PortSlot.peek`` answers the bound implementation, or ``None`` before the app is ready.
 The lazy urlpatterns read the seo slot through it, so a concat built before ``NextFrameworkConfig.ready()`` leaves the seo routes out and caches nothing, and a URL resolved or reversed from an earlier ``ready()`` still works.
 
@@ -61,7 +84,7 @@ Implementations
 ---------------
 
 Each area binds its own implementation, one class per port, holding nothing but the delegation to the area's real entry points.
-Every implementation lives in the ``ports`` module of its area, save ``FormRoutes``, which the form action manager answers itself.
+Every implementation lives in the ``ports`` module of its area, save ``FormRoutes``, which the form action manager answers itself, ``AsyncBridge`` and ``ThreadWait``, which ``next.suspense.drive`` and ``next.suspense.serve_until`` answer themselves, ``DeferralSink``, which ``next.suspense.assembly.inline_sink`` answers, ``RouterStamp``, which ``next.router.navigation.stamp`` answers, and ``ZoneMarking``, which ``next.router.navigation.action_marking`` answers.
 
 .. list-table::
    :header-rows: 1
@@ -73,21 +96,27 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
    * - ``ActionOwners``
      - ``next.forms.ports.ActionOwnersImpl``
      - ``action_owners_slot``
+   * - ``AsyncBridge``
+     - ``next.suspense.drive``
+     - ``async_bridge_slot``
+   * - ``DeferralSink``
+     - ``next.suspense.assembly.inline_sink``
+     - ``deferrals_slot``
    * - ``FormRoutes``
      - ``next.forms.manager.form_action_manager``
      - ``form_routes_slot``
    * - ``PageScan``
      - ``next.pages.ports.PageScanImpl``
      - ``page_scan_slot``
-   * - ``PartialShaper``
-     - ``next.partial.ports.PartialShaperImpl``
-     - ``partial_shaper_slot``
    * - ``RealtimeNegotiation``
      - ``next.realtime.ports.RealtimeNegotiationImpl``
      - ``realtime_negotiation_slot``
    * - ``RouterAccess``
      - ``next.urls.ports.RouterAccessImpl``
      - ``router_access_slot``
+   * - ``RouterStamp``
+     - ``next.router.navigation.stamp``
+     - ``router_stamp_slot``
    * - ``SeoRoutes``
      - ``next.seo.ports.SeoRoutesImpl``
      - ``seo_routes_slot``
@@ -97,9 +126,15 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
    * - ``PageScripts``
      - ``next.scripts.ports.PageScriptsImpl``
      - ``page_scripts_slot``
+   * - ``ThreadWait``
+     - ``next.suspense.serve_until``
+     - ``thread_wait_slot``
+   * - ``ZoneMarking``
+     - ``next.router.navigation.action_marking``
+     - ``zone_marking_slot``
 
-``next.apps`` binds all nine in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
-A project that replaces one subclasses the shipped implementation and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
+``next.apps`` binds every slot in the table in ``NextFrameworkConfig.ready()``, ahead of every step that imports user code.
+A project that replaces one subclasses the shipped implementation, or wraps it where the implementation is a function, and calls ``set`` on the slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since the slot holds one implementation and the last binding wins.
 
 Public API
 ----------
@@ -113,5 +148,5 @@ See also
 .. seealso::
 
    :doc:`apps` for the startup step that binds the slots.
-   :doc:`partial` for the subsystem that implements ``PartialShaper``, and :doc:`seo` for the one that implements ``SeoRoutes``.
+   :doc:`seo` for the subsystem that implements ``SeoRoutes``.
    :doc:`/content/internals/overview` for where ``next.ports`` sits in the subsystem dependency graph.

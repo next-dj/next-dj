@@ -1,3 +1,4 @@
+import itertools
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +7,7 @@ from django.middleware.http import ConditionalGetMiddleware
 from django.middleware.security import SecurityMiddleware
 from django.test import override_settings
 
+from next.compression.checks import check_compression_middleware
 from next.pages.checks import (
     check_conditional_get_order,
     check_csrf_delivery,
@@ -211,6 +213,8 @@ SESSIONS = "django.contrib.sessions.middleware.SessionMiddleware"
 SECURITY = "django.middleware.security.SecurityMiddleware"
 GUARD = "next.middleware.SharedCacheGuardMiddleware"
 UPDATE_CACHE = "django.middleware.cache.UpdateCacheMiddleware"
+COMPRESSION = "next.middleware.CompressionMiddleware"
+COMMON = "django.middleware.common.CommonMiddleware"
 
 
 class QuietSecurity(SecurityMiddleware):
@@ -298,6 +302,27 @@ class TestConditionalGetOrder:
             override_settings(MIDDLEWARE=[SESSIONS, CONDITIONAL]),
         ):
             assert check_conditional_get_order() == []
+
+    @pytest.mark.parametrize(
+        "middleware",
+        [list(order) for order in itertools.permutations([COMPRESSION, CONDITIONAL])],
+        ids=["compression_first", "conditional_first"],
+    )
+    def test_compression_sets_no_cookie(self, tmp_path, middleware) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=[SECURITY, *middleware, COMMON]),
+        ):
+            assert check_conditional_get_order() == []
+
+    def test_the_compression_order_satisfies_both_checks(self, tmp_path) -> None:
+        middleware = [SECURITY, COMPRESSION, COMMON, CONDITIONAL, SESSIONS]
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=middleware),
+        ):
+            assert check_conditional_get_order() == []
+            assert check_compression_middleware() == []
 
 
 class TestCsrfEndpoint:

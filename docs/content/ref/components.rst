@@ -44,6 +44,11 @@ Any component with a ``component.py`` counts as one that decides what it shows, 
 .. autoclass:: next.components.ComponentModuleImportError
    :members:
 
+``ComponentContextConflictError`` is raised at render when a keyless ``@component.context`` returns a prop of the calling tag, a reserved render key, or a ``slot_`` key, with the component as ``component``, the function name as ``function``, and the names as ``keys``, see :ref:`components-merge-guard`.
+
+.. autoclass:: next.components.ComponentContextConflictError
+   :members:
+
 .. autofunction:: next.components.get_component
 
 .. autofunction:: next.components.collect_visible_components
@@ -51,6 +56,13 @@ Any component with a ``component.py`` counts as one that decides what it shows, 
 .. autofunction:: next.components.load_component_template
 
 .. autofunction:: next.components.render_component
+
+Boundary declarations
+~~~~~~~~~~~~~~~~~~~~~
+
+``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=None, tokens=None)`` and ``component.props(*names)`` declare the boundary of the ``component.py`` that calls them, see :doc:`defer`.
+A ``loading.djx`` beside the component makes it a ``stream`` boundary without a declaration, and an ``error.djx`` beside it makes it an error boundary in every render.
+:doc:`/content/topics/boundaries/loading` covers the modes and the options.
 
 Manager
 ~~~~~~~

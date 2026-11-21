@@ -1,13 +1,16 @@
 import logging
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
+from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.exceptions import BadRequest
+from django.core.handlers.base import BaseHandler
+from django.db import connection, connections, transaction
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -15,6 +18,7 @@ from django.http import (
     HttpResponseRedirect,
     QueryDict,
 )
+from django.test import override_settings
 
 from next.components import render_component
 from next.components.context import component as component_ctx
@@ -43,6 +47,7 @@ from next.forms.wizard import FormWizard
 from next.pages import page
 from next.pages.registry import PageContextRegistry
 from next.testing import capture_signals, override_dependency
+from next.transactions import AtomicOverride, ViewKind
 from tests.support import DeferringProvider, bound_dependency
 
 
@@ -311,6 +316,7 @@ class TestDispatchViaClient:
         assert b"ok" in resp.content
 
 
+@pytest.mark.django_db()
 class TestFormDispatchRenderInvalidPageBranches:
     """``RegistryFormActionBackend.render_invalid_page`` fallbacks."""
 
@@ -549,6 +555,7 @@ class TestFormDispatchRenderInvalidPageBranches:
         assert "'no_op'" in caplog.text
 
 
+@pytest.mark.django_db()
 class TestDispatchOnValid:
     """Dispatch calls on_valid when handler is None (class-based form)."""
 
@@ -620,6 +627,7 @@ class TestDispatchOnValid:
         assert recorder.events == []
 
 
+@pytest.mark.django_db()
 class TestOriginAdmission:
     """Every action post names a routed origin page before anything else runs."""
 
@@ -732,6 +740,7 @@ class TestOriginAdmission:
         assert runs == ["on_valid"]
 
 
+@pytest.mark.django_db()
 class TestShapeResponseHook:
     """Backend `shape_response` hook and the default invalid envelope."""
 
@@ -948,6 +957,7 @@ class _CustomInitForm(django_forms.Form):
         self.label_suffix = label_suffix
 
 
+@pytest.mark.django_db()
 class TestFormClassInitKwargs:
     """Factory returning `(cls, init_kwargs)` bypasses get_initial."""
 
@@ -1018,6 +1028,7 @@ class TestFormClassInitKwargs:
         assert bound.label_suffix == "$"
 
 
+@pytest.mark.django_db()
 class TestDispatchSharedDepCache:
     """Dispatch threads a single dep_cache through factory, handler, and signals."""
 
@@ -1083,6 +1094,37 @@ class TestDispatchSharedDepCache:
         assert "dep_cache" in seen
         assert isinstance(seen["dep_cache"], dict)
         assert seen["dep_cache"].get("greeting") == "hi"
+
+    def test_a_sync_action_reads_an_async_named_dependency(
+        self, mock_http_request
+    ) -> None:
+        """The action stays sync, the async binding it names runs through the bridge."""
+        backend = RegistryFormActionBackend()
+
+        async def greeting() -> str:
+            return "hi"
+
+        def handler(greeting: str = Depends("async_greeting")) -> HttpResponse:
+            return HttpResponse(greeting)
+
+        backend.register_action(
+            ActionRegistration(
+                name="async_dep_handler",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
+        )
+        request = mock_http_request(method="POST", POST=_origin_post())
+        meta = backend.get_meta("async_dep_handler")
+        assert meta is not None
+        with bound_dependency("async_greeting", greeting):
+            response = FormActionDispatch.dispatch(
+                backend, request, "async_dep_handler", meta
+            )
+
+        assert response.content == b"hi"
+        assert getattr(request, REQUEST_DEP_CACHE_ATTR)["async_greeting"] == "hi"
 
     def test_depends_provider_invoked_once_across_phases(
         self, mock_http_request
@@ -1600,3 +1642,222 @@ class TestWizardOutcomePayload:
         outcome = outcomes[-1]
         assert outcome.kind == ActionOutcomeKind.INVALID
         assert isinstance(outcome.wizard, DispatchWizard)
+
+
+_ACTION_EVENTS: list[str] = []
+_ACTION_KINDS: list[ViewKind] = []
+
+
+def record_action_kind(request: HttpRequest, kind: ViewKind) -> tuple[str, ...]:
+    _ACTION_KINDS.append(kind)
+    return ()
+
+
+def _writing_handler(*, status: int = 200, fail: bool = False):
+    def handler(request: HttpRequest) -> HttpResponse:
+        transaction.on_commit(lambda: _ACTION_EVENTS.append("commit"))
+        _ACTION_EVENTS.append(f"atomic={connection.in_atomic_block}")
+        Group.objects.create(name="from-action")
+        if fail:
+            msg = "action failed"
+            raise ValueError(msg)
+        return HttpResponse(status=status)
+
+    return handler
+
+
+def _atomic_meta(handler, **extra: object) -> dict[str, object]:
+    return {
+        "name": "atomic_probe",
+        "uid": "atomic_probe_uid",
+        "file_path": _FAKE_FILE,
+        "scope": "shared",
+        "handler": handler,
+        **extra,
+    }
+
+
+def _post(mock_http_request):
+    return mock_http_request(method="POST", POST=_origin_post(), FILES=None)
+
+
+@pytest.mark.django_db(transaction=True)
+class TestActionTransaction:
+    """Dispatch runs the action in one transaction it opens once access is granted."""
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        _ACTION_EVENTS.clear()
+        _ACTION_KINDS.clear()
+
+    def test_a_post_runs_in_one_transaction_with_the_hook_after_commit(
+        self, mock_http_request
+    ) -> None:
+        meta = _atomic_meta(_writing_handler())
+        FormActionDispatch.dispatch(
+            RegistryFormActionBackend(), _post(mock_http_request), "atomic_probe", meta
+        )
+        assert _ACTION_EVENTS == ["atomic=True", "commit"]
+        assert Group.objects.filter(name="from-action").exists()
+
+    def test_an_exception_rolls_back(self, mock_http_request) -> None:
+        meta = _atomic_meta(_writing_handler(fail=True))
+        with pytest.raises(ValueError, match="action failed"):
+            FormActionDispatch.dispatch(
+                RegistryFormActionBackend(),
+                _post(mock_http_request),
+                "atomic_probe",
+                meta,
+            )
+        assert _ACTION_EVENTS == ["atomic=True"]
+        assert not Group.objects.filter(name="from-action").exists()
+
+    @pytest.mark.parametrize("status", [400, 500])
+    def test_an_error_response_commits(self, mock_http_request, status: int) -> None:
+        meta = _atomic_meta(_writing_handler(status=status))
+        response = FormActionDispatch.dispatch(
+            RegistryFormActionBackend(), _post(mock_http_request), "atomic_probe", meta
+        )
+        assert response.status_code == status
+        assert _ACTION_EVENTS == ["atomic=True", "commit"]
+        assert Group.objects.filter(name="from-action").exists()
+
+    def test_atomic_off_leaves_the_action_bare(self, mock_http_request) -> None:
+        meta = _atomic_meta(_writing_handler(), atomic=AtomicOverride(atomic=False))
+        FormActionDispatch.dispatch(
+            RegistryFormActionBackend(), _post(mock_http_request), "atomic_probe", meta
+        )
+        assert _ACTION_EVENTS == ["commit", "atomic=False"]
+
+    def test_the_rule_hears_the_action_kind(self, mock_http_request) -> None:
+        meta = _atomic_meta(_writing_handler())
+        rule = "tests.forms.test_dispatch.record_action_kind"
+        framework = {**settings.NEXT_FRAMEWORK, "TRANSACTIONS": {"RULE": rule}}
+        with override_settings(NEXT_FRAMEWORK=framework):
+            FormActionDispatch.dispatch(
+                RegistryFormActionBackend(),
+                _post(mock_http_request),
+                "atomic_probe",
+                meta,
+            )
+        assert _ACTION_KINDS == [ViewKind.ACTION]
+        assert _ACTION_EVENTS == ["commit", "atomic=False"]
+
+    def test_a_bad_request_leaves_no_transaction_open(self, mock_http_request) -> None:
+        meta = _atomic_meta(_writing_handler())
+        request = mock_http_request(method="POST", POST=QueryDict(), FILES=None)
+        with pytest.raises(BadRequest, match=MISSING_ORIGIN):
+            FormActionDispatch.dispatch(
+                RegistryFormActionBackend(), request, "atomic_probe", meta
+            )
+        assert not connection.in_atomic_block
+        assert _ACTION_EVENTS == []
+
+    @pytest.mark.parametrize("atomic_requests", [True, False])
+    def test_the_action_view_runs_in_one_transaction(
+        self, mock_http_request, *, atomic_requests: bool
+    ) -> None:
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="atomic_probe",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=_writing_handler(),
+            )
+        )
+        meta = backend.get_meta("atomic_probe")
+        assert meta is not None
+        with patch.dict(
+            connections.settings["default"], {"ATOMIC_REQUESTS": atomic_requests}
+        ):
+            view = BaseHandler().make_view_atomic(backend._action_view)
+        view(_post(mock_http_request), uid=meta["uid"])
+        assert view is backend._action_view
+        assert _ACTION_EVENTS == ["atomic=True", "commit"]
+
+
+class _RecordingGroupForm(ModelForm):
+    """A model form whose `on_valid` records the transaction it ran in."""
+
+    class Meta:
+        abstract = True
+        model = Group
+        fields = ("name",)
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        transaction.on_commit(lambda: _ACTION_EVENTS.append("commit"))
+        _ACTION_EVENTS.append(f"atomic={connection.in_atomic_block}")
+        self.save()
+        return HttpResponseRedirect("/")
+
+
+@pytest.mark.django_db(transaction=True)
+class TestFormClassTransaction:
+    """A form registered through its own `Meta` steers its transaction with `atomic`."""
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        _ACTION_EVENTS.clear()
+
+    def _submit(self, client_no_csrf, action_name: str) -> None:
+        url = form_action_manager.get_action_url(action_name)
+        response = client_no_csrf.post(
+            url, data={"name": "from-form", ORIGIN_FIELD_NAME: "/"}
+        )
+        assert response.status_code == 302
+        assert Group.objects.filter(name="from-form").exists()
+
+    def test_the_default_runs_the_handler_in_one_transaction(
+        self, client_no_csrf
+    ) -> None:
+        class DefaultTransactionForm(_RecordingGroupForm):
+            class Meta(_RecordingGroupForm.Meta):
+                abstract = False
+
+        self._submit(client_no_csrf, "default_transaction_form")
+        assert _ACTION_EVENTS == ["atomic=True", "commit"]
+
+    def test_atomic_false_runs_the_handler_in_autocommit(self, client_no_csrf) -> None:
+        class AutocommitForm(_RecordingGroupForm):
+            class Meta(_RecordingGroupForm.Meta):
+                abstract = False
+                atomic = False
+
+        self._submit(client_no_csrf, "autocommit_form")
+        assert _ACTION_EVENTS == ["commit", "atomic=False"]
+
+
+class TestActionTransactionWiring:
+    def test_a_get_is_refused_before_the_transaction_decision(
+        self, mock_http_request, monkeypatch
+    ) -> None:
+        opened: list[object] = []
+        monkeypatch.setattr(
+            transaction, "atomic", lambda *args, **kwargs: opened.append(kwargs)
+        )
+        meta = _atomic_meta(_writing_handler(), atomic=AtomicOverride(atomic=True))
+        with (
+            override_settings(NEXT_FRAMEWORK={"TRANSACTIONS": {"SAFE": True}}),
+            patch("next.forms.dispatch.atomic_aliases") as decide,
+        ):
+            response = FormActionDispatch.dispatch(
+                RegistryFormActionBackend(),
+                mock_http_request(method="GET"),
+                "atomic_probe",
+                meta,
+            )
+        assert response.status_code == 405
+        assert response["Allow"] == "POST"
+        decide.assert_not_called()
+        assert opened == []
+
+    def test_atomic_requests_on_two_aliases_leaves_the_action_view_unwrapped(
+        self, monkeypatch
+    ) -> None:
+        view = RegistryFormActionBackend()._action_view
+        declared = {"ATOMIC_REQUESTS": True}
+        monkeypatch.setattr(
+            connections, "settings", {"default": declared, "replica": declared}
+        )
+        assert BaseHandler().make_view_atomic(view) is view

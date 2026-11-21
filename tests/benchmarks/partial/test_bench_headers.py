@@ -7,7 +7,7 @@ from tests.support import partial_meta, plain_get
 
 
 class TestBenchIntentParse:
-    """Header parsing, the first thing every request pays on the shaper gate.
+    """Header parsing, the first thing every page view and form dispatch pays.
 
     Benched through the private entry point, as the public one memoises on the request.
     """

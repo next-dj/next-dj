@@ -8,6 +8,8 @@ import pytest
 from django.http import HttpRequest
 from django.test import RequestFactory, override_settings
 
+from next.deps import Depends
+from next.errors import AsyncCallableError
 from next.pages.responses import NO_STORE, cache_control
 from next.seo import RobotsRule
 from next.seo.discovery import BrokenSource, SeoRoot, SeoSource, declared_cache
@@ -23,7 +25,7 @@ from next.seo.robots import (
     rules_of,
 )
 from next.utils import PageRoot
-from tests.support import rewrite_in_tick, touch_later
+from tests.support import bound_dependency, rewrite_in_tick, touch_later
 
 
 def _module(**attributes: object) -> types.ModuleType:
@@ -95,6 +97,28 @@ class TestDeclaredRules:
         assert robots.rules(request) == (
             RobotsRule(user_agent="Bingbot", disallow="/testserver/"),
         )
+
+    def test_a_callable_reads_an_async_named_dependency(self) -> None:
+        async def agent() -> str:
+            return "Bingbot"
+
+        def rules(agent: str = Depends("async_agent")) -> list[RobotsRule]:
+            return [RobotsRule(user_agent=agent, disallow="/")]
+
+        robots = DeclaredRobots(Path("robots.py"), _module(rules=rules))
+        with bound_dependency("async_agent", agent):
+            assert robots.rules(None) == (
+                RobotsRule(user_agent="Bingbot", disallow="/"),
+            )
+
+    def test_an_async_callable_is_still_refused(self) -> None:
+        async def rules() -> list[RobotsRule]:
+            return []
+
+        robots = DeclaredRobots(Path("robots.py"), _module(rules=rules))
+        with pytest.raises(AsyncCallableError, match="is async") as caught:
+            robots.rules(None)
+        assert any("robots.py" in note for note in caught.value.__notes__)
 
     def test_the_render_puts_the_own_sitemap_first(self) -> None:
         module = _module(

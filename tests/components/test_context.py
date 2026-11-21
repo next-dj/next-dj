@@ -1,6 +1,5 @@
 import functools
 import importlib.util
-import re
 import sys
 import textwrap
 from pathlib import Path
@@ -666,18 +665,52 @@ class TestComponentContextRegistryLookupBound:
         assert list(reg._lookup_cache) == [link_dir / "component.py"]
 
 
-class TestComponentContextAsyncRefusal:
-    """An async `@component.context` callable is refused before it is registered."""
+class TestComponentContextColour:
+    """An async `@component.context` registers with its colour, a generator never."""
 
-    def test_decorator_refuses_async(self) -> None:
+    def test_a_coroutine_function_registers_as_async(self) -> None:
         manager = ComponentContextManager()
 
         async def greeting() -> str:
             return "hi"
 
-        with pytest.raises(
-            AsyncCallableError,
-            match=re.escape('@component.context callable "greeting"'),
-        ):
+        manager.context("greeting")(greeting)
+        ((entry,),) = manager.registry.registered().values()
+        assert entry.is_async is True
+
+    def test_a_sync_function_registers_as_sync(self) -> None:
+        manager = ComponentContextManager()
+
+        def greeting() -> str:
+            return "hi"
+
+        manager.context("greeting")(greeting)
+        ((entry,),) = manager.registry.registered().values()
+        assert entry.is_async is False
+
+    def test_an_async_generator_is_refused(self) -> None:
+        manager = ComponentContextManager()
+
+        async def greeting():
+            yield "hi"
+
+        with pytest.raises(AsyncCallableError, match="is an async generator"):
             manager.context("greeting")(greeting)
         assert len(manager.registry) == 0
+
+    def test_the_lookup_says_whether_any_function_is_async(
+        self, tmp_path: Path
+    ) -> None:
+        manager = ComponentContextManager()
+        module_path = tmp_path / "component.py"
+
+        async def later() -> str:
+            return "later"
+
+        manager.registry.register(module_path, "first", lambda: "first")
+        functions, awaiting = manager.lookup(module_path)
+        assert (len(functions), awaiting) == (1, False)
+        manager.registry.register(module_path, "later", later)
+        functions, awaiting = manager.lookup(module_path)
+        assert (len(functions), awaiting) == (2, True)
+        assert manager.get_functions(module_path) is functions

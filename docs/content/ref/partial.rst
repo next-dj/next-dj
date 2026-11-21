@@ -23,12 +23,14 @@ One module graph sits behind the package facade, and the table below names the p
    * - ``backends``
      - The ``PartialProtocolBackend`` contract and the shipped ``JsonPartialProtocolBackend``.
    * - ``checks``
-     - The startup validation of zone placement, intercept zones, context bindings, custom verbs, repeated forms, and backend configuration.
+     - The startup validation of zone placement, intercept zones, context bindings, custom verbs, repeated forms, infinite lists, and backend configuration.
        A package whose submodules re-export through the package address.
    * - ``envelope``
      - The frozen value objects of the wire contract, ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta``, and their wire forms.
    * - ``errors``
      - Every exception the builder and the zone branch raise when a caller breaks a wire contract.
+   * - ``forms``
+     - ``FormShaper``, the default ``ResponseShaper`` a form backend answers partial requests through.
    * - ``guards``
      - The zones a standalone render refuses, read once for checks and the registry.
    * - ``headers``
@@ -39,17 +41,19 @@ One module graph sits behind the package facade, and the table below names the p
      - The wire keys of the patch protocol, the one module the TypeScript runtime mirrors.
    * - ``manager``
      - The protocol-backend manager and the resolution of the asset version.
+   * - ``more``
+     - The ``{% more %}`` tag and the ``next_page`` and ``previous_page`` filters that adapt a Django ``Page`` to it.
    * - ``origin``
      - Resolution of the host page a partial request morphs out of band, with ``PartialOrigin`` and ``OriginSource``.
+   * - ``paging``
+     - The pagers of a ``{% more %}`` list, ``NumberPager`` and ``KeysetPager`` on the ``Pager`` contract, the ``Window`` they return, and the ``Paging`` a context callable receives.
    * - ``patches``
      - The request-bound ``Patches`` builder and the ``PatchResponse`` it finalises.
-   * - ``ports``
-     - ``PartialShaperImpl``, the implementation bound into the ``PartialShaper`` slot at startup.
    * - ``registry``
      - The patch verbs and the zones of a compiled page template.
        A package holding two unrelated records, the verbs in its ``ops`` submodule and the zones in its ``zones`` submodule, both re-exporting through the package address.
    * - ``render``
-     - Standalone zone rendering over the full page context, behind ``render_zone``.
+     - Standalone zone rendering over the zone-scoped context of the batch, behind ``render_zone``.
    * - ``shaping``
      - The pipeline that turns a form action outcome into an envelope, split across submodules behind the package address.
        ``shape_partial`` is its only entry on the curated ``next.partial`` surface.
@@ -79,7 +83,7 @@ Stable.
    Use them in page modules, action handlers, and stream sources.
 
 Advanced.
-   ``shape_partial``, ``PartialProtocolBackend``, ``JsonPartialProtocolBackend``, and ``StreamMeta`` are imported from ``next.partial``.
+   ``shape_partial``, ``FormShaper``, ``PartialProtocolBackend``, ``JsonPartialProtocolBackend``, and ``StreamMeta`` are imported from ``next.partial``.
    ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to ``morph(zone=, page=)``.
    ``OriginSource`` lives in ``next.partial.origin``.
    ``DedupeMode``, the ``"key"`` or ``"id"`` literal that the ``dedupe=`` argument of ``append`` and ``prepend`` takes, lives in ``next.partial.patches``.
@@ -100,7 +104,6 @@ Framework machinery.
 
    ``ActionRef``, ``shape_validate``, and ``drain_messages`` live in ``next.partial.shaping``.
    ``PatchOpRegistry``, the ``patch_op_registry`` instance, and ``BUILTIN_OPS`` live in ``next.partial.registry``.
-   ``PartialShaperImpl``, the implementation the app binds into the :doc:`next.ports <ports>` slot at startup, lives in ``next.partial.ports``.
    The wire keys of the patch protocol, ``FORM_ZONE_ATTR`` and ``FORM_KEY_ATTR`` among them, live in ``next.partial.keys``, which is the one module the TypeScript runtime mirrors.
 
 Internal hooks.
@@ -115,9 +118,8 @@ Detecting a partial request
 
 ``is_partial_request`` returns ``True`` when the request carries the ``X-Next-Request`` switch, the test a ``render`` escape hatch reads before shaping a patch response.
 ``partial_intent`` parses and memoises the ``X-Next-*`` headers into a ``PartialIntent``.
-``zone_requested`` answers whether the intent names a given zone, the guard a lazy zone's context provider reads to skip an expensive query on a full render.
-``@context(..., zone="name")`` skips the provider call outright on a GET for another zone.
-``zone_requested`` stays the in-body guard for a provider of a lazy zone, whose work has to be skipped on a full render too.
+``zone_requested`` answers whether the intent names a given zone, the in-body guard a context provider reads to do work only for a request that re-renders that zone.
+``@context(..., zone="name")`` skips the provider call outright on a GET for another zone, while a full render still runs it.
 
 ``set_partial_vary`` in ``next.partial.headers`` stamps the ``VARY_HEADERS`` tuple on a response that a ``render()`` escape hatch builds itself.
 
@@ -188,7 +190,8 @@ See :doc:`/content/topics/partial-rendering/extending` for the end-to-end recipe
 Zones
 ~~~~~
 
-``render_zone`` renders one or more zones of a page standalone with the full page context, returning a ``ZoneRenderResult`` that carries the wrapped HTML and the collected assets.
+``render_zone`` renders one or more zones of a page standalone, returning a ``ZoneRenderResult`` that carries the wrapped HTML and the collected assets.
+It builds the zone-scoped context a zone GET builds, the ``@context`` callables bound to no zone plus the ones bound to a requested zone or a zone nested in one, and a ``morph_zone`` patch renders through the same call.
 ``zones_of(template, page_path)`` returns the compiled zones of the composed template of a page as a mapping of ``ZoneInfo``, both reached through ``next.partial.registry``.
 ``ZoneInfo.standalone`` is ``True`` when the zone may render on its own and ``False`` for a zone under a ``{% has_perm %}``, an ``{% if %}``, or a ``{% for %}`` of the page, or in the body of a component that decides whether that part shows, and for a zone under a block tag from a module outside ``django.`` and ``next.``, whose body the analysis cannot read.
 A zone that is not standalone counts as undeclared for every request, see :ref:`topics-permissions-zones`.
@@ -203,6 +206,41 @@ The page path anchors the component lookups, and with ``DEBUG`` on an edit to a 
    :members:
 
 .. autofunction:: next.partial.registry.zones_of
+
+.. _ref-partial-infinite-lists:
+
+Infinite lists
+~~~~~~~~~~~~~~
+
+A pager cuts the rows of a ``{% more %}`` list into the ``Window`` the query string of the request asks for.
+It is a stateless module-level object, a ``NumberPager`` that pages by ``?page=N`` or a ``KeysetPager`` that pages by an opaque ``?cursor=<token>``.
+A context callable takes ``Annotated[Paging, <pager>]`` and returns ``page.paginate(rows)`` or ``await page.apaginate(rows)``, and the template passes that ``Window`` to ``next=`` and ``previous=``.
+Both pagers read one row past the window instead of counting, while ``count=True`` reads the total into ``Window.count`` with one more query, see :ref:`topics-partial-rendering-reference-more`.
+``?<param>=<token>&restore=1`` reaches back ``NEXT_FRAMEWORK["DEFER"]["MORE"]["MAX_RESTORE"]`` batches at most, see :doc:`settings`.
+The ``{% more %}`` tag and its filters are listed in :doc:`template-tags`, and :doc:`/content/howto/page-a-list-by-cursor` walks through a keyset list, its token codec, and a pager of another scheme.
+
+.. autoclass:: next.partial.Window
+   :members:
+
+.. autoclass:: next.partial.Paging
+   :members:
+
+.. autoclass:: next.partial.Pager
+   :members:
+
+.. autoclass:: next.partial.NumberPager
+   :members:
+
+.. autoclass:: next.partial.KeysetPager
+   :members:
+
+``next.partial.Rows`` is the type of the row source a pager takes, a queryset or a sequence, and a custom ``Pager`` annotates its ``window`` and ``awindow`` with it.
+
+``PagingProvider`` fills every ``Paging`` parameter at priority ``25``, ahead of the provider that matches a parameter name against the context, so a context value named like the parameter does not shadow the annotation.
+A ``Paging`` annotation that names no pager, or more than one, raises ``TypeError`` when the callable is first resolved.
+
+.. autoclass:: next.partial.paging.PagingProvider
+   :members:
 
 Origin and authorization
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,18 +262,18 @@ It stays importable from ``next.partial`` in the Advanced tier, because only the
 Shaping
 ~~~~~~~
 
-``shape_partial`` turns a form action outcome into a patch envelope, the body of the bundled form backend's partial-aware ``shape_response``.
-A custom backend that overrides ``shape_response`` routes partial requests through it, or the ``next.W068`` check warns that the runtime receives a full page instead.
+``shape_partial`` turns a form action outcome into a patch envelope for a partial request.
 
 .. autofunction:: next.partial.shape_partial
 
-``PartialShaperImpl`` in ``next.partial.ports`` is the object that binds these shaping entry points to the ``PartialShaper`` port, so ``next.pages`` and ``next.forms`` reach partial rendering without importing it.
-``NextFrameworkConfig.ready`` composes it into ``next.ports.partial_shaper_slot``, the one place the binding happens, and unlike the settings-driven backends it answers to no ``NEXT_FRAMEWORK`` key.
-A project that shapes partial responses differently subclasses it, overrides one of ``intent``, ``zone_response``, ``shape_response``, ``shape_validate``, and ``set_vary``, then calls ``partial_shaper_slot.set`` from the ``ready`` of an application listed after ``next`` in ``INSTALLED_APPS``.
-The slot holds one implementation and the last binding wins, so the replacement serves every later request.
-See :doc:`ports` for the protocol the subclass satisfies.
+``FormShaper`` is the default ``ResponseShaper`` of every form backend, named by the ``OPTIONS["SHAPER"]`` entry of ``FORM_ACTION_BACKENDS``.
+Its ``shape`` answers a partial request through ``shape_partial`` and a plain one with ``None``, so the backend serves the full page.
+Its ``validate`` answers a submission whose ``X-Next-Validate`` header names fields with a form morph envelope and any other with ``None``.
+A project that shapes form responses differently names its own class under ``OPTIONS["SHAPER"]``, and a subclass of ``FormShaper`` keeps the patch envelopes for what it does not change.
+A custom backend that overrides ``shape_response`` without calling ``super().shape_response`` or ``self.shaper.shape`` serves a full page to a partial request, which the ``next.W068`` check warns about.
+See :doc:`forms` for the protocol and :doc:`settings` for the option.
 
-.. autoclass:: next.partial.ports.PartialShaperImpl
+.. autoclass:: next.partial.FormShaper
    :members:
 
 SSE stream
@@ -368,7 +406,7 @@ See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (`
 System checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, intercept-zone, custom-verb, context-binding, and backend-configuration checks (``next.E060`` through ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.E214``, ``next.E215``, ``next.W067`` through ``next.W071``, and ``next.W083``).
+See :doc:`system-checks` for the zone-placement, template-compile, intercept-zone, custom-verb, context-binding, infinite-list, and backend-configuration checks (``next.E060`` through ``next.E063``, ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.E214``, ``next.E215``, ``next.E220``, ``next.E232``, ``next.E235``, ``next.E244``, ``next.W067`` through ``next.W071``, and ``next.W083``).
 
 See also
 --------

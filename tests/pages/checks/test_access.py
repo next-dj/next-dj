@@ -948,6 +948,7 @@ class TestActionPages:
         assert found == []
         assert serious == []
 
+    @pytest.mark.django_db()
     def test_the_action_answers_a_post(self, root) -> None:
         write_page(root, "", page_source())
         lone = write_guard(root / "a", _ACTION)

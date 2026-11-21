@@ -4,11 +4,35 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+LOADING_FILE: Final = "loading.djx"
+ERROR_FILE: Final = "error.djx"
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryFiles:
+    """The `loading.djx` and `error.djx` beside a component, `None` for one missing."""
+
+    loading: Path | None
+    error: Path | None
+
+
+def boundary_files(directory: Path) -> BoundaryFiles | None:
+    """Return the boundary files inside `directory`, `None` when it holds neither."""
+    loading = directory / LOADING_FILE
+    error = directory / ERROR_FILE
+    found = BoundaryFiles(
+        loading if loading.is_file() else None, error if error.is_file() else None
+    )
+    if found.loading is None and found.error is None:
+        return None
+    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +45,7 @@ class ComponentInfo:
     template_path: Path | None
     module_path: Path | None
     is_simple: bool
+    files: BoundaryFiles | None = None
     resolved_scope_root: Path = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -30,6 +55,13 @@ class ComponentInfo:
         except OSError:
             resolved = self.scope_root
         object.__setattr__(self, "resolved_scope_root", resolved)
+
+    def current_files(self) -> BoundaryFiles | None:
+        """Return the boundary files on disk now, `None` for a single-file component."""
+        if self.is_simple:
+            return None
+        source = self.module_path or self.template_path
+        return None if source is None else boundary_files(source.parent)
 
 
 def paths_from_component_info(info: ComponentInfo) -> set[Path]:
@@ -41,7 +73,18 @@ def paths_from_component_info(info: ComponentInfo) -> set[Path]:
     if info.module_path is not None:
         with contextlib.suppress(OSError):
             out.add(info.module_path.resolve())
+    if info.files is not None:
+        for boundary in (info.files.loading, info.files.error):
+            if boundary is not None:
+                with contextlib.suppress(OSError):
+                    out.add(boundary.resolve())
     return out
 
 
-__all__ = ["ComponentInfo"]
+__all__ = [
+    "ERROR_FILE",
+    "LOADING_FILE",
+    "BoundaryFiles",
+    "ComponentInfo",
+    "boundary_files",
+]

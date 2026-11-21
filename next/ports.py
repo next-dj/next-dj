@@ -2,24 +2,35 @@
 
 from __future__ import annotations
 
+from concurrent.futures import wait
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Protocol
 
+from asgiref.sync import async_to_sync
 from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterator, Mapping
+    from collections.abc import (
+        Awaitable,
+        Callable,
+        Collection,
+        Iterator,
+        Mapping,
+        MutableMapping,
+    )
+    from concurrent.futures import Future
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
-    from django.forms import BaseForm, BaseFormSet
-    from django.http import HttpRequest, HttpResponse
+    from django.http import HttpRequest
+    from django.http.response import HttpResponseBase
+    from django.template import Context
     from django.urls import URLPattern
 
     from next.components.info import ComponentInfo
-    from next.forms.backends import FormActionBackend
-    from next.forms.dispatch.responses import ActionOutcome
-    from next.forms.wizard import FormWizard
-    from next.partial.headers import PartialIntent
+    from next.components.trip import TripInput
+    from next.defer import DeferredCall
     from next.static import StaticCollector
     from next.urls import RouterBackend, RouterManager, URLPatternParser
     from next.utils import PageRoot
@@ -55,49 +66,6 @@ class PortSlot[T]:
             f"The {self._subject} is unbound, which means the next app never "
             "finished starting. NextFrameworkConfig.ready() binds it."
         )
-
-
-class PartialShaper(Protocol):
-    """Shapes page and form responses for partial requests."""
-
-    def intent(self, request: HttpRequest) -> PartialIntent:
-        """Return what the request headers ask for."""
-
-    def zone_response(
-        self,
-        page_path: Path,
-        request: HttpRequest,
-        intent: PartialIntent,
-        *,
-        dynamic_body: bool,
-        url_kwargs: dict[str, object],
-        dep_cache: dict[str, Any],
-    ) -> HttpResponse:
-        """Return the envelope for the zones the intent named.
-
-        An intercept refusal reuses `dep_cache`, the one the page refusal resolved with.
-        """
-
-    def shape_response(
-        self, backend: FormActionBackend, request: HttpRequest, outcome: ActionOutcome
-    ) -> HttpResponse:
-        """Return the envelope for one form action outcome."""
-
-    def shape_validate(
-        self,
-        backend: FormActionBackend,
-        request: HttpRequest,
-        form: BaseForm | BaseFormSet,
-        intent: PartialIntent,
-        *,
-        action_name: str,
-        uid: str,
-        wizard: FormWizard | None = None,
-    ) -> HttpResponse:
-        """Return the form morph envelope of a validate-only pass."""
-
-    def set_vary(self, response: HttpResponse) -> None:
-        """Declare the partial request headers `response` was negotiated on."""
 
 
 class ActionOwners(Protocol):
@@ -222,35 +190,177 @@ class RealtimeNegotiation(Protocol):
         """Return the content type of the active partial backend and the stock one."""
 
 
+class AsyncBridge(Protocol):
+    """Runs async code to completion from sync code, on the thread that asks.
+
+    `next.suspense` sits above the areas that bridge, so they reach its driver here.
+    """
+
+    def __call__[T](self, work: Awaitable[T] | Callable[[], Awaitable[T]], /) -> T:
+        """Run `work`, an awaitable or a factory of one, and return its result."""
+
+
+class DeferralSink(Protocol):
+    """Where a deferred component call goes, and how a render settles what it queued.
+
+    `next.suspense` sits above the tags and the render paths, so they reach it here.
+    """
+
+    def queue(self, context: Context, call: DeferredCall) -> str:
+        """Take one deferred call and return the text the render holds in its place."""
+
+    def inline(self, context: Context, call: DeferredCall) -> str:
+        """Render one call in place inside its settled wrapper."""
+
+    def retry(self, request: object, trip: TripInput) -> str:
+        """Return the token attributes a failed plain call retries with, or nothing."""
+
+    def assembled(
+        self,
+        render: Callable[[], str],
+        *,
+        collector: StaticCollector | None,
+        request: HttpRequest | None,
+        context: MutableMapping[str, object] | None = None,
+    ) -> str:
+        """Return what `render` renders with every deferred call it queued settled."""
+
+
+class ThreadWait(Protocol):
+    """Blocks the calling thread on a future, serving the hops sent to that thread.
+
+    `next.suspense` sits above `next.deps`, so a waiting loader reaches its server here.
+    """
+
+    def __call__(self, future: Future[Any], /) -> None:
+        """Return once `future` is done, running the hops queued for this thread."""
+
+
+class RouterStamp(Protocol):
+    """Sets the client router directives, a login or logout among them, on a response.
+
+    `next.router` sits above `next.forms`, so a form or action response reaches it here.
+    """
+
+    def __call__(
+        self, response: HttpResponseBase, request: HttpRequest, /
+    ) -> HttpResponseBase:
+        """Return `response` carrying the `X-Next-Router` directives of `request`."""
+
+
+class ZoneMarking(Protocol):
+    """Binds the active-link pass over the zone HTML an action response renders.
+
+    `next.router` sits above `next.forms`, so the action dispatch reaches it here.
+    """
+
+    def __call__(self, request: HttpRequest, /) -> AbstractContextManager[None]:
+        """Return the block whose zone HTML is marked for the page of the form."""
+
+
 action_owners_slot = PortSlot["ActionOwners"]("action owners port")
+async_bridge_slot = PortSlot["AsyncBridge"]("async bridge port")
+deferrals_slot = PortSlot["DeferralSink"]("deferrals port")
 form_routes_slot = PortSlot["FormRoutes"]("form routes port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
-partial_shaper_slot = PortSlot["PartialShaper"]("partial shaper")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
+router_stamp_slot = PortSlot["RouterStamp"]("router stamp port")
+zone_marking_slot = PortSlot["ZoneMarking"]("zone marking port")
 page_scripts_slot = PortSlot["PageScripts"]("page scripts port")
 realtime_negotiation_slot = PortSlot["RealtimeNegotiation"]("realtime negotiation port")
 seo_routes_slot = PortSlot["SeoRoutes"]("seo routes port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
+thread_wait_slot = PortSlot["ThreadWait"]("thread wait port")
+
+
+async def _completed[T](work: Awaitable[T] | Callable[[], Awaitable[T]]) -> T:
+    awaitable = work() if callable(work) else work
+    return await awaitable
+
+
+def run_bridged[T](work: Awaitable[T] | Callable[[], Awaitable[T]]) -> T:
+    """Run `work` through the bound bridge, or through `async_to_sync` when unbound.
+
+    The fallback is correct but slower, as outside a server it starts a loop per call.
+    """
+    bridge = async_bridge_slot.peek()
+    if bridge is None:
+        return async_to_sync(_completed)(work)
+    return bridge(work)
+
+
+def render_deferred(
+    render: Callable[[], str],
+    *,
+    collector: StaticCollector | None,
+    request: HttpRequest | None,
+    context: MutableMapping[str, object] | None = None,
+) -> str:
+    """Run `render` through the bound deferral sink, plainly when none is bound.
+
+    Unbound, every deferred call it meets renders in place, one after another.
+    """
+    sink = deferrals_slot.peek()
+    if sink is None:
+        return render()
+    return sink.assembled(render, collector=collector, request=request, context=context)
+
+
+def stamp_router(response: HttpResponseBase, request: HttpRequest) -> HttpResponseBase:
+    """Set the client router directives through the bound stamp, none when unbound."""
+    stamp = router_stamp_slot.peek()
+    return response if stamp is None else stamp(response, request)
+
+
+def marked_zones(request: HttpRequest) -> AbstractContextManager[None]:
+    """Return the block the bound zone marking opens, a plain one when unbound."""
+    marking = zone_marking_slot.peek()
+    return nullcontext() if marking is None else marking(request)
+
+
+def wait_served(future: Future[Any]) -> None:
+    """Block until `future` is done through the bound wait, or plainly when unbound.
+
+    A thread that waits plainly serves no hop, so one queued for it waits as well.
+    """
+    serve = thread_wait_slot.peek()
+    if serve is None:
+        wait((future,))
+        return
+    serve(future)
 
 
 __all__ = [
     "ActionOwners",
+    "AsyncBridge",
+    "DeferralSink",
     "FormRoutes",
     "PageScan",
     "PageScripts",
-    "PartialShaper",
     "PortSlot",
     "RealtimeNegotiation",
     "RouterAccess",
+    "RouterStamp",
     "SeoRoutes",
     "StaticAssets",
+    "ThreadWait",
+    "ZoneMarking",
     "action_owners_slot",
+    "async_bridge_slot",
+    "deferrals_slot",
     "form_routes_slot",
+    "marked_zones",
     "page_scan_slot",
     "page_scripts_slot",
-    "partial_shaper_slot",
     "realtime_negotiation_slot",
+    "render_deferred",
     "router_access_slot",
+    "router_stamp_slot",
+    "run_bridged",
     "seo_routes_slot",
+    "stamp_router",
     "static_assets_slot",
+    "thread_wait_slot",
+    "wait_served",
+    "zone_marking_slot",
 ]

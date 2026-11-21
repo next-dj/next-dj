@@ -322,7 +322,7 @@ describe("createPartial surface", () => {
       });
       const errors = dispatched.filter((d) => d.event === "partial:error");
       expect(errors.map((d) => d.detail)).toEqual([
-        { kind: "parse", body, error: expect.any(TypeError) },
+        { kind: "parse", body, error: expect.any(TypeError), zones: ["z"] },
       ]);
     },
   );
@@ -460,26 +460,12 @@ describe("createPartial surface", () => {
     expect(seen).toEqual(["a", "b"]);
   });
 
-  it("ready batches the document's load zones into one zone fetch", async () => {
-    document.body.innerHTML =
-      '<div data-next-zone="a" data-next-lazy="load"></div>' +
-      '<div data-next-zone="b" data-next-lazy="load"></div>';
-    const calls: { url: string; init: RequestInit }[] = [];
-    partial._configure({
-      document,
-      fetch: async (url, init) => {
-        calls.push({ url, init });
-        return new Response('{"version":"v1","ops":[],"assets":[],"form":null}', {
-          status: 200,
-          headers: { "content-type": "application/vnd.next.patches+json" },
-        });
-      },
-      navigate: () => {},
+  it("decodes a body through the parse hook its content type names", () => {
+    partial.parseHook("application/x-custom", (_response, body) => ({ version: body }));
+    expect(partial._parse("application/x-custom; charset=utf-8", "v9")).toEqual({
+      version: "v9",
     });
-    partial.ready();
-    await Promise.resolve();
-    expect(calls).toHaveLength(1);
-    expect(new Headers(calls[0]!.init.headers).get("X-Next-Zone")).toBe("a,b");
+    expect(partial._parse("application/json", '{"a":1}')).toEqual({ a: 1 });
   });
 
   it("a refresh op re-GETs the zone through the wire", async () => {
@@ -604,7 +590,6 @@ describe("createPartial surface", () => {
   it("keeps every zone GET of a double-slash page on its own origin", async () => {
     window.history.replaceState(null, "", `${location.origin}//attacker.example/x/`);
     document.body.innerHTML =
-      '<div data-next-zone="late" data-next-lazy="load"></div>' +
       '<div data-next-zone="tick" data-next-poll="5000"></div>' +
       '<button data-next-accepted="tick">open</button>';
     const clock = manualPollClock();
@@ -627,7 +612,6 @@ describe("createPartial surface", () => {
     const page = `${location.origin}//attacker.example/x/`;
     expect(calls.map((call) => call.url)).toEqual([
       page,
-      page,
       `${location.origin}/modal/`,
       page,
     ]);
@@ -635,7 +619,7 @@ describe("createPartial surface", () => {
       expect(new URL(call.url).origin).toBe(location.origin);
       expect(call.init.mode).toBe("same-origin");
     }
-    const origin = new Headers(calls[3]!.init.headers).get("X-Next-Origin");
+    const origin = new Headers(calls[2]!.init.headers).get("X-Next-Origin");
     expect(origin).toBe("//attacker.example/x/");
     partial.layers._reset();
     window.history.replaceState(null, "", "/");
@@ -852,6 +836,25 @@ describe("createPartial surface", () => {
     expect(stream.tags()).toBe(1);
     stream.land(createSse);
     expect(source.opened).toHaveLength(1);
+    lazy._reset();
+  });
+
+  it("loads no stream chunk for a stream attribute with an empty url", () => {
+    const stream = unloaded<SseFactory>("stream");
+    const lazy = createPartial({
+      ...chunkModules,
+      stream,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    document.head.innerHTML = "";
+    document.body.innerHTML = '<div data-next-stream=""></div>';
+    lazy.stream.scan(document);
+    expect(stream.tags()).toBe(0);
+    document.documentElement.setAttribute("data-next-streamed", "");
+    lazy.stream.scan(document);
+    expect(stream.tags()).toBe(0);
+    document.documentElement.removeAttribute("data-next-streamed");
     lazy._reset();
   });
 
@@ -1270,7 +1273,7 @@ describe("createPartial surface", () => {
 
   it("a dev chunk landing after ready validates the mounted page once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    document.body.innerHTML = '<div data-next-zone="t" data-next-lazy="soon"></div>';
+    document.body.innerHTML = '<div data-next-zone="t" data-next-defer="soon"></div>';
     partial._configure({ document, dev: true });
     partial.ready();
     expect(warn).not.toHaveBeenCalled();
@@ -1278,7 +1281,7 @@ describe("createPartial surface", () => {
     partial._configure({ dev: true, diagnostics });
     partial._configure({ dev: true });
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="soon"');
+    expect(warn.mock.calls[0]![0]).toContain('data-next-defer="soon"');
   });
 
   it("onMount returns a teardown that unregisters the callback", () => {
@@ -1485,9 +1488,27 @@ describe("Next.partial.submit", () => {
       "partial:before-request",
       "partial:before-apply",
       "partial:applied",
+      "partial:settled",
     ]);
     const applied = s.dispatched[2]!.detail;
     expect(applied).toMatchObject({ envelope: outcome.envelope, ok: true });
+    expect(s.dispatched[3]!.detail).toEqual({
+      zones: ["z"],
+      boundaries: [],
+      status: "ok",
+    });
+  });
+
+  it("marks the zone a submit targets busy until the reply settles", async () => {
+    const s = answering();
+    const zone = document.querySelector('[data-next-zone="z"]')!;
+    const sent = s.partial.submit(document.querySelector("form")!);
+    expect(zone.hasAttribute("data-next-busy")).toBe(true);
+    expect(zone.getAttribute("aria-busy")).toBe("true");
+    s.replies[0]!(patchesResponse(ENVELOPE_OK));
+    await sent;
+    expect(zone.hasAttribute("data-next-busy")).toBe(false);
+    expect(zone.hasAttribute("aria-busy")).toBe(false);
   });
 
   it("resolves an invalid form with its errors", async () => {
@@ -1690,7 +1711,8 @@ describe("Next.partial.submit", () => {
     const queued = move("card-1");
     const latest = move("card-1");
     await expect(queued).resolves.toEqual({ status: "dropped", applied: false });
-    expect(s.dispatched.map((d) => d.detail.intent)).toMatchObject([
+    const sent = s.dispatched.filter((d) => d.event === "partial:before-request");
+    expect(sent.map((d) => d.detail.intent)).toMatchObject([
       { uid: "card-1" },
       { uid: "card-2" },
     ]);
@@ -1746,7 +1768,7 @@ describe("Next.partial.submit", () => {
       await vi.advanceTimersByTimeAsync(1000);
       await expect(outcome).resolves.toMatchObject({
         status: "error",
-        error: { kind: "network" },
+        error: { kind: "timeout" },
       });
       expect(made.dispatched.map((d) => d.event)).toContain("partial:error");
     } finally {
@@ -2373,5 +2395,141 @@ describe("createPartial after a mutation that got no reply", () => {
     expect(ws.tags()).toBe(1);
     expect(stream.tags()).toBe(1);
     lazy._reset();
+  });
+});
+
+describe("createPartial zone batches", () => {
+  const inner = (...pairs: [string, string][]): Response =>
+    patchesResponse(
+      JSON.stringify({
+        version: "v1",
+        ops: pairs.map(([zone, html]) => ({ op: "inner", target: { zone }, html })),
+      }),
+    );
+
+  it("keeps a newer GET's answer for a zone a late batch also carries", async () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a">a0</div><div data-next-zone="b">b0</div>';
+    const { partial, dispatched } = makeSurface();
+    const replies: ((r: Response) => void)[] = [];
+    partial._configure({
+      document,
+      navigate: () => undefined,
+      fetch: () => new Promise<Response>((resolve) => replies.push(resolve)),
+    });
+    const text = (name: string): string | null =>
+      document.querySelector(`[data-next-zone="${name}"]`)!.textContent;
+    const batch = partial.fetch({ url: "/p/", zone: "a,b" });
+    const single = partial.fetch({ url: "/p/", zone: "a" });
+    replies[1]!(inner(["a", "a2"]));
+    await single;
+    replies[0]!(inner(["a", "a1"], ["b", "b1"]));
+    await expect(batch).resolves.toMatchObject({ status: "ok", applied: true });
+    expect(text("a")).toBe("a2");
+    expect(text("b")).toBe("b1");
+    expect(document.querySelectorAll("[data-next-busy]")).toHaveLength(0);
+    const settled = dispatched.filter((d) => d.event === "partial:settled");
+    expect(settled.map((d) => d.detail)).toEqual([
+      { zones: ["a"], boundaries: [], status: "ok" },
+      { zones: ["a", "b"], boundaries: [], status: "ok" },
+    ]);
+  });
+});
+
+describe("createPartial reveals", () => {
+  it("asks again for a failed sentinel only once it re-enters view", async () => {
+    document.body.innerHTML =
+      '<div href="/late/" data-next-merge="append" data-next-target="late" ' +
+      'data-next-defer="visible"></div>';
+    const { partial } = makeSurface();
+    let view: (visible: boolean) => void = () => undefined;
+    const urls: string[] = [];
+    partial._configure({
+      document,
+      navigate: () => undefined,
+      observer: {
+        observe: (_el, onView) => {
+          view = onView;
+          return () => undefined;
+        },
+      },
+      fetch: async (url) => {
+        urls.push(url);
+        return new Response("{}", {
+          status: 500,
+          headers: { "content-type": "application/vnd.next.patches+json" },
+        });
+      },
+    });
+    partial.ready();
+    const settle = (): Promise<void> =>
+      new Promise((resolve) => setTimeout(resolve, 0));
+    view(true);
+    await settle();
+    view(true);
+    await settle();
+    expect(urls).toHaveLength(1);
+    view(false);
+    view(true);
+    await settle();
+    expect(urls).toHaveLength(2);
+  });
+});
+
+describe("Next.partial.fetch with an element", () => {
+  it("resolves as dropped without the defer chunk, sending nothing", async () => {
+    const fetch = vi.fn(() => Promise.resolve(patchesResponse()));
+    const partial = createPartial({
+      ...chunkModules,
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    partial._configure({ fetch });
+    await expect(partial.fetch(document.createElement("div"))).resolves.toEqual({
+      status: "dropped",
+      applied: false,
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("the router seams of the surface", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+    document.body.innerHTML = "";
+  });
+
+  it("asks the router for the last answer of a pop while one is set", () => {
+    const { partial } = makeSurface();
+    const reload = vi.fn();
+    partial._configure({ reload });
+    window.history.replaceState(null, "", "/x/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    const answer = vi.fn(() => "/x/");
+    partial._pop = answer;
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(answer).toHaveBeenCalledTimes(1);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("resolves a slot through the router while one is set", () => {
+    const { partial } = makeSurface();
+    document.body.innerHTML = "<!--a--><p>old</p><!--b-->";
+    const morph = { op: "morph", target: { slot: "L1" }, html: "<p>new</p>" };
+    partial.apply({ version: "", ops: [morph] });
+    expect(document.body.innerHTML).toBe("<!--a--><p>old</p><!--b-->");
+    const [start, , end] = [...document.body.childNodes];
+    partial._slot = (target) =>
+      target.slot === "L1" ? [document.body, start!, end!] : undefined;
+    partial.apply({ version: "", ops: [morph] });
+    expect(document.body.innerHTML).toBe("<!--a--><p>new</p><!--b-->");
+  });
+
+  it("stamps the runtime headers on a request the router sends", () => {
+    const { partial } = makeSurface();
+    const headers = partial._headers({ "X-Next-Navigate": "1" });
+    expect(headers.get("X-Next-Request")).toBe("1");
+    expect(headers.get("X-Next-Navigate")).toBe("1");
+    expect(headers.has("Accept")).toBe(true);
   });
 });

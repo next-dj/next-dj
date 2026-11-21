@@ -26,6 +26,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`read-query-parameters`
    Read query-string values with the ``DQuery`` marker.
 
+:doc:`page-a-list-by-cursor`
+   Page an infinite list by an opaque cursor with ``KeysetPager``, and sign its tokens or write a pager of another scheme.
+
 :doc:`add-a-custom-template-loader`
    Plug an extra ``TemplateLoader`` into ``TEMPLATE_LOADERS``.
 
@@ -188,6 +191,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    reload-routes-from-code
    write-a-router-backend
    read-query-parameters
+   page-a-list-by-cursor
    add-a-custom-template-loader
    require-login-on-pages
    internationalize-routes

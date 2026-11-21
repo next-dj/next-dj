@@ -1,6 +1,5 @@
 // Delegated handlers for the data-next-* triggers, bound once on the document.
-// Lazy-zone activation runs per inserted subtree after each apply. Load zones are
-// batched on ready, revealed zones and pagination sentinels wait for the observer.
+// Sentinels are armed per inserted subtree after each apply and wait for the observer.
 
 import {
   defaultClock,
@@ -18,10 +17,8 @@ import {
   ATTR_POLL,
   ATTR_KEY,
   ATTR_TRANSPORT,
-  ATTR_ZONE,
   HEADER_MERGE,
   HEADER_ORIGIN,
-  addZone,
   currentUrl,
   matching,
 } from "./protocol";
@@ -32,17 +29,25 @@ import type { Clock } from "./wire";
 const TRIGGER_ATTR = "data-next-trigger";
 const TARGET_ATTR = "data-next-target";
 const DEBOUNCE_ATTR = "data-next-debounce";
+const MARGIN_ATTR = "data-next-margin";
 export const MERGE_ATTR = "data-next-merge";
 const CONFIRM_ATTR = "data-next-confirm";
-export const LAZY_ATTR = "data-next-lazy";
+export const DEFER_ATTR = "data-next-defer";
 export const POLL_ATTR = ATTR_POLL;
 const VALIDATE_ATTR = "data-next-validate";
 // X-Next-Validate is local to inline validation, not shared protocol vocabulary.
 const HEADER_VALIDATE = "X-Next-Validate";
 
+const ARMED = 0;
+const IDLE = 1;
+const SENT = 2;
+const LEFT = 3;
+const OWED = 4;
+const DONE = 5;
+
 /** The geometry seam over IntersectionObserver, which jsdom does not model. */
 export interface IntersectionAdapter {
-  observe(el: Element, onReveal: () => void): () => void;
+  observe(el: Element, onView: (visible: boolean) => void, margin: string): () => void;
 }
 
 /** The confirm gate, injectable so tests drive accept and cancel without a dialog. */
@@ -61,12 +66,13 @@ export interface TriggerRequest {
   key?: string;
   owner?: string;
   transport?: WireTransport;
+  background?: boolean;
 }
 
 /** The seams the triggers draw on. */
 export interface TriggerDeps {
   // The partial fetch, named by zone and merge intent, never selectors.
-  fetch: (request: TriggerRequest) => void;
+  fetch: (request: TriggerRequest) => void | Promise<{ status: string }>;
   // Abort the in-flight request on a queue, so a submit cancels its own validation.
   abort: (key: string) => void;
   document?: Document;
@@ -76,7 +82,8 @@ export interface TriggerDeps {
   visibility?: VisibilityAdapter;
   // The zone poller, exported by the poll chunk.
   poll: LazyModule<PollFactory>;
-  // The owning page of an element. Absent, lazy and poll GETs read the address bar.
+  defer: LazyModule<DeferArm>;
+  // The owning page of an element. Absent, poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
   // The host page of the layer an element sits in, answered by the layer stack. Absent,
   // a submit inside a layer stamps no origin, the same as one outside.
@@ -97,14 +104,19 @@ export interface TriggerDeps {
 export interface Triggers {
   // Bind the delegated listeners once, the lifecycle of the layer stack.
   install(doc: Document): () => void;
-  // Fire the batched load zones on ready.
-  ready(): void;
-  // Activate lazy zones and arm sentinels in a freshly inserted subtree.
+  // Arm the sentinels and start the polls of a freshly inserted subtree.
   scan(root: ParentNode): void;
   submission(form: HTMLFormElement, submitter?: Element | null): TriggerRequest;
   sender(el: Element): Pick<TriggerRequest, "owner" | "headers">;
+  sweep(): void;
   _reset(): void;
 }
+
+export type Sent = ReturnType<TriggerDeps["fetch"]>;
+
+export type Watch = (el: Element, send: () => Sent) => void;
+
+export type DeferArm = (watch: Watch) => void;
 
 function transportOf(form: Element): WireTransport {
   return form.getAttribute(ATTR_TRANSPORT) === "any" ? "any" : "http";
@@ -121,10 +133,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const diagnostics = deps.diagnostics ?? ((): undefined => undefined);
   // Per-element debounce handles, keyed by the element.
   const timers = new WeakMap<Element, number>();
-  // Lazy zones already activated, so a re-inserted element fires no second GET.
+  // Sentinels already armed, so a re-inserted element fires no second GET.
   const activated = new WeakSet<Element>();
-  // Live observer teardowns by element. A one-shot reveal drops its own entry as it
-  // fires, so an infinite scroll does not pile them up for the life of the page.
+  // Live observer teardowns by element. A reveal drops its own entry once its request
+  // settles, so an infinite scroll does not pile them up for the life of the page.
   const observed = new Map<Element, () => void>();
   // A form's pending validation. The debounce timer and the POST it would send share
   // one controller, so a submit cancels whichever of the two is pending.
@@ -212,27 +224,18 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.search = new URLSearchParams(pairs).toString();
     const url = target.pathname + target.search;
     if (rewrite(form, url)) history.replace(url);
-    zoneGet(url, zone);
-  }
-
-  // The wire stamps X-Next-Zone from request.zone, triggers pass intent, not headers.
-  function zoneGet(url: string, zone: string): void {
-    deps.fetch({ url, zone });
-  }
-
-  // Fire one comma-joined zone GET per owning page.
-  function flushBatches(batches: Map<string, string[]>): void {
-    for (const [url, zones] of batches) zoneGet(url, zones.join(","));
+    // The wire stamps X-Next-Zone from request.zone, triggers pass intent, not headers.
+    void deps.fetch({ url, zone });
   }
 
   // A pagination link or sentinel GETs the next page with a merge intent.
-  function paginate(el: Element, zone: string): void {
+  function paginate(el: Element, zone: string): Sent {
     const href = el.getAttribute("href");
     if (href === null || href === "") return;
     // Every caller reaches paginate via a [data-next-merge] match, so this never runs.
     /* v8 ignore next */
     const merge = el.getAttribute(MERGE_ATTR) ?? "append";
-    deps.fetch({ url: href, zone, headers: { [HEADER_MERGE]: merge } });
+    return deps.fetch({ url: href, zone, headers: { [HEADER_MERGE]: merge } });
   }
 
   // Inline validation on blur. The FormData drops file fields so a multipart form
@@ -245,7 +248,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       if (value instanceof File) continue;
       data.append(name, value);
     }
-    deps.fetch({
+    void deps.fetch({
       url: form.getAttribute("action") ?? here(),
       method: "POST",
       // The validate POST carries a body but mutates nothing. It uses an abortable
@@ -298,7 +301,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     // Intercept as a partial mutation under the uid lock. Without the runtime the
     // form posts natively, so this is the enhancement, never the only path.
     event.preventDefault();
-    deps.fetch(submission(form, submitter));
+    void deps.fetch(submission(form, submitter));
   }
 
   function submission(
@@ -364,38 +367,48 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const zone = link.getAttribute(TARGET_ATTR);
     if (zone !== null && zone !== "") {
       event.preventDefault();
-      paginate(link, zone);
+      void paginate(link, zone);
     }
   }
 
-  // Activate one lazy zone or sentinel. load fires straight away (batched on
-  // ready), revealed and sentinels wait for the observer.
-  function activate(el: Element): void {
-    if (activated.has(el)) return;
-    const zone = el.getAttribute(ATTR_ZONE);
-    const lazy = el.getAttribute(LAZY_ATTR);
-    const merge = el.getAttribute(MERGE_ATTR);
-    if (zone !== null && lazy === "revealed") {
-      activated.add(el);
-      watch(el, () => zoneGet(pageUrl(el), zone));
-      return;
-    }
-    const targetZ = el.getAttribute(TARGET_ATTR);
-    if (merge !== null && targetZ !== null) {
-      // An infinite-scroll sentinel: paginate when it scrolls into view.
-      activated.add(el);
-      watch(el, () => paginate(el, targetZ));
-    }
-  }
-
-  // A one-shot reveal, tracked so _reset can stop the ones still waiting.
-  function watch(el: Element, onReveal: () => void): void {
-    const stop = observer.observe(el, () => {
-      // Geometry is answered in a later task, so the entry is already in place.
+  // One request per entry into view, tracked so _reset can stop the ones still waiting.
+  function watch(el: Element, send: () => Sent): void {
+    observed.get(el)?.();
+    let state = ARMED;
+    let stop = (): void => undefined;
+    const finish = (): void => {
+      state = DONE;
+      stop();
       observed.delete(el);
-      onReveal();
-    });
-    observed.set(el, stop);
+    };
+    const fire = (): void => {
+      state = SENT;
+      const sent = send();
+      if (sent instanceof Promise)
+        void sent.then(
+          ({ status }) => settle(status === "error"),
+          () => settle(true),
+        );
+      else settle(false);
+    };
+    const settle = (failed: boolean): void => {
+      if (state === DONE) return;
+      if (!failed || !el.isConnected) finish();
+      else if (state === OWED) fire();
+      else state = state === LEFT ? ARMED : IDLE;
+    };
+    stop = observer.observe(
+      el,
+      (visible) => {
+        if (!el.isConnected) finish();
+        else if (!visible) state = state < SENT ? ARMED : LEFT;
+        else if (state === ARMED) fire();
+        else if (state === LEFT) state = OWED;
+      },
+      el.getAttribute(MARGIN_ATTR) ?? "",
+    );
+    if (state === DONE) stop();
+    else observed.set(el, finish);
   }
 
   // The poller, built on first use once its chunk has loaded.
@@ -404,33 +417,23 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   let epoch = 0;
 
   function startPolls(factory: PollFactory, els: Element[]): void {
-    poller ??= factory({ clock, visibility, pageUrl, fetch: zoneGet });
+    poller ??= factory({
+      clock,
+      visibility,
+      pageUrl,
+      fetch: (url, zone) => void deps.fetch({ url, zone, background: true }),
+    });
     for (const el of els) poller.start(el);
-  }
-
-  // Batch the load zones into one comma-joined GET per owning page. Grouping by
-  // the layer-resolved page keeps a base-page zone and a layer zone apart.
-  function loadBatch(root: ParentNode): void {
-    const batches = new Map<string, string[]>();
-    for (const el of matching(root, `[${LAZY_ATTR}="load"]`)) {
-      if (activated.has(el)) continue;
-      const zone = el.getAttribute(ATTR_ZONE);
-      if (zone === null) continue;
-      activated.add(el);
-      addZone(batches, pageUrl(el), zone);
-    }
-    // The wire queues per path and zone batch, so a re-fired batch supersedes its own.
-    flushBatches(batches);
   }
 
   function scan(root: ParentNode): void {
     diagnostics()?.attrs(root);
-    for (const el of matching(root, `[${LAZY_ATTR}="revealed"]`)) {
-      activate(el);
-    }
-    for (const el of matching(root, `a[${MERGE_ATTR}][${TARGET_ATTR}]`)) {
-      // Only marked sentinels arm an observer, plain pagination links stay clicks.
-      if (el.hasAttribute(LAZY_ATTR)) activate(el);
+    // Only marked sentinels arm an observer, plain pagination links stay clicks.
+    for (const el of matching(root, `[${MERGE_ATTR}][${DEFER_ATTR}]`)) {
+      const zone = el.getAttribute(TARGET_ATTR);
+      if (zone === null || activated.has(el)) continue;
+      activated.add(el);
+      watch(el, () => paginate(el, zone));
     }
     // A page with no poll zone never fetches the poller.
     const polled = matching(root, `[${POLL_ATTR}]`);
@@ -462,20 +465,18 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     return detach;
   }
 
+  deps.defer.whenLoaded((arm) => arm(watch));
+
   return {
     install,
-    ready() {
-      loadBatch(doc);
-    },
-    scan(root) {
-      scan(root);
-      loadBatch(root);
-    },
+    scan,
     submission,
     sender,
+    sweep() {
+      for (const [el, finish] of observed) if (!el.isConnected) finish();
+    },
     _reset() {
-      for (const stop of observed.values()) stop();
-      observed.clear();
+      for (const finish of observed.values()) finish();
       poller?._reset();
       epoch += 1;
       // Also remove the listeners install added, so a reset instance handles no event.

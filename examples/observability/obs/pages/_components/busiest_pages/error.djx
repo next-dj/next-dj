@@ -1,0 +1,5 @@
+{% #component "alert" variant="warning" title="The busiest pages are unavailable" %}
+  {% #slot "content" %}
+    <p>The widget could not read its counters. Every other panel stays live.</p>
+  {% /slot %}
+{% /component %}

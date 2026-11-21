@@ -76,6 +76,12 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
         return self.compile_resolve(param)(context)
 
     @override
+    def static_blocking(self, param: inspect.Parameter) -> bool:
+        """Block only for a callable source, as a key or a constant reads memory."""
+        marker: Context = param.default
+        return callable(marker.source)
+
+    @override
     def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller:
         """Read the source and the default of the marker once per plan.
 
@@ -122,6 +128,7 @@ class ContextByNameProvider(RegisteredParameterProvider):
     """Inject context_data values when the parameter name is already a key."""
 
     priority = 30
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:

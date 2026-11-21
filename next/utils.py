@@ -30,7 +30,6 @@ from django.utils.module_loading import import_string
 from django.utils.regex_helper import normalize
 
 from next.caches import DEFAULT_CACHE_SIZE, BoundedCache
-from next.diagnostics import Capture
 from next.errors import InvalidDirsError
 from next.stamps import fresh, settled, snapshot
 
@@ -685,24 +684,31 @@ class _PageTreeWalk:
             self.mark(child, source, marker, child_trail, child_raw)
 
 
-_MIDDLEWARE_CLASSES: dict[str, type] = {}
+_MIDDLEWARE_CLASSES: dict[str, type | None] = {}
 
 
 def _middleware_class(path: str) -> type | None:
-    """Import a `MIDDLEWARE` entry, `None` when it does not import as a class.
+    """Import a `MIDDLEWARE` entry once per settings load, `None` when it is no class.
 
-    Only a class is kept, so an entry fixed after a failed import is read again.
+    A failure is remembered too, so a streamed request never retries a broken import.
     """
-    known = _MIDDLEWARE_CLASSES.get(path)
-    if known is not None:
-        return known
-    capture = Capture()
-    with capture:
+    try:
+        return _MIDDLEWARE_CLASSES[path]
+    except KeyError:
+        pass
+    try:
         found = import_string(path)
-    if capture.failed or not isinstance(found, type):
-        return None
-    _MIDDLEWARE_CLASSES[path] = found
-    return found
+    except ImportError:
+        found = None
+    resolved = found if isinstance(found, type) else None
+    _MIDDLEWARE_CLASSES[path] = resolved
+    return resolved
+
+
+def forget_middleware_classes(**kwargs: object) -> None:
+    """Drop the imported `MIDDLEWARE` classes when the framework settings reload."""
+    _MIDDLEWARE_CLASSES.clear()
+    _installed.forget()
 
 
 def is_middleware(entry: object, base: str) -> bool:
@@ -722,6 +728,42 @@ def is_middleware(entry: object, base: str) -> bool:
 def middleware_listed(middleware: Iterable[object], base: str) -> bool:
     """Whether `middleware` lists the class `base` or a subclass of it."""
     return any(is_middleware(entry, base) for entry in middleware)
+
+
+class _Installed:
+    """What `settings.MIDDLEWARE` lists, each answer held while the list stays the one.
+
+    An override or a reload sets another list, so the held answers need no receiver.
+    """
+
+    __slots__ = ("_held",)
+
+    def __init__(self) -> None:
+        """Start before the first read."""
+        self._held: tuple[object, dict[str, bool]] | None = None
+
+    def lists(self, base: str) -> bool:
+        """Return whether the list held now names `base` or a subclass of it."""
+        middleware = settings.MIDDLEWARE
+        held = self._held
+        if held is None or held[0] is not middleware:
+            held = self._held = (middleware, {})
+        found = held[1].get(base)
+        if found is None:
+            found = held[1][base] = middleware_listed(middleware or (), base)
+        return found
+
+    def forget(self) -> None:
+        """Drop the answers, which also follow the classes the entries import to."""
+        self._held = None
+
+
+_installed: Final = _Installed()
+
+
+def middleware_installed(base: str) -> bool:
+    """Whether `settings.MIDDLEWARE` lists `base` or a subclass, asked once per list."""
+    return _installed.lists(base)
 
 
 def child_nodelists(node: Node) -> Iterator[NodeList]:

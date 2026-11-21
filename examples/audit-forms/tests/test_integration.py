@@ -1,9 +1,11 @@
 import importlib.util
 import re
+from html import unescape
 from io import StringIO
 from pathlib import Path
 
 import pytest
+from access.demo import REQUESTERS
 from access.models import AccessRequest, AccessRequestQuerySet, AuditEntry
 from django.core.cache import caches
 from django.core.checks import run_checks
@@ -21,6 +23,7 @@ from next.testing import (
     assert_metadata,
     envelope_of,
     find_anchor,
+    find_form,
     hidden_fields,
     resolve_action_url,
 )
@@ -105,6 +108,56 @@ def _walk_three_steps(next_client) -> None:
 def submitted_request(next_client) -> AccessRequest:
     _walk_three_steps(next_client)
     return AccessRequest.objects.get()
+
+
+LOG_URL = "/admin/audit/"
+DEMO_ROWS = 85
+LOG_ZONES = "audit-rows,audit-rows-more,audit-rows-less,audit-totals"
+OLDER = "Show older rows"
+NEWER = "Show newer rows"
+
+_ROW_KEY = re.compile(r'<tr data-audit-row data-next-key="(\d+)"')
+_HREF = re.compile(r'href="([^"]*)"')
+_LOG_ZONE = r'<div data-next-zone="audit-rows-{}"[^>]*>([\s\S]*?)</div>'
+
+
+def _row_keys(html: str) -> list[int]:
+    return [int(key) for key in _ROW_KEY.findall(html)]
+
+
+def _log_order(**filters: str) -> list[int]:
+    rows = AuditEntry.objects.filter(**filters).order_by("-created_at", "-pk")
+    return list(rows.values_list("pk", flat=True))
+
+
+def _sentinel(body: str, suffix: str) -> str:
+    match = re.search(_LOG_ZONE.format(suffix), body)
+    assert match is not None
+    return match.group(1)
+
+
+def _link(html: str, label: str) -> str:
+    match = _HREF.search(find_anchor(html, text=label))
+    assert match is not None
+    return unescape(match.group(1))
+
+
+def _older(next_client, href: str):
+    return envelope_of(
+        next_client.get_zones(
+            f"{LOG_URL}{href}", "audit-rows,audit-rows-more", HTTP_X_NEXT_MERGE="append"
+        )
+    )
+
+
+def _newer(next_client, href: str):
+    return envelope_of(
+        next_client.get_zones(
+            f"{LOG_URL}{href}",
+            "audit-rows,audit-rows-less",
+            HTTP_X_NEXT_MERGE="prepend",
+        )
+    )
 
 
 def _wizard_form_block(html: str) -> str:
@@ -374,69 +427,272 @@ class TestNamespacedAction:
 
 
 class TestAdminAuditPage:
-    def test_admin_full_render_shows_only_the_skeleton(self, next_client) -> None:
+    def test_the_first_render_lists_the_rows_of_both_channels(
+        self, next_client
+    ) -> None:
         _post_step(next_client, "identity", IDENTITY)
+        _post_step(next_client, "identity", {**IDENTITY, "email": ""})
 
-        response = next_client.get("/admin/audit/")
+        response = next_client.get(LOG_URL)
         assert response.status_code == 200
         body = response.content.decode()
 
-        assert 'data-next-zone="audit-table"' in body
-        assert 'data-next-lazy="revealed"' in body
-        assert "data-audit-skeleton" in body
-        assert "data-audit-table" not in body
-        assert 'data-source="backend"' not in body
-
-    def test_the_header_counts_the_rows_of_each_channel(self, next_client) -> None:
-        _post_step(next_client, "identity", IDENTITY)
-
-        body = next_client.get("/admin/audit/").content.decode()
-
-        assert re.search(r"Backend rows \(\d+\) and signal rows \(\d+\)", body)
+        assert '<tbody data-next-zone="audit-rows"' in body
+        assert "data-audit-table" in body
+        assert 'data-source="backend"' in body
+        assert 'data-source="signal"' in body
+        assert 'data-kind="dispatched"' in body
+        assert 'data-kind="validation_failed"' in body
+        assert _row_keys(body) == _log_order()
         assert "{{" not in body
 
-    def test_zone_request_morphs_the_audit_table(self, next_client) -> None:
+    def test_an_empty_log_says_so(self, next_client) -> None:
+        body = next_client.get(LOG_URL).content.decode()
+        assert "No audit rows yet" in _sentinel(body, "more")
+        assert _row_keys(body) == []
+
+    def test_a_short_log_ends_under_its_rows(self, next_client) -> None:
+        _post_step(next_client, "identity", IDENTITY)
+
+        more = _sentinel(next_client.get(LOG_URL).content.decode(), "more")
+        assert "End of the log." in more
+        assert "<a" not in more
+
+    def test_kind_filter_reloads_every_zone_it_narrows(self, next_client) -> None:
+        body = next_client.get(f"{LOG_URL}?kind=dispatched").content.decode()
+        form = find_form(body, contains='id="kind-filter"')
+        assert 'method="get"' in form
+        assert f'data-next-target="{LOG_ZONES}"' in form
+        assert 'data-next-trigger="change"' in form
+        assert "onchange" not in form
+        assert "<noscript>" in form
+        assert '<option value="dispatched" selected>' in form
+        for zone in LOG_ZONES.split(","):
+            assert f'data-next-zone="{zone}"' in body
+
+    def test_the_filter_request_morphs_the_rows_and_resets_the_totals(
+        self, next_client
+    ) -> None:
         _post_step(next_client, "identity", IDENTITY)
         _post_step(next_client, "identity", {**IDENTITY, "email": ""})
 
-        response = next_client.get_zones("/admin/audit/", "audit-table")
+        response = next_client.get_zones(f"{LOG_URL}?kind=validation_failed", LOG_ZONES)
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph"]
-        assert envelope.zone_targets() == ["audit-table"]
-        html = envelope.html_for_zone("audit-table")
-        assert 'data-source="backend"' in html
-        assert 'data-source="signal"' in html
-        assert 'data-kind="dispatched"' in html
-        assert 'data-kind="validation_failed"' in html
-        assert "data-audit-table" in html
+        assert envelope.op_verbs() == ["morph"] * 4
+        assert envelope.zone_targets() == LOG_ZONES.split(",")
+        rows = envelope.html_for_zone("audit-rows")
+        assert _row_keys(rows) == _log_order(kind=AuditEntry.KIND_VALIDATION_FAILED)
+        assert 'data-kind="dispatched"' not in rows
+        totals = envelope.html_for_zone("audit-totals")
+        assert 'data-next-defer="visible"' in totals
+        assert "data-audit-skeleton" in totals
 
-    def test_admin_filter_narrows_to_one_kind(self, next_client) -> None:
+    def test_an_unknown_kind_lists_every_row(self, next_client) -> None:
         _post_step(next_client, "identity", IDENTITY)
-        _post_step(next_client, "identity", {**IDENTITY, "email": ""})
 
-        response = next_client.get_zones(
-            "/admin/audit/?kind=validation_failed", "audit-table"
-        )
-        html = envelope_of(response).html_for_zone("audit-table")
-        assert 'data-kind="validation_failed"' in html
-        assert 'data-kind="dispatched"' not in html
-        assert 'data-kind="request_started"' not in html
-        assert (
-            AuditEntry.objects.filter(kind=AuditEntry.KIND_VALIDATION_FAILED).count()
-            == 1
-        )
+        body = next_client.get(f"{LOG_URL}?kind=bogus").content.decode()
+        assert _row_keys(body) == _log_order()
 
     def test_admin_surfaces_access_denied_rows(self, next_client) -> None:
         _post_step_unacknowledged(next_client, "identity", IDENTITY)
 
-        response = next_client.get_zones(
-            "/admin/audit/?kind=access_denied", "audit-table"
+        body = next_client.get(f"{LOG_URL}?kind=access_denied").content.decode()
+        assert 'data-kind="access_denied"' in body
+        assert "view/denied" in body
+        assert 'data-kind="dispatched"' not in body
+
+
+class TestAuditTotals:
+    """The per-channel counts load on their own request, behind a skeleton."""
+
+    def test_the_full_render_holds_the_skeleton_and_counts_nothing(
+        self, next_client
+    ) -> None:
+        _post_step(next_client, "identity", IDENTITY)
+
+        body = next_client.get(LOG_URL).content.decode()
+        assert 'data-next-zone="audit-totals"' in body
+        assert 'data-next-defer="visible"' in body
+        assert "data-audit-skeleton" in body
+        assert "data-audit-totals" not in body
+
+    def test_the_totals_arrive_on_their_own_request(
+        self, next_client, demo_data
+    ) -> None:
+        envelope = next_client.get_boundary(LOG_URL, "audit_totals", kind="")
+        [op] = envelope.ops
+        assert op["s"] == "ready"
+        backend = AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count()
+        assert "data-audit-totals" in op["html"]
+        assert f">{backend}</p>" in op["html"]
+        assert f">{DEMO_ROWS - backend}</p>" in op["html"]
+
+    def test_the_kind_prop_narrows_the_totals(self, next_client, demo_data) -> None:
+        envelope = next_client.get_boundary(
+            f"{LOG_URL}?kind=access_denied", "audit_totals", kind="access_denied"
         )
-        html = envelope_of(response).html_for_zone("audit-table")
-        assert 'data-kind="access_denied"' in html
-        assert "view/denied" in html
-        assert 'data-kind="dispatched"' not in html
+        html = envelope.ops[0]["html"]
+        denied = AuditEntry.objects.filter(kind=AuditEntry.KIND_ACCESS_DENIED).count()
+        assert denied
+        assert ">0</p>" in html
+        assert f">{denied}</p>" in html
+
+    def test_a_visitor_without_the_runtime_gets_the_totals_inline(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get(f"{LOG_URL}?_nojs=1").content.decode()
+        assert "data-audit-totals" in body
+        assert "data-audit-skeleton" not in body
+
+
+class TestAuditLogWindows:
+    """The log pages by a cursor over `(-created_at, -pk)`, one batch per request."""
+
+    def test_the_first_window_holds_the_newest_batch(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get(LOG_URL).content.decode()
+        assert _row_keys(body) == _log_order()[:20]
+        more = _sentinel(body, "more")
+        assert 'data-next-param="cursor"' in more
+        assert 'data-next-prune="60"' in more
+        assert 'data-next-url="replace"' in more
+        assert "data-next-back=" in more
+        assert _link(more, OLDER).startswith("?cursor=")
+        less = _sentinel(body, "less")
+        assert less.count("<a") == 1
+        assert " hidden>" in less
+
+    def test_the_next_token_appends_the_following_batch(
+        self, next_client, demo_data
+    ) -> None:
+        first = next_client.get(LOG_URL).content.decode()
+        envelope = _older(next_client, _link(first, OLDER))
+
+        assert envelope.op_verbs() == ["append", "append"]
+        assert envelope.zone_targets() == ["audit-rows", "audit-rows-more"]
+        assert _row_keys(envelope.html_for_zone("audit-rows")) == _log_order()[20:40]
+        following = _link(envelope.html_for_zone("audit-rows-more"), OLDER)
+        assert following != _link(first, OLDER)
+
+    def test_a_batch_costs_one_bounded_query(
+        self, next_client, demo_data, django_assert_num_queries
+    ) -> None:
+        href = _link(next_client.get(LOG_URL).content.decode(), OLDER)
+        with django_assert_num_queries(1) as captured:
+            _older(next_client, href)
+        [query] = captured.captured_queries
+        assert "LIMIT 21" in query["sql"]
+        assert "OFFSET" not in query["sql"]
+        assert "COUNT(" not in query["sql"]
+
+    def test_following_every_token_reads_each_row_once(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get(LOG_URL).content.decode()
+        keys = _row_keys(body)
+        more = _sentinel(body, "more")
+        while "<a" in more:
+            envelope = _older(next_client, _link(more, OLDER))
+            keys += _row_keys(envelope.html_for_zone("audit-rows"))
+            more = envelope.html_for_zone("audit-rows-more")
+
+        assert keys == _log_order()
+        assert len(keys) == DEMO_ROWS
+        assert "End of the log." in more
+        assert 'data-next-key="audit-rows-more"' in more
+
+    def test_a_deep_link_offers_the_rows_above_it(self, next_client, demo_data) -> None:
+        href = _link(next_client.get(LOG_URL).content.decode(), OLDER)
+        body = next_client.get(f"{LOG_URL}{href}").content.decode()
+
+        assert _row_keys(body) == _log_order()[20:40]
+        less = _sentinel(body, "less")
+        assert " hidden" not in less
+        assert 'data-next-target="audit-rows,audit-rows-less"' in less
+        assert 'data-next-merge="prepend"' in less
+
+    def test_the_previous_token_prepends_the_batch_above(
+        self, next_client, demo_data
+    ) -> None:
+        href = _link(next_client.get(LOG_URL).content.decode(), OLDER)
+        deep = next_client.get(f"{LOG_URL}{href}").content.decode()
+        envelope = _newer(next_client, _link(_sentinel(deep, "less"), NEWER))
+
+        assert envelope.op_verbs() == ["prepend", "prepend"]
+        assert _row_keys(envelope.html_for_zone("audit-rows")) == _log_order()[:20]
+        assert " hidden>" in envelope.html_for_zone("audit-rows-less")
+
+    def test_a_restore_renders_the_batches_the_prune_keeps(
+        self, next_client, demo_data
+    ) -> None:
+        more = _sentinel(next_client.get(LOG_URL).content.decode(), "more")
+        hrefs = []
+        for _batch in range(3):
+            hrefs.append(_link(more, OLDER))
+            more = _older(next_client, hrefs[-1]).html_for_zone("audit-rows-more")
+
+        shallow = next_client.get(f"{LOG_URL}{hrefs[0]}&restore=1").content.decode()
+        assert _row_keys(shallow) == _log_order()[:40]
+        assert " hidden>" in _sentinel(shallow, "less")
+
+        deep = next_client.get(f"{LOG_URL}{hrefs[2]}&restore=1").content.decode()
+        assert _row_keys(deep) == _log_order()[20:80]
+        assert " hidden" not in _sentinel(deep, "less")
+        backs = re.search(r'data-next-backs="([^"]+)"', _sentinel(deep, "more"))
+        assert backs is not None
+        assert len(backs.group(1).split(" ")) == 2
+        assert "restore" not in _link(_sentinel(deep, "more"), OLDER)
+
+    @pytest.mark.parametrize(
+        "cursor",
+        ["garbage", "%21%21", "W10", "WzFd", "W2ZhbHNlLCJub3QgYSBkYXRlIiwxXQ"],
+        ids=["no-json", "no-slug", "empty-list", "no-direction", "no-stamp"],
+    )
+    def test_a_malformed_cursor_falls_back_to_the_first_window(
+        self, next_client, demo_data, cursor
+    ) -> None:
+        response = next_client.get(f"{LOG_URL}?cursor={cursor}")
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert _row_keys(body) == _log_order()[:20]
+        assert " hidden>" in _sentinel(body, "less")
+
+    def test_the_cursor_carries_the_kind_filter(self, next_client, demo_data) -> None:
+        kind = AuditEntry.KIND_DISPATCHED
+        body = next_client.get(f"{LOG_URL}?kind={kind}").content.decode()
+        href = _link(_sentinel(body, "more"), OLDER)
+        assert href.startswith(f"?kind={kind}&cursor=")
+
+        envelope = _older(next_client, href)
+        keys = _row_keys(body) + _row_keys(envelope.html_for_zone("audit-rows"))
+        assert keys == _log_order(kind=kind)[:40]
+
+
+class TestDemoData:
+    """The demo log comes from a seed module rather than a migration."""
+
+    def test_the_seed_command_fills_an_empty_log(self) -> None:
+        out = StringIO()
+        call_command("seed_demo", stdout=out)
+        assert "Demo audit log seeded." in out.getvalue()
+        assert AuditEntry.objects.count() == DEMO_ROWS
+        assert AccessRequest.objects.count() == REQUESTERS
+        assert set(AuditEntry.objects.values_list("kind", flat=True)) == set(
+            AuditEntry.KINDS
+        )
+
+    def test_seeding_twice_keeps_one_copy(self, demo_data) -> None:
+        call_command("seed_demo", stdout=StringIO())
+        assert AuditEntry.objects.count() == DEMO_ROWS
+        assert AccessRequest.objects.count() == REQUESTERS
+
+    def test_the_rows_of_one_post_share_a_stamp(self, demo_data) -> None:
+        stamps = AuditEntry.objects.values_list("created_at", flat=True)
+        assert len(set(stamps)) < DEMO_ROWS
+        linked = AuditEntry.objects.filings()
+        assert linked.count() == REQUESTERS
 
 
 class TestUnknownUid:
@@ -954,10 +1210,8 @@ class TestAuditLogPeek:
     def test_linked_log_rows_open_the_peek(
         self, next_client, submitted_request: AccessRequest
     ) -> None:
-        html = envelope_of(
-            next_client.get_zones("/admin/audit/", "audit-table")
-        ).html_for_zone("audit-table")
-        anchor = find_anchor(html, href=f"/request/{submitted_request.pk}/audit/")
+        body = next_client.get(LOG_URL).content.decode()
+        anchor = find_anchor(body, href=f"/request/{submitted_request.pk}/audit/")
         assert 'data-next-layer="audit-log-peek"' in anchor
 
     def test_the_trail_page_links_its_rows_without_a_peek(

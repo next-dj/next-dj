@@ -3,6 +3,10 @@
 {% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="Template example" brand_href="/" brand_icon="✨" %}
+    {% #slot "nav" %}
+      {% component "nav_link" url_name="next:page_" label="Home" variant="bar" %}
+      {% component "nav_link" url_name="myapp:page_" label="My items" variant="bar" %}
+    {% /slot %}
     {% #slot "content" %}
       {% template %}
     {% /slot %}

@@ -35,6 +35,9 @@ Subsystems
    * - URLs
      - File router, dispatcher, reverse helpers, hot reload.
      - ``next.urls``
+   * - Views
+     - The page views the URL router mounts and the per-request route decision.
+     - ``next.views``
    * - Forms
      - Form action registry, dispatch, validation, formsets.
      - ``next.forms``
@@ -44,6 +47,15 @@ Subsystems
    * - Partial
      - Zones, patches, SSE streams, partial protocol backend.
      - ``next.partial``
+   * - Router
+     - The server side of the client router, shared layouts kept across navigations, active links, speculation rules.
+     - ``next.router``
+   * - Suspense
+     - Deferred boundaries, their tokens and job lanes, and async page code driven from sync views.
+     - ``next.suspense``
+   * - Compression
+     - Response compression with zstd, brotli, and gzip, negotiated per request.
+     - ``next.compression``
    * - Realtime
      - Topics, brokers, topic streams, the WebSocket app, tickets and bindings, presence, upstream handlers, the form tunnel.
      - ``next.realtime``
@@ -75,7 +87,7 @@ Subsystems
      - Test client, signal recorder, isolation.
      - ``next.testing``
    * - App
-     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``permissions``, ``forms``, ``realtime``, and ``signals``, component bootstrap, and the nine ports during ``ready()``.
+     - Django ``AppConfig`` that wires autoreload, template-tag builtins, staticfiles integration, app module autodiscovery of ``deps``, ``permissions``, ``forms``, ``realtime``, and ``signals``, component bootstrap, and every port slot during ``ready()``.
      - ``next.apps``
 
 Bootstrap
@@ -83,16 +95,16 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The framework system checks are registered by then, since ``next.apps.config`` imports ``next.checks.catalog``.
-The hook runs nineteen startup steps in a fixed order.
-The first three connect every signal receiver of the framework, in three ordered tables for ``setting_changed``, ``settings_reloaded``, and ``router_reloaded``, each with a ``dispatch_uid`` of its module and qualified name, so no module connects a receiver at import time.
+The hook runs its startup steps in a fixed order.
+The first steps connect every signal receiver of the framework, three ordered tables for ``setting_changed``, ``settings_reloaded``, and ``router_reloaded`` and the client router receivers of ``user_logged_in`` and ``user_logged_out``, each with a ``dispatch_uid`` of its module and qualified name, so no module connects a receiver at import time.
 ``reset_failure_logs`` runs first on ``settings_reloaded``, and the ``router_reloaded`` table drops every watch, page-root, dependency, object-row, SEO-source, hreflang, and scripts memo a router rebuild leaves stale.
 
-The fourth, ``apply_resolver_setting()``, points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
+Next, ``apply_resolver_setting()`` points the dependency-injection singleton at the configured resolver class, ahead of every step that imports user modules.
 
-The next ten bind the nine ``next.ports`` slots that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
+The steps after it bind every ``next.ports`` slot that the request path, the URL patterns, the watcher, and the checks all read, each one taking the implementation from the area that owns it, and move ``seo_routes_version`` right after the SEO routes slot so the lazy urlpatterns rebuild with its routes.
 They run early for the same reason the resolver setting does, so no discovery failure leaves a process behind with an unbound port.
 
-The next three install autoreload, template-tag builtins, and staticfiles integration into the Django runtime.
+The installers follow, and the first three install autoreload, template-tag builtins, and staticfiles integration into the Django runtime.
 Then ``autodiscover.install()`` imports the ``deps``, ``permissions``, ``forms``, ``realtime``, and ``signals`` modules of every installed application, in that order, so providers, object permissions, shared forms, upstream handlers, and receivers register before the first request arrives.
 The last, ``components.install()``, bootstraps the components into the Django runtime, after the providers a ``component.py`` may need are in place.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
@@ -175,12 +187,13 @@ The dependency graph between subsystems is shallow.
 - ``next.permissions`` imports no model and keeps off Django's ``BaseBackend``, whose module imports the auth models, so ``AUTHENTICATION_BACKENDS`` can name its backend before the app registry is ready.
   It depends on ``next.conf`` and ``next.utils`` for the access rules, and only its ``checks`` module reaches ``next.pages``, ``next.components``, and ``next.forms``.
 - ``next.ports`` imports no subsystem at runtime and declares the protocols one subsystem calls another through.
-- ``next.pages`` depends on ``next.conf`` and ``next.deps``, and reaches ``next.static``, ``next.urls``, and ``next.partial`` only through ``next.ports`` slots.
+- ``next.pages`` depends on ``next.conf`` and ``next.deps``, and reaches ``next.static`` and ``next.urls`` only through ``next.ports`` slots.
 - ``next.components`` depends on ``next.conf`` and ``next.deps``, and adds a module-level dependency on ``next.pages.watch`` so the watcher and the checks share one page-tree reading.
 - ``next.static`` depends on ``next.conf``, ``next.pages``, and ``next.components``, whose trees its discovery and staticfiles finder walk.
 - ``next.forms`` depends on ``next.conf``, ``next.pages``, ``next.deps``, and ``next.components``, the last through the component-widget binding, and reaches the static collector through the ``StaticAssets`` slot rather than by importing ``next.static``.
-- ``next.pages`` and ``next.forms`` reach partial shaping through a ``next.ports`` slot rather than through ``next.partial``, so neither imports the partial subsystem on the request path.
-- ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, and ``next.forms``.
+- ``next.forms`` reaches partial shaping through the ``ResponseShaper`` its ``OPTIONS["SHAPER"]`` dotted path names, so it never imports ``next.partial``.
+- ``next.views`` holds the page views the router mounts and depends on ``next.pages``, ``next.deps``, and ``next.partial``, which it calls directly, and no lower area imports it.
+- ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, ``next.forms``, and ``next.views``, whose ``page_view`` it mounts.
 - ``next.partial`` depends on ``next.conf``, ``next.pages``, ``next.static``, and ``next.forms`` to render zones and shape patches, and its system checks add ``next.components.sources``.
   It touches ``next.urls`` only in those checks, under ``TYPE_CHECKING``.
   The form nodes those checks walk come from ``next.forms.nodes`` and the attribute names from ``next.partial.keys``, so no area imports a symbol out of the ``next.templatetags`` tag libraries and the shim layer stays a leaf.
@@ -206,18 +219,29 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - Subsystem
      - Submodules
    * - ``next.pages``
-     - ``manager`` (``templates``, ``views``), ``registry``, ``access``, ``loaders``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``visits``, ``metadata`` (``dicts``, ``markers``, ``normalize``, ``shapes``, ``scope``, ``titles``, ``fold``, ``chain``, ``registry``, ``resolve``, ``hreflang``, ``ld``, ``head``, ``backends``, ``nodes``), ``responses``, ``ports``, ``errors``, ``checks`` (``composed``, ``contexts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``zones``), ``signals``, ``watch``.
+     - ``manager`` (``patterns``, ``templates``), ``registry``, ``declarations``, ``access``, ``loaders``, ``layouts``, ``context``, ``processors``, ``scan``, ``paths``, ``placeholder``, ``visits``, ``scope``, ``graph``, ``gating``, ``guards``, ``deferral``, ``boundaries``, ``skeletons``, ``transactions``, ``compression``, ``navigation``, ``metadata`` (``dicts``, ``markers``, ``normalize``, ``shapes``, ``scope``, ``titles``, ``fold``, ``chain``, ``registry``, ``resolve``, ``hreflang``, ``ld``, ``backends``, ``nodes``), ``responses``, ``ports``, ``errors``, ``checks`` (``access``, ``branches``, ``composed``, ``contexts``, ``deferral``, ``gating``, ``groups``, ``intercepts``, ``layouts``, ``loaders``, ``metadata``, ``modules``, ``processors``, ``responses``, ``structure``, ``walk``, ``zones``), ``signals``, ``watch``.
    * - ``next.components``
-     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``backends``, ``errors``, ``nodes``, ``watch``, ``checks``, ``signals``.
+     - ``manager``, ``registry``, ``scanner``, ``sources``, ``loading``, ``renderers``, ``context``, ``facade``, ``info``, ``bridge``, ``boundary``, ``deferral``, ``trip``, ``stash``, ``reads``, ``backends``, ``errors``, ``nodes``, ``watch``, ``checks``, ``signals``.
    * - ``next.urls``
      - ``manager``, ``ports``, ``backends``, ``dispatcher``, ``parser``, ``resolver``, ``markers``, ``reverse``, ``mount``, ``routes``, ``urlconf``, ``errors``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``nodes``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``registration``, ``transport``, ``ports``, ``errors``, ``checks`` (``actions``, ``config``, ``sources``, ``widgets``, ``wizards``), ``signals``.
+     - ``manager``, ``dispatch`` (``build``, ``permissions``, ``responses``, ``wizard``), ``backends``, ``decorators``, ``base``, ``markers``, ``nodes``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``registration``, ``transport``, ``ports``, ``errors``, ``checks`` (``actions``, ``config``, ``csrf``, ``sources``, ``widgets``, ``wizards``), ``signals``.
    * - ``next.static``
-     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``runtime``, ``nonce``, ``inject``, ``serializers``, ``defaults``, ``finders``, ``ports``, ``errors``, ``checks``, ``signals``.
+     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``bundles``, ``runtime``, ``nonce``, ``inject``, ``serializers``, ``defaults``, ``finders``, ``ports``, ``errors``, ``checks``, ``signals``.
    * - ``next.partial``
-     - ``manager``, ``registry`` (``ops``, ``zones``), ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``guards``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``ports``, ``sse``, ``stream``, ``intercept``, ``view``, ``headers``, ``keys``, ``origin``, ``checks`` (``backends``, ``codes``, ``forms``, ``nodes``, ``ops``, ``templates``, ``zones``), ``signals``.
+     - ``manager``, ``registry`` (``ops``, ``zones``), ``backends``, ``zone``, ``render``, ``envelope``, ``errors``, ``patches``, ``guards``, ``shaping`` (``outcomes``, ``validate``, ``scrub``, ``targets``, ``csrf``, ``responses``), ``forms``, ``more``, ``sse``, ``stream``, ``intercept``, ``view``, ``headers``, ``keys``, ``origin``, ``checks`` (``backends``, ``codes``, ``forms``, ``intercepts``, ``more``, ``nodes``, ``ops``, ``templates``, ``zones``), ``signals``.
        :doc:`partial-pipeline` walks what each one does on a zone request.
+   * - ``next.views``
+     - ``pages``, ``routes``, ``checks``.
+       The page views the URL router mounts and the per-request decision of the response a page URL answers with.
+   * - ``next.router``
+     - ``manager``, ``backends``, ``markers``, ``navigation``, ``digest``, ``current``, ``speculation``, ``checks``, ``signals``.
+       The server side of the client router, from the declarations of a ``page.py`` to the navigation envelope, the active-link pass, and the speculation rules.
+   * - ``next.suspense``
+     - ``manager``, ``policy``, ``session``, ``components``, ``render``, ``response``, ``assembly``, ``partial``, ``reload``, ``trip``, ``calls``, ``admission``, ``executors``, ``drivers``, ``markers``, ``coordinator`` (``machine``, ``placement``, ``runner``, ``drivers``), ``connections`` (``backends``, ``config``, ``deadline``, ``detection``, ``facts``, ``guard``, ``settle``, ``snapshot``, ``checks``), ``tokens`` (``backends``, ``binding``, ``claims``, ``clock``, ``codec``, ``context``, ``keyring``, ``options``, ``props``, ``seal``, ``storage``, ``transport``), ``errors``, ``checks``, ``signals``.
+       Deferred boundaries from the queued job to the settled wrapper, the signed tokens a client-trip boundary carries, and the driver that runs async page code from a sync view.
+   * - ``next.compression``
+     - ``manager``, ``registry``, ``backends``, ``negotiation``, ``streams``, ``decorators``, ``errors``, ``checks``, ``signals``.
    * - ``next.realtime``
      - ``manager``, ``backends``, ``topics``, ``messages``, ``delivery``, ``replay``, ``roster``, ``attendance``, ``lifecycle``, ``limits``, ``pool``, ``transports``, ``negotiation``, ``tickets``, ``binding``, ``access``, ``asgi``, ``socket``, ``frames``, ``handlers``, ``tunnel``, ``views``, ``urls``, ``console``, ``deployment``, ``redis`` (``broker``, ``pubsub``, ``scripts``), ``ports``, ``errors``, ``checks``, ``signals``.
    * - ``next.seo``
@@ -233,33 +257,45 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.csrf``
      - A single flat module deciding where a page puts its CSRF token and serving ``/_next/csrf/``, read by the static, form, partial, and page areas.
    * - ``next.deps``
-     - ``resolver``, ``linear``, ``plan``, ``providers``, ``registry``, ``cache``, ``context``, ``markers``, ``objects``, ``introspect``, ``errors``, ``checks``, ``signals``.
+     - ``resolver``, ``linear``, ``plan``, ``runner``, ``providers``, ``registry``, ``cache``, ``scope``, ``context``, ``markers``, ``objects``, ``loader``, ``introspect``, ``errors``, ``checks``, ``signals``.
    * - ``next.permissions``
      - ``access``, ``backends``, ``checks``, ``errors``, ``manager``, ``markers``, ``nodes``, ``registry``.
    * - ``next.management``
      - ``endpoints``, ``table``, ``commands`` (``permissions``, ``realtime``, ``routes``, ``runserver``, ``showmetadata``).
    * - ``next.middleware``
-     - A single flat module holding the middleware that makes a response setting a cookie private for every shared cache.
+     - A single flat module holding the middleware that makes a response setting a cookie private for every shared cache and ``CompressionMiddleware``, which compresses every response no stream compressed itself.
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``asgi``, ``checks``, ``signals``.
    * - ``next.conf``
-     - ``settings``, ``defaults``, ``scopes``, ``merge``, ``frozen``, ``sentinels``, ``helpers``, ``imports``, ``checks``, ``signals``.
+     - ``settings``, ``defaults``, ``scopes``, ``merge``, ``frozen``, ``sentinels``, ``helpers``, ``imports``, ``router``, ``defer``, ``compression``, ``checks``, ``signals``.
    * - ``next.testing``
-     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``realtime``, ``responses``, ``plugin``.
+     - ``client``, ``capture``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``, ``metadata``, ``seo``, ``realtime``, ``responses``, ``streaming``, ``boundaries``, ``tokens``, ``plugin``.
        ``plugin`` is the only module in the area that imports pytest, and a suite loads it with ``-p next.testing.plugin``.
    * - ``next.apps``
      - ``config``, ``autoreload``, ``autodiscover``, ``templates``, ``staticfiles``, ``components``, ``checks``.
    * - ``next.backends``
      - A single flat module that provides ``load_backends``, ``backend_entries``, ``resolve_backend_class``, ``resolve_setting_class``, ``BackendListManager``, ``SingleBackendManager``, and ``BackendRoot`` for every settings-driven backend family.
    * - ``next.ports``
-     - A single flat module holding the protocols and slots one subsystem calls another through, each bound in ``AppConfig.ready`` to the implementation its owning area keeps in that area's ``ports`` module.
-       ``ActionOwners`` lets the body-source check read the directories that declare actions without importing ``next.forms``, ``FormRoutes`` lets the URL checks read the form action routes without importing ``next.forms``, ``PartialShaper`` lets the page and form paths shape partial responses without importing ``next.partial``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``, and ``RealtimeNegotiation`` lets the page payload name the transports and content types of a stream without importing ``next.realtime``.
+     - A single flat module holding the protocols and slots one subsystem calls another through, each bound in ``AppConfig.ready`` to the implementation its owning area keeps, see :doc:`/content/ref/ports`.
+       ``ActionOwners`` lets the body-source check read the directories that declare actions without importing ``next.forms``, ``FormRoutes`` lets the URL checks read the form action routes without importing ``next.forms``, ``RouterAccess`` lets the page watcher and the checks build routers without importing ``next.urls``, ``StaticAssets`` lets the render path reach the static manager without importing ``next.static``, ``PageScan`` lets the checks execute the routed ``page.py`` modules without closing the loop back into ``next.pages.scan``, ``SeoRoutes`` lets the lazy urlpatterns append the SEO routes without importing ``next.seo``, ``PageScripts`` lets the static injector add the third-party scripts without importing ``next.scripts``, ``RealtimeNegotiation`` lets the page payload name the transports and content types of a stream without importing ``next.realtime``, ``AsyncBridge`` and ``ThreadWait`` let the render, dependency, and form areas drive async work and wait on a loader batch without importing ``next.suspense``, ``DeferralSink`` lets the template tags and the render paths queue a deferred component call without importing ``next.suspense``, and ``RouterStamp`` and ``ZoneMarking`` let a form or action response carry the client router directives and the active-link marks without importing ``next.router``.
    * - ``next.utils``
      - A single flat module holding the path helpers, the ``PageRoot`` value object, the ``template_edits_watched`` predicate, and the ``TreeSource`` loader of a file at the top of a page tree.
+   * - ``next.boundaries``
+     - A single flat module holding the inline error boundary, which contains a failed subtree behind its error UI.
+   * - ``next.defer``
+     - A single flat module holding the vocabulary of deferred boundaries and error boundaries every area shares.
+   * - ``next.identity``
+     - A single flat module holding the subject a request proves, which realtime tickets and boundary tokens share.
+   * - ``next.tasks``
+     - A single flat module holding a unit of work that runs at most once, on whichever caller claims it first.
+   * - ``next.transactions``
+     - A single flat module holding the transaction policy of the framework views and the lazy savepoints around rendered subtrees.
    * - ``next.intercept``
      - A single flat module holding the table of intercepting routes, which page serves a zone over a routed target.
    * - ``next.interpolation``
      - A single flat module that interpolates ``{{ expr }}`` inside the string a template tag argument holds.
+   * - ``next.paths``
+     - A single flat module holding the path rule of active links, the normal path, the page and ancestor marks, and the home paths that are exact only, which the router's link pass and the breadcrumb trail share.
    * - ``next.stamps``
      - A single flat module holding the freshness stamps of files, which never trust an mtime written in the current clock tick.
    * - ``next.caches``
@@ -280,7 +316,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
      - ``__init__`` holds the shared ``NEXT`` and ``SEO`` tags and imports nothing of the framework.
        ``catalog`` imports the ``checks`` of every area but ``next.apps``, and ``common`` provides shared helpers used by individual ``checks`` modules.
    * - ``next.templatetags``
-     - ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``permissions``, ``scripts``.
+     - ``boundaries``, ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``permissions``, ``scripts``.
 
 See also
 --------

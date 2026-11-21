@@ -23,12 +23,29 @@ def _area_signal_modules() -> dict[str, ModuleType]:
     return modules
 
 
+def _flat_signal_modules() -> dict[str, ModuleType]:
+    """Import every flat root module of the framework that exports a signal."""
+    modules: dict[str, ModuleType] = {}
+    for info in pkgutil.iter_modules(next_package.__path__):
+        if info.ispkg or info.name == "signals":
+            continue
+        module = importlib.import_module(f"next.{info.name}")
+        if _signal_names(module):
+            modules[module.__name__] = module
+    return modules
+
+
 def _signal_names(module: ModuleType) -> list[str]:
-    """Return the names the module binds to a Signal, in declaration order."""
-    return [name for name, value in vars(module).items() if isinstance(value, Signal)]
+    """Return the names the module exports bound to a Signal, in declaration order."""
+    exported = set(getattr(module, "__all__", vars(module)))
+    return [
+        name
+        for name, value in vars(module).items()
+        if name in exported and isinstance(value, Signal)
+    ]
 
 
-_AREA_MODULES = _area_signal_modules()
+_AREA_MODULES = {**_area_signal_modules(), **_flat_signal_modules()}
 
 _AREA_SIGNALS = [
     pytest.param(name, module_name, id=f"{module_name}.{name}")
@@ -38,10 +55,13 @@ _AREA_SIGNALS = [
 
 
 class TestAggregateSignalsModule:
-    """next.signals re-exports every signal from the subsystems."""
+    """next.signals re-exports every signal the areas and the flat modules own."""
 
     def test_area_signal_modules_are_discovered(self) -> None:
         assert {"next.forms.signals", "next.partial.signals"} <= set(_AREA_MODULES)
+
+    def test_a_flat_module_that_exports_a_signal_is_discovered(self) -> None:
+        assert _signal_names(_AREA_MODULES["next.boundaries"]) == ["boundary_failed"]
 
     @pytest.mark.parametrize(("name", "module_name"), _AREA_SIGNALS)
     def test_area_signal_is_reexported(self, name: str, module_name: str) -> None:

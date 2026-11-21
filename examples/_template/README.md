@@ -16,7 +16,7 @@ next.dj then joins in canonical file names. `config/settings.py` lists `"next"`,
 
 On top of that the folder carries:
 
-- The shared UI kit. `config/settings.py` puts [`../_shared/`](../_shared/) on `sys.path`, lists `../_shared/static` in `STATICFILES_DIRS` and `../_shared/_components` in `COMPONENT_BACKENDS["DIRS"]`, and [`chrome/layout.djx`](chrome/layout.djx) renders the envelope through the shared `page_head` and `app_shell` components.
+- The shared UI kit. `config/settings.py` puts [`../_shared/`](../_shared/) on `sys.path`, lists `../_shared/static` in `STATICFILES_DIRS` and `../_shared/_components` in `COMPONENT_BACKENDS["DIRS"]`, and [`chrome/layout.djx`](chrome/layout.djx) renders the envelope through the shared `page_head` and `app_shell` components. The header links fill the `nav` slot of `app_shell`, which renders them inside `<nav>`, so the framework marks the link of the page on screen with `aria-current="page"` and `nav_link` styles it with no code of its own.
 - `STATIC_VERSION`, `SITE` and `METADATA` under `NEXT_FRAMEWORK`, with the tab icon shipped as `home/static/home/icon.svg`.
 - `pytest.ini` and the tests under `tests/`, which replace the `tests.py` module `startapp` writes, since every example drives its pages through `next.testing.NextClient` with plain pytest.
 - `@override` on `ItemAdmin.save_model`, which tells ruff the boolean positional `change` is the signature Django calls.

@@ -26,6 +26,7 @@ export interface NavigatedDetail extends NavigationState {
 export interface Intent {
   href: string;
   action: "push" | "replace";
+  quiet?: boolean;
 }
 
 /** The history writes of one envelope, announced together by end. */
@@ -54,7 +55,8 @@ export interface Navigation {
    * Run the popstate handling in during, then announce the change as a pop.
    *
    * during answers the page on screen, undefined for the last announced one. A bar
-   * on another page reloads unannounced, since nothing restores a history entry.
+   * on another page reloads unannounced, since nothing restores a history entry. A
+   * pop the answerer takes is announced by the commit that claims its page.
    */
   popped(during: () => string | undefined): void;
 }
@@ -65,6 +67,7 @@ export interface NavigationDeps {
   history?: HistoryAdapter;
   // The full reload a Back or Forward onto unrendered content falls back to.
   reload?: () => void;
+  answer?: () => string | undefined;
 }
 
 interface Move {
@@ -88,6 +91,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   // Whether the runtime wrote history, the only content a Back cannot restore.
   let wrote = false;
   let open: Move | undefined;
+  let taken: { owner: string; from: NavigationState } | undefined;
 
   function current(): NavigationState {
     return {
@@ -98,9 +102,10 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   }
 
   // A pushState that throws (a browser rate limit) loses the entry and is reported.
-  function record(intent: Intent): boolean {
+  function record(intent: Intent, kind = "nav"): boolean {
     try {
-      history[intent.action](intent.href);
+      const key = Math.random().toString(36).slice(2);
+      history[intent.action](intent.href, { next: 1, kind, key });
       here = currentUrl(doc);
       wrote = true;
       return true;
@@ -114,9 +119,10 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     }
   }
 
-  // A push anywhere in the commit makes it a push, even when a replace follows.
+  // A push or a pop anywhere in the commit names it, even when a replace follows.
   function moved(move: Move, action: NavigationAction): void {
-    move.action = move.action === "push" ? "push" : action;
+    move.action =
+      move.action === "push" || move.action === "pop" ? move.action : action;
   }
 
   function frame(preset: Move): Commit {
@@ -125,8 +131,15 @@ export function createNavigation(deps: NavigationDeps): Navigation {
     open = move;
     return {
       claim(owner) {
-        const entry = owner === undefined ? undefined : held.get(owner);
-        if (owner === undefined || entry === undefined) return;
+        if (owner === undefined) return;
+        if (taken?.owner === owner) {
+          move.from = taken.from;
+          move.action = "pop";
+          taken = undefined;
+          return;
+        }
+        const entry = held.get(owner);
+        if (entry === undefined) return;
         held.delete(owner);
         // The URL changed with the held push, so start from the state saved before it.
         move.from = entry.from;
@@ -134,7 +147,9 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         entry.onCommit();
       },
       write(intent) {
-        if (record(intent)) moved(move, intent.action);
+        if (!record(intent)) return;
+        if (!intent.quiet) moved(move, intent.action);
+        else if (move.action === undefined) move.from = current();
       },
       end() {
         if (nested) return;
@@ -144,6 +159,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         known = to.path;
         here = known;
         const urlChanged = to.path !== from.path;
+        if (urlChanged) taken = undefined;
         if (!urlChanged && to.title === from.title) return;
         fire(doc, deps.dispatch, "next:navigated", {
           ...to,
@@ -169,7 +185,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
         back: currentUrl(doc) + doc.location.hash,
         onCommit,
       };
-      if (!record({ href, action: "push" })) return;
+      if (!record({ href, action: "push" }, "layer")) return;
       held.set(owner, entry);
       return () => {
         if (held.get(owner) !== entry) return;
@@ -186,16 +202,23 @@ export function createNavigation(deps: NavigationDeps): Navigation {
       replace: (href) => write(href, "replace"),
     }),
     popped(during) {
-      const commit = frame({ action: "pop", from: { ...current(), path: known } });
+      const move: Move = { action: "pop", from: { ...current(), path: known } };
+      const commit = frame(move);
+      taken = undefined;
+      let own: string | undefined;
       let answered: string | undefined;
       try {
-        answered = during();
+        own = during();
+        answered = own ?? deps.answer?.();
       } finally {
         const shown = answered ?? here;
-        // With no write and no layer, the entry is the page's own, made by its scripts.
-        if (shown === currentUrl(doc) || (!wrote && answered === undefined))
+        if (open === move && own === undefined && answered === currentUrl(doc)) {
+          open = undefined;
+          taken = { owner: answered, from: move.from };
+        } else if (shown === currentUrl(doc) || (!wrote && answered === undefined)) {
+          // With no write and no layer, the entry is the page's own, made by its scripts.
           commit.end();
-        else {
+        } else {
           // The reload drops the page, so an open commit goes with it.
           open = undefined;
           reload();

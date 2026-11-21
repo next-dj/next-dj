@@ -1,4 +1,4 @@
-from access.models import AccessRequest, AuditEntry
+from access.models import AccessRequest, AuditEntry, AuditEntryQuerySet
 
 
 def create_access_request(
@@ -26,17 +26,15 @@ def recent_audit(limit: int) -> list[AuditEntry]:
     return list(AuditEntry.objects.order_by("-created_at", "-pk")[:limit])
 
 
-def audit_entries(*, kind: str, limit: int) -> list[AuditEntry]:
-    """Return the newest `limit` audit rows, narrowed to `kind` when it names one."""
-    rows = AuditEntry.objects.all()
-    if kind:
-        rows = rows.filter(kind=kind)
-    return list(rows[:limit])
+def audit_entries(*, kind: str) -> AuditEntryQuerySet:
+    """Return the audit rows of `kind`, lazy so a pager reads one window of them."""
+    return AuditEntry.objects.of_kind(kind)
 
 
-def audit_totals() -> dict[str, int]:
-    """Return how many rows each audit channel wrote."""
+def audit_totals(*, kind: str) -> dict[str, int]:
+    """Return how many rows of `kind` each audit channel wrote."""
+    rows = AuditEntry.objects.of_kind(kind)
     return {
-        "backend": AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count(),
-        "signal": AuditEntry.objects.filter(source=AuditEntry.SOURCE_SIGNAL).count(),
+        "backend": rows.filter(source=AuditEntry.SOURCE_BACKEND).count(),
+        "signal": rows.filter(source=AuditEntry.SOURCE_SIGNAL).count(),
     }

@@ -382,7 +382,23 @@ class TestBackendsLoadedOnce:
 class TestChunkUrlMemo:
     """Each chunk URL is resolved once per storage and again after a rebuild."""
 
-    @pytest.mark.parametrize("name", ["scripts", "stream", "csrf", "poll", "dev"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "scripts",
+            "stream",
+            "csrf",
+            "poll",
+            "dev",
+            "defer",
+            "reload",
+            "more",
+            "reader",
+            "router",
+            "history",
+            "intent",
+        ],
+    )
     def test_a_rebuilt_storage_resolves_it_again(
         self, fresh_manager: StaticManager, name: str
     ) -> None:

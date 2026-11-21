@@ -6,7 +6,7 @@ Dependency injection reference
 Module summary
 --------------
 
-``next.deps`` exposes the resolver, the parameter providers and their registry, the dependency cache, and the public markers used in annotations, ``DObject`` among them.
+``next.deps`` exposes the resolver, the parameter providers and their registry, the dependency cache, the public markers used in annotations, ``DObject`` among them, and the async machinery, the request scope, the ``Loader``, and the segment runner.
 
 Public API
 ----------
@@ -48,6 +48,10 @@ The hook returns either ``None`` or a ``next.deps.ParameterFiller``, a callable 
 Returning ``None``, which is what the base class answers, leaves the parameter on the plain ``resolve`` path, and so does leaving the hook undefined altogether.
 The hook belongs to ``CompilingParameterProvider`` rather than to ``ParameterProvider``, so a provider written against the mandatory contract alone still passes an ``isinstance`` check against it.
 A ``compile_resolve`` that is present but not callable is refused with a ``TypeError`` naming the class, the way a missing ``static_can_handle`` is.
+
+``compile_aresolve`` is the async counterpart, declared by ``AsyncCompilingParameterProvider``.
+The async replay of a plan, the one an async page or component render runs, asks it once per parameter and awaits the ``AsyncParameterFiller`` it returns, and ``None`` keeps the parameter on the sync filler.
+``RegisteredParameterProvider`` answers ``None`` and declares ``blocking``, ``True`` unless a provider that only reads memory sets it ``False``, which ``static_blocking`` reads to decide whether the async replay runs the filler as a blocking segment on the request thread.
 
 .. automodule:: next.deps.providers
    :members:
@@ -94,6 +98,10 @@ Markers
 .. automodule:: next.deps.markers
    :members:
 
+Other areas declare their own markers on the same base.
+``DUrl`` and ``DQuery`` of ``next.urls`` read the captured path and the query string, see :doc:`urls`.
+``Paging`` of ``next.partial`` is a plain class rather than a marker, named as ``Annotated[Paging, <pager>]``, and hands a context callable the pager of an infinite list bound to the request, see :ref:`ref-partial-infinite-lists`.
+
 Objects
 ~~~~~~~
 
@@ -110,6 +118,8 @@ See :ref:`topics-di-dobject` for the topic guide.
 Cache
 ~~~~~
 
+``DependencyCache`` stores what a named ``Depends("name")`` and a ``Depends(factory)`` returned and the rows ``DObject`` loads, so each of them runs once per cache, within one render unit on a sync and an async render alike, see :ref:`topics-dependency-injection`.
+
 .. automodule:: next.deps.cache
    :members:
 
@@ -119,11 +129,13 @@ Errors
 .. automodule:: next.deps.errors
    :members:
 
+``AsyncDependencyError`` is raised for an async callable a resolve cannot await, an async generator or an ``async def`` handed to the sync ``resolve_dependencies``, and it subclasses ``AsyncCallableError``, so a module load reports it as ``next.E218``.
+``MissingKeyError`` is raised by a ``Loader`` for a key its batch function returned no value for, and it is a ``LookupError`` rather than a ``KeyError``, so a template lookup cannot hide it.
 ``DependencyCycleError`` carries the chain that closed the loop on ``cycle``, and ``UnknownDependencyError`` carries the missing ``name``, the ``param_name`` it was asked for, the ``suggestion`` a close registered name produced, and the ``func`` the failed resolve attributed it to.
 ``UnboundObjectError`` subclasses :exc:`~django.core.exceptions.ImproperlyConfigured` and carries the ``param_name`` of the ``DObject`` parameter, the ``key`` it found nothing under, and ``parent``, which is ``True`` when that key is a missing parent context value rather than a missing URL kwarg.
 For an ``obj=DObject[Model]`` of an access declaration, ``param_name`` holds the label of the model and ``key`` its ``model_name``, and the dispatcher answers that variant with 400 as well.
 The form dispatcher answers an ``UnboundObjectError`` for a missing URL kwarg with 400 Bad Request and a logged warning, since the origin the client sent lacks the kwarg, and lets the parent variant raise.
-All three are re-exported from ``next.deps``, so a caller never imports the module directly.
+Every error is re-exported from ``next.deps``, so a caller never imports the module directly.
 
 Context
 ~~~~~~~
@@ -136,6 +148,43 @@ A context key cannot shadow a reserved resolver input.
 ``resolve_dependencies`` reads the same frozenset to tell its fixed inputs from the URL kwargs, so one list governs both the split and the refusal.
 A context mapping reaches resolution as it is, on the page path and on the component path alike, and the reserved names are invisible to the name-based providers rather than stripped from a copy.
 See :doc:`/content/internals/di-resolver` for the resolution detail.
+
+Request scope
+~~~~~~~~~~~~~
+
+``RequestScope`` computes each shared dependency once per async render as a task the scope owns, and every later reader receives the same value or the same error.
+Only the loop thread that owns a scope computes into it, while ``get`` and ``layer()`` work from any thread.
+``layer()`` opens a child that keeps its own writes and reads its parent on a miss, and ``close()`` runs the close callbacks, fails the waiters, and cancels what is still running.
+Each async deferred job of a response resolves in a layer of the response scope, so it reads what the shell left and keeps its own values, while loader batches still span every job through the root.
+A component instance rendered under a request scope resolves in a layer of its render unit that ``RequestMemo.instance()`` opens, so it reads what the page resolved and never a value another instance computed from its own props.
+A value is therefore shared page-wide only when the page resolved it, since the page's providers read the request, the URL kwargs and the page context but no props or template context of a component.
+``request_memo`` is the context variable that holds the ``RequestMemo`` of the current render, its scope and the keys it shares, and a render with no async callable sets none.
+
+.. automodule:: next.deps.scope
+   :members: RequestScope
+
+Loader
+~~~~~~
+
+``Loader(batch, *, max_batch=None, window=None)`` gathers the keys one request scope loads into one call of ``batch`` per window.
+``batch`` is a plain ``def`` or an ``async def`` that takes a sequence of keys and returns a mapping by key or a sequence in key order.
+``await loader.load(key)`` loads on the event loop, and ``loader.load_sync(key)`` on a thread, refusing an event loop thread.
+A ``max_batch`` or ``window`` left at ``None`` follows ``DEFER["LOADER_MAX_BATCH"]`` and ``DEFER["BATCH_WINDOW"]``, see :doc:`settings`.
+An ``async def`` batch function runs on the event loop and may not reach the ORM or a thread-sensitive ``sync_to_async`` call, which raises ``RuntimeError``.
+``rows(Model)`` returns the shared loader of ``Model`` rows by primary key, one ``pk__in`` query per batch through the default manager with no access scoping.
+See :doc:`/content/topics/boundaries/async` for the guide.
+
+.. automodule:: next.deps.loader
+   :members: Loader, rows
+
+Segment runner
+~~~~~~~~~~~~~~
+
+The async replay of a plan hands each blocking step to ``segment_runner``, a context variable whose default ``run_on_request_thread`` runs the step through ``sync_to_async(thread_sensitive=True)``, on the thread Django gives the request.
+A scope swaps the runner by setting the variable, and a ``SegmentRunner`` is any callable that takes the step and returns an awaitable of its result.
+
+.. automodule:: next.deps.runner
+   :members: SegmentRunner, run_on_request_thread, segment_runner
 
 Signals
 -------

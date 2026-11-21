@@ -1,9 +1,13 @@
+import re
 from pathlib import Path
 from typing import override
 
 import pytest
-from django.test import Client
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse
+from django.test import Client, override_settings
 
+from next.csrf import csrf_url
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial.backends import JsonPartialProtocolBackend
 from next.partial.envelope import Asset, Envelope, FormMeta, Patch
@@ -14,7 +18,8 @@ from next.testing import (
     override_next_settings,
 )
 from tests.forms import actions
-from tests.support import TWIN_ACTION
+from tests.pages.checks.metadata.trees import COMPONENTS
+from tests.support import TWIN_ACTION, routed, write_page
 from tests.support.forms import post_without_origin
 
 
@@ -37,6 +42,7 @@ class ReversedJsonBackend(JsonPartialProtocolBackend):
 class TestNextClientByPage:
     """`page` routes a shared action name to the page the test means."""
 
+    @pytest.mark.django_db()
     @pytest.mark.parametrize("label", ["create", "edit"])
     def test_post_action_reaches_the_named_page(self, twins: Path, label: str) -> None:
         response = NextClient().post_action(
@@ -44,6 +50,7 @@ class TestNextClientByPage:
         )
         assert response.content == label.encode()
 
+    @pytest.mark.django_db()
     def test_get_action_url_names_the_page_of_post_action(self, twins: Path) -> None:
         client = NextClient()
         url = client.get_action_url(TWIN_ACTION, page=twins / "edit")
@@ -62,6 +69,7 @@ class TestNextClient:
         url = client.get_action_url("simple_form")
         assert "_next/form/" in url
 
+    @pytest.mark.django_db()
     def test_post_action_dispatches_form(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
         response = client.post_action(
@@ -77,6 +85,7 @@ class TestNextClient:
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
 
+    @pytest.mark.django_db()
     def test_a_post_without_an_origin_is_refused_before_dispatch(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
         response = post_without_origin(client, "simple_form", {"name": ""})
@@ -141,6 +150,15 @@ class TestPostActionPartialHeaders:
             "simple_form", {"name": ""}, origin="/", partial=("alpha", "beta")
         )
         assert response.wsgi_request.headers["X-Next-Zone"] == "alpha,beta"
+
+    @pytest.mark.django_db()
+    def test_a_single_zone_name_reaches_the_request(self) -> None:
+        client = NextClient(enforce_csrf_checks=False)
+        response = client.post_action(
+            "simple_form", {"name": ""}, origin="/", partial="alpha"
+        )
+        assert response.wsgi_request.headers["X-Next-Zone"] == "alpha"
+        assert response.wsgi_request.headers["X-Next-Request"] == "1"
 
     @pytest.mark.django_db()
     def test_version_header_reaches_the_request(self) -> None:
@@ -365,3 +383,214 @@ class TestEnvelopeStrictness:
 
     def test_raw_payload_stays_readable(self) -> None:
         assert PartialEnvelope({"ops": []}).data == {"ops": []}
+
+
+_CARD = (
+    'from next.components import component\n\ncomponent.defer("load", props=("sku",))\n'
+)
+
+
+@pytest.fixture()
+def trip_pages(tmp_path: Path) -> Path:
+    root = tmp_path / "pages"
+    folder = root / "_components" / "card"
+    folder.mkdir(parents=True)
+    (folder / "component.py").write_text(_CARD)
+    (folder / "component.djx").write_text("<p>card {{ sku }}</p>")
+    (root / "layout.djx").write_text("<html><body>{% template %}</body></html>")
+    write_page(
+        root,
+        "shop",
+        "from next import page\n\npage.public()\n",
+        body='{% component "card" sku="a" %}',
+    )
+    return root
+
+
+@pytest.mark.django_db()
+class TestGetBoundary:
+    """`get_boundary` mints a token and reloads the component through the view."""
+
+    @pytest.mark.parametrize(
+        "transport",
+        [None, "next.suspense.QueryTransport", "next.suspense.BodyTransport"],
+    )
+    def test_the_component_reloads_through_each_transport(
+        self, trip_pages: Path, transport: str | None
+    ) -> None:
+        options = {} if transport is None else {"TRANSPORT": transport}
+        with routed(
+            trip_pages,
+            COMPONENT_BACKENDS=COMPONENTS,
+            DEFER={"TOKENS": {"OPTIONS": options}},
+        ):
+            envelope = NextClient().get_boundary("/shop/", "card", sku="b")
+        (op,) = envelope.ops
+        assert op["html"] == "<p>card b</p>"
+        assert op["s"] == "ready"
+
+    def test_an_unknown_component_raises(self, trip_pages: Path) -> None:
+        with (
+            routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS),
+            pytest.raises(LookupError, match="ghost"),
+        ):
+            NextClient().boundary_token("/shop/", "ghost")
+
+    def test_a_url_without_a_page_raises(self, trip_pages: Path) -> None:
+        with (
+            routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS),
+            pytest.raises(LookupError, match="no page view"),
+        ):
+            NextClient().boundary_token(csrf_url(), "card")
+
+
+def carried(request: HttpRequest) -> str:
+    """Bind what the request carries, so a session or user the view lacks refuses."""
+    return f"session={hasattr(request, 'session')} user={hasattr(request, 'user')}"
+
+
+_CARRIED = {"TOKENS": {"OPTIONS": {"BINDING": f"{__name__}.carried"}}}
+_SESSION_MIDDLEWARE = "django.contrib.sessions.middleware.SessionMiddleware"
+_AUTH_MIDDLEWARE = "django.contrib.auth.middleware.AuthenticationMiddleware"
+_MESSAGE_MIDDLEWARE = "django.contrib.messages.middleware.MessageMiddleware"
+
+
+@pytest.mark.django_db()
+class TestBoundaryTokenWithoutContribApps:
+    """The minted token carries only what the view of a slimmer project sees."""
+
+    @pytest.mark.parametrize(
+        ("app", "middleware"),
+        [
+            (
+                "django.contrib.sessions",
+                {_SESSION_MIDDLEWARE, _AUTH_MIDDLEWARE, _MESSAGE_MIDDLEWARE},
+            ),
+            ("django.contrib.auth", {_AUTH_MIDDLEWARE}),
+        ],
+    )
+    def test_the_component_reloads_without_the_app(
+        self, trip_pages: Path, app: str, middleware: set[str]
+    ) -> None:
+        installed = [name for name in settings.INSTALLED_APPS if name != app]
+        layers = [name for name in settings.MIDDLEWARE if name not in middleware]
+        client = NextClient()
+        with (
+            override_settings(INSTALLED_APPS=installed, MIDDLEWARE=layers),
+            routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS, DEFER=_CARRIED),
+        ):
+            envelope = client.get_boundary("/shop/", "card", sku="b")
+        (op,) = envelope.ops
+        assert op["html"] == "<p>card b</p>"
+        assert (settings.SESSION_COOKIE_NAME in client.cookies) is (
+            app != "django.contrib.sessions"
+        )
+
+
+_TRIP_WRAPPER = re.compile(
+    r'id="(?P<id>b-[0-9a-f]+-[0-9]+)" data-next-boundary="(?P=id)" '
+    r'data-next-boundary-key="(?P<key>[^"]*)"'
+)
+
+
+@pytest.mark.django_db()
+class TestFollowBoundary:
+    """`follow_boundary` reloads a wrapper of a rendered page with its own token."""
+
+    @pytest.mark.parametrize(
+        "transport",
+        [None, "next.suspense.QueryTransport", "next.suspense.BodyTransport"],
+    )
+    def test_the_rendered_token_reloads_through_each_transport(
+        self, trip_pages: Path, transport: str | None
+    ) -> None:
+        options = {} if transport is None else {"TRANSPORT": transport}
+        with routed(
+            trip_pages,
+            COMPONENT_BACKENDS=COMPONENTS,
+            DEFER={"TOKENS": {"OPTIONS": options}},
+        ):
+            client = NextClient()
+            document = client.get("/shop/?q=1")
+            sent: list[dict[str, object]] = []
+            original = client.request
+
+            def spy(**request: object):
+                sent.append(request)
+                return original(**request)
+
+            client.request = spy
+            envelope = client.follow_boundary(document, "card")
+        [found] = _TRIP_WRAPPER.finditer(document.content.decode())
+        (op,) = envelope.ops
+        assert op["target"] == {"boundary": found["id"]}
+        assert op["html"] == "<p>card a</p>"
+        assert sent[0]["PATH_INFO"] == "/shop/"
+        assert str(sent[0]["QUERY_STRING"]).startswith("q=1")
+        assert sent[0]["HTTP_X_NEXT_ZONE"] == found["id"]
+
+    @pytest.mark.parametrize("field", ["id", "key"])
+    def test_the_wrapper_is_found_by_its_wire_id_or_stable_key(
+        self, trip_pages: Path, field: str
+    ) -> None:
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            document = client.get("/shop/")
+            [found] = _TRIP_WRAPPER.finditer(document.content.decode())
+            envelope = client.follow_boundary(document, found[field])
+        assert envelope.ops[0]["html"] == "<p>card a</p>"
+
+    def test_following_mints_nothing_and_reads_no_session(
+        self, trip_pages: Path, django_assert_num_queries
+    ) -> None:
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            document = client.get("/shop/")
+            with django_assert_num_queries(0):
+                envelope = client.follow_boundary(document, "card")
+        assert envelope.ops[0]["s"] == "ready"
+
+    def test_an_unknown_boundary_raises(self, trip_pages: Path) -> None:
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            document = client.get("/shop/")
+            with pytest.raises(LookupError, match="ghost"):
+                client.follow_boundary(document, "ghost")
+
+    def test_a_response_no_client_sent_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="test client"):
+            NextClient().follow_boundary(HttpResponse("<p>x</p>"), "card")
+
+    @pytest.mark.parametrize("read", ["response", "envelope"])
+    def test_a_zone_refresh_is_followed_through_its_envelope(
+        self, trip_pages: Path, read: str
+    ) -> None:
+        write_page(
+            trip_pages,
+            "zoned",
+            "from next import page\n\npage.public()\n",
+            body='{% zone "list" %}{% component "card" sku="z" %}{% endzone %}',
+        )
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            response = client.get_zones("/zoned/", "list")
+            source = envelope_of(response) if read == "envelope" else response
+            envelope = client.follow_boundary(source, "card")
+        assert envelope.ops[0]["html"] == "<p>card z</p>"
+
+    def test_a_zone_refresh_without_the_boundary_raises(self, trip_pages: Path) -> None:
+        write_page(
+            trip_pages,
+            "zoned",
+            "from next import page\n\npage.public()\n",
+            body='{% zone "list" %}<p>empty</p>{% endzone %}',
+        )
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            response = client.get_zones("/zoned/", "list")
+            with pytest.raises(LookupError, match="card"):
+                client.follow_boundary(response, "card")
+
+    def test_a_hand_built_envelope_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="test client"):
+            NextClient().follow_boundary(PartialEnvelope({"ops": []}), "card")

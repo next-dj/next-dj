@@ -101,6 +101,17 @@ def _collect_component_paths_from_backend_dirs() -> set[Path]:
     return result
 
 
+def refresh_component_files() -> bool:
+    """Swap in the boundary files every components backend finds on disk now.
+
+    The development watcher calls it per tick, so a render never stats those files.
+    """
+    changed = False
+    for backend in components_manager.backends:
+        changed = backend.refresh_files() or changed
+    return changed
+
+
 def get_component_paths_for_watch() -> set[Path]:
     """Return filesystem paths that matter for the dev component reloader.
 
@@ -111,4 +122,8 @@ def get_component_paths_for_watch() -> set[Path]:
     return page_paths | extra_paths
 
 
-__all__ = ["component_watch_roots", "get_component_paths_for_watch"]
+__all__ = [
+    "component_watch_roots",
+    "get_component_paths_for_watch",
+    "refresh_component_files",
+]

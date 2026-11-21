@@ -164,12 +164,12 @@ class TestDuplicateZoneNamePatchedOnce:
         assert counted_page.counters["alpha"] == 1
 
 
-class TestLazyZoneDataStaysHonest:
-    """The lazy report body and its database hit stay off the full render."""
+class TestGuardedZoneDataStaysHonest:
+    """A provider guarded by `zone_requested` keeps its database hit off a render."""
 
-    def test_full_render_skips_the_lazy_body(self, counted_page) -> None:
+    def test_full_render_paints_the_report_zone_empty(self, counted_page) -> None:
         body = Client().get("/counted/").content.decode()
-        assert "loading report" in body
+        assert '<div data-next-zone="report"><table>None</table></div>' in body
         assert "report-rows" not in body
 
     def test_full_render_never_touches_the_database(self, counted_page) -> None:
@@ -182,7 +182,7 @@ class TestLazyZoneDataStaysHonest:
         assert counted_page.counters["beta"] == 1
         assert counted_page.counters["gamma"] == 1
 
-    def test_requesting_the_lazy_zone_hits_the_database(self, counted_page) -> None:
+    def test_requesting_the_report_zone_hits_the_database(self, counted_page) -> None:
         response = NextClient().get_zones("/counted/", "report")
         assert envelope_of(response).zone_targets() == ["report"]
         assert counted_page.counters["db"] == 1

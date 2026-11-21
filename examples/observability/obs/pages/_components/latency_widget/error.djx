@@ -1,0 +1,6 @@
+{% #component "alert" variant="warning" title="Render latency is unavailable" %}
+  {% #slot "content" %}
+    <p>The counters behind this widget are incomplete, so no mean render time is shown. Every other panel reads its own counters and stays live. Running <code class="font-mono">flush_metrics</code> starts the store over.</p>
+    <p class="mt-2 text-xs text-muted-foreground">Reference <code class="font-mono">{{ error.digest }}</code></p>
+  {% /slot %}
+{% /component %}

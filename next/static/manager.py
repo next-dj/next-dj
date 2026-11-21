@@ -265,9 +265,9 @@ class StaticManager(BackendListManager[StaticBackend]):
         return builder
 
     def chunk_url(self, name: str) -> str | None:
-        """Return the URL of the lazy chunk `$chunks` names `name`, once per storage.
+        """Return the URL of the lazy bundle `name`, resolved once per storage.
 
-        A missing chunk is a deploy error `next.W090` reports, never a degraded render.
+        A missing bundle is a deploy error `next.W090` reports, never a degraded render.
         """
         path = CHUNK_STATIC_PATHS[name]
         if name not in self._chunk_urls:
@@ -276,9 +276,8 @@ class StaticManager(BackendListManager[StaticBackend]):
         if url is None:
             _failures.warn(
                 path,
-                "The static files storage has no %s, so pages leave it out of $chunks "
-                "and the runtime cannot load it. Build the client runtime and run "
-                "collectstatic.",
+                "The static files storage has no %s, so the runtime cannot load it. "
+                "Build the client runtime and run collectstatic.",
                 path,
             )
         return url
@@ -327,7 +326,9 @@ class StaticManager(BackendListManager[StaticBackend]):
         policy = (
             self._js_policy_factory() if self._js_policy_factory is not None else None
         )
-        return StaticCollector(dedup=dedup, js_context_policy=policy)
+        return StaticCollector(
+            dedup=dedup, js_context_policy=policy, bundle_url=self.chunk_url
+        )
 
     def forget_backend_urls(self) -> None:
         """Tell every loaded backend the storage behind its URLs was rebuilt.

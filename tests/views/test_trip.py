@@ -1,0 +1,987 @@
+import json
+import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from html import unescape
+from pathlib import Path
+from urllib.parse import urlencode
+
+import pytest
+from django.contrib.auth.backends import ModelBackend
+from django.contrib.auth.models import Permission, User
+from django.http import HttpResponse
+from django.template import TemplateSyntaxError
+from django.test import Client, override_settings
+
+from next.components import registry as registry_module
+from next.components.registry import DeferredComponents
+from next.pages import manager as manager_module
+from next.signals import boundary_token_rejected
+from next.suspense.manager import suspense_manager
+from next.suspense.tokens import BoundaryClaims
+from next.templatetags import components as component_tags
+from next.testing import (
+    NextClient,
+    capture_signals,
+    freeze_token_clock,
+    issue_boundary_token,
+)
+from tests.pages.checks.metadata.trees import COMPONENTS
+from tests.support import routed, write_page
+
+
+CALLS: list[tuple[str, int]] = []
+
+_CARD = """
+from next.components import component
+from tests.views import test_trip as host
+
+component.defer("visible", props=("sku", "n"))
+
+
+@component.context("title")
+def title(sku: str, n: int) -> str:
+    host.CALLS.append((sku, n))
+    return f"card {sku} x{n * 2}"
+"""
+
+_LOCKED = """
+from next.components import component
+
+component.defer("load", props=("sku",))
+component.permission_required("auth.change_user")
+"""
+
+_ROW = """
+from django.contrib.auth.models import User
+
+from next.components import component
+
+component.defer("manual", props=("target",))
+
+
+@component.context("label")
+def label(target: User) -> str:
+    return f"row {target.username}"
+"""
+
+_OWNED = """
+from django.contrib.auth.models import User
+
+from next.components import component
+
+component.defer("load", props=("target",))
+component.permission_required("auth.change_user", obj="target")
+
+
+@component.context("owner")
+def owner(target: User) -> str:
+    return target.username
+"""
+
+_BOOM = """
+from next.components import component
+
+component.defer("load")
+
+
+@component.context("value")
+def value() -> str:
+    raise ValueError("down")
+"""
+
+_FLAKY = """
+from next.components import component
+
+component.props("q")
+
+
+@component.context("value")
+def value(q: str) -> str:
+    raise ValueError(q)
+"""
+
+_MISSING = """
+from django.http import Http404
+
+from next.components import component
+
+component.defer("load")
+
+
+@component.context("value")
+def value() -> str:
+    raise Http404
+"""
+
+_RENDERED = """
+from next import page
+
+page.public()
+
+
+def render() -> str:
+    return "<p>rendered</p>"
+"""
+
+_ROWS_PAGE = """
+from django.contrib.auth.models import User
+
+from next import context, page
+from next.urls import DUrl
+
+page.public()
+
+
+@context("target")
+def target(id: DUrl[int]) -> User:
+    return User.objects.get(pk=id)
+"""
+
+_PUBLIC = "from next import page\n\npage.public()\n"
+_PRIVATE = "from next import page\n\npage.login_required()\n"
+_WRAPPER = re.compile(
+    r'<div id="(?P<id>b-[0-9a-f]{8}-[0-9]+)" data-next-boundary="(?P=id)" '
+    r'data-next-boundary-key="[0-9a-f]{8}" data-next-defer="(?P<mode>\w+)" '
+    r'data-next-token="(?P<token>[^"]+)"(?P<rest>[^>]*)>'
+)
+
+
+_PEEK = """
+from next.components import component
+from tests.views import test_trip as host
+
+component.defer("load", props=("uid",))
+
+
+@component.context("secret")
+def secret(uid: int) -> str:
+    host.CALLS.append(("peek", uid))
+    return f"secret {uid}"
+"""
+
+_GATED = """
+from django.contrib.auth.models import User
+
+from next.components import component
+
+component.defer("manual", props=("target",))
+component.permission_required("auth.view_user")
+
+
+@component.context("label")
+def label(target: User) -> str:
+    return f"gated {target.username}"
+"""
+
+_STAFF_GATE = """
+from django.core.exceptions import PermissionDenied
+from django.http import HttpRequest
+
+from next import context, page
+
+page.public()
+
+
+@context("gate")
+def gate(request: HttpRequest) -> str:
+    if not request.user.is_staff:
+        raise PermissionDenied
+    return "ok"
+"""
+
+_MISSING_GATE = _STAFF_GATE.replace(
+    "from django.core.exceptions import PermissionDenied",
+    "from django.http import Http404",
+).replace("raise PermissionDenied", "raise Http404")
+
+_ASYNC_GATE = """
+from django.core.exceptions import PermissionDenied
+from django.http import HttpRequest
+
+from next import context, page
+
+page.public()
+
+
+@context("gate")
+async def gate(request: HttpRequest) -> str:
+    user = await request.auser()
+    if not user.is_staff:
+        raise PermissionDenied
+    return "ok"
+"""
+
+_FLAGGED_GATE = """
+from django.core.exceptions import PermissionDenied
+from django.http import HttpRequest
+
+from next import context, page
+
+page.public()
+
+
+@context("gate", guard=True)
+def gate(request: HttpRequest) -> str:
+    refusal = PermissionDenied
+    if not request.user.is_staff:
+        raise refusal
+    return "ok"
+"""
+
+_INHERITED_GATE = _STAFF_GATE.replace(
+    "page.public()", "page.public(inherit=True)"
+).replace('@context("gate")', '@context("gate", inherit_context=True)')
+
+_STAFF_PAGE = 'from next import page\n\npage.permission_required("auth.change_user")\n'
+
+_ECHO = "<p>{{ request.get_full_path }}|{{ request.META.QUERY_STRING }}</p>"
+
+
+class ObjectBackend(ModelBackend):
+    """Grant a permission on any object to a user who holds it on the model."""
+
+    def has_perm(self, user_obj, perm, obj=None) -> bool:
+        return super().has_perm(user_obj, perm)
+
+
+class OwnerBackend(ModelBackend):
+    """Grant a permission on a row only to the user its `last_name` names."""
+
+    def has_perm(self, user_obj, perm, obj=None) -> bool:
+        if obj is None:
+            return super().has_perm(user_obj, perm)
+        return user_obj.is_active and obj.last_name == user_obj.username
+
+
+def _component(
+    pages: Path,
+    name: str,
+    module: str,
+    template: str,
+    *,
+    loading: str = "<i>loading</i>",
+    error: str | None = None,
+) -> None:
+    folder = pages / "_components" / name
+    folder.mkdir(parents=True)
+    (folder / "component.py").write_text(module)
+    (folder / "component.djx").write_text(template)
+    (folder / "loading.djx").write_text(loading)
+    if error is not None:
+        (folder / "error.djx").write_text(error)
+
+
+@pytest.fixture()
+def flag(monkeypatch: pytest.MonkeyPatch) -> DeferredComponents:
+    """Track the deferred components of this test alone."""
+    fresh = DeferredComponents()
+    for module in (registry_module, manager_module, component_tags):
+        monkeypatch.setattr(module, "deferred_components", fresh)
+    return fresh
+
+
+@pytest.fixture()
+def pages(tmp_path: Path, flag: DeferredComponents) -> Path:
+    CALLS.clear()
+    root = tmp_path / "pages"
+    root.mkdir()
+    (root / "layout.djx").write_text("<html><body>{% template %}</body></html>")
+    _component(
+        root,
+        "card",
+        _CARD,
+        "<p>{{ title }}</p>",
+        loading="<i>loading {{ props.sku }}</i>",
+        error="<b data-next-retry>failed</b>",
+    )
+    _component(root, "locked", _LOCKED, "<p>locked {{ sku }}</p>")
+    _component(root, "row", _ROW, "<p>{{ label }}</p>", error="<b>{{ error.kind }}</b>")
+    _component(root, "owned", _OWNED, "<p>owned {{ target.username }}</p>")
+    _component(
+        root, "boom", _BOOM, "<p>{{ value }}</p>", error="<b data-next-retry>x</b>"
+    )
+    _component(
+        root, "flaky", _FLAKY, "<p>{{ value }}</p>", error="<b data-next-retry>f</b>"
+    )
+    write_page(
+        root,
+        "home",
+        _PUBLIC,
+        body='<main>{% component "card" sku="a" n=3 %}{% component "boom" %}</main>',
+    )
+    write_page(root, "elsewhere", _PUBLIC, body='{% component "card" sku="a" n=3 %}')
+    write_page(
+        root,
+        "guarded",
+        _PUBLIC,
+        body='{% has_perm "auth.view_user" %}{% component "locked" sku="z" %}'
+        "{% endhas_perm %}",
+    )
+    write_page(
+        root, "rows/[int:id]", _ROWS_PAGE, body='{% component "row" target=target %}'
+    )
+    write_page(
+        root, "owned/[int:id]", _ROWS_PAGE, body='{% component "owned" target=target %}'
+    )
+    write_page(root, "private", _PRIVATE, body='{% component "card" sku="p" n=1 %}')
+    write_page(root, "flaky", _PUBLIC, body='{% component "flaky" q="x" %}')
+    _component(
+        root, "missing", _MISSING, "<p>{{ value }}</p>", error="<b>{{ error.kind }}</b>"
+    )
+    write_page(root, "missing", _PUBLIC, body='{% component "missing" %}')
+    write_page(root, "rendered", _RENDERED)
+    write_page(
+        root, "extra", _PUBLIC, body='{% component "card" sku="a" n=1 colour="red" %}'
+    )
+    _component(root, "peek", _PEEK, "<p>{{ secret }}</p>")
+    _component(
+        root, "gated", _GATED, "<p>{{ label }}</p>", error="<b>{{ error.kind }}</b>"
+    )
+    peek = '{% component "peek" uid=7 %}'
+    write_page(root, "gp", _STAFF_GATE, body=peek)
+    write_page(root, "gn", _MISSING_GATE, body=peek)
+    write_page(root, "ga", _ASYNC_GATE, body=peek)
+    write_page(root, "gf", _FLAGGED_GATE, body=peek)
+    write_page(root, "vault", _INHERITED_GATE, body="<p>vault</p>")
+    write_page(root, "vault/inner", _PUBLIC, body=peek)
+    write_page(root, "staff", _STAFF_PAGE, body=peek)
+    write_page(
+        root, "gated/[int:id]", _ROWS_PAGE, body='{% component "gated" target=target %}'
+    )
+    write_page(root, "echo", _PUBLIC, body=_ECHO)
+    return root
+
+
+@contextmanager
+def _routed(pages: Path, **tokens: object) -> Iterator[None]:
+    defer = {"TOKENS": {"OPTIONS": tokens}} if tokens else {}
+    with routed(pages, COMPONENT_BACKENDS=COMPONENTS, DEFER=defer):
+        yield
+
+
+def _shell(client: Client, url: str) -> tuple[str, list[re.Match[str]]]:
+    html = client.get(url).content.decode()
+    return html, list(_WRAPPER.finditer(html))
+
+
+def _reload(
+    client: Client, url: str, found: re.Match[str], **headers: str
+) -> HttpResponse:
+    sent = {
+        "X-Next-Request": "1",
+        "X-Next-Zone": found["id"],
+        "X-Next-Boundary": found["token"],
+        **headers,
+    }
+    return client.get(url, headers=sent)
+
+
+def _op(response: HttpResponse) -> dict[str, object]:
+    return json.loads(response.content)["ops"][0]
+
+
+def _user(name: str, *perms: str) -> User:
+    user = User.objects.create_user(name, password="x")
+    for codename in perms:
+        user.user_permissions.add(Permission.objects.get(codename=codename))
+    return User.objects.get(pk=user.pk)
+
+
+def _logged(user: User) -> Client:
+    client = Client()
+    client.force_login(user)
+    return client
+
+
+@pytest.mark.django_db()
+class TestShell:
+    """A client-trip call leaves its idle wrapper, its token and its loading UI."""
+
+    def test_each_mode_is_written_on_its_wrapper(self, pages: Path) -> None:
+        target = _user("target")
+        with _routed(pages):
+            _html, home = _shell(Client(), "/home/")
+            _html, rows = _shell(Client(), f"/rows/{target.pk}/")
+        assert [found["mode"] for found in home] == ["visible", "load"]
+        assert [found["mode"] for found in rows] == ["manual"]
+
+    def test_the_wrapper_is_idle_and_carries_its_loading_ui(self, pages: Path) -> None:
+        with _routed(pages):
+            html, (card, _boom) = _shell(Client(), "/home/")
+        assert card["rest"] == ' data-next-state="idle"'
+        assert "aria-busy" not in html
+        assert "data-next-transport" not in html
+        assert "<i>loading a</i>" in html
+        assert "<!--b-" not in html
+
+    def test_no_context_function_runs_in_the_shell(self, pages: Path) -> None:
+        with _routed(pages):
+            Client().get("/home/")
+        assert CALLS == []
+
+    def test_an_unbound_token_leaves_the_page_shareable(self, pages: Path) -> None:
+        with _routed(pages):
+            response = Client().get("/home/")
+        assert "private" not in response.get("Cache-Control", "")
+
+    def test_a_user_bound_token_makes_the_shell_private(self, pages: Path) -> None:
+        with _routed(pages, BINDING="user"):
+            response = _logged(_user("viewer")).get("/home/")
+        assert "private" in response["Cache-Control"]
+
+    def test_a_query_transport_is_named_on_the_wrapper(self, pages: Path) -> None:
+        with _routed(pages, TRANSPORT="next.suspense.QueryTransport"):
+            html = Client().get("/home/").content.decode()
+        assert 'data-next-transport="query:_nb"' in html
+
+    def test_a_denied_call_leaves_nothing_and_mints_nothing(
+        self, pages: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        minted: list[object] = []
+        with _routed(pages):
+            backend = suspense_manager.tokens()
+            monkeypatch.setattr(backend, "issue", lambda *a, **k: minted.append(a))
+            html, found = _shell(_logged(_user("viewer", "view_user")), "/guarded/")
+        assert found == []
+        assert "data-next-boundary" not in html
+        assert minted == []
+
+    def test_an_object_rule_runs_on_the_prop_in_the_shell(self, pages: Path) -> None:
+        target = _user("target")
+        backends = ["tests.views.test_trip.ObjectBackend"]
+        with override_settings(AUTHENTICATION_BACKENDS=backends), _routed(pages):
+            _html, denied = _shell(_logged(_user("plain")), f"/owned/{target.pk}/")
+            client = _logged(_user("editor", "change_user"))
+            _html, (found,) = _shell(client, f"/owned/{target.pk}/")
+            response = _reload(client, f"/owned/{target.pk}/", found)
+        assert denied == []
+        assert _op(response)["html"] == "<p>owned target</p>"
+
+    def test_an_undeclared_prop_is_refused_when_rendered(self, pages: Path) -> None:
+        with _routed(pages), pytest.raises(TemplateSyntaxError, match=r"next\.E224"):
+            Client().get("/extra/")
+
+    def test_a_visitor_without_a_session_gets_the_boundary_streamed(
+        self, pages: Path
+    ) -> None:
+        with _routed(pages, BINDING="session"):
+            html, found = _shell(Client(raise_request_exception=False), "/home/")
+        assert found == []
+        assert "<p>card a x6</p>" in html
+        assert 'data-next-state="ready"' in html
+
+    def test_a_reader_without_scripts_follows_the_link_to_the_content(
+        self, pages: Path
+    ) -> None:
+        with _routed(pages):
+            shell = Client().get("/elsewhere/?q=1").content.decode()
+            [href] = re.findall(r'<noscript><a href="([^"]+)" rel="nofollow"', shell)
+            page = Client().get(f"/elsewhere/{unescape(href)}").content.decode()
+        assert href == "?q=1&amp;_nojs=1"
+        assert "<p>card a x6</p>" in page
+        assert "data-next-token" not in page
+        assert "<noscript><a" not in page
+        assert CALLS == [("a", 3)]
+
+    def test_a_failed_stream_component_offers_a_retry_token(self, pages: Path) -> None:
+        with _routed(pages):
+            html = Client(raise_request_exception=False).get("/flaky/").content.decode()
+        assert 'data-next-state="error"' in html
+        assert "data-next-token=" in html
+        assert "data-next-boundary-exp" not in html
+
+
+@pytest.mark.django_db()
+class TestReload:
+    """A reload redeems the token and answers the component alone in an envelope."""
+
+    def test_the_round_trip_renders_the_component_from_its_props(
+        self, pages: Path
+    ) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = _reload(client, "/home/", card)
+        assert response.status_code == 200
+        assert _op(response) == {
+            "op": "morph",
+            "target": {"boundary": card["id"]},
+            "html": "<p>card a x6</p>",
+            "s": "ready",
+        }
+        assert CALLS == [("a", 3)]
+        assert response["Cache-Control"] == "private, no-store"
+        assert response["Referrer-Policy"] == "same-origin"
+        assert "X-Next-Boundary" in response["Vary"]
+
+    def test_a_failed_reload_answers_its_error_ui_with_a_retry_token(
+        self, pages: Path
+    ) -> None:
+        client = Client(raise_request_exception=False)
+        with _routed(pages):
+            _html, (_card, boom) = _shell(client, "/home/")
+            op = _op(_reload(client, "/home/", boom))
+        assert op["s"] == "error"
+        assert op["k"] == "error"
+        assert op["html"] == "<b data-next-retry>x</b>"
+        assert isinstance(op["token"], str)
+        assert "exp" not in op
+
+    def test_an_intended_failure_answers_its_error_ui(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (found,) = _shell(client, "/missing/")
+            op = _op(_reload(client, "/missing/", found))
+        assert op["s"] == "error"
+        assert op["k"] == "not_found"
+        assert op["html"] == "<b>not_found</b>"
+
+    def test_a_page_with_a_render_function_serves_a_reload(self, pages: Path) -> None:
+        with _routed(pages):
+            envelope = NextClient().get_boundary("/rendered/", "card", sku="r", n=2)
+        assert envelope.ops[0]["html"] == "<p>card r x4</p>"
+
+    def test_model_props_are_fetched_again(self, pages: Path) -> None:
+        target = _user("target")
+        client = Client()
+        url = f"/rows/{target.pk}/"
+        with _routed(pages):
+            _html, (found,) = _shell(client, url)
+            User.objects.filter(pk=target.pk).update(username="renamed")
+            fresh = _op(_reload(client, url, found))
+            User.objects.filter(pk=target.pk).delete()
+            gone = _op(_reload(client, url, found))
+        assert fresh["html"] == "<p>row renamed</p>"
+        assert gone["s"] == "error"
+        assert gone["k"] == "not_found"
+        assert gone["html"] == "<b>not_found</b>"
+
+    def test_a_spilled_prop_past_max_bytes_round_trips(self, pages: Path) -> None:
+        sku = "s" * 3000
+        write_page(
+            pages, "long", _PUBLIC, body=f'{{% component "card" sku="{sku}" n=1 %}}'
+        )
+        client = Client()
+        with _routed(pages, STORAGE="next.suspense.SpillStorage"):
+            _html, (card,) = _shell(client, "/long/")
+            response = _reload(client, "/long/", card)
+        assert _op(response)["html"] == f"<p>card {sku} x2</p>"
+
+    def test_an_expired_token_answers_the_reload_signal(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages, MAX_AGE=60):
+            with freeze_token_clock(1_000_000):
+                _html, (card, _boom) = _shell(client, "/home/")
+            with freeze_token_clock(1_000_060):
+                response = _reload(client, "/home/", card)
+        assert response.status_code == 409
+        assert response["X-Next-Reload"] == "token-expired"
+        assert response.content == b""
+
+    def test_a_body_transport_reload_passes_csrf(self, pages: Path) -> None:
+        client = Client(enforce_csrf_checks=True)
+        with _routed(pages, TRANSPORT="next.suspense.BodyTransport"):
+            _html, (card, _boom) = _shell(client, "/home/")
+            headers = {"X-Next-Request": "1", "X-Next-Zone": card["id"]}
+            refused = client.post("/home/", {"_nb": card["token"]}, headers=headers)
+            csrf = client.cookies["csrftoken"].value
+            headers["X-CSRFToken"] = csrf
+            answered = client.post("/home/", {"_nb": card["token"]}, headers=headers)
+        assert refused.status_code == 403
+        assert answered.status_code == 200
+        assert _op(answered)["html"] == "<p>card a x6</p>"
+
+
+_PREFETCH = {
+    "X-Next-Request": "1",
+    "X-Next-Navigate": "1",
+    "X-Next-Prefetch": "1",
+    "X-Next-Origin": "/",
+    "Sec-Fetch-Site": "same-origin",
+}
+
+
+@pytest.mark.django_db()
+class TestPrefetch:
+    """A prefetch that left a client-trip wrapper is not the page a navigation answers."""
+
+    def _prefetch(self, pages: Path, url: str) -> dict[str, object]:
+        with routed(pages, COMPONENT_BACKENDS=COMPONENTS, ROUTER={"ENABLED": True}):
+            response = Client().get(url, headers=_PREFETCH)
+        assert response["Cache-Control"] == "private, no-store"
+        return json.loads(response.content)
+
+    def test_a_client_trip_wrapper_leaves_the_prefetch_incomplete(
+        self, pages: Path
+    ) -> None:
+        envelope = self._prefetch(pages, "/home/")
+        assert "data-next-token" in envelope["ops"][0]["html"]
+        assert "complete" not in envelope
+
+    def test_a_page_without_a_boundary_prefetches_complete(self, pages: Path) -> None:
+        envelope = self._prefetch(pages, "/rendered/")
+        assert "<p>rendered</p>" in envelope["ops"][0]["html"]
+        assert envelope["complete"] is True
+
+
+@pytest.mark.django_db()
+class TestRefusal:
+    """Every refusal answers one identical 403, and the page access comes first."""
+
+    def _refused(self, response: HttpResponse) -> None:
+        assert response.status_code == 403
+        assert response.content == b""
+        assert response["Cache-Control"] == "private, no-store"
+        assert response["X-Next-Reload"] == "refused"
+
+    def test_a_tampered_token_is_refused(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            token = card["token"]
+            swapped = "A" if token[-1] != "A" else "B"
+            response = client.get(
+                "/home/",
+                headers={
+                    "X-Next-Request": "1",
+                    "X-Next-Zone": card["id"],
+                    "X-Next-Boundary": token[:-1] + swapped,
+                },
+            )
+        self._refused(response)
+
+    def test_a_token_of_another_url_is_refused(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card,) = _shell(client, "/elsewhere/")
+            response = _reload(client, "/home/", card)
+        self._refused(response)
+
+    @pytest.mark.parametrize(
+        ("component", "scope"),
+        [
+            pytest.param("ghost", "", id="unknown"),
+            pytest.param("card", "x", id="scope"),
+        ],
+    )
+    def test_a_token_of_a_component_the_page_does_not_hold_is_refused(
+        self, pages: Path, component: str, scope: str
+    ) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            claims = BoundaryClaims.of(component, scope, url_path="/home/")
+            request = client.get("/home/").wsgi_request
+            token = issue_boundary_token(request, claims)
+            response = client.get(
+                "/home/",
+                headers={
+                    "X-Next-Request": "1",
+                    "X-Next-Zone": card["id"],
+                    "X-Next-Boundary": token,
+                },
+            )
+        self._refused(response)
+
+    def test_a_token_of_another_user_is_refused(self, pages: Path) -> None:
+        with _routed(pages, BINDING="user"):
+            _html, (card, _boom) = _shell(_logged(_user("owner")), "/home/")
+            response = _reload(_logged(_user("thief")), "/home/", card)
+        self._refused(response)
+
+    def test_a_cross_site_reload_is_refused(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = _reload(
+                client, "/home/", card, **{"Sec-Fetch-Site": "cross-site"}
+            )
+        self._refused(response)
+
+    def test_a_wrapper_id_of_another_shape_is_refused(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = _reload(client, "/home/", card, **{"X-Next-Zone": "list"})
+        self._refused(response)
+
+    def test_a_token_without_the_partial_switch_never_reaches_the_reload(
+        self, pages: Path
+    ) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = client.get(
+                "/home/",
+                headers={"X-Next-Zone": card["id"], "X-Next-Boundary": card["token"]},
+            )
+        assert response.status_code == 200
+        assert response["Content-Type"].startswith("text/html")
+
+    def test_a_page_the_visitor_may_not_open_refuses_before_the_token(
+        self, pages: Path
+    ) -> None:
+        with _routed(pages), capture_signals(boundary_token_rejected) as recorder:
+            response = Client().get(
+                "/private/",
+                headers={
+                    "X-Next-Request": "1",
+                    "X-Next-Zone": "b-0a0b0c0d-0",
+                    "X-Next-Boundary": "garbage",
+                },
+            )
+        assert response.status_code == 302
+        assert len(recorder) == 0
+
+    def test_the_rule_runs_again_for_a_revoked_permission(self, pages: Path) -> None:
+        user = _user("viewer", "view_user", "change_user")
+        client = _logged(user)
+        with _routed(pages):
+            _html, (found,) = _shell(client, "/guarded/")
+            allowed = _reload(client, "/guarded/", found)
+            user.user_permissions.remove(Permission.objects.get(codename="change_user"))
+            response = _reload(client, "/guarded/", found)
+        assert _op(allowed)["html"] == "<p>locked z</p>"
+        self._refused(response)
+
+    def test_the_recorded_has_perm_names_run_again(self, pages: Path) -> None:
+        user = _user("viewer", "view_user", "change_user")
+        client = _logged(user)
+        with _routed(pages):
+            _html, (found,) = _shell(client, "/guarded/")
+            user.user_permissions.remove(Permission.objects.get(codename="view_user"))
+            response = _reload(client, "/guarded/", found)
+        self._refused(response)
+
+
+def _staff() -> User:
+    return User.objects.create_user("staff", password="x", is_staff=True)
+
+
+def _sent(found: re.Match[str]) -> dict[str, str]:
+    return {
+        "X-Next-Request": "1",
+        "X-Next-Zone": found["id"],
+        "X-Next-Boundary": found["token"],
+    }
+
+
+def _private_headers(response: HttpResponse) -> tuple[str, str, bool]:
+    return (
+        response["Cache-Control"],
+        response["Referrer-Policy"],
+        "X-Next-Boundary" in response["Vary"],
+    )
+
+
+_PRIVATE_HEADERS = ("private, no-store", "same-origin", True)
+
+
+def _shape(response: HttpResponse) -> tuple[object, ...]:
+    return (
+        response.status_code,
+        response.content,
+        response["Content-Type"],
+        *_private_headers(response),
+    )
+
+
+@pytest.mark.django_db()
+class TestPageGuards:
+    """A reload runs the context guards of the page before its component."""
+
+    @pytest.mark.parametrize(
+        ("url", "status"),
+        [
+            pytest.param("/gp/", 403, id="permission-denied"),
+            pytest.param("/gn/", 404, id="not-found"),
+            pytest.param("/ga/", 403, id="async"),
+            pytest.param("/gf/", 403, id="declared-guard"),
+            pytest.param("/vault/inner/", 403, id="inherited"),
+        ],
+    )
+    def test_a_replayed_token_meets_the_guard_of_the_page(
+        self, pages: Path, url: str, status: int
+    ) -> None:
+        with _routed(pages):
+            _html, (found,) = _shell(_logged(_staff()), url)
+            CALLS.clear()
+            other = _logged(_user("other"))
+            page = other.get(url)
+            replayed = other.get(url, headers=_sent(found))
+            anonymous = Client().get(url, headers=_sent(found))
+        assert page.status_code == status
+        assert (replayed.status_code, replayed.content) == (status, page.content)
+        assert _shape(anonymous) == _shape(replayed)
+        assert _private_headers(replayed) == _PRIVATE_HEADERS
+        assert replayed.get("X-Next-Reload") == ("refused" if status == 403 else None)
+        assert CALLS == []
+
+    def test_the_visitor_the_guard_admits_gets_the_component(self, pages: Path) -> None:
+        staff = _logged(_staff())
+        with _routed(pages):
+            _html, (found,) = _shell(staff, "/gp/")
+            response = staff.get("/gp/", headers=_sent(found))
+        assert _op(response)["html"] == "<p>secret 7</p>"
+
+    def test_a_garbage_token_is_refused_before_any_guard(self, pages: Path) -> None:
+        with _routed(pages):
+            response = Client().get(
+                "/gp/",
+                headers={
+                    "X-Next-Request": "1",
+                    "X-Next-Zone": "b-0a0b0c0d-0",
+                    "X-Next-Boundary": "garbage",
+                },
+            )
+        assert response.status_code == 403
+        assert response.content == b""
+
+    def test_a_page_refusal_that_raises_is_sent_private(self, pages: Path) -> None:
+        with _routed(pages):
+            response = _logged(_user("plain")).get(
+                "/staff/",
+                headers={
+                    "X-Next-Request": "1",
+                    "X-Next-Zone": "b-0a0b0c0d-0",
+                    "X-Next-Boundary": "garbage",
+                },
+            )
+        assert response.status_code == 403
+        assert _private_headers(response) == _PRIVATE_HEADERS
+        assert response["X-Next-Reload"] == "refused"
+
+
+@pytest.mark.django_db()
+class TestObjectRule:
+    """An object rule runs on the row fetched again, for the visitor of the reload."""
+
+    def test_a_reassigned_owner_holds_the_token_no_more(self, pages: Path) -> None:
+        target = _user("target")
+        url = f"/owned/{target.pk}/"
+        backends = ["tests.views.test_trip.OwnerBackend"]
+        with override_settings(AUTHENTICATION_BACKENDS=backends), _routed(pages):
+            alice, bob = _logged(_user("alice")), _logged(_user("bob"))
+            User.objects.filter(pk=target.pk).update(last_name="alice")
+            _html, (minted,) = _shell(alice, url)
+            _html, denied = _shell(bob, url)
+            User.objects.filter(pk=target.pk).update(last_name="bob")
+            former = alice.get(url, headers=_sent(minted))
+            _html, (fresh,) = _shell(bob, url)
+            current = bob.get(url, headers=_sent(fresh))
+            reference = Client().get(url, headers=_sent(minted))
+        assert denied == []
+        assert _shape(former) == _shape(reference)
+        assert former.status_code == 403
+        assert former.content == b""
+        assert _op(current)["html"] == "<p>owned target</p>"
+
+    def test_a_vanished_row_under_an_object_rule_refuses_everyone(
+        self, pages: Path
+    ) -> None:
+        target = _user("target")
+        url = f"/owned/{target.pk}/"
+        backends = ["tests.views.test_trip.ObjectBackend"]
+        with override_settings(AUTHENTICATION_BACKENDS=backends), _routed(pages):
+            owner = _logged(_user("owner", "change_user"))
+            _html, (found,) = _shell(owner, url)
+            User.objects.filter(pk=target.pk).delete()
+            answers = [
+                client.get(url, headers=_sent(found))
+                for client in (owner, _logged(_user("plain")), Client())
+            ]
+        assert {_shape(response) for response in answers} == {
+            (403, b"", "text/html; charset=utf-8", *_PRIVATE_HEADERS)
+        }
+
+    def test_a_vanished_row_is_named_only_to_a_visitor_the_rule_admits(
+        self, pages: Path
+    ) -> None:
+        target = _user("target")
+        viewer = _logged(_user("viewer", "view_user"))
+        url = f"/gated/{target.pk}/"
+        with _routed(pages):
+            _html, (found,) = _shell(viewer, url)
+            User.objects.filter(pk=target.pk).delete()
+            admitted = _op(viewer.get(url, headers=_sent(found)))
+            plain = _logged(_user("plain")).get(url, headers=_sent(found))
+            anonymous = Client().get(url, headers=_sent(found))
+        assert (admitted["s"], admitted["k"]) == ("error", "not_found")
+        assert _shape(plain) == _shape(anonymous)
+        assert plain.status_code == 403
+        assert plain.content == b""
+
+
+@pytest.mark.django_db()
+class TestMethods:
+    """A reload answers `GET` and `HEAD`, and `POST` only under the body transport."""
+
+    @pytest.mark.parametrize("method", ["post", "put", "delete", "options", "patch"])
+    def test_another_method_is_not_allowed(self, pages: Path, method: str) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = getattr(client, method)("/home/", headers=_sent(card))
+        assert response.status_code == 405
+        assert response["Allow"] == "GET, HEAD"
+        assert _private_headers(response) == _PRIVATE_HEADERS
+        assert CALLS == []
+
+    def test_a_head_answers_headers_without_rendering(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = client.head("/home/", headers=_sent(card))
+        assert response.status_code == 200
+        assert response.content == b""
+        assert _private_headers(response) == _PRIVATE_HEADERS
+        assert CALLS == []
+
+    def test_a_put_under_the_body_transport_carries_no_token(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages, TRANSPORT="next.suspense.BodyTransport"):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = client.put(
+                "/home/",
+                data=urlencode({"_nb": card["token"]}),
+                content_type="application/x-www-form-urlencoded",
+                headers={"X-Next-Request": "1"},
+            )
+        assert response.status_code == 200
+        assert response["Content-Type"].startswith("text/html")
+        assert "data-next-boundary" in response.content.decode()
+
+
+@pytest.mark.django_db()
+class TestReflection:
+    """A token in the query string never reaches what the request reads."""
+
+    def test_a_plain_navigation_renders_the_page_without_the_token(
+        self, pages: Path
+    ) -> None:
+        with _routed(pages, TRANSPORT="next.suspense.QueryTransport"):
+            response = Client().get("/echo/?q=1&_nb=SENTINEL")
+        assert response.status_code == 200
+        assert response["Content-Type"].startswith("text/html")
+        assert "SENTINEL" not in response.content.decode()
+        assert "<p>/echo/?q=1|q=1</p>" in response.content.decode()
+
+    def test_the_login_redirect_of_a_reload_carries_no_token(self, pages: Path) -> None:
+        headers = {"X-Next-Request": "1", "X-Next-Zone": "b-0a0b0c0d-0"}
+        with _routed(pages, TRANSPORT="next.suspense.QueryTransport"):
+            reload = Client().get("/private/?q=1&_nb=SENTINEL", headers=headers)
+            plain = Client().get("/private/?q=1&_nb=SENTINEL")
+        assert reload.status_code == plain.status_code == 302
+        assert "SENTINEL" not in reload["Location"]
+        assert "SENTINEL" not in plain["Location"]
+        assert _private_headers(reload) == _PRIVATE_HEADERS
+
+    def test_a_body_token_without_the_switch_is_ignored(self, pages: Path) -> None:
+        client = Client()
+        with _routed(pages, TRANSPORT="next.suspense.BodyTransport"):
+            _html, (card, _boom) = _shell(client, "/home/")
+            response = client.post("/home/", {"_nb": card["token"]})
+        assert response.status_code == 200
+        assert response["Content-Type"].startswith("text/html")
+        assert CALLS == []

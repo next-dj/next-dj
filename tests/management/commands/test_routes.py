@@ -224,3 +224,40 @@ class TestRoutesIntercepts:
             ("/b/feed/photo/", "b:page_feed_photo", "-"),
             ("/b/feed/photo/", "-", "peek"),
         ]
+
+
+class TestRoutesBoundaryColumns:
+    """A tree holding boundary files names the nearest of each kind per page."""
+
+    def test_the_table_gains_loading_and_error_columns(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        write_page(site, "shop/cart")
+        write_page(site, "contact")
+        (site / "error.djx").write_text("e")
+        (site / "shop" / "loading.djx").write_text("l")
+        out = StringIO()
+
+        with installed_apps(tmp_path, dirs=[site], BASE_DIR=tmp_path):
+            call_command("routes", stdout=out)
+
+        lines = out.getvalue().splitlines()
+        assert lines[0].split() == ["URL", "Name", "File", "Access", "Loading", "Error"]
+        rows = {line.split()[0]: line.split()[4:] for line in lines[1:]}
+        assert rows == {
+            "/shop/cart/": ["site/shop/loading.djx", "site/error.djx"],
+            "/contact/": ["-", "site/error.djx"],
+        }
+
+    def test_an_intercept_column_follows_the_boundary_columns(self, tmp_path) -> None:
+        site = tmp_path / "site"
+        write_page(site, "feed/photo")
+        write_page(site, "feed/(.)photo", PAGE_HEAD, body=zone_body("peek"))
+        (site / "feed" / "error.djx").write_text("e")
+        out = StringIO()
+
+        with installed_apps(tmp_path, dirs=[site], BASE_DIR=tmp_path):
+            call_command("routes", stdout=out)
+
+        lines = out.getvalue().splitlines()
+        assert lines[0].split()[-3:] == ["Loading", "Error", "Intercept"]
+        assert lines[2].split()[-3:] == ["-", "site/feed/error.djx", "peek"]

@@ -4,13 +4,12 @@ import functools
 from collections.abc import Callable
 from typing import Final
 
-from django.conf import settings
 from django.http import HttpRequest
 
 from next.conf import next_framework_settings
 from next.conf.sentinels import UNSET
 from next.csrf import CSP_NONCE_ATTR, NONCE_ATTR, nonce_minted
-from next.utils import middleware_listed
+from next.utils import middleware_installed
 
 
 CSP_MIDDLEWARE: Final = (
@@ -49,8 +48,7 @@ def nonce_active() -> bool:
     """Return whether tags get a nonce, which needs `CSP_NONCE` and a CSP middleware."""
     if not nonce_enabled():
         return False
-    middleware = getattr(settings, "MIDDLEWARE", None) or ()
-    return any(middleware_listed(middleware, path) for path in CSP_MIDDLEWARE)
+    return any(map(middleware_installed, CSP_MIDDLEWARE))
 
 
 def forget_nonce_setting(**kwargs: object) -> None:

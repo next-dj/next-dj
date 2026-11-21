@@ -1,11 +1,12 @@
 <div class="space-y-6">
-  {% #component "page_header" title="Audit log" description="Backend rows ({{ totals.backend }}) and signal rows ({{ totals.signal }}) interleaved newest-first." %}
+  {% #component "page_header" title="Audit log" description="Backend rows and signal rows interleaved newest-first, read one window at a time by a cursor." %}
     {% #slot "actions" %}
-      <form method="get" class="flex items-center gap-2 text-sm">
+      <form method="get" class="flex items-center gap-2 text-sm"
+            data-next-target="audit-rows,audit-rows-more,audit-rows-less,audit-totals"
+            data-next-trigger="change">
         <label for="kind-filter" class="text-muted-foreground">Filter</label>
         <select id="kind-filter"
                 name="kind"
-                onchange="this.form.submit()"
                 class="rounded-md border border-input bg-background px-2 py-1">
           <option value="" {% if active_kind == "" %}selected{% endif %}>All kinds</option>
           <option value="dispatched" {% if active_kind == "dispatched" %}selected{% endif %}>dispatched</option>
@@ -13,40 +14,50 @@
           <option value="request_started" {% if active_kind == "request_started" %}selected{% endif %}>request_started</option>
           <option value="access_denied" {% if active_kind == "access_denied" %}selected{% endif %}>access_denied</option>
         </select>
+        <noscript>
+          <button type="submit" class="rounded-md border border-input bg-background px-2 py-1 hover:bg-accent">Apply</button>
+        </noscript>
       </form>
     {% /slot %}
   {% /component %}
 
+  {% zone "audit-totals" %}
+    {% component "audit_totals" kind=active_kind %}
+  {% endzone %}
+
   <div class="overflow-hidden rounded-md border border-border bg-card shadow-sm">
-    {% zone "audit-table" lazy="revealed" %}
-      {% if entries %}
-        <table class="w-full text-left text-sm" data-audit-table>
-          <thead class="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th class="px-4 py-2">Time</th>
-              <th class="px-4 py-2">Source</th>
-              <th class="px-4 py-2">Kind</th>
-              <th class="px-4 py-2">Action</th>
-              <th class="px-4 py-2">Status</th>
-              <th class="px-4 py-2">Summary</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            {% for entry in entries %}
-              {% component "audit_row" peek="audit-log-peek" %}
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="p-6 text-sm text-muted-foreground">No audit rows yet. Submit a request to populate the log.</p>
-      {% endif %}
-    {% placeholder %}
-      <div data-audit-skeleton class="space-y-2 p-4">
-        {% component "skeleton" height="1.5rem" extra="w-1/3" %}
-        {% for _ in "xxxxxx" %}
-          {% component "skeleton" height="1.25rem" %}
+    {% more zone="audit-rows" previous=entries %}
+      <span class="block border-b border-border px-4 py-2 text-center text-sm text-muted-foreground hover:bg-accent">
+        Show newer rows
+      </span>
+    {% endmore %}
+
+    <table class="w-full text-left text-sm" data-audit-table>
+      <thead class="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+        <tr>
+          <th class="px-4 py-2">Time</th>
+          <th class="px-4 py-2">Source</th>
+          <th class="px-4 py-2">Kind</th>
+          <th class="px-4 py-2">Action</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Summary</th>
+        </tr>
+      </thead>
+      {% zone "audit-rows" tag="tbody" class="divide-y divide-border" %}
+        {% for entry in entries %}
+          {% component "audit_row" peek="audit-log-peek" %}
         {% endfor %}
-      </div>
-    {% endzone %}
+      {% endzone %}
+    </table>
+
+    {% more zone="audit-rows" next=entries prune=60 url="replace" %}
+      <span class="block border-t border-border px-4 py-2 text-center text-sm text-muted-foreground hover:bg-accent">
+        Show older rows
+      </span>
+    {% empty %}
+      <p data-audit-end class="border-t border-border px-4 py-2 text-center text-sm text-muted-foreground">
+        {% if entries %}End of the log.{% else %}No audit rows yet. Submit a request to populate the log.{% endif %}
+      </p>
+    {% endmore %}
   </div>
 </div>

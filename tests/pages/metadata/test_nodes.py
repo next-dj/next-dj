@@ -214,6 +214,11 @@ metadata = {
 """
 
 
+def _trail(html: str) -> str:
+    start = html.index('<nav aria-label="Breadcrumb">')
+    return html[start : html.index("</nav>", start)]
+
+
 def _breadcrumb_tree(root: Path) -> Path:
     write_page(root, "", 'metadata = {"title": "Home"}\n', body=BODY)
     write_page(root, "blog", 'metadata = {"breadcrumb": "Blog"}\n', body=BODY)
@@ -247,11 +252,23 @@ class TestBreadcrumbsTag:
             '<nav aria-label="Breadcrumb"><ol><li>&lt;Leaf&gt;</li></ol></nav>'
         )
 
-    def test_a_current_crumb_without_a_url_carries_aria_current(self) -> None:
+    def test_a_current_crumb_without_a_url_carries_the_page_marks(self) -> None:
         crumbs = (Breadcrumb("Home", "/"), Breadcrumb("Here", None, current=True))
         assert render_breadcrumbs(crumbs) == (
             '<nav aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li>'
-            '<li aria-current="page">Here</li></ol></nav>'
+            '<li aria-current="page" data-next-current="page">Here</li></ol></nav>'
+        )
+
+    def test_an_ancestor_crumb_carries_the_ancestor_mark(self) -> None:
+        crumbs = (
+            Breadcrumb("Blog", "/blog/", ancestor=True),
+            Breadcrumb("Post", "/blog/post/", current=True),
+        )
+        assert render_breadcrumbs(crumbs) == (
+            '<nav aria-label="Breadcrumb"><ol>'
+            '<li><a href="/blog/" data-next-current="ancestor">Blog</a></li>'
+            '<li><a href="/blog/post/" aria-current="page" data-next-current="page">'
+            "Post</a></li></ol></nav>"
         )
 
     @pytest.mark.parametrize(
@@ -278,9 +295,9 @@ class TestBreadcrumbTrail:
             html = Client().get("/blog/hello/").content.decode()
         assert (
             '<nav aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li>'
-            '<li><a href="/blog/">Blog</a></li>'
-            '<li><a href="/blog/hello/" aria-current="page">Post hello</a></li>'
-            "</ol></nav>"
+            '<li><a href="/blog/" data-next-current="ancestor">Blog</a></li>'
+            '<li><a href="/blog/hello/" aria-current="page" data-next-current="page">'
+            "Post hello</a></li></ol></nav>"
         ) in html
 
     def test_a_non_ascii_slug_is_current(self, tmp_path: Path) -> None:
@@ -288,7 +305,8 @@ class TestBreadcrumbTrail:
         with routed(root, **WITH_BASE):
             html = Client().get("/blog/café/").content.decode()
         assert (
-            '<li><a href="/blog/caf%C3%A9/" aria-current="page">Post café</a></li>'
+            '<li><a href="/blog/caf%C3%A9/" aria-current="page" '
+            'data-next-current="page">Post café</a></li>'
         ) in html
 
     def test_the_graph_gains_a_breadcrumb_list(self, tmp_path: Path) -> None:
@@ -337,7 +355,8 @@ class TestBreadcrumbTrail:
             html = Client().get("/shop/item/").content.decode()
         assert (
             '<ol><li><a href="/">Home</a></li>'
-            '<li><a href="/shop/item/" aria-current="page">Item</a></li></ol>'
+            '<li><a href="/shop/item/" aria-current="page" data-next-current="page">'
+            "Item</a></li></ol>"
         ) in html
 
     def test_false_drops_the_segment(self, tmp_path: Path) -> None:
@@ -345,7 +364,10 @@ class TestBreadcrumbTrail:
         with routed(root, **WITH_BASE):
             html = Client().get("/hidden/leaf/").content.decode()
         assert "Hidden" not in html.split("<body>")[1]
-        assert '<a href="/hidden/leaf/" aria-current="page">Leaf</a>' in html
+        assert (
+            '<a href="/hidden/leaf/" aria-current="page" data-next-current="page">'
+            "Leaf</a>"
+        ) in html
 
     def test_a_declared_breadcrumb_list_replaces_the_derived_one(
         self, tmp_path: Path
@@ -379,6 +401,23 @@ class TestBreadcrumbTrail:
         ):
             html = Client().get("/de/blog/hello/").content.decode()
         assert (
-            '<li><a href="/de/">Home</a></li><li><a href="/de/blog/">Blog</a></li>'
-            '<li><a href="/de/blog/hello/" aria-current="page">Post hello</a></li>'
+            '<li><a href="/de/">Home</a></li>'
+            '<li><a href="/de/blog/" data-next-current="ancestor">Blog</a></li>'
+            '<li><a href="/de/blog/hello/" aria-current="page" '
+            'data-next-current="page">Post hello</a></li>'
         ) in html
+
+    @pytest.mark.parametrize(
+        "path", ["/blog/hello/", "/shop/item/", "/blog/café/", "/hidden/leaf/"]
+    )
+    def test_the_trail_is_the_same_with_the_link_pass_off(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        root = _breadcrumb_tree(tmp_path / "pages")
+        with routed(root, **WITH_BASE):
+            on = Client().get(path).content.decode()
+        off_router = {"ENABLED": False, "CURRENT": {"ENABLED": False}}
+        with routed(root, ROUTER=off_router, **WITH_BASE):
+            off = Client().get(path).content.decode()
+        assert _trail(on) == _trail(off)
+        assert 'data-next-current="page"' in _trail(off)

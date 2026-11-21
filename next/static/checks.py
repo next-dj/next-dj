@@ -32,7 +32,9 @@ from .discovery import PathResolver, default_stems, find_role_files
 from .finders import NextAppDirectoriesFinder, scan_page_tree_assets
 from .nonce import nonce_active
 from .runtime import (
+    CHUNK_FIELDS,
     CHUNK_STATIC_PATHS,
+    CHUNK_TEMPLATE,
     DEV_CHUNK_KEY,
     INIT_FIELDS,
     NEXT_JS_STATIC_PATH,
@@ -42,6 +44,7 @@ from .runtime import (
     NextScriptBuilder,
     ScriptInjectionPolicy,
     dry_run_template,
+    payload_in_script,
 )
 from .serializers import JsContextSerializer
 
@@ -414,7 +417,12 @@ def check_app_directories_finder(*args: object, **kwargs: object) -> list[CheckM
     ]
 
 
-_RUNTIME_TEMPLATES: Final = ("preload_template", "script_tag_template", "init_template")
+_RUNTIME_TEMPLATES: Final = (
+    "preload_template",
+    "script_tag_template",
+    "init_template",
+    "chunk_template",
+)
 _BACKEND_TEMPLATES: Final = ("css_tag", "js_tag", "module_tag")
 
 
@@ -558,7 +566,11 @@ def check_script_policy(*args: object, **kwargs: object) -> list[CheckMessage]:
 
 
 def _template_fields(where: str) -> tuple[str, ...]:
-    return INIT_FIELDS if "init_template" in where else TAG_FIELDS
+    if "init_template" in where:
+        return INIT_FIELDS
+    if "chunk_template" in where:
+        return CHUNK_FIELDS
+    return TAG_FIELDS
 
 
 @register(NEXT)
@@ -580,6 +592,18 @@ def check_tag_templates_format(*args: object, **kwargs: object) -> list[CheckMes
                     "instead.",
                     hint="Double every literal brace as {{ or }} and name no other "
                     "field.",
+                    obj=settings,
+                    id="next.E139",
+                )
+            )
+            continue
+        if where == CHUNK_TEMPLATE and not payload_in_script(template):
+            errors.append(
+                Error(
+                    f"{where} is {template!r}, which puts {{payload}} outside the "
+                    "text of a <script> element, where its escaping does not hold, so "
+                    "the default chunk renders instead.",
+                    hint="Place {payload} in the text of the script element alone.",
                     obj=settings,
                     id="next.E139",
                 )

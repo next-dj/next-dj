@@ -177,7 +177,9 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - ``next/client/entries/dev.ts``
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
 
-The job then enforces a gzip budget on every bundle, 16384 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
+The job then enforces a gzip budget on every bundle, 18432 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks.
+The defer, reload, more, and reader chunks get 2048 bytes each, and the router, history, and intent chunks get 4096 bytes each.
+That budget check runs in continuous integration only.
 Growth past a budget calls for a lazily loaded chunk rather than a larger core file.
 The job finishes with the vitest run and its coverage thresholds.
 

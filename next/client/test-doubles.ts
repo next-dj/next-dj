@@ -10,6 +10,7 @@ import { createPoller } from "./poll";
 import { createSse } from "./sse";
 import { createWebSocketTransport } from "./ws";
 import type { VisibilityAdapter } from "./sse";
+import type { DeferArm } from "./triggers";
 import type { Clock } from "./wire";
 
 // Holds every pending timer with a working clearTimeout, so a duplicate chain
@@ -118,4 +119,5 @@ export const chunkModules = {
   ws: landed(createWebSocketTransport),
   csrf: landed(mintCsrf),
   poll: landed(createPoller),
+  defer: landed<DeferArm>(() => undefined),
 };

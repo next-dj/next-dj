@@ -1,9 +1,11 @@
 """Partial-request headers, intent parsing, and Vary stamping."""
 
 import enum
+import functools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from django.http import HttpResponse
 from django.utils.cache import patch_vary_headers
 
 from next.conf.sentinels import UNSET
@@ -28,11 +30,33 @@ RESPONSE_ACTION = "X-Next-Action"
 
 CONTENT_TYPE = "application/vnd.next.patches+json"
 ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9"
+STREAM_ACCEPT = "text/event-stream, application/json;q=0.9"
+EVENT_STREAM = "text/event-stream"
 
-# VALIDATE, ORIGIN, and REQUEST_ID never change the cached body, so not in Vary.
-VARY_HEADERS: tuple[str, ...] = (REQUEST_FLAG, ZONE, MERGE, VERSION)
+BOUNDARY = "X-Next-Boundary"
+SEC_FETCH_SITE = "Sec-Fetch-Site"
+
+NAVIGATE = "X-Next-Navigate"
+LAYOUTS = "X-Next-Layouts"
+PREFETCH = "X-Next-Prefetch"
+ROUTER = "X-Next-Router"
+
+# VALIDATE and REQUEST_ID never change the cached body, so not in Vary.
+VARY_HEADERS: tuple[str, ...] = (
+    REQUEST_FLAG,
+    ZONE,
+    MERGE,
+    VERSION,
+    BOUNDARY,
+    NAVIGATE,
+    LAYOUTS,
+    PREFETCH,
+)
+STREAM_VARY: tuple[str, ...] = ("Accept",)
 
 _INTENT_ATTR = "_next_partial_intent"
+_JSON = "application/json"
+_RANKED = frozenset({EVENT_STREAM, _JSON})
 
 
 class MergeMode(enum.StrEnum):
@@ -46,7 +70,8 @@ class MergeMode(enum.StrEnum):
 class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
-    Without the `X-Next-Request` switch every derived field stays empty.
+    Without the `X-Next-Request` switch every derived field stays empty. `layouts` is
+    the raw declaration of a navigation, which the router parses against its bounds.
     """
 
     partial: bool = False
@@ -56,6 +81,9 @@ class PartialIntent:
     version: str | None = None
     request_id: str | None = None
     origin: str | None = None
+    navigate: bool = False
+    layouts: str | None = None
+    prefetch: bool = False
 
 
 # Every field is immutable and empty, so non-partial requests share one instance.
@@ -79,15 +107,22 @@ def _parse_merge(raw: str | None) -> "MergeMode | None":
         return None
 
 
+@functools.cache
+def _meta_key(name: str) -> str:
+    """Return the WSGI `META` key of a header name."""
+    return "HTTP_" + name.upper().replace("-", "_")
+
+
 def _value(request: "HttpRequest", name: str) -> str | None:
-    """Return a single request header value, or None when absent."""
-    return request.headers.get(name)
+    """Return a request header value from `META`, skipping the parsed headers map."""
+    return request.META.get(_meta_key(name))
 
 
 def _parse_intent(request: "HttpRequest") -> PartialIntent:
     """Parse the partial-request headers of a request into an intent."""
     if _value(request, REQUEST_FLAG) != "1":
         return _NOT_PARTIAL
+    navigate = _value(request, NAVIGATE) == "1"
     return PartialIntent(
         partial=True,
         zones=_split_names(_value(request, ZONE)),
@@ -96,6 +131,9 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
         version=_value(request, VERSION),
         request_id=_value(request, REQUEST_ID),
         origin=_value(request, ORIGIN),
+        navigate=navigate,
+        layouts=_value(request, LAYOUTS) if navigate else None,
+        prefetch=navigate and _value(request, PREFETCH) == "1",
     )
 
 
@@ -114,18 +152,85 @@ def is_partial_request(request: "HttpRequest") -> bool:
     return partial_intent(request).partial
 
 
+@functools.lru_cache(maxsize=256)
+def _varied(held: str | None, names: tuple[str, ...]) -> str:
+    """Return the `Vary` value `patch_vary_headers` leaves a response holding `held`."""
+    carrier = HttpResponse()
+    if held is not None:
+        carrier.headers["Vary"] = held
+    patch_vary_headers(carrier, names)
+    return carrier.headers["Vary"]
+
+
+def vary_on(response: "HttpResponseBase", names: tuple[str, ...]) -> None:
+    """Add `names` to `Vary` as `patch_vary_headers` does, each merge computed once."""
+    headers = response.headers
+    held = headers.get("Vary")
+    merged = _varied(held, names)
+    if merged != held:
+        headers["Vary"] = merged
+
+
 def set_partial_vary(response: "HttpResponseBase") -> None:
     """Add the partial Vary headers so shared caches stay unpoisoned."""
-    patch_vary_headers(response, VARY_HEADERS)
+    vary_on(response, VARY_HEADERS)
+
+
+def set_stream_vary(response: "HttpResponseBase") -> None:
+    """Add `Accept` to Vary, as a partial `GET` answers a stream or JSON by it."""
+    vary_on(response, STREAM_VARY)
+
+
+def _quality(params: list[str]) -> float:
+    """Return the `q` parameter of one media range, `1` when absent, `0` unreadable."""
+    for param in params:
+        name, _, value = param.partition("=")
+        if name.strip().lower() == "q":
+            try:
+                quality = float(value.strip())
+            except ValueError:
+                return 0.0
+            return quality if 0 <= quality <= 1 else 0.0
+    return 1.0
+
+
+def accepts_event_stream(request: "HttpRequest") -> bool:
+    """Whether `Accept` ranks `text/event-stream` above zero and no lower than JSON.
+
+    A wildcard range accepts nothing here, as only a client with a stream reader asks.
+    """
+    accept = request.META.get("HTTP_ACCEPT", "").lower()
+    if EVENT_STREAM not in accept:
+        return False
+    qualities: dict[str, float] = {}
+    for media_range in accept.split(","):
+        media, *params = media_range.split(";")
+        name = media.strip()
+        if name in _RANKED and name not in qualities:
+            qualities[name] = _quality(params)
+    stream = qualities.get(EVENT_STREAM, 0.0)
+    return stream > 0 and stream >= qualities.get(_JSON, 0.0)
 
 
 __all__ = [
     "ACCEPT",
+    "BOUNDARY",
     "CONTENT_TYPE",
+    "EVENT_STREAM",
+    "LAYOUTS",
+    "NAVIGATE",
+    "PREFETCH",
+    "ROUTER",
+    "SEC_FETCH_SITE",
+    "STREAM_ACCEPT",
+    "STREAM_VARY",
     "VARY_HEADERS",
     "MergeMode",
     "PartialIntent",
+    "accepts_event_stream",
     "is_partial_request",
     "partial_intent",
     "set_partial_vary",
+    "set_stream_vary",
+    "vary_on",
 ]

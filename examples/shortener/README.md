@@ -228,33 +228,21 @@ Every `{% component %}` prop compiles as a Django `FilterExpression`, so `title=
 
 The card also ships a co-located [`component.css`](shortener/pages/_components/link_card/component.css). The collector emits it once per page no matter how many cards render.
 
-### 8. Shared `nav_link`: one place for the active-state logic
+### 8. Shared `nav_link`: the framework marks the current link
 
-Root nav and admin subnav both need the same active-state rule. The logic lives once in the shared kit at [`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py), registered as a global component root through `COMPONENT_BACKENDS[0]["DIRS"]` in [`config/settings.py`](config/settings.py):
+Root nav and admin subnav need the same rule, and neither the example nor the shared kit writes it. Every full page passes through the framework's active-link pass, which marks each anchor inside a `<nav>`, a `[role=navigation]` or a `[data-next-nav]` element. A link to the current path gains `aria-current="page" data-next-current="page"`, a link to a segment prefix of it gains `data-next-current="ancestor"`, and a link to `/` is never an ancestor. The header links fill the `nav` slot of the shared `app_shell`, which renders them inside `<nav aria-label="Main">`, and the admin subnav sits inside the shared `nav` component, itself a `<nav>`.
 
-```python
-@component.context("is_active")
-def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
-    match = getattr(request, "resolver_match", None)
-    if match is None:
-        return False
-    view_name = match.view_name
-    if active_when:
-        return active_when in view_name
-    return view_name == url_name
-```
-
-Usage:
+[`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py) only resolves the `href` and picks one class string per variant. Each string styles the marks through Tailwind's attribute variants, `aria-[current=page]:` for the current page and, on the `bar` variant, `data-[next-current=ancestor]:` for a section the visitor is inside:
 
 ```djx
-{# exact match #}
+{# exact page: the Stats tab is marked on /admin/stats/ only #}
 {% component "nav_link" url_name="next:page_admin_stats" label="Stats" variant="tabs" %}
 
-{# prefix match: stays active across every URL name that contains 'page_admin' #}
-{% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
+{# section: the header link reads as current anywhere under /admin/ #}
+{% component "nav_link" url_name="next:page_admin" label="admin" variant="bar" %}
 ```
 
-No `request.path` string-munging, no custom template tag, no context processor. Django populates `request.resolver_match.view_name` and the component reads it.
+No `resolver_match` lookup, no substring match on view names, no context processor. The `tabs` variant leaves the ancestor mark unstyled, so the "Links" tab at `/admin/` stays dim on `/admin/stats/` while the header link stays lit. `TestActiveNav` in [`tests/test_integration.py`](tests/test_integration.py) asserts the marks on both navs.
 
 ### 9. URL names and `{% url %}`
 

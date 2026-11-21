@@ -11,6 +11,8 @@ User = get_user_model()
 
 _VALIDATE_HEADER = f"HTTP_{VALIDATE.upper().replace('-', '_')}"
 
+pytestmark = pytest.mark.django_db
+
 
 class _ForeignSender:
     """A sender no validate pass ever sends under."""
@@ -123,7 +125,6 @@ class TestValidateBehindGuard:
         assert response["Content-Type"] != CONTENT_TYPE
         assert received == []
 
-    @pytest.mark.django_db()
     def test_authenticated_validate_returns_an_envelope(
         self, next_client: NextClient
     ) -> None:
@@ -168,7 +169,6 @@ class TestValidateBehindViewPermissions:
         assert response["Content-Type"] != CONTENT_TYPE
         assert received == []
 
-    @pytest.mark.django_db()
     def test_authenticated_validate_runs_the_validator_behind_the_hook(
         self, next_client: NextClient
     ) -> None:
@@ -188,7 +188,6 @@ class TestValidateBehindViewPermissions:
         assert meta["errors"]["email"] == ["address already registered"]
 
 
-@pytest.mark.django_db()
 class TestValidateCsrfMeta:
     """The validate envelope carries the CSRF meta only on a token rotation."""
 
@@ -232,7 +231,6 @@ class TestValidateInsideAZone:
         assert "This field is required." in envelope.html_for_zone("rename-board")
 
 
-@pytest.mark.django_db()
 class TestValidateOnAWizardStep:
     """A validate request on a wizard step shapes a morph without saving.
 

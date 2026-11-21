@@ -35,6 +35,7 @@ Public API
 
    The process-wide ``Page`` coordinator that every router-built view renders through.
    ``Page`` takes ``login_required``, ``permission_required``, and ``public`` from ``PageDeclarations``, documented with ``next.pages.access`` below.
+   It takes ``atomic`` from ``TransactionDeclarations``, documented with ``next.pages.transactions`` below.
 
 Access declarations
 ~~~~~~~~~~~~~~~~~~~
@@ -59,6 +60,38 @@ Both read ``has_body(file_path, module)`` of ``next.pages.loaders``, the one cri
 .. automodule:: next.pages.access
    :exclude-members: refusal
 
+Transaction declaration
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``page.atomic(atomic, *, aliases=None)`` at the top of a ``page.py`` decides whether its page runs inside a request transaction, whatever the method, and wins over ``TRANSACTIONS["SAFE"]``, ``TRANSACTIONS["UNSAFE"]``, and ``TRANSACTIONS["RULE"]``, see ``TRANSACTIONS`` in :doc:`settings`.
+``page.atomic(True)`` wraps every request of the page, a ``GET`` included, and ``page.atomic(False)`` leaves every request of it, a ``POST`` included, in autocommit.
+``aliases`` of ``None`` takes ``TRANSACTIONS["ALIASES"]``, ``"all"`` takes every alias ``DATABASES`` declares, and a list or a tuple names the aliases to wrap.
+The declaration binds its own page alone, the pages below its directory follow their own ``page.py``, and a full page, a zone, a boundary, and a navigation request of the page all read it.
+The form actions the page declares do not read it and take their own choice through ``@action(atomic=...)`` or ``Meta.atomic``, see :doc:`forms`.
+The last call of a module wins, and an edited ``page.py`` that drops the call stops applying it once the module loads again.
+A call inside a function, a flag that is no bool, or an ``aliases`` value of another shape applies nothing and is reported as ``next.E240``.
+
+Boundary declaration
+~~~~~~~~~~~~~~~~~~~~
+
+``page.defer(*, timeout=None, parallel=None)`` at the top of a ``page.py`` bounds the job of the page boundary a ``loading.djx`` above the page declares, and places it on the pool for ``True``, on the request thread for ``False``, or by placement for ``None``.
+The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value outside its shape declares nothing and is reported as ``next.E222``.
+See :doc:`defer` and :doc:`/content/topics/boundaries/loading`.
+
+Every page view carries the ``_non_atomic_requests`` mark for every alias, so ``ATOMIC_REQUESTS`` never wraps it, settles the access check of the page before it opens its transaction, and closes the transaction once the response object exists.
+An exception leaving the view rolls the transaction back, and a returned response commits it whatever its status.
+
+.. automodule:: next.pages.transactions
+   :members:
+
+Router declaration
+~~~~~~~~~~~~~~~~~~
+
+``page.router(*, navigate=True, prefetch=True, snapshot=True)`` at the top of a ``page.py`` declares how the client router treats its page.
+``navigate=False`` answers every navigation with a hard load, ``prefetch=False`` refuses a prefetch with ``204`` before any render, and ``snapshot=False`` keeps the page out of the history snapshots.
+The last call of a module wins, and a flag that is no bool, a call inside a function, or a call outside a ``page.py`` declares nothing and is reported as ``next.E238``.
+See :doc:`router` and :doc:`/content/topics/router/index`.
+
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
 
@@ -70,18 +103,19 @@ Fourteen ``Page`` methods and the ``contexts`` property carry no leading undersc
 They follow the underscore rule of :doc:`/content/faq/general`, so they are safe from removal without notice.
 They do not carry the application-facing stability of a Stable tier, and their signatures may drift as partial rendering evolves.
 ``register_template`` is called by ``composed_template_for`` on every cache miss and by no other area, so it serves application code seeding a composed body under the same underscore rule, again without the Stable tier's signature guarantee.
-``resolve_page_body`` and ``render_composed`` carry no underscore because the routed views of ``next.pages.manager.views`` call them, and ``reset_metadata`` because ``reset_metadata_registry`` and the test isolation helpers reset the registry through it.
+``resolve_page_body`` and ``render_composed`` carry no underscore because the routed views of ``next.views.pages`` call them, and ``reset_metadata`` because ``reset_metadata_registry`` and the test isolation helpers reset the registry through it.
 They follow the same underscore rule without the Stable tier's signature guarantee.
 
 Manager
 ~~~~~~~
 
 ``next.pages.manager`` is a package.
-Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds the per-page template cache, and ``views`` holds the routed views and the ``URLPattern`` factory the file router routes them through.
+Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds the per-page template cache, and ``patterns`` holds the ``URLPattern`` factory the file router mounts the routed views of ``next.views`` through.
+``Page`` and ``page`` are documented once, under `Public API`_, with the names ``next.pages`` exports.
 
 .. automodule:: next.pages.manager
    :members:
-   :exclude-members: page, context, layout, resolver
+   :exclude-members: Page, page, context, layout, resolver
 
 .. automodule:: next.pages.manager.templates
    :members:

@@ -2,7 +2,7 @@
 
 A three-step access-request workflow whose every dispatch and validation failure is recorded by **two parallel audit channels**: a custom `FormActionBackend` that writes synchronously inside `dispatch`, and signal receivers reacting to `action_dispatched`, `form_validation_failed`, and `form_access_denied`. The admin page interleaves rows from both channels so you can compare them side by side.
 
-The example focuses on the form-action subsystem of next-dj: a custom backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a declarative `FormWizard` that routes all three steps from one class, three composite components (`progress_bar` and `step_section` inside the form, `audit_row` shared between the admin and per-request audit pages), step drafts held in a cache alias of their own through `FORM_WIZARD_BACKEND`, a `request_id` correlation column on `AuditEntry`, and full coverage of the `next.testing` `SignalRecorder` API.
+The example focuses on the form-action subsystem of next-dj: a custom backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a declarative `FormWizard` that routes all three steps from one class, three composite components (`progress_bar` and `step_section` inside the form, `audit_row` shared between the admin and per-request audit pages), an audit log paged by a keyset cursor through `KeysetPager` and `{% more %}`, step drafts held in a cache alias of their own through `FORM_WIZARD_BACKEND`, a `request_id` correlation column on `AuditEntry`, and full coverage of the `next.testing` `SignalRecorder` API.
 
 ## What you will see
 
@@ -14,7 +14,7 @@ The example focuses on the form-action subsystem of next-dj: a custom backend wi
 | `/request/approval/` | Step 3: read-only confirmation summary. |
 | `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. Once the filing is recorded, "View the receipt" opens the receipt as a modal. |
 | `/request/<id>/receipt/` | The receipt of a filed request, a page whose body comes from `render()`. `?format=txt` downloads it as plain text. |
-| `/admin/audit/` | Global audit log. The heavy table is a lazy `audit-table` zone behind a skeleton. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows linked to a request open a summary of that request as a modal over the log. |
+| `/admin/audit/` | Global audit log, newest first. The table pages by cursor: it grows as you scroll, drops old batches from the top, and a reload restores the window the address names. The per-channel totals load once they scroll into view, behind a skeleton. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows linked to a request open a summary of that request as a modal over the log. |
 
 The user flow:
 
@@ -30,10 +30,13 @@ With the client runtime loaded, the same three steps run inside a modal layer ov
 
 ```bash
 cd examples/audit-forms
-uv run python manage.py migrate
-uv run python manage.py runserver     # http://127.0.0.1:8000/
+uv run python manage.py migrate        # schema only
+uv run python manage.py seed_demo      # eight requests and an 85-row audit log
+uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
+
+`seed_demo` fills an empty audit log from [`access/demo.py`](access/demo.py). Eight requesters walk the wizard a minute apart, every third one fails validation once and every fourth one is denied once, which leaves 85 rows across both channels, enough to page through. The rows one POST leaves share a stamp. Migrations carry schema only, and the command adds nothing to a log that already has rows.
 
 Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The wizard threads step data across requests through `FORM_WIZARD_BACKEND`, configured in [`config/settings.py`](config/settings.py) as `CacheFormWizardBackend` over a dedicated cache alias (section 7). Keep `SessionMiddleware` in `MIDDLEWARE`: the draft bucket is keyed by session key, and `done` hands the new request id to the audit backend through the session.
 
@@ -44,7 +47,7 @@ Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No 
 `AuditEntry.source` distinguishes them.
 
 - `source="backend"`: written by `AuditedFormActionBackend.dispatch` in [`access/backends.py`](access/backends.py). It runs synchronously inside the dispatch path so it has direct access to `request.POST` and the resolved `HttpResponse`. It writes two rows per dispatch: `request_started` (with the captured POST payload) and `dispatched` (with `response_status` and the redirect target).
-- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class. Each receiver is a plain Django `@receiver` that hands the write to `transaction.on_commit`, so its row lands once the transaction the dispatch ran in commits and never for a dispatch that rolled back. Under the default `ATOMIC_REQUESTS = False` there is no open transaction and the row lands at once. The framework imports `signals.py` at startup, so `AccessConfig` has no `ready()` at all.
+- `source="signal"`: written by the receivers in [`access/signals.py`](access/signals.py). They subscribe to `next.forms.signals.action_dispatched`, `form_validation_failed`, and `form_access_denied`, using only the kwargs the framework ships in those signals. They never see the raw request, which is the whole point: the signal channel is decoupled from the backend class. Each receiver is a plain Django `@receiver` that hands the write to `transaction.on_commit`, so its row lands once the transaction the dispatch ran in commits and never for a dispatch that rolled back. A POST action runs inside a transaction by default, and the wizard opts out of it (section 3a), so here the row lands at once. The framework imports `signals.py` at startup, so `AccessConfig` has no `ready()` at all.
 
 The two channels intentionally overlap on `kind="dispatched"` so the admin page can show them side by side. Pick whichever fits your project, or run both, like this example does.
 
@@ -132,7 +135,7 @@ def _on_form_access_denied(action_name, layer, reason, **kwargs):
     )
 ```
 
-Because the denied step writes no draft and no `dispatched` row, this `access_denied` row is the only trace that records _why_ the request was refused. The backend channel still leaves a `request_started` row (with no `reason`) before `super().dispatch` reaches the denying hook, which is the whole point of the signal channel. Filter the admin log to the denial with `/admin/audit/?kind=access_denied`.
+Because the denied step writes no draft and no `dispatched` row, this `access_denied` row is the only trace that records _why_ the request was refused. A POST action runs inside a transaction that opens before its access checks, and a denial raises `PermissionDenied` through it, so the rollback would discard every `on_commit` hook the denial registered. The wizard therefore declares `Meta.atomic = False`. Its one database write is the single insert of `done`, which needs no transaction around it, and the denial row lands in autocommit. The backend channel still leaves a `request_started` row (with no `reason`) before `super().dispatch` reaches the denying hook, which is the whole point of the signal channel. Filter the admin log to the denial with `/admin/audit/?kind=access_denied`.
 
 ### 3b. A deliberately shared field, and the check it silences
 
@@ -167,7 +170,9 @@ The example ships three composite components, each pairing one `.djx` with a `co
 
 - **`step_section/`: one context callable driving a loop in the template.** Lives next to `progress_bar`. Its `sections` context takes `form` and `wizard` via DI and returns one dict per step: the state (`active`, `errors`, `saved`, `pending`), the border classes, the badge props, the bound fields to render, and the stored values to list. The `.djx` walks that list and owns every tag, so the shared `badge` component draws the pill and `|truncatechars` shortens a long saved value. Field labels are read off the step form classes rather than restated, and the page template calls `{% component "step_section" %}` once for all three steps.
 
-- **`audit_row/`: `@component.context` deriving display data.** Lives at `pages/_components/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only. The admin log passes `peek="audit-log-peek"`, which turns the request link into a modal opener (section 12), and the per-request trail passes nothing, since every row there links to the page already open.
+- **`audit_row/`: `@component.context` deriving display data.** Lives at `pages/_components/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only, and its `<tr>` carries `data-next-key`, the key a batch appended to the log is deduplicated by. The admin log passes `peek="audit-log-peek"`, which turns the request link into a modal opener (section 12), and the per-request trail passes nothing, since every row there links to the page already open.
+
+- **`audit_totals/`: a component that loads when seen.** Lives at `pages/_components/audit_totals/`. Its `component.py` calls `component.defer("visible", props=("kind",))` and counts the rows of each channel in `@component.context("totals")`, so it renders on its own request from the `kind` prop alone. `loading.djx` holds the skeleton blocks of the first paint and `error.djx` the message shown if the counts fail to load (section 8).
 
 ### 6. Per-request audit trail (`AuditEntry.request` FK)
 
@@ -193,47 +198,81 @@ Two options earn the swap for a flow that carries names, emails, and free-text r
 
 The effect on the page is the same either way: on `GET` of step 2 the team summary already reads "Computing", which is what `tests/test_integration.py::TestSessionResume` asserts. `TestCacheBackedDrafts` adds the storage half. The bucket is stored in the `wizards` alias, stays out of `default`, and is emptied once `done` runs.
 
-### 8. Admin filter by GET query, plus a lazy audit table
+### 8. The audit log: a GET filter, a list that pages by cursor, totals that load when seen
 
-`/admin/audit/?kind=validation_failed` narrows the table to one kind through a plain GET form. The `@context("active_kind")` function reads `request.GET` and the template uses it to mark the matching `<option>` as `selected`.
+`/admin/audit/?kind=validation_failed` narrows the log to one kind through a plain GET form. The `@context("active_kind")` function reads `request.GET` and the template uses it to mark the matching `<option>` as `selected`. The form carries `data-next-target="audit-rows,audit-rows-more,audit-rows-less,audit-totals"` and `data-next-trigger="change"`, so picking a kind fires one zone GET for the rows, both sentinels and the totals instead of a full page reload, and the runtime syncs `?kind=` into the address bar with `replaceState`. The form submits its own field alone, so a new kind drops the cursor of the old window and the list starts again from the newest row. Without the runtime a `<noscript>` button submits the same form as a plain GET.
 
-The heavy table is a lazy zone. `pages/admin/audit/template.djx` wraps it in `{% zone "audit-table" lazy="revealed" %}` with a `{% placeholder %}` branch of `skeleton` bars. On the full page render only the placeholder renders, and the body, the `<table>` with up to a hundred rows, is skipped. The body arrives as a morph patch when the zone scrolls into view, so the table is fetched on demand rather than on first paint.
-
-The expensive query is guarded by `zone_requested`, the idiom that makes the laziness honest rather than cosmetic:
+The rows page by keyset. [`access/pages/admin/audit/page.py`](access/pages/admin/audit/page.py) declares one stateless pager at module level and binds it to the request in the callable that reads the rows:
 
 ```python
-from next.partial import zone_requested
+log = KeysetPager(("-created_at", "-pk"), per_page=20)
 
 
-@context("entries", zone="audit-table")
-def entries(request: HttpRequest) -> list[AuditEntry] | None:
-    if not zone_requested(request, "audit-table"):
-        return None
-    requested_kind = request.GET.get("kind", "")
-    kind = requested_kind if requested_kind in _VALID_KIND_FILTERS else ""
-    return audit_entries(kind=kind, limit=100)
+@context("entries")
+def entries(active_kind: str, page: Annotated[Paging, log]) -> Window[AuditEntry]:
+    return page.paginate(audit_entries(kind=active_kind))
 ```
 
-The query itself lives in `audit_entries` in [`access/services.py`](access/services.py), next to `audit_totals` and `recent_audit`, because a page tree reads rows only through `visible_to(...)` or a function of `services.py`.
+`audit_entries` in [`access/services.py`](access/services.py) returns the lazy queryset `AuditEntry.objects.of_kind(kind)`, because a page tree reads rows only through `visible_to(...)` or a function of `services.py`. `page.paginate` orders it, reads one batch past the position `?cursor=` names and returns a `Window`, the rows with the tokens of the batches around them. The template loops over the window inside a table zone and hands the same object to two `{% more %}` tags:
 
-On the full render the provider returns `None` and the query never runs. On the zone GET, where `X-Next-Zone: audit-table` is set, `zone_requested` is true and the rows load. The `?kind=` filter still reads `request.GET`, so it works on the zone request the same way it worked on the old full page. Without the runtime the placeholder simply stays, so the critical, always-needed content lives outside the lazy zone by design.
+```django
+{% more zone="audit-rows" previous=entries %}Show newer rows{% endmore %}
 
-The two filters stack rather than compete. `zone="audit-table"` on the decorator is the first filter, so a GET for any other zone on the page never calls `entries` at all. `zone_requested` inside the body covers the full render, where no zone is requested and every provider runs, and the body of a `lazy="revealed"` zone is not painted there.
+<table>
+  <thead>…</thead>
+  {% zone "audit-rows" tag="tbody" %}
+    {% for entry in entries %}
+      {% component "audit_row" peek="audit-log-peek" %}
+    {% endfor %}
+  {% endzone %}
+</table>
+
+{% more zone="audit-rows" next=entries prune=60 url="replace" %}
+  Show older rows
+{% empty %}
+  End of the log.
+{% endmore %}
+```
+
+`next=` renders the link that fetches the following batch when it scrolls into view, and the batch lands as `<tr>` rows appended to the `<tbody>`. `url="replace"` writes `?cursor=<token>&restore=1` into the address after each batch. `prune=60` drops whole batches from the top once the table holds more than 60 rows, keeps the scroll position, and shows the `previous=` link, which sits hidden on the first window until then. A reload of the written address renders the batch the cursor names under the batches before it, up to `DEFER["MORE"]["MAX_RESTORE"]`, which [`config/settings.py`](config/settings.py) sets to `3` so a restore brings back the three batches the prune keeps and no more. A cursor the pager cannot read, cut short or edited by hand, answers with the first window rather than an error.
+
+#### Why an append-only log pages by cursor
+
+A log grows at its newest end, which is exactly where page numbers break. `?page=3` means "skip 40 rows", so every row written while a reader scrolls shifts the pages under them and the next batch repeats rows already shown, and the database still walks the skipped rows on every request. A cursor names a row instead, the `(created_at, pk)` of the last one shown. The next batch is the rows strictly older than it however many arrived on top, and the query is a seek, `WHERE created_at < :stamp OR (created_at = :stamp AND id < :pk)` in the order of the log with `LIMIT 21`, one row past the batch to learn whether another follows. It costs the same on the first batch and on the thousandth.
+
+The ordering ends in `pk` because `created_at` alone is not unique. Both channels can stamp the rows of one POST in the same instant, and `KeysetPager` refuses an ordering whose last column is not unique, since rows tied across a batch boundary would be skipped or repeated. The index `audit_newest_idx` over `(-created_at, -id)` in [`access/models.py`](access/models.py) serves that order, added by the schema-only migration [`0004_audit_newest_index`](access/migrations/0004_audit_newest_index.py). The kind filter rides the same index, the database walks it in order and skips the other kinds, which four kinds keep cheap. The pager counts nothing either, `count=` stays off, because a total over a log is a scan that grows with it.
+
+#### Totals that load when seen
+
+The two counts above the table are the one part of the page that still reads the whole log, so they left the page context for a component that loads later. [`access/pages/_components/audit_totals/`](access/pages/_components/audit_totals/) declares the delivery and the one prop the later request renders from:
+
+```python
+component.defer("visible", props=("kind",))
+
+
+@component.context("totals")
+def totals(kind: str) -> dict[str, int]:
+    return audit_totals(kind=kind)
+```
+
+On the full page render the call `{% component "audit_totals" kind=active_kind %}` renders only the `loading.djx` beside the component, two `skeleton` blocks, and no count runs. When the wrapper scrolls into view the browser fetches the component on its own request, which renders `component.djx`, two `stat_card` tiles, from the `kind` it was given. A batch the sentinel fetches therefore costs one bounded query and never a count, and a visitor restored deep into the log does not pay for totals that are off screen. The call sits in `{% zone "audit-totals" %}` because the zone is what the filter form addresses and a zone always renders inline. A filter change morphs the zone, which puts the skeleton back with the new `kind`, and the totals fetch themselves again. An `error.djx` stands in for the totals alone if that render fails, and without the runtime a `<noscript>` link under the skeleton reloads the page with the totals rendered inline.
+
+`TestAuditLogWindows` in the integration suite follows the tokens the way the runtime does: the first window, every next token down to the end of the log, a previous token, a restore, five malformed cursors, and the one bounded query a batch costs. [`tests/e2e/test_log.py`](tests/e2e/test_log.py) drives the scroll, the prune and the reload in a browser.
 
 ### 9. Comparing the two audit channels
 
 |  | Backend channel | Signal channel |
 | --- | --- | --- |
 | Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed / form_access_denied)` with `transaction.on_commit` |
-| When written | at once, inside any transaction the dispatch runs in, so a rollback takes the row with it | after that transaction commits, never on rollback |
+| When written | at once, before and after the transaction of the action, so its rollback never takes a row back | after the transaction of the action commits, never on rollback, and at once for an action outside a transaction |
 | Sees raw POST? | yes | no, only the signal kwargs |
 | Sees response status? | yes | yes (via signal kwarg) |
 | Records permission denials? | partially, a denial raises before the `dispatched` row, leaving only the `request_started` row with no reason | yes, `form_access_denied` carries `layer` and `reason` |
 | Correlated to `AccessRequest`? | yes (last step only) | no |
 | Coupled to backend class? | yes, only fires when this backend dispatches | no, fires whatever backend is configured |
-| When to pick | compliance, full request payloads, transactional rollback | metrics, side effects on action lifecycle, decoupled from backend swap |
+| When to pick | compliance, full request payloads, rows that survive a rollback | metrics, side effects on action lifecycle, decoupled from backend swap |
 
-The example runs both because it is a _demonstration_. In production, pick the channel that matches your need: backend if you want raw inputs and atomicity with the form's database write, signal if you want decoupling and minimal coupling to the backend implementation.
+The example runs both because it is a _demonstration_. In production, pick the channel that matches your need: backend if you want raw inputs and a row whatever the action's transaction does, signal if you want decoupling and minimal coupling to the backend implementation.
 
 ### 10. The flagship: a modal wizard that refreshes a list
 
@@ -304,7 +343,7 @@ The test suite asserts the server contract (the envelopes, the zone targets, the
 - **Caret and typed input.** A blur-validation error on the email field re-renders the step without moving the caret or clearing text already typed into a neighbouring field.
 - **Geometry.** The dialog is centered, scrolls its own body when the step is tall, and the backdrop covers the full viewport with no gap at the page edges.
 - **Toast and list refresh.** The success toast appears once on submit, and the recent-requests list under the closed modal shows the new row without a full page reload.
-- **Lazy audit table.** Opening `/admin/audit/` shows the skeleton first, and the table fills in once it scrolls into view, with the `?kind=` filter applied on the zone request the same way it was on the full page.
+- **Audit log on scroll.** After `seed_demo`, opening `/admin/audit/` shows the first twenty rows at once and the totals skeleton, which fills in once it is on screen. Scrolling down appends batches without a reload and the address gains `?cursor=…&restore=1`. The fourth batch drops the first from the top without a jump and reveals "Show newer rows", and a reload brings back the same three batches. Picking another kind restarts the list from its newest row and reloads the totals with it.
 
 ### 11. Tab titles that never name the requester
 
@@ -388,7 +427,7 @@ The link keeps the honest href and names a zone. Nothing else on the client chan
    data-next-layer="audit-peek">{{ r.status }} · audit</a>
 ```
 
-The runtime sends a GET of `/request/5/audit/` with `X-Next-Zone: audit-peek`. The audit page declares no such zone, so the intercept page that declares it renders the response, a zone with no layout around it. The same URL serves two different modals, because the zone name and not the URL decides which intercept answers. `audit-peek` opens from the landing and `audit-log-peek` from the log, where the lazy `audit-table` zone renders the rows and each linked row carries `data-next-layer="audit-log-peek"` through the `audit_row` component. Each modal ends in a plain link to the full page, which carries no `data-next-layer` and so navigates to the real page.
+The runtime sends a GET of `/request/5/audit/` with `X-Next-Zone: audit-peek`. The audit page declares no such zone, so the intercept page that declares it renders the response, a zone with no layout around it. The same URL serves two different modals, because the zone name and not the URL decides which intercept answers. `audit-peek` opens from the landing and `audit-log-peek` from the log, where the `audit_table` component inside the `audit-table` zone renders the rows and each linked row carries `data-next-layer="audit-log-peek"` through the `audit_row` component. Each modal ends in a plain link to the full page, which carries no `data-next-layer` and so navigates to the real page.
 
 #### The tab title follows the modal
 
@@ -459,5 +498,6 @@ The portal has no accounts and no default login, so neither the targets nor the 
 - [`next/pages/metadata/`](../../next/pages/metadata/): the metadata chain behind the dicts and the `@page.metadata` callable of section 11.
 - [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/intercept.py`](../../next/intercept.py) and [`next/partial/intercept.py`](../../next/partial/intercept.py): the intercept table and the zone selection of section 12.
+- [`next/partial/paging.py`](../../next/partial/paging.py) and [`next/partial/more.py`](../../next/partial/more.py): `KeysetPager`, `Paging`, `Window` and the `{% more %}` tag of section 8.
 - [`next/testing/capture.py`](../../next/testing/capture.py): `SignalRecorder` and `capture_signals` helpers used in the tests.
 - [`next/testing/plugin.py`](../../next/testing/plugin.py): the pytest plugin behind the `next_pages`, `next_clear_cache`, and `next_client` entries this example's `pytest.ini` uses.

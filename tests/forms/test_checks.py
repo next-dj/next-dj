@@ -1,5 +1,5 @@
 from typing import ClassVar
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
@@ -11,6 +11,7 @@ from next.forms.checks import (
     check_action_applied_to_class,
     check_form_action_backends_configuration,
     check_form_action_collisions,
+    check_form_action_shapers,
     check_form_anchor_files,
     check_form_wizard_backend,
     check_form_wizard_sessions,
@@ -24,9 +25,10 @@ from next.forms.checks import (
     check_wizard_url_param_route,
 )
 from next.forms.decorators import action
-from next.forms.manager import form_action_manager
+from next.forms.manager import FormActionManager, form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.signals import action_registered
+from tests.support.forms import DECLINING_SHAPER, DecliningShaper
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -104,6 +106,18 @@ class TestFormActionCollisions:
                 name="reload_me", file_path=_FAKE_FILE, scope="shared", handler=same
             )
         )
+        assert check_form_action_collisions() == []
+
+    def test_one_definition_run_under_two_module_names_is_safe(self) -> None:
+        backend = RegistryFormActionBackend()
+        for module in ("page_module", "myapp.pages.page"):
+            handler = _distinct_handler("twice")
+            handler.__module__ = module
+            backend.register_action(
+                ActionRegistration(
+                    name="twice", file_path=_FAKE_FILE, scope="page", handler=handler
+                )
+            )
         assert check_form_action_collisions() == []
 
     def test_tracker_is_not_signal_receiver(self) -> None:
@@ -269,6 +283,98 @@ class TestFormActionBackendsConfigurationCheck:
             ]
         }
         assert check_form_action_backends_configuration() == []
+
+
+class _ArgumentShaper(DecliningShaper):
+    """Shaper whose constructor needs an argument the backend never passes."""
+
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+
+
+class _ShapelessShaper:
+    """Class whose instances define neither shape nor validate."""
+
+
+class _ForeignShaperBackend(RegistryFormActionBackend):
+    """Backend whose own `shaper` property answers with no response shaper."""
+
+    @property
+    def shaper(self):
+        return object()
+
+
+_CHECK_SHAPERS = "tests.forms.test_checks"
+
+
+def _shaper_backend(shaper: object) -> RegistryFormActionBackend:
+    return RegistryFormActionBackend(
+        {
+            "BACKEND": "next.forms.RegistryFormActionBackend",
+            "OPTIONS": {"SHAPER": shaper},
+        }
+    )
+
+
+def _shaper_errors(*backends: RegistryFormActionBackend) -> list:
+    manager = MagicMock(spec=FormActionManager)
+    manager.backends = tuple(backends)
+    with patch("next.forms.checks.config.form_action_manager", manager):
+        return check_form_action_shapers()
+
+
+class TestFormActionShapersCheck:
+    """`next.E241` resolves the response shaper of every loaded backend."""
+
+    def test_the_default_shaper_is_clean(self) -> None:
+        assert _shaper_errors(RegistryFormActionBackend()) == []
+
+    def test_a_named_shaper_is_clean(self) -> None:
+        assert _shaper_errors(_shaper_backend(DECLINING_SHAPER)) == []
+
+    @pytest.mark.parametrize(
+        ("dotted", "message"),
+        [
+            pytest.param(
+                f"{_CHECK_SHAPERS}._NoSuchShaper",
+                "could not be imported",
+                id="unimportable",
+            ),
+            pytest.param(
+                f"{_CHECK_SHAPERS}._ArgumentShaper",
+                "cannot be built without arguments",
+                id="needs-arguments",
+            ),
+            pytest.param(
+                f"{_CHECK_SHAPERS}._ShapelessShaper",
+                "is not a ResponseShaper class",
+                id="shapeless",
+            ),
+            pytest.param(42, "by dotted path", id="no-string"),
+        ],
+    )
+    def test_a_bad_shaper_is_e241(self, dotted: object, message: str) -> None:
+        (error,) = _shaper_errors(_shaper_backend(dotted))
+        assert error.id == "next.E241"
+        assert message in error.msg
+
+    def test_the_message_names_the_dotted_path(self) -> None:
+        dotted = f"{_CHECK_SHAPERS}._NoSuchShaper"
+        (error,) = _shaper_errors(_shaper_backend(dotted))
+        assert repr(dotted) in error.msg
+
+    def test_a_shaper_property_answering_no_shaper_is_e241(self) -> None:
+        (error,) = _shaper_errors(_ForeignShaperBackend())
+        assert error.id == "next.E241"
+        assert "'_ForeignShaperBackend'" in error.msg
+
+    def test_every_backend_is_resolved(self) -> None:
+        errors = _shaper_errors(
+            _shaper_backend(f"{_CHECK_SHAPERS}._ShapelessShaper"),
+            RegistryFormActionBackend(),
+            _shaper_backend(f"{_CHECK_SHAPERS}._NoSuchShaper"),
+        )
+        assert [error.id for error in errors] == ["next.E241", "next.E241"]
 
 
 class TestCheckFormsOutsideBaseDir:

@@ -10,18 +10,24 @@ Module summary
 
 Importing ``next.apps`` registers the framework system checks, because the package imports its own ``checks`` and ``config.py`` imports ``next.checks.catalog``, which imports the ``checks`` of every other area.
 ``NextFrameworkConfig.check_modules`` holds that catalogue, ``CHECK_MODULES``, and ``ready()`` leaves the checks alone.
-``NextFrameworkConfig.ready()`` runs nineteen startup steps in a fixed order.
+``NextFrameworkConfig.ready()`` runs its startup steps in a fixed order, the signal receivers first, then the resolver, then the port slots, and the installers last.
 
 #. ``setting_changed`` receivers connected
 #. ``settings_reloaded`` receivers connected
 #. ``router_reloaded`` receivers connected
+#. ``user_logged_in`` receiver ``clear_on_login`` connected
+#. ``user_logged_out`` receiver ``clear_on_logout`` connected
 #. ``apply_resolver_setting()``
+#. ``async_bridge_slot.set(drive)``
+#. ``thread_wait_slot.set(serve_until)``
+#. ``deferrals_slot.set(inline_sink)``
 #. ``action_owners_slot.set(ActionOwnersImpl())``
 #. ``form_routes_slot.set(form_action_manager)``
 #. ``page_scan_slot.set(PageScanImpl())``
-#. ``partial_shaper_slot.set(PartialShaperImpl())``
 #. ``realtime_negotiation_slot.set(RealtimeNegotiationImpl())``
 #. ``router_access_slot.set(RouterAccessImpl())``
+#. ``router_stamp_slot.set(stamp)``
+#. ``zone_marking_slot.set(action_marking)``
 #. ``page_scripts_slot.set(PageScriptsImpl())``
 #. ``seo_routes_slot.set(SeoRoutesImpl())``
 #. ``seo_routes_version.move()``
@@ -32,13 +38,14 @@ Importing ``next.apps`` registers the framework system checks, because the packa
 #. ``autodiscover.install()``
 #. ``components.install()``
 
-Every framework receiver of ``setting_changed``, ``settings_reloaded``, and ``router_reloaded`` is connected in the first three steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
+Every framework receiver of ``setting_changed``, ``settings_reloaded``, ``router_reloaded``, ``user_logged_in``, and ``user_logged_out`` is connected in the connect steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
 Each signal below lists its receivers in the order they run, and each is connected with ``dispatch_uid`` set to its module and qualified name, so a second ``ready`` call connects nothing twice.
 
 - ``setting_changed`` runs ``reload_on_setting_changed`` of ``next.conf.settings`` first, which rebuilds the merged ``NEXT_FRAMEWORK`` and sends ``settings_reloaded``, then the receivers that read Django settings directly, among them ``forget_app_page_roots``, ``reload_app_routers``, ``staticfiles.reinstall_finders``, and ``templates.reinstall_builtins``.
 - ``settings_reloaded`` runs ``reset_failure_logs`` first, so every failure logs again under the new configuration, then every receiver that forgets a memo derived from the settings, among them ``reapply_resolver_setting``, ``forget_site_config``, ``forget_metadata_renderer``, ``forget_serializer``, ``forget_static_manager``, ``forget_seo_sources``, ``forget_scripts``, and ``forget_consent_settings``.
 - ``router_reloaded`` runs ``forget_watch_state``, ``forget_shared_layouts``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, ``forget_object_rows``, ``forget_seo_sources``, ``forget_translated_urls``, and ``forget_scripts``.
   A reload that replaces the routers from code changes what they report without touching settings, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
+- ``user_logged_in`` and ``user_logged_out`` run ``clear_on_login`` and ``clear_on_logout`` of ``next.router.navigation``, which mark the request so its response tells the client router to drop what it cached for the previous identity, see :doc:`router`.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
 It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``permissions.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
@@ -48,10 +55,10 @@ It runs ahead of ``components.install()``, so a ``component.py`` imported in the
 The ``deps``, ``permissions``, ``realtime``, and ``signals`` sweeps always run, the way Django's admin imports every ``admin.py``, and ``FORM_AUTODISCOVER`` turns off the ``forms`` one, see :doc:`settings`.
 The ``realtime`` sweep imports the modules that ``REALTIME["HANDLERS"]`` selects.
 
-Steps five to fourteen bind the nine :doc:`next.ports <ports>` slots, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
+The ``set`` steps bind every :doc:`next.ports <ports>` slot, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
-Step thirteen moves ``seo_routes_version`` of ``next.urls.manager``, the counter the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port step twelve bound.
+The ``seo_routes_version.move()`` step right after the ``seo_routes_slot`` binding moves the counter of ``next.urls.manager`` the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port just bound.
 
 Public API
 ----------
@@ -70,7 +77,7 @@ Template tag registration
    :members:
 
 ``templates.install()`` also prepends a line-spanning branch to Django's template lexing pattern, so a component tag can carry its arguments over more than one line.
-The branch matches twenty literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
+The branch matches a fixed set of literal framework tag names and nothing else, and Django's own block-tag branch stays behind it, so a stock tag, a third-party tag, a variable, and a comment all lex as Django lexes them.
 See :doc:`template-tags` for the tags this enables and the exact set.
 A Django release that spells the block-tag branch differently raises ``RuntimeError`` out of ``ready``, because a pattern left unwidened would turn every multi-line tag into template text at render time.
 

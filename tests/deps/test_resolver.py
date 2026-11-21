@@ -34,6 +34,7 @@ from next.deps.introspect import (
     cached_type_hints,
     introspect_key,
 )
+from next.deps.markers import DependsProvider
 from next.deps.resolver import _CLAIMED_RESERVED, _UNCLAIMED_RESERVED, forget_dep_caches
 from next.errors import AsyncCallableError
 from next.testing import make_resolution_context
@@ -285,6 +286,19 @@ class TestDependencyResolverProviderOrder:
         assert r.resolve_dependencies(fn) == {"x": "prepended"}
         r.remove_provider(winner)
         assert r.resolve_dependencies(fn) == {"x": "appended"}
+
+    def test_the_providers_read_in_claim_order(self) -> None:
+        r = _minimal_resolver()
+        first = HttpRequestProvider()
+        last = UrlKwargsProvider()
+        r.add_provider(last)
+        r.prepend_provider(first)
+
+        providers = r.providers
+
+        assert providers[0] is first
+        assert providers[-1] is last
+        assert isinstance(providers, tuple)
 
     def test_removing_a_provider_that_was_never_added_is_silent(self) -> None:
         """A double removal leaves the list alone instead of raising."""
@@ -1293,8 +1307,14 @@ class TestAsyncRefusal:
         instance.resolve_dependencies(_sync_render)
         assert instance._plan_cache.get(key) is cached
 
-    def test_registering_an_async_dependency_raises(self) -> None:
+    def test_an_async_dependency_is_bridged_rather_than_refused(self) -> None:
         instance = _minimal_resolver()
-        with pytest.raises(AsyncCallableError, match="dependency 'feed'"):
-            instance.register_dependency("feed", _async_render)
-        assert instance.get_dependency("feed") is None
+        instance.register_dependency("feed", _async_render)
+        assert instance.get_dependency("feed") is _async_render
+        assert "feed" not in instance._dependency_callables
+
+        def reader(feed: str = Depends("feed")) -> str:
+            return feed
+
+        instance.add_provider(DependsProvider(instance))
+        assert instance.resolve_dependencies(reader) == {"feed": "ok"}

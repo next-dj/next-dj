@@ -49,7 +49,7 @@ def check_request_in_context(*args: object, **kwargs: object) -> list[CheckMessa
 def check_context_processor_signature(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
-    """Report a context processor that takes no `request` parameter (`next.E040`)."""
+    """Report a context processor that cannot take the request (`next.E040`)."""
     errors: list[CheckMessage] = []
     for backend_index, backend in _iter_page_backend_configs():
         for processor_index, path in enumerate(_processors(backend)):
@@ -92,7 +92,10 @@ def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
 def _check_processor_request_parameter(
     processor_path: str, location: str
 ) -> CheckMessage | None:
-    """Return an error when the callable at `processor_path` lacks `request`."""
+    """Return an error when the callable at `processor_path` cannot take the request.
+
+    Django and the page render call `processor(request)`, so the parameter name is free.
+    """
     try:
         callable_obj = import_string(processor_path)
     except (ImportError, ValueError):
@@ -103,14 +106,19 @@ def _check_processor_request_parameter(
         sig = inspect.signature(callable_obj)
     except (TypeError, ValueError):
         return None
-    if "request" in sig.parameters:
-        return None
-    return Error(
-        f"{location} points at {processor_path!r} which does not accept a "
-        "'request' parameter. Context processors must accept request.",
-        obj=settings,
-        id="next.E040",
-    )
+    try:
+        sig.bind(None)
+    except TypeError:
+        return Error(
+            f"{location} points at {processor_path!r}, which cannot be called with "
+            "the request as its one positional argument, as Django calls a context "
+            "processor.",
+            hint="Accept the request as one positional parameter, named `_request` "
+            "when the processor does not read it.",
+            obj=settings,
+            id="next.E040",
+        )
+    return None
 
 
 __all__ = [

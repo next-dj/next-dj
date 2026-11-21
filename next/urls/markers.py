@@ -91,6 +91,7 @@ class HttpRequestProvider(RegisteredParameterProvider):
     """
 
     priority = 50
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
@@ -121,6 +122,7 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
     """Fill `DUrl[...]` parameters from `url_kwargs`."""
 
     priority = 60
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
@@ -194,6 +196,7 @@ class UrlKwargsProvider(RegisteredParameterProvider):
     """Fill parameters by name from `url_kwargs`, a `DObject` one never."""
 
     priority = 70
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
@@ -225,6 +228,7 @@ class QueryParamProvider(RegisteredParameterProvider):
     """Resolve `DQuery[...]` parameters from `request.GET`."""
 
     priority = 80
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:

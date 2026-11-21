@@ -841,7 +841,7 @@ describe("refresh verb", () => {
   });
 });
 
-describe("mount and generation", () => {
+describe("mount", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
   });
@@ -920,15 +920,6 @@ describe("mount and generation", () => {
     );
     expect(ran).toEqual(["SECTION"]);
     expect(document.querySelector("section")!.textContent).toBe("new");
-  });
-
-  it("bumps the per-zone generation on each apply", () => {
-    document.body.innerHTML = '<div data-next-zone="z">old</div>';
-    const { applier } = makeApplier();
-    expect(applier.generation("z")).toBe(0);
-    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "one" }]));
-    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "two" }]));
-    expect(applier.generation("z")).toBe(2);
   });
 });
 

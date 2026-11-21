@@ -1,20 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPoller } from "./poll";
 import type { PollFactory } from "./poll";
-import { CHUNK_TIMEOUT } from "./chunks";
+import { CHUNK_TIMEOUT, lazyChunk } from "./chunks";
 import {
   chunkModules,
+  landed,
   manualPollClock,
   manualVisibility,
   unloaded,
 } from "./test-doubles";
 import { createTriggers } from "./triggers";
 import { createDiagnostics } from "./diagnostics";
-import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
+import type {
+  DeferArm,
+  IntersectionAdapter,
+  TriggerDeps,
+  Triggers,
+  Watch,
+} from "./triggers";
 import type { Clock } from "./wire";
 
 // The captured request is exactly the shape the triggers hand their fetch seam.
 type Request = Parameters<TriggerDeps["fetch"]>[0];
+
+const LATE =
+  '<div href="/late/" data-next-merge="append" data-next-target="late" ' +
+  'data-next-defer="visible"';
 
 function manualClock(): Clock & { run(): void } {
   let pending: (() => void) | null = null;
@@ -36,18 +47,49 @@ function manualClock(): Clock & { run(): void } {
 }
 
 function manualObserver(): IntersectionAdapter & { reveal(): void } {
-  let cb: (() => void) | null = null;
+  let cb: ((visible: boolean) => void) | null = null;
   return {
-    observe: (_el, onReveal) => {
-      cb = onReveal;
+    observe: (_el, onView) => {
+      cb = onView;
       return () => {
         cb = null;
       };
     },
     reveal() {
-      cb?.();
+      cb?.(true);
     },
   };
+}
+
+function viewObserver(): IntersectionAdapter & {
+  show(): void;
+  hide(): void;
+  live(): boolean;
+  margins: string[];
+} {
+  const margins: string[] = [];
+  let cb: ((visible: boolean) => void) | null = null;
+  return {
+    margins,
+    observe: (_el, onView, margin) => {
+      margins.push(margin);
+      cb = onView;
+      return () => {
+        cb = null;
+      };
+    },
+    show() {
+      cb?.(true);
+    },
+    hide() {
+      cb?.(false);
+    },
+    live: () => cb !== null,
+  };
+}
+
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}): {
@@ -58,13 +100,14 @@ function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}):
   const requests: Request[] = [];
   const aborted: string[] = [];
   const triggers = createTriggers({
-    fetch: (request) => requests.push(request),
+    fetch: (request) => void requests.push(request),
     abort: (zone) => aborted.push(zone),
     document,
     clock: manualClock(),
     observer: manualObserver(),
     confirm: () => true,
     poll: chunkModules.poll,
+    defer: chunkModules.defer,
     ...over,
   });
   return { triggers, requests, aborted };
@@ -82,40 +125,28 @@ describe("trigger delegation", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("batches load zones into one GET on ready", () => {
+  it("fires nothing for a zone carrying a hand-written defer attribute", () => {
+    const observer = manualObserver();
     document.body.innerHTML =
-      '<div data-next-zone="a" data-next-lazy="load"></div>' +
-      '<div data-next-zone="b" data-next-lazy="load"></div>';
-    const { triggers, requests } = makeTriggers();
+      '<div data-next-zone="a" data-next-defer="load"></div>' +
+      '<div data-next-zone="b" data-next-defer="visible"></div>';
+    const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
-    triggers.ready();
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.zone).toBe("a,b");
-    expect(requests[0]!.headers).toBeUndefined();
+    triggers.scan(document.body);
+    observer.reveal();
+    expect(requests).toHaveLength(0);
   });
 
-  it("groups a load batch by the owning page URL, one GET per page", () => {
+  it("does not re-arm a sentinel re-scanned by a parent morph", () => {
+    const observer = viewObserver();
     document.body.innerHTML =
-      '<div id="a" data-next-zone="a" data-next-lazy="load"></div>' +
-      '<div id="b" data-next-zone="b" data-next-lazy="load"></div>' +
-      '<div id="c" data-next-zone="c" data-next-lazy="load"></div>';
-    const { triggers, requests } = makeTriggers({
-      pageUrl: (el) => (el.id === "c" ? "/layer/" : "/host/"),
-    });
-    detach = triggers.install(document);
-    triggers.ready();
-    expect(requests).toHaveLength(2);
-    expect(requests[0]).toMatchObject({ url: "/host/", zone: "a,b" });
-    expect(requests[1]).toMatchObject({ url: "/layer/", zone: "c" });
-  });
-
-  it("does not re-fire a load zone re-scanned by a parent morph", () => {
-    document.body.innerHTML = '<div data-next-zone="a" data-next-lazy="load"></div>';
-    const { triggers, requests } = makeTriggers();
+      '<a href="/p2/" data-next-merge="append" data-next-target="list" ' +
+      'data-next-defer="visible">more</a>';
+    const { triggers } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(document.body);
     triggers.scan(document.body);
-    expect(requests).toHaveLength(1);
+    expect(observer.margins).toHaveLength(1);
   });
 
   it("debounces a filter auto-submit per element", () => {
@@ -137,7 +168,8 @@ describe("trigger delegation", () => {
   it("reveals through the observer adapter", () => {
     const observer = manualObserver();
     document.body.innerHTML =
-      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+      '<div href="/p2/" data-next-merge="append" data-next-target="late" ' +
+      'data-next-defer="visible"></div>';
     const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(document.body);
@@ -145,20 +177,6 @@ describe("trigger delegation", () => {
     observer.reveal();
     expect(requests).toHaveLength(1);
     expect(requests[0]!.zone).toBe("late");
-  });
-
-  it("a revealed zone GETs the page answered by the pageUrl dep", () => {
-    const observer = manualObserver();
-    document.body.innerHTML =
-      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
-    const { triggers, requests } = makeTriggers({
-      observer,
-      pageUrl: () => "/host/",
-    });
-    detach = triggers.install(document);
-    triggers.scan(document.body);
-    observer.reveal();
-    expect(requests[0]!.url).toBe("/host/");
   });
 
   it("blocks a request when confirm is cancelled", () => {
@@ -381,7 +399,7 @@ describe("trigger delegation", () => {
     const observer = manualObserver();
     document.body.innerHTML =
       '<a href="/p2/" data-next-merge="append" data-next-target="list" ' +
-      'data-next-lazy="revealed">sentinel</a>';
+      'data-next-defer="visible">sentinel</a>';
     const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(document.body);
@@ -606,14 +624,6 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(1);
   });
 
-  it("skips a load zone element with no zone name", () => {
-    document.body.innerHTML = '<div data-next-lazy="load"></div>';
-    const { triggers, requests } = makeTriggers();
-    detach = triggers.install(document);
-    triggers.ready();
-    expect(requests).toHaveLength(0);
-  });
-
   it("does not arm a plain pagination link as a sentinel on scan", () => {
     document.body.innerHTML =
       '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>';
@@ -741,16 +751,29 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("arms no sentinel for a revealed element without a zone, merge, or target", () => {
+  it("arms no sentinel for a visible element without a zone, merge, or target", () => {
     const observer = manualObserver();
     document.body.innerHTML =
-      '<div data-next-lazy="revealed"></div>' +
-      '<div data-next-lazy="revealed" data-next-merge="append"></div>';
+      '<div data-next-defer="visible"></div>' +
+      '<div data-next-defer="visible" data-next-merge="append"></div>';
     const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(document.body);
     observer.reveal();
     expect(requests).toHaveLength(0);
+  });
+
+  it("sends nothing from a revealed sentinel without an href", () => {
+    const observer = viewObserver();
+    document.body.innerHTML =
+      '<div data-next-merge="append" data-next-target="list" ' +
+      'data-next-defer="visible"></div>';
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    expect(requests).toHaveLength(0);
+    expect(observer.live()).toBe(false);
   });
 
   it("re-installs cleanly by detaching the previous binding first", () => {
@@ -768,8 +791,7 @@ describe("trigger delegation", () => {
 
   it("_reset stops outstanding observers", () => {
     const observer = manualObserver();
-    document.body.innerHTML =
-      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+    document.body.innerHTML = `${LATE}></div>`;
     const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(document.body);
@@ -778,26 +800,367 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("forgets a one-shot teardown as it fires, so a long scroll keeps none", () => {
+  it("drops the teardown of a settled reveal, so a long scroll keeps none", () => {
     let stopped = 0;
     let reveal = (): void => undefined;
     const observer: IntersectionAdapter = {
-      observe: (_el, onReveal) => {
-        reveal = onReveal;
+      observe: (_el, onView) => {
+        reveal = () => onView(true);
         return () => {
           stopped += 1;
         };
       },
     };
-    document.body.innerHTML =
-      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+    document.body.innerHTML = `${LATE}></div>`;
     const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(document.body);
     reveal();
     triggers._reset();
     expect(requests).toHaveLength(1);
-    expect(stopped).toBe(0);
+    expect(stopped).toBe(1);
+  });
+});
+
+describe("reveal retries and margins", () => {
+  const ZONE = LATE;
+  const SENTINEL =
+    '<a href="/p2/" data-next-merge="append" data-next-target="list" ' +
+    'data-next-defer="visible"';
+  let detach: () => void;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    detach?.();
+  });
+
+  function answering(statuses: string[]): {
+    sent: Request[];
+    fetch: TriggerDeps["fetch"];
+  } {
+    const sent: Request[] = [];
+    return {
+      sent,
+      fetch: async (request) => {
+        sent.push(request);
+        return { status: statuses.shift() ?? "ok" };
+      },
+    };
+  }
+
+  function deferred(): {
+    fetch: TriggerDeps["fetch"];
+    sent: Request[];
+    answer: (status: string) => Promise<void>;
+  } {
+    const sent: Request[] = [];
+    let resolve: (outcome: { status: string }) => void = () => undefined;
+    return {
+      sent,
+      fetch: (request) => {
+        sent.push(request);
+        return new Promise<{ status: string }>((done) => {
+          resolve = done;
+        });
+      },
+      answer: async (status) => {
+        resolve({ status });
+        await flush();
+      },
+    };
+  }
+
+  it("fires once while a failing element stays in view", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch } = answering(["error", "error"]);
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    await flush();
+    observer.show();
+    observer.show();
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(observer.margins).toHaveLength(1);
+    expect(observer.live()).toBe(true);
+  });
+
+  it("fires again once a failed element leaves view and enters it again", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE} data-next-margin="100px 0px"></div>`;
+    const { sent, fetch } = answering(["error", "ok"]);
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    await flush();
+    observer.hide();
+    observer.show();
+    await flush();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.zone).toBe("late");
+    expect(observer.margins).toEqual(["100px 0px"]);
+    expect(observer.live()).toBe(false);
+  });
+
+  it("re-arms an element that left view during its failed request", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch, answer } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    observer.hide();
+    await answer("error");
+    observer.show();
+    expect(sent).toHaveLength(2);
+  });
+
+  it("sends nothing on a repeated entry report while a request is in flight", () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    observer.show();
+    observer.hide();
+    observer.show();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("waits out a failure in view until the element leaves and returns", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch, answer } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    await answer("error");
+    observer.show();
+    expect(sent).toHaveLength(1);
+    observer.hide();
+    observer.show();
+    expect(sent).toHaveLength(2);
+  });
+
+  it("gives an entry made during a failed request its own attempt", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch, answer } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    observer.hide();
+    observer.show();
+    await answer("error");
+    expect(sent).toHaveLength(2);
+    await answer("ok");
+    expect(observer.live()).toBe(false);
+  });
+
+  it("stops watching an element removed while idle after a failure", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { fetch, answer } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    await answer("error");
+    document.body.innerHTML = "";
+    observer.hide();
+    expect(observer.live()).toBe(false);
+  });
+
+  it("frees an element removed out of view after a failure on teardown", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch, answer } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    observer.hide();
+    await answer("error");
+    document.body.innerHTML = "";
+    expect(observer.live()).toBe(true);
+    triggers._reset();
+    expect(observer.live()).toBe(false);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("stops an element an adapter reveals inside observe once it is answered", () => {
+    let stopped = 0;
+    const observer: IntersectionAdapter = {
+      observe: (_el, onView) => {
+        onView(true);
+        return () => {
+          stopped += 1;
+        };
+      },
+    };
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(requests).toHaveLength(1);
+    expect(stopped).toBe(1);
+    triggers._reset();
+    expect(stopped).toBe(1);
+  });
+
+  it.each(["dropped", "invalid"])("stops a sentinel answered %s", async (status) => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${SENTINEL}>more</a>`;
+    const { sent, fetch } = answering([status]);
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    await flush();
+    expect(sent[0]!.headers?.["X-Next-Merge"]).toBe("append");
+    expect(observer.live()).toBe(false);
+  });
+
+  it("re-arms a sentinel whose request rejects", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    let sent = 0;
+    const { triggers } = makeTriggers({
+      observer,
+      fetch: async () => {
+        sent += 1;
+        throw new Error("offline");
+      },
+    });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    await flush();
+    observer.hide();
+    observer.show();
+    await flush();
+    expect(sent).toBe(2);
+  });
+
+  it("stops watching an element removed while in flight", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { fetch } = answering(["error"]);
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    document.body.innerHTML = "";
+    await flush();
+    expect(observer.live()).toBe(false);
+  });
+
+  it("arms nothing for an instance reset while in flight", async () => {
+    const observer = viewObserver();
+    document.body.innerHTML = `${ZONE}></div>`;
+    const { sent, fetch, answer } = deferred();
+    const { triggers } = makeTriggers({ observer, fetch });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.show();
+    triggers._reset();
+    await answer("error");
+    observer.hide();
+    observer.show();
+    expect(sent).toHaveLength(1);
+    expect(observer.margins).toHaveLength(1);
+  });
+
+  it("hands each element its own margin and the default an empty one", () => {
+    const observer = viewObserver();
+    document.body.innerHTML =
+      `${ZONE} data-next-margin="200px"></div>` +
+      `${SENTINEL} data-next-margin="50%">more</a>` +
+      `${ZONE}></div>`;
+    const { triggers } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(observer.margins).toEqual(["200px", "50%", ""]);
+  });
+});
+
+describe("default observer", () => {
+  class FakeObserver {
+    static made: FakeObserver[] = [];
+    readonly targets = new Set<Element>();
+    readonly report: IntersectionObserverCallback;
+    readonly margin: string | undefined;
+    constructor(report: IntersectionObserverCallback, init?: IntersectionObserverInit) {
+      if (init?.rootMargin === "bad") throw new DOMException("", "SyntaxError");
+      this.report = report;
+      this.margin = init?.rootMargin;
+      FakeObserver.made.push(this);
+    }
+    observe(el: Element): void {
+      this.targets.add(el);
+    }
+    unobserve(el: Element): void {
+      this.targets.delete(el);
+    }
+    emit(el: Element): void {
+      const entry = { target: el, isIntersecting: true } as IntersectionObserverEntry;
+      this.report([entry], this as unknown as IntersectionObserver);
+    }
+  }
+
+  beforeEach(() => {
+    FakeObserver.made = [];
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.body.innerHTML = "";
+  });
+
+  it("shares an observer per margin, an invalid one joining the default", () => {
+    const watched = (id: string, margin = ""): string =>
+      `<div id="${id}" href="/${id}/" data-next-merge="append" ` +
+      `data-next-target="${id}" data-next-defer="visible"${margin}></div>`;
+    document.body.innerHTML =
+      watched("wide", ' data-next-margin="200px"') +
+      watched("plain") +
+      watched("bad", ' data-next-margin="bad"') +
+      '<a id="more" href="/p2/" data-next-merge="append" data-next-target="list" ' +
+      'data-next-defer="visible" data-next-margin="200px">more</a>';
+    const requests: Request[] = [];
+    const triggers = createTriggers({
+      fetch: (request) => void requests.push(request),
+      abort: () => undefined,
+      document,
+      poll: chunkModules.poll,
+      defer: chunkModules.defer,
+    });
+    triggers.scan(document.body);
+    const [wide, plain] = FakeObserver.made;
+    expect(FakeObserver.made.map((made) => made.margin)).toEqual(["200px", ""]);
+    expect(wide!.targets.size).toBe(2);
+    expect(plain!.targets.size).toBe(2);
+    const bad = document.getElementById("bad")!;
+    wide!.emit(document.getElementById("wide")!);
+    plain!.emit(bad);
+    expect(requests.map((request) => request.zone)).toEqual(["wide", "bad"]);
+    expect(wide!.targets.size).toBe(1);
+    expect(plain!.targets.has(bad)).toBe(false);
+    triggers._reset();
+    expect(wide!.targets.size).toBe(0);
+    expect(plain!.targets.size).toBe(0);
   });
 });
 
@@ -978,6 +1341,7 @@ describe("zone polling", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]!.zone).toBe("t");
     expect(requests[0]!.headers).toBeUndefined();
+    expect(requests[0]!.background).toBe(true);
     clock.tick();
     expect(requests).toHaveLength(2);
   });
@@ -1285,14 +1649,16 @@ describe("zone polling", () => {
     expect(requests[0]!.zone).toBe("t");
   });
 
-  it("fires the load batch when the scan root itself is the load wrapper", () => {
-    document.body.innerHTML = '<div data-next-zone="a" data-next-lazy="load"></div>';
+  it("arms a sentinel when the scan root itself is the sentinel", () => {
+    const observer = manualObserver();
+    document.body.innerHTML = `${LATE}></div>`;
     const el = document.querySelector("div")!;
-    const { triggers, requests } = makeTriggers();
+    const { triggers, requests } = makeTriggers({ observer });
     detach = triggers.install(document);
     triggers.scan(el);
+    observer.reveal();
     expect(requests).toHaveLength(1);
-    expect(requests[0]!.zone).toBe("a");
+    expect(requests[0]!.zone).toBe("late");
   });
 
   it("polls the URL answered by the pageUrl dep, not the address bar", () => {
@@ -1440,15 +1806,15 @@ describe("dev attribute validation", () => {
     detach?.();
   });
 
-  it("warns on an out-of-set data-next-lazy value in dev", () => {
-    document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="loaded"></div>';
+  it("warns on an out-of-set data-next-defer value in dev", () => {
+    document.body.innerHTML = '<div data-next-zone="z" data-next-defer="loaded"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { triggers } = makeTriggers({ diagnostics: () => DEV });
     detach = triggers.install(document);
     triggers.scan(document.body);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="loaded"');
-    expect(warn.mock.calls[0]![0]).toContain("load, revealed");
+    expect(warn.mock.calls[0]![0]).toContain('data-next-defer="loaded"');
+    expect(warn.mock.calls[0]![0]).toContain("load, visible, manual");
     warn.mockRestore();
   });
 
@@ -1515,7 +1881,7 @@ describe("dev attribute validation", () => {
   });
 
   it("warns when the scan root itself carries the malformed attribute", () => {
-    document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="loaded"></div>';
+    document.body.innerHTML = '<div data-next-zone="z" data-next-defer="loaded"></div>';
     const el = document.querySelector("div")!;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { triggers } = makeTriggers({ diagnostics: () => DEV });
@@ -1523,13 +1889,15 @@ describe("dev attribute validation", () => {
     // A replace patch scans the new wrapper element itself, not only descendants.
     triggers.scan(el);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="loaded"');
+    expect(warn.mock.calls[0]![0]).toContain('data-next-defer="loaded"');
     warn.mockRestore();
   });
 
   it("stays silent on recognised values in dev", () => {
     document.body.innerHTML =
-      '<div data-next-zone="z" data-next-lazy="load"></div>' +
+      '<div data-next-zone="z" data-next-defer="load"></div>' +
+      '<div data-next-zone="v" data-next-defer="visible"></div>' +
+      '<div data-next-zone="m" data-next-defer="manual"></div>' +
       '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>' +
       '<div data-next-zone="p" data-next-poll="5000"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1542,7 +1910,7 @@ describe("dev attribute validation", () => {
 
   it("stays silent on an out-of-set value when dev is off", () => {
     document.body.innerHTML =
-      '<div data-next-zone="z" data-next-lazy="loaded"></div>' +
+      '<div data-next-zone="z" data-next-defer="loaded"></div>' +
       '<a href="/p2/" data-next-merge="add" data-next-target="list">more</a>' +
       '<div data-next-zone="p" data-next-poll="5s"></div>' +
       '<div data-next-poll="5000"></div>';
@@ -1552,5 +1920,84 @@ describe("dev attribute validation", () => {
     triggers.scan(document.body);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("the defer chunk", () => {
+  const WRAPPER =
+    '<div id="b-1" data-next-boundary="b-1" data-next-token="t" data-next-state="idle" ';
+
+  beforeEach(() => {
+    document.head.innerHTML = "";
+    document.body.innerHTML = "";
+  });
+
+  it("is never fetched by a scan and is armed once the chunk lands", () => {
+    const defer = lazyChunk<DeferArm>(
+      { dispatch: () => undefined, nonce: undefined, context: () => ({}) },
+      "defer",
+    );
+    const { triggers } = makeTriggers({ defer });
+    document.body.innerHTML =
+      `${WRAPPER}data-next-defer="load"></div>` +
+      '<div data-next-zone="z" data-next-reload="loading"></div>';
+    triggers.scan(document.body);
+    expect(document.head.querySelectorAll("script")).toHaveLength(0);
+    const arm = vi.fn<DeferArm>();
+    defer.land(arm);
+    expect(arm).toHaveBeenCalledTimes(1);
+    expect(arm).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it("hands the chunk the observer and re-arm of the triggers", () => {
+    const observer = manualObserver();
+    let watched: Watch | undefined;
+    makeTriggers({
+      observer,
+      defer: landed<DeferArm>((watch) => (watched = watch)),
+    });
+    document.body.innerHTML = `${WRAPPER}data-next-defer="visible"></div>`;
+    const send = vi.fn(() => Promise.resolve({ status: "ok" }));
+    watched!(document.getElementById("b-1")!, send);
+    expect(send).not.toHaveBeenCalled();
+    observer.reveal();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces the watch of an element still waiting, so one entry sends once", () => {
+    const observer = viewObserver();
+    let watched: Watch | undefined;
+    makeTriggers({
+      observer,
+      defer: landed<DeferArm>((watch) => (watched = watch)),
+    });
+    document.body.innerHTML = `${WRAPPER}data-next-defer="visible"></div>`;
+    const el = document.getElementById("b-1")!;
+    const first = vi.fn(() => Promise.resolve({ status: "ok" }));
+    const second = vi.fn(() => Promise.resolve({ status: "ok" }));
+    watched!(el, first);
+    watched!(el, second);
+    expect(observer.margins).toHaveLength(2);
+    observer.show();
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the observer sweep", () => {
+  it("stops the observers of elements that left the document and keeps the rest", () => {
+    const stops: string[] = [];
+    const observer: IntersectionAdapter = {
+      observe: (el) => () => stops.push(el.id),
+    };
+    const { triggers } = makeTriggers({ observer });
+    document.body.innerHTML = `${LATE} id="gone"></div>${LATE} id="kept"></div>`;
+    triggers.scan(document.body);
+    document.getElementById("gone")!.remove();
+    triggers.sweep();
+    triggers.sweep();
+    expect(stops).toEqual(["gone"]);
+    triggers._reset();
+    expect(stops).toEqual(["gone", "kept"]);
   });
 });

@@ -57,6 +57,7 @@ class AccessRequestWizard(FormWizard):
             ("approval", ApprovalStep),
         ]
         url_param = "step"
+        atomic = False
 
     @classmethod
     def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:

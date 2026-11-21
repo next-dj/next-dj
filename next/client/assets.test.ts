@@ -134,6 +134,25 @@ describe("assets registry and delta", () => {
     expect(scan).not.toHaveBeenCalled();
   });
 
+  it("leaves the page scope of a sheet to the router", () => {
+    const urls: string[] = [];
+    const loadLink: LinkLoader = (url, _nonce, done) => {
+      urls.push(url);
+      done(true);
+    };
+    const { assets } = makeAssets({ loadLink });
+    assets.loadCss(
+      [
+        { ...css("http://x/page.css"), scope: "page" },
+        { ...inlineCss(".p{}"), scope: "page" },
+      ],
+      () => undefined,
+    );
+    expect(urls).toEqual(["http://x/page.css"]);
+    const style = document.head.querySelector("style")!;
+    expect(style.hasAttribute("data-next-asset")).toBe(false);
+  });
+
   it("seeds an inline style so the inline css delta skips it", () => {
     document.head.innerHTML = "<style>.z{}</style>";
     const { assets } = makeAssets();
@@ -206,6 +225,86 @@ describe("assets registry and delta", () => {
     const errors = dispatched.filter((d) => d.event === "partial:error");
     expect(errors).toHaveLength(1);
     expect(errors[0]!.detail.kind).toBe("asset");
+  });
+
+  it("holds a second delta naming a loading sheet until that load settles", () => {
+    const settlers: ((ok: boolean) => void)[] = [];
+    const loadLink: LinkLoader = (_url, _nonce, done) => settlers.push(done);
+    const { assets } = makeAssets({ loadLink });
+    const first = vi.fn();
+    const second = vi.fn();
+    assets.loadCss([css("http://x/slow.css")], first);
+    assets.loadCss([css("http://x/slow.css")], second);
+    expect(settlers).toHaveLength(1);
+    expect(second).not.toHaveBeenCalled();
+    settlers[0]!(true);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the styling gap to a delta that waited on a sheet that failed", () => {
+    const settlers: ((ok: boolean) => void)[] = [];
+    const loadLink: LinkLoader = (_url, _nonce, done) => settlers.push(done);
+    const { assets, dispatched } = makeAssets({ loadLink });
+    const second = vi.fn();
+    assets.loadCss([css("http://x/gone.css")], () => undefined);
+    assets.loadCss([css("http://x/gone.css")], second);
+    settlers[0]!(false);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(dispatched.filter((d) => d.event === "partial:error")).toHaveLength(2);
+  });
+
+  it("names the zones of the envelope on a stylesheet failure", () => {
+    const loadLink: LinkLoader = (_url, _nonce, done) => done(false);
+    const { assets, dispatched } = makeAssets({ loadLink });
+    assets.loadCss([css("http://x/broken.css")], () => undefined, ["cart"]);
+    const error = dispatched.find((d) => d.event === "partial:error")!.detail;
+    expect(error).toEqual({
+      kind: "asset",
+      error: expect.any(Error),
+      zones: ["cart"],
+    });
+  });
+
+  it("stops holding a delta once the sheet it names has settled", () => {
+    const { assets, loaded } = makeAssets();
+    assets.loadCss([css("http://x/done.css")], () => undefined);
+    const later = vi.fn();
+    assets.loadCss([css("http://x/done.css")], later);
+    expect(loaded).toEqual(["http://x/done.css"]);
+    expect(later).toHaveBeenCalledTimes(1);
+  });
+
+  it("inserts a doubled sheet once and runs done once it settles", () => {
+    const settlers: ((ok: boolean) => void)[] = [];
+    const loadLink: LinkLoader = (_url, _nonce, done) => settlers.push(done);
+    const { assets } = makeAssets({ loadLink });
+    const done = vi.fn();
+    assets.loadCss([css("http://x/twice.css"), css("http://x/twice.css")], done);
+    expect(settlers).toHaveLength(1);
+    settlers[0]!(true);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a load keyed after reset when the load before it settles late", () => {
+    const settlers: ((ok: boolean) => void)[] = [];
+    const loadLink: LinkLoader = (_url, _nonce, done) => settlers.push(done);
+    const { assets } = makeAssets({ loadLink });
+    const stale = vi.fn();
+    const fresh = vi.fn();
+    const later = vi.fn();
+    assets.loadCss([css("http://x/again.css")], stale);
+    assets._reset();
+    assets.loadCss([css("http://x/again.css")], fresh);
+    expect(settlers).toHaveLength(2);
+    settlers[0]!(true);
+    expect(stale).toHaveBeenCalledTimes(1);
+    expect(fresh).not.toHaveBeenCalled();
+    assets.loadCss([css("http://x/again.css")], later);
+    expect(later).not.toHaveBeenCalled();
+    settlers[1]!(true);
+    expect(fresh).toHaveBeenCalledTimes(1);
+    expect(later).toHaveBeenCalledTimes(1);
   });
 
   it("calls done synchronously when nothing is missing", () => {
@@ -705,6 +804,22 @@ describe("seeding across the parse window", () => {
     ).toHaveLength(1);
   });
 
+  it("runs a delta at once on a streamed page that is still parsing", () => {
+    const { assets, loaded } = makeAssets();
+    const done = vi.fn();
+    assets.seed();
+    parseTag('<link rel="stylesheet" href="/static/shell.css">');
+    document.documentElement.setAttribute("data-next-streamed", "");
+    assets.loadCss([css("/static/shell.css"), css("/static/reload.css")], done);
+    assets.loadJs([{ kind: "js", url: "/static/reload.js" }]);
+    document.documentElement.removeAttribute("data-next-streamed");
+    expect(loaded).toEqual(["/static/reload.css"]);
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll('script[src="/static/reload.js"]')).toHaveLength(
+      1,
+    );
+  });
+
   it("holds the css delta and its done until parsing ends", () => {
     const { assets, loaded } = makeAssets();
     const done = vi.fn();
@@ -780,6 +895,17 @@ describe("seeding across the parse window", () => {
     assets._reset();
     expect(forget).not.toHaveBeenCalled();
   });
+
+  it("seeds what a streamed page parsed between two deltas", () => {
+    const { assets, loaded } = makeAssets();
+    assets.seed();
+    document.body.setAttribute("data-next-streamed", "");
+    assets.loadCss([css("/static/chunk.css")], () => undefined);
+    parseTag('<link rel="stylesheet" href="/static/tail.css">');
+    assets.loadCss([css("/static/tail.css")], () => undefined);
+    document.body.removeAttribute("data-next-streamed");
+    expect(loaded).toEqual(["/static/chunk.css"]);
+  });
 });
 
 describe("version safeguard and reload-once", () => {
@@ -834,6 +960,16 @@ describe("version safeguard and reload-once", () => {
     const err = made.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.kind).toBe("asset");
     expect(err!.detail.url).toBe("https://attacker.example/");
+  });
+
+  it("names the zones of the envelope on a version error, none when it named none", () => {
+    const made = makeAssets({ session: memorySession() });
+    made.assets.versionMismatch("v1", "/here/");
+    made.assets.versionMismatch("v2", "https://attacker.example/", ["cart"]);
+    made.assets.versionMismatch("v2", "https://attacker.example/");
+    const errors = made.dispatched.filter((d) => d.event === "partial:error");
+    expect(errors.map((d) => d.detail.zones)).toEqual([["cart"], undefined]);
+    expect("zones" in errors[1]!.detail).toBe(false);
   });
 
   it("ignores an empty version on accept, keeping the known one", () => {
@@ -906,6 +1042,7 @@ describe("the native stylesheet loader", () => {
     const clock = timerClock();
     nativeLinkLoader(document)("/a.css", undefined, () => undefined, clock, 3000);
     expect(inserted().nonce).toBe("");
+    expect(inserted().hasAttribute("data-next-asset")).toBe(false);
   });
 
   it("reports a failed sheet", () => {

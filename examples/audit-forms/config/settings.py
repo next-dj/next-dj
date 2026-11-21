@@ -22,6 +22,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "next.middleware.CompressionMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -104,6 +105,7 @@ NEXT_FRAMEWORK = {
         "BACKEND": "next.forms.CacheFormWizardBackend",
         "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
     },
+    "DEFER": {"MORE": {"MAX_RESTORE": 3}},
     "STATIC_VERSION": "v1",
     "SITE": {"URL": "https://access.example", "NAME": "next.dj audit"},
     "METADATA": {

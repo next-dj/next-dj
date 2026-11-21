@@ -18,7 +18,7 @@ from django.http import (
     JsonResponse,
 )
 from django.http.request import HttpHeaders
-from django.middleware.csrf import get_token
+from django.middleware.csrf import CSRF_SESSION_KEY, get_token
 from django.urls import (
     NoReverseMatch,
     get_resolver,
@@ -47,6 +47,9 @@ CSRF_URL_NAME: Final = "csrf"
 CSRF_DEFERRED_ATTR: Final = "_next_csrf_deferred"
 """The request attribute that marks a render whose HTML carries no CSRF token."""
 
+_PAYLOAD_ATTR: Final = "_next_csrf_payload"
+_COOKIE_KEY: Final = "CSRF_COOKIE"
+_RENEWED_KEY: Final = "CSRF_COOKIE_NEEDS_UPDATE"
 _REQUEST_FLAG: Final = "X-Next-Request"
 _SAFE_METHODS: Final = ("GET", "HEAD")
 _SAME_ORIGIN: Final = "same-origin"
@@ -152,6 +155,7 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
     """Return the `$csrf` payload, the endpoint URL in place of a deferred token.
 
     When the endpoint is not routed the token is embedded instead, so forms still post.
+    One request masks one token per secret, shared by its page and its envelope.
     """
     if token_deferred(request):
         with _failures.guard(
@@ -162,7 +166,28 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
             catch=(NoReverseMatch,),
         ):
             return {"header": csrf_header_name(), "url": csrf_url()}
-    return csrf_token_payload(request)
+    meta = request.META
+    held: tuple[object, dict[str, str]] | None = request.__dict__.get(_PAYLOAD_ATTR)
+    if held is None or held[0] != meta.get(_COOKIE_KEY):
+        payload = csrf_token_payload(request)
+        held = (meta.get(_COOKIE_KEY), payload)
+        setattr(request, _PAYLOAD_ATTR, held)
+    return held[1]
+
+
+def secret_changed(request: HttpRequest) -> bool:
+    """Whether the response sets a CSRF secret other than the one the request brought.
+
+    Reading a token flags the cookie for renewal too, so the flag alone names no change.
+    """
+    meta = request.META
+    if not meta.get(_RENEWED_KEY):
+        return False
+    if settings.CSRF_USE_SESSIONS:
+        brought = request.session.get(CSRF_SESSION_KEY)
+    else:
+        brought = request.COOKIES.get(settings.CSRF_COOKIE_NAME)
+    return bool(brought != meta.get(_COOKIE_KEY))
 
 
 def _refusal(request: HttpRequest) -> HttpResponse | None:
@@ -208,5 +233,6 @@ __all__ = [
     "defer_token",
     "forget_csrf_delivery",
     "nonce_minted",
+    "secret_changed",
     "token_deferred",
 ]

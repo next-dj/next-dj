@@ -1,12 +1,12 @@
 <header class="flex items-baseline justify-between">
   <h2 class="text-lg font-semibold">{{ category.name }} products</h2>
   {% zone "catalog-count" %}
-    <p class="text-sm text-muted-foreground">{{ page_obj.total }} products</p>
+    <p class="text-sm text-muted-foreground">{{ page_obj.paginator.count }} products</p>
   {% endzone %}
 </header>
 
 {% zone "catalog-results" tag="ul" %}
-  {% for product in page_obj.products %}
+  {% for product in page_obj %}
     <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
   {% endfor %}
 {% endzone %}

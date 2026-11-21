@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextvars import copy_context
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -19,8 +20,23 @@ from next.static import (
     default_kinds,
 )
 from next.static.collector import HEAD_CLOSE
+from next.static.inject import (
+    SPLIT_NOTE,
+    _dropped as dropped_bundles,
+    _split_mark,
+    split_of,
+)
 from next.static.manager import _failures as manager_failures
-from next.static.runtime import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
+from next.static.runtime import (
+    BUNDLE_NOTE,
+    CSRF_PAYLOAD_KEY,
+    DEV_PAYLOAD_KEY,
+    PROGRESS_STYLE,
+    RouterRender,
+    html_finish,
+    partial_streams,
+    router_render,
+)
 from next.static.serializers import JsonJsContextSerializer
 from next.testing import override_next_settings
 from tests.support import (
@@ -639,6 +655,85 @@ class TestInjectMissingPlaceholders:
         assert out == html
 
 
+class TestStreamSplit:
+    """A streamed render asks where its chunks go, the end of the scripts slot."""
+
+    def _split(self, manager: StaticManager, html: str) -> tuple[str, int | None]:
+        collector = StaticCollector()
+        collector.note(SPLIT_NOTE, None)
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            out = manager.inject(html, collector)
+        return out, split_of(collector)
+
+    def test_the_split_follows_the_last_scripts_slot(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        html = f"<head></head><p>{SCRIPTS_PLACEHOLDER}</p><p>x</p>{SCRIPTS_PLACEHOLDER}"
+        out, split = self._split(fresh_manager, html)
+        assert split is not None
+        assert out[:split].endswith("</script>\n")
+        assert SCRIPTS_PLACEHOLDER not in out
+        assert out.count("Next._init(") == 2
+        assert out[split:] == ""
+
+    def test_a_body_close_after_the_scripts_slot_takes_the_split(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        html = f"<head>{SCRIPTS_PLACEHOLDER}</head><body><p>x</p></body></html>"
+        out, split = self._split(fresh_manager, html)
+        assert out[split:] == "</body></html>"
+
+    def test_a_page_without_a_body_close_splits_at_its_end(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        out, split = self._split(fresh_manager, "<p>x</p>")
+        assert (out, split) == ("<p>x</p>", 8)
+
+    def test_page_text_that_looks_like_a_mark_stays_and_no_mark_leaks(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        text = "user\x00next-split\x00text"
+        html = f"<p>{text}</p>{SCRIPTS_PLACEHOLDER}<footer>{text}</footer></body>"
+        out, split = self._split(fresh_manager, html)
+        assert out.count(text) == 2
+        assert "\x00next-split-" not in out
+        assert split is not None
+        assert out[split:] == "</body>"
+
+    def test_an_unrouted_html_finishes_before_its_split(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        seen: list[str] = []
+
+        def finish(html: str) -> str:
+            seen.append(html)
+            return html.replace("<nav>", '<nav data-x="1">')
+
+        token = html_finish.set(finish)
+        try:
+            out, split = self._split(
+                fresh_manager, f"<body><nav></nav>{SCRIPTS_PLACEHOLDER}</body>"
+            )
+        finally:
+            html_finish.reset(token)
+        assert "\x00next-split-" in seen[0]
+        assert out.startswith('<body><nav data-x="1"></nav>')
+        assert out[split:] == "</body>"
+
+    def test_each_render_gets_its_own_mark(self) -> None:
+        assert _split_mark() != _split_mark()
+
+    def test_a_render_that_asks_nothing_gets_no_split(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        out = fresh_manager.inject(f"<body>{SCRIPTS_PLACEHOLDER}</body>", collector)
+        assert split_of(collector) is None
+        assert SCRIPTS_PLACEHOLDER not in out
+
+
 class TestInjectForwardsRequest:
     """`inject` forwards the active request to the backend rendering each tag."""
 
@@ -1044,3 +1139,441 @@ class TestChunkUrlsWithoutARewrite:
         assert second == first
         assert '"poll":"/static/next/next.poll.min.js?v=v1"' in second
         assert asset_url.call_args_list == [mock.call(NEXT_JS_URL, request=None)]
+
+
+DEFER_URL = "/static/next/next.defer.min.js"
+RELOAD_URL = "/static/next/next.reload.min.js"
+MORE_URL = "/static/next/next.more.min.js"
+READER_URL = "/static/next/next.reader.min.js"
+
+
+class TestDeclaredBundles:
+    """A needed bundle is declared by a tag between the runtime and the init script."""
+
+    PAGE = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    @pytest.fixture(autouse=True)
+    def _rearmed(self):
+        manager_failures.clear()
+        dropped_bundles.clear()
+        yield
+        manager_failures.clear()
+        dropped_bundles.clear()
+
+    def _inject(
+        self,
+        manager: StaticManager,
+        needs: tuple[str, ...],
+        *,
+        urgent: bool = False,
+        streams: bool = False,
+        page: str = PAGE,
+    ) -> tuple[StaticCollector, str]:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            collector = manager.create_collector()
+            collector.add(StaticAsset(url=JS_URL, kind="js"))
+            if streams:
+                collector.note(SPLIT_NOTE, None)
+            for name in needs:
+                collector.require(name)
+            if urgent:
+                collector.require(needs[0], urgent=True)
+            return collector, manager.inject(page, collector)
+
+    def _marked(
+        self,
+        manager: StaticManager,
+        needs: tuple[str, ...],
+        *,
+        urgent: bool = False,
+        page: str = PAGE,
+    ) -> tuple[StaticCollector, str]:
+        token = partial_streams.set(True)
+        try:
+            return self._inject(manager, needs, urgent=urgent, page=page)
+        finally:
+            partial_streams.reset(token)
+
+    def test_a_need_lands_after_the_runtime_and_before_the_init(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("defer",))
+        runtime = f'<script src="{NEXT_JS_URL}"></script>\n'
+        bundle = f'<script async fetchpriority="low" src="{DEFER_URL}"></script>\n'
+        assert f"{runtime}{bundle}<script>Next._init(" in out
+        assert out.index("Next._init(") < out.index(JS_URL)
+        assert out.count(DEFER_URL) == 1
+
+    def test_urgency_defers_every_bundle_of_the_page(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("more", "defer", "reload"), urgent=True)
+        assert (
+            f'<script defer src="{MORE_URL}"></script>\n'
+            f'<script defer src="{DEFER_URL}"></script>\n'
+            f'<script defer src="{RELOAD_URL}"></script>\n'
+            "<script>Next._init("
+        ) in out
+        assert "async" not in out
+
+    def test_a_streamed_page_loads_the_reader_and_urgent_bundles_at_once(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(
+            fresh_manager, ("reader", "defer", "reload"), urgent=True, streams=True
+        )
+        assert (
+            f'<script async src="{READER_URL}"></script>\n'
+            f'<script async src="{DEFER_URL}"></script>\n'
+            f'<script async src="{RELOAD_URL}"></script>\n'
+            "<script>Next._init("
+        ) in out
+        assert " defer" not in out
+
+    def test_a_streamed_page_keeps_a_bundle_no_boundary_hurries_lazy(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("reader", "more"), streams=True)
+        assert f'<script async src="{READER_URL}"></script>\n' in out
+        assert f'<script async fetchpriority="low" src="{MORE_URL}"></script>' in out
+
+    def test_a_page_marked_for_streamed_partials_requires_the_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector, out = self._marked(fresh_manager, ("defer",), urgent=True)
+        assert collector.notes(BUNDLE_NOTE) == [DEFER_URL, READER_URL]
+        assert (
+            f'<script defer src="{DEFER_URL}"></script>\n'
+            f'<script async fetchpriority="low" src="{READER_URL}"></script>\n'
+            "<script>Next._init("
+        ) in out
+        assert '"$stream":true' in out
+
+    def test_a_page_without_the_runtime_slot_requires_no_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector, out = self._marked(fresh_manager, (), page="<body></body>")
+        assert collector.notes(BUNDLE_NOTE) == ()
+        assert "next.reader" not in out
+
+    def test_a_manual_page_marked_for_streamed_partials_requires_no_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK=MANUAL):
+            collector, out = self._marked(fresh_manager, ())
+        assert collector.notes(BUNDLE_NOTE) == ()
+        assert "next.reader" not in out
+
+    def test_no_need_renders_the_scripts_slot_unchanged(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ())
+        baseline = StaticCollector()
+        baseline.add(StaticAsset(url=JS_URL, kind="js"))
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            expected = fresh_manager.inject(self.PAGE, baseline)
+        assert out == expected
+        assert "next.defer" not in out
+
+    def test_the_payload_never_lists_a_declared_bundle(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("defer", "reload", "more"))
+        assert f"Next._init({{{CHUNKS}}})" in out
+
+    def test_the_tags_carry_the_page_nonce(self, fresh_manager: StaticManager) -> None:
+        with mock.patch("next.static.inject.resolve_nonce", return_value="n0"):
+            _, out = self._inject(fresh_manager, ("reload",))
+        assert (
+            f'<script async fetchpriority="low" src="{RELOAD_URL}" nonce="n0"></script>'
+        ) in out
+
+    def test_without_the_runtime_no_bundle_renders(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="next.static.inject")
+        with override_settings(NEXT_FRAMEWORK=DISABLED):
+            _, out = self._inject(fresh_manager, ("defer",))
+        assert "next.defer" not in out
+        assert JS_URL in out
+        [record] = [r for r in caplog.records if r.name == "next.static.inject"]
+        assert record.levelno == logging.DEBUG
+        assert DEFER_URL in record.getMessage()
+
+    def test_a_manual_page_declares_them_before_its_scripts(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="next.static.inject")
+        with override_settings(NEXT_FRAMEWORK=MANUAL):
+            _, out = self._inject(fresh_manager, ("defer",), urgent=True)
+        assert out.startswith(f'<body><script defer src="{DEFER_URL}"></script>\n')
+        assert out.index(DEFER_URL) < out.index(JS_URL)
+        assert "Next._init(" not in out
+        assert not [r for r in caplog.records if r.name == "next.static.inject"]
+
+    def test_a_page_without_the_scripts_slot_logs_the_drop(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="next.static.inject")
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            collector = fresh_manager.create_collector()
+            collector.require("reload")
+            out = fresh_manager.inject("<body></body>", collector)
+        assert out == "<body></body>"
+        [record] = [r for r in caplog.records if r.name == "next.static.inject"]
+        assert RELOAD_URL in record.getMessage()
+
+    def test_an_unbuilt_bundle_is_left_out(self, caplog) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_hashed_without("next/next.defer.min.js"),
+        ):
+            manager = StaticManager()
+            collector = manager.create_collector()
+            collector.require("defer", urgent=True)
+            out = manager.inject(self.PAGE, collector)
+        assert "next.defer" not in out
+        assert "<script>Next._init(" in out
+        [message] = _records(caplog)
+        assert "next/next.defer.min.js" in message
+
+
+ROUTER_URL = "/static/next/next.router.min.js"
+HISTORY_URL = "/static/next/next.history.min.js"
+INTENT_URL = "/static/next/next.intent.min.js"
+
+
+class TestRoutedRender:
+    """Under the client router the injector seals its output and loads the router."""
+
+    PAGE = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    def _inject(
+        self, manager: StaticManager, routed: RouterRender, *, streams: bool = False
+    ) -> tuple[StaticCollector, str]:
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ):
+                collector = manager.create_collector()
+                collector.add(StaticAsset(url=CSS_URL, kind="css"))
+                if streams:
+                    collector.note(SPLIT_NOTE, None)
+                return collector, manager.inject(self.PAGE, collector)
+        finally:
+            router_render.reset(token)
+
+    def test_every_filled_slot_is_sealed(self, fresh_manager: StaticManager) -> None:
+        finished: list[str] = []
+
+        def finish(html: str) -> str:
+            finished.append(html)
+            return html.replace(routed.mark, "[]")
+
+        routed = RouterRender("5ea1", '{"scope":"all"}', finish)
+        collector, out = self._inject(fresh_manager, routed)
+        assert "<!--nx:a 5ea1--><link" in out
+        assert out.count("<!--/nx:a 5ea1-->") == 2
+        assert f'<script async src="{ROUTER_URL}"></script>' in out
+        assert (
+            f'"$router":{{"scope":"all","reader":"{READER_URL}",'
+            f'"history":"{HISTORY_URL}","intent":"{INTENT_URL}"}},"$layouts":[]'
+        ) in out
+        assert f'src="{READER_URL}"' not in out
+        assert f'src="{HISTORY_URL}"' not in out
+        assert f'src="{INTENT_URL}"' not in out
+        assert routed.reader == READER_URL
+        assert routed.history == HISTORY_URL
+        assert routed.intent == INTENT_URL
+        assert routed.collector is collector
+        assert finished
+        assert routed.mark in finished[0]
+
+    @pytest.mark.parametrize(
+        ("missing", "attr", "fields"),
+        [
+            pytest.param(
+                "next/next.reader.min.js",
+                "reader",
+                f'"history":"{HISTORY_URL}","intent":"{INTENT_URL}"',
+                id="reader",
+            ),
+            pytest.param(
+                "next/next.history.min.js",
+                "history",
+                f'"reader":"{READER_URL}","intent":"{INTENT_URL}"',
+                id="history",
+            ),
+            pytest.param(
+                "next/next.intent.min.js",
+                "intent",
+                f'"reader":"{READER_URL}","history":"{HISTORY_URL}"',
+                id="intent",
+            ),
+        ],
+    )
+    def test_a_storage_without_a_bundle_leaves_it_out(
+        self, missing: str, attr: str, fields: str
+    ) -> None:
+        routed = RouterRender("5ea1", '{"scope":"all"}')
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                side_effect=_hashed_without(missing),
+            ):
+                manager = StaticManager()
+                out = manager.inject(self.PAGE, manager.create_collector())
+        finally:
+            router_render.reset(token)
+        assert f'"$router":{{"scope":"all",{fields}}}' in out
+        assert [
+            name
+            for name in ("reader", "history", "intent")
+            if getattr(routed, name) is None
+        ] == [attr]
+
+    def test_a_collector_without_bundles_names_no_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", '{"scope":"all"}')
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ):
+                out = fresh_manager.inject(self.PAGE, StaticCollector())
+        finally:
+            router_render.reset(token)
+        assert routed.reader is None
+        assert routed.history is None
+        assert routed.intent is None
+        assert '"$router":{"scope":"all"}' in out
+
+    def test_a_page_out_of_snapshots_says_so_in_the_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", '{"scope":"all"}', snapshot=False)
+        _collector, out = self._inject(fresh_manager, routed)
+        assert f'"intent":"{INTENT_URL}","snapshot":false}}' in out
+
+    def test_a_stream_keeps_its_split_inside_the_sealed_scripts(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", "{}")
+        collector, out = self._inject(fresh_manager, routed, streams=True)
+        split = split_of(collector)
+        assert split is not None
+        assert out[split:] == "</body>"
+        assert out[:split].endswith("<!--/nx:a 5ea1-->")
+
+    def test_the_unrouted_pass_stays_off_a_routed_render(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        unrouted: list[str] = []
+
+        def finish(html: str) -> str:
+            unrouted.append(html)
+            return html
+
+        token = html_finish.set(finish)
+        try:
+            self._inject(fresh_manager, RouterRender("5ea1", "{}", str.strip))
+        finally:
+            html_finish.reset(token)
+        assert unrouted == []
+
+    def test_an_empty_slot_is_left_unsealed(self, fresh_manager: StaticManager) -> None:
+        routed = RouterRender("5ea1", "{}")
+        token = router_render.set(routed)
+        try:
+            out = fresh_manager.inject("<p>x</p>", fresh_manager.create_collector())
+        finally:
+            router_render.reset(token)
+        assert out == "<p>x</p>"
+
+    def _routed(
+        self, manager: StaticManager, routed: RouterRender, collector: StaticCollector
+    ) -> str:
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ):
+                return manager.inject(self.PAGE, collector)
+        finally:
+            router_render.reset(token)
+
+    def test_page_stylesheets_carry_the_asset_attribute(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.add(StaticAsset(url="", kind="css", inline="p{color:red}"))
+        collector.add(StaticAsset(url=JS_URL, kind="js"))
+        out = self._routed(fresh_manager, RouterRender("5ea1", "{}"), collector)
+        assert f'<link data-next-asset="page" rel="stylesheet" href="{CSS_URL}">' in out
+        assert '<style data-next-asset="page">p{color:red}</style>' in out
+        assert f'<script src="{JS_URL}"></script>' in out
+
+    def test_a_tag_without_an_element_stays_as_rendered(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        with mock.patch.object(
+            fresh_manager.default_backend, "render_link_tag", return_value="plain"
+        ):
+            out = self._routed(fresh_manager, RouterRender("5ea1", "{}"), collector)
+        assert "<!--nx:a 5ea1-->plain<!--/nx:a 5ea1-->" in out
+
+    def test_the_head_carries_the_speculation_rules(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", "{}", speculation='{"prefetch":[]}')
+        out = self._routed(fresh_manager, routed, StaticCollector())
+        head = out.split("</head>")[0]
+        assert (
+            '<!--nx:a 5ea1--><script type="speculationrules">{"prefetch":[]}</script>'
+            "<!--/nx:a 5ea1-->"
+        ) in head
+
+    def test_the_head_carries_the_progress_bar_with_the_nonce(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", "{}", speculation="{}", progress=True)
+        with mock.patch("next.static.inject.resolve_nonce", return_value="n0"):
+            out = self._routed(fresh_manager, routed, StaticCollector())
+        head = out.split("</head>")[0]
+        assert (
+            f'<!--nx:a 5ea1--><style nonce="n0">{PROGRESS_STYLE}</style>\n'
+            '<script type="speculationrules" nonce="n0">{}</script><!--/nx:a 5ea1-->'
+        ) in head
+
+    def test_a_render_without_the_progress_bar_carries_no_style(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        out = self._routed(fresh_manager, RouterRender("5ea1", "{}"), StaticCollector())
+        assert PROGRESS_STYLE not in out
+        assert "<style" not in out
+
+    def test_the_rules_come_before_the_head_scripts(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        scripts = mock.Mock()
+        scripts.render.return_value = ("<script data-h></script>", {})
+        slot = PortSlot("page scripts port")
+        slot.set(scripts)
+        routed = RouterRender("5ea1", "{}", speculation="{}")
+        with mock.patch("next.static.inject.page_scripts_slot", slot):
+            out = self._routed(fresh_manager, routed, StaticCollector())
+        assert (
+            '<script type="speculationrules">{}</script>\n<script data-h></script>'
+        ) in out

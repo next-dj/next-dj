@@ -41,7 +41,7 @@ The visitor cookie takes the path, domain, ``Secure`` flag, ``SameSite`` value, 
 Write a binding
 ~~~~~~~~~~~~~~~
 
-A project binding subclasses ``TicketBinding`` and implements four methods.
+A project binding subclasses ``TicketBinding`` of ``next.identity`` and implements four methods.
 A fifth, ``live_session``, serves SSE and has a default.
 ``issue(request)`` runs while the ticket is negotiated and returns the subject the ticket binds.
 ``credential(cookies)`` reads the credential from the cookies of the WebSocket handshake.
@@ -65,7 +65,8 @@ The database stores only a digest of each token, so the credential is that diges
    from django.http import HttpRequest
    from django.utils import timezone
 
-   from next.realtime import InvalidTicketError, LiveIdentity, TicketBinding
+   from next.identity import LiveIdentity, TicketBinding
+   from next.realtime import InvalidTicketError
 
    PREFIX = "token:"
 
@@ -134,7 +135,7 @@ It does no database, cache, or network access, and the credential carries everyt
 ``subject`` returns ``None`` for a credential it does not recognise.
 
 A ticket stores a digest of the subject under ``SECRET_KEY`` and is accepted under any ``SECRET_KEY_FALLBACKS`` entry too, so rotating the key does not strand a ticket for its short lifetime.
-Over SSE the default ``live_session`` hands the session key of the request to ``stored_session`` from ``next.realtime.binding``.
+Over SSE the default ``live_session`` hands the session key of the request to ``stored_session`` from ``next.identity``.
 A binding with no sessions overrides ``live_session`` to return ``None``, and one with its own SSE identity returns a ``LiveIdentity`` from it.
 
 Limits

@@ -22,7 +22,7 @@ Partial rendering uses a single protocol backend, so only the first entry runs.
 A singular ``*_BACKEND`` key holds the one engine for a concern.
 A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``, ``PARTIAL_``) groups related keys.
 ``NEXT_JS_OPTIONS`` stands outside the prefix scheme and configures the bundled client runtime.
-``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY``, ``CSP_NONCE``, and ``DEV_SERVER`` as single values.
+``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``, ``TRANSACTIONS``, ``DEFER``, ``COMPRESSION``, and ``ROUTER`` stand outside it as the scopes of one concern each, and ``CSRF_DELIVERY``, ``CSP_NONCE``, and ``DEV_SERVER`` as single values.
 
 .. _ref-settings-merge:
 
@@ -38,7 +38,7 @@ The rule holds for every key, with no per-key exception.
 This is what Django does with its own configuration mappings.
 Defining :doc:`STORAGES <django:ref/settings>` overrides the default configuration rather than merging with it, and ``TEMPLATES``, ``DATABASES``, and ``CACHES`` each read the whole list or mapping the project wrote.
 Filling in what a single entry leaves out belongs to the code that consumes the entry, the same place Django fills a ``DATABASES`` alias with ``ATOMIC_REQUESTS`` or a ``TEMPLATES`` entry with ``APP_DIRS``.
-The scopes ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
+The scopes ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``, ``TRANSACTIONS``, and ``DEFER`` are such consumers, since every read goes through ``next.conf.scopes.scope_value``, which answers the default of a sub-key the project leaves out, see :doc:`conf`.
 A nested ``OPTIONS`` inside a scope still comes from the project alone once the project sets it.
 
 A single backend dict follows the rule like any other key.
@@ -48,7 +48,7 @@ Write the whole entry, ``BACKEND`` included.
 Each key accepts one shape, and a value of any other type is dropped in favour of the default rather than merged into it.
 
 - The list keys (``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``PARTIAL_BACKENDS``, ``TEMPLATE_LOADERS``, ``FORM_ANCHOR_FILES``) accept a list.
-- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``) accept a dict.
+- The mapping keys (``NEXT_JS_OPTIONS``, ``FORM_WIZARD_BACKEND``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``, ``TRANSACTIONS``, ``DEFER``, ``COMPRESSION``, ``ROUTER``) accept a dict.
 - The dotted-path keys (``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``COMPONENT_TEMPLATE_LOADER``) accept a string naming an importable class, and ``JS_CONTEXT_SERIALIZER`` accepts such a dotted path or ``None``.
 - ``CSRF_DELIVERY`` accepts a string naming a mode.
 - ``STATIC_VERSION`` accepts a string or ``None``.
@@ -146,9 +146,15 @@ Default value.
    [
        {
            "BACKEND": "next.forms.RegistryFormActionBackend",
-           "OPTIONS": {},
+           "OPTIONS": {"SHAPER": "next.partial.FormShaper"},
        }
    ]
+
+``OPTIONS["SHAPER"]`` is the dotted path to the ``ResponseShaper`` class a backend asks before its default response envelope, and an entry without it keeps ``next.partial.FormShaper``.
+The option applies only to a backend that passes its config to the base initialiser, so a subclass with its own ``__init__`` calls ``super().__init__(config)``, and one that does not keeps ``next.partial.FormShaper``.
+The backend imports and instantiates the class the first time it shapes a response, and a path that does not import, a class that cannot be built without arguments, or one without ``shape`` and ``validate`` raises :class:`~django.core.exceptions.ImproperlyConfigured` there.
+``manage.py check`` resolves the shaper of every loaded backend and reports the same failures as ``next.E241``.
+See :doc:`forms` under *Backends* for the protocol.
 
 FORM_ANCHOR_FILES
 ~~~~~~~~~~~~~~~~~
@@ -299,7 +305,8 @@ Default value.
        Unset, the pool takes ``max_connections`` from ``CLIENT``, or the redis-py default of 100, and ``manage.py check --deploy`` reports ``next.W151`` when neither is set.
 
 ``MemoryBroker`` serves one process and does not coordinate sequence numbers across processes.
-``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.
+``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149`` once realtime is in use, meaning ``NEXT_FRAMEWORK`` sets a non-empty ``REALTIME`` mapping, an ``@on`` handler is registered, the URLconf routes the ticket introspection view, or a routed ``page.py`` holds a ``TopicStream``.
+A project that never touches realtime gets no warning, and a deployment that runs one process lists the code in ``SILENCED_SYSTEM_CHECKS``.
 ``RedisBroker`` needs the ``broker`` extra, which installs ``redis`` 8 or newer.
 A custom backend validates its own ``OPTIONS`` keys in its ``check_options`` classmethod, which ``manage.py check`` calls, and reports its deployment warnings from ``check_deployment``, which ``manage.py check --deploy`` calls, see :doc:`realtime`.
 
@@ -487,9 +494,13 @@ NEXT_JS_OPTIONS
 ~~~~~~~~~~~~~~~~~
 
 Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime.
-Keys are the injection ``policy`` (``auto``, ``disabled``, or ``manual``) and the optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
+Keys are the injection ``policy`` (``auto``, ``disabled``, or ``manual``) and the optional string templates ``preload_template``, ``script_tag_template``, ``init_template``, and ``chunk_template``, the script a streamed page pushes each chunk with.
 A ``policy`` no member names reads as ``auto``, and a template ``.format`` cannot fill is replaced by the default one.
+The ``{payload}`` of ``chunk_template`` is escaped for the text of a ``<script>`` element alone, so a template that places it anywhere else, an attribute included, is replaced by the default one too.
 ``manage.py check`` reports both, and a render meets them under :ref:`topics-failure-containment`.
+``script_tag_template`` also renders the tag of each bundle a page declares, such as ``defer``, ``reload``, ``more``, or ``reader``, with its load attributes added after ``<script``, and the default tag serves a template that holds no ``<script``.
+A bundle loads with ``async fetchpriority="low"``, with ``async`` on a streamed page for the ``reader`` bundle and for every bundle of a page that holds a ``load`` boundary, and with ``defer`` on a page that holds a ``load`` boundary and does not stream.
+Under ``manual`` those bundle tags open the ``{% collect_scripts %}`` slot, so the tag that loads the runtime goes above it, and under ``disabled`` none renders, which ``next.W181`` reports.
 
 Default value ``{}`` (automatic injection with default templates).
 
@@ -526,6 +537,374 @@ The key closes the page trees alone, so a Django view of the project outside the
 Default value ``False``.
 ``manage.py check`` warns with ``next.W130`` about ``False`` written beside the middleware and with ``next.W131`` about ``True`` without ``django.contrib.auth`` and its ``AuthenticationMiddleware``.
 :ref:`topics-access-default-login` describes the behaviour and how ``page.public()`` differs from :func:`~django.contrib.auth.decorators.login_not_required`.
+
+Transactions
+------------
+
+TRANSACTIONS
+~~~~~~~~~~~~
+
+Dict holding the transaction rule of ``next.transactions``, which names per request the databases whose transaction wraps it.
+
+Default value.
+
+.. code-block:: python
+
+   {"SAFE": False, "UNSAFE": True, "ALIASES": ("default",), "RULE": None}
+
+``SAFE`` decides for ``GET``, ``HEAD``, ``OPTIONS``, and ``TRACE``, and ``UNSAFE`` for every other method, ``True`` meaning a transaction on each alias of ``ALIASES``.
+``ALIASES`` is a list of ``DATABASES`` aliases, or ``"all"`` for every alias ``DATABASES`` declares, nested the way ``ATOMIC_REQUESTS`` nests them, so the last alias holds the outermost transaction and commits last.
+An alias ``DATABASES`` does not declare is skipped, so a project without a database opens no transaction.
+``RULE`` is the dotted path of a callable taking the request and the view kind, ``page`` for a page, ``zone`` for a zone request to a page, ``boundary`` for a boundary reload, ``navigation`` for a client router navigation, or ``action`` for a form action, and returning the aliases to wrap, which replaces ``SAFE``, ``UNSAFE``, and ``ALIASES`` when set.
+Its answer passes the same filter as ``ALIASES``, so a single alias name counts as a one-item tuple, an undeclared alias is skipped, and a repeated one opens once.
+The transaction opens eagerly, so a :func:`~django.db.transaction.on_commit` hook registered before the first query still waits for the commit, and a request that wraps no alias touches no connection.
+The aliases come from ``django.db.connections``, the source ``ATOMIC_REQUESTS`` reads, and the scope is read once and again after a settings reload or a change of the connection settings.
+Every view next.dj mounts for pages and form actions, zone requests included, follows this rule in place of ``ATOMIC_REQUESTS``, which other Django views keep.
+The access checks of a page and of a form action run before the transaction opens, so a refused request opens none, and the checks of a form action on its bound row run inside it, see :doc:`views` and :doc:`forms`.
+``page.atomic()`` in a ``page.py`` overrides the rule for one page, and ``@action(atomic=...)`` or ``Meta.atomic`` on a form class for one action, see :doc:`pages` and :doc:`forms`.
+``page.atomic()`` covers the full page, zone, boundary, and navigation requests of its page and none of the actions the page declares.
+A form action answers only ``POST``, so under the default ``UNSAFE`` a :func:`~django.db.transaction.on_commit` hook registered inside it fires when the action's transaction commits, not when it is registered.
+An action whose handler does slow work outside the database, such as a sleep, an outbound HTTP call, or sending mail, opts out with ``atomic=False`` or ``Meta.atomic = False``, so it holds no connection inside an open transaction while that work runs.
+
+A missing key takes its default, any key besides the four is reported as ``next.E035``, and a value of the wrong type is reported as ``next.E076`` and read as its default.
+``manage.py check`` reports a ``RULE`` that does not import or names no callable as ``next.E237``, the same path raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the rule is first read, and an ``ALIASES`` entry missing from ``DATABASES`` is reported as ``next.W179``.
+A database alias with ``ATOMIC_REQUESTS`` set is reported as ``next.W154``, since next.dj views ignore it.
+
+Deferred work
+-------------
+
+DEFER
+~~~~~
+
+Dict holding the settings of deferred boundaries, error boundaries, and the request-scoped batches of ``next.deps.Loader``, see :doc:`/content/topics/boundaries/index`.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "EXECUTOR": {
+           "BACKEND": "next.suspense.LaneExecutor",
+           "OPTIONS": {
+               "MAX_WORKERS": 16,
+               "PER_REQUEST": 4,
+               "QUEUE_TIMEOUT": 0.05,
+               "MAX_QUEUE": 64,
+               "MAX_FOREGROUND": 16,
+               "CONN_IDLE": 60.0,
+               "PARALLEL": True,
+               "SQLITE": "foreground",
+               "THREAD_LOCAL_MIDDLEWARE": (),
+               "PLACEMENT": {
+                   "MODE": "adaptive",
+                   "HANDOFF": 0.0003,
+                   "CPU_RATIO": 0.8,
+                   "CPU_MAX": 0.002,
+                   "EXPLORE": 3,
+               },
+           },
+       },
+       "POLICY": {
+           "BACKEND": "next.suspense.DefaultStreamPolicy",
+           "OPTIONS": {"STREAM": True, "BOTS": None, "SYNC_WORKERS": "inline"},
+       },
+       "TRANSPORT": {
+           "BACKEND": "next.suspense.DefaultStreamTransport",
+           "OPTIONS": {
+               "INCREMENTAL": None,
+               "CONCURRENT": None,
+               "BUFFERED_MARKS": None,
+           },
+       },
+       "TOKENS": {
+           "BACKEND": "next.suspense.StackedTokenBackend",
+           "OPTIONS": {
+               "CODEC": "next.suspense.JsonCodec",
+               "STORAGE": "next.suspense.InlineStorage",
+               "SEAL": "next.suspense.SignedSeal",
+               "BINDING": "next.suspense.NoBinding",
+               "TRANSPORT": "next.suspense.HeaderTransport",
+               "MAX_AGE": 600,
+               "BUCKET": None,
+               "MAX_BYTES": 2048,
+               "MAX_STORED_BYTES": 65536,
+               "CACHE_ALIAS": "default",
+               "KEYS": None,
+               "EPOCH": 1,
+           },
+       },
+       "CONNECTION_STATE": [],
+       "THREAD_STATE": [],
+       "ADMISSION": "next.suspense.QueueDelay",
+       "DEADLINE": 10.0,
+       "DEADLINE_TO_DB": "state",
+       "DB_TIMEOUT_FLOOR": 0.05,
+       "WRITE_GRACE": 2.0,
+       "REQUEST_CONCURRENCY": 1,
+       "MAX_BOUNDARIES": 64,
+       "MAX_PER_SITE": 4,
+       "MAX_DEPTH": 4,
+       "MAX_INSTANCES": 1000,
+       "MAX_STREAMS": "auto",
+       "BATCH_WINDOW": 0.001,
+       "LOADER_MAX_BATCH": 500,
+       "LOADING": None,
+       "ERROR": None,
+       "NOSCRIPT": True,
+       "ERRORS": {
+           "RAISE": False,
+           "REPORTER": None,
+           "ATOMIC": "writes",
+           "KINDS": "detailed",
+           "DEBUG_DETAIL": True,
+       },
+       "MORE": {"MAX_RESTORE": 10},
+   }
+
+``EXECUTOR`` names the ``BoundaryExecutor`` of the pool lane and its ``OPTIONS``.
+``MAX_WORKERS`` is the most pool threads the process starts, on demand, and a thread idle for ``CONN_IDLE`` seconds closes its connections and later exits.
+``PER_REQUEST`` is the most pool jobs one response holds at once, and the size of a group the later calls of one site run in.
+A pool job waits at most ``QUEUE_TIMEOUT`` in a queue of at most ``MAX_QUEUE`` jobs before its request thread takes it, and ``MAX_FOREGROUND`` bounds the request-lane work of the process under ASGI.
+``PARALLEL`` set to ``False`` keeps every job on its request thread.
+``SQLITE`` of ``"foreground"`` keeps the jobs of a project with a SQLite alias on the request thread, and ``"parallel"`` lets a file database use the pool.
+``THREAD_LOCAL_MIDDLEWARE`` lists the dotted paths of middleware that keep request state on the thread, which pins jobs to the request thread until a ``THREAD_STATE`` backend covers them.
+``PLACEMENT["MODE"]`` of ``"pool"`` sends every job no rule pins to the pool, and ``"adaptive"`` chooses per call site from the costs it measures.
+A site runs ``EXPLORE`` jobs on the pool before its cost decides, a site whose jobs take less than ``HANDOFF`` seconds stays on the request thread, and so does one whose CPU time passes ``CPU_RATIO`` of its wall time within ``CPU_MAX`` seconds while the GIL is on.
+
+``POLICY`` names the ``StreamPolicy`` that decides how a response delivers its boundaries.
+The ``OPTIONS`` of the default one are ``STREAM``, ``False`` assembling every response inline, ``BOTS``, the case-insensitive pattern of the user agents assembled inline, ``None`` naming the common crawlers, and ``SYNC_WORKERS``, ``"inline"`` or ``"stream"`` for a transport that serves one request at a time.
+
+``TRANSPORT`` names the ``StreamTransport`` that tells once per request whether the response reaches its client write by write and whether the server serves other requests meanwhile, see :doc:`/content/topics/boundaries/streaming`.
+The ``OPTIONS`` of the default one are ``INCREMENTAL`` and ``CONCURRENT``, ``True`` or ``False`` stating the fact over every detection and ``None`` detecting it, and ``BUFFERED_MARKS``, the request keys and key prefixes that the buffering adapter of the project leaves.
+``BUFFERED_MARKS`` is ``None`` for no marks, or a dict with a ``WSGI`` and an ``ASGI`` entry, each a dict of ``KEYS`` and ``PREFIXES`` lists of strings.
+A transport that is not incremental assembles every page inline, and one that is not concurrent follows ``SYNC_WORKERS``, see :doc:`/content/deployment/platforms`.
+
+``TOKENS`` names the token backend of client-trip boundaries and its ``OPTIONS``, the ``CODEC``, ``STORAGE``, ``SEAL``, ``BINDING``, and ``TRANSPORT`` classes, ``MAX_AGE`` and ``BUCKET`` described below, ``MAX_BYTES``, the largest token, ``MAX_STORED_BYTES``, the largest claims a cache storage keeps, and ``EPOCH``, whose change refuses every token minted before it.
+``BUCKET`` floors the mint second of a token to a multiple of it, so equal claims mint an equal token and a cached shell stays byte-stable.
+``BINDING`` is a short name, ``"none"``, ``"session"``, or ``"user"``, the dotted path of a concrete ``SubjectBinding`` subclass that takes no arguments, such as ``next.suspense.UserBinding``, or the dotted path of a callable that takes the request and returns the subject as text or ``None``, which ``CallableBinding`` wraps, see :doc:`/content/topics/boundaries/loading`.
+``TRANSPORT`` names where the browser sends the token on a reload, ``next.suspense.HeaderTransport`` in the ``X-Next-Boundary`` header, ``next.suspense.QueryTransport`` in the ``_nb`` query field, or ``next.suspense.BodyTransport`` in the ``_nb`` field of a ``POST`` body.
+
+``CONNECTION_STATE`` and ``THREAD_STATE`` list the dotted paths of ``ConnectionState`` and ``ThreadState`` subclasses, which replay per-connection and thread-local state on a pool thread, and ``ADMISSION`` names the ``Admission`` that decides between the pool queue, the request thread, and shedding.
+
+``DEADLINE`` is the seconds every job of a response has from the moment the response opened, after which a job settles as ``timeout``, and ``WRITE_GRACE`` the seconds past it a stream still writes settled jobs before it ends.
+``DEADLINE_TO_DB`` hands the remaining time of a pool job to PostgreSQL as its statement timeout, ``"state"`` inside the transaction a ``ConnectionState`` replay opens, ``"always"`` in one opened for that alone, and ``False`` never, and ``DB_TIMEOUT_FLOOR`` is the least timeout it sets.
+``REQUEST_CONCURRENCY`` is the request threads one process runs, which sizes ``MAX_STREAMS`` of ``"auto"`` under WSGI and the connections ``next.W162`` compares a pool against.
+``MAX_STREAMS`` is the most open streams of a process, ``"auto"`` meaning four per pool worker under ASGI and half of ``REQUEST_CONCURRENCY``, at least one, otherwise.
+``MAX_BOUNDARIES``, ``MAX_PER_SITE``, ``MAX_DEPTH``, and ``MAX_INSTANCES`` bound the jobs of one response, the jobs that run on their own, those of one call site that do, the nesting depth, and the calls that queue at all.
+
+``LOADING`` and ``ERROR`` name the templates a deferred component without a ``loading.djx`` or an ``error.djx`` renders, ``None`` for none, and ``NOSCRIPT`` hides the loading UI of a streamed page read without scripts.
+``ERRORS`` configures every error boundary, ``RAISE`` re-raising each contained failure, ``REPORTER`` naming a callable that reports a failure and returns its digest or ``None`` for none, ``ATOMIC`` choosing ``"writes"``, ``True``, or ``False`` for what a failed subtree rolls back in autocommit, ``KINDS`` of ``"opaque"`` reading every kind with a status as ``error``, and ``DEBUG_DETAIL`` showing the traceback under ``DEBUG``, see :doc:`/content/topics/boundaries/errors`.
+
+``LOADER_MAX_BATCH`` is the most keys one call of a batch function receives, an integer from ``1``, default ``500``.
+A batch that reaches it closes at once and the next key opens another one.
+``BATCH_WINDOW`` is how long a batch stays open after its first key so that concurrent callers join it, a duration from ``0`` written as a number of seconds or as a literal such as ``"1ms"`` or ``"2s"``, default ``0.001``.
+A ``Loader`` built with ``max_batch=`` or ``window=`` keeps its own limit, and one built without them reads the setting each time it opens or fills a batch, so a settings reload reaches loaders built before it.
+
+``MORE["MAX_RESTORE"]`` is the most batches a pager renders for a restored ``{% more %}`` list, an integer from ``1``, default ``10``.
+A ``NumberPager`` answers ``?page=N&restore=1`` with pages ``max(1, N - MAX_RESTORE + 1)`` to ``N``, and a ``KeysetPager`` answers ``?cursor=<token>&restore=1`` with the batch the token names and the whole batches before it, see :ref:`ref-partial-infinite-lists`.
+
+Every duration of the scope is at most one day, ``86400`` seconds or ``"86400s"``, and a longer or non-finite one is outside its shape.
+
+``TOKENS["OPTIONS"]`` of the shipped token backend checks its static values together.
+``MAX_AGE`` is an integer from ``1`` or the dotted path of a callable taking the request and the claims, ``BUCKET`` stays below it, and a value outside either rule is reported as ``next.E233`` and read as its default.
+A token seals its expiry at mint, and a redeem accepts it only before the earlier of that second and its mint second plus the lifetime ``MAX_AGE`` answers then, so a callable can shorten the life of a token and never extend it.
+A ``BUCKET`` that reaches the lifetime a callable answers raises :exc:`~django.core.exceptions.ImproperlyConfigured` at mint instead of minting a token born expired.
+A ``MAX_AGE`` above one day draws the ``next.W175`` warning.
+``KEYS`` is ``None`` or a list of keys of 32 characters or more, and any other value is reported as ``next.E233`` and read as its default.
+With ``KEYS`` left at ``None`` the ring is ``SECRET_KEY`` followed by ``SECRET_KEY_FALLBACKS``, each held to the same 32 characters, and a shorter one is reported as ``next.E231`` while a component can mint a token, and raises :exc:`~django.core.exceptions.ImproperlyConfigured` at the first mint or redeem.
+A dotted ``KEYS`` callable is asked again at most once a minute, and every key it answers is held to the same rule.
+``SpillStorage`` keeps the claims inside the token while the whole token fits ``MAX_BYTES`` and stores larger claims in the cache, so it has no threshold of its own.
+``CacheStorage`` and ``SpillStorage`` write to ``CACHE_ALIAS``, and Django unpickles a cache entry before the token's MAC is checked, so the alias must name a cache whose writers are trusted exactly like those of the session cache.
+Leaving ``CACHE_ALIAS`` unset with either storage draws the ``next.W180`` warning, and an alias that stores where the session engine keeps sessions is reported as ``next.E234``.
+``SignedSeal`` signs a token without hiding it, so a client reads its props, the component name, the scope, the URL, and the permission codenames the boundary renders under, while ``EncryptedSeal`` hides them all.
+
+A missing key takes its default, nested keys included, so a project that sets ``ERRORS["RAISE"]`` keeps the defaults of the other ``ERRORS`` keys.
+An unknown key at any level of the mapping is reported as ``next.E035``, and a value outside its shape is reported as ``next.E076`` and read as its default.
+
+Compression
+-----------
+
+COMPRESSION
+~~~~~~~~~~~
+
+Dict holding the settings of response compression, read by ``next.middleware.CompressionMiddleware`` and by the streams that compress themselves, see :doc:`compression`.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "ENABLED": True,
+       "BACKENDS": [
+           "next.compression.ZstdBackend",
+           "next.compression.BrotliBackend",
+           "next.compression.GzipBackend",
+       ],
+       "ORDER": ("zstd", "br", "gzip"),
+       "LEVELS": {"zstd": 3, "br": 4, "gzip": 4},
+       "WINDOWS": {"zstd": 17, "br": 18},
+       "MIN_SIZE": 1024,
+       "CONTENT_TYPES": (
+           "text/*",
+           "application/json",
+           "application/ld+json",
+           "application/manifest+json",
+           "application/problem+json",
+           "application/x-ndjson",
+           "application/javascript",
+           "application/xml",
+           "application/xhtml+xml",
+           "application/rss+xml",
+           "application/atom+xml",
+           "image/svg+xml",
+       ),
+       "STREAMS": "self",
+       "SSE": True,
+       "SSE_TOPICS": "off",
+       "PADDING": 32,
+       "COALESCE_MS": 2,
+       "OFFLOAD_BYTES": 16384,
+       "RESPECT_NO_TRANSFORM": True,
+       "EXCLUDE": None,
+   }
+
+``ENABLED`` switches compression on and off for the middleware and for every self-compressing stream at once.
+``BACKENDS`` lists the dotted paths of the ``CompressionBackend`` classes the process loads, the first backend of a coding answering it.
+``ORDER`` is the server preference among the codings, and a coding whose library does not import is left out of it at runtime.
+``LEVELS`` and ``WINDOWS`` map a coding to its compression level and to its stream window as a base-2 logarithm, each laid over its default key by key, and a value outside the range of the codec falls back to the default of the codec.
+gzip takes no window, its window is fixed at 32 KB.
+``MIN_SIZE`` is the smallest buffered body in bytes that is compressed.
+``CONTENT_TYPES`` lists the lower-case media types that are compressed, exactly or as a ``type/*`` family.
+``STREAMS`` names who compresses a next.dj document stream, ``"self"`` for the stream itself and ``"middleware"`` for the middleware, the choice for a project whose other middleware rewrites streamed bodies.
+``SSE`` decides whether ``text/event-stream`` responses are compressed.
+``SSE_TOPICS`` decides how a realtime topic stream is compressed, ``"off"`` for not at all, ``"reset"`` for a fresh window per event on a codec that can drop its window, and ``"shared"`` for one window across the stream.
+``PADDING`` is the most random characters the comment appended to each flushed write of an HTML document or an event stream carries, ``0`` turning the padding off.
+``COALESCE_MS`` is how long a streamed page writer waits for more ready output before it compresses and flushes, in milliseconds.
+``OFFLOAD_BYTES`` is the largest write compressed on the event loop under ASGI, a larger one being compressed in a worker thread.
+``RESPECT_NO_TRANSFORM`` leaves a response with ``Cache-Control: no-transform`` uncompressed.
+``EXCLUDE`` is ``None`` or the dotted path of a callable taking the request and the response that returns ``True`` to keep the response uncompressed.
+
+A missing key takes its default.
+An unknown key is reported as ``next.E035``, and a value outside its shape is reported as ``next.E076`` and read as its default.
+A ``BACKENDS`` or ``EXCLUDE`` path that names nothing usable is reported as ``next.E219``, and an unknown coding, a level or a window outside its range, or a codec ``ORDER`` forces without its library as ``next.E228``.
+
+Client router
+-------------
+
+ROUTER
+~~~~~~
+
+Dict holding the settings of the client router, which answers a same-document navigation with only the slot of the deepest layout the old and the new page share.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "ENABLED": True,
+       "SCOPE": "all",
+       "EXCLUDE": (),
+       "FOREIGN": "hard",
+       "PREFETCH": "intent",
+       "PREFETCH_DELAY": 0.065,
+       "PREFETCH_TTL": 30.0,
+       "PREFETCH_SHELL_TTL": 300.0,
+       "PREFETCH_ENTRIES": 16,
+       "SNAPSHOTS": 10,
+       "PROGRESS_DELAY": 0.15,
+       "PROGRESS": True,
+       "TRANSITIONS": False,
+       "INTERCEPT": "opt-in",
+       "SPECULATION": None,
+       "MAX_LAYOUTS": 32,
+       "CUT": "next.router.VerifiedCut",
+       "DIGEST": "next.router.ChromeDigest",
+       "CURRENT": {
+           "ENABLED": True,
+           "BACKEND": "next.router.CurrentLinks",
+           "CONTAINERS": ("nav", "[role=navigation]", "[data-next-nav]"),
+       },
+   }
+
+The browser reads every key but ``ENABLED``, ``PROGRESS``, ``SPECULATION``, ``CUT``, ``DIGEST``, and ``CURRENT["BACKEND"]`` from the ``$router`` payload entry.
+
+``ENABLED``, default ``True``
+   Switches the router on.
+   With it off, composition writes no slot marker, no document carries ``$router``, ``$layouts``, the router bundle, or Speculation Rules, a request carrying the navigation headers is answered as a plain page, and active links keep working.
+
+``SCOPE``, default ``"all"``
+   ``"all"`` takes over every same-origin link, and ``"opt-in"`` only the links inside an element carrying ``data-next-router``.
+
+``EXCLUDE``, default ``()``
+   Path prefixes, each starting with ``/``, that the router never takes over, after the prefixes derived from ``STATIC_URL``, ``MEDIA_URL``, and the admin site.
+   A prefix matches the start of the URL path, the script prefix included, as plain text, so ``"/docs"`` also covers ``/docs-archive/`` and ``"/docs/"`` covers only that directory.
+   A bare ``"/"`` and a repeat of a derived prefix are dropped, and the browser sees the result as ``exclude`` in ``$router``.
+   A link under an excluded prefix loads as the browser would load it, and ``SPECULATION`` hands it to the browser's own prefetch.
+   A prefix that starts no path of the URLconf draws ``next.W184``.
+
+``FOREIGN``, default ``"hard"``
+   What the browser does with an answer that is no navigation envelope.
+   ``"hard"`` loads the URL as a new document and remembers its path for the tab, and ``"extract"`` reads a ``text/html`` answer in the browser and swaps it in like a navigation.
+
+``PREFETCH``, default ``"intent"``
+   ``"intent"`` prefetches a link the pointer or the focus rests on, or one pressed.
+   ``"viewport"`` also prefetches every owned link once as it scrolls into view, at the price of one render per link in view, and ``"off"`` prefetches nothing on its own.
+   ``data-next-prefetch`` set to ``"viewport"``, ``"intent"``, or ``"off"`` on an element overrides the mode for the links inside it, see :doc:`/content/topics/router/prefetch`.
+
+``PREFETCH_DELAY``, default ``0.065``
+   The seconds, above ``0``, the pointer or the focus rests on a link before it is prefetched.
+
+``PREFETCH_TTL``, default ``30.0``
+   The seconds, above ``0``, a prefetched answer marked ``complete`` stays usable, and the age up to which Back or Forward shows a history snapshot without fetching the page again.
+
+``PREFETCH_SHELL_TTL``, default ``300.0``
+   The seconds, above ``0``, a prefetched shell, an answer not marked ``complete``, stays usable.
+   A navigation that applies a shell always fetches the page beside it, so a shell can live longer than a complete answer.
+
+``PREFETCH_ENTRIES``, default ``16``
+   The prefetched answers the browser keeps, an integer from ``1``, the oldest dropped first.
+   A link in view waits while the kept answers and the prefetches in flight reach this number, until a shell older than ``PREFETCH_TTL`` gives way, the oldest first.
+
+``SNAPSHOTS``, default ``10``
+   The history snapshots a tab keeps in memory and the scroll positions it saves in ``sessionStorage``, an integer from ``1``.
+
+``PROGRESS_DELAY``, default ``0.15``
+   The wait in seconds, above ``0``, before a navigation marks ``<html>`` with ``data-next-navigating``.
+
+``PROGRESS``, default ``True``
+   Puts a ``<style>`` with the default progress bar, keyed on ``html[data-next-navigating]``, in the head of every routed document, with the CSP nonce of the response.
+   ``False`` leaves the progress UI to the project, see :doc:`/content/topics/router/browser`.
+
+``TRANSITIONS``, default ``False``
+   Runs each swap of a slot or the body inside a view transition, where the browser supports one and the visitor has not asked for reduced motion.
+
+``INTERCEPT``, default ``"opt-in"``
+   ``"opt-in"`` opens the layer of an intercepted page only from a ``data-next-layer`` link, and ``"links"`` answers a plain navigation to such a page with its layer.
+
+``SPECULATION``, default ``None``
+   ``None`` emits no Speculation Rules.
+   ``"conservative"``, ``"moderate"``, or ``"eager"``, as a string or as ``{"eagerness": ...}``, makes every routed document carry a prefetch rule for the same-origin links the router does not own.
+   A value that names another eagerness, asks for ``prerender``, or holds another key emits nothing and is reported as ``next.E242``.
+
+``MAX_LAYOUTS``, default ``32``
+   The layouts a navigation declares, an integer from ``1``.
+   The browser sends at most that many, and the server reads a declaration past it or past 1 KB as none.
+
+``CUT``, default ``"next.router.VerifiedCut"``
+   The ``NavigationCut`` subclass that decides how far a navigation keeps the layouts.
+
+``DIGEST``, default ``"next.router.ChromeDigest"``
+   The ``ChromeDigest`` subclass that normalises and digests their chrome.
+
+``CURRENT``, default ``{"ENABLED": True, "BACKEND": "next.router.CurrentLinks", "CONTAINERS": ("nav", "[role=navigation]", "[data-next-nav]")}``
+   The settings of active links, ``True`` for the defaults, ``False`` to switch the pass off, or a dict whose missing keys take their defaults.
+   ``CURRENT["ENABLED"]`` switches the server pass and the client pass together, independently of ``ENABLED``.
+   ``CURRENT["BACKEND"]`` names the ``CurrentLinks`` subclass that marks the links.
+   ``CURRENT["CONTAINERS"]`` lists the navigation containers whose links are marked, each a tag name, ``[attr]``, or ``[attr=value]`` with the value bare or quoted.
+
+A missing key takes its default, nested ``CURRENT`` keys included, and a key or value outside its shape is reported as ``next.E236`` and read as its default.
+A ``CUT``, ``DIGEST`` or ``CURRENT['BACKEND']`` path that names no usable class is reported as ``next.E237``.
+See :doc:`/content/topics/router/index`, :doc:`/content/topics/router/prefetch`, and :doc:`router`.
 
 Strictness
 ----------

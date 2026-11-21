@@ -2,6 +2,7 @@ from catalog.deps import DFilters, DPage
 from catalog.models import Category
 from catalog.services import brands, cached_search
 from catalog.zones import CATEGORY_ZONES, zone_target
+from django.core.paginator import Page, Paginator
 from django.shortcuts import get_object_or_404
 
 from next import context, page
@@ -12,7 +13,7 @@ from next.pages import MetadataDict
 def filter_zones() -> str:
     """Name every zone the live filter re-renders on a category listing.
 
-    The listing paginates, so the set drops `catalog-more` and keeps the pager.
+    The listing paginates, so the set drops the sentinel zone and keeps the pager.
     """
     return zone_target(CATEGORY_ZONES)
 
@@ -30,9 +31,10 @@ def category_meta(category: Category) -> MetadataDict:
 
 
 @context("page_obj")
-def page_obj(category: Category, filters: DFilters, page: DPage) -> dict:
-    """Return the cached search payload scoped to the current category."""
-    return cached_search(filters, page.number, page.per_page, category=category)
+def page_obj(category: Category, filters: DFilters, page: DPage) -> Page:
+    """Return the page of the cached search scoped to the current category."""
+    rows = cached_search(filters, category=category)
+    return Paginator(rows, page.per_page).get_page(page.number)
 
 
 @context("all_brands")

@@ -8,7 +8,7 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 | URL | Description |
 | --- | --- |
-| `/` | Overview with four headline counters in a polling zone, a React sparkline, and a lazy-loaded busiest-pages widget. |
+| `/` | Overview with four headline counters in a polling zone, a React sparkline, a busiest-pages widget that fetches itself once the page loads, and a render-latency table whose `error.djx` stands in for it alone when the counter store loses half of a pair. |
 | `/stats/` | Live page with the Chart.js bar chart and the window filter. `?window=1m`, `?window=5m`, and `?window=1h` each re-aggregate over real minute buckets. |
 | `/stats/pages/` | Per-page render counts pulled from the cumulative `pages.rendered` kind. |
 | `/stats/components/` | Per-component render counts. |
@@ -21,7 +21,7 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
 
-The overview shows the other two zone modes. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders, which shows that the polling works. The busiest-pages widget below the sparkline is a `lazy="load"` zone: the first paint ships only its `{% placeholder %}` branch and the body arrives through one batched zone-GET as soon as the page loads. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so the lazy GET for the widget skips the four counter aggregations it would never read, while the full render still runs them.
+The overview shows a polling zone next to a component that loads later. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders, which shows that the polling works. The busiest-pages widget below the sparkline is a deferred component: its `component.py` calls `component.defer("load")`, so the first paint ships only the `loading.djx` beside it and the browser fetches the component in one GET as soon as the page loads. The component reads its own rows through `@component.context`, which is what lets it render on that later request without the page. An `error.djx` stands in for it alone if that render fails. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so a GET of any other zone skips the four counter aggregations it would never read, while the full render still runs them, and the widget's own request never runs page callables at all.
 
 ## How to run
 
@@ -68,7 +68,7 @@ obs/
 ├── apps.py                   <- registers the jsx kind and the metric-pulse verb
 ├── models.py                 <- MetricSnapshot persisted by flush_metrics
 ├── forms.py                  <- WindowFilterForm, partial apply emits metric-pulse
-├── metrics.py                <- LocMemCache counter API, bucketed and cumulative
+├── metrics.py                <- LocMemCache counter API, bucketed and cumulative, mean render times
 ├── backends.py               <- CountingComponentsBackend, BabelJsxBackend
 ├── static_policies.py        <- InstrumentedDedup
 ├── serializers.py            <- PydanticJsContextSerializer + WrappedJsContextSerializer
@@ -78,10 +78,11 @@ obs/
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
-    ├── template.djx          <- poll zone with the overview grid, React sparkline, lazy busiest-pages widget
+    ├── template.djx          <- poll zone with the overview grid, React sparkline, deferred busiest-pages widget, latency widget
     ├── _components/
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
-    │   ├── busiest_pages/    <- lazy-zone body, component-level top_by_kind lookup
+    │   ├── busiest_pages/    <- component.defer("load"), loading.djx and error.djx, its own top_by_kind lookup
+    │   ├── latency_widget/   <- mean render time per page, error.djx contains its own failures
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
     │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, chart.js cdn via stats/page.py
@@ -253,7 +254,7 @@ The form component lives under [`_components/filter_window/`](obs/pages/_compone
 
 ### 8. A project-defined patch verb, `metric-pulse`
 
-The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which makes the verb available through the generic `op()` channel on the builder. An unregistered verb is refused at build time with `UnknownPatchOpError`. `register_patch_op` raises `BuiltinPatchOpError` for a name that shadows a built-in verb, and the system check `next.E090` reports a name that is no valid verb token. A partial apply returns
+The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. The layout renders the form inside its own `{% zone "stats-filter" %}`, because `live_zone` belongs to the index alone and a form outside a zone would make the layout differ between the tabs. The client router therefore keeps the layout on a tab change and re-renders the form, with the target on `/stats/` and without it elsewhere. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which makes the verb available through the generic `op()` channel on the builder. An unregistered verb is refused at build time with `UnknownPatchOpError`. `register_patch_op` raises `BuiltinPatchOpError` for a name that shadows a built-in verb, and the system check `next.E090` reports a name that is no valid verb token. A partial apply returns
 
 ```python
 Patches(request).morph(zone="live-totals").morph(zone="stats-window").op(
@@ -381,6 +382,32 @@ The code here is deliberately single-process. Every uvicorn or gunicorn worker k
 Multiprocess mode changes the Gauge. Each worker writes its own file, and the gauge needs a `multiprocess_mode` that says how to fold them, `livesum` for the open-streams gauge. The live modes drop a worker only when `mark_process_dead` removes its file, so a worker that dies past the exit hook keeps its last count in the sum until the directory is wiped. Process and GC metrics are not part of a multiprocess registry.
 
 A receiver connected while a stream is open never sees that stream close, as the signals reference spells out. These receivers connect at startup, before the first stream, so the gauge never drops below zero.
+
+### 12. A widget that fails alone
+
+The render-latency table on the overview divides the `pages.duration_ms_total` counter of each page by its `pages.rendered` counter. The two sit under separate cache keys, and `LocMemCache` holds at most `MAX_ENTRIES` keys, 300 by default. Once the store is full the next write culls the least recently used third, and `read_all` touches the keys in the arbitrary order of the index set, so a cull can take one half of a pair and keep the other. `read_all` already skips a missing counter, which is harmless for a total and wrong for a ratio, because a duration with no render count beside it has nothing to divide by. [`metrics.latency_by_page`](obs/metrics.py) raises `CounterLostError` instead of inventing a mean.
+
+```
+_components/latency_widget/
+├── component.py     <- @component.context latencies, metrics.latency_by_page(limit=5)
+├── component.djx    <- the shared counter_list as a table
+└── error.djx        <- the shared alert with the digest as a reference code
+```
+
+The `error.djx` beside `component.djx` is what turns the component into an error boundary. Whatever raises inside it, the context function, the template, or the nested `counter_list`, stops there. The rest of the page renders as usual, and the place of the widget shows `error.djx` inside a `<div data-next-boundary="…" data-next-state="error" data-next-error="error">` wrapper the framework adds. The template reads the call-site context plus `error`, and `error.digest` is the code the `next.boundaries` logger records beside the traceback, so the reference on screen is what an operator searches the log for. Under `DEBUG` the wrapper also shows the exception and its traceback.
+
+```django
+{% #component "alert" variant="warning" title="Render latency is unavailable" %}
+  {% #slot "content" %}
+    <p>The counters behind this widget are incomplete, ...</p>
+    <p class="mt-2 text-xs text-muted-foreground">Reference <code class="font-mono">{{ error.digest }}</code></p>
+  {% /slot %}
+{% /component %}
+```
+
+The response keeps status 200 and goes out with `Cache-Control: private, no-store`, since a page missing one of its widgets must not land in a shared cache. `flush_metrics` empties the store, and from then on every render writes both counters of its pair again, so the widget recovers on its own.
+
+`NextClient` re-raises the first contained failure by default, so no other test can pass over a broken widget unnoticed. `TestLatencyWidget` in [`tests/test_integration.py`](tests/test_integration.py) deletes a render count the way a cull would and asserts that a plain request raises `CounterLostError`. Inside `boundary_errors("render")`, or under the `rendered_boundary_errors` fixture, it asserts the error UI, the rest of the dashboard, the status, the cache header, and the failure `response.boundary_failures` lists. The e2e suite repeats the scenario in a browser.
 
 ## Out of scope
 

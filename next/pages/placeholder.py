@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, cast
+from urllib.parse import quote, unquote
 
 from django.template.base import DebugLexer, TokenType
 
@@ -21,6 +23,13 @@ PLACEHOLDER = "{% template %}"
 PLACEHOLDER_OPEN = "{% #template %}"
 PLACEHOLDER_CLOSE = "{% /template %}"
 ROOT_MARKER = "{% layout root %}"
+BOUNDARY_TAG = "next:boundary"
+BOUNDARY_END_TAG = "/next:boundary"
+FAILED_TAG = "next:failed"
+SLOT_TAG = "next:slot"
+SLOT_END_TAG = "/next:slot"
+NO_WRAPPER: Final = "-"
+"""The wrapper argument of the boundary tag for a slot that takes no wrapper element."""
 
 _SINGLE_TAG = "template"
 _OPEN_TAG = "#template"
@@ -34,7 +43,27 @@ _ROOT_MARKER_WORDS = ["layout", "root"]
 _HTML_OPEN = re.compile(r"<html(?![\w:-])", re.IGNORECASE)
 _HTML_COMMENT_OPEN = "<!--"
 _HTML_COMMENT_CLOSE = "-->"
+_PLACEHOLDER_TEXT = re.compile(r"\{%\s*#?template\s*%\}")
+_TAG_OPEN = re.compile(r"<[a-zA-Z/!]")
+_TITLE_OPEN = re.compile(r"<title(?![\w:-])", re.IGNORECASE)
+_TITLE_CLOSE = re.compile(r"</title\s*>", re.IGNORECASE)
 _BLANK = " \t\n\r\f\v\ufeff"
+
+
+def quote_source(source: Path | None) -> str:
+    """Return `source` as a quoted argument of the boundary tag, `""` for none."""
+    return '""' if source is None else f'"{quote(str(source), safe="/")}"'
+
+
+def is_quoted(bit: str) -> bool:
+    """Return whether a boundary tag argument is a quoted source."""
+    return len(bit) > 1 and bit[0] == bit[-1] == '"'
+
+
+def unquote_source(bit: str) -> Path | None:
+    """Return the source a quoted boundary tag argument names, `None` for none."""
+    text = unquote(bit[1:-1])
+    return Path(text) if text else None
 
 
 def _tokens(content: str) -> Iterator[tuple[TokenType, str, int, int]]:
@@ -150,6 +179,54 @@ def opens_html_document(content: str) -> bool:
     return False
 
 
+def _verbatim_placeholder(content: str) -> bool:
+    """Whether a `{% verbatim %}` block of `content` spells a placeholder."""
+    verbatim: str | None = None
+    for token_type, contents, _start, _end in _parsed_tokens(content):
+        if token_type is TokenType.BLOCK:
+            if verbatim is None and _command(contents) == _VERBATIM_TAG:
+                verbatim = f"end{contents}"
+                continue
+            if contents == verbatim:
+                verbatim = None
+                continue
+        if verbatim is not None and _PLACEHOLDER_TEXT.search(contents):
+            return True
+    return False
+
+
+def _last(pattern: re.Pattern[str], text: str) -> int:
+    """Return where the last match of `pattern` in `text` starts, `-1` for none."""
+    found = -1
+    for match in pattern.finditer(text):
+        found = match.start()
+    return found
+
+
+def slot_problem(content: str) -> str | None:
+    """Return where the placeholder of a layout sits that slot markers cannot wrap.
+
+    `None` means the markers fit, or the layout holds no placeholder at all.
+    """
+    if _verbatim_placeholder(content):
+        return "inside a {% verbatim %} block"
+    spans = placeholder_spans(content)
+    if not spans:
+        return None
+    start = spans[0][0]
+    texts = [
+        contents
+        for token_type, contents, _begin, end in _parsed_tokens(content)
+        if token_type is TokenType.TEXT and end <= start
+    ]
+    visible, _open = _outside_html_comments("".join(texts), in_comment=False)
+    if _last(_TAG_OPEN, visible) > visible.rfind(">"):
+        return "inside an HTML attribute"
+    if _last(_TITLE_OPEN, visible) > _last(_TITLE_CLOSE, visible):
+        return "inside a <title>"
+    return None
+
+
 def _outside_html_comments(text: str, *, in_comment: bool) -> tuple[str, bool]:
     """Return the part of `text` outside HTML comments and whether one stays open.
 
@@ -175,12 +252,22 @@ def _outside_html_comments(text: str, *, in_comment: bool) -> tuple[str, bool]:
 
 
 __all__ = [
+    "BOUNDARY_END_TAG",
+    "BOUNDARY_TAG",
+    "FAILED_TAG",
+    "NO_WRAPPER",
     "PLACEHOLDER",
     "PLACEHOLDER_CLOSE",
     "PLACEHOLDER_OPEN",
     "ROOT_MARKER",
+    "SLOT_END_TAG",
+    "SLOT_TAG",
     "RootScan",
+    "is_quoted",
     "opens_html_document",
     "placeholder_spans",
+    "quote_source",
     "scan_root",
+    "slot_problem",
+    "unquote_source",
 ]

@@ -11,6 +11,7 @@ from django.template.engine import Engine
 
 
 _BUILTIN_MODULES = (
+    "next.templatetags.boundaries",
     "next.templatetags.forms",
     "next.templatetags.components",
     "next.templatetags.next_static",
@@ -37,6 +38,12 @@ _NEXT_TAG_NAMES = (
     "has_perm",
     "layout",
     "metadata",
+    "more",
+    "next:boundary",
+    "/next:boundary",
+    "next:failed",
+    "next:slot",
+    "/next:slot",
     "script",
     "set_slot",
     "slot",

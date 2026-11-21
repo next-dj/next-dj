@@ -23,6 +23,7 @@ from .backends import ActionRegistration, scope_key_for
 from .base import (
     PermissionOutcome,
     _format_success_message,
+    _meta_atomic,
     _meta_guard,
     _meta_requires_runtime,
     _meta_transport,
@@ -321,6 +322,7 @@ def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
             guard=_meta_guard(cls),
             requires_runtime=_meta_requires_runtime(cls),
             transport=_meta_transport(cls),
+            atomic=_meta_atomic(cls),
         )
     )
 

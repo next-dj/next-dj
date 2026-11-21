@@ -96,8 +96,7 @@ def test_the_plain_row_link_navigates_to_the_change_page(
     book = make_book("Dracula")
     open_changelist(page, base_url)
 
-    with page.expect_navigation():
-        page.get_by_role("link", name="Dracula", exact=True).click()
+    page.get_by_role("link", name="Dracula", exact=True).click()
 
     expect(page).to_have_url(f"{base_url}{change_path(book)}")
     expect(page.locator(DIALOG)).to_have_count(0)

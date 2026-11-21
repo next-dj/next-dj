@@ -41,7 +41,10 @@ class TestExtendDefaultBackend:
             "FORM_ACTION_BACKENDS", OPTIONS={"strict": True}
         )
         assert patched[0]["BACKEND"] == "next.forms.RegistryFormActionBackend"
-        assert patched[0]["OPTIONS"] == {"strict": True}
+        assert patched[0]["OPTIONS"] == {
+            "SHAPER": "next.partial.FormShaper",
+            "strict": True,
+        }
 
     def test_raises_for_unknown_key(self) -> None:
         with pytest.raises(ImproperlyConfigured, match="Unknown backend list"):

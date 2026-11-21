@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
 from unittest.mock import MagicMock, patch
+from urllib.parse import quote
 
 import pytest
 from django.http import HttpRequest
@@ -14,9 +15,12 @@ from next.caches import BoundedCache
 from next.conf import next_framework_settings
 from next.errors import AsyncCallableError
 from next.pages.loaders import (
+    NO_BOUNDARIES,
     AncestorStamps,
     DjxTemplateLoader,
+    ErrorBoundary,
     LayoutTemplateLoader,
+    PageBoundary,
     PageModuleImportError,
     PythonTemplateLoader,
     TemplateLoader,
@@ -26,6 +30,7 @@ from next.pages.loaders import (
     _page_roots,
     _routed_root,
     _split_ancestry,
+    _wrapper_of,
     build_registered_loaders,
     forget_layout_texts,
     forget_page_roots,
@@ -33,6 +38,7 @@ from next.pages.loaders import (
     has_load_errors,
     last_load_error,
     layout_chain,
+    layout_ids,
     layout_root_scan,
     layout_stamps,
     load_page_module,
@@ -40,6 +46,7 @@ from next.pages.loaders import (
     module_generation,
     module_stamps,
     module_version,
+    page_boundaries,
     page_tree_depth,
     read_module_string_lists,
     reset_module_memo,
@@ -51,6 +58,7 @@ from next.pages.placeholder import ROOT_MARKER
 from next.pages.processors import _get_context_processors, _import_context_processor
 from next.stamps import RACY_MTIME_WINDOW_NS, stat_mtime_ns, trusted
 from next.utils import MAX_ANCESTOR_WALK_DEPTH
+from next.views import page_view
 from tests.support import (
     LAYOUT_CONFIG_CASES,
     PAGES_DIRS_CONFIG_CASES,
@@ -147,7 +155,9 @@ class TestDjxTemplateLoader:
         page_file.write_text(case.page_content)
         (tmp_path / "template.djx").write_text(case.template_djx)
 
-        assert page_instance.create_url_pattern("test", page_file, url_parser)
+        assert page_instance.create_url_pattern(
+            "test", page_file, url_parser, page_view
+        )
 
         # The template is read at the first render, not at pattern creation.
         rendered = page_instance.render(
@@ -1755,11 +1765,20 @@ class TestPageModuleImportErrors:
 
 
 class TestAsyncRenderRefusal:
-    """An `async def render` stops the `page.py` from loading, refused at load time."""
+    """An async generator `render` stops the `page.py` from loading at load time."""
 
-    def test_async_render_records_the_refusal(self, tmp_path) -> None:
+    def test_async_render_loads(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text("async def render():\n    return 'hi'\n")
+
+        module = load_python_module_memo(page_file)
+
+        assert module is not None
+        assert last_load_error(page_file) is None
+
+    def test_async_generator_render_records_the_refusal(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text("async def render():\n    yield 'hi'\n")
 
         assert load_python_module_memo(page_file) is None
         error = last_load_error(page_file)
@@ -2883,3 +2902,427 @@ class TestComposeBodyRoutedSibling:
         assert composed == (
             f"{ROOT_MARKER}<embed>{{% #template %}}<h1>b</h1>{{% /template %}}</embed>"
         )
+
+
+_CLOSE = "{% /next:boundary %}"
+_FAILED = "{% next:failed %}"
+
+
+def _open(error: Path, wrapper: str = "div") -> str:
+    """Return the internal tag composition opens at the slot of `error`."""
+    source = quote(str(error), safe="/")
+    return f'{{% next:boundary "{source}" {wrapper} %}}'
+
+
+def _deferred(loading: Path, error: Path | None = None, wrapper: str = "div") -> str:
+    """Return the internal tag composition opens at the slot of a `loading.djx`."""
+    shown = "" if error is None else quote(str(error), safe="/")
+    source = quote(str(loading), safe="/")
+    return f'{{% next:boundary "{shown}" {wrapper} "{source}" %}}'
+
+
+def _boundary_tree(root: Path) -> tuple[Path, Path, Path]:
+    """Write `<html>` over `sec/<section>` over `sec/leaf`, an `error.djx` at both.
+
+    Return the page path, the `error.djx` of `sec` and the one of the root.
+    """
+    _write_layout(root, "html")
+    _write_layout(root / "sec", "section")
+    (root / "error.djx").write_text("root error")
+    (root / "sec" / "error.djx").write_text("sec error")
+    (root / "sec" / "leaf").mkdir()
+    return (
+        root / "sec" / "leaf" / "page.py",
+        root / "sec" / "error.djx",
+        root / "error.djx",
+    )
+
+
+class TestPageBoundaryDiscovery:
+    """The chain walk records the `error.djx` and `loading.djx` of every directory."""
+
+    def test_a_file_in_the_page_directory_is_its_own(self, tmp_path) -> None:
+        (tmp_path / "error.djx").write_text("e")
+
+        chain = page_boundaries(tmp_path / "page.py")
+
+        assert chain.errors == (ErrorBoundary(0, 0, tmp_path / "error.djx"),)
+        assert chain.error == tmp_path / "error.djx"
+        assert chain.loading is None
+
+    def test_an_ancestor_file_wraps_the_page_below_it(self, tmp_path) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+
+        chain = page_boundaries(page)
+
+        assert chain.errors == (
+            ErrorBoundary(1, 0, sec_error),
+            ErrorBoundary(2, 1, root_error),
+        )
+        assert chain.error == sec_error
+
+    def test_the_nearest_file_wins_and_each_stays_a_boundary(self, tmp_path) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+        own = page.parent / "error.djx"
+        own.write_text("own")
+
+        chain = page_boundaries(page)
+
+        assert chain.error == own
+        assert [guard.source for guard in chain.errors] == [own, sec_error, root_error]
+
+    def test_a_route_group_holds_files_like_any_directory(self, tmp_path) -> None:
+        group = tmp_path / "(shop)"
+        (group / "cart").mkdir(parents=True)
+        (group / "error.djx").write_text("e")
+        (group / "loading.djx").write_text("l")
+
+        chain = page_boundaries(group / "cart" / "page.py")
+
+        assert chain.error == group / "error.djx"
+        assert chain.loading == group / "loading.djx"
+        assert chain.errors[0].level == 1
+
+    def test_a_loading_file_alone_is_recorded_as_a_deferred_boundary(
+        self, tmp_path
+    ) -> None:
+        _write_layout(tmp_path, "html")
+        loading = tmp_path / "loading.djx"
+        loading.write_text("l")
+        page = tmp_path / "leaf" / "page.py"
+        page.parent.mkdir()
+
+        chain = page_boundaries(page)
+        composed = LayoutTemplateLoader().compose_body("<h1>b</h1>", page)
+
+        assert chain.loading == loading
+        assert chain.errors == ()
+        assert chain.deferred == (PageBoundary(1, 0, None, loading),)
+        assert composed == (
+            f"<html>{{% #template %}}{_deferred(loading)}<h1>b</h1>{_CLOSE}"
+            "{% /template %}</html>"
+        )
+
+    def test_a_file_above_a_root_layout_is_not_in_the_chain(self, tmp_path) -> None:
+        (tmp_path / "error.djx").write_text("e")
+        _write_layout(tmp_path / "embed", "embed", root=True)
+        page = tmp_path / "embed" / "x" / "page.py"
+        page.parent.mkdir()
+
+        assert page_boundaries(page) is NO_BOUNDARIES
+
+    def test_a_page_without_files_shares_the_empty_chain(self, tmp_path) -> None:
+        assert page_boundaries(tmp_path / "page.py") is NO_BOUNDARIES
+
+    def test_the_chain_is_held_until_the_memo_version_moves(self, tmp_path) -> None:
+        page = tmp_path / "page.py"
+        assert page_boundaries(page).error is None
+        (tmp_path / "error.djx").write_text("e")
+
+        assert page_boundaries(page).error is None
+        reset_module_memo()
+        assert page_boundaries(page).error == tmp_path / "error.djx"
+
+    def test_forgetting_the_layout_texts_drops_the_held_chain(self, tmp_path) -> None:
+        page = tmp_path / "page.py"
+        page_boundaries(page)
+        (tmp_path / "error.djx").write_text("e")
+
+        forget_layout_texts()
+
+        assert page_boundaries(page).error == tmp_path / "error.djx"
+
+    def test_a_watched_process_sees_a_file_appear(
+        self, tmp_path, watched_template_edits
+    ) -> None:
+        page = tmp_path / "page.py"
+        assert page_boundaries(page).error is None
+
+        (tmp_path / "error.djx").write_text("e")
+
+        assert page_boundaries(page).error == tmp_path / "error.djx"
+
+
+class TestBoundaryComposition:
+    """Composition wraps the slot of each `error.djx` before its own layout does."""
+
+    def test_a_page_without_files_composes_byte_identically(self, tmp_path) -> None:
+        loader = LayoutTemplateLoader()
+        _write_layout(tmp_path, "html")
+        _write_layout(tmp_path / "sec", "section")
+        page = tmp_path / "sec" / "leaf" / "page.py"
+        page.parent.mkdir()
+
+        composed = loader.compose_body("<h1>b</h1>", page)
+
+        assert composed == loader._compose_layout_hierarchy(
+            "{% #template %}<h1>b</h1>{% /template %}", loader._find_layout_files(page)
+        )
+        assert composed == (
+            "<html><section>{% #template %}<h1>b</h1>{% /template %}</section></html>"
+        )
+
+    def test_the_own_directory_layout_sits_outside_its_boundary(self, tmp_path) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+
+        composed = LayoutTemplateLoader().compose_body("<h1>b</h1>", page)
+
+        assert composed == (
+            f"<html>{_open(root_error)}<section>{{% #template %}}"
+            f"{_open(sec_error)}<h1>b</h1>{_CLOSE}{{% /template %}}</section>"
+            f"{_CLOSE}</html>"
+        )
+
+    def test_the_composition_comes_with_the_chain_it_walked(self, tmp_path) -> None:
+        page, _sec_error, _root_error = _boundary_tree(tmp_path)
+        loader = LayoutTemplateLoader()
+
+        composed, chain = loader.compose_chained("<h1>b</h1>", page)
+        skeleton, slotted = loader.compose_slotted(page)
+
+        assert composed == loader.compose_body("<h1>b</h1>", page)
+        assert skeleton == loader.compose_skeleton(page)
+        assert chain == slotted == page_boundaries(page)
+        assert "{% load" not in composed
+
+    def test_a_composition_reuses_the_walk_of_the_chain(self, tmp_path) -> None:
+        page, _sec_error, _root_error = _boundary_tree(tmp_path)
+        loader = LayoutTemplateLoader()
+
+        with patch.object(loaders_module, "_walk", wraps=loaders_module._walk) as walk:
+            chain = page_boundaries(page)
+            composed, walked = loader.compose_chained("<h1>b</h1>", page)
+
+        assert walk.call_count == 1
+        assert walked is chain
+        assert composed == loader.compose_body("<h1>b</h1>", page)
+
+    def test_a_watched_composition_walks_again(self, tmp_path, settings) -> None:
+        settings.DEBUG = True
+        page, _sec_error, _root_error = _boundary_tree(tmp_path)
+
+        with patch.object(loaders_module, "_walk", wraps=loaders_module._walk) as walk:
+            chain = page_boundaries(page)
+            _composed, walked = LayoutTemplateLoader().compose_chained("b", page)
+
+        assert walk.call_count == 2
+        assert walked == chain
+
+    def test_a_held_walk_is_dropped_with_the_layout_texts(self, tmp_path) -> None:
+        page = tmp_path / "page.py"
+        assert page_boundaries(page) is NO_BOUNDARIES
+        (tmp_path / "error.djx").write_text("e")
+        assert page_boundaries(page) is NO_BOUNDARIES
+
+        forget_layout_texts()
+
+        assert page_boundaries(page).error == tmp_path / "error.djx"
+
+    def test_a_directory_without_the_file_builds_no_path(self, tmp_path) -> None:
+        with patch.object(Path, "__truediv__") as joined:
+            assert loaders_module._layout_at(tmp_path, linked=False) is None
+        joined.assert_not_called()
+
+    def test_a_page_without_layouts_composes_with_the_empty_chain(
+        self, tmp_path
+    ) -> None:
+        composed, chain = LayoutTemplateLoader().compose_chained(
+            "<h1>b</h1>", tmp_path / "page.py"
+        )
+
+        assert composed == "<h1>b</h1>"
+        assert chain is NO_BOUNDARIES
+
+    def test_a_page_with_its_own_layout_takes_no_fallback(self, tmp_path) -> None:
+        _write_layout(tmp_path, "main")
+        (tmp_path / "error.djx").write_text("e")
+
+        composed = LayoutTemplateLoader().compose_body(
+            "<h1>b</h1>", tmp_path / "page.py"
+        )
+
+        assert (
+            composed
+            == f"<main>{_open(tmp_path / 'error.djx')}<h1>b</h1>{_CLOSE}</main>"
+        )
+
+    def test_a_chain_without_layouts_wraps_the_body_alone(self, tmp_path) -> None:
+        (tmp_path / "error.djx").write_text("e")
+
+        composed = LayoutTemplateLoader().compose_body(
+            "<h1>b</h1>", tmp_path / "page.py"
+        )
+
+        assert composed == f"{_open(tmp_path / 'error.djx')}<h1>b</h1>{_CLOSE}"
+
+    def test_a_slot_inside_a_list_leaves_no_wrapper(self, tmp_path) -> None:
+        (tmp_path / "layout.djx").write_text("<ul>{% template %}</ul>")
+        (tmp_path / "error.djx").write_text("e")
+
+        composed = LayoutTemplateLoader().compose_body(
+            "<li>b</li>", tmp_path / "page.py"
+        )
+
+        assert (
+            composed
+            == f"<ul>{_open(tmp_path / 'error.djx', '-')}<li>b</li>{_CLOSE}</ul>"
+        )
+
+    def test_an_unreadable_or_slotless_layout_keeps_the_div(self, tmp_path) -> None:
+        unreadable = tmp_path / "bad.djx"
+        unreadable.write_bytes(b"<ul>\xff{% template %}")
+        slotless = tmp_path / "plain.djx"
+        slotless.write_text("<ul></ul>")
+
+        assert _wrapper_of([unreadable], 0) == "div"
+        assert _wrapper_of([slotless], 0) == "div"
+        assert _wrapper_of([], 0) == "div"
+
+    def test_a_failure_composes_from_the_boundary_that_caught(self, tmp_path) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+        loader = LayoutTemplateLoader()
+
+        from_root = loader.compose_failure(page, ErrorBoundary(2, 1, root_error))
+        from_sec = loader.compose_failure(page, ErrorBoundary(1, 0, sec_error))
+
+        assert from_root == f"<html>{_open(root_error)}{_FAILED}{_CLOSE}</html>"
+        assert from_sec == (
+            f"<html>{_open(root_error)}<section>{{% #template %}}"
+            f"{_open(sec_error)}{_FAILED}{_CLOSE}{{% /template %}}</section>"
+            f"{_CLOSE}</html>"
+        )
+
+
+class TestDeferredComposition:
+    """A `loading.djx` composes its slot as a deferred boundary, nested ones apart."""
+
+    def test_a_directory_with_both_files_composes_one_tag(self, tmp_path) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+        loading = tmp_path / "sec" / "loading.djx"
+        loading.write_text("l")
+
+        composed = LayoutTemplateLoader().compose_body("<h1>b</h1>", page)
+
+        assert composed == (
+            f"<html>{_open(root_error)}<section>{{% #template %}}"
+            f"{_deferred(loading, sec_error)}<h1>b</h1>{_CLOSE}{{% /template %}}"
+            f"</section>{_CLOSE}</html>"
+        )
+
+    def test_each_loading_file_of_the_chain_is_its_own_boundary(self, tmp_path) -> None:
+        _write_layout(tmp_path, "html")
+        _write_layout(tmp_path / "sec", "section")
+        outer = tmp_path / "loading.djx"
+        inner = tmp_path / "sec" / "loading.djx"
+        outer.write_text("outer")
+        inner.write_text("inner")
+        page = tmp_path / "sec" / "leaf" / "page.py"
+        page.parent.mkdir()
+
+        composed, chain = LayoutTemplateLoader().compose_chained("<h1>b</h1>", page)
+
+        assert [found.loading for found in chain.deferred] == [inner, outer]
+        assert composed == (
+            f"<html>{_deferred(outer)}<section>{{% #template %}}{_deferred(inner)}"
+            f"<h1>b</h1>{_CLOSE}{{% /template %}}</section>{_CLOSE}</html>"
+        )
+
+    def test_a_failure_composes_without_the_loading_files(self, tmp_path) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+        (tmp_path / "sec" / "loading.djx").write_text("l")
+        (tmp_path / "loading.djx").write_text("l")
+
+        composed = LayoutTemplateLoader().compose_failure(
+            page, ErrorBoundary(1, 0, sec_error)
+        )
+
+        assert composed == (
+            f"<html>{_open(root_error)}<section>{{% #template %}}"
+            f"{_open(sec_error)}{_FAILED}{_CLOSE}{{% /template %}}</section>"
+            f"{_CLOSE}</html>"
+        )
+
+    def test_the_guard_of_a_level_is_the_nearest_error_at_or_above(
+        self, tmp_path
+    ) -> None:
+        page, sec_error, root_error = _boundary_tree(tmp_path)
+        chain = page_boundaries(page)
+
+        assert chain.guard_of(0) == ErrorBoundary(1, 0, sec_error)
+        assert chain.guard_of(2) == ErrorBoundary(2, 1, root_error)
+        assert chain.guard_of(3) is None
+
+
+def _two_roots(base: Path) -> tuple[Path, Path, Path]:
+    """Write a project tree owning the outer layout and an app tree without one.
+
+    Return the page of the app tree, the project `layout.djx` and the `DIRS` config.
+    """
+    project = base / "project" / "pages"
+    shell = _write_layout(project, "html")
+    page = base / "shop" / "pages" / "cart" / "page.py"
+    page.parent.mkdir(parents=True)
+    return page, shell, _dirs_config(project, base / "shop" / "pages")
+
+
+class TestBoundariesAcrossRoots:
+    """The boundary files beside an outer root's layout guard the pages it wraps."""
+
+    def test_the_project_files_guard_an_app_page(self, tmp_path) -> None:
+        page, shell, config = _two_roots(tmp_path.resolve())
+        error = shell.parent / "error.djx"
+        loading = shell.parent / "loading.djx"
+        error.write_text("e")
+        loading.write_text("l")
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            assert layout_chain(page) == (shell,)
+            composed, chain = LayoutTemplateLoader().compose_chained("<h1>b</h1>", page)
+
+        assert chain.boundaries == (PageBoundary(2, 0, error, loading),)
+        assert chain.error == error
+        assert chain.loading == loading
+        assert composed.startswith("<html>")
+        assert (
+            f"{{% #template %}}{_deferred(loading, error)}<h1>b</h1>{_CLOSE}"
+            "{% /template %}"
+        ) in composed
+
+    def test_an_app_file_stays_nearer_than_the_project_one(self, tmp_path) -> None:
+        page, shell, config = _two_roots(tmp_path.resolve())
+        outer = shell.parent / "error.djx"
+        outer.write_text("project")
+        own = page.parent.parent / "error.djx"
+        own.write_text("app")
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            chain = page_boundaries(page)
+
+        assert chain.errors == (ErrorBoundary(1, 0, own), ErrorBoundary(2, 0, outer))
+        assert chain.guard_of(2) == ErrorBoundary(2, 0, outer)
+
+    def test_a_file_beside_a_layout_above_the_tree_guards_it(self, tmp_path) -> None:
+        base = tmp_path.resolve()
+        shell = _write_layout(base / "site", "html")
+        (base / "error.djx").write_text("no layout here")
+        error = base / "site" / "error.djx"
+        error.write_text("e")
+        tree = base / "site" / "pages"
+        page = tree / "cart" / "page.py"
+        page.parent.mkdir(parents=True)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": _dirs_config(tree)}):
+            assert layout_chain(page) == (shell,)
+            chain = page_boundaries(page)
+
+        assert chain.errors == (ErrorBoundary(2, 0, error),)
+
+    def test_a_project_file_leaves_the_layout_ids_alone(self, tmp_path) -> None:
+        page, shell, config = _two_roots(tmp_path.resolve())
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
+            before = layout_ids(page)
+            (shell.parent / "error.djx").write_text("e")
+            reset_module_memo()
+            assert layout_ids(page) == before
+            assert page_boundaries(page).error == shell.parent / "error.djx"

@@ -61,7 +61,7 @@ A metadata callable that fails is logged, the patch is left out, and the zone st
 A zone GET served by the target itself carries no ``meta`` patch.
 
 A request from inside the modal runs the same selection and both access checks every time.
-A refresh, a poll, a lazy zone, a stream, and a pagination link GET the layer URL, or the href of the pagination link, with ``X-Next-Zone`` only.
+A refresh, a poll, a stream, and a pagination link GET the layer URL, or the href of the pagination link, with ``X-Next-Zone`` only.
 A pagination href is therefore rendered on the target path, and a query string is fine.
 A nested zone of the intercept page is selected like its outer zone.
 The target and the intercept each climb their own file-system ancestors for access, and the stricter chain wins.
@@ -122,7 +122,7 @@ Which page a title belongs to decides how long it lasts.
    * - The layer's own page, through the layer body, a zone GET inside the layer, or a mutation fired from it.
        The ``meta`` patch of an intercept page is included, see `Opening another page's zone over its own URL`_.
      - Lasts as long as the layer.
-   * - The host page or a lower layer, through a poll of the base page, a lazy zone GET, or a stream the host subscribed.
+   * - The host page or a lower layer, through a poll of the base page or a stream the host subscribed.
      - Becomes the title the covering layer restores, so the newest title of the page underneath survives the close.
        It shows at once when the covering layers set no title of their own.
        Otherwise the layer title stays in the tab until they close.
@@ -205,7 +205,9 @@ A foreign page whose module fails to import, or that sits under a ``page.py`` th
 Styling layers and toasts
 -------------------------
 
-The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
+The runtime creates a bare ``<dialog data-next-dialog>`` for every layer.
+Toasts go into the first element with ``data-next-toasts`` found top layer down, so a tray the layout or a modal renders receives them.
+Only a page that renders no tray gets one from the runtime, a ``<div data-next-toasts aria-live="polite">`` at the end of the body, built on the first toast.
 No framework CSS is applied.
 The selectors are the hook.
 

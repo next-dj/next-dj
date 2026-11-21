@@ -5,33 +5,56 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import PermissionDenied
 from django.core.handlers.exception import response_for_exception
 from django.http import Http404, HttpResponse
+from django.http.response import HttpResponseBase
 
 from next.intercept import Intercept
-from next.pages.responses import never_store
+from next.pages.manager import page
+from next.pages.responses import never_store, zone_policy
+from next.static.runtime import html_finish
 
 from . import keys
 from .envelope import Envelope
 from .errors import UnknownZoneError
-from .headers import MergeMode, set_partial_vary
+from .headers import (
+    ORIGIN,
+    STREAM_VARY,
+    VARY_HEADERS,
+    MergeMode,
+    set_partial_vary,
+    vary_on,
+)
 from .intercept import admit, pick_intercept
 from .manager import asset_version, partial_backend_manager
 from .patches import Patches, PatchResponse
-from .render import render_zone
+from .render import render_plain_zones, render_zone
 from .signals import intercept_access_denied
+from .stream import streamable
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from django.http import HttpRequest
+    from django.template import Template
+
+    from next.pages.boundaries import Caught
 
     from .headers import PartialIntent
     from .render import ZoneRenderResult
+    from .stream import Streamable
 
 
 _SAFE_METHODS = frozenset({"GET", "HEAD"})
 _BAD_REQUEST = 400
 _VERSION_CONFLICT = 409
+_VARY = {
+    (False, False): VARY_HEADERS,
+    (True, False): (*VARY_HEADERS, *STREAM_VARY),
+    (False, True): (*VARY_HEADERS, ORIGIN),
+    (True, True): (*VARY_HEADERS, *STREAM_VARY, ORIGIN),
+}
+_SHORT_VARY = {False: VARY_HEADERS, True: (*VARY_HEADERS, ORIGIN)}
 
 
 def zone_response(
@@ -42,10 +65,13 @@ def zone_response(
     dynamic_body: bool,
     url_kwargs: dict[str, object],
     dep_cache: dict[str, Any],
-) -> HttpResponse:
+    caught: "Caught | None" = None,
+) -> HttpResponseBase:
     """Build the partial response for a zone GET, or a refusal or 400/409 short-circuit.
 
     An intercept serving the zones refuses on its own rule before any status check.
+    A body failure a page boundary `caught` answers with its error UI in the zones.
+    Deferred boundaries the zones hold stream after the envelope when the client asks.
     """
     served = _served_intercept(page_path, intent, request)
     if served is not None:
@@ -59,20 +85,79 @@ def zone_response(
     if request.method in _SAFE_METHODS and _version_conflict(intent, version):
         return _conflict()
     backend = partial_backend_manager.get()
-    try:
-        result = render_zone(
-            page_path if served is None else served,
-            intent.zones,
-            request,
-            url_kwargs=url_kwargs,
-        )
-    except UnknownZoneError:
-        return _bad_request("unknown zone")
+    with streamable(request) as block:
+        try:
+            result = render_zone(
+                page_path if served is None else served,
+                intent.zones,
+                request,
+                url_kwargs=url_kwargs,
+                caught=caught,
+                stashed=served is not None,
+            )
+        except UnknownZoneError:
+            return _bad_request("unknown zone")
     envelope = _build_envelope(
         result, intent, version, request, served=served, url_kwargs=url_kwargs
     )
+    streamed = _streamed(block, envelope, page_path)
+    if streamed is not None:
+        return streamed
     body = backend.serialize_envelope(envelope)
-    return PatchResponse(body, content_type=backend.content_type, version=version)
+    vary = _VARY[request.method in _SAFE_METHODS, html_finish.get() is not None]
+    return PatchResponse(
+        body, content_type=backend.content_type, version=version, vary=vary
+    )
+
+
+def plain_zone_response(
+    page_path: "Path",
+    intent: "PartialIntent",
+    request: "HttpRequest",
+    url_kwargs: dict[str, object],
+    template: "Template",
+    *,
+    origin: bool,
+) -> HttpResponseBase:
+    """Answer the safe zone request of a page no intercept serves and nothing guards.
+
+    Its zones never stream, so `template` renders straight to an envelope, and
+    `origin` says whether every answer varies on `X-Next-Origin` for the link pass.
+    """
+    vary = _SHORT_VARY[origin]
+    version = asset_version()
+    if _version_conflict(intent, version):
+        return _conflict(vary)
+    try:
+        result = render_plain_zones(
+            page_path, template, intent.zones, request, url_kwargs
+        )
+    except UnknownZoneError:
+        return _bad_request("unknown zone", vary)
+    envelope = _build_envelope(
+        result, intent, version, request, served=None, url_kwargs=url_kwargs
+    )
+    backend = partial_backend_manager.get()
+    return PatchResponse(
+        backend.serialize_envelope(envelope),
+        content_type=backend.content_type,
+        version=version,
+        vary=_VARY[True, origin],
+    )
+
+
+def _streamed(
+    block: "Streamable | None", envelope: Envelope, page_path: "Path"
+) -> HttpResponseBase | None:
+    """Return the stream the zone render left, `None` to answer the envelope whole.
+
+    A page whose policy opts out of compression keeps its stream plain.
+    """
+    deferred = None if block is None else block.deferred
+    if deferred is None:
+        return None
+    compress = zone_policy(page, page_path).compress
+    return deferred.respond(envelope, page_path=page_path, compress=compress)
 
 
 def _served_intercept(
@@ -150,8 +235,9 @@ def _build_envelope(
     The verb is server-authored from the intent, and a serving intercept adds its head.
     """
     patches = Patches.versioned(version, request=request)
+    marks = html_finish.get()
     for name in result.html:
-        _patch_zone(patches, name, result, intent.merge)
+        _patch_zone(patches, name, result, intent.merge, marks)
     patches.absorb_zone_result(result)
     if served is not None:
         patches.page_meta(served, url_kwargs, result.context)
@@ -159,33 +245,42 @@ def _build_envelope(
 
 
 def _patch_zone(
-    patches: Patches, name: str, result: "ZoneRenderResult", merge: "MergeMode | None"
+    patches: Patches,
+    name: str,
+    result: "ZoneRenderResult",
+    merge: "MergeMode | None",
+    marks: "Callable[[str], str] | None" = None,
 ) -> None:
     """Patch one zone in place, morphing it or merging deduplicated children.
 
     Append and prepend graft the bare inner body to avoid nesting a second wrapper.
+    A failed zone morphs, since its error UI stands for the whole body.
     """
     target = {keys.ZONE: name}
-    if merge is MergeMode.APPEND:
-        patches.append(target, result.bodies[name])
-    elif merge is MergeMode.PREPEND:
-        patches.prepend(target, result.bodies[name])
+    grafted = None if result.failed else merge
+    html = (result.html if grafted is None else result.bodies)[name]
+    if marks is not None:
+        html = marks(html)
+    if grafted is MergeMode.APPEND:
+        patches.append(target, html)
+    elif grafted is MergeMode.PREPEND:
+        patches.prepend(target, html)
     else:
-        patches.morph(target, result.html[name])
+        patches.morph(target, html)
 
 
-def _bad_request(reason: str) -> HttpResponse:
-    """Return a 400 with a plain reason and the partial Vary headers."""
+def _bad_request(reason: str, vary: tuple[str, ...] = VARY_HEADERS) -> HttpResponse:
+    """Return a 400 with a plain reason, varied on the partial headers or on `vary`."""
     response = HttpResponse(reason, status=_BAD_REQUEST, content_type="text/plain")
-    set_partial_vary(response)
+    vary_on(response, vary)
     return response
 
 
-def _conflict() -> HttpResponse:
-    """Return an empty-bodied 409 with the partial Vary headers."""
+def _conflict(vary: tuple[str, ...] = VARY_HEADERS) -> HttpResponse:
+    """Return an empty-bodied 409, varied on the partial headers or on `vary`."""
     response = HttpResponse(b"", status=_VERSION_CONFLICT)
-    set_partial_vary(response)
+    vary_on(response, vary)
     return response
 
 
-__all__ = ["zone_response"]
+__all__ = ["plain_zone_response", "zone_response"]

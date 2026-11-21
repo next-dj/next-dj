@@ -20,7 +20,7 @@ from next.consent.manager import consent_configured, consent_payload, server_mod
 from next.consent.markers import joint_category
 from next.diagnostics import FailureLog
 from next.discovery import routed_page_trees
-from next.pages.responses import vary_on_cookie
+from next.pages.responses import Purpose, purpose_of, vary_on_cookie
 from next.static import (
     StaticAsset,
     StaticCollector,
@@ -56,6 +56,8 @@ _NOTHING: Final[tuple[str, Mapping[str, object]]] = ("", {})
 _NO_SCRIPTS: Final[tuple[Script, ...]] = ()
 
 _ASSET_ERRORS: Final = (StaticAssetNotFoundError, StaticAssetTraversalError)
+
+_ENVELOPED: Final = frozenset({Purpose.NAVIGATION, Purpose.PREFETCH})
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,7 +232,8 @@ class ScriptsManager:
     ) -> tuple[str, Mapping[str, object]]:
         """Return the head tags and the reserved payload entries of one render.
 
-        `nonce` is called only when a head tag is written, since it mints the nonce.
+        A navigation applies no head, so it lists every script as a manifest entry.
+        `nonce` mints the nonce, so it is called only when a head tag is written.
         """
         tree = self.tree(page_path)
         if not (tree or consent_configured() or collector.notes(CONSENT_NOTE)):
@@ -238,7 +241,10 @@ class ScriptsManager:
         selected = self._selected(tree, collector, page_path)
         server = server_mode(request)
         consent = get_consent(request) if server else UNDECIDED
-        head, manifest = _split(selected, consent)
+        head: list[Script] = []
+        manifest = selected
+        if purpose_of(request) not in _ENVELOPED:
+            head, manifest = _split(selected, consent)
         if server and (consent.decided or any(script.gated for script in selected)):
             # `$consent` carries the choice of a decided visitor whatever is gated.
             vary_on_cookie(request)

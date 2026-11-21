@@ -1,0 +1,5 @@
+<div data-audit-skeleton class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+  {% for _ in "xx" %}
+    {% component "skeleton" height="7.5rem" %}
+  {% endfor %}
+</div>

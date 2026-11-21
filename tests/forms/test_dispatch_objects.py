@@ -155,6 +155,7 @@ def _dispatch(registration: ActionRegistration, origin: str | None) -> HttpRespo
 
 
 @pytest.mark.usefixtures("scoped_models", "origins")
+@pytest.mark.django_db()
 class TestUnboundObjectOnDispatch:
     """A `DObject` kwarg the posted origin lacks is a bad request, not a crash."""
 

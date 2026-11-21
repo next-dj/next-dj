@@ -8,16 +8,16 @@ Module summary
 
 next.dj contributes Django system checks for every subsystem.
 Run them through ``uv run python manage.py check`` and the framework reports configuration mistakes with a code and a hint.
-Eight of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which eight and why.
+Ten of them are deployment checks and answer only to ``uv run python manage.py check --deploy``, see `Check registration`_ for which ten and why.
 
 Check registration
 ------------------
 
 Each subsystem ``checks`` module registers its checks with ``@register`` on import, and Django imports them all while it loads ``INSTALLED_APPS``.
 ``next.apps`` imports ``next.apps.checks``, and ``next.checks.catalog`` imports every other one at module top level and lists them in ``CHECK_MODULES``, which ``NextFrameworkConfig.check_modules`` holds.
-The modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.server.checks``, ``next.site.checks``, ``next.static.checks``, and ``next.urls.checks``.
+The modules are ``next.apps.checks``, ``next.components.checks``, ``next.conf.checks``, ``next.consent.checks``, ``next.deps.checks``, ``next.forms.checks``, ``next.pages.checks``, ``next.partial.checks``, ``next.permissions.checks``, ``next.realtime.checks``, ``next.scripts.checks``, ``next.seo.checks``, ``next.server.checks``, ``next.site.checks``, ``next.static.checks``, ``next.urls.checks``, and ``next.views.checks``, beside ``next.compression.checks``, ``next.router.checks``, ``next.suspense.checks``, and ``next.suspense.connections.checks``.
 
-``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, and ``next.seo.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
+``next.pages.checks``, ``next.forms.checks``, ``next.partial.checks``, ``next.seo.checks``, and ``next.suspense.checks`` are packages rather than single modules, and importing the package imports every submodule that carries a check.
 ``next.pages.checks.metadata`` is a package inside the pages one and splits the same way.
 The address a project imports stays the same either way, and the tables under `Check code reference`_ name the submodule behind each code.
 A check function is imported from its area's ``checks`` module, since ``next.checks`` itself holds only the ``NEXT`` and ``SEO`` tags and imports nothing of the framework.
@@ -25,7 +25,7 @@ A check function is imported from its area's ``checks`` module, since ``next.che
 .. automodule:: next.checks.catalog
    :members:
 
-Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
+Ten checks are deployment checks and carry ``deploy=True``, so ``manage.py check`` alone never runs them and ``manage.py check --deploy`` does.
 
 .. list-table::
    :header-rows: 1
@@ -42,7 +42,7 @@ Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py che
      - A source checkout builds the client runtime only on demand.
    * - ``check_shared_broker``
      - ``next.W149``
-     - A development server runs on the in-process default broker by design.
+     - A development server runs on the in-process default broker by design, and the check stays silent while realtime is not in use.
    * - ``check_broker_deployment``
      - ``next.W151``
      - The ``check_deployment`` hook of ``RedisBroker`` flags a redis-py pool default a development server never reaches.
@@ -58,6 +58,12 @@ Eight checks are deployment checks and carry ``deploy=True``, so ``manage.py che
    * - ``check_consent_cookie_secure``
      - ``next.W119``
      - It reads the consent settings a deployment runs on.
+   * - ``check_token_cache``
+     - ``next.E223``
+     - A development server runs one process, where a ``LocMemCache`` behind the token storage is enough.
+   * - ``check_token_binding``
+     - ``next.W186``
+     - A development server mints tokens for its own accounts, so an unbound token leaks nothing there.
 
 ``next.E017``, ``next.E084``, and ``next.E072`` run on every ``manage.py check``, because the page and component checks already import and compile those modules.
 
@@ -66,7 +72,7 @@ That tag is the importable string constant ``next.checks.NEXT``, so a project ch
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
 
-A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the eight deployment checks to it.
+A tagged run reports what a full run reports, and ``--tag next --deploy`` adds the ten deployment checks to it.
 The ``seo`` tag, the importable constant ``next.checks.SEO``, marks every ``next.seo`` check, every page metadata check, and the site checks.
 ``manage.py check --tag seo`` runs the metadata, crawler-document, and site checks alone, and ``manage.py check --deploy --tag seo`` adds the two deployment checks that carry the tag.
 Every check that reads registrations discovers the files declaring them itself, rather than relying on a URL check having expanded the router first.
@@ -101,7 +107,7 @@ Shared helpers
 
 ``next.checks.common`` holds helpers reused across subsystem check modules.
 The area checks modules import it directly and ``next.checks.catalog`` reaches it only through them, while the router manager and the page-tree walk it passes on live in ``next.discovery``, outside this package, because production code reads them too.
-The unknown-key probe behind ``next.E035``, ``errors_for_unknown_keys``, lives in ``next.conf.checks``, the lowest layer every area's checks reach, and ``next.checks.common`` passes it on.
+The unknown-key probe behind ``next.E035``, ``errors_for_unknown_keys``, and the nested-shape error behind ``next.E076``, ``error_for_wrong_shape``, live in ``next.conf.checks``, the lowest layer every area's checks reach, and ``next.checks.common`` passes them on.
 ``raw_scope(name)`` answers a ``NEXT_FRAMEWORK`` scope as written, ``None`` where ``next.E076`` reports its shape, and ``takes_request(func)`` whether a callable setting can take the request alone, read off its signature without a call.
 ``RunMemo`` holds one value a check run builds once, kept while its key is the same object, and ``forget_run_memos`` drops every such value, which ``reset_check_caches`` calls.
 
@@ -118,6 +124,7 @@ The package splits by subject, one submodule per group of codes.
 
 - ``access`` covers the access a ``page.py`` declares, a ``public()`` beside a requirement of the same file, a declaration made from any other module, and the declaring ``page.py`` files without a page below them.
 - ``contexts`` covers the ``@context`` callables of a routed ``page.py``.
+- ``deferral`` covers the boundary a ``page.py`` declares through ``page.defer()`` and a ``component.py`` through ``component.defer()`` and ``component.props()``, which it reads after running both kinds of module.
 - ``layouts`` covers the page-body placeholder and the root marker of a ``layout.djx``.
 - ``groups`` covers the parenthesised directory names and the route groups they spell.
 - ``intercepts`` covers the intercepting routes, whose zone checks live in ``next.partial.checks.intercepts``.
@@ -215,12 +222,12 @@ Static
 Partial rendering
 ~~~~~~~~~~~~~~~~~
 
-The package splits into ``backends`` for the ``PARTIAL_BACKENDS`` entries, ``forms`` for where a form action meets partial rendering, ``ops`` for the custom patch verbs, ``templates`` for the composed-template compile, and ``zones`` for the ``{% zone %}`` tags of a composed page.
+The package splits into ``backends`` for the ``PARTIAL_BACKENDS`` entries, ``forms`` for where a form action meets partial rendering, ``more`` for the ``{% more %}`` tags of a composed page, ``ops`` for the custom patch verbs, ``templates`` for the composed-template compile, and ``zones`` for the ``{% zone %}`` tags of a composed page.
 ``codes`` holds every identifier the package emits, so a submodule names a code without importing a sibling, ``nodes`` holds the node walk the zone and form checks share, and both read the one-compile-per-page walk of ``next.pages.checks.composed``.
 
 .. automodule:: next.partial.checks
    :members:
-   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_LAZY_WITHOUT_PLACEHOLDER, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_HAS_PERM, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
+   :exclude-members: E_BACKENDS_NOT_A_LIST, E_BACKEND_WITHOUT_PATH, E_COMPOSED_TEMPLATE_SYNTAX, E_CONTEXT_ZONE_UNKNOWN, E_DUPLICATE_ZONE, E_NON_ASCII_ZONE, E_OP_BAD_NAME, E_ZONE_IN_COMPONENT, E_ZONE_IN_FOR, E_ZONE_IN_HAS_PERM, E_ZONE_IN_IF, W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY, W_MANIFEST_VERSION_NO_STORAGE, W_TOO_MANY_BACKENDS, W_WITH_OVER_ZONE
 
 Permissions
 ~~~~~~~~~~~
@@ -238,6 +245,44 @@ Development server
 ``next.server.checks`` validates ``DEV_SERVER`` and warns when an app above ``next`` ships the ``runserver`` that runs.
 
 .. automodule:: next.server.checks
+   :members:
+
+Compression
+~~~~~~~~~~~
+
+``next.compression.checks`` validates the ``COMPRESSION`` scope, its backend and exclude paths, the codings, levels, windows and libraries of its codecs, the place of ``CompressionMiddleware`` in ``settings.MIDDLEWARE``, and the ``SameSite`` cookie settings compression meets.
+It builds the backends itself, the way the compression manager does, so the check and the request path read one configuration.
+
+.. automodule:: next.compression.checks
+   :members:
+
+Views
+~~~~~
+
+``next.views.checks`` validates the ``TRANSACTIONS`` scope every next.dj view reads, reusing the shape predicates and the ``RULE`` import of ``next.transactions``, so the check and the request path cannot disagree.
+It also reports a ``page.atomic()``, an ``@action(atomic=...)``, or a ``Meta.atomic`` that applies nothing (``next.E240``), through the same shape test the request path reads, and a database alias with ``ATOMIC_REQUESTS`` set (``next.W154``).
+
+.. automodule:: next.views.checks
+   :members:
+
+Router
+~~~~~~
+
+``next.router.checks`` validates the ``ROUTER`` scope and its seam paths, the layout placeholders the slot markers wrap, and, while the router is on, the root layouts that read the request path, the inline scripts of page and layout templates, and the pages that forbid every store.
+It also reports a ``page.router()`` that applies nothing (``next.E238``) and a ``SPECULATION`` value that emits no rules (``next.E242``).
+
+.. automodule:: next.router.checks
+   :members:
+
+Deferred boundaries
+~~~~~~~~~~~~~~~~~~~
+
+``next.suspense.checks`` validates the ``DEFER`` backends and token settings, the props and the placement of client-trip calls, the bundles a page needs under the ``disabled`` script policy, the CSP nonce of a stream, the middleware that buffers a stream, and ``durable=True`` in code a deferred job runs.
+The package keeps the props and the placement of client-trip calls in ``next.suspense.checks.calls``.
+It also registers the request-lane checks of ``next.suspense.connections.checks``, the per-connection and thread-local sources no replay backend covers and the size and timeout of a PostgreSQL connection pool.
+``next.pages.checks.deferral`` reports a ``page.defer()``, ``page.compress()``, ``component.defer()``, or ``component.props()`` that declares nothing, and ``next.pages.checks.gating`` the reads and the guards a page boundary splits off its shell.
+
+.. automodule:: next.suspense.checks
    :members:
 
 Realtime
@@ -388,7 +433,7 @@ Errors
    * - ``next.E029``
      - A keyless ``@context`` callable is not annotated as returning a dict.
        The check reads the context registry, so it catches ``@context``, ``@page.context``, and an aliased import.
-       An async context callable is rejected at registration with ``next.E218``.
+       An ``async def`` callable is read the same way, by the return annotation it declares, and an async generator is refused at registration with ``next.E218``.
      - ``next.pages.checks.contexts``
    * - ``next.E030``
      - A router cannot report its page trees, because ``page_roots`` raised or answered something other than ``PageRoot`` entries.
@@ -412,6 +457,7 @@ Errors
      - ``next.components.checks``
    * - ``next.E035``
      - A configuration dict has unknown keys.
+       For the ``DEFER`` scope it covers every nested mapping, while the ``OPTIONS`` of a backend other than the shipped one belong to that backend and are not read.
      - ``next.conf.checks``
    * - ``next.E036``
      - A static backend dotted path fails to import.
@@ -427,10 +473,11 @@ Errors
      - Two distinct routes collapse to the same reverse URL name after separator normalisation.
      - ``next.urls.checks``
    * - ``next.E040``
-     - A context processor named by a ``PAGE_BACKENDS`` entry does not accept a ``request`` parameter.
+     - A context processor named by a ``PAGE_BACKENDS`` entry cannot be called with the request as its one positional argument, the way Django and the page render call it.
+       The parameter name is free, so ``_request`` serves a processor that does not read it.
      - ``next.pages.checks.processors``
    * - ``next.E041``
-     - A form action name is registered by more than one handler.
+     - A form action name is registered by more than one handler, told apart by declaring file and qualname, so one file run under two module names counts once.
      - ``next.forms.checks.actions``
    * - ``next.E042``
      - A ``TEMPLATE_LOADERS`` entry is not a dotted-path string.
@@ -507,11 +554,9 @@ Errors
        A zone under a block tag from a module outside ``django.`` and ``next.`` draws the same code, naming the tag, since such a tag may decide in code what its body shows.
        The runtime refuses such a zone as an unknown zone.
      - ``next.partial.checks.zones``
-   * - ``next.E064``
-     - A ``lazy=`` zone declares no ``{% placeholder %}`` branch to show until its body arrives.
-     - ``next.partial.checks.zones``
    * - ``next.E065``
-     - A component template declares a ``{% zone %}`` tag, which belongs to a page or layout.
+     - A component template declares a zone through a ``{% zone %}`` or a ``{% more %}`` tag, while a zone is an inline region of a page or layout.
+       The tag belongs in the page or layout template around the component call, and a component that loads later or shows a loading UI does so as a boundary of its own, through a ``loading.djx`` beside it.
      - ``next.partial.checks.zones``
    * - ``next.E067``
      - ``NEXT_FRAMEWORK['PARTIAL_BACKENDS']`` is not a list, so the value is ignored and the default protocol backend loads in place of the configured one.
@@ -548,8 +593,12 @@ Errors
    * - ``next.E076``
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
-       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``CSRF_DELIVERY``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT`` as dicts.
+       It also covers ``COMPONENT_TEMPLATE_LOADER``, ``CSRF_DELIVERY``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``, ``TRANSACTIONS``, and ``DEFER`` as dicts.
+       Inside ``TRANSACTIONS`` it also covers ``SAFE`` and ``UNSAFE`` as bools, ``ALIASES`` as ``"all"`` or a list of aliases, and ``RULE`` as a string or ``None``, values the transaction rule reads as their default.
+       Inside ``DEFER`` it covers every value at every level, a negative duration or one above a day, a cap below one, and a value outside its set, and a read of such a value answers its default.
+       The token ``KEYS``, ``MAX_AGE`` and ``BUCKET`` carry their own code, ``next.E233``.
        ``PARTIAL_BACKENDS``, ``FORM_ACTION_BACKENDS``, ``FORM_ANCHOR_FILES``, ``FORM_WIZARD_BACKEND``, and ``JS_CONTEXT_SERIALIZER`` carry their own per-key checks, ``next.E067``, ``next.E044``, ``next.E052``, ``next.E051``, and ``next.W042``, so this probe leaves them out.
+       ``next.views.checks`` reports the ``TRANSACTIONS`` values through ``error_for_wrong_shape``, so the code keeps one owner.
      - ``next.conf.checks``
    * - ``next.E077``
      - ``NEXT_FRAMEWORK`` is not a dict, so the settings layer ignores it entirely and the project runs on the framework defaults.
@@ -770,8 +819,9 @@ Errors
      - A script loads through the runtime, by a gated category or an ``IDLE``, ``INTERACTION``, or ``MANUAL`` strategy, while ``NEXT_JS_OPTIONS["policy"]`` keeps the runtime off every page.
      - ``next.scripts.checks``
    * - ``next.E139``
-     - A custom ``preload_template``, ``script_tag_template``, or ``init_template`` in ``NEXT_JS_OPTIONS``, or a ``css_tag``, ``js_tag``, or ``module_tag`` in a ``STATIC_BACKENDS`` entry, does not format with its fields, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, through a stray brace or another field.
+     - A custom ``preload_template``, ``script_tag_template``, ``init_template``, or ``chunk_template`` in ``NEXT_JS_OPTIONS``, or a ``css_tag``, ``js_tag``, or ``module_tag`` in a ``STATIC_BACKENDS`` entry, does not format with its fields, ``{url}`` or ``{payload}`` and ``{nonce_attr}``, through a stray brace or another field.
        The check formats each with blank values, and a render uses the default tag in its place.
+       A ``chunk_template`` that places ``{payload}`` outside the text of a ``<script>`` element is refused too, as the payload is escaped for script text alone.
      - ``next.static.checks``
    * - ``next.E140``
      - A script names a category ``CONSENT["CATEGORIES"]`` does not list, so no visitor can grant it.
@@ -1095,12 +1145,146 @@ Errors
      - ``next.urls.checks``
    * - ``next.E218``
      - A ``page.py`` or ``component.py`` declares an ``async def`` callable that next.dj calls synchronously, so the module did not load.
-       It covers a module ``render``, an ``@context`` or ``@component.context`` callable, an ``@action`` handler, and the form and wizard hooks the dispatcher calls, like ``on_valid``, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``done``.
+       It covers an ``@action`` handler and the form and wizard hooks the dispatcher calls, like ``on_valid``, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, and ``done``.
+       A page ``render``, an ``@context`` callable, an ``@page.metadata`` callable, and an ``@component.context`` callable may be coroutine functions, which make the render async, so for them only an async generator is refused.
        The refusal is an ``AsyncCallableError``, a subclass of ``ImproperlyConfigured`` raised at registration or module load, and the message names the callable and its file.
        The dependency resolver refuses an async callable the same way when it first compiles the injection plan of one.
        ``next.E017`` and ``next.E084`` stay silent for that module, so the failure surfaces once.
        Realtime handlers are not affected, since they run async by design.
      - ``next.pages.checks.modules``, ``next.components.checks``
+   * - ``next.E219``
+     - ``NEXT_FRAMEWORK['DEFER']['EXECUTOR']['BACKEND']`` names a path that does not import or no concrete ``BoundaryExecutor`` subclass, ``NEXT_FRAMEWORK['DEFER']['ADMISSION']`` does the same for ``Admission``, ``NEXT_FRAMEWORK['DEFER']['POLICY']['BACKEND']`` for ``StreamPolicy``, ``NEXT_FRAMEWORK['DEFER']['TRANSPORT']['BACKEND']`` for ``StreamTransport``, or ``NEXT_FRAMEWORK['DEFER']['TOKENS']['BACKEND']`` for ``BoundaryTokenBackend``.
+       Under the shipped token backend it also covers the ``CODEC``, ``STORAGE``, ``SEAL``, and ``TRANSPORT`` options against ``TokenCodec``, ``TokenStorage``, ``TokenSeal``, and ``TokenTransport``, a ``BINDING`` that names neither a short binding name, a concrete ``SubjectBinding`` subclass that takes no arguments, nor a callable, so ``CallableBinding`` itself is reported, and a ``KEYS`` or ``MAX_AGE`` path that names no callable.
+       The backends are built on the first deferred call of a page, so the check reports the path before that render fails.
+       A value that is no string is reported by ``next.E076`` instead.
+       It also covers a ``NEXT_FRAMEWORK['COMPRESSION']['BACKENDS']`` entry that does not import or names no concrete ``CompressionBackend`` subclass, and an ``EXCLUDE`` path that does not import or names no callable, which the compression manager skips, logging a warning, or raises as ``CompressionBackendError`` under ``DEBUG`` or ``STRICT_LOADING``.
+     - ``next.suspense.checks``, ``next.compression.checks``
+   * - ``next.E220``
+     - A ``{% more %}`` tag names in ``zone=`` a zone the composed page template does not declare, so every page it fetches lands nowhere.
+     - ``next.partial.checks.more``
+   * - ``next.E221``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['SEAL']`` names ``NoSeal`` or a subclass while ``DEBUG`` is off.
+       A token sealed by nothing lets anyone load any client-trip component with any props, so the seal is for tests only.
+       Naming ``SignedSeal`` or ``EncryptedSeal`` clears it.
+     - ``next.suspense.checks``
+   * - ``next.E222``
+     - A ``component.defer()``, ``component.props()``, ``page.defer()``, or ``page.compress()`` call declares nothing.
+       It covers a mode outside ``stream``, ``load``, ``visible``, ``manual``, and ``inline``, a ``timeout`` that is neither ``None`` nor a duration above zero and up to one day, written as seconds or as ``"3s"`` or ``"500ms"``, a ``props`` value that is not a tuple of distinct identifiers or that names ``defer``, ``timeout``, ``reload``, or ``delay``, a ``tag`` that names no HTML element or names one that cannot wrap the loading HTML, a void element or one whose content is raw text, script or inert markup such as ``script``, ``style``, ``textarea``, ``title``, ``template``, ``noscript``, ``iframe``, ``object``, or ``img``, a ``parallel`` other than ``None``, ``True``, or ``False``, a ``tokens`` mapping with a key outside ``max_age``, ``bucket``, ``binding``, and ``max_bytes``, with an unusable value, or with a ``bucket`` at or above its ``max_age``, props named through both ``component.defer(props=...)`` and ``component.props()``, a ``page.compress()`` value that is no bool, and a call inside a function.
+       It also covers a call outside the module kind it is for, a ``component.defer()`` or ``component.props()`` outside a ``component.py`` and a ``page.defer()`` or ``page.compress()`` outside a ``page.py``.
+       The component or the page keeps the boundary its files give it until the declaration is fixed.
+     - ``next.pages.checks.deferral``
+   * - ``next.E223``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['STORAGE']`` keeps claims in a cache, ``CacheStorage`` or ``SpillStorage``, and its ``CACHE_ALIAS`` names a ``LocMemCache``.
+       A locmem cache lives inside one process, so with several workers or hosts a redeem misses the entry another process wrote and the client reloads the page.
+       It runs under ``manage.py check --deploy`` only, since the check cannot count the processes, so a single-process deployment silences it.
+     - ``next.suspense.checks``
+   * - ``next.E224``
+     - A call of a client-trip component, one delivered in the ``load``, ``visible``, or ``manual`` mode by its call site or its ``component.defer()``, passes a prop its ``component.py`` does not declare, or gives the component children or slots.
+       The browser loads such a component on a later request, where it renders from its declared props alone, so anything else the call carries is lost.
+       The tag raises ``TemplateSyntaxError`` with the same reason when it renders the call, in every environment.
+       Declaring the prop with ``component.defer(mode, props=(...))``, or moving the children into the component, clears it.
+     - ``next.suspense.checks.calls``
+   * - ``next.E225``
+     - A client-trip component declares an access rule whose ``obj=`` names no declared prop, or names a model a URL would carry.
+       The shell checks the rule before it mints the token of the call, and it has nothing but the props of the call to check it on.
+       Naming a declared prop in ``component.permission_required(perm, obj=...)`` clears it.
+     - ``next.suspense.checks.calls``
+   * - ``next.E226``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['BINDING']`` names a binding that reads the session while ``django.contrib.sessions`` is not installed, so no bound token can be minted.
+       Such a binding sets ``needs_sessions``, as ``SessionBinding`` and every realtime ``TicketBinding`` do.
+       A component ``tokens={"binding": "session"}`` override is refused the same way, as ``ImproperlyConfigured``, when its settings are first built.
+     - ``next.suspense.checks``
+   * - ``next.E227``
+     - ``settings.MIDDLEWARE`` lists both ``next.middleware.CompressionMiddleware`` and Django's ``GZipMiddleware``, a subclass of either counting too.
+       Each skips a response that already carries ``Content-Encoding``, so the lower one encodes every response and the other never runs.
+       Removing ``GZipMiddleware`` clears it.
+     - ``next.compression.checks``
+   * - ``next.E228``
+     - ``NEXT_FRAMEWORK['COMPRESSION']`` names a coding in ``ORDER``, ``LEVELS``, or ``WINDOWS`` that no ``BACKENDS`` entry serves, a level or a window outside the range of its codec, a window for gzip, whose window is fixed, or a codec in ``ORDER`` whose library does not import while compression is on.
+       The default ``ORDER`` forces only the codecs of the core dependencies, zstd and gzip, so a missing ``brotli`` extra is reported only when the project writes ``ORDER`` itself.
+       It also covers ``SSE_TOPICS`` set to ``"reset"`` while no available codec of ``ORDER`` can drop its window, brotli being unable to, so topic streams stay uncompressed.
+       A level or a window out of range is read as the default of the codec.
+     - ``next.compression.checks``
+   * - ``next.E229``
+     - The ``error.djx`` of a component holds a component tag naming that component.
+       While a component renders its own error UI a failure of that component is never caught by it again, so the tag would hand every failure to the next error boundary up.
+       The check reads the component tags of the compiled ``error.djx`` and skips a file that does not read or compile.
+     - ``next.components.checks``
+   * - ``next.E230``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['SEAL']`` names ``EncryptedSeal`` or a subclass while the ``cryptography`` package does not import.
+       The seal refuses to build, so no client-trip boundary can be minted, and installing the ``next-dj[crypto]`` extra clears it.
+     - ``next.suspense.checks``
+   * - ``next.E231``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['KEYS']`` is unset, so the ring signs with ``SECRET_KEY`` and ``SECRET_KEY_FALLBACKS``, and one of them is shorter than 32 characters while a component can mint a boundary token.
+       A component can mint one when it declares a client-trip mode or props, or when a template calls it with a client-trip mode, and a project that mints none is not reported.
+       Anyone could forge a token signed with a short secret, so the token backend raises ``ImproperlyConfigured`` at the first mint or redeem whatever this check saw.
+       A declaration only a lazy component backend loads at render time escapes the check and meets that refusal at mint instead.
+       Generating each secret with ``secrets.token_urlsafe(32)``, or naming a ring of long keys in ``KEYS``, clears it.
+     - ``next.suspense.checks``
+   * - ``next.E232``
+     - A ``loading.<zone>.djx`` sits beside a ``template.djx``, a ``layout.djx``, or a ``component.djx`` that declares no zone of that name.
+       The file is the reload skeleton of the zone the template beside it declares, it is never inherited, so a zone declared in another directory never uses it.
+       Renaming the file after a zone of that template, or moving it beside the template that declares the zone, clears it.
+     - ``next.partial.checks.zones``
+   * - ``next.E233``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['KEYS']`` of the shipped token backend is neither ``None``, a dotted path, nor a non-empty list of keys of 32 characters or more, ``MAX_AGE`` is below ``1`` or neither an integer nor a dotted path, or ``BUCKET`` is negative or at or above ``MAX_AGE``.
+       A short key lets anyone forge reload tokens and a bucket that reaches the lifetime mints expired tokens, so the framework ignores the value and keeps its default.
+       The token backend checks every ring each time it reads it, a dotted ``KEYS`` callable at most once a minute, and a short key raises ``ImproperlyConfigured``.
+       Generating each key with ``secrets.token_urlsafe(32)``, or dropping ``KEYS`` while the project secrets are long enough, clears it.
+     - ``next.conf.checks``
+   * - ``next.E234``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['CACHE_ALIAS']`` of a ``CacheStorage`` or ``SpillStorage`` stores where ``SESSION_CACHE_ALIAS`` does while ``SESSION_ENGINE`` is the cache or the cached database engine.
+       Two aliases store in one place when they name the same alias, or the same backend class and the same ``LOCATION``.
+       Token entries and sessions then share one cache, where each evicts the other.
+       Giving boundary tokens a cache alias of their own clears it.
+     - ``next.suspense.checks``
+   * - ``next.E235``
+     - A ``{% more %}`` tag writes ``prune=`` or ``url=`` on a page where no context callable a render runs, its own or one it inherits from a page above, takes an ``Annotated[Paging, <Pager>]``.
+       Both rely on ``?<param>=<token>&restore=1`` restoring the window of rows, which only a pager reads, so a reload would render a single batch.
+       Taking ``page: Annotated[Paging, pager]`` in the callable that pages the rows and passing the ``Window`` it returns to ``next=`` clears it.
+     - ``next.partial.checks.more``
+   * - ``next.E236``
+     - ``NEXT_FRAMEWORK['ROUTER']`` holds an unknown key, at the top or under ``CURRENT``, a ``SCOPE``, ``PREFETCH``, ``INTERCEPT`` or ``FOREIGN`` value outside its set, a delay or a TTL that is no finite number above zero, a ``PREFETCH_ENTRIES``, ``SNAPSHOTS`` or ``MAX_LAYOUTS`` that is no integer from one, an ``EXCLUDE`` that is no list or tuple of paths starting with ``/``, an ``ENABLED``, ``TRANSITIONS`` or ``CURRENT['ENABLED']`` that is no bool, a ``CUT``, ``DIGEST`` or ``CURRENT['BACKEND']`` that is no non-empty string, a ``SPECULATION`` that is neither ``None``, a string, nor a dict, a ``CURRENT`` that is neither a bool nor a dict, or a ``CURRENT['CONTAINERS']`` entry that is not one simple selector, a tag name, ``[attr]`` or ``[attr=value]``.
+       The framework reads such a value as its default.
+     - ``next.router.checks``
+   * - ``next.E237``
+     - ``NEXT_FRAMEWORK['TRANSACTIONS']['RULE']`` names a path that does not import, or one that names no callable, or ``NEXT_FRAMEWORK['ROUTER']`` names in ``CUT``, ``DIGEST`` or ``CURRENT['BACKEND']`` a path that does not import or no concrete subclass of ``NavigationCut``, ``ChromeDigest`` or ``CurrentLinks``.
+       The transaction rule raises ``ImproperlyConfigured`` on the first request it is asked about and a router seam on the first navigation, so the check reports the path before that request.
+       ``next.conf.checks.error_for_unusable_seam`` builds the message for both.
+     - ``next.views.checks``, ``next.router.checks``
+   * - ``next.E238``
+     - A ``page.router()`` call declares nothing.
+       It covers a ``navigate``, ``prefetch`` or ``snapshot`` that is no bool, a call inside a function, and a call outside a ``page.py``, which names no page.
+       The page keeps the default router options until the declaration is fixed.
+     - ``next.router.checks``
+   * - ``next.E239``
+     - The ``{% template %}`` placeholder of a layout sits inside a ``{% verbatim %}`` block, inside an HTML attribute or inside a ``<title>``, while ``ROUTER['ENABLED']`` is on.
+       The client router marks each slot with two HTML comments, which cannot stand there, so every navigation under the layout loads hard or morphs the whole body.
+       Moving the placeholder into the body of an element clears it.
+     - ``next.router.checks``
+   * - ``next.E240``
+     - A ``page.atomic()`` call, an ``@action(atomic=...)`` value, or a ``Meta.atomic`` value on a form class declares nothing.
+       It covers a ``page.atomic()`` flag that is no bool, an ``aliases`` value other than ``None``, ``"all"``, or a list or a tuple of alias names, a ``page.atomic()`` call inside a function or outside a ``page.py``, an ``atomic=`` or ``Meta.atomic`` that is neither a bool, ``None``, nor an ``AtomicOverride``, and an ``AtomicOverride`` holding such values.
+       The page or the action follows the method rule of ``TRANSACTIONS`` until the declaration is fixed.
+     - ``next.views.checks``
+   * - ``next.E241``
+     - The ``OPTIONS["SHAPER"]`` of a loaded form action backend names a path that does not import, a class that cannot be built without arguments, or one whose instances lack ``shape()`` or ``validate()``, or a backend's own ``shaper`` answers with no such object.
+       A path the backend cannot resolve raises the same message as ``ImproperlyConfigured`` on every form POST it shapes, so the check reports it before the first one.
+     - ``next.forms.checks.config``
+   * - ``next.E242``
+     - ``NEXT_FRAMEWORK["ROUTER"]["SPECULATION"]`` names an eagerness other than ``conservative``, ``moderate`` or ``eager``, asks for ``prerender``, or holds unknown keys.
+       Documents carry no Speculation Rules until the value is fixed.
+     - ``next.router.checks``
+   * - ``next.E243``
+     - A prop a component declares through ``component.defer(props=...)`` or ``component.props()`` is annotated, in a ``@component.context`` parameter of the same name, with a type no boundary token carries, or a call site passes it a constant the token refuses, such as ``"2"`` for an ``int`` prop.
+       Every render of that call would raise ``BoundaryPropsError`` when it mints the token, so the check reports it before the first one.
+       An unannotated prop takes any ``str``, ``int``, ``float``, ``bool``, ``None`` or list of those, so only an annotated prop or an out-of-range constant reaches the check.
+     - ``next.suspense.checks.calls``
+   * - ``next.E244``
+     - Two distinct pagers that context callables of one page take, its own or ones it inherits from a page above, read the same query parameter.
+       Each list would then page by the token of the other, and a restore would mix their windows.
+       Giving each pager its own ``param=`` clears it.
+     - ``next.partial.checks.more``
 
 A code emitted by ``next.checks.common`` or by ``next.discovery`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -1176,7 +1360,9 @@ Warnings
      - A ``{% zone %}`` is a direct child of a ``{% with %}`` block, whose bindings a standalone zone render cannot see.
      - ``next.partial.checks.zones``
    * - ``next.W068``
-     - A form action backend overrides ``shape_response`` while ``PARTIAL_BACKENDS`` is configured, so it may drop the patch envelope.
+     - A form action backend overrides ``shape_response`` without consulting ``self.shaper`` while ``PARTIAL_BACKENDS`` is configured, so a partial request receives a full page instead of a patch envelope.
+       The check reads the override's source and accepts the shaper read as an attribute or through ``getattr`` on the first parameter, whatever its name, or a call to ``super().shape_response`` or to a base class's ``shape_response`` named outright, which it follows to that class.
+       A static or class method has no instance to read the shaper from and draws the warning, and an override whose source cannot be read is left alone.
      - ``next.partial.checks.forms``
    * - ``next.W069``
      - A partial backend sets ``VERSION: "manifest"`` while the staticfiles storage does not hash files, so the version guard stays silent.
@@ -1521,7 +1707,8 @@ Warnings
        Moving ``next`` above the named app clears it.
      - ``next.server.checks``
    * - ``next.W149``
-     - The configured broker class is ``MemoryBroker`` or a subclass of it, which keeps topics inside one process.
+     - The configured broker class is ``MemoryBroker`` or a subclass of it, which keeps topics inside one process, and realtime is in use, meaning ``NEXT_FRAMEWORK`` sets a non-empty ``REALTIME`` mapping, an ``@on`` handler is registered, the URLconf routes the ticket introspection view, or a routed ``page.py`` holds a ``TopicStream``.
+       A project that never touches realtime gets no warning.
        With several workers or hosts a publish reaches only the subscribers of the publishing process.
        The check carries ``deploy=True``.
        Selecting ``next.realtime.RedisBroker`` or another shared ``BrokerBackend`` clears it, and a single-process deployment lists the code in ``SILENCED_SYSTEM_CHECKS``.
@@ -1538,6 +1725,180 @@ Warnings
        The check carries ``deploy=True``.
        Setting ``SUBSCRIBE_MAX_CONNECTIONS`` to the open streams one process serves clears it.
      - ``next.realtime.checks``
+   * - ``next.W152``
+     - A page a URL serves has a ``loading.djx`` in its chain, which defers the ``@context`` callables of the page and of the directories below the boundary, and a layout outside that boundary, a ``loading.djx`` of that boundary or of one around it, or the page metadata reads a key only such a callable provides.
+       The layout and the loading UI render before the deferred job runs, so they read the key empty, and a metadata read moves the callable before the shell, where it delays the first byte.
+       The scan reads the variables and tag arguments of the template text, so a read through an include, a custom tag or a keyless callable is not found.
+       Providing the value from a callable of the boundary's directory or above, declaring the callable ``@context(..., guard=True)``, or reading the value in the page body only clears it.
+     - ``next.pages.checks.gating``
+   * - ``next.W153``
+     - ``django.middleware.gzip.GZipMiddleware`` is listed in ``settings.MIDDLEWARE`` under a Django below 6.1 while ``NEXT_FRAMEWORK['COMPRESSION']['ENABLED']`` is off and ``DEFER['POLICY']['OPTIONS']['STREAM']`` is not ``False``.
+       That middleware compresses a stream without flushing below Django 6.1, so the delivery policy assembles every page a gzip client asks for inline rather than streaming it.
+       Replacing it with ``next.middleware.CompressionMiddleware`` and turning ``COMPRESSION['ENABLED']`` on, or upgrading to Django 6.1, clears it.
+     - ``next.suspense.checks``
+   * - ``next.W154``
+     - A database alias sets ``ATOMIC_REQUESTS``.
+       Page views, zone requests, and form action dispatch carry the ``_non_atomic_requests`` mark and open the transactions ``NEXT_FRAMEWORK['TRANSACTIONS']`` asks for, so they ignore it, while plain Django views keep it.
+       Dropping ``ATOMIC_REQUESTS`` clears it, and a project that keeps it for its other views lists the code in ``SILENCED_SYSTEM_CHECKS``.
+     - ``next.views.checks``
+   * - ``next.W155``
+     - Per-connection state, such as a tenant router or a ``SET`` issued by a middleware the framework detects, has no ``ConnectionState`` backend whose ``covers`` names it.
+       A pool thread opens its own connection without that state, so every deferred job of every response runs on the request thread instead.
+       Listing a ``ConnectionState`` backend that covers the source in ``NEXT_FRAMEWORK['DEFER']['CONNECTION_STATE']``, or setting ``next_stateless = True`` on a router that keeps no state, clears it.
+     - ``next.suspense.connections.checks``
+   * - ``next.W156``
+     - The template of a component that declares props reads a top-level variable that is neither a declared prop, a key of one of its ``@component.context`` callables, a name a context processor gives, nor a loop or ``{% with %}`` local.
+       A reload renders such a component from its declared props alone, so the variable reads empty there.
+       A component with a keyless context callable is skipped, since its keys are unknown, and so is every component while a context processor refuses a bare request.
+       Declaring the variable as a prop, or computing it in a keyed context callable, clears it.
+     - ``next.suspense.checks.calls``
+   * - ``next.W157``
+     - A deferred component, one whose ``component.py`` calls ``component.defer()`` or that keeps a ``loading.djx`` beside it, has no ``loading.djx``, and ``NEXT_FRAMEWORK['DEFER']['LOADING']`` names no default.
+       A component declared with ``component.defer("inline")`` renders in place on first paint, so it is not reported.
+       Its placeholder stays empty until the content arrives.
+       Adding a ``loading.djx`` beside the component or setting ``DEFER['LOADING']`` to a template path clears it.
+     - ``next.components.checks``
+   * - ``next.W158``
+     - A ``@component.context`` callable takes a parameter named ``defer``, ``timeout``, ``reload``, or ``delay``.
+       The component tag reserves these keywords for the options of a boundary, so a call site cannot pass a prop of that name.
+       Renaming the parameter clears it.
+     - ``next.components.checks``
+   * - ``next.W159``
+     - A call of a client-trip component sits under ``{% if %}``, a ``{% has_perm %}`` that names an object or a variable permission or holds the call in its ``{% else %}`` branch, or a component that declares an access rule, in a page or a component template, while the called component declares no access rule of its own.
+       The reload request of the component runs the page refusal, the page guards, the literal model permissions of the ``{% has_perm %}`` tags around the call and the component's own rule, so a template condition the page shows it under is not held on that request.
+       Declaring the access the page implies with ``component.login_required()`` or ``component.permission_required()`` clears it.
+     - ``next.suspense.checks.calls``
+   * - ``next.W160``
+     - Streaming is on and a CSP middleware is listed, while ``NEXT_FRAMEWORK['CSP_NONCE']`` is off or the enforced ``SECURE_CSP`` of Django's own middleware restricts script elements through ``script-src-elem``, ``script-src`` or ``default-src`` without ``CSP.NONCE`` and without an ``'unsafe-inline'`` browsers honour.
+       A streamed page writes each deferred boundary as an inline script, so the browser refuses those scripts and every boundary keeps its loading UI.
+       The policy of django-csp is not read, so with that middleware only ``CSP_NONCE`` is checked.
+       Keeping ``CSP_NONCE`` on with the nonce in the script sources, or setting ``DEFER['POLICY']['OPTIONS']['STREAM']`` to ``False``, clears it.
+     - ``next.suspense.checks``
+   * - ``next.W162``
+     - A PostgreSQL alias sets ``OPTIONS['pool']`` and the pool holds fewer connections than ``DEFER['REQUEST_CONCURRENCY']`` plus ``DEFER['EXECUTOR']['OPTIONS']['MAX_WORKERS']``, the connections one process may hold at once.
+       The size is ``max_size``, else ``min_size``, and ``pool=True`` reads the psycopg_pool default of four, all from the settings without importing psycopg.
+       A deferred job then waits for a connection another thread holds.
+       Raising ``max_size`` to the budget, or lowering ``MAX_WORKERS``, clears it.
+     - ``next.suspense.connections.checks``
+   * - ``next.W163``
+     - A sync ``@context`` callable of an async page names the key of an async one, through its parameter name or a ``Context("key")`` default, and the graph of the page overlaps async callables.
+       A read through a dependency, a ``Context`` source callable or a keyless callable is not flagged, and neither is a serial graph, where nothing overlaps.
+       The sync callable waits for the async one on the request thread, so the callables after it in the graph cannot overlap the async work.
+       Declaring the reading callable ``async def``, or passing the value another way, clears it.
+     - ``next.pages.checks.contexts``
+   * - ``next.W164``
+     - ``NEXT_FRAMEWORK['COMPRESSION']['ENABLED']`` is on while ``settings.MIDDLEWARE`` does not list ``next.middleware.CompressionMiddleware``.
+       Only the streams that compress themselves are then compressed.
+       Listing the middleware directly below ``SecurityMiddleware``, or setting ``ENABLED`` to ``False``, clears it.
+     - ``next.compression.checks``
+   * - ``next.W165``
+     - ``next.middleware.CompressionMiddleware`` sits below ``CommonMiddleware``, ``ConditionalGetMiddleware``, or ``FetchFromCacheMiddleware`` in ``settings.MIDDLEWARE``, a subclass such as ``CacheMiddleware`` counting too.
+       Those then read the compressed body, so an ETag, a ``Content-Length``, or a cache hit describes compressed bytes, the placement Django's ``GZipMiddleware`` avoids too.
+       Listing the middleware directly below ``SecurityMiddleware`` clears it.
+     - ``next.compression.checks``
+   * - ``next.W166``
+     - ``SESSION_COOKIE_SAMESITE`` or ``CSRF_COOKIE_SAMESITE`` is ``'None'`` while compression is on.
+       Another site can then send credentialed requests and measure compressed response lengths, the BREACH attack.
+       Setting the cookie to ``'Lax'`` or ``'Strict'``, or keeping the pages that reflect input beside a secret uncompressed, clears it.
+     - ``next.compression.checks``
+   * - ``next.W167``
+     - The static ``MAX_AGE`` of the shipped token backend is below the lifetime of a page whose static ``cache`` a shared cache may store, plus ``BUCKET``.
+       A CDN then hands out a shell whose boundary tokens already expired, so every client-trip boundary reloads the page.
+       A page with a callable ``cache`` and a callable ``MAX_AGE`` are not read, and the check cannot tell which pages hold a client-trip boundary.
+     - ``next.suspense.checks``
+   * - ``next.W168``
+     - An async ``@context`` callable reaches a cycle of named ``Depends`` dependencies, which the async plan compiler finds without running anything.
+       The render raises ``DependencyCycleError`` when it reaches the callable, so the check reports it before the first request.
+       Breaking the cycle clears it.
+     - ``next.pages.checks.contexts``
+   * - ``next.W169``
+     - A ``@context`` callable a deferred page boundary runs in its job reaches, more than three calls deep, a function whose source names ``get_object_or_404``, ``get_list_or_404``, ``Http404``, ``PermissionDenied``, ``BadRequest`` or ``SuspiciousOperation``.
+       The guard scan resolves each raised exception and each called function through the globals and closure of the function it reads, and follows plain functions and the methods of modules and classes three calls deep, so such a 404, 403 or 400 would answer after the shell.
+       The scan misses a ``raise`` of an exception held in a variable, a call through an instance with ``__call__``, a method of an object made at run time, and any other dynamic dispatch, and this check does not name them.
+       Declaring the callable ``@context(..., guard=True)`` runs it before the shell, and ``guard=False`` keeps it deferred and clears it.
+     - ``next.pages.checks.gating``
+   * - ``next.W170``
+     - A deferred component, ``inline`` mode included, has no ``error.djx``, and ``NEXT_FRAMEWORK['DEFER']['ERROR']`` names no default.
+       A failed render leaves an error wrapper with no UI, which still carries ``data-next-state="error"`` and ``data-next-error`` for CSS.
+       Adding an ``error.djx`` beside the component or setting ``DEFER['ERROR']`` to a template path clears it.
+     - ``next.components.checks``
+   * - ``next.W171``
+     - Thread-local scoping, such as a library or a middleware listed in ``EXECUTOR['OPTIONS']['THREAD_LOCAL_MIDDLEWARE']`` that keeps request state on the thread, has no ``ThreadState`` backend whose ``covers`` names it.
+       A pool thread does not inherit that state, so every deferred job of every response runs on the request thread instead.
+       Listing a ``ThreadState`` backend that covers the source in ``NEXT_FRAMEWORK['DEFER']['THREAD_STATE']`` clears it.
+     - ``next.suspense.connections.checks``
+   * - ``next.W172``
+     - A PostgreSQL alias sets ``OPTIONS['pool']`` with an acquisition ``timeout`` above ``NEXT_FRAMEWORK['DEFER']['DEADLINE']``, ``pool=True`` reading the psycopg_pool default of thirty seconds.
+       A deferred job blocked on the pool holds its thread after its boundary settled as a timeout.
+       Setting the pool ``timeout`` at or below the deadline clears it.
+     - ``next.suspense.connections.checks``
+   * - ``next.W173``
+     - ``NEXT_FRAMEWORK['DEFER']['CONNECTION_STATE']`` lists a backend, and a module a deferred job runs code from passes ``durable=True``, the ``component.py`` of a component that defers, the ``page.py`` of a page with a ``loading.djx`` in its chain, or the file of one of that page's deferred ``@context`` callables.
+       A ``ConnectionState`` replays its state with transaction-local statements, so a job runs inside a transaction and a durable atomic block there raises.
+       The scan reads the literal keyword in the source, skips a file it cannot read or parse, and does not follow helpers or dependency providers.
+       Dropping ``durable=True`` from code a deferred boundary runs, or rendering that boundary inline, clears it.
+     - ``next.suspense.checks``
+   * - ``next.W174``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['BUCKET']`` is set while the seal encrypts, as ``EncryptedSeal`` does.
+       Each encrypted token is sealed under a fresh key derived from a random salt, so equal claims never give equal tokens and the bucket keeps no shell byte-stable.
+     - ``next.suspense.checks``
+   * - ``next.W175``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['MAX_AGE']`` of the shipped token backend is above one day, ``86400`` seconds.
+       A leaked reload token stays usable that long, so keeping ``MAX_AGE`` at a day or below clears it.
+     - ``next.conf.checks``
+   * - ``next.W176``
+     - ``ROUTER['ENABLED']`` is on and a root layout reads ``request.path``, ``request.path_info``, ``request.get_full_path`` or a key whose value a context processor derives from the path or ``resolver_match``, outside every ``{% zone %}``.
+       The scan reads the template and the processor source statically, so the key must come back from a dict literal the processor returns.
+       A key counts when its value reads a path attribute of the request, a local assigned from one, a method of the request, or the request itself, and a key holding a constant stays quiet.
+       A name the scan cannot follow, such as a loop target or an unpacked value, counts as path-dependent.
+       The chrome of the layout then differs on every page, so every navigation under it morphs the whole body, and moving the value into a zone or into the page clears it.
+     - ``next.router.checks``
+   * - ``next.W177``
+     - ``ROUTER['ENABLED']`` is on and a page or layout template holds an inline ``<script>`` with no ``src`` and no ``nonce``, of a JavaScript type.
+       A script a navigation inserts runs only with the nonce of its response, so that code does not run after a client navigation.
+     - ``next.router.checks``
+   * - ``next.W178``
+     - ``ROUTER['ENABLED']`` is on and a ``page.py`` declares a static ``cache`` with ``no_store``, ``cache = False`` included.
+       The browser keeps no back-forward copy of such a page, so a Back to it always loads again.
+     - ``next.router.checks``
+   * - ``next.W179``
+     - ``NEXT_FRAMEWORK['TRANSACTIONS']['ALIASES']`` names an alias ``DATABASES`` does not declare.
+       The transaction rule skips such an alias, so next.dj views open no transaction on it.
+     - ``next.views.checks``
+   * - ``next.W180``
+     - ``NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['STORAGE']`` names ``CacheStorage`` or ``SpillStorage`` while ``CACHE_ALIAS`` is left unset, so token claims land in the ``default`` cache.
+       Django unpickles a cache entry before the token's MAC is checked, so whoever can write that cache can run code in every process.
+       Setting ``CACHE_ALIAS`` to a cache whose writers are trusted exactly like those of the session cache clears it.
+     - ``next.suspense.checks``
+   * - ``next.W181``
+     - ``NEXT_JS_OPTIONS['policy']`` is ``disabled`` while a page needs a bundle that registers with the runtime, as when a zone reloads to its loading UI, a ``{% more %}`` sets ``prune=`` or ``url=``, or a component loads on a later request or declares props.
+       No page loads the runtime, so no bundle tag renders and that markup stays inert.
+       Setting the policy to ``auto``, or to ``manual`` with a tag of your own that loads the runtime above ``{% collect_scripts %}``, clears it.
+     - ``next.suspense.checks``
+   * - ``next.W182``
+     - A deferred component declares ``component.defer(..., tokens={"max_age": ...})`` above one day, ``86400`` seconds.
+       A leaked reload token of that component stays usable that long, so keeping ``tokens["max_age"]`` at a day or below clears it.
+     - ``next.components.checks``
+   * - ``next.W183``
+     - ``ROUTER['ENABLED']`` is on and a layout reads, outside every ``{% zone %}`` and outside its ``{% template %}`` slot, a key that a ``@context`` callable of a page below it provides, when that callable sits below the layout's own directory or feeds only its own page.
+       The chrome of the layout then differs between pages that set the key differently, so the client router cannot keep the layout across a navigation between them.
+       Wrapping the part that reads the key in a ``{% zone %}``, which a kept layout morphs on its own, or moving it into the page slot clears it.
+     - ``next.router.checks``
+   * - ``next.W184``
+     - ``ROUTER['ENABLED']`` is on and a ``ROUTER['EXCLUDE']`` prefix starts no path a route of the URLconf serves, which usually means a typo or a renamed route.
+       The check reads the literal start of each route, so a converter or a regex group past it counts as serving anything, and it skips a prefix outside the script prefix or overlapping the paths of ``STATIC_URL`` and ``MEDIA_URL``.
+       Correcting or dropping the prefix clears it, and a prefix a server outside Django answers is silenced through ``SILENCED_SYSTEM_CHECKS``.
+     - ``next.router.checks``
+   * - ``next.W185``
+     - A keyless ``@component.context`` returns a dict whose literal keys include a prop the component declares.
+       A prop the calling tag passes always wins over a keyless merge, so every call that passes it raises ``ComponentContextConflictError``.
+       Registering the value under ``@component.context("key")`` or dropping it from the returned dict clears it.
+     - ``next.components.checks``
+   * - ``next.W186``
+     - Deployment check, run by ``check --deploy``.
+       ``DEFER["TOKENS"]["OPTIONS"]["BINDING"]`` is ``NoBinding`` while ``django.contrib.auth`` is installed and a component mints boundary tokens, so a token minted for one signed-in user opens the boundary for any client that obtains it until it expires.
+       Setting the binding to ``"user"`` or ``"session"`` clears it, and a project whose client-trip boundaries show only public content silences it through ``SILENCED_SYSTEM_CHECKS``.
+     - ``next.suspense.checks``
 
 Codes are assigned per check and are not contiguous.
 

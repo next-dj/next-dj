@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from django.test import override_settings
 
-from tests.support.helpers import file_router_config_entry
+from tests.support.helpers import ROUTER_OFF, file_router_config_entry
 from tests.support.pages import write_page
 from tests.support.sites import NAMESPACED_URLCONF
 
@@ -60,10 +60,9 @@ def write_metadata_tree(root: Path, *pages: tuple[str, str], sitemap: str = "") 
 def routed(
     *roots: Path, urlconf: str = NAMESPACED_URLCONF, **framework: object
 ) -> Generator[None, None, None]:
-    """Route `roots` through one file router mounted by `urlconf` for the block."""
+    """Route `roots` through one file router, the client router off unless asked."""
     first, *rest = roots
     entry = file_router_config_entry(pages_dir=first, dirs=list(rest))
-    with override_settings(
-        ROOT_URLCONF=urlconf, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], **framework}
-    ):
+    framework = {"PAGE_BACKENDS": [entry], "ROUTER": ROUTER_OFF, **framework}
+    with override_settings(ROOT_URLCONF=urlconf, NEXT_FRAMEWORK=framework):
         yield

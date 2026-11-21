@@ -1,5 +1,5 @@
 <nav class="flex gap-2 text-sm">
   {% for href, label in nav_items %}
-    <a class="rounded-md border border-border bg-background px-3 py-2 hover:bg-accent hover:text-accent-foreground transition-colors" href="{{ href }}">{{ label }}</a>
+    <a class="rounded-md border border-border bg-background px-3 py-2 hover:bg-accent hover:text-accent-foreground transition-colors aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground" href="{{ href }}">{{ label }}</a>
   {% endfor %}
 </nav>

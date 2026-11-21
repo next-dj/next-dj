@@ -1,0 +1,1 @@
+{% component "counter_list" items=latencies layout="table" name_header="Page module" value_header="Mean ms" empty_message="No render times have been recorded yet." %}

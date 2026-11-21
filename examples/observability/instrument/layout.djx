@@ -3,7 +3,7 @@
 {% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj observability" brand_href="/" brand_icon="📊" %}
-    {% #slot "actions" %}
+    {% #slot "nav" %}
       {% component "nav_link" url="/" label="Overview" variant="bar" %}
       {% component "nav_link" url="/stats/" label="Stats" variant="bar" %}
       {% component "nav_link" url="/realtime/" label="Realtime" variant="bar" %}

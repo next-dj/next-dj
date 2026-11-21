@@ -12,12 +12,12 @@ from tests.support import patch_checks_components_manager, patch_checks_router_m
 
 _ASYNC_PAGES = [
     pytest.param(
-        "async def render():\n    return 'hi'\n", 'page.py render "render"', id="render"
+        "async def render():\n    yield 'hi'\n", 'page.py render "render"', id="render"
     ),
     pytest.param(
         "from next.pages import context\n\n"
         "@context('rows')\n"
-        "async def rows():\n    return [1]\n\n"
+        "async def rows():\n    yield 1\n\n"
         "template = 'ok'\n",
         '@context callable "rows"',
         id="context",
@@ -90,21 +90,19 @@ class TestAsyncPageCallables:
 
 
 class TestAsyncComponentCallables:
-    """`next.E218` names the async callable that stopped a `component.py`."""
+    """`next.E218` names the async generator that stopped a `component.py`."""
 
     @pytest.mark.parametrize(
         ("source", "named"),
         [
             pytest.param(
-                "async def render():\n    return 'hi'\n",
-                'component.py render "render"',
-                id="render",
+                "async def render():\n    yield 'hi'\n", '"render"', id="render"
             ),
             pytest.param(
                 "from next.components import context\n\n"
                 "@context('greeting')\n"
-                "async def greeting():\n    return 'hi'\n",
-                '@component.context callable "greeting"',
+                "async def greeting():\n    yield 'hi'\n",
+                '"greeting"',
                 id="context",
             ),
         ],

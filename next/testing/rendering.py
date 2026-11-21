@@ -5,17 +5,22 @@ Thin wrappers over `page.render` and `render_component` needing no hand-built re
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from django.test import RequestFactory
 
+from next.boundaries import render_boundaries
 from next.components.facade import render_component
 from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
-from next.pages.manager import page
+from next.pages.manager import defers, page
+from next.ports import render_deferred
 from next.seeding import RenderFrame
 from next.static import collect_component_assets
+
+from .boundaries import in_document_order, raise_first, recorded_failures
 
 
 if TYPE_CHECKING:
@@ -31,11 +36,14 @@ def render_page(
 ) -> str:
     """Render the page at `file_path` and return its HTML string.
 
-    Without `request` a bare GET `/` request is built, `url_kwargs` go to `page.render`.
+    Without `request` a bare GET `/` is built, and a contained failure is re-raised.
     """
     target = Path(file_path) if not isinstance(file_path, Path) else file_path
     req = request if request is not None else RequestFactory().get("/")
-    return page.render(target, req, url_kwargs)
+    with recorded_failures() as failures, render_boundaries():
+        html = page.render(target, req, url_kwargs)
+    raise_first(in_document_order(failures, html))
+    return html
 
 
 def render_component_by_name(
@@ -50,7 +58,7 @@ def render_component_by_name(
 ) -> str:
     """Render component `name` as resolved from the template path `at`.
 
-    The seeded frame is what a nested tag composes from, and `context` outranks it.
+    A nested tag composes from the seeded frame, and deferred calls come back settled.
     """
     anchor = Path(at) if not isinstance(at, Path) else at
     info = components_manager.get_component(name, anchor)
@@ -70,7 +78,16 @@ def render_component_by_name(
     context_data.update(props or {})
     # Publishing `context` too would guard keys a page render leaves shadowable.
     context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(props or ())
-    return render_component(info, context_data, request=frame.request)
+    render = partial(render_component, info, context_data, request=frame.request)
+    with recorded_failures() as failures, render_boundaries():
+        if defers():
+            html = render_deferred(
+                render, collector=frame.collector, request=frame.request
+            )
+        else:
+            html = render()
+    raise_first(in_document_order(failures, html))
+    return html
 
 
 __all__ = ["render_component_by_name", "render_page"]

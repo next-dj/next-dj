@@ -141,7 +141,7 @@ The zone keyword
 ~~~~~~~~~~~~~~~~
 
 ``zone="name"`` binds a callable to one :doc:`zone <partial-rendering/zones>`.
-A zone GET that asks for any other zone skips the callable before its dependencies are resolved, so a lazy or polling neighbour does not pay for it.
+A zone GET that asks for any other zone skips the callable before its dependencies are resolved, so a polling neighbour or a ``{% more %}`` sentinel does not pay for it.
 
 .. code-block:: python
    :caption: admin/audit/page.py
@@ -473,7 +473,7 @@ Give each function a key or merge them.
 ``check_context_reads_foreign_zone`` reports ``next.W077`` for a callable that reads the key of a provider bound to a zone it does not share.
 A zone GET that does not name the bound zone skips the provider while the reader still runs and receives ``None``.
 
-``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` does not accept a ``request`` parameter.
+``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` cannot be called with the request as its one positional argument, which is how Django calls it, so the parameter may be named ``_request`` when the processor does not read it.
 The check covers ``PAGE_BACKENDS`` entries only, not the Django ``TEMPLATES`` list.
 
 See also

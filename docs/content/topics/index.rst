@@ -13,6 +13,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`url-reversing`
    ``page_reverse`` and ``with_query`` helpers.
 
+:doc:`router/index`
+   The client router, shared layouts and the verified cut, history, scroll and snapshots, session clearing, and active links.
+
 .. rubric:: Pages, layouts, and components
 
 :doc:`pages`
@@ -48,7 +51,10 @@ Read the topic that matches the part you are touching, then jump to the referenc
    Co-located files, deduplication, asset kinds, backends, JS context.
 
 :doc:`partial-rendering/index`
-   Zones, patches, forms, the modal wizard, lazy zones, co-located JavaScript, and the SSE bridge.
+   Zones, patches, forms, the modal wizard, components that load later, co-located JavaScript, and the SSE bridge.
+
+:doc:`boundaries/index`
+   ``loading.djx`` and ``error.djx``, the delivery modes, streamed pages, error containment and rollback, async code, the ``Loader``, and the lanes a deferred job runs on.
 
 :doc:`realtime`
    Topic publication, broker selection, authorized streams, and delivery guarantees.
@@ -87,6 +93,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 
    file-router
    url-reversing
+   router/index
    pages
    layouts
    access
@@ -98,6 +105,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    forms/index
    static-assets/index
    partial-rendering/index
+   boundaries/index
    realtime
    dependency-injection
    permissions

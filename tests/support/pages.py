@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 from django.http import HttpRequest
 
 from next.pages.loaders import load_page_module
-from next.pages.manager.views import unified_view as build_unified_view
 from next.pages.metadata import resolve_metadata
 from next.pages.metadata.chain import MetadataThunk
 from next.seeding import METADATA_KEY
+from next.views.pages import unified_view as build_unified_view
 from tests.support.partial_requests import partial_meta
 
 

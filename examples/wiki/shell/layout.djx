@@ -3,8 +3,10 @@
 {% component "page_head" tailwind_plugins="typography" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="Wiki" brand_href="/" brand_icon="📚" %}
-    {% #slot "actions" %}
+    {% #slot "nav" %}
       {% component "nav_link" url_name="next:page_search" label="Search" variant="bar" %}
+    {% /slot %}
+    {% #slot "actions" %}
       {% component "button" href="/articles/new/" text="New article" variant="default" size="sm" %}
     {% /slot %}
     {% #slot "content" %}

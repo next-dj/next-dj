@@ -670,6 +670,17 @@ class SenderDeniedForm(Form):
         return HttpResponse("denied", status=403)
 
 
+class _AnsweringShaper:
+    """Shaper that answers every outcome itself and leaves validation alone."""
+
+    def shape(self, backend, request, outcome) -> HttpResponse:
+        del backend, request, outcome
+        return HttpResponse("shaped", status=202)
+
+    def validate(self, backend, request, form, *, action_name, uid, wizard) -> None:
+        del backend, request, form, action_name, uid, wizard
+
+
 @contextmanager
 def _dispatch_receiver(signal: Signal) -> Iterator[list[dict[str, Any]]]:
     """Connect a receiver filtered on the `FormActionDispatch` sender."""
@@ -699,6 +710,7 @@ def _probe_post() -> QueryDict:
     return post
 
 
+@pytest.mark.django_db()
 class TestDispatchSignalSender:
     """Receivers filtering on `sender=FormActionDispatch` still get every signal.
 
@@ -768,6 +780,28 @@ class TestDispatchSignalSender:
         assert events[0]["sender"] is FormActionDispatch
         assert events[0]["layer"] == "view"
         assert events[0]["reason"] == "response"
+
+    def test_a_shaper_answering_the_outcome_leaves_the_sender_alone(
+        self, mock_http_request
+    ) -> None:
+        """The response shaper builds the response, the pipeline still announces it."""
+        backend = RegistryFormActionBackend()
+        backend.shaper = _AnsweringShaper()
+        backend.register_action(
+            ActionRegistration(
+                name="sender_shaped",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: "ok",
+            )
+        )
+        request = mock_http_request(method="POST", POST=_probe_post())
+        with _dispatch_receiver(action_dispatched) as events:
+            response = _dispatch_probe(backend, request, "sender_shaped")
+        assert response.status_code == 202
+        assert len(events) == 1
+        assert events[0]["sender"] is FormActionDispatch
+        assert events[0]["response_status"] == 202
 
 
 class TestFormBackendLoadedSignal:

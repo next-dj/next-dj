@@ -16,7 +16,7 @@ from next.pages import page as page_manager
 from next.pages.access import page_access, refusal
 from next.partial import keys
 from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, set_partial_vary
-from next.partial.patches import Patches, PatchResponse
+from next.partial.patches import Patches, PatchResponse, finished_zone
 from next.partial.render import render_zone
 
 from .csrf import _csrf_rotated
@@ -208,7 +208,7 @@ def _advance_zone(
     result = render_zone(
         page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
     )
-    patches.morph({keys.ZONE: zone}, result.html[zone])
+    patches.morph({keys.ZONE: zone}, finished_zone(result.html[zone]))
     patches.absorb_zone_result(result)
 
 

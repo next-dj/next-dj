@@ -205,24 +205,28 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
 
 .. _topics-pages-sync-callables:
 
-Sync callables
---------------
+Sync and async callables
+------------------------
 
-A ``render``, an ``@context`` callable, an ``@action`` handler, and a form hook are plain ``def`` functions, because the framework calls them synchronously.
-An ``async def`` one raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as :ref:`next.E218 <ref-system-checks>`.
-Async code is reached through :func:`~asgiref.sync.async_to_sync`.
+A ``render``, an ``@context`` callable, and an ``@page.metadata`` callable may be ``async def`` coroutine functions, and one of them makes the render of its page async.
+The view stays a sync Django view under WSGI and ASGI alike, and it drives the async part of the render on an event loop while the request thread serves every synchronous call that part makes.
+An async ``@context`` callable therefore awaits native async I/O directly, and the Django async ORM, such as ``aget``, runs on the request thread inside the transaction of the request.
+Two async callables that do not read each other run concurrently.
 
 .. code-block:: python
    :caption: page.py
 
-   from asgiref.sync import async_to_sync
    from weather.client import fetch_forecast
 
    from next import context
 
    @context("forecast")
-   def forecast() -> dict:
-       return async_to_sync(fetch_forecast)()
+   async def forecast() -> dict:
+       return await fetch_forecast()
+
+An ``@action`` handler and a form hook stay plain ``def`` functions, because the form dispatch calls them synchronously.
+An ``async def`` one, and an async generator anywhere, raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as :ref:`next.E218 <ref-system-checks>`.
+:doc:`/content/topics/boundaries/async` covers the request scope async values share, the ``Loader`` that batches lookups, and the lanes a deferred job runs on.
 
 Page access
 -----------
@@ -243,6 +247,36 @@ A requirement a section shares carries ``inherit=True``, which binds every page 
 
 ``page.public()`` lifts what every ``page.py`` above requires for that page alone, and ``manage.py permissions`` names the file of the lift.
 See :ref:`topics-permissions-tree` for the order of the checks and the answer to a refusal.
+
+Transactions
+------------
+
+Database transactions of next.dj views follow the HTTP method.
+A ``GET``, ``HEAD``, ``OPTIONS``, or ``TRACE`` request runs in autocommit and touches no connection before its first query, and any other method runs inside one transaction on each alias of ``TRANSACTIONS["ALIASES"]``, ``default`` alone unless the project names more.
+Page views, zone requests, and form action dispatch follow this rule in place of ``ATOMIC_REQUESTS``, which plain Django views keep, and ``manage.py check`` reports an ``ATOMIC_REQUESTS`` alias as ``next.W154``.
+The view settles the access check before it opens the transaction, so a refused request opens none, and closes the transaction once the response object exists, so an exception rolls the work back, a returned response commits it whatever its status, and a :func:`~django.db.transaction.on_commit` hook waits for that commit.
+A row the access rule loads from the URL kwargs is read before the transaction and reused by the render, so a render that locks it reloads it with ``select_for_update()``.
+
+A ``page.py`` that writes on a ``GET``, or a page that must not hold a transaction on a ``POST``, declares its own choice at the top of the module.
+
+.. code-block:: python
+   :caption: shop/pages/checkout/page.py
+
+   from next import page
+
+   page.atomic(True, aliases=["default", "ledger"])
+
+``page.atomic()`` covers the full page, zone, boundary, and navigation requests of its page and none of the actions the page declares.
+A form action takes its own choice as ``@action(..., atomic=False)`` or ``Meta.atomic = False``, and ``TRANSACTIONS["RULE"]`` replaces the method table for the whole project, see ``TRANSACTIONS`` in :doc:`/content/ref/settings`.
+Inside an action an ``on_commit`` hook fires when the action's transaction commits, so a handler that sleeps, calls another service, or sends mail opts out to hold no connection in an open transaction, see :ref:`topics-forms-actions-transactions`.
+A streamed page writes its deferred boundaries after the view returned, so their jobs run outside this transaction, see :doc:`/content/topics/boundaries/async`.
+
+Loading and error UI
+--------------------
+
+A ``loading.djx`` in the page directory, in a directory above it inside the page tree, or beside a layout that wraps the page from another root turns everything below that directory into a deferred boundary, and the response shows the loading UI in its place until the job settles.
+An ``error.djx`` there turns it into an error boundary, which renders in place of a body or a context callable that failed, and ``page.defer(timeout=..., parallel=...)`` tunes the job of the page boundary.
+See :doc:`/content/topics/boundaries/loading` and :doc:`/content/topics/boundaries/errors`.
 
 Custom template loaders
 -----------------------

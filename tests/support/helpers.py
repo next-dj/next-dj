@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 def build_mock_http_request(*, path: str | None = "/test/", **attrs) -> MagicMock:
     """Return ``MagicMock(spec=HttpRequest)`` with optional ``path`` and attributes."""
     m = MagicMock(spec=HttpRequest)
+    m.META = {}
     if path is not None:
         m.path = path
     for key, val in attrs.items():
@@ -131,6 +132,9 @@ def named_temp_py(content: str, *, suffix: str = ".py") -> Generator[Path, None,
         yield path
     finally:
         path.unlink(missing_ok=True)
+
+
+ROUTER_OFF = {"ENABLED": False}
 
 
 def file_router_config_entry(

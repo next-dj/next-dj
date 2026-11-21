@@ -182,8 +182,7 @@ def test_a_locked_note_refuses_every_save_path(
 
     expect_no_partial_request(page, next_probe, seen)
 
-    with page.expect_navigation():
-        page.get_by_role("link", name="Back to notes").click()
+    page.get_by_role("link", name="Back to notes").click()
 
     expect(page).to_have_url(f"{base_url}/notes/")
     locked_note.refresh_from_db()
@@ -199,7 +198,7 @@ def test_saving_an_unlocked_note_lands_back_on_its_editor(
     expect(save).to_be_enabled()
 
     page.locator("#id_body").fill("rewritten in the browser")
-    with page.expect_navigation():
+    with page.expect_response(lambda response: response.request.method == "POST"):
         save.click()
 
     expect(page).to_have_url(f"{base_url}/notes/{acme_note.pk}/edit/")

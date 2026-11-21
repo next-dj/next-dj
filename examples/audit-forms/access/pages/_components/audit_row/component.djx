@@ -1,4 +1,4 @@
-<tr data-audit-row data-source="{{ data_attrs.source }}" data-kind="{{ data_attrs.kind }}">
+<tr data-audit-row data-next-key="{{ entry.pk }}" data-source="{{ data_attrs.source }}" data-kind="{{ data_attrs.kind }}">
   <td class="px-4 py-2 align-top font-mono text-xs text-slate-500">
     {{ entry.created_at|date:"Y-m-d H:i:s" }}
   </td>

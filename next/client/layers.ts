@@ -9,18 +9,20 @@ import type { Head, HeadPatch } from "./head";
 import { fireRemoved } from "./morph";
 import type { Navigation } from "./navigation";
 import {
+  ATTR_BUSY,
   ATTR_ZONE,
   HEADER_ORIGIN,
   HEADER_ZONE,
   cssEscape,
   fire,
+  markBusy,
   pageKey,
   currentUrl as pageUrl,
 } from "./protocol";
 
 const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
-const BUSY_ATTR = "data-next-busy";
+const TOASTS_ATTR = "data-next-toasts";
 
 /** The detail passed to close, an accept result or a dismiss reason. */
 export interface LayerCloseEvent {
@@ -110,12 +112,10 @@ export interface LayerStack {
   close(detail: LayerCloseEvent): void;
   /** Sync a page's head tags, a page under a titled layer shows them once it closes. */
   head(patch: HeadPatch, page?: string): void;
-  /** Append a toast as textContent, never parsed as HTML. */
-  toast(text: string, variant: string): void;
+  /** Append a toast as textContent to the page's tray or its own, return the item. */
+  toast(text: string, variant: string): Element;
   /** The number of open layers. */
   size(): number;
-  /** Mark the initiator and target busy for a request, returning the releaser. */
-  busy(initiator: Element | null, target: Element | null): () => void;
   /** Install the delegated click handler, returning its teardown. */
   install(doc: Document): () => void;
   _reset(): void;
@@ -215,27 +215,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return true;
   }
 
-  function busy(initiator: Element | null, target: Element | null): () => void {
-    const marked = [initiator, target].filter((el): el is Element => el !== null);
-    for (const el of marked) {
-      el.toggleAttribute(BUSY_ATTR, true);
-      el.setAttribute("aria-busy", "true");
-    }
-    return () => {
-      for (const el of marked) {
-        el.toggleAttribute(BUSY_ATTR, false);
-        el.removeAttribute("aria-busy");
-      }
-    };
-  }
-
   async function open(
     opener: HTMLElement | null,
     href?: string,
     zone?: string,
   ): Promise<void> {
     // A second open for a busy opener is dropped here, so neither path stacks a modal.
-    if (opener?.hasAttribute(BUSY_ATTR) === true) return;
+    if (opener?.hasAttribute(ATTR_BUSY) === true) return;
     const seed =
       href !== undefined && zone !== undefined
         ? { href, zone, owner: pageKey(href, doc) }
@@ -278,7 +264,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     stack.push(layer);
     // Both ends go busy before the request, and the opener's flag is what the
     // double-click guard above reads. Nothing awaits before this line.
-    const release = busy(opener, root);
+    const release = markBusy([opener, root]);
     // A body fetch needs both the URL and the zone. A zone-only or empty open
     // shows a bare modal for a later patch to seed, with no history entry.
     try {
@@ -413,24 +399,25 @@ export function createLayers(deps: LayerDeps): LayerStack {
     });
   }
 
-  function toast(text: string, variant: string): void {
-    const host = ensureToastHost();
+  function toast(text: string, variant: string): Element {
     const item = doc.createElement("div");
     item.setAttribute("data-next-toast", variant);
     // textContent, never innerHTML, so a server toast string cannot smuggle markup.
     item.textContent = text;
-    host.append(item);
-    emit("next:toast", { text, variant });
+    toastTray().append(item);
+    emit("next:toast", { text, variant, element: item });
+    return item;
   }
 
-  function ensureToastHost(): HTMLElement {
-    if (toastHost?.isConnected) return toastHost;
-    const host = doc.createElement("div");
-    host.setAttribute("data-next-toasts", "");
-    host.setAttribute("aria-live", "polite");
-    doc.body.append(host);
-    toastHost = host;
-    return host;
+  // The page's tray wins top layer down, so the runtime builds one only as a fallback.
+  function toastTray(): Element {
+    const tray = resolveSelector(`[${TOASTS_ATTR}]`, doc);
+    if (tray !== null) return tray;
+    toastHost = doc.createElement("div");
+    toastHost.setAttribute(TOASTS_ATTR, "");
+    toastHost.setAttribute("aria-live", "polite");
+    doc.body.append(toastHost);
+    return toastHost;
   }
 
   function emit(event: string, detail: Record<string, unknown>): void {
@@ -449,7 +436,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (!isPlainActivation(event, opener)) return;
     event.preventDefault();
     // A second click while the first is in flight is dropped, no double dialog.
-    if (opener.hasAttribute(BUSY_ATTR)) return;
+    if (opener.hasAttribute(ATTR_BUSY)) return;
     void open(opener, href, zone);
   }
 
@@ -477,14 +464,11 @@ export function createLayers(deps: LayerDeps): LayerStack {
     head,
     toast,
     size: () => stack.length,
-    busy,
     install,
     _reset() {
       for (const layer of topDown()) remove(layer);
-      if (toastHost !== null) {
-        toastHost.remove();
-        toastHost = null;
-      }
+      toastHost?.remove();
+      toastHost = null;
       // Drop the click and popstate listeners install bound, so a reset leaves none.
       if (detach !== null) {
         detach();

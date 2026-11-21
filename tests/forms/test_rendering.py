@@ -12,6 +12,7 @@ from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
 from next.csrf import defer_token
+from next.diagnostics import degraded, degraded_status, watch_degraded
 from next.forms import (
     ActionRegistration,
     ComponentFileWidget,
@@ -209,6 +210,80 @@ class TestRenderInvalidPage:
         )
         assert "<main>" in third
         assert "<p>v2</p>" in third
+
+
+_EXPLODING = """
+from next.pages import context
+
+
+def _explode():
+    raise ValueError("body")
+
+
+@context("boom")
+def boom():
+    return _explode
+"""
+
+_FAILING_CONTEXT = """
+from next.pages import context
+
+
+@context("value")
+def value():
+    raise ValueError("context")
+"""
+
+
+class TestRenderInvalidPageBoundaries:
+    """A page boundary contains a failed re-render at the status of the form flow."""
+
+    def _render(self, mock_http_request, page_file: Path) -> str:
+        backend = form_action_manager.default_backend
+        return backend.render_invalid_page(
+            mock_http_request(method="POST", POST=QueryDict()),
+            "simple_form",
+            SimpleForm(data={}),
+            page_file_path=page_file,
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "body"),
+        [(_EXPLODING, "{{ form.name }}{{ boom }}"), (_FAILING_CONTEXT, "{{ value }}")],
+        ids=("body", "context"),
+    )
+    def test_a_failure_renders_the_error_ui_without_a_status(
+        self, mock_http_request, tmp_path, source: str, body: str
+    ) -> None:
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
+        (tmp_path / "leaf").mkdir()
+        (tmp_path / "leaf" / "error.djx").write_text("<p>form page down</p>")
+        page_file = tmp_path / "leaf" / "page.py"
+        page_file.write_text(source)
+        (tmp_path / "leaf" / "template.djx").write_text(body)
+        watch_degraded()
+
+        html = self._render(mock_http_request, page_file)
+
+        assert html.startswith("<main><div id=")
+        assert "<p>form page down</p>" in html
+        assert degraded() is True
+        assert degraded_status() is None
+        watch_degraded()
+
+    def test_a_working_page_renders_the_bound_form(
+        self, mock_http_request, tmp_path
+    ) -> None:
+        (tmp_path / "error.djx").write_text("<p>form page down</p>")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        (tmp_path / "template.djx").write_text("{{ form.is_bound }}")
+        watch_degraded()
+
+        html = self._render(mock_http_request, page_file)
+
+        assert html == "True"
+        assert degraded() is False
 
 
 class TestFormTagSyntax:

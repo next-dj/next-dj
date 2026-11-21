@@ -11,6 +11,8 @@ import pytest
 from next.static.runtime import (
     CHUNK_PAYLOAD_KEYS,
     CHUNK_STATIC_PATHS,
+    DECLARED_CHUNK_KEYS,
+    LISTED_CHUNK_KEYS,
     NEXT_JS_STATIC_PATH,
 )
 
@@ -35,6 +37,17 @@ def _static_bundles() -> set[str]:
     return {NEXT_JS_STATIC_PATH, *CHUNK_STATIC_PATHS.values()}
 
 
+def _entry_source(key: str) -> str:
+    """Return the source of the build entry the bundle `key` is built from."""
+    entry = _build_entries()[f"next.{key}.min"]
+    return (ROOT / entry).read_text(encoding="utf-8")
+
+
+def _lands(key: str) -> bool:
+    """Whether the entry of `key` registers its module through `Next._land`."""
+    return f'Next._land("{key}"' in _entry_source(key)
+
+
 def _build_entries() -> dict[str, str]:
     """Return the `build:next` esbuild entries, output name to source file."""
     script = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
@@ -46,13 +59,14 @@ def _build_entries() -> dict[str, str]:
 class TestChunkLists:
     """Every list of the chunks names the same ones."""
 
-    def test_module_keys_match_the_payload_chunk_map(self) -> None:
+    def test_module_keys_are_the_listed_chunks_and_each_landing_bundle(self) -> None:
         source = (CLIENT / "next.ts").read_text(encoding="utf-8")
         modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(")
-        assert modules == set(CHUNK_STATIC_PATHS)
+        landing = {key for key in DECLARED_CHUNK_KEYS if _lands(key)}
+        assert modules == set(LISTED_CHUNK_KEYS) | landing
 
     def test_chunk_keys_name_every_shipped_chunk(self) -> None:
-        assert set(CHUNK_STATIC_PATHS) == {
+        assert set(LISTED_CHUNK_KEYS) == {
             "scripts",
             "stream",
             "ws",
@@ -60,6 +74,16 @@ class TestChunkLists:
             "poll",
             "dev",
         }
+        assert {
+            "defer",
+            "reload",
+            "more",
+            "reader",
+            "router",
+            "history",
+            "intent",
+        } == DECLARED_CHUNK_KEYS
+        assert set(CHUNK_STATIC_PATHS) == {*LISTED_CHUNK_KEYS, *DECLARED_CHUNK_KEYS}
 
     def test_scripts_chunk_keys_match_the_payload_keys(self) -> None:
         source = (CLIENT / "chunks.ts").read_text(encoding="utf-8")
@@ -69,12 +93,33 @@ class TestChunkLists:
         built = {f"next/{name}.js" for name in _build_entries()}
         assert built == _static_bundles()
 
-    def test_each_chunk_entry_lands_under_its_own_key(self) -> None:
+    def test_each_listed_chunk_entry_lands_under_its_own_key(self) -> None:
         entries = _build_entries()
-        for key, path in CHUNK_STATIC_PATHS.items():
+        for key in LISTED_CHUNK_KEYS:
+            path = CHUNK_STATIC_PATHS[key]
             entry = entries[path.removeprefix("next/").removesuffix(".js")]
             source = (ROOT / entry).read_text(encoding="utf-8")
             assert f'Next._land("{key}"' in source, entry
+
+    def test_a_declared_bundle_lands_or_installs_itself_on_the_runtime(self) -> None:
+        for key in DECLARED_CHUNK_KEYS:
+            source = _entry_source(key)
+            if not _lands(key):
+                assert "window.Next" in source, key
+                assert "_land" not in source, key
+
+    def test_a_self_installing_bundle_runs_once_and_is_never_fetched_lazily(
+        self,
+    ) -> None:
+        source = (CLIENT / "next.ts").read_text(encoding="utf-8")
+        modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(")
+        installing = {key for key in DECLARED_CHUNK_KEYS if not _lands(key)}
+        assert {"reload", "more", "reader", "router", "history", "intent"} <= installing
+        for key in installing:
+            entry = _entry_source(key)
+            assert f"if (!next.${key}) {{" in entry, key
+            assert f"next.${key} = true;" in entry, key
+            assert key not in modules, key
 
     def test_each_chunk_entry_is_named_by_its_key(self) -> None:
         entries = _build_entries()

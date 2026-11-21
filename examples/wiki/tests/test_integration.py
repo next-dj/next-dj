@@ -442,6 +442,28 @@ class TestSearchAutoSubmit:
         assert "Type a query" in html
 
 
+class TestSearchReloadSkeleton:
+    """The results zone reloads to its loading UI from `loading.search-results.djx`."""
+
+    def test_the_zone_reloads_to_its_loading_ui(self, next_client: NextClient) -> None:
+        body = next_client.get(reverse("next:page_search")).content.decode()
+        assert (
+            '<div data-next-zone="search-results" data-next-reload="loading">' in body
+        )
+
+    def test_the_skeleton_ships_once_after_the_zone(
+        self, next_client: NextClient
+    ) -> None:
+        body = next_client.get(reverse("next:page_search")).content.decode()
+        stash = '<template data-next-loading="search-results">'
+        assert body.count(stash) == 1
+        skeleton = body.split(stash, 1)[1].split("</template>", 1)[0]
+        assert "data-search-skeleton" in skeleton
+        assert "Loading results" in skeleton
+        assert "Type a query" not in skeleton
+        assert body.index('data-next-zone="search-results"') < body.index(stash)
+
+
 class TestMarkdownPreviewMount:
     """The preview pane is rebindable through the mount registry."""
 

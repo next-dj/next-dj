@@ -37,6 +37,10 @@ DICT_KEYS: Final[frozenset[str]] = frozenset(
         "SITE",
         "SEO",
         "CONSENT",
+        "TRANSACTIONS",
+        "DEFER",
+        "COMPRESSION",
+        "ROUTER",
     }
 )
 STR_KEYS: Final[frozenset[str]] = frozenset(

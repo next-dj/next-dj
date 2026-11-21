@@ -390,7 +390,7 @@ The framework resolves parameters from the surrounding template scope, from URL 
    These are a different set from the nine render-time reserved keys listed under :ref:`components-merge-guard`, and :doc:`/content/ref/deps` documents them as ``RESERVED_KEYS``.
    It also raises ``ValueError`` for a duplicate registration of two different functions under the same key, or of two different unkeyed callables, in one ``component.py``.
    Re-registering the same function under the same key replaces the stored entry rather than raising.
-   These are the registration failures, and the unkeyed form raises one more ``ValueError`` at render time, described below.
+   These are the registration failures, and the unkeyed form raises ``ComponentContextConflictError`` at render time, described below.
 
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
 The behaviour is identical to ``@context`` on a page module, so the value must be JSON-encodable by the active serializer.
@@ -416,6 +416,13 @@ A ``component.py`` declares who may see the component with ``component.login_req
 
 A declaration binds that component alone, with no ``inherit`` and no ``public()``, and a refused request renders the component as an empty string, with no redirect and no 403.
 A component without declarations follows the page or the zone it renders in, see :ref:`topics-permissions-tree`.
+
+Loading and error UI
+--------------------
+
+A ``loading.djx`` beside a component makes each call of it a deferred boundary, whose loading UI the response shows first and whose content arrives once its job settles.
+An ``error.djx`` beside it makes an error boundary, which renders in place of the component when its render fails, in every render, deferred or not.
+``component.defer()`` in the ``component.py`` picks the delivery mode, ``stream`` in the same response or ``load``, ``visible``, or ``manual`` on a later request, see :doc:`boundaries/index`.
 
 Co-located static assets
 ------------------------
@@ -448,7 +455,7 @@ The unkeyed context merge guard
 An unkeyed ``@component.context`` merges its dict into the component scope, so the framework guards the names that merge would quietly take over.
 An unkeyed callable that returns anything other than a ``dict`` is silently dropped from the template scope, and a custom mapping type has to be converted to a ``dict`` before it is returned.
 
-The render raises ``ValueError`` when the returned dict carries a prop passed by the ``{% component %}`` tag being rendered, a reserved render key, or any key that starts with ``slot_``.
+The render raises ``ComponentContextConflictError``, a ``ValueError`` naming the component, the function, and the keys, when the returned dict carries a prop passed by the ``{% component %}`` tag being rendered, a reserved render key, or any key that starts with ``slot_``.
 The nine reserved render keys are ``children``, ``request``, ``csrf_token``, ``current_template_path``, ``current_page_module_path``, ``current_component_module_path``, ``current_action_anchor``, ``_static_collector``, and ``_component_props``.
 The whole ``slot_`` prefix is reserved, so a returned ``slot_count`` raises even when the component declares no ``count`` slot.
 Register the value under an explicit ``@component.context("key")`` instead, which is the deliberate override and is never guarded.
@@ -461,6 +468,8 @@ The ``{% component %}`` tag publishes the props of its own call, ``ComponentWidg
 A bare ``render_component`` has no call site, so it guards the reserved keys alone.
 The same component code therefore raises under ``{% component "note_card" preview=text %}`` and merges quietly under ``{% component "note_card" %}``.
 This failure leaves the render rather than degrading to an empty string, so ``STRICT_LOADING`` and ``DEBUG`` do not change it.
+A reload of a deferred component publishes the props its token carries, so it meets the guard exactly as the inline render of the same call does, and an error boundary around either contains the failure like any other.
+A keyless callable whose returned dict literal names a prop the component declares is ``next.W185``.
 
 Lookup performance
 ------------------

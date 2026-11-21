@@ -50,8 +50,11 @@ Modules
    Holds ``PageTemplateCache``, the per-page composed source, compiled ``Template``, and layout skeleton layers, each with the mtime snapshot that dates it.
    See `Composed-template cache`_ below for the layers and their staleness rule.
 
-``next.pages.manager.views``.
-   Builds the two routed views, the static one that serves a compiled composed template and the resolving one that runs ``render()`` per request, and the ``URLPattern`` the file router routes either through.
+``next.pages.manager.patterns``.
+   Builds the ``URLPattern`` the file router mounts a page view under, from the view factory ``next.urls`` passes in, and sizes the page-keyed memos by the pages the patterns mount.
+
+``next.views.pages``.
+   Builds the two routed views above the pages area, the static one that serves a compiled composed template and the resolving one that runs ``render()`` per request.
    Both carry ``next_page_path`` and both stamp the partial ``Vary`` set on the full-page branch.
 
 ``next.pages.placeholder``.

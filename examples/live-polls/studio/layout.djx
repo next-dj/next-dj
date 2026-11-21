@@ -4,9 +4,9 @@
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="🗳️ next.dj Live polls" brand_href="/polls/" %}
     {% #slot "actions" %}
-      <span class="text-sm text-muted-foreground">
+      {% zone "open-polls" tag="span" class="text-sm text-muted-foreground" %}
         {{ active_polls_count }} open polls
-      </span>
+      {% endzone %}
     {% /slot %}
     {% #slot "content" %}
       {% template %}

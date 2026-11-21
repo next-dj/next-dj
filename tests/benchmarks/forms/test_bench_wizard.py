@@ -89,6 +89,7 @@ class TestBenchWizardNavigation:
         benchmark(_wizard().current_form)
 
 
+@pytest.mark.django_db(transaction=True)
 class TestBenchWizardDispatch:
     """End-to-end wizard step submit through `FormActionDispatch.dispatch`."""
 

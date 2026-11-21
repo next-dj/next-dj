@@ -3,12 +3,14 @@
 Import from here when one module subscribes to several subsystems at once.
 """
 
+from next.boundaries import boundary_failed
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
     components_registered,
 )
+from next.compression.signals import compression_backend_loaded
 from next.conf.signals import settings_reloaded
 from next.consent.signals import consent_backend_loaded
 from next.deps.signals import provider_registered
@@ -46,6 +48,7 @@ from next.realtime.signals import (
     upstream_received,
     upstream_rejected,
 )
+from next.router.signals import navigation_rendered, prefetch_shed, router_cleared
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
@@ -54,6 +57,14 @@ from next.static.signals import (
     collector_finalized,
     html_injected,
     static_backend_loaded,
+)
+from next.suspense.signals import (
+    boundary_rendered,
+    boundary_side_effect,
+    boundary_token_rejected,
+    page_stream_closed,
+    page_stream_declined,
+    page_stream_opened,
 )
 from next.urls.signals import (
     intercept_registered,
@@ -67,12 +78,17 @@ __all__ = [
     "action_dispatched",
     "action_registered",
     "asset_registered",
+    "boundary_failed",
+    "boundary_rendered",
+    "boundary_side_effect",
+    "boundary_token_rejected",
     "broker_backend_loaded",
     "collector_finalized",
     "component_backend_loaded",
     "component_registered",
     "component_rendered",
     "components_registered",
+    "compression_backend_loaded",
     "consent_backend_loaded",
     "context_registered",
     "field_validated",
@@ -84,12 +100,18 @@ __all__ = [
     "intercept_registered",
     "message_published",
     "metadata_registered",
+    "navigation_rendered",
     "page_rendered",
+    "page_stream_closed",
+    "page_stream_declined",
+    "page_stream_opened",
     "partial_backend_loaded",
     "patch_op_registered",
+    "prefetch_shed",
     "provider_registered",
     "route_registered",
     "router_backend_loaded",
+    "router_cleared",
     "router_reloaded",
     "scripts_registered",
     "settings_reloaded",

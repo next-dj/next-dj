@@ -51,14 +51,14 @@ def _check_id_literals() -> dict[str, set[str]]:
 _CHECK_ID_LITERALS = _check_id_literals()
 
 _RETIRED_IDS = frozenset(
-    {"next.E001", "next.E014", "next.E023", "next.E026", "next.E066", "next.E081"}
-    | {"next.E091", "next.E109"}
+    {"next.E001", "next.E014", "next.E023", "next.E026", "next.E064", "next.E066"}
+    | {"next.E081", "next.E091", "next.E109"}
     | {f"next.W{number:03d}" for number in range(3, 30)}
     | {f"next.W{number:03d}" for number in range(32, 42)}
     | {"next.W044", "next.W045"}
     | {f"next.W{number:03d}" for number in range(47, 54)}
     | {f"next.W{number:03d}" for number in range(64, 67)}
-    | {"next.W073"}
+    | {"next.W073", "next.W161"}
 )
 
 _CHECKS_REFERENCE = (

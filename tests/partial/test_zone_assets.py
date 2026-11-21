@@ -96,3 +96,27 @@ class TestZoneGetMixedManifest:
         } in envelope.assets
         context_ops = [op for op in envelope.ops if op["op"] == "context"]
         assert context_ops == [{"op": "context", "data": {"seen": 7}}]
+
+
+RELOAD_ASSET = {
+    "kind": "js",
+    "url": "/static/next/next.reload.min.js",
+    "load": "script",
+}
+
+
+class TestZoneGetBundleNeeds:
+    """A zone GET lists the declared bundle its zone needs among its assets."""
+
+    def test_a_loading_zone_needs_the_reload_bundle(self) -> None:
+        response = NextClient().get_zones("/zoned/", "later")
+        assert RELOAD_ASSET in envelope_of(response).assets
+
+    def test_a_keep_zone_needs_none(self) -> None:
+        response = NextClient().get_zones("/zoned/", "alpha")
+        assert RELOAD_ASSET not in envelope_of(response).assets
+
+    def test_the_own_page_zone_carries_no_skeleton(self) -> None:
+        response = NextClient().get_zones("/zoned/", "later")
+        morph = envelope_of(response).ops[0]
+        assert "data-next-loading" not in morph["html"]

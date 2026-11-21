@@ -179,9 +179,9 @@ The other fields carry what each kind needs.
 On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the identity of the origin page that the dispatcher resolved from the posted ``_next_form_origin`` field, and a ``page_path`` of ``None`` makes the default envelope answer HTTP 400.
 The dataclass may grow fields over time, so construct an ``ActionOutcome`` with keywords only.
 
-The base implementation asks the partial shaper bound in ``next.ports`` whether the request is partial and, if so, hands it the outcome for a patch envelope.
-Only a plain request reaches ``FormActionDispatch.shape_response``, the default full-page envelope.
-An override that never calls ``super().shape_response`` therefore disables the partial envelopes for every action the backend dispatches, see :doc:`/content/topics/partial-rendering/how-it-works`.
+The base implementation hands the outcome to ``self.shaper``, the ``ResponseShaper`` the entry's ``OPTIONS["SHAPER"]`` names, and the default ``next.partial.FormShaper`` answers a partial request with a patch envelope.
+Only an outcome the shaper declines with ``None`` reaches ``FormActionDispatch.shape_response``, the default full-page envelope.
+An override that calls neither ``super().shape_response`` nor ``self.shaper.shape`` therefore disables the partial envelopes for every action the backend dispatches, which ``next.W068`` warns about, see :doc:`/content/topics/partial-rendering/how-it-works`.
 On the default full-page path an invalid submission re-renders the origin page with HTTP 200, the ``X-Next-Form: invalid`` header, and the ``X-Next-Action`` header when the outcome carries a ``uid``.
 A wizard advance redirects with HTTP 302.
 Both are behaviour of the default backend, not a guarantee of the endpoint.
@@ -220,6 +220,7 @@ The four abstract methods must all be present.
 
    class CustomBackend(FormActionBackend):
        def __init__(self, config: dict[str, Any] | None = None) -> None:
+           super().__init__(config)
            self._actions: dict[str, ActionMeta] = {}
 
        def register_action(self, registration: ActionRegistration) -> None:
@@ -380,6 +381,7 @@ The framework validates the backend configuration at startup.
 - ``next.E059`` reports an entry whose ``BACKEND`` is not a string.
 - ``next.E068`` reports a ``BACKEND`` dotted path that cannot be imported.
 - ``next.E045`` reports a backend class outside the ``FormActionBackend`` family.
+- ``next.E241`` reports an ``OPTIONS["SHAPER"]`` that names no buildable ``ResponseShaper`` class.
 
 Run ``uv run python manage.py check`` after editing the backend list.
 

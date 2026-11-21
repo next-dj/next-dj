@@ -18,7 +18,7 @@ DIRECTIVE = re.compile(r"^(\s*)\.\.\s+(?:code-block|code|sourcecode)::\s*(\S+)?\
 OPTION = re.compile(r"^\s+:([\w-]+):\s*(.*)$")
 SETTINGS_BLOCK = re.compile(r"NEXT_FRAMEWORK\s*=\s*\{(.*?)\n\}", re.DOTALL)
 SETTINGS_KEY = re.compile(r'^\s{4}"([A-Z_]+)"\s*:', re.MULTILINE)
-TAG = re.compile(r"\{%-?\s*(#?/?\w+)")
+TAG = re.compile(r"\{%-?\s*(#?/?[\w:]+)")
 
 PY_LANGS = frozenset({"python", "py", "python3"})
 TEMPLATE_LANGS = frozenset({"jinja", "html", "django", "html+django"})
@@ -36,6 +36,8 @@ SLASH_TAGS = frozenset(
         "#use_style",
         "#use_script",
         "#template",
+        "next:boundary",
+        "next:slot",
     }
 )
 END_TAGS = frozenset(
@@ -54,6 +56,7 @@ END_TAGS = frozenset(
         "ifchanged",
         "language",
         "localize",
+        "more",
         "spaceless",
         "verbatim",
         "with",
@@ -168,9 +171,10 @@ def template_error(source: str) -> str | None:
         if token in SLASH_TAGS or token in END_TAGS:
             stack.append(token)
             continue
-        expected = (
-            "#" + token[1:] if token.startswith("/") else token.removeprefix("end")
-        )
+        expected = token.removeprefix("end")
+        if token.startswith("/"):
+            plain = token[1:]
+            expected = plain if plain in SLASH_TAGS else "#" + plain
         if expected == token:
             continue
         if not stack:

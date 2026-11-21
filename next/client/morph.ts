@@ -3,7 +3,7 @@
 // scroll survive a patch. Matching runs on id-sets, then a child walk reuses.
 
 import { defaultMove } from "./adapters";
-import { ATTR_KEY } from "./protocol";
+import { ATTR_BUSY, ATTR_KEY, isBusy } from "./protocol";
 
 /** Whether a morph replaces the target itself or only its children. */
 export type MorphMode = "node" | "children";
@@ -159,16 +159,15 @@ function findMatch(
   pointer: Node | null,
   newChild: Node,
   persistent: Set<string>,
+  end: Node | null,
 ): Node | null {
-  for (let scan = pointer; scan !== null; scan = scan.nextSibling) {
+  for (let scan = pointer; scan && scan !== end; scan = scan.nextSibling) {
     if (isHardMatch(ctx, scan, newChild, persistent)) {
       return scan;
     }
   }
-  if (pointer === null || !isSoftMatch(ctx, pointer, newChild, persistent)) {
-    return null;
-  }
-  return pointer;
+  if (!pointer || pointer === end) return null;
+  return isSoftMatch(ctx, pointer, newChild, persistent) ? pointer : null;
 }
 
 // A hyphenated tag or a shadow root is atomic. On a tag match only attributes
@@ -241,6 +240,7 @@ function syncLive(ctx: Ctx, oldEl: Element, newEl: Element): void {
 // Attributes owned by syncLive rather than the generic pass, the value/checked and
 // selected twins, a touched <details> open, and a layer-owned <dialog> open.
 function skipAttribute(ctx: Ctx, el: Element, name: string): boolean {
+  if (name === ATTR_BUSY || name === "aria-busy") return isBusy(el);
   const tag = el.tagName;
   if (name === "value" || name === "checked") return tag === "INPUT";
   if (name === "selected") return tag === "OPTION";
@@ -319,12 +319,14 @@ function morphChildren(
   oldParent: Element,
   newParent: ParentNode,
   persistent: Set<string>,
+  first: Node | null = oldParent.firstChild,
+  end: Node | null = null,
 ): void {
-  let pointer: Node | null = oldParent.firstChild;
+  let pointer = first;
   let newChild = newParent.firstChild;
   while (newChild !== null) {
     const next = newChild.nextSibling;
-    const match = findMatch(ctx, pointer, newChild, persistent);
+    const match = findMatch(ctx, pointer, newChild, persistent, end);
     if (match === null) {
       // Unmatched, the only path new content takes into the document.
       if (ctx.beforeNode(null, newChild) !== false) {
@@ -341,7 +343,7 @@ function morphChildren(
     applyMatch(ctx, match, newChild, persistent);
     newChild = next;
   }
-  while (pointer !== null) {
+  while (pointer && pointer !== end) {
     const after = pointer.nextSibling;
     discard(ctx, pointer);
     pointer = after;
@@ -433,42 +435,23 @@ function firstElement(fragment: DocumentFragment): Element | null {
   return null;
 }
 
-/** Bring target up to html and return the root, a new node if the root tag changed. */
-export function morph(
-  target: Element,
-  html: string | Element | DocumentFragment,
-  options: MorphOptions = {},
-): Element {
-  const content = parseContent(target, html);
-  const mode = options.mode ?? "node";
+function prepare(
+  doc: Document,
+  olds: Iterable<Element>,
+  fresh: Iterable<Element>,
+  options: MorphOptions,
+  body: (ctx: Ctx, persistent: Set<string>) => void,
+): void {
   const keyed = options.keyed;
-  const doc = target.ownerDocument;
-
-  const newRoot =
-    content instanceof DocumentFragment
-      ? mode === "children"
-        ? content
-        : firstElement(content)
-      : content;
-  if (newRoot === null) return target;
-
-  // One id-map across both trees, plus a raw universe per side.
   const ids = new Map<Element, Set<string>>();
   const oldUniverse = new Set<string>();
   const newUniverse = new Set<string>();
-  collectIds(target, ids, oldUniverse, keyed);
-  if (newRoot instanceof Element) {
-    collectIds(newRoot, ids, newUniverse, keyed);
-  } else {
-    for (const child of Array.from(newRoot.childNodes)) {
-      if (isElement(child)) collectIds(child, ids, newUniverse, keyed);
-    }
-  }
+  for (const el of olds) collectIds(el, ids, oldUniverse, keyed);
+  for (const el of fresh) collectIds(el, ids, newUniverse, keyed);
   const persistent = new Set<string>();
   for (const id of oldUniverse) {
     if (newUniverse.has(id)) persistent.add(id);
   }
-
   const ctx: Ctx = {
     ids,
     isDirty: options.isDirty ?? (() => false),
@@ -478,28 +461,64 @@ export function morph(
     afterNode: options.afterNode ?? (() => undefined),
     onDiscard: options.onDiscard ?? (() => undefined),
   };
-
   const snap = snapshotFocus(doc);
-  let result: Element = target;
+  body(ctx, persistent);
+  restoreFocus(doc, snap);
+}
 
-  if (mode === "children") {
-    morphChildren(ctx, target, newRoot, persistent);
-  } else {
-    const root = newRoot as Element;
+/** Bring target up to html and return the root, a new node if the root tag changed. */
+export function morph(
+  target: Element,
+  html: string | Element | DocumentFragment,
+  options: MorphOptions = {},
+): Element {
+  const content = parseContent(target, html);
+  if (options.mode === "children") {
+    morphRange([target, null, null], content, options);
+    return target;
+  }
+  const root = content instanceof DocumentFragment ? firstElement(content) : content;
+  if (root === null) return target;
+  let result: Element = target;
+  prepare(target.ownerDocument, [target], [root], options, (ctx, persistent) => {
     if (target.tagName === root.tagName) {
       morphNode(ctx, target, root, persistent);
-    } else {
-      // A changed root tag recreates the node in the target's position.
-      const parent = target.parentNode;
-      if (parent !== null) {
-        parent.insertBefore(root, target);
-        fireRemoved(target);
-        target.remove();
-      }
-      result = root;
+      return;
     }
-  }
-
-  restoreFocus(doc, snap);
+    // A changed root tag recreates the node in the target's position.
+    const parent = target.parentNode;
+    if (parent !== null) {
+      parent.insertBefore(root, target);
+      fireRemoved(target);
+      target.remove();
+    }
+    result = root;
+  });
   return result;
+}
+
+export type Bounds = [parent: Element, start: Node | null, end: Node | null];
+
+export function between([parent, start, end]: Bounds): Element[] {
+  const found: Element[] = [];
+  for (
+    let node = start ? start.nextSibling : parent.firstChild;
+    node && node !== end;
+    node = node.nextSibling
+  )
+    if (isElement(node)) found.push(node);
+  return found;
+}
+
+export function morphRange(
+  bounds: Bounds,
+  content: Element | DocumentFragment,
+  options: MorphOptions = {},
+): void {
+  const [parent, start, end] = bounds;
+  const first = start ? start.nextSibling : parent.firstChild;
+  const olds = between(bounds);
+  prepare(parent.ownerDocument, olds, content.children, options, (ctx, ids) =>
+    morphChildren(ctx, parent, content, ids, first, end),
+  );
 }

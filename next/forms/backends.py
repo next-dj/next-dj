@@ -3,20 +3,32 @@
 import hashlib
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, cast, override
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Protocol,
+    TypedDict,
+    cast,
+    override,
+    runtime_checkable,
+)
 from weakref import WeakSet
 
 from django.contrib.auth.decorators import login_not_required
 from django.core.exceptions import ImproperlyConfigured
 from django.http import Http404
 from django.urls import get_script_prefix, path
+from django.utils.module_loading import import_string
 from django.views.decorators.http import require_http_methods
 
 from next.caches import BoundedCache
-from next.ports import partial_shaper_slot
+from next.conf.merge import FROZEN_DEFAULTS
+from next.transactions import AtomicOverride, skip_atomic_requests
 from next.utils import app_holding, resolve_base_dir
 
 from .dispatch import FormActionDispatch
@@ -109,22 +121,30 @@ def scope_key_for(file_path: str, scope: str) -> str:
     return _action_keys(file_path, scope)[1]
 
 
-def _handler_fingerprint(handler: "Callable[..., Any]") -> tuple[str, str]:
-    module = getattr(handler, "__module__", "") or ""
+def _handler_fingerprint(
+    handler: "Callable[..., Any]", file_path: str
+) -> tuple[str, str]:
+    """Return the declaring file and the qualname that identify a handler across loads.
+
+    The module name stays out, since one file may run under two, as a page does.
+    """
     qualname = getattr(handler, "__qualname__", "") or getattr(handler, "__name__", "")
-    return (str(module), str(qualname))
+    return (_resolved_path_str(file_path), str(qualname))
 
 
 def record_possible_collision(
     action_name: str,
     old_handler: "Callable[..., Any]",
     new_handler: "Callable[..., Any]",
+    *,
+    old_file: str,
+    new_file: str,
 ) -> None:
-    """Record a collision when a name is re-registered with a distinct handler."""
+    """Record a collision when a name is re-registered with a distinct definition."""
     if old_handler is new_handler:
         return
-    old_fp = _handler_fingerprint(old_handler)
-    new_fp = _handler_fingerprint(new_handler)
+    old_fp = _handler_fingerprint(old_handler, old_file)
+    new_fp = _handler_fingerprint(new_handler, new_file)
     if old_fp == new_fp:
         return
     registration_diagnostics.action_collisions.setdefault(action_name, {old_fp}).add(
@@ -175,6 +195,7 @@ class ActionMeta(_ActionIdentity, total=False):
     guard: ActionGuard | None
     requires_runtime: bool
     transport: "Transport"
+    atomic: AtomicOverride
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +225,8 @@ class ActionRegistration:
     """Whether every form posting here submits through the client runtime."""
     transport: "Transport" = "http"
     """Whether the action also answers through a tunnel, `"any"`, or HTTP alone."""
+    atomic: AtomicOverride | None = None
+    """The transaction the action runs in, `None` for the method rule of the view."""
     claims_name_binding: bool = False
     """Whether this registration takes over lookups that carry no page scope.
 
@@ -214,8 +237,92 @@ class ActionRegistration:
     """
 
 
+_SHAPER_OPTION: Final = "SHAPER"
+_DEFAULT_SHAPER: Final[str] = FROZEN_DEFAULTS["FORM_ACTION_BACKENDS"][0]["OPTIONS"][
+    _SHAPER_OPTION
+]
+
+
+@runtime_checkable
+class ResponseShaper(Protocol):
+    """The strategy a form backend asks before its default response envelope."""
+
+    def shape(
+        self,
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        outcome: ActionOutcome,
+    ) -> "HttpResponse | None":
+        """Return the response for one outcome, `None` to leave it to the default."""
+
+    def validate(
+        self,
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        form: "BaseForm | BaseFormSet",
+        *,
+        action_name: str,
+        uid: str,
+        wizard: "FormWizard | None",
+    ) -> "HttpResponse | None":
+        """Return the answer of a validate-only pass, `None` when none was asked."""
+
+
+def _load_shaper(dotted: object) -> ResponseShaper:
+    """Return an instance of the response shaper class `dotted` names."""
+    if not isinstance(dotted, str):
+        msg = (
+            "OPTIONS['SHAPER'] of a form action backend names a ResponseShaper "
+            f"class by dotted path, got {dotted!r}."
+        )
+        raise ImproperlyConfigured(msg)
+    try:
+        shaper_class = import_string(dotted)
+    except ImportError as exc:
+        msg = (
+            f"OPTIONS['SHAPER'] {dotted!r} of a form action backend could not be "
+            f"imported: {exc}"
+        )
+        raise ImproperlyConfigured(msg) from exc
+    if isinstance(shaper_class, type):
+        try:
+            shaper = shaper_class()
+        except TypeError as exc:
+            msg = (
+                f"OPTIONS['SHAPER'] {dotted!r} of a form action backend cannot be "
+                f"built without arguments: {exc}"
+            )
+            raise ImproperlyConfigured(msg) from exc
+        if isinstance(shaper, ResponseShaper):
+            return shaper
+    msg = (
+        f"OPTIONS['SHAPER'] {dotted!r} of a form action backend is not a "
+        "ResponseShaper class, whose instances define shape() and validate()."
+    )
+    raise ImproperlyConfigured(msg)
+
+
 class FormActionBackend(ABC):
     """Storage and HTTP dispatch for `@action` handlers."""
+
+    _shaper_path: object = _DEFAULT_SHAPER
+
+    def __init__(self, config: "Mapping[str, Any] | None" = None) -> None:
+        """Keep the response shaper path the entry names under `OPTIONS["SHAPER"]`.
+
+        A subclass that never calls this answers through the default shaper.
+        """
+        options = None if config is None else config.get("OPTIONS")
+        if options is not None and isinstance(options, Mapping):
+            self._shaper_path = options.get(_SHAPER_OPTION, _DEFAULT_SHAPER)
+
+    @cached_property
+    def shaper(self) -> ResponseShaper:
+        """Return the response shaper `OPTIONS["SHAPER"]` names, resolved once.
+
+        Built without a lock, so a shaper must be stateless or safe to build twice.
+        """
+        return _load_shaper(self._shaper_path)
 
     @abstractmethod
     def register_action(self, registration: ActionRegistration) -> None:
@@ -292,11 +399,11 @@ class FormActionBackend(ABC):
     ) -> "HttpResponse":
         """Turn one pipeline outcome into the HTTP response.
 
-        A partial request uses the partial shaper port, a plain one the full page.
+        The response shaper answers first, the default envelope takes what it declines.
         """
-        shaper = partial_shaper_slot.get()
-        if shaper.intent(request).partial:
-            return shaper.shape_response(self, request, outcome)
+        shaped = self.shaper.shape(self, request, outcome)
+        if shaped is not None:
+            return shaped
         return FormActionDispatch.shape_response(self, request, outcome)
 
 
@@ -333,6 +440,8 @@ def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
         meta["requires_runtime"] = True
     if registration.transport != "http":
         meta["transport"] = registration.transport
+    if registration.atomic is not None:
+        meta["atomic"] = registration.atomic
     return meta
 
 
@@ -369,8 +478,9 @@ class _DispatchView(Protocol):
 class RegistryFormActionBackend(FormActionBackend):
     """In-memory actions behind one dispatcher path keyed by UID."""
 
-    def __init__(self, _config: dict[str, Any] | None = None) -> None:
-        """Create an empty action map. `_config` is accepted for factory parity."""
+    def __init__(self, _config: "Mapping[str, Any] | None" = None) -> None:
+        """Create an empty action map answering through the shaper `_config` names."""
+        super().__init__(_config)
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
@@ -451,7 +561,13 @@ class RegistryFormActionBackend(FormActionBackend):
             )
             new_obj = handler or form_class or wizard_class
             if old_obj is not None and new_obj is not None:
-                record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
+                record_possible_collision(
+                    f"{scope_key}:{name}",
+                    old_obj,
+                    new_obj,
+                    old_file=previous["file_path"],
+                    new_file=file_path,
+                )
 
         self._registry[key] = _action_meta(registration, uid)
         if registration.claims_name_binding:
@@ -537,7 +653,7 @@ class RegistryFormActionBackend(FormActionBackend):
         """
         view = login_not_required(require_http_methods(["GET", "POST"])(self.dispatch))
         cast("_DispatchView", view).next_access_kind = ACTION_KIND
-        return view
+        return skip_atomic_requests(view)
 
     def action_name(self, uid: str) -> str | None:
         """Return the name of the action registered under `uid`, `None` for none."""
@@ -604,6 +720,7 @@ __all__ = [
     "FormActionBackend",
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
+    "ResponseShaper",
     "build_action_guard",
     "declaring_files",
     "file_to_dotted_module",

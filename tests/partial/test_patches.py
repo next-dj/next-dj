@@ -14,7 +14,7 @@ import next.partial.patches
 from next.diagnostics import degraded, watch_degraded
 from next.pages import ld
 from next.pages.errors import PageMetadataShapeError
-from next.pages.metadata import resolve_metadata
+from next.pages.metadata import Metadata, resolve_metadata
 from next.partial import Asset, FormMeta, Patches, PatchResponse
 from next.partial.errors import (
     BuiltinPatchOpError,
@@ -22,9 +22,12 @@ from next.partial.errors import (
     ReservedPatchKeyError,
 )
 from next.partial.headers import CONTENT_TYPE
-from next.partial.render import ZoneRenderResult
+from next.partial.patches import finished_zone
+from next.partial.render import ZoneRenderResult, render_zone
 from next.static import KindRegistry, StaticAsset
+from next.static.collector import StaticCollector
 from next.static.manager import default_manager, get_static_manager
+from next.static.runtime import html_finish
 from next.testing import override_next_settings
 from tests.support import (
     BUILD_MANIFEST,
@@ -57,6 +60,14 @@ metadata = {"title": "Leaf"}
 
 def render():
     return HttpResponseForbidden()
+"""
+ASYNC_ROOT = """
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+async def root_meta():
+    return {"title": {"template": "{title} | Async"}}
 """
 RAISING_ROOT = """
 from next.pages import page
@@ -103,6 +114,81 @@ def leaf_meta(user):
     return {"title": user}
 """
 
+SCOPED_LEAF = """
+from next.pages import page
+
+
+@page.context("shared", serialize=True)
+def shared():
+    return "all"
+
+
+@page.context("own", zone="main", serialize=True)
+def own():
+    return "mine"
+
+
+@page.context("deep", zone="inner", serialize=True)
+def deep():
+    return "nested"
+
+
+@page.context("other", zone="side", serialize=True)
+def other():
+    return "theirs"
+"""
+SCOPED_BODY = (
+    '{% zone "main" %}{{ shared }} {{ own }}'
+    '{% zone "inner" %}{{ deep }}{% endzone %}{% endzone %}'
+    '{% zone "side" %}{{ other }}{% endzone %}'
+)
+
+COUNTED_ROOT = """
+from next.pages import page
+
+
+@page.metadata(inherit=True)
+def root_meta(shared):
+    return {"title": {"template": "{title} | " + shared}}
+"""
+COUNTED_LEAF = """
+from django.http import HttpRequest
+
+from next.pages import page
+
+
+@page.context("shared", serialize=True)
+def shared(request: HttpRequest):
+    request.calls.append("shared")
+    return "all"
+
+
+@page.context("own", zone="main", serialize=True)
+def own(request: HttpRequest):
+    request.calls.append("own")
+    return "mine"
+
+
+@page.context("other", zone="side", serialize=True)
+def other(request: HttpRequest):
+    request.calls.append("other")
+    return "theirs"
+"""
+SPREAD_LEAF = (
+    COUNTED_LEAF
+    + """
+
+@page.context(serialize=True)
+def spread(request: HttpRequest):
+    request.calls.append("spread")
+    return {"spread": True}
+"""
+)
+COUNTED_BODY = (
+    '{% zone "main" %}{{ shared }} {{ own }}{% endzone %}'
+    '{% zone "side" %}{{ other }}{% endzone %}'
+)
+
 
 def _routed(root: Path) -> override_settings:
     """Route the page tree under `root` as the only page backend."""
@@ -146,6 +232,21 @@ class TestAddAssetResolvesLoad:
             Patches.versioned("v1").add_asset("css", "", inline=".x {}").envelope()
         )
         assert envelope.assets[0].as_dict()["load"] == "link"
+
+    def test_a_stylesheet_is_page_scoped_under_the_router(self) -> None:
+        with override_next_settings(ROUTER={"ENABLED": True}):
+            envelope = (
+                Patches.versioned("v1")
+                .add_asset("css", "/a.css")
+                .add_asset("css", "", inline=".x {}")
+                .add_asset("js", "/a.js")
+                .envelope()
+            )
+        assert [asset.scope for asset in envelope.assets] == ["page", "page", None]
+
+    def test_a_stylesheet_has_no_scope_with_the_router_off(self) -> None:
+        envelope = Patches.versioned("v1").add_asset("css", "/a.css").envelope()
+        assert "scope" not in envelope.assets[0].as_dict()
 
     def test_inline_module_body_travels_without_a_verb(self) -> None:
         envelope = (
@@ -601,6 +702,16 @@ class TestMeta:
             envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
         assert envelope.ops[0].extras == _meta("Post | Kanban")
 
+    def test_an_async_inherited_callable_folds_into_the_head(
+        self, tmp_path: Path
+    ) -> None:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", ASYNC_ROOT), ("leaf", LEAF_TITLE)]
+        )
+        with _routed(tmp_path):
+            envelope = _builder_for(tmp_path, leaf).meta("Post").envelope()
+        assert envelope.ops[0].extras == _meta("Post | Async")
+
     def test_an_inherited_callable_reads_a_get_visit_of_the_origin(
         self, tmp_path: Path
     ) -> None:
@@ -726,6 +837,10 @@ class TestPatchResponse:
         response = PatchResponse(b"{}")
         assert "X-Next-Merge" in response["Vary"]
 
+    def test_the_vary_names_can_be_given(self) -> None:
+        response = PatchResponse(b"{}", vary=("X-Next-Request", "Accept"))
+        assert response["Vary"] == "X-Next-Request, Accept"
+
     def test_custom_status(self) -> None:
         response = PatchResponse(b"{}", status=409)
         assert response.status_code == 409
@@ -831,6 +946,33 @@ class TestBuilderZoneManifest:
         assert envelope.ops[1].as_dict() == {"op": "context", "data": {"seen": 7}}
 
 
+class TestFinishedZone:
+    """Zone HTML a builder morphs runs the active-link pass the response binds."""
+
+    def test_unbound_keeps_the_html(self) -> None:
+        html = "<nav></nav>"
+        assert finished_zone(html) is html
+
+    def test_bound_runs_the_pass(self) -> None:
+        token = html_finish.set(str.upper)
+        try:
+            assert finished_zone("<nav></nav>") == "<NAV></NAV>"
+        finally:
+            html_finish.reset(token)
+
+    def test_a_zone_morph_is_marked(self) -> None:
+        token = html_finish.set(lambda html: f"{html}<!--marked-->")
+        try:
+            envelope = (
+                Patches(partial_request(origin="/zoned_inline/"))
+                .morph(zone="styled", context=False)
+                .envelope()
+            )
+        finally:
+            html_finish.reset(token)
+        assert envelope.ops[0].html.endswith("<!--marked-->")
+
+
 class TestZoneOverridesReachTheMetadataTag:
     """A `{% metadata %}` in a zone body reads the overrides of the morph."""
 
@@ -845,6 +987,39 @@ class TestZoneOverridesReachTheMetadataTag:
             assert "<title>Bob</title>" in bob.ops[0].html
             ann = builder.morph(zone="head").envelope()
         assert "<title>Ann</title>" in ann.ops[1].html
+
+
+class TestZoneMorphRunsTheZoneGetContext:
+    """`morph(zone=...)` runs only the context callables a zone GET of it runs."""
+
+    @staticmethod
+    def _morph_and_get(tmp_path: Path, zone: str) -> tuple[Patches, ZoneRenderResult]:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", SCOPED_LEAF)])
+        (leaf.parent / "template.djx").write_text(SCOPED_BODY)
+        with _routed(tmp_path):
+            builder = _builder_for(tmp_path, leaf).morph(zone=zone)
+            got = render_zone(leaf, (zone,), builder.request)
+        return builder, got
+
+    def test_a_foreign_zone_callable_stays_out(self, tmp_path: Path) -> None:
+        builder, _got = self._morph_and_get(tmp_path, "main")
+        ops = [op.as_dict() for op in builder.envelope().ops]
+        assert ops[1] == {
+            "op": "context",
+            "data": {"shared": "all", "own": "mine", "deep": "nested"},
+        }
+        assert ops[0]["html"] == (
+            '<div data-next-zone="main">all mine'
+            '<div data-next-zone="inner">nested</div></div>'
+        )
+
+    @pytest.mark.parametrize("zone", ["main", "inner", "side"])
+    def test_the_morph_matches_the_zone_get(self, tmp_path: Path, zone: str) -> None:
+        builder, got = self._morph_and_get(tmp_path, zone)
+        morph, context = builder.envelope().ops
+        (absorbed,) = Patches.versioned("v1").absorb_zone_result(got).envelope().ops
+        assert morph.html == got.html[zone]
+        assert context.as_dict() == absorbed.as_dict()
 
 
 class TestZoneDeltaReservedKeys:
@@ -880,34 +1055,133 @@ class TestZoneDeltaReservedKeys:
 
 
 class TestOriginRenderContextMemoised:
-    """The origin render context is built once per builder."""
+    """A builder reads the serialized names of a keyed page without a full build."""
 
-    def test_context_then_morph_builds_render_context_once(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls = 0
+    @staticmethod
+    def _requested(
+        monkeypatch: pytest.MonkeyPatch, build: Callable[[Patches], Patches]
+    ) -> list[frozenset[str] | None]:
+        requested: list[frozenset[str] | None] = []
         original = next.pages.page.build_render_context
 
-        def _counting(*args, **kwargs) -> object:
-            nonlocal calls
-            calls += 1
+        def _recording(*args, **kwargs) -> object:
+            requested.append(kwargs.get("requested_zones"))
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(next.pages.page, "build_render_context", _counting)
-        Patches(partial_request()).context(flag=True).morph(zone="alpha").envelope()
-        assert calls == 1
+        monkeypatch.setattr(next.pages.page, "build_render_context", _recording)
+        build(Patches(partial_request())).envelope()
+        return requested
 
-    def test_context_only_builds_render_context_once(
+    def test_a_zone_morph_builds_only_its_zone_context(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = 0
-        original = next.pages.page.build_render_context
+        requested = self._requested(
+            monkeypatch,
+            lambda b: b.context(flag=True).morph(zone="alpha").context(flag=False),
+        )
+        assert requested == [frozenset({"alpha"})]
 
-        def _counting(*args, **kwargs) -> object:
-            nonlocal calls
-            calls += 1
-            return original(*args, **kwargs)
+    def test_context_alone_builds_no_render_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._requested(monkeypatch, lambda b: b.context(flag=True)) == []
 
-        monkeypatch.setattr(next.pages.page, "build_render_context", _counting)
-        Patches(partial_request()).context(flag=True).envelope()
-        assert calls == 1
+
+class TestBuilderRunsEachContextCallableOnce:
+    """A builder runs each context callable of the origin page at most once."""
+
+    @staticmethod
+    def _run(
+        tmp_path: Path, build: Callable[[Patches], Patches], leaf_source: str
+    ) -> tuple[list[str], list[dict[str, object]]]:
+        _root, leaf = write_page_chain(
+            tmp_path, [("root", COUNTED_ROOT), ("leaf", leaf_source)]
+        )
+        (leaf.parent / "template.djx").write_text(COUNTED_BODY)
+        with _routed(tmp_path):
+            builder = _builder_for(tmp_path, leaf)
+            request = builder.request
+            request.calls = []
+            ops = [op.as_dict() for op in build(builder).envelope().ops]
+        return sorted(request.calls), ops
+
+    def test_a_morph_runs_no_foreign_zone_callable(self, tmp_path: Path) -> None:
+        calls, _ops = self._run(tmp_path, lambda b: b.morph(zone="main"), COUNTED_LEAF)
+        assert calls == ["own", "shared"]
+
+    def test_context_around_a_morph_runs_each_callable_once(
+        self, tmp_path: Path
+    ) -> None:
+        calls, ops = self._run(
+            tmp_path,
+            lambda b: b.context(shared="x").morph(zone="main").context(own="y"),
+            COUNTED_LEAF,
+        )
+        assert calls == ["own", "shared"]
+        assert [op["data"] for op in ops if op["op"] == "context"] == [
+            {"shared": "x"},
+            {"shared": "all", "own": "y"},
+        ]
+
+    def test_context_alone_runs_no_callable(self, tmp_path: Path) -> None:
+        calls, _ops = self._run(tmp_path, lambda b: b.context(other="z"), COUNTED_LEAF)
+        assert calls == []
+
+    def test_meta_and_context_share_one_full_build(self, tmp_path: Path) -> None:
+        calls, ops = self._run(
+            tmp_path,
+            lambda b: b.context(spread=False).meta("Post").context(spread=True),
+            SPREAD_LEAF,
+        )
+        assert calls == ["other", "own", "shared", "spread"]
+        assert ops[1]["title"] == "Post | all"
+
+    def test_a_keyless_spread_reads_its_names_from_the_full_build(
+        self, tmp_path: Path
+    ) -> None:
+        _calls, ops = self._run(
+            tmp_path, lambda b: b.context(spread=False), SPREAD_LEAF
+        )
+        assert ops == [{"op": "context", "data": {"spread": False}}]
+
+
+class TestNavigationBuilder:
+    """The builder methods a navigation envelope is assembled with."""
+
+    def test_replace_context_and_navigation_fields(self) -> None:
+        patches = Patches(None, version="v")
+        patches.replace_context({"user": 1}).navigation({"root": None})
+        envelope = patches.envelope()
+        assert envelope.ops[0].as_dict() == {
+            "op": "context",
+            "data": {"user": 1},
+            "replace": True,
+        }
+        assert envelope.navigation == {"root": None}
+
+    def test_an_unknown_navigation_field_raises(self) -> None:
+        with pytest.raises(TypeError, match="unknown fields \\['nope'\\]"):
+            Patches(None, version="v").navigation({"nope": 1})
+
+    def test_head_writes_the_four_tags(self) -> None:
+        resolved = resolve_metadata(Metadata(title="T"), request=None)
+        (op,) = Patches(None, version="v").head(resolved).envelope().ops
+        assert op.op == "meta"
+        assert op.extras["title"] == "T"
+
+    def test_page_assets_take_the_resolved_urls(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="/static/a.css", kind="css"))
+        collector.add(StaticAsset(url="", kind="js", inline="go()"))
+        assets = Patches(None, version="v").page_assets(collector).envelope().assets
+        assert {(asset.kind, asset.url, asset.inline) for asset in assets} == {
+            ("css", "/static/a.css", None),
+            ("js", "", "go()"),
+        }
+
+    def test_page_assets_skip_an_asset_a_backend_left_without_a_url(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="", kind="css"))
+        collector.add(StaticAsset(url="/static/b.js", kind="js"))
+        assets = Patches(None, version="v").page_assets(collector).envelope().assets
+        assert [(asset.kind, asset.url) for asset in assets] == [("js", "/static/b.js")]

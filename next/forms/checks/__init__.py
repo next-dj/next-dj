@@ -23,6 +23,7 @@ from .actions import (
 )
 from .config import (
     check_form_action_backends_configuration,
+    check_form_action_shapers,
     check_form_anchor_files,
     check_form_wizard_backend,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "check_empty_branches",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
+    "check_form_action_shapers",
     "check_form_anchor_files",
     "check_form_wizard_backend",
     "check_form_wizard_sessions",

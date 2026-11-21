@@ -5,7 +5,7 @@ from typing import Final
 from django import template
 from django.template.base import NodeList, Parser, Token
 
-from next.permissions.nodes import HasPermNode
+from next.permissions.nodes import HasPermNode, granting
 
 
 register = template.Library()
@@ -25,7 +25,8 @@ def do_has_perm(parser: Parser, token: Token) -> HasPermNode:
         raise template.TemplateSyntaxError(msg)
     perm = parser.compile_filter(bits[1])
     obj = parser.compile_filter(bits[2]) if len(bits) == _WITH_OBJECT else None
-    granted = parser.parse((_ELSE, _END))
+    with granting(parser, perm, obj):
+        granted = parser.parse((_ELSE, _END))
     denied = NodeList()
     if parser.next_token().contents == _ELSE:
         denied = parser.parse((_END,))

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from time import monotonic
@@ -13,6 +14,7 @@ from weakref import WeakSet
 
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.http import Http404
+from django.http.multipartparser import MultiPartParserError
 
 from next.caches import BoundedCache
 from next.conf.settings import fail_loudly
@@ -28,12 +30,16 @@ INTENDED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     PermissionDenied,
     SuspiciousOperation,
     BadRequest,
+    MultiPartParserError,
 )
 
 QUIET_PERIOD: Final = 600.0
 """Seconds a logged failure key stays quiet before its next occurrence is logged."""
 
-_DEGRADED: ContextVar[bool] = ContextVar("next_degraded", default=False)
+_CLEAN: Final = 0
+_MARKED: Final = 1
+
+_DEGRADED: ContextVar[int] = ContextVar("next_degraded", default=_CLEAN)
 
 
 def watch_degraded() -> None:
@@ -41,7 +47,7 @@ def watch_degraded() -> None:
 
     A page view calls it before it renders, so `degraded` reports on that render alone.
     """
-    _DEGRADED.set(False)
+    _DEGRADED.set(_CLEAN)
 
 
 def degraded() -> bool:
@@ -49,12 +55,38 @@ def degraded() -> bool:
 
     A degraded page lacks its failing source's output, so no shared cache stores it.
     """
-    return _DEGRADED.get()
+    return _DEGRADED.get() != _CLEAN
 
 
-def mark_degraded() -> None:
-    """Mark the current render as degraded, for a memoised fallback it reuses."""
-    _DEGRADED.set(True)
+def degraded_status() -> int | None:
+    """Return the status a contained failure gave the response, `None` for none."""
+    held = _DEGRADED.get()
+    return held if held > _MARKED else None
+
+
+def mark_degraded(status: int | None = None) -> None:
+    """Mark the current render as degraded, answering with `status` when one is given.
+
+    A plain mark keeps a status an earlier failure of the same render set.
+    """
+    if status is not None:
+        _DEGRADED.set(status)
+    elif _DEGRADED.get() == _CLEAN:
+        _DEGRADED.set(_MARKED)
+
+
+@contextmanager
+def status_kept() -> Iterator[None]:
+    """Keep a status a failure contained in the block sets off the response.
+
+    The render still reads as degraded, so no shared cache stores it.
+    """
+    before = _DEGRADED.get()
+    try:
+        yield
+    finally:
+        if _DEGRADED.get() != before:
+            _DEGRADED.set(max(before, _MARKED))
 
 
 def isolated_build[T](build: Callable[[], T]) -> tuple[T, bool]:
@@ -178,7 +210,7 @@ class Guard(Capture):
         if fail_loudly():
             exc.add_note(self._message % args if args else self._message)
             return False
-        _DEGRADED.set(True)
+        mark_degraded()
         self._log.emit(logging.ERROR, self._key, self._message, args, exc)
         return super()._held(exc)
 
@@ -233,17 +265,29 @@ class FailureLog:
         message: str,
         args: tuple[object, ...],
         exc_info: BaseException | None = None,
+        *,
+        extra: Mapping[str, object] | None = None,
+        quiet: int | None = None,
     ) -> None:
-        """Log `message` when `key` is due, naming the occurrences left out."""
+        """Log `message` when `key` is due, naming the occurrences left out.
+
+        A `quiet` level logs an occurrence the quiet period leaves out at that level.
+        """
         suppressed = self._due(key)
         if suppressed is None:
+            if quiet is not None:
+                self._logger.log(quiet, message, *args, exc_info=exc_info, extra=extra)
             return
         if suppressed:
             # The appended count turns on %-formatting, so a literal % is escaped.
             text = message if args else message.replace("%", "%%")
             message, args = text + _SUPPRESSED, (*args, suppressed)
         self._logger.log(
-            level, message, *args, exc_info=exc_info, extra={"suppressed": suppressed}
+            level,
+            message,
+            *args,
+            exc_info=exc_info,
+            extra={**(extra or {}), "suppressed": suppressed},
         )
 
     def guard(
@@ -315,10 +359,12 @@ __all__ = [
     "FailureLog",
     "Guard",
     "degraded",
+    "degraded_status",
     "exception_text",
     "isolated_build",
     "mark_degraded",
     "reset_failure_logs",
+    "status_kept",
     "type_name",
     "watch_degraded",
 ]

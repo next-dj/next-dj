@@ -6,7 +6,37 @@ from typing import Any, override
 
 from django.core.exceptions import ImproperlyConfigured
 
-from next.introspect import describe_callable
+from next.errors import AsyncCallableError
+from next.introspect import describe_callable, is_coroutine_callable
+
+
+class AsyncDependencyError(AsyncCallableError):
+    """Raised when a resolver meets an async callable it cannot call for a value.
+
+    A subclass of `AsyncCallableError`, so the module load checks report it alike.
+    """
+
+    def __init__(self, func: Callable[..., Any], *, name: str | None = None) -> None:
+        """Describe `func`, the named dependency `name` binds when one is given."""
+        role = (
+            "dependency-injected callable" if name is None else f"dependency {name!r}"
+        )
+        super().__init__(role, describe_callable(func))
+        if is_coroutine_callable(func):
+            message = (
+                f"The {role} {self.subject} is async, so the sync resolver would hand "
+                "back a coroutine nobody awaits. Resolve it on the async path instead, "
+                "await resolver.aresolve(func, context) for its arguments or await "
+                "resolver.acall(func, context) for its value."
+            )
+        else:
+            message = (
+                f"The {role} {self.subject} is an async generator, so either "
+                "resolver would hand back a stream nobody iterates. Declare it with "
+                "'async def' and return the value, then await resolver.acall(func, "
+                "context) for it."
+            )
+        self.args = (message,)
 
 
 class DependencyCycleError(Exception):
@@ -16,6 +46,23 @@ class DependencyCycleError(Exception):
         """Record the offending dependency chain for the error message."""
         self.cycle = cycle
         super().__init__(f"Circular dependency: {' -> '.join(cycle)}")
+
+
+class MissingKeyError(LookupError):
+    """Raised when a loader's batch function returns no value for a key it was given.
+
+    It is no `KeyError`, so a template lookup or an `except KeyError` cannot hide it.
+    """
+
+    def __init__(self, key: object) -> None:
+        """Keep the key the message names."""
+        super().__init__(key)
+        self.key = key
+
+    @override
+    def __str__(self) -> str:
+        """Name the key in a sentence."""
+        return f"The batch function returned no value for the key {self.key!r}."
 
 
 class UnknownDependencyError(LookupError):
@@ -102,4 +149,10 @@ class UnboundObjectError(ImproperlyConfigured):
         super().__init__(message)
 
 
-__all__ = ["DependencyCycleError", "UnboundObjectError", "UnknownDependencyError"]
+__all__ = [
+    "AsyncDependencyError",
+    "DependencyCycleError",
+    "MissingKeyError",
+    "UnboundObjectError",
+    "UnknownDependencyError",
+]

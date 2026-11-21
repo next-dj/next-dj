@@ -18,7 +18,8 @@ The resolver runs at several call sites.
 Page context functions, the page render function, component context functions, and the form dispatch all pass through it.
 The form dispatch resolves the form-class factory, ``get_initial``, ``get_form_kwargs``, ``check_permissions``, ``has_object_permission``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
 Every call site shares one provider list and one set of markers.
-Each of those callables is a plain ``def``, and the resolver refuses an ``async def`` one with ``AsyncCallableError``, see :ref:`topics-pages-sync-callables`.
+The form dispatch callables are plain ``def`` functions, and the resolver refuses an ``async def`` one with ``AsyncCallableError``.
+A page ``render``, a page or component context callable, a named dependency, and a ``Depends`` factory may be ``async def``, and the resolver awaits them, see :ref:`topics-pages-sync-callables` and :doc:`/content/topics/boundaries/async`.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
 A Django view receives ``request`` as its first positional argument and reads everything else off it, while here a callable declares what it wants and the resolver supplies it.
@@ -69,25 +70,28 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter with default ``Depends(...)`` receives the resolved dependency.
 3. Context by default provider (priority 20).
    A parameter with a ``Context(...)`` default receives the named context value.
-4. Context by name provider (priority 30).
+4. Paging provider (priority 25).
+   A parameter annotated ``Annotated[Paging, <pager>]`` receives that pager bound to the request, and its ``paginate()`` returns the window of an infinite list the query string asks for, see :ref:`topics-partial-rendering-reference-more`.
+   It sits ahead of the context by name provider, so a context value named like the parameter does not shadow the annotation.
+5. Context by name provider (priority 30).
    A parameter whose name matches a context key receives that context value.
-5. Form provider (priority 40).
+6. Form provider (priority 40).
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
-6. Cleaned data provider (priority 40).
+7. Cleaned data provider (priority 40).
    A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
-7. HttpRequest provider (priority 50).
+8. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request, and one annotated with a concrete subclass receives it only when the request is an instance of that subclass.
-8. Consent provider (priority 50).
+9. Consent provider (priority 50).
    A parameter annotated ``Consent`` receives the visitor's consent, and an undecided visitor on a page a shared cache holds, see :doc:`/content/topics/scripts/consent`.
-9. URL annotation provider (priority 60).
-   A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
-10. URL kwargs provider (priority 70).
+10. URL annotation provider (priority 60).
+    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
+11. URL kwargs provider (priority 70).
     A parameter whose name matches a captured URL segment resolves to that value.
     The value is coerced to the parameter annotation when one is present and is left as the captured string otherwise.
     A plain ``note_id: int`` on a ``[note_id]`` route therefore arrives already parsed, so ``DUrl`` is only needed to read a segment under a different name.
-11. Query string provider (priority 80).
+12. Query string provider (priority 80).
     A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
-12. Unserved object provider (priority 1000).
+13. Unserved object provider (priority 1000).
     A ``DObject`` parameter that no earlier provider loaded raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
 
 The object provider comes first so that nothing reaches a ``DObject`` parameter around ``visible_to``, neither a ``Depends`` default nor a context value or URL kwarg of the same name.
@@ -281,6 +285,7 @@ Two markers fill parameters from distinct data sources.
 ``Depends(callable)``.
    The argument is a callable.
    The resolver resolves the callable's own parameters and calls it as a factory.
+   Like the named form it runs once per resolution cache, and every later parameter that names it reads the same value.
 
 ``Depends(value)``.
    The argument is any other object.
@@ -347,7 +352,7 @@ When two of them ask for each other, directly or through a longer chain, resolut
 
 The resolver records each name on a stack as it enters the dependency and marks the cache entry in progress.
 Re-entering a name that is already on the stack raises ``DependencyCycleError``.
-The callable form ``Depends(some_factory)`` runs under the same guard, with the dotted ``module.qualname`` of the factory standing in for the registered name on the stack, so two factories that ask for each other raise the same error rather than exhausting the stack.
+The callable form ``Depends(some_factory)`` runs under the same guard, with the dotted ``module.qualname`` of the factory and its address standing in for the registered name on the stack, so two factories that ask for each other raise the same error rather than exhausting the stack.
 
 .. code-block:: text
    :caption: the error
@@ -600,7 +605,7 @@ Declare the provider in ``deps.py``.
    A class that registers later still joins the provider list by priority, and the plans compiled without it are recompiled.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The twelve built-in providers occupy the range ``0`` (object) through ``80`` (query string) and ``1000`` for the refusal of an unloaded ``DObject``, so the default keeps a custom provider after every one that fills a parameter.
+The thirteen built-in providers occupy the range ``0`` (object) through ``80`` (query string) and ``1000`` for the refusal of an unloaded ``DObject``, so the default keeps a custom provider after every one that fills a parameter.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 A provider that needs a named dependency, the way ``DObject`` reads ``scope``, calls ``self.resolver.resolve_callable_dependency("scope", context, param=param)``, which shares the pass cache and the cycle guard of ``Depends("scope")``.
@@ -629,11 +634,26 @@ Resolution cache
 Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
 The wrapper is new per call, but one backing store spans the whole page render, the callable ``cache`` of the ``page.py``, its ``render()`` function, every ``@context`` callable, and every ``@page.metadata`` callable.
 A ``Depends("name")`` provider therefore runs once per render, for the first of these callables that asks for it, and every later one reads the value it returned.
-The cache memoises ``Depends("name")`` callables, keyed by the registered name, and the rows ``DObject`` parameters load.
+The cache memoises ``Depends("name")`` callables, keyed by the registered name, ``Depends(factory)`` callables, keyed by the factory, and the rows ``DObject`` parameters load.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
 To share one value across several context functions in the same render, register it with ``resolver.dependency("active_tenant")`` and ask for it through ``Depends("active_tenant")`` in each callable that needs it.
 The first callable to ask pays the resolution, and every later callable in the same pass reads the value the cache already holds.
+
+A ``Depends(factory)`` follows the same rule, keyed by the factory itself rather than by a name.
+Within one cache the factory runs once, for the first parameter that names it, and every later parameter reads the value it returned, on a sync and an async render alike.
+The factory's own parameters resolve once, from the context of that first consumer, exactly as the parameters of a named dependency do.
+The key pairs the dotted ``module.qualname`` with the address of the factory, or of the object a bound method is bound to, so two lambdas or two closures that share one path keep their own values.
+On an async render, consumers running at the same time share one run through the request scope whenever the scope shares the key, as it does for a named dependency, and two context callables of a page that name one factory share it even while they overlap.
+A factory that raises leaves nothing in the cache, so the next consumer calls it again, while a key the request scope shares keeps the error and raises it to every reader, both as for a named dependency.
+
+The rule holds within one render unit.
+The context phase of a page is one unit, with one cache and one request scope.
+Each async deferred job is a unit of its own that resolves in a layer of the response scope, reading the values the shell left and keeping what it computes.
+Two jobs therefore compute a value they both ask for once each, because the scope keys a value by its name or factory alone while the props and template context of two jobs differ.
+A component instance rendered under a request scope is a unit of the same kind, resolving in a layer of its own, so two instances never read each other's values and both read what the page resolved.
+Only a value the page resolved is shared page-wide, as the page's providers read the request, the URL kwargs and the page context but never the props or template context of a component, so a dependency only components ask for runs once per instance.
+A sync deferred job, on the request thread or a pool thread, resolves against a cache of its own and never waits on a value another job computes, so a value bound to the database connection of one thread never reaches another.
 
 That store covers the callables of the ``page.py``, and a component render is a pass of its own.
 On an ordinary GET every ``@component.context`` callable of one component resolves against a cache built for that component, so a ``Depends("name")`` two components both ask for is resolved once per component rather than once per page.

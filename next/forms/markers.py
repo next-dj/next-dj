@@ -38,6 +38,7 @@ class FormProvider(RegisteredParameterProvider):
     """Inject a `form` instance matching the annotation or the parameter name `form`."""
 
     priority = 40
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
@@ -70,6 +71,7 @@ class CleanedDataProvider(RegisteredParameterProvider):
     """Inject merged wizard cleaned data for the parameter named `cleaned_data`."""
 
     priority = 40
+    blocking = False
 
     @override
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:

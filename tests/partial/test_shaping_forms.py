@@ -12,6 +12,9 @@ from tests.support import action_uid
 from tests.support.cases.formset_errors import CrossRowFormSet, ErrorRow
 
 
+pytestmark = pytest.mark.django_db
+
+
 def _cross_row_rows() -> tuple[type[forms.BaseFormSet], dict]:
     formset_class = forms.formset_factory(ErrorRow, formset=CrossRowFormSet, extra=0)
     return formset_class, {"initial": [{}]}

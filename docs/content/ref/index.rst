@@ -76,6 +76,18 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`partial`
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
+:doc:`compression`
+   ``next.compression`` for the zstd, brotli and gzip codecs, the negotiation, the compression middleware, and the streams that compress themselves.
+
+:doc:`defer`
+   ``next.defer``, ``next.boundaries``, ``next.transactions``, and ``next.suspense`` for deferred boundaries, error boundaries, the transaction rule, the delivery policy, the lanes, and the boundary tokens.
+
+:doc:`views`
+   ``next.views`` for the page view the router mounts, the route of one request, and the transaction it runs in.
+
+:doc:`router`
+   ``next.router`` for the client router, the cut and the chrome digest, active links, ``router_clear``, and the navigation wire.
+
 :doc:`realtime`
    ``next.realtime`` for topics and publishing, broker backends, topic streams, the WebSocket application, ticket bindings, presence, upstream handlers, the form tunnel, and the wire protocol.
 
@@ -164,6 +176,10 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    forms
    static
    partial
+   compression
+   defer
+   views
+   router
    realtime
    metadata
    seo

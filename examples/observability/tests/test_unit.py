@@ -11,7 +11,7 @@ from django.db import IntegrityError, transaction
 from obs import metrics
 from obs.backends import BabelJsxBackend, CountingComponentsBackend
 from obs.forms import WINDOW_CHOICES, WindowFilterForm
-from obs.metrics import INDEX_KEY, PREFIX
+from obs.metrics import INDEX_KEY, PREFIX, CounterLostError
 from obs.models import MetricSnapshot
 from obs.pages.page import totals
 from obs.pages.stats.components.page import counters as components_counters
@@ -109,6 +109,36 @@ class TestMetrics:
         metrics.flush()
         assert metrics.read_all() == {}
         assert metrics.read_window("group", 60) == {}
+
+
+def _rendered(page: str, *durations: int) -> None:
+    for duration in durations:
+        on_page_rendered(file_path=page, duration_ms=duration)
+
+
+class TestLatencyByPage:
+    """`latency_by_page` divides each duration total by the render count beside it."""
+
+    def test_means_come_back_slowest_first(self) -> None:
+        _rendered("fast.py", 10, 20)
+        _rendered("slow.py", 90, 110, 100)
+        assert metrics.latency_by_page() == [("slow.py", 100.0), ("fast.py", 15.0)]
+
+    def test_limit_keeps_the_slowest(self) -> None:
+        _rendered("fast.py", 10)
+        _rendered("slow.py", 90)
+        assert metrics.latency_by_page(limit=1) == [("slow.py", 90.0)]
+
+    def test_an_empty_store_has_no_latencies(self) -> None:
+        assert metrics.latency_by_page() == []
+
+    def test_a_culled_render_count_refuses_the_mean(self) -> None:
+        _rendered("culled.py", 40)
+        cache.delete(f"{PREFIX}pages.rendered:culled.py")
+        with pytest.raises(CounterLostError) as caught:
+            metrics.latency_by_page()
+        assert (caught.value.kind, caught.value.key) == ("pages.rendered", "culled.py")
+        assert "culled.py" in str(caught.value)
 
 
 class TestMetricSnapshotModel:

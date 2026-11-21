@@ -16,7 +16,7 @@ MAX_PER_PAGE = 60
 
 @dataclass(frozen=True, slots=True)
 class PageRequest:
-    """Validated paging descriptor consumed by `cached_search`."""
+    """Validated paging descriptor the category listing hands its `Paginator`."""
 
     number: int
     per_page: int

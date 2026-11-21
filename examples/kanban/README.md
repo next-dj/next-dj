@@ -104,7 +104,7 @@ pages/board/[int:board]/
         └── component.djx       <- "Move complete" SSR fallback
 ```
 
-The outer HTML envelope is not in this tree. It lives in [`cockpit/layout.djx`](cockpit/layout.djx), the project-level page root listed in `PAGE_BACKENDS["DIRS"]`, while the routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "pages"`.
+The outer HTML envelope is not in this tree. It lives in [`cockpit/layout.djx`](cockpit/layout.djx), the project-level page root listed in `PAGE_BACKENDS["DIRS"]`, while the routable pages come from the app through `APP_DIRS = True` and `PAGES_DIR = "pages"`. Its header reads `active_boards_count` and `viewer`, two inherited `@context` values of `kanban/pages/page.py`, so it renders them inside the `account` zone. The client router keeps the layout across a navigation and re-renders that zone beside the new page, which is what `manage.py check` asks for with `next.W183` when a layout reads a page key outside a zone.
 
 `layout.djx` renders the Board and Settings tabs with the shared `nav_link` component and feeds it `url_kwargs=board_url_kwargs`, an inherited `@context` that returns `{"board": board.pk}`. The tabs therefore reverse `next:page_board_int_board` and `next:page_board_int_board_settings` by name, and the call site never spells out the `[int:board]` converter or a literal `/board/<id>/` path.
 

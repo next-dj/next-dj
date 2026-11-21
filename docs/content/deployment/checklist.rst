@@ -157,8 +157,9 @@ A clean exit is required for the deployment to proceed.
 
 The ``--deploy`` flag is what matters here, because the framework registers its deployment checks for that flag alone and a plain ``check`` never runs them.
 A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile, and the deployment run repeats them.
-``manage.py check --deploy`` adds these framework warnings.
+``manage.py check --deploy`` adds these framework messages.
 
+- ``next.E223`` reports a boundary token storage whose ``CACHE_ALIAS`` names a ``LocMemCache``.
 - ``next.W083`` reports an asset version that never moves.
 - ``next.W090`` reports a client runtime bundle or lazy chunk the static files storage cannot serve.
 - ``next.W110`` reports a missing ``SITE["URL"]``.
@@ -166,8 +167,9 @@ A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on
 - ``next.W111`` reports a closed site that still publishes crawler documents.
 - ``next.W118`` reports a script over plain HTTP.
 - ``next.W119`` reports an insecure consent cookie.
-- ``next.W149`` reports a process-local realtime broker.
+- ``next.W149`` reports a process-local realtime broker in a project that uses realtime.
 - ``next.W151`` reports a Redis subscription pool left at the redis-py default of 100 connections.
+- ``next.W186`` reports boundary tokens bound to nobody in a project with ``django.contrib.auth``.
 
 See :ref:`ref-system-checks` for the full catalog.
 

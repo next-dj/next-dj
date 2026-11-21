@@ -17,9 +17,9 @@ from django.http import HttpRequest, StreamingHttpResponse
 from django.test import override_settings
 
 from next.conf import next_framework_settings
+from next.identity import LiveIdentity, TicketBinding
 from next.partial import Patches
-from next.realtime import MemoryBroker, apublish, publish
-from next.realtime.binding import LiveIdentity, SessionBinding, TicketBinding
+from next.realtime import MemoryBroker, SessionBinding, apublish, publish
 from next.realtime.errors import InvalidTicketError
 from next.realtime.frames import Refusal, Reply
 from next.realtime.manager import broker_manager
