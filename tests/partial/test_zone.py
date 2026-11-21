@@ -236,6 +236,7 @@ class TestZoneTagSyntax:
             "data-next-nav",
             "data-next-persist",
             "data-next-prefetch",
+            "data-next-press",
             "data-next-router",
             "data-next-scroll",
             "data-next-scroll-region",

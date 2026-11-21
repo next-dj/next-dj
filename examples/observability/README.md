@@ -8,7 +8,7 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 | URL | Description |
 | --- | --- |
-| `/` | Overview with four headline counters in a polling zone, a React sparkline, a busiest-pages widget that fetches itself once the page loads, and a render-latency table whose `error.djx` stands in for it alone when the counter store loses half of a pair. |
+| `/` | Overview with four headline counters in a polling zone, a React sparkline, a busiest-pages widget that fetches itself once the page loads, and a render-latency table that streams in behind its `loading.djx` and whose `error.djx` stands in for it alone when the counter store loses half of a pair. |
 | `/stats/` | Live page with the Chart.js bar chart and the window filter. `?window=1m`, `?window=5m`, and `?window=1h` each re-aggregate over real minute buckets. |
 | `/stats/pages/` | Per-page render counts pulled from the cumulative `pages.rendered` kind. |
 | `/stats/components/` | Per-component render counts. |
@@ -78,11 +78,11 @@ obs/
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
-    ├── template.djx          <- poll zone with the overview grid, React sparkline, deferred busiest-pages widget, latency widget
+    ├── template.djx          <- poll zone with the overview grid, React sparkline, deferred busiest-pages widget, streamed latency widget
     ├── _components/
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
     │   ├── busiest_pages/    <- component.defer("load"), loading.djx and error.djx, its own top_by_kind lookup
-    │   ├── latency_widget/   <- mean render time per page, error.djx contains its own failures
+    │   ├── latency_widget/   <- mean render time per page, streamed behind loading.djx, error.djx contains its failures
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
     │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, chart.js cdn via stats/page.py
@@ -391,6 +391,7 @@ The render-latency table on the overview divides the `pages.duration_ms_total` c
 _components/latency_widget/
 ├── component.py     <- @component.context latencies, metrics.latency_by_page(limit=5)
 ├── component.djx    <- the shared counter_list as a table
+├── loading.djx      <- the line the shell shows while the means are computed
 └── error.djx        <- the shared alert with the digest as a reference code
 ```
 
@@ -408,6 +409,14 @@ The `error.djx` beside `component.djx` is what turns the component into an error
 The response keeps status 200 and goes out with `Cache-Control: private, no-store`, since a page missing one of its widgets must not land in a shared cache. `flush_metrics` empties the store, and from then on every render writes both counters of its pair again, so the widget recovers on its own.
 
 `NextClient` re-raises the first contained failure by default, so no other test can pass over a broken widget unnoticed. `TestLatencyWidget` in [`tests/test_integration.py`](tests/test_integration.py) deletes a render count the way a cull would and asserts that a plain request raises `CounterLostError`. Inside `boundary_errors("render")`, or under the `rendered_boundary_errors` fixture, it asserts the error UI, the rest of the dashboard, the status, the cache header, and the failure `response.boundary_failures` lists. The e2e suite repeats the scenario in a browser.
+
+### 13. A streamed widget and the press of a link
+
+The `loading.djx` beside the latency widget makes every call of it a `stream` boundary, since its `component.py` names no other mode. The overview goes out as a shell with the loading line in the widget's place, the job reads the counters during the same response, and the table arrives as a chunk that settles the boundary as `ready`. A browser that loads the overview as a document sees the same, a crawler gets the page assembled inline, and under `DEBUG` the `X-Next-Stream` header names the delivery, with the reason when the page is assembled inline. The SQLite database keeps the job on the request thread, which still streams.
+
+The client router asks for that page in two depths. Hovering a link sends `X-Next-Prefetch: 1`, the shell alone with no job run. Pressing a link with the mouse sends `X-Next-Prefetch: full` before the click, an answer that runs the job and streams like a navigation, and the click that follows adopts it instead of sending a request of its own. A hovered link therefore shows the prefetched shell at the click while the full answer streams the table in. A press released off the link aborts its request, a modifier click leaves the press alone, and a touch keeps the shell prefetch, which is what `ROUTER["PRESS"] = "mouse"`, the default, asks for.
+
+`TestLatencyStream` in [`tests/test_integration.py`](tests/test_integration.py) reads the overview as a stream and the two prefetch depths through `NextClient`. [`tests/e2e/test_press.py`](tests/e2e/test_press.py) drives the five pointer paths in a browser that reports a desktop Chrome user agent, since the default bot pattern of the delivery policy matches `HeadlessChrome`, and holds the widget's job with `next.testing.boundary_gate` so the loading line is on screen until the test lets the job run.
 
 ## Out of scope
 

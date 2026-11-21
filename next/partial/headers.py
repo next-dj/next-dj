@@ -39,6 +39,8 @@ SEC_FETCH_SITE = "Sec-Fetch-Site"
 NAVIGATE = "X-Next-Navigate"
 LAYOUTS = "X-Next-Layouts"
 PREFETCH = "X-Next-Prefetch"
+FULL_DEPTH = "full"
+"""The `X-Next-Prefetch` value of a press, which asks for the page with its jobs run."""
 ROUTER = "X-Next-Router"
 
 # VALIDATE and REQUEST_ID never change the cached body, so not in Vary.
@@ -57,6 +59,7 @@ STREAM_VARY: tuple[str, ...] = ("Accept",)
 _INTENT_ATTR = "_next_partial_intent"
 _JSON = "application/json"
 _RANKED = frozenset({EVENT_STREAM, _JSON})
+_DEPTHS = frozenset({"1", FULL_DEPTH})
 
 
 class MergeMode(enum.StrEnum):
@@ -71,7 +74,7 @@ class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
     Without the `X-Next-Request` switch every derived field stays empty. `layouts` is
-    the raw declaration of a navigation, which the router parses against its bounds.
+    the raw declaration of a navigation, and `full` a prefetch that asks for its jobs.
     """
 
     partial: bool = False
@@ -84,6 +87,7 @@ class PartialIntent:
     navigate: bool = False
     layouts: str | None = None
     prefetch: bool = False
+    full: bool = False
 
 
 # Every field is immutable and empty, so non-partial requests share one instance.
@@ -123,6 +127,7 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
     if _value(request, REQUEST_FLAG) != "1":
         return _NOT_PARTIAL
     navigate = _value(request, NAVIGATE) == "1"
+    depth = _value(request, PREFETCH) if navigate else None
     return PartialIntent(
         partial=True,
         zones=_split_names(_value(request, ZONE)),
@@ -133,7 +138,8 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
         origin=_value(request, ORIGIN),
         navigate=navigate,
         layouts=_value(request, LAYOUTS) if navigate else None,
-        prefetch=navigate and _value(request, PREFETCH) == "1",
+        prefetch=depth in _DEPTHS,
+        full=depth == FULL_DEPTH,
     )
 
 
@@ -217,6 +223,7 @@ __all__ = [
     "BOUNDARY",
     "CONTENT_TYPE",
     "EVENT_STREAM",
+    "FULL_DEPTH",
     "LAYOUTS",
     "NAVIGATE",
     "PREFETCH",

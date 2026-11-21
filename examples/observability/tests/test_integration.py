@@ -534,6 +534,44 @@ class TestLatencyWidget:
             next_client.get("/")
 
 
+LATENCY_LOADING = "Averaging the render times"
+
+
+def navigation_html(navigation) -> str:
+    return "".join(op.get("html") or "" for op in navigation.envelope.ops)
+
+
+class TestLatencyStream:
+    """The latency widget streams behind its `loading.djx` and settles in a chunk."""
+
+    def test_the_shell_ships_the_loading_ui_and_a_chunk_settles_it(
+        self, next_client
+    ) -> None:
+        next_client.get("/stats/")
+        streamed = next_client.get_stream("/")
+        assert LATENCY_LOADING in streamed.shell
+        assert "Mean ms" not in streamed.shell
+        [chunk] = streamed.chunks
+        assert chunk.state == "ready"
+        assert CULLED_PAGE in chunk.html
+
+    def test_a_shell_prefetch_keeps_the_loading_ui(self, next_client) -> None:
+        next_client.get("/")
+        navigation = next_client.navigate("/", origin="/stats/", prefetch=True)
+        html = navigation_html(navigation)
+        assert LATENCY_LOADING in html
+        assert "Mean ms" not in html
+
+    def test_a_press_prefetch_runs_the_job(self, next_client) -> None:
+        next_client.get("/")
+        navigation = next_client.navigate(
+            "/", origin="/stats/", headers={"X-Next-Prefetch": "full"}
+        )
+        html = navigation_html(navigation)
+        assert "Mean ms" in html
+        assert LATENCY_LOADING not in html
+
+
 class TestMetricPulseVerb:
     """A partial apply morphs the totals zone and emits the custom verb."""
 

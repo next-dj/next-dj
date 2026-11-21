@@ -21,6 +21,9 @@ SCOPES: Final = ("all", "opt-in")
 PREFETCH_MODES: Final = ("intent", "viewport", "off")
 """When the client router prefetches a link."""
 
+PRESS_MODES: Final = ("mouse", "all", "off")
+"""Which pointers send the full page request at the press of a link."""
+
 FOREIGN_MODES: Final = ("hard", "extract")
 """How the client router follows a link whose answer is no navigation envelope."""
 
@@ -108,6 +111,7 @@ SHAPES: Final[Mapping[str, tuple[Usable, str]]] = MappingProxyType(
         "PREFETCH_TTL": (_seconds, "a number of seconds above 0"),
         "PREFETCH_SHELL_TTL": (_seconds, "a number of seconds above 0"),
         "PREFETCH_ENTRIES": (_count, "an integer from 1"),
+        "PRESS": (_choice(PRESS_MODES), "'mouse', 'all' or 'off'"),
         "SNAPSHOTS": (_count, "an integer from 1"),
         "PROGRESS_DELAY": (_seconds, "a number of seconds above 0"),
         "PROGRESS": (_flag, "True or False"),
@@ -218,6 +222,7 @@ class RouterSettings:
     prefetch_ttl: float
     prefetch_shell_ttl: float
     prefetch_entries: int
+    press: str
     snapshots: int
     progress_delay: float
     progress: bool
@@ -266,6 +271,7 @@ def read_settings(scope: Mapping[str, object]) -> RouterSettings:
             _pick(scope, "PREFETCH_SHELL_TTL", _seconds, defaults)
         ),
         prefetch_entries=_pick(scope, "PREFETCH_ENTRIES", _count, defaults),
+        press=_pick(scope, "PRESS", _choice(PRESS_MODES), defaults),
         snapshots=_pick(scope, "SNAPSHOTS", _count, defaults),
         progress_delay=float(_pick(scope, "PROGRESS_DELAY", _seconds, defaults)),
         progress=_pick(scope, "PROGRESS", _flag, defaults),
@@ -325,6 +331,7 @@ __all__ = [
     "INTERCEPT_MODES",
     "LINKS",
     "PREFETCH_MODES",
+    "PRESS_MODES",
     "SCOPE",
     "SCOPES",
     "SHAPES",

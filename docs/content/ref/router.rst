@@ -122,8 +122,11 @@ A navigation is a ``GET`` of the page URL with these request headers.
    * - ``X-Next-Layouts``
      - The chain on screen, one ``id.digest`` per layout, outer first, comma separated, an id being 16 hex characters and a digest 16 or 32.
        A value past ``ROUTER["MAX_LAYOUTS"]`` entries or past 1 KB, or one that does not parse, counts as no declaration.
-   * - ``X-Next-Prefetch: 1``
+   * - ``X-Next-Prefetch``
      - Marks the navigation as a prefetch.
+       ``1`` asks for the shell of the page, with no deferred job run and no stream.
+       ``full`` is sent at the press of a link and asks for the page as a navigation gets it, jobs run and the answer streamed when the transport can stream.
+       ``request.next.depth`` is ``Depth.SHELL`` or ``Depth.FULL`` accordingly.
    * - ``X-Next-Origin``
      - The path and query the browser navigates from, which decides between pushing and replacing the history entry and, under ``ROUTER["INTERCEPT"] = "links"``, whether a link to an intercepted page opens its layer.
        A value that is no same-site path is ignored.
@@ -133,8 +136,10 @@ A navigation is a ``GET`` of the page URL with these request headers.
      - ``text/event-stream`` first when the browser can read a streamed navigation.
 
 The answer is a patch envelope, or an event stream that opens with one, whose top-level fields add ``layouts``, ``[id, digest, seal]`` per layout of the new chain with a ``null`` seal for each kept one, ``root``, the id of the root layout, ``nonce``, ``scripts``, ``consent``, and ``shared``, whether a shared cache may store the document of the page.
-A prefetch answer that skipped no deferred job and left no client-trip boundary also carries ``complete: true``, and the navigation after it applies that answer without a request of its own.
+A shell that skipped no deferred job and left no client-trip boundary also carries ``complete: true``, as does a full answer that is not streamed and left no client-trip boundary, and the navigation after it applies that answer without a request of its own.
 A navigation after any other prefetch answer sends its request at the click, beside the prefetched shell it applies.
+The click after a press adopts the response of the press as its navigation.
+A prefetch answer may be shown with no further request, so a page that must act on a visit declares ``page.router(prefetch=False)``, which refuses both depths with ``204``.
 A slot morph targets ``{"slot": id}``, a body morph ``{"body": true}``, and a hard load is a ``visit`` operation.
 
 .. list-table::
@@ -179,7 +184,7 @@ A routed document carries two entries in its init payload.
 
 ``$router``
    The settings the browser reads.
-   ``scope``, ``exclude``, ``foreign``, ``prefetch``, ``prefetch_delay``, ``prefetch_ttl``, ``prefetch_shell_ttl``, ``prefetch_entries``, ``snapshots``, ``progress_delay``, ``transitions``, ``intercept``, and ``max_layouts`` copy the ``ROUTER`` keys of the same name, and ``exclude`` lists the derived prefixes of ``STATIC_URL``, ``MEDIA_URL``, and the admin site first.
+   ``scope``, ``exclude``, ``foreign``, ``prefetch``, ``prefetch_delay``, ``prefetch_ttl``, ``prefetch_shell_ttl``, ``prefetch_entries``, ``press``, ``snapshots``, ``progress_delay``, ``transitions``, ``intercept``, and ``max_layouts`` copy the ``ROUTER`` keys of the same name, and ``exclude`` lists the derived prefixes of ``STATIC_URL``, ``MEDIA_URL``, and the admin site first.
    ``current`` lists the active-link containers and ``homes`` the home paths, both ``null`` while active links are off.
    ``reader``, ``history``, and ``intent`` hold the URLs of those bundles when the page resolves them, ``type`` names the content type of a partial backend whose answers are not the stock one, and ``snapshot`` is ``false`` for a page that refuses snapshots.
 

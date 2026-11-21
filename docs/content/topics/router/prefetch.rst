@@ -17,7 +17,7 @@ Viewport and intent prefetch
 
 ``"intent"``, the default
    A link the pointer rests on, or one that gains keyboard focus, is prefetched once ``ROUTER["PREFETCH_DELAY"]`` seconds pass, ``0.065`` by default.
-   Leaving the link earlier cancels it, and a press of the pointer or a touch prefetches at once.
+   Leaving the link earlier cancels it, and a press of the pointer or a touch skips the wait, see `The press of a link`_.
 
 ``"viewport"``
    Every link the router owns is also prefetched once it scrolls into view.
@@ -69,6 +69,59 @@ For any other answer the navigation asks for the page at the click, beside the p
 A navigation to a URL whose prefetch is still in flight waits for that prefetch and sends nothing beside it, so a quick click or a tap costs the server one render.
 A complete answer then lands with no request, a shell lands and the request for the page leaves at that moment, and an answer that never came, such as a refusal or a failure, leaves the navigation to its own request.
 A URL still waiting in the queue leaves it, and the navigation asks for the page alone.
+A URL the router is already navigating to is not prefetched.
+
+The press of a link
+-------------------
+
+A press of a link starts the page request before the click, so the click adopts an answer that is already on its way.
+``ROUTER["PRESS"]`` decides which pointers do it.
+
+``"mouse"``, the default
+   A press of a mouse sends the full request.
+   A touch or a pen keeps the shell prefetch it had.
+
+``"all"``
+   Every pointer sends the full request at its press.
+
+``"off"``
+   Every press stays at the shell depth.
+
+``data-next-press`` on a link or an element around it overrides the setting for the links inside, with the same three values.
+The press follows the other prefetch rules of this page, so ``ROUTER["PREFETCH"] = "off"``, ``data-next-prefetch="off"``, a hidden tab, Save-Data, and a ``2g`` connection turn it off with every other prefetch.
+A path the router fetches as a plain document sends no press request either.
+
+.. code-block:: jinja
+   :caption: layout.djx
+
+   <nav data-next-press="all">
+     <a href="/reports/">Reports</a>
+   </nav>
+   <a href="/search/" data-next-press="off">Search</a>
+
+A press with the main button and no modifier key sends the page request at once, ahead of the queue, with ``X-Next-Prefetch: full``.
+The request keeps its response unread.
+A press with another button, or with Shift, Ctrl, Alt, or Meta held, keeps the shell prefetch, since the click would not navigate in place.
+
+The click that follows takes that response as its navigation and sends no request of its own.
+When a hover left a shell for the URL in the cache, the click lands that shell first and the response of the press morphs over it as it arrives.
+When the response streams, the navigation commits on its envelope and the boundaries fill as their jobs settle.
+A press sends nothing when the cache holds a fresh ``complete`` answer for the URL, when the URL was refused with ``204`` earlier, and while prefetches are paused.
+A shell prefetch of the URL that waits in the queue is dropped by the press, and one already in flight runs on.
+
+A press that does not become a click ends in one of these ways.
+
+- The browser fires ``pointercancel``, ``dragstart``, or ``contextmenu``.
+- The pointer is released outside the link.
+- Another navigation starts.
+- One second passes without a click.
+
+An answer that arrived whole as a navigation envelope is kept in the prefetch cache, under the rules above.
+A response that is still streaming, or was redirected, is closed.
+A navigation that a ``router:before`` listener cancels closes the request of its press as well.
+
+A full request runs the deferred jobs of the page, and a job that started is not interrupted when the visitor leaves.
+That cost is why a touch keeps the shell depth by default, since a scroll that starts on a link begins with the same event as a tap.
 
 When an answer lands, each stylesheet it lists that the document holds no ``<link>`` for is fetched ahead with a ``<link rel="preload" as="style">`` carrying the nonce of the router script, so the navigation does not wait on the stylesheet gate.
 An answer asked for by the viewport alone uses ``rel="prefetch"`` instead, since a link in view is a weaker hint than an intent.
@@ -78,13 +131,22 @@ The cache is emptied with the snapshots, after a non-``GET`` partial request, a 
 What a prefetch renders
 -----------------------
 
-A prefetch is a navigation request that also carries ``X-Next-Prefetch: 1``.
-The server renders the page through the same view, with its access rules and context callables, and ``request.next.purpose`` is ``prefetch``.
-A deferred boundary renders its loading content and no deferred job runs, so the answer is the shell of the page, and a prefetch never streams.
-The navigation that applies it shows that loading content until the fresh render fills the boundaries.
-A prefetch that skipped no deferred job and left no client-trip boundary is marked ``complete`` in its envelope, since a navigation would render the same page.
+A prefetch is a navigation request that also carries ``X-Next-Prefetch``.
+The server renders the page through the same view, with its access rules and context callables, and ``request.next.purpose`` is ``prefetch`` at both depths.
+``request.next.depth`` tells them apart, ``Depth.SHELL`` for ``X-Next-Prefetch: 1`` and ``Depth.FULL`` for ``X-Next-Prefetch: full``.
+It is ``None`` for a request that is no router prefetch.
 
-The context callables of a prefetched page do run, so a page that acts on a visit declares ``page.router(prefetch=False)``, or a callable skips its side effect when the purpose is ``prefetch``.
+At the shell depth a deferred boundary renders its loading content and no deferred job runs, so the answer is the shell of the page, and it never streams.
+The navigation that applies it shows that loading content until the fresh render fills the boundaries.
+A shell that skipped no deferred job and left no client-trip boundary is marked ``complete`` in its envelope, since a navigation would render the same page.
+
+At the full depth the server answers as it answers a navigation.
+The deferred jobs run, and the answer streams when the delivery policy lets a navigation stream, see :doc:`/content/topics/boundaries/streaming`.
+Otherwise it is the assembled page in a JSON envelope, marked ``complete`` unless it left a client-trip boundary.
+
+The context callables of a prefetched page do run, and a prefetch answer may be shown to the visitor with no further request, a complete one after a hover and a full one after a press.
+A page that must act on a visit declares ``page.router(prefetch=False)``, and the click then navigates with its own request.
+A counter on the server that skips prefetches still counts a prefetch at the full depth, ``request.next.depth == "full"``, or the counting happens in the browser on ``router:commit``.
 
 The server's answers
 --------------------
@@ -98,6 +160,9 @@ The server's answers
    The browser pauses every prefetch for the seconds ``Retry-After`` names, and drops the links waiting in the queue, which come back the next time they scroll into view.
 
 A ``429`` without a usable ``Retry-After``, or a ``5xx``, pauses every prefetch for thirty seconds, a wait that doubles with each further failure up to five minutes, and a successful answer resets it.
+A full request meets the same answers.
+A ``204`` marks the URL as refused, and a ``429`` or a ``5xx`` pauses every prefetch.
+In each case the press leaves nothing to adopt, and the click navigates with its own request.
 A prefetch answer that carries ``X-Next-Router: clear`` empties the prefetch cache and drops every snapshot.
 
 Prefetching from code

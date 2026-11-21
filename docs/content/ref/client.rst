@@ -535,7 +535,7 @@ Every router event fires on the document as a ``CustomEvent`` and on the ``Next.
      - Fires
    * - ``router:before``
      - ``{url, trigger, cached}``
-     - Before a navigation, cancelable, and never for a Back or Forward step, ``cached`` telling whether a prefetched answer is ready or in flight.
+     - Before a navigation, cancelable, and never for a Back or Forward step, ``cached`` telling whether a prefetched answer is kept or a press request is in flight.
    * - ``router:start``
      - ``{url}``
      - As the navigation request is about to leave.
@@ -580,6 +580,9 @@ Router attributes
    * - ``data-next-prefetch``
      - Hand-written
      - Overrides ``ROUTER["PREFETCH"]`` for the links inside it, ``viewport`` prefetching them as they scroll into view, ``intent`` only on intent, and ``off`` never, which also keeps them out of the Speculation Rules.
+   * - ``data-next-press``
+     - Hand-written
+     - Overrides ``ROUTER["PRESS"]`` for the links inside it, ``mouse`` sending the full page request at the press of a mouse, ``all`` at the press of every pointer, and ``off`` keeping every press at the shell depth.
    * - ``data-next-transition``
      - The runtime
      - Set on ``<html>`` as each view transition under ``ROUTER["TRANSITIONS"]`` starts, ``forward``, ``back``, or ``replace``.

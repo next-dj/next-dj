@@ -28,7 +28,7 @@ from next.pages.loaders import layout_chain, layout_ids, template_source
 from next.pages.metadata.resolve import published_metadata
 from next.pages.navigation import page_router
 from next.pages.placeholder import placeholder_spans
-from next.pages.responses import never_store, purpose_of
+from next.pages.responses import depth_of, never_store, purpose_of
 from next.partial import keys
 from next.partial.errors import CrossSiteHrefError
 from next.partial.headers import (
@@ -644,6 +644,7 @@ def announce(
             sender=Routing,
             page_path=page_path,
             purpose=purpose_of(request),
+            depth=depth_of(request),
             cut=cut.kind,
             kept=cut.kept,
             diverged_at=cut.diverged_at,

@@ -70,6 +70,16 @@ class TestEntry:
         assert (entry["prefetch_ttl"], entry["prefetch_shell_ttl"]) == (30.0, 300.0)
         assert "progress" not in entry
 
+    @pytest.mark.parametrize(
+        ("written", "sent"),
+        [(None, "mouse"), ("all", "all"), ("off", "off"), ("touch", "mouse")],
+    )
+    def test_the_press_mode_is_sent(self, written, sent) -> None:
+        router = {} if written is None else {"PRESS": written}
+        with override_next_settings(ROUTER=router):
+            entry = json.loads(router_entry())
+        assert entry["press"] == sent
+
     def test_the_stock_content_type_stays_out(self) -> None:
         assert partial_backend_manager.get().content_type == CONTENT_TYPE
         assert "type" not in json.loads(router_entry())

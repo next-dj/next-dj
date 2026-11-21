@@ -96,6 +96,7 @@ def router_entry() -> str:
         "prefetch_ttl": current.prefetch_ttl,
         "prefetch_shell_ttl": current.prefetch_shell_ttl,
         "prefetch_entries": current.prefetch_entries,
+        "press": current.press,
         "snapshots": current.snapshots,
         "progress_delay": current.progress_delay,
         "transitions": current.transitions,

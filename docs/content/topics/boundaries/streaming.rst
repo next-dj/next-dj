@@ -16,6 +16,8 @@ The delivery policy
 
 ``DEFER["POLICY"]["BACKEND"]`` names the ``StreamPolicy`` that decides, ``next.suspense.DefaultStreamPolicy`` by default.
 It answers a ``HEAD`` request with the shell alone and streams every ``GET`` that no row below holds back, the first row that holds naming the reason.
+A router prefetch at the shell depth is answered with the shell alone before any row is read.
+A full prefetch, sent at the press of a link, goes through the rows as a navigation does.
 
 .. list-table::
    :header-rows: 1

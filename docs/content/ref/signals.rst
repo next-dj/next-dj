@@ -213,25 +213,27 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        ``inherit`` is the flag the registration carried.
    * - ``navigation_rendered``
      - ``next.router.navigation.Routing``
-     - ``page_path``, ``purpose``, ``cut``, ``kept``, ``diverged_at``, ``reason``, ``streamed``, ``request``
+     - ``page_path``, ``purpose``, ``depth``, ``cut``, ``kept``, ``diverged_at``, ``reason``, ``streamed``, ``request``
      - Once per client router navigation or prefetch the page view rendered and answered with an envelope, never for one refused or answered before any render.
-       ``purpose`` is ``navigation`` or ``prefetch``, ``cut`` is ``slot``, ``body`` or ``visit``, and ``kept`` the ids of the layouts kept on screen, outer first.
+       ``purpose`` is ``navigation`` or ``prefetch``, ``depth`` is the ``Depth`` of the prefetch, ``shell`` or ``full``, and ``None`` for a navigation, and ``cut`` is ``slot``, ``body`` or ``visit``, and ``kept`` the ids of the layouts kept on screen, outer first.
        ``diverged_at`` names the first layout that did not match, ``reason`` why, ``id``, ``digest``, ``head`` or ``declaration``, or ``clear`` for a response that clears the router and so keeps no layout, and both are ``None`` when every layout matched.
        ``streamed`` is ``True`` when deferred boundaries follow the envelope as an event stream.
    * - ``page_rendered``
      - ``Page``
-     - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``, ``purpose``
+     - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``, ``purpose``, ``depth``
      - After ``Page.render`` produces HTML and injects static assets.
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
-       ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigation``, ``prefetch`` or ``speculation``, so a page-view counter skips a prefetch with one comparison.
+       ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigation``, ``prefetch`` or ``speculation``.
+       ``depth`` is the ``Depth`` of ``request.next``, ``shell`` or ``full`` for a router prefetch and ``None`` for any other request.
+       A prefetch answer may be shown with no further request, so a page-view counter that skips prefetches still counts a prefetch whose ``depth`` is ``full``, or counts in the browser on ``router:commit``, and a page that must act on a visit declares ``page.router(prefetch=False)``.
        Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
    * - ``page_stream_declined``
      - ``next.suspense.StreamPolicy``
      - ``delivery``, ``reason``, ``transport_reason``, ``partial``, ``request``
      - Once per page or partial response whose deferred jobs are assembled inline, as the first deferred call of the render is decided.
        ``delivery`` is ``Delivery.INLINE``, ``reason`` the row of the delivery policy that held the stream back, such as ``buffered`` or ``sync-worker``, and ``transport_reason`` the fact behind the answer of the transport, such as ``wsgi.multithread`` or a buffering mark.
-       A ``HEAD`` request, a router prefetch, and a streamed response send nothing.
+       A ``HEAD`` request, a shell prefetch, and a streamed response send nothing.
        Fired only when a receiver for ``StreamPolicy`` is connected.
    * - ``page_stream_opened``
      - ``next.suspense.StreamingPageResponse``, or ``next.suspense.PartialStream`` for a partial response

@@ -7,7 +7,7 @@ from urllib.parse import unquote_plus
 from django.http import HttpRequest, QueryDict
 
 from next.conf.router import router_enabled
-from next.pages.responses import Purpose, mark_purpose
+from next.pages.responses import Depth, Purpose, mark_purpose
 from next.partial.headers import PartialIntent, partial_intent
 from next.suspense.manager import suspense_manager
 from next.suspense.tokens.transport import FIELD, BodyTransport
@@ -110,8 +110,12 @@ def decide_route(request: HttpRequest) -> Route:
 def note_purpose(request: HttpRequest, route: Route) -> None:
     """Set `request.next` to why the view renders, a browser prefetch a speculation."""
     if route is Route.NAVIGATE:
-        prefetch = partial_intent(request).prefetch
-        mark_purpose(request, Purpose.PREFETCH if prefetch else Purpose.NAVIGATION)
+        intent = partial_intent(request)
+        if intent.prefetch:
+            depth = Depth.FULL if intent.full else Depth.SHELL
+            mark_purpose(request, Purpose.PREFETCH, depth)
+        else:
+            mark_purpose(request, Purpose.NAVIGATION)
     elif _SPECULATIVE in request.META.get("HTTP_SEC_PURPOSE", ""):
         mark_purpose(request, Purpose.SPECULATION)
     else:

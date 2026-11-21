@@ -253,6 +253,7 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
             "PREFETCH_TTL": 30.0,
             "PREFETCH_SHELL_TTL": 300.0,
             "PREFETCH_ENTRIES": 16,
+            "PRESS": "mouse",
             "SNAPSHOTS": 10,
             "PROGRESS_DELAY": 0.15,
             "PROGRESS": True,

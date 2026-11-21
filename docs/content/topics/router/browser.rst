@@ -48,6 +48,7 @@ A navigation that finds a prefetched answer marked ``complete`` applies it at on
 A prefetched answer that is not complete, the shell of a page with deferred boundaries, is applied and committed at once while the request for the page leaves at the click, and the first frame of the fresh render morphs over the shell and refills its boundaries, so a prefetched page never stays on screen stale.
 The morph of that frame swaps nothing again, it runs no second transition, snapshot, scroll, or focus move.
 A navigation to a URL whose prefetch is still in flight waits for that prefetch first and then goes on the same way, with no request beside it until it lands, see :doc:`prefetch`.
+A press of a link sends the page request before the click, and the navigation adopts that response and sends no request of its own, see :doc:`prefetch`.
 
 An answer the router cannot apply, a status outside ``2xx``, a final URL on another origin after redirects, or a response that is no navigation envelope ends in a hard load of the URL with the status ``hard``, and a ``visit`` operation in a hard load of the URL it names, unless ``ROUTER["FOREIGN"] = "extract"`` reads a ``text/html`` answer in the browser, see :ref:`topics-router-foreign`.
 A request that throws, or an envelope that fails to apply, fires ``router:error`` first.
@@ -260,7 +261,7 @@ Only the document event of ``router:before`` can cancel a navigation.
    * - ``router:before``
      - ``{url, trigger, cached}``
      - Before a navigation starts, cancelable.
-       ``trigger`` is the link or form, ``undefined`` for ``Next.router.visit()``, and ``cached`` tells whether a prefetched answer is ready or in flight.
+       ``trigger`` is the link or form, ``undefined`` for ``Next.router.visit()``, and ``cached`` tells whether a prefetched answer is kept or a press request is in flight.
    * - ``router:start``
      - ``{url}``
      - Once the navigation request is about to leave.

@@ -23,17 +23,23 @@ from next.pages.metadata.resolve import publish_metadata, resolve_metadata
 from next.pages.responses import (
     NO_STORE,
     CacheControl,
+    Depth,
+    Purpose,
+    RequestInfo,
     ResponsePolicy,
     SharedCookies,
     cache_control,
     cache_problems,
     cookie_varies,
+    depth_of,
     finish_response,
     headers_problems,
     mark_bound_render,
     mark_personal_render,
+    mark_purpose,
     personal_render,
     prepare_page_render,
+    purpose_of,
     response_policy,
     robots_tag,
     vary_on_cookie,
@@ -1543,3 +1549,41 @@ class TestBoundRender:
 
     def test_no_request_marks_nothing(self) -> None:
         mark_bound_render(None)
+
+
+class TestRequestDepth:
+    """`request.next` names the purpose of a request and the depth of a prefetch."""
+
+    def test_the_depths(self) -> None:
+        assert [depth.value for depth in Depth] == ["shell", "full"]
+
+    def test_an_info_has_no_depth_by_default(self) -> None:
+        assert RequestInfo().depth is None
+        assert RequestInfo(Purpose.PREFETCH).depth is None
+
+    def test_a_purpose_without_a_depth(self) -> None:
+        request = RequestFactory().get("/")
+        mark_purpose(request, Purpose.NAVIGATION)
+        assert purpose_of(request) is Purpose.NAVIGATION
+        assert depth_of(request) is None
+        assert request.next == RequestInfo(Purpose.NAVIGATION)
+
+    @pytest.mark.parametrize("depth", list(Depth))
+    def test_a_marked_depth(self, depth: Depth) -> None:
+        request = RequestFactory().get("/")
+        mark_purpose(request, Purpose.PREFETCH, depth)
+        assert purpose_of(request) is Purpose.PREFETCH
+        assert depth_of(request) is depth
+        assert request.next == RequestInfo(Purpose.PREFETCH, depth)
+
+    def test_the_info_is_shared(self) -> None:
+        first, second = RequestFactory().get("/"), RequestFactory().get("/")
+        mark_purpose(first, Purpose.PREFETCH, Depth.FULL)
+        mark_purpose(second, Purpose.PREFETCH, Depth.FULL)
+        assert first.next is second.next
+
+    def test_an_unmarked_request_has_no_depth(self) -> None:
+        assert depth_of(RequestFactory().get("/")) is None
+
+    def test_an_object_that_is_no_request_has_no_depth(self) -> None:
+        assert depth_of(object()) is None

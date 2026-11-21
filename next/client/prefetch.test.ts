@@ -4,7 +4,7 @@ import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import { createPrefetch } from "./prefetch";
 import { CONTENT_TYPE } from "./protocol";
-import type { HistoryHost, Keeper, Layout, Settings } from "./router";
+import type { HistoryHost, Keeper, Layout, Prefetched, Settings } from "./router";
 import { chunkModules } from "./test-doubles";
 import type { IntersectionAdapter } from "./triggers";
 
@@ -27,11 +27,15 @@ let replies: Reply[];
 let chain: Layout[];
 let settings: Settings;
 let cleared: Mock<() => void>;
+let plains: string[];
+let going: string;
 
 beforeEach(() => {
   listening = new AbortController();
   asked = [];
   replies = [];
+  plains = [];
+  going = "";
   chain = [["L1", "D1", "S1"]];
   settings = { prefetch: "intent", prefetch_delay: 0.02 };
   cleared = vi.fn<() => void>();
@@ -46,7 +50,9 @@ afterEach(() => {
   listening.abort();
   surface._reset();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   Reflect.deleteProperty(navigator, "connection");
+  Reflect.deleteProperty(document, "elementFromPoint");
   document.body.innerHTML = "";
 });
 
@@ -74,6 +80,8 @@ function host(): HistoryHost {
       return reply instanceof Response ? Promise.resolve(reply) : reply(signal);
     },
     owned: (url) => url.origin === location.origin && !url.pathname.startsWith("/x/"),
+    plain: (path) => plains.includes(path),
+    going: () => going,
     flush: cleared,
   };
 }
@@ -92,6 +100,18 @@ function fire(el: EventTarget, type: string, init: MouseEventInit = {}): void {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function held(): (response?: Response) => void {
+  let answer: (response: Response) => void = () => undefined;
+  replies.push(
+    (signal) =>
+      new Promise<Response>((done, fail) => {
+        answer = done;
+        signal.addEventListener("abort", () => fail(signal.reason as Error));
+      }),
+  );
+  return (response = shell()) => answer(response);
 }
 
 const at = (path: string): string => `${location.origin}${path}`;
@@ -208,18 +228,6 @@ describe("intent", () => {
 });
 
 describe("the queue", () => {
-  function held(): (response?: Response) => void {
-    let answer: (response: Response) => void = () => undefined;
-    replies.push(
-      (signal) =>
-        new Promise<Response>((done, fail) => {
-          answer = done;
-          signal.addEventListener("abort", () => fail(signal.reason as Error));
-        }),
-    );
-    return (response = shell()) => answer(response);
-  }
-
   it("runs three prefetches at once and starts a waiting one as one ends", async () => {
     const answers = [held(), held(), held(), held()];
     const prefetch = make();
@@ -549,18 +557,6 @@ describe("viewport", () => {
 
   const byId = (id: string): Element => document.getElementById(id)!;
 
-  function held(): (response?: Response) => void {
-    let answer: (response: Response) => void = () => undefined;
-    replies.push(
-      (signal) =>
-        new Promise<Response>((done, fail) => {
-          answer = done;
-          signal.addEventListener("abort", () => fail(signal.reason as Error));
-        }),
-    );
-    return (response = shell()) => answer(response);
-  }
-
   it("watches every owned link under the viewport mode but a region that opts out", () => {
     settings = { prefetch: "viewport" };
     document.body.innerHTML =
@@ -859,5 +855,450 @@ describe("stylesheets of a prefetched page", () => {
     const prefetch = make();
     await prefetch.prefetch(at("/b/"));
     expect(sheets()).toEqual([]);
+  });
+});
+
+describe("the press", () => {
+  const FULL = { "X-Next-Prefetch": "full" };
+  const SHALLOW = { "X-Next-Prefetch": "1" };
+
+  afterEach(() => {
+    document.head.innerHTML = "";
+  });
+
+  function press(el: Element, init: PointerEventInit = {}): void {
+    el.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse", ...init }),
+    );
+  }
+
+  function link(markup = '<a id="l" href="/b/"><span id="s">B</span></a>'): Element {
+    document.body.innerHTML = `${markup}<p id="p">p</p>`;
+    return document.getElementById("l")!;
+  }
+
+  function stalled(): void {
+    replies.push(
+      (signal) =>
+        new Promise<Response>((_done, fail) =>
+          signal.addEventListener("abort", () => fail(signal.reason as Error)),
+        ),
+    );
+  }
+
+  function point(id: string): Mock<(x: number, y: number) => Element | null> {
+    const found = vi.fn<(x: number, y: number) => Element | null>(() =>
+      document.getElementById(id),
+    );
+    Object.defineProperty(document, "elementFromPoint", {
+      value: found,
+      configurable: true,
+    });
+    return found;
+  }
+
+  const extras = (): unknown[] => asked.map((call) => call.extra);
+  const aborted = (): boolean[] => asked.map((call) => call.signal.aborted);
+  const taken = (prefetch: Prefetch, path: string): Prefetched =>
+    prefetch.take(at(path)) as Prefetched;
+
+  it("sends one full request at a mouse press and no shell prefetch for the link", async () => {
+    const el = link();
+    make();
+    fire(el, "pointerover");
+    press(el);
+    press(el);
+    el.dispatchEvent(new Event("touchstart", { bubbles: true }));
+    el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await wait(40);
+    expect(asked).toEqual([
+      { href: at("/b/"), signal: expect.any(AbortSignal), extra: FULL },
+    ]);
+  });
+
+  it.each([
+    ["the default mode", {}, '<a id="l" href="/b/">B</a>', "mouse", FULL],
+    ["the default mode", {}, '<a id="l" href="/b/">B</a>', "touch", SHALLOW],
+    ["the default mode", {}, '<a id="l" href="/b/">B</a>', "pen", SHALLOW],
+    ["the mouse mode", { press: "mouse" }, '<a id="l" href="/b/">B</a>', "mouse", FULL],
+    [
+      "the mouse mode",
+      { press: "mouse" },
+      '<a id="l" href="/b/">B</a>',
+      "touch",
+      SHALLOW,
+    ],
+    ["the all mode", { press: "all" }, '<a id="l" href="/b/">B</a>', "touch", FULL],
+    ["the all mode", { press: "all" }, '<a id="l" href="/b/">B</a>', "pen", FULL],
+    ["the off mode", { press: "off" }, '<a id="l" href="/b/">B</a>', "mouse", SHALLOW],
+    [
+      "a link that turns it off",
+      { press: "all" },
+      '<a id="l" href="/b/" data-next-press="off">B</a>',
+      "mouse",
+      SHALLOW,
+    ],
+    [
+      "a link that turns it on",
+      { press: "off" },
+      '<a id="l" href="/b/" data-next-press="mouse">B</a>',
+      "mouse",
+      FULL,
+    ],
+    [
+      "an ancestor that turns it on for every pointer",
+      { press: "off" },
+      '<nav data-next-press="all"><a id="l" href="/b/">B</a></nav>',
+      "touch",
+      FULL,
+    ],
+    [
+      "an ancestor that turns it off",
+      {},
+      '<nav data-next-press="off"><a id="l" href="/b/">B</a></nav>',
+      "mouse",
+      SHALLOW,
+    ],
+    [
+      "a link that overrides its ancestor",
+      {},
+      '<nav data-next-press="off"><a id="l" href="/b/" data-next-press="all">B</a></nav>',
+      "touch",
+      FULL,
+    ],
+  ])(
+    "under %s answers a %s press with %o",
+    async (_name, mode, markup, type, extra) => {
+      settings = { prefetch: "intent", ...mode };
+      const el = link(markup);
+      make();
+      press(el, { pointerType: type });
+      await wait(0);
+      expect(extras()).toEqual([extra]);
+    },
+  );
+
+  it.each([
+    ["a modifier key", (el: Element) => press(el, { ctrlKey: true })],
+    ["a button other than the main one", (el: Element) => press(el, { button: 1 })],
+    [
+      "a touchstart",
+      (el: Element) => el.dispatchEvent(new Event("touchstart", { bubbles: true })),
+    ],
+    [
+      "a path the router fetches as a plain document",
+      (el: Element) => {
+        plains = ["/b/"];
+        press(el);
+      },
+    ],
+  ])("keeps a shell prefetch for %s", async (_name, act) => {
+    settings = { prefetch: "intent", press: "all" };
+    const el = link();
+    make();
+    act(el);
+    await wait(0);
+    expect(extras()).toEqual([SHALLOW]);
+  });
+
+  it.each([
+    ["a data saver", { saveData: true }, false, "intent"],
+    ["a hidden page", {}, true, "intent"],
+    ["prefetching off", {}, false, "off"],
+  ])("sends nothing at a press on %s", async (_name, connection, hidden, mode) => {
+    Object.defineProperty(navigator, "connection", {
+      value: connection,
+      configurable: true,
+    });
+    vi.spyOn(document, "hidden", "get").mockReturnValue(hidden);
+    settings = { prefetch: mode, press: "all" };
+    const el = link();
+    make();
+    press(el);
+    await wait(0);
+    expect(asked).toEqual([]);
+  });
+
+  it.each([
+    ["a fresh complete answer is cached", () => shell({ ...SHELL, complete: true })],
+    ["the page refused prefetches", () => new Response(null, { status: 204 })],
+    ["prefetches are paused", () => new Response(null, { status: 429 })],
+  ])("sends nothing at a press while %s", async (_name, reply) => {
+    replies = [reply()];
+    const el = link();
+    const prefetch = make();
+    await prefetch.prefetch(at("/b/"));
+    press(el);
+    await wait(0);
+    expect(extras()).toEqual([SHALLOW]);
+  });
+
+  it("takes a waiting shell prefetch of the link off the queue at the press", async () => {
+    const answers = [held(), held(), held()];
+    const el = link();
+    const prefetch = make();
+    const done = ["/a/", "/c/", "/d/"].map((path) => prefetch.prefetch(at(path)));
+    const waiting = prefetch.prefetch(at("/b/"));
+    press(el);
+    await waiting;
+    for (const answer of answers) answer();
+    await Promise.all(done);
+    await wait(0);
+    expect(hrefs()).toEqual(["/a/", "/c/", "/d/", "/b/"]);
+    expect(extras().at(-1)).toEqual(FULL);
+  });
+
+  it("leaves a shell prefetch of the link in flight and hands a visit both", async () => {
+    const answer = held();
+    const reply = shell();
+    replies.push(reply);
+    const el = link();
+    const prefetch = make();
+    const flying = prefetch.prefetch(at("/b/"));
+    press(el);
+    expect(extras()).toEqual([SHALLOW, FULL]);
+    const joined = prefetch.take(at("/b/"));
+    expect(joined).toBeInstanceOf(Promise);
+    fire(document, "pointercancel");
+    const response = shell();
+    answer(response);
+    const found = (await joined)!;
+    expect(found).toMatchObject({ raw: SHELL, response });
+    expect(await found.flight).toBe(reply);
+    expect(aborted()).toEqual([false, false]);
+    await flying;
+  });
+
+  it.each([
+    ["a cancelled pointer", () => fire(document, "pointercancel")],
+    ["a drag", () => fire(document, "dragstart")],
+    ["a context menu", () => fire(document, "contextmenu")],
+    [
+      "a navigation that starts",
+      () => document.dispatchEvent(new CustomEvent("router:start")),
+    ],
+    [
+      "a release outside the link",
+      () => {
+        point("p");
+        fire(document.getElementById("p")!, "pointerup");
+      },
+    ],
+  ])("aborts the pressed request on %s", (_name, end) => {
+    stalled();
+    const el = link();
+    const prefetch = make();
+    press(el);
+    end();
+    expect(aborted()).toEqual([true]);
+    expect(prefetch.take(at("/b/"))).toBeUndefined();
+  });
+
+  it("keeps the pressed request when the pointer comes up on the link", () => {
+    stalled();
+    const el = link();
+    const prefetch = make();
+    const found = point("s");
+    fire(el, "pointerup");
+    expect(found).not.toHaveBeenCalled();
+    press(el);
+    fire(document.getElementById("s")!, "pointerup", { clientX: 3, clientY: 4 });
+    expect(found).toHaveBeenCalledWith(3, 4);
+    expect(aborted()).toEqual([false]);
+    expect(taken(prefetch, "/b/").flight).toBeInstanceOf(Promise);
+  });
+
+  it("aborts the pressed request once the press outlasts its window", () => {
+    vi.useFakeTimers();
+    stalled();
+    const el = link();
+    make();
+    press(el);
+    vi.advanceTimersByTime(999);
+    expect(aborted()).toEqual([false]);
+    vi.advanceTimersByTime(1);
+    expect(aborted()).toEqual([true]);
+  });
+
+  it("keeps a flight a visit claimed past the window", () => {
+    vi.useFakeTimers();
+    stalled();
+    const el = link();
+    const prefetch = make();
+    press(el);
+    expect(taken(prefetch, "/b/").flight).toBeInstanceOf(Promise);
+    vi.advanceTimersByTime(1000);
+    fire(document, "pointercancel");
+    expect(aborted()).toEqual([false]);
+  });
+
+  it("aborts the press on one link once another is pressed", () => {
+    stalled();
+    stalled();
+    document.body.innerHTML = '<a id="a" href="/a/">A</a><a id="b" href="/b/">B</a>';
+    make();
+    press(document.getElementById("a")!);
+    press(document.getElementById("b")!);
+    expect(hrefs()).toEqual(["/a/", "/b/"]);
+    expect(aborted()).toEqual([true, false]);
+  });
+
+  it("keeps the envelope a released press already received for the next visit", async () => {
+    const raw = { ...SHELL, complete: true, assets: [{ kind: "css", url: "/b.css" }] };
+    const response = shell(raw);
+    replies = [response];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    await wait(0);
+    fire(document, "pointercancel");
+    await wait(0);
+    expect(aborted()).toEqual([false]);
+    expect(prefetch.take(at("/b/"))).toEqual({ raw, response });
+    expect(document.head.querySelector("link")?.rel).toBe("preload");
+  });
+
+  it.each([
+    [
+      "a stream",
+      () =>
+        new Response("event: end\ndata: 1\n\n", {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    ],
+    [
+      "a redirected answer",
+      () => {
+        const response = shell();
+        Object.defineProperty(response, "redirected", { value: true });
+        return response;
+      },
+    ],
+    ["an answer without layouts", () => shell({ version: "v1", ops: [] })],
+    [
+      "a body that does not parse",
+      () => new Response("{", { headers: { "content-type": CONTENT_TYPE } }),
+    ],
+  ])("aborts %s a released press received and keeps nothing", async (_name, reply) => {
+    replies = [reply()];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    await wait(0);
+    fire(document, "pointercancel");
+    await wait(0);
+    expect(aborted()).toEqual([true]);
+    expect(prefetch.take(at("/b/"))).toBeUndefined();
+  });
+
+  it("aborts a pressed request on a drop and keeps nothing it received", async () => {
+    const el = link();
+    const prefetch = make();
+    press(el);
+    await wait(0);
+    prefetch.drop();
+    await wait(0);
+    expect(aborted()).toEqual([true]);
+    expect(prefetch.take(at("/b/"))).toBeUndefined();
+  });
+
+  it("marks a page that refuses the press and hands a visit an empty flight", async () => {
+    replies = [new Response(null, { status: 204 })];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    const found = taken(prefetch, "/b/");
+    expect(found.raw).toBeUndefined();
+    expect(await found.flight).toBeUndefined();
+    await prefetch.prefetch(at("/b/"));
+    expect(hrefs()).toEqual(["/b/"]);
+  });
+
+  it.each([
+    [
+      "a busy answer with Retry-After",
+      { status: 429, headers: { "Retry-After": "5" } },
+      5_000,
+    ],
+    ["a busy answer", { status: 429 }, 30_000],
+    ["a server error", { status: 503 }, 30_000],
+  ])(
+    "pauses prefetches and drops the waiting ones on %s to a press",
+    async (_name, init, pause) => {
+      let now = 1_000_000;
+      vi.spyOn(Date, "now").mockImplementation(() => now);
+      const answers = [held(), held(), held()];
+      replies.push(new Response(null, init));
+      const el = link();
+      const prefetch = make();
+      const done = ["/a/", "/c/", "/d/"].map((path) => prefetch.prefetch(at(path)));
+      const waiting = prefetch.prefetch(at("/e/"));
+      press(el);
+      expect(await taken(prefetch, "/b/").flight).toBeUndefined();
+      await waiting;
+      for (const answer of answers) answer();
+      await Promise.all(done);
+      now += pause - 1;
+      await prefetch.prefetch(at("/f/"));
+      now += 2;
+      await prefetch.prefetch(at("/f/"));
+      expect(hrefs()).toEqual(["/a/", "/c/", "/d/", "/b/", "/f/"]);
+    },
+  );
+
+  it("hands a visit an empty flight when the network fails the press", async () => {
+    replies = [() => Promise.reject(new TypeError("offline"))];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    expect(await taken(prefetch, "/b/").flight).toBeUndefined();
+    await prefetch.prefetch(at("/b/"));
+    expect(hrefs()).toEqual(["/b/", "/b/"]);
+  });
+
+  it("hands a visit the pressed flight beside a kept shell and stops it on demand", async () => {
+    const response = shell();
+    replies = [response];
+    stalled();
+    const el = link();
+    const prefetch = make();
+    await prefetch.prefetch(at("/b/"));
+    press(el);
+    const found = taken(prefetch, "/b/");
+    expect(found).toMatchObject({ raw: SHELL, response, flight: expect.any(Promise) });
+    found.stop!();
+    expect(aborted()).toEqual([false, true]);
+    expect(await found.flight).toBeUndefined();
+  });
+
+  it("hands a visit the pressed flight alone when nothing is kept", async () => {
+    const reply = shell();
+    replies = [reply];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    const found = taken(prefetch, "/b/#part");
+    expect(found.raw).toBeUndefined();
+    expect(found.response).toBeUndefined();
+    expect(await found.flight).toBe(reply);
+    expect(prefetch.take(at("/b/"))).toBeUndefined();
+  });
+
+  it("leaves a pressed flight in place for a visit to another URL", () => {
+    stalled();
+    const el = link();
+    const prefetch = make();
+    press(el);
+    expect(prefetch.take(at("/c/"))).toBeUndefined();
+    expect(aborted()).toEqual([false]);
+    expect(taken(prefetch, "/b/").flight).toBeInstanceOf(Promise);
+  });
+
+  it("asks nothing for the URL the router is loading", async () => {
+    going = at("/b/");
+    const prefetch = make();
+    await prefetch.prefetch(at("/b/#part"));
+    await prefetch.prefetch(at("/c/"));
+    expect(hrefs()).toEqual(["/c/"]);
   });
 });

@@ -51,6 +51,7 @@ export interface Settings {
   prefetch_ttl?: number;
   prefetch_shell_ttl?: number;
   prefetch_entries?: number;
+  press?: string;
   snapshots?: number;
   snapshot?: boolean;
   progress_delay?: number;
@@ -66,8 +67,10 @@ export interface Settings {
 }
 
 export interface Prefetched {
-  raw: Record<string, unknown>;
-  response: Response;
+  raw?: Record<string, unknown> | undefined;
+  response?: Response | undefined;
+  flight?: Promise<Response | undefined> | undefined;
+  stop?: (() => void) | undefined;
 }
 
 export interface Turn {
@@ -89,6 +92,8 @@ export interface HistoryHost {
     extra?: Record<string, string>,
   ) => Promise<Response>;
   owned: (url: URL, el?: Element) => boolean;
+  plain: (path: string) => boolean;
+  going: () => string;
   flush: () => void;
   ready?: ((chunk: "scripts") => Promise<ScriptsChunk>) | undefined;
   nonce?: string | undefined;
@@ -196,6 +201,7 @@ export function createRouter(
   let pending: unknown;
   let reading: unknown;
   let active: AbortController | undefined;
+  let bound = "";
   let focus: RouterOptions["focus"];
   let announce: RouterOptions["announce"];
   let unmark = (): void => undefined;
@@ -273,10 +279,14 @@ export function createRouter(
     const path = target.pathname + target.search;
     const hit = pop ? undefined : keeper.take?.(target.href);
     const detail = { url: target.href, trigger, cached: hit !== undefined };
-    if (!pop && partial._fire("router:before", detail, true) === false) return;
+    if (!pop && partial._fire("router:before", detail, true) === false) {
+      void Promise.resolve(hit).then((found) => found?.stop?.());
+      return;
+    }
     active?.abort();
     turns += 1;
     const controller = (active = new AbortController());
+    bound = target.href.replace(/#.*/s, "");
     const { signal } = controller;
     const replace = how.replace === true || partial.layers.size() > 0;
     const motion = pop ? "back" : replace ? "replace" : "forward";
@@ -421,14 +431,18 @@ export function createRouter(
     };
     const early = async (found?: Prefetched): Promise<unknown> => {
       await loading;
-      return found && land(found.raw, found.response);
+      const { raw, response } = found ?? {};
+      return raw && response && land(raw, response);
     };
-    const stream = async (): Promise<void> => {
+    const stream = async (found?: Prefetched): Promise<void> => {
       try {
         const bare = keeper.plain?.(path) === true;
+        signal.addEventListener("abort", () => found?.stop?.());
+        if (bare) found?.stop?.();
         const response = bare
           ? await fetch(target.href, { signal, mode: "same-origin" })
-          : await ask(target.href, signal);
+          : ((found?.flight && (await found.flight)) ??
+            (await ask(target.href, signal)));
         url = new URL(response.url || target.href);
         url.hash = target.hash;
         const at = url.pathname + url.search;
@@ -462,14 +476,16 @@ export function createRouter(
     };
     try {
       const found = hit instanceof Promise ? await hit : hit;
-      await Promise.all([
-        early(found).catch(fail),
-        found?.raw.complete === true || stream(),
-      ]);
+      const whole = found?.raw?.complete === true;
+      if (whole) found.stop?.();
+      await Promise.all([early(found).catch(fail), whole || stream(found)]);
       if (!signal.aborted) again();
     } finally {
       settle();
-      if (active === controller) active = undefined;
+      if (active === controller) {
+        active = undefined;
+        bound = "";
+      }
       emit("end", {
         url: url.href,
         status: signal.aborted && status === "complete" ? "superseded" : status,
@@ -612,6 +628,8 @@ export function createRouter(
           key: () => key,
           ask,
           owned,
+          plain: (path) => keeper.plain?.(path) === true,
+          going: () => bound,
           flush,
           ready: next.ready,
           nonce,

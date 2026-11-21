@@ -234,7 +234,9 @@ The router adds the guarantees below, each enforced on the server, see :doc:`/co
 - ``X-Next-Origin`` is read only as a same-site path, and any other value is ignored.
 - A path that opens with ``//`` is answered with a hard load of the single-slash path, and the router follows no answer to another origin.
 
-A prefetch runs the context callables of the page, and ``ROUTER["SPECULATION"]`` lets the browser prefetch every same-origin link the router does not own, which often includes a sign-out or a download link marked ``data-next-router="off"``.
+A prefetch runs the context callables of the page, and a full one, sent at the press of a link, runs its deferred jobs too.
+An answer may be shown to the visitor with no further request, so code that acts on a visit declares ``page.router(prefetch=False)``.
+``ROUTER["SPECULATION"]`` lets the browser prefetch every same-origin link the router does not own, which often includes a sign-out or a download link marked ``data-next-router="off"``.
 A page or an endpoint that changes state on a ``GET`` declares ``page.router(prefetch=False)`` or carries ``data-next-prefetch="off"`` on its links, see :doc:`/content/topics/router/prefetch`.
 
 A ``NavigationCut``, ``ChromeDigest``, or ``CurrentLinks`` named in ``ROUTER`` sees the rendered page and decides only what the answer carries of it.

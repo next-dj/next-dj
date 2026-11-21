@@ -606,9 +606,10 @@ _PREFETCH = {
 class TestPrefetch:
     """A prefetch that left a client-trip wrapper is not the page a navigation answers."""
 
-    def _prefetch(self, pages: Path, url: str) -> dict[str, object]:
+    def _prefetch(self, pages: Path, url: str, depth: str = "1") -> dict[str, object]:
+        headers = {**_PREFETCH, "X-Next-Prefetch": depth}
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS, ROUTER={"ENABLED": True}):
-            response = Client().get(url, headers=_PREFETCH)
+            response = Client().get(url, headers=headers)
         assert response["Cache-Control"] == "private, no-store"
         return json.loads(response.content)
 
@@ -618,6 +619,16 @@ class TestPrefetch:
         envelope = self._prefetch(pages, "/home/")
         assert "data-next-token" in envelope["ops"][0]["html"]
         assert "complete" not in envelope
+
+    def test_a_client_trip_wrapper_leaves_a_full_prefetch_incomplete(
+        self, pages: Path
+    ) -> None:
+        envelope = self._prefetch(pages, "/home/", "full")
+        assert "data-next-token" in envelope["ops"][0]["html"]
+        assert "complete" not in envelope
+
+    def test_a_full_prefetch_without_a_boundary_is_complete(self, pages: Path) -> None:
+        assert self._prefetch(pages, "/rendered/", "full")["complete"] is True
 
     def test_a_page_without_a_boundary_prefetches_complete(self, pages: Path) -> None:
         envelope = self._prefetch(pages, "/rendered/")

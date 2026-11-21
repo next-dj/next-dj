@@ -110,7 +110,7 @@ A page opts out on the server with ``page.router(...)`` at the top of its ``page
    A page whose markup or scripts assume a fresh document uses it.
 
 ``prefetch=False``
-   A navigation request marked as a prefetch, ``X-Next-Prefetch: 1``, is answered ``204`` with an empty body before any render, and the browser asks no more for the life of the page, see :doc:`prefetch`.
+   A navigation request marked as a prefetch, ``X-Next-Prefetch: 1`` or ``X-Next-Prefetch: full``, is answered ``204`` with an empty body before any render, and the browser asks no more for the life of the page, see :doc:`prefetch`.
    A page whose context callables act on a visit, such as counting a view or consuming a one-time link, uses it.
 
 ``snapshot=False``
@@ -148,7 +148,7 @@ The pages of this guide
    The three router bundles, history, scroll, snapshots and when they are dropped, persisted elements, view transitions, page stylesheets, scripts in navigated HTML, focus and announcements, progress and pending marks, the events, and the ``Next.router`` API.
 
 :doc:`prefetch`
-   The intent prefetch, its modes and limits, what a prefetch renders, the server's refusals, and the Speculation Rules for the links the router does not own.
+   The intent prefetch and the press of a link, their modes and limits, what a prefetch renders, the server's refusals, and the Speculation Rules for the links the router does not own.
 
 :doc:`sessions`
    How a login, a logout, and a changed session key clear the router, redirects that ride a full load, ``router_clear``, prefetch refusals, and the caching and security guarantees of a navigation.

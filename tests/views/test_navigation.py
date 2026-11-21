@@ -12,7 +12,7 @@ from django.test import RequestFactory
 from next.pages import page
 from next.pages.layouts import SLOT
 from next.pages.loaders import LayoutTemplateLoader
-from next.pages.responses import Purpose, purpose_of
+from next.pages.responses import Depth, Purpose, purpose_of
 from next.pages.signals import page_rendered
 from next.partial.headers import VARY_HEADERS
 from next.router import (
@@ -355,6 +355,19 @@ class TestGate:
         response = _navigate(pages["opted"], "/sec/opted/", **{"X-Next-Prefetch": "1"})
         assert response.status_code == 204
 
+    def test_a_page_refusing_a_full_prefetch(self, pages: dict[str, Path]) -> None:
+        response = _navigate(
+            pages["opted"], "/sec/opted/", **{"X-Next-Prefetch": "full"}
+        )
+        assert response.status_code == 204
+
+    def test_a_lagging_pool_sheds_a_full_prefetch(self, pages: dict[str, Path]) -> None:
+        lag = Capacity(4, 4, 9, 2.2)
+        with mock.patch.object(suspense_manager, "capacity", return_value=lag):
+            response = _navigate(pages["b"], **{"X-Next-Prefetch": "full"})
+        assert response.status_code == 429
+        assert response["Retry-After"] == "3"
+
     def test_a_page_out_of_navigations_loads_hard(self, pages: dict[str, Path]) -> None:
         assert _ops(_navigate(pages["hard"], "/sec/hard/")) == [("visit", None)]
 
@@ -408,6 +421,73 @@ class TestDeferred:
         assert "complete" not in _envelope(response)
         (event,) = recorder.events
         assert event.kwargs["purpose"] is Purpose.PREFETCH
+        assert event.kwargs["depth"] is Depth.SHELL
+
+    def test_a_full_prefetch_runs_the_jobs_and_is_complete(
+        self, pages: dict[str, Path]
+    ) -> None:
+        declared = _declare(_layouts(_get(pages["a"], "/sec/a/")))
+        with capture_signals(page_rendered, navigation_rendered) as recorder:
+            response = _navigate(
+                pages["slow"], "/sec/slow/", declared, **{"X-Next-Prefetch": "full"}
+            )
+        assert response.status_code == 200
+        assert "<p>loading</p>" not in response.content.decode()
+        assert "<h1>" in _envelope(response)["ops"][0]["html"]
+        assert _envelope(response)["complete"] is True
+        assert response["Cache-Control"] == "private, no-store"
+        for signal in (page_rendered, navigation_rendered):
+            (event,) = [e for e in recorder.events if e.signal is signal]
+            assert event.kwargs["purpose"] is Purpose.PREFETCH
+            assert event.kwargs["depth"] is Depth.FULL
+
+    def test_a_full_prefetch_streams_when_the_transport_can(
+        self, pages: dict[str, Path]
+    ) -> None:
+        declared = _declare(_layouts(_get(pages["a"], "/sec/a/")))
+        with streaming():
+            response = _navigate(
+                pages["slow"],
+                "/sec/slow/",
+                declared,
+                Accept="text/event-stream",
+                **{"X-Next-Prefetch": "full"},
+            )
+            body = b"".join(response.streaming_content).decode()
+        assert response["Content-Type"].startswith("text/event-stream")
+        hello, first, *rest = body.split("\n\n")
+        assert hello.startswith("event: hello")
+        assert "<p>loading</p>" in first
+        assert any("event: end" in frame for frame in rest)
+
+    def test_a_shell_prefetch_never_streams(self, pages: dict[str, Path]) -> None:
+        declared = _declare(_layouts(_get(pages["a"], "/sec/a/")))
+        with streaming():
+            response = _navigate(
+                pages["slow"],
+                "/sec/slow/",
+                declared,
+                Accept="text/event-stream",
+                **{"X-Next-Prefetch": "1"},
+            )
+        assert not response.streaming
+        assert "complete" not in _envelope(response)
+
+    def test_a_navigation_carries_no_depth(self, pages: dict[str, Path]) -> None:
+        declared = _declare(_layouts(_get(pages["a"], "/sec/a/")))
+        with capture_signals(page_rendered, navigation_rendered) as recorder:
+            _navigate(pages["b"], "/sec/b/", declared)
+        assert {e.kwargs["depth"] for e in recorder.events} == {None}
+        assert {e.kwargs["purpose"] for e in recorder.events} == {Purpose.NAVIGATION}
+
+    def test_a_full_prefetch_without_a_boundary_is_complete(
+        self, pages: dict[str, Path]
+    ) -> None:
+        declared = _declare(_layouts(_get(pages["a"], "/sec/a/")))
+        response = _navigate(
+            pages["b"], "/sec/b/", declared, **{"X-Next-Prefetch": "full"}
+        )
+        assert _envelope(response)["complete"] is True
 
     def test_a_prefetch_that_skipped_no_job_is_complete(
         self, pages: dict[str, Path]

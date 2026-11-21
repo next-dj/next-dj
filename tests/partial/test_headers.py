@@ -9,6 +9,7 @@ from next.partial import is_partial_request, partial_intent
 from next.partial.headers import (
     ACCEPT,
     CONTENT_TYPE,
+    FULL_DEPTH,
     STREAM_ACCEPT,
     VARY_HEADERS,
     MergeMode,
@@ -323,6 +324,24 @@ class TestNavigationIntent:
             None,
             False,
         )
+
+    @pytest.mark.parametrize(
+        ("value", "prefetch", "full"),
+        [("1", True, False), ("full", True, True), ("deep", False, False)],
+    )
+    def test_the_prefetch_depth(self, value, prefetch, full) -> None:
+        request = _request_with_headers(
+            **{"X-Next-Request": "1", "X-Next-Navigate": "1", "X-Next-Prefetch": value}
+        )
+        intent = partial_intent(request)
+        assert (intent.prefetch, intent.full) == (prefetch, full)
+
+    def test_a_full_prefetch_needs_the_navigation(self) -> None:
+        request = _request_with_headers(
+            **{"X-Next-Request": "1", "X-Next-Prefetch": FULL_DEPTH}
+        )
+        intent = partial_intent(request)
+        assert (intent.prefetch, intent.full) == (False, False)
 
     def test_the_navigation_headers_are_varied(self) -> None:
         assert {"X-Next-Navigate", "X-Next-Layouts", "X-Next-Prefetch"} <= set(

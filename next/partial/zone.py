@@ -100,6 +100,7 @@ _AUTHOR_ATTRS: Final = frozenset(
         "data-next-nav",
         "data-next-persist",
         "data-next-prefetch",
+        "data-next-press",
         _RESERVE_ATTR,
         "data-next-router",
         "data-next-scroll",

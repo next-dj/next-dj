@@ -440,6 +440,30 @@ class TestRouterPrefetch:
         )
         assert _decide(facts) == Delivered(Delivery.SHELL, "head")
 
+    def test_a_full_prefetch_goes_through_the_ordinary_rows(self) -> None:
+        assert _decide(_facts()) == Delivered(Delivery.STREAM, "stream")
+        assert _decide(_facts(transport=_SYNC)) == Delivered(
+            Delivery.INLINE, "sync-worker"
+        )
+        assert _decide(_facts(compression="gzip", buffering=True)) == Delivered(
+            Delivery.INLINE, "gzip"
+        )
+
+    @pytest.mark.parametrize(
+        ("depth", "shell"), [("1", True), ("full", False), ("deep", False)]
+    )
+    def test_only_the_shell_depth_is_the_prefetch_fact(self, depth, shell) -> None:
+        request = RequestFactory().get(
+            "/",
+            headers={
+                "X-Next-Request": "1",
+                "X-Next-Navigate": "1",
+                "X-Next-Prefetch": depth,
+            },
+        )
+        with override_next_settings(ROUTER={"ENABLED": True}):
+            assert page_facts(request).prefetch is shell
+
     @pytest.mark.parametrize("enabled", [True, False])
     def test_the_fact_needs_the_router(self, enabled) -> None:
         request = RequestFactory().get(

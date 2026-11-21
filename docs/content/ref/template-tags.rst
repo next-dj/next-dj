@@ -236,7 +236,7 @@ Partial rendering
    The wrapper carries ``data-next-zone`` whatever the tag.
 
    Any other ``key="value"`` pair whose key is an HTML global attribute, such as ``class``, ``id``, ``style``, or ``role``, or an ``aria-*`` or ``data-*`` attribute, is written on the wrapper after the framework's own attributes, escaped, on a full page render and a zone render alike.
-   The hand-written ``data-next-*`` attributes of :doc:`/content/ref/client`, ``data-next-nav``, ``data-next-toasts``, ``data-next-current``, ``data-next-match``, ``data-next-router``, ``data-next-prefetch``, ``data-next-persist``, ``data-next-scroll``, ``data-next-scroll-region``, and ``data-next-focus``, are written the same way, so a zone can be a navigation container or the toast tray, and so is ``data-next-reserve``, described with ``reload=`` below.
+   The hand-written ``data-next-*`` attributes of :doc:`/content/ref/client`, ``data-next-nav``, ``data-next-toasts``, ``data-next-current``, ``data-next-match``, ``data-next-router``, ``data-next-prefetch``, ``data-next-press``, ``data-next-persist``, ``data-next-scroll``, ``data-next-scroll-region``, and ``data-next-focus``, are written the same way, so a zone can be a navigation container or the toast tray, and so is ``data-next-reserve``, described with ``reload=`` below.
    Any other ``data-next-*`` key is reserved for the runtime, and any other key is an unknown option, both raising ``TemplateSyntaxError`` at parse time.
 
    ``poll="<interval>"`` re-GETs the body on the interval, read from a quoted ``5s`` or ``1500ms`` literal or a bare number of milliseconds, never from a template variable.

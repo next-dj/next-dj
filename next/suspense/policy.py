@@ -181,7 +181,7 @@ class PageFacts:
 
     `compression` is the coding the stream goes out in, `buffering` whether a middleware
     buffers it, `runtime` whether the runtime loads, `capacity` whether a slot is free,
-    and `prefetch` whether the client router asks for the shell of a navigation.
+    and `prefetch` whether the client router asks for the shell alone, no job run.
     """
 
     server: Server
@@ -237,7 +237,7 @@ def page_facts(request: HttpRequest) -> PageFacts:
         is not ScriptInjectionPolicy.DISABLED,
         speculative=_PREFETCH in request.META.get("HTTP_SEC_PURPOSE", ""),
         capacity=open_streams.open < stream_limit(server),
-        prefetch=intent.prefetch and router_enabled(),
+        prefetch=intent.prefetch and not intent.full and router_enabled(),
     )
 
 
@@ -331,9 +331,9 @@ class DefaultStreamPolicy(StreamPolicy):
 
     @override
     def delivery(self, request: HttpRequest, facts: PageFacts) -> Delivered:
-        """Return `SHELL` for `HEAD`, `PREFETCH` for a router prefetch, else a stream.
+        """Return `SHELL` for `HEAD`, `PREFETCH` for a shell prefetch, else a stream.
 
-        A prefetch is decided before every other row, so it never opens a stream.
+        A shell prefetch is decided before every other row, so it never opens a stream.
         """
         if facts.method == _HEAD:
             return Delivered(Delivery.SHELL, "head")

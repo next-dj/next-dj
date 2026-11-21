@@ -30,6 +30,8 @@ function host(over: Partial<HistoryHost> = {}): HistoryHost {
     key: () => "",
     ask: () => Promise.reject(new Error("offline")),
     owned: () => true,
+    plain: () => false,
+    going: () => "",
     flush: () => undefined,
     ...over,
   };

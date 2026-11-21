@@ -469,28 +469,51 @@ class Purpose(enum.StrEnum):
     SPECULATION = "speculation"
 
 
+class Depth(enum.StrEnum):
+    """How much of a page a router prefetch asks for, which `request.next.depth` names.
+
+    A shell runs no deferred job, and a full prefetch is the page a press may show.
+    """
+
+    SHELL = "shell"
+    FULL = "full"
+
+
 @dataclass(frozen=True, slots=True)
 class RequestInfo:
     """What next.dj tells user code about the request a page view serves."""
 
     purpose: Purpose = Purpose.DOCUMENT
+    depth: Depth | None = None
 
 
 NEXT_ATTR: Final = "next"
 """The request attribute a page view sets, read by user code as `request.next`."""
 
-_INFOS: Final = {purpose: RequestInfo(purpose) for purpose in Purpose}
+_INFOS: Final = {
+    (purpose, depth): RequestInfo(purpose, depth)
+    for purpose in Purpose
+    for depth in (None, *Depth)
+}
 
 
-def mark_purpose(request: HttpRequest, purpose: Purpose) -> None:
-    """Set `request.next` to the shared info of `purpose`."""
-    setattr(request, NEXT_ATTR, _INFOS[purpose])
+def mark_purpose(
+    request: HttpRequest, purpose: Purpose, depth: Depth | None = None
+) -> None:
+    """Set `request.next` to the shared info of `purpose` at `depth`."""
+    setattr(request, NEXT_ATTR, _INFOS[purpose, depth])
 
 
 def purpose_of(request: object) -> Purpose:
     """Return the purpose `request.next` names, a document when no view set one."""
     info = getattr(request, NEXT_ATTR, None)
     return info.purpose if isinstance(info, RequestInfo) else Purpose.DOCUMENT
+
+
+def depth_of(request: object) -> Depth | None:
+    """Return the prefetch depth `request.next` names, `None` for any other request."""
+    info = getattr(request, NEXT_ATTR, None)
+    return info.depth if isinstance(info, RequestInfo) else None
 
 
 _SHARED_RENDER_ATTR: Final = "_next_shared_render"

@@ -214,7 +214,7 @@ The partial-rendering stream signals appear in context in :doc:`/content/topics/
 The realtime stream signals and their payloads are covered in :ref:`ref-signals-stream-lifecycle`.
 
 The three router signals share the sender ``next.router.navigation.Routing``, and each carries the ``request``.
-``navigation_rendered`` adds ``page_path``, ``purpose``, ``cut``, ``kept``, ``diverged_at``, ``reason``, and ``streamed``, ``prefetch_shed`` adds ``page_path`` and ``waited_ms``, and ``router_cleared`` adds ``reason``.
+``navigation_rendered`` adds ``page_path``, ``purpose``, ``depth``, ``cut``, ``kept``, ``diverged_at``, ``reason``, and ``streamed``, ``prefetch_shed`` adds ``page_path`` and ``waited_ms``, and ``router_cleared`` adds ``reason``.
 A receiver of ``navigation_rendered`` that counts body morphs and hard loads finds the layouts that never persist, see :doc:`router/layouts`.
 
 .. code-block:: python

@@ -450,6 +450,8 @@ describe("scroll positions", () => {
         key: () => "",
         ask: () => Promise.reject(new Error("offline")),
         owned: () => true,
+        plain: () => false,
+        going: () => "",
         flush: () => undefined,
       },
       { signal: listening.signal },

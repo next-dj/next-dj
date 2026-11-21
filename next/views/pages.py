@@ -23,7 +23,8 @@ from next.pages.loaders import load_page_module, load_python_module_memo, serves
 from next.pages.manager import Built, defers, page as zone_pages
 from next.pages.navigation import page_router
 from next.pages.responses import (
-    Purpose,
+    Depth,
+    depth_of,
     finish_response,
     finish_zone_response,
     prepare_page_render,
@@ -205,7 +206,7 @@ class _Block:
         stack = ExitStack()
         self._entered = stack
         purpose = purpose_of(request)
-        if self.route is Route.NAVIGATE and purpose is Purpose.NAVIGATION:
+        if self.route is Route.NAVIGATE and depth_of(request) is not Depth.SHELL:
             self.block = stack.enter_context(streamable(request))
         self.rendering = stack.enter_context(_deferrals(request, self._chain))
         self.routed = stack.enter_context(routing(request, self._file_path, purpose))
@@ -265,9 +266,10 @@ def _complete(request: HttpRequest, rendering: PageRender | None) -> bool:
 
     A prefetch that skipped a deferred job or left a client-trip wrapper is refetched.
     """
-    if purpose_of(request) is not Purpose.PREFETCH or tripped(request):
+    depth = depth_of(request)
+    if depth is None or tripped(request):
         return False
-    return rendering is None or rendering.delivered is None
+    return depth is Depth.FULL or rendering is None or rendering.delivered is None
 
 
 def _navigated(

@@ -64,9 +64,14 @@ Every other redirect is followed by the fetch as before.
 Prefetch requests
 -----------------
 
-A navigation request that also carries ``X-Next-Prefetch: 1`` is a prefetch.
-The server answers it like a navigation, with ``request.next.purpose`` set to ``prefetch``, so a context callable or a ``page_rendered`` receiver that counts visits skips it with one comparison.
-A prefetch renders the shell of the page, its deferred boundaries at their loading content and no deferred job run, and never streams, see :doc:`prefetch`.
+A navigation request that also carries ``X-Next-Prefetch`` is a prefetch, at one of two depths.
+``X-Next-Prefetch: 1`` asks for the shell of the page, its deferred boundaries at their loading content and no deferred job run, and the answer never streams.
+``X-Next-Prefetch: full`` is sent at the press of a link and asks for the page as a navigation gets it, deferred jobs run and the answer streamed when the transport can stream, see :doc:`prefetch`.
+``request.next.purpose`` is ``prefetch`` for both, and ``request.next.depth`` is ``Depth.SHELL`` or ``Depth.FULL``.
+
+A prefetch answer may be shown to the visitor with no further request, a complete one after a hover and a full one after a press.
+Code that must act on a visit therefore declares ``page.router(prefetch=False)``.
+A counter that skips prefetches still counts a prefetch at the full depth, ``request.next.depth == "full"``, or counts in the browser on ``router:commit``.
 
 Two answers refuse a prefetch before any render.
 

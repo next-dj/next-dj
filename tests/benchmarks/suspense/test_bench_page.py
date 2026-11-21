@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
+from django.test import RequestFactory
 from django.urls import resolve
 
 from next.pages.manager import page as page_singleton
+from next.partial.headers import (
+    NAVIGATE,
+    ORIGIN,
+    PREFETCH,
+    REQUEST_FLAG,
+    SEC_FETCH_SITE,
+)
 from next.suspense import StreamingPageResponse
 from tests.benchmarks.factories import (
     REQUEST_ROUNDS,
@@ -59,6 +68,7 @@ def _site(
     *,
     loading: str | None = "<p>loading</p>",
     error: bool = False,
+    router: bool = False,
 ) -> Iterator[Callable[[HttpRequest], HttpResponseBase]]:
     """Route a one-page site around the `card` component and yield the page view."""
     (root / "layout.djx").write_text(_LAYOUT)
@@ -69,11 +79,23 @@ def _site(
     write_page(root, "cards", _PUBLIC, body=body)
     if error:
         (root / "cards" / "error.djx").write_text("<b>{{ error.kind }}</b>")
-    with routed(root, COMPONENT_BACKENDS=COMPONENTS):
+    with routed(root, COMPONENT_BACKENDS=COMPONENTS, ROUTER={"ENABLED": router}):
         try:
             yield resolve("/cards/").func
         finally:
             page_singleton.clear_template_caches()
+
+
+def _full_prefetch() -> HttpRequest:
+    """Return the GET a press sends, which asks for the page with its jobs run."""
+    headers = {
+        REQUEST_FLAG: "1",
+        NAVIGATE: "1",
+        PREFETCH: "full",
+        ORIGIN: "/",
+        SEC_FETCH_SITE: "same-origin",
+    }
+    return RequestFactory().get("/cards/", headers=headers)
 
 
 def _read(
@@ -174,6 +196,25 @@ class TestBenchDeferredPageStreamed:
             benchmark.pedantic(
                 shell,
                 setup=each_round(partial(threaded_get, "/cards/")),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
+
+
+class TestBenchFullPrefetch:
+    """A press asking for a page whose deferred jobs settle before the answer."""
+
+    @_BOUNDARIES
+    @pytest.mark.benchmark(group="suspense.page")
+    def test_full_prefetch(self, tmp_path: Path, boundaries: int, benchmark) -> None:
+        with _site(tmp_path, _cards(boundaries), router=True) as view:
+            envelope = json.loads(view(_full_prefetch()).content)
+            assert envelope["complete"] is True
+            assert envelope["ops"][0]["html"].count(" ready</p>") == boundaries
+            assert "loading" not in envelope["ops"][0]["html"]
+            benchmark.pedantic(
+                view,
+                setup=each_round(_full_prefetch),
                 rounds=REQUEST_ROUNDS,
                 warmup_rounds=REQUEST_WARMUP_ROUNDS,
             )

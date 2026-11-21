@@ -32,6 +32,7 @@ class TestReadSettings:
         assert (current.prefetch, current.prefetch_delay) == ("intent", 0.065)
         assert (current.prefetch_ttl, current.prefetch_entries) == (30.0, 16)
         assert current.prefetch_shell_ttl == 300.0
+        assert current.press == "mouse"
         assert (current.snapshots, current.progress_delay) == (10, 0.15)
         assert current.progress is True
         assert current.transitions is False
@@ -73,6 +74,14 @@ class TestReadSettings:
         assert current.current_enabled is False
         assert current.current_containers[0] == "nav"
 
+    @pytest.mark.parametrize("mode", ["mouse", "all", "off"])
+    def test_every_press_mode_is_read(self, mode: str) -> None:
+        assert read_settings({"PRESS": mode}).press == mode
+
+    @pytest.mark.parametrize("value", ["touch", "", 1, None])
+    def test_a_misfit_press_falls_back_to_the_default(self, value) -> None:
+        assert read_settings({"PRESS": value}).press == "mouse"
+
     @pytest.mark.parametrize("switch", [True, False])
     def test_a_bool_switches_the_pass(self, *, switch: bool) -> None:
         current = read_settings({"CURRENT": switch})
@@ -100,6 +109,7 @@ class TestMisfits:
                 "SCOPE": "some",
                 "PREFETCH_DELAY": 0,
                 "PROGRESS": "on",
+                "PRESS": "touch",
                 "PREFETCH_SHELL_TTL": -1,
                 "EXCLUDE": ["files/"],
                 "SPECULATION": 3,
@@ -110,6 +120,7 @@ class TestMisfits:
         assert Misfit(("SCOPE",), "'all' or 'opt-in'", "'some'") in found
         assert Misfit(("PREFETCH_DELAY",), "a number of seconds above 0", "0") in found
         assert Misfit(("PROGRESS",), "True or False", "'on'") in found
+        assert Misfit(("PRESS",), "'mouse', 'all' or 'off'", "'touch'") in found
         assert (
             Misfit(("PREFETCH_SHELL_TTL",), "a number of seconds above 0", "-1")
             in found

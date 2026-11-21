@@ -134,6 +134,7 @@ function serve(...replies: Reply[]) {
     const signal = init.signal ?? null;
     calls.push({ url, headers: new Headers(init.headers), signal });
     const reply = replies.shift() ?? answer(envelope());
+    if (signal?.aborted) return Promise.reject(signal.reason as Error);
     return reply instanceof Response ? Promise.resolve(reply) : reply(signal);
   });
   vi.stubGlobal("fetch", fetch);
@@ -300,6 +301,26 @@ function back(state: unknown, at = "/"): Promise<Detail> {
   const done = settled();
   pop(state, at);
   return done;
+}
+
+function commits(): (string | null)[] {
+  const shown: (string | null)[] = [];
+  document.addEventListener(
+    "router:commit",
+    () => shown.push(document.getElementById("w")?.textContent ?? null),
+    { signal: listening.signal },
+  );
+  return shown;
+}
+
+function held(): [Reply, (response: Response) => void] {
+  let release: (response: Response) => void = () => undefined;
+  const reply: Reply = (signal) =>
+    new Promise((resolve, reject) => {
+      release = resolve;
+      signal?.addEventListener("abort", () => reject(signal.reason as Error));
+    });
+  return [reply, (response) => release(response)];
 }
 
 describe("link ownership", () => {
@@ -1666,6 +1687,7 @@ describe("focus, announcement and progress", () => {
     expect(document.documentElement.hasAttribute("data-next-navigating")).toBe(true);
     expect(document.body.getAttribute("aria-busy")).toBe("true");
     vi.useRealTimers();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
     release(answer(envelope()));
     await done;
     expect(link.hasAttribute("data-next-pending")).toBe(false);
@@ -2031,26 +2053,6 @@ describe("prefetched shells", () => {
     return (hit) => arrive(hit);
   }
 
-  function commits(): (string | null)[] {
-    const shown: (string | null)[] = [];
-    document.addEventListener(
-      "router:commit",
-      () => shown.push(document.getElementById("w")?.textContent ?? null),
-      { signal: listening.signal },
-    );
-    return shown;
-  }
-
-  function held(): [Reply, (response: Response) => void] {
-    let release: (response: Response) => void = () => undefined;
-    const reply: Reply = (signal) =>
-      new Promise((resolve, reject) => {
-        release = resolve;
-        signal?.addEventListener("abort", () => reject(signal.reason as Error));
-      });
-    return [reply, (response) => release(response)];
-  }
-
   it("loads the page hard once when the prefetched shell throws as it lands", async () => {
     const keeper = stubKeeper(0, { raw: envelope(), response: answer({}) });
     keeper.swap.mockImplementation(() => {
@@ -2067,7 +2069,7 @@ describe("prefetched shells", () => {
     expect(ends.at(-1)!.status).toBe("hard");
   });
 
-  it("asks for the page at once while it lands a prefetched shell", () => {
+  it("asks for the page at once while it lands a prefetched shell", async () => {
     const shell = envelope('<main><h1>B</h1><p id="w">loading</p></main>');
     const keeper = stubKeeper(0, { raw: shell, response: answer({}) });
     const { router } = setup();
@@ -2075,6 +2077,7 @@ describe("prefetched shells", () => {
     const [reply] = held();
     serve(reply);
     void router.visit("/b/");
+    await Promise.resolve();
     expect(calls).toHaveLength(1);
     expect(calls[0]!.headers.has("X-Next-Prefetch")).toBe(false);
   });
@@ -2140,6 +2143,206 @@ describe("prefetched shells", () => {
     serve(answer(envelope()));
     await router.visit("/b/");
     expect(heading()).toBe("B");
+  });
+});
+
+describe("pressed flights", () => {
+  function pressed(extra: Prefetched = {}) {
+    let arrive: (response?: Response) => void = () => undefined;
+    const flight = new Promise<Response | undefined>((done) => (arrive = done));
+    const stop = vi.fn(() => arrive(undefined));
+    return {
+      hit: { ...extra, flight, stop },
+      stop,
+      arrive: (r?: Response) => arrive(r),
+    };
+  }
+
+  it("adopts a streamed flight and hands its response to the reader", async () => {
+    const press = pressed();
+    const keeper = stubKeeper(0, press.hit);
+    const { router } = setup();
+    router._install(() => keeper);
+    createReader({ partial: surface, on: () => () => undefined });
+    const reader = vi.fn(surface._reader);
+    surface._reader = reader;
+    const fetch = serve();
+    const frame = JSON.stringify({ e: envelope() });
+    const response = new Response(`event: patch\ndata: ${frame}\n\n`, {
+      headers: { "content-type": "text/event-stream" },
+    });
+    const visit = router.visit("/b/");
+    press.arrive(response);
+    await visit;
+    expect(fetch).not.toHaveBeenCalled();
+    expect(reader.mock.calls[0]![0]).toBe(response);
+    expect(heading()).toBe("B");
+    expect(press.stop).not.toHaveBeenCalled();
+  });
+
+  it("adopts a flight that answers an envelope and lands it", async () => {
+    const press = pressed();
+    const keeper = stubKeeper(0, press.hit);
+    const { router, ends } = setup();
+    router._install(() => keeper);
+    const fetch = serve();
+    const visit = router.visit("/b/");
+    press.arrive(answer(envelope()));
+    await visit;
+    expect(fetch).not.toHaveBeenCalled();
+    expect(heading()).toBe("B");
+    expect(location.pathname).toBe("/b/");
+    expect(ends.at(-1)!.status).toBe("complete");
+  });
+
+  it("asks for the page itself once the flight brings nothing", async () => {
+    const press = pressed();
+    const keeper = stubKeeper(0, press.hit);
+    const { router } = setup();
+    router._install(() => keeper);
+    serve(answer(envelope()));
+    const visit = router.visit("/b/");
+    await wait(10);
+    expect(calls).toHaveLength(0);
+    press.arrive(undefined);
+    await visit;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.get("X-Next-Navigate")).toBe("1");
+    expect(calls[0]!.headers.has("X-Next-Prefetch")).toBe(false);
+    expect(heading()).toBe("B");
+  });
+
+  it("lands a kept shell first and fills it from the flight", async () => {
+    const shell = envelope('<main><h1>B</h1><p id="w">loading</p></main>');
+    const press = pressed({ raw: shell, response: answer({}) });
+    const keeper = stubKeeper(0, press.hit);
+    const { router } = setup();
+    router._install(() => keeper);
+    const fetch = serve();
+    const shown = commits();
+    const visit = router.visit("/b/");
+    await wait(10);
+    expect(document.getElementById("w")!.textContent).toBe("loading");
+    press.arrive(answer(envelope('<main><h1>B</h1><p id="w">ready</p></main>')));
+    await visit;
+    expect(fetch).not.toHaveBeenCalled();
+    expect(shown).toEqual(["loading"]);
+    expect(document.getElementById("w")!.textContent).toBe("ready");
+  });
+
+  it("lands a kept complete answer and stops the flight unread", async () => {
+    const page = envelope('<main><h1>B</h1><p id="w">whole</p></main>', "/b/", {
+      complete: true,
+    });
+    const press = pressed({ raw: page, response: answer({}) });
+    const keeper = stubKeeper(0, press.hit);
+    const { router } = setup();
+    router._install(() => keeper);
+    const fetch = serve();
+    const late = answer(envelope('<main><h1>B</h1><p id="w">late</p></main>'));
+    const visit = router.visit("/b/");
+    press.arrive(late);
+    await visit;
+    expect(press.stop).toHaveBeenCalledTimes(1);
+    expect(late.bodyUsed).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(document.getElementById("w")!.textContent).toBe("whole");
+  });
+
+  it.each([
+    ["returned at once", (hit: Prefetched) => hit],
+    ["still in flight", (hit: Prefetched) => Promise.resolve(hit)],
+  ])(
+    "stops a flight a router:before listener vetoes when it is %s",
+    async (_n, wrap) => {
+      const press = pressed();
+      const keeper = stubKeeper();
+      keeper.take.mockReturnValue(wrap(press.hit));
+      const { router } = setup();
+      router._install(() => keeper);
+      const fetch = serve();
+      document.addEventListener("router:before", (event) => event.preventDefault(), {
+        signal: listening.signal,
+      });
+      await router.visit("/b/");
+      await wait(0);
+      expect(press.stop).toHaveBeenCalledTimes(1);
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("stops the adopted flight once a newer visit aborts the one it serves", async () => {
+    const press = pressed();
+    const keeper = stubKeeper();
+    keeper.take.mockReturnValueOnce(press.hit);
+    const { router, ends } = setup();
+    router._install(() => keeper);
+    const page = envelope("<main><h1>C</h1></main>", "/c/");
+    serve(answer(page), answer(page));
+    const first = router.visit("/b/");
+    const second = router.visit("/c/");
+    await Promise.all([first, second]);
+    expect(press.stop).toHaveBeenCalledTimes(1);
+    expect(heading()).toBe("C");
+    expect(
+      ends
+        .slice(1)
+        .map((detail) => detail.status)
+        .sort(),
+    ).toEqual(["complete", "superseded"]);
+  });
+
+  it("stops the flight of a path it fetches as a plain document", async () => {
+    const press = pressed();
+    const keeper = stubKeeper(0, press.hit);
+    const { router } = setup();
+    router._install(() => ({ ...keeper, plain: (path: string) => path === "/b/" }));
+    serve(new Response("<p>doc</p>", { headers: { "content-type": "text/html" } }));
+    await router.visit("/b/");
+    expect(press.stop).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.has("X-Next-Navigate")).toBe(false);
+    expect(keeper.extract).toHaveBeenCalledWith("<p>doc</p>", "/b/");
+    expect(heading()).toBe("X");
+  });
+
+  it("names the bare URL it loads while a visit is in flight", async () => {
+    const { router } = setup();
+    const seams = seamsOf(router);
+    const [reply, release] = held();
+    serve(reply);
+    expect(seams.going()).toBe("");
+    const visit = router.visit("/b/#part");
+    expect(seams.going()).toBe(`${location.origin}/b/`);
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    release(answer(envelope()));
+    await visit;
+    expect(seams.going()).toBe("");
+  });
+
+  it("names the newer visit while the one it superseded settles", async () => {
+    const { router } = setup();
+    const seams = seamsOf(router);
+    const [stalled] = held();
+    const [reply, release] = held();
+    serve(stalled, reply);
+    const first = router.visit("/b/");
+    const second = router.visit("/c/");
+    await first;
+    expect(seams.going()).toBe(`${location.origin}/c/`);
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    release(answer(envelope("<main><h1>C</h1></main>", "/c/")));
+    await second;
+    expect(seams.going()).toBe("");
+  });
+
+  it("tells the intent chunk which paths the history chunk fetches plain", () => {
+    const { router } = setup();
+    const seams = seamsOf(router);
+    expect(seams.plain("/b/")).toBe(false);
+    router._install(() => ({ plain: (path: string) => path === "/b/" }));
+    expect(seams.plain("/b/")).toBe(true);
+    expect(seams.plain("/c/")).toBe(false);
   });
 });
 

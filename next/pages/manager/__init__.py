@@ -65,7 +65,7 @@ from next.pages.navigation import NavigationDeclarations, router_declarations
 from next.pages.paths import clear_page_path_info, forget_page_path_info, page_path_info
 from next.pages.processors import _get_context_processors
 from next.pages.registry import PageContextRegistry
-from next.pages.responses import purpose_of
+from next.pages.responses import depth_of, purpose_of
 from next.pages.scope import render_scope
 from next.pages.signals import page_rendered, template_loaded
 from next.pages.transactions import TransactionDeclarations, atomic_declarations
@@ -732,6 +732,7 @@ class Page(
             scripts_count=len(collector.assets_in_slot("scripts")),
             context_keys=tuple(context_data.keys()),
             purpose=purpose_of(request),
+            depth=depth_of(request),
         )
 
     def _built_context(

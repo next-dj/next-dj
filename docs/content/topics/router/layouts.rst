@@ -137,7 +137,7 @@ Streamed navigations
 A page with ``stream`` boundaries streams a navigation the way it streams a document, when the router asks for ``text/event-stream`` and the delivery policy of :doc:`/content/topics/boundaries/streaming` lets the response stream.
 The router asks for it when the ``reader`` bundle is on the page or named in the ``$router`` payload entry, and loads the reader before it reads a streamed answer.
 The envelope is the first frame, the browser commits the navigation on it, and each boundary arrives after it as its job settles.
-A prefetch and a hard load never stream, and a navigation that does not stream renders its boundaries before the envelope leaves.
+A shell prefetch and a hard load never stream, a full prefetch streams as a navigation does, and a navigation that does not stream renders its boundaries before the envelope leaves.
 
 A layout that should persist across pages keeps its deferred components out of its chrome, as `What makes a layout diverge`_ explains.
 

@@ -1,9 +1,10 @@
 import pytest
 from django.test import RequestFactory
 
+from next.pages.responses import Depth, Purpose, depth_of, purpose_of
 from next.testing import override_next_settings
 from next.views import Route
-from next.views.routes import boundary_token, decide_route
+from next.views.routes import boundary_token, decide_route, note_purpose
 from tests.support import build_page_request, build_zone_request
 
 
@@ -131,3 +132,33 @@ class TestDecideRoute:
         assert boundary_token(request) == "t"
         request.META["HTTP_X_NEXT_BOUNDARY"] = "other"
         assert boundary_token(request) == "t"
+
+
+class TestNotePurpose:
+    """A navigation is a prefetch at a depth or a plain navigation, the rest no depth."""
+
+    @pytest.mark.parametrize(
+        ("value", "purpose", "depth"),
+        [
+            ("1", Purpose.PREFETCH, Depth.SHELL),
+            ("full", Purpose.PREFETCH, Depth.FULL),
+            ("deep", Purpose.NAVIGATION, None),
+            (None, Purpose.NAVIGATION, None),
+        ],
+    )
+    def test_a_navigation(self, value, purpose, depth) -> None:
+        headers = {"X-Next-Request": "1", "X-Next-Navigate": "1"}
+        if value is not None:
+            headers["X-Next-Prefetch"] = value
+        request = RequestFactory().get("/", headers=headers)
+        note_purpose(request, Route.NAVIGATE)
+        assert (purpose_of(request), depth_of(request)) == (purpose, depth)
+
+    @pytest.mark.parametrize(
+        ("headers", "purpose"),
+        [({}, Purpose.DOCUMENT), ({"Sec-Purpose": "prefetch"}, Purpose.SPECULATION)],
+    )
+    def test_a_page_has_no_depth(self, headers, purpose) -> None:
+        request = RequestFactory().get("/", headers=headers)
+        note_purpose(request, Route.PAGE)
+        assert (purpose_of(request), depth_of(request)) == (purpose, None)

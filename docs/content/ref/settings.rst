@@ -810,6 +810,7 @@ Default value.
        "PREFETCH_TTL": 30.0,
        "PREFETCH_SHELL_TTL": 300.0,
        "PREFETCH_ENTRIES": 16,
+       "PRESS": "mouse",
        "SNAPSHOTS": 10,
        "PROGRESS_DELAY": 0.15,
        "PROGRESS": True,
@@ -847,7 +848,7 @@ The browser reads every key but ``ENABLED``, ``PROGRESS``, ``SPECULATION``, ``CU
    ``"hard"`` loads the URL as a new document and remembers its path for the tab, and ``"extract"`` reads a ``text/html`` answer in the browser and swaps it in like a navigation.
 
 ``PREFETCH``, default ``"intent"``
-   ``"intent"`` prefetches a link the pointer or the focus rests on, or one pressed.
+   ``"intent"`` prefetches a link the pointer or the focus rests on, or one pressed, and ``PRESS`` decides how deep a press goes.
    ``"viewport"`` also prefetches every owned link once as it scrolls into view, at the price of one render per link in view, and ``"off"`` prefetches nothing on its own.
    ``data-next-prefetch`` set to ``"viewport"``, ``"intent"``, or ``"off"`` on an element overrides the mode for the links inside it, see :doc:`/content/topics/router/prefetch`.
 
@@ -864,6 +865,12 @@ The browser reads every key but ``ENABLED``, ``PROGRESS``, ``SPECULATION``, ``CU
 ``PREFETCH_ENTRIES``, default ``16``
    The prefetched answers the browser keeps, an integer from ``1``, the oldest dropped first.
    A link in view waits while the kept answers and the prefetches in flight reach this number, until a shell older than ``PREFETCH_TTL`` gives way, the oldest first.
+
+``PRESS``, default ``"mouse"``
+   Which pointers send the full page request, ``X-Next-Prefetch: full``, at the press of a link, so the click adopts the response.
+   ``"mouse"`` does it for a mouse press only and keeps the shell prefetch for a touch or a pen, ``"all"`` does it for every pointer, and ``"off"`` keeps every press at the shell depth.
+   ``data-next-press`` set to ``"mouse"``, ``"all"``, or ``"off"`` on an element overrides the value for the links inside it.
+   A full request runs the deferred jobs of the page, see :doc:`/content/topics/router/prefetch`.
 
 ``SNAPSHOTS``, default ``10``
    The history snapshots a tab keeps in memory and the scroll positions it saves in ``sessionStorage``, an integer from ``1``.

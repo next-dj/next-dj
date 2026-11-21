@@ -47,6 +47,8 @@ A request to a page URL is routed once, then answered inside the transaction the
 A partial request carries ``X-Next-Request: 1``, a header no cross-site form can set without a CORS preflight, so no request from another site reaches a boundary reload.
 ``boundary_token`` reads the token through the configured transport once and drops the token field from the query string and a form body, so nothing the page renders echoes it.
 ``note_purpose`` sets ``request.next``, whose ``purpose`` names why the view renders, ``document``, ``navigation``, ``prefetch``, or ``speculation`` for a browser prefetch.
+Its ``depth`` is ``Depth.SHELL`` for a router prefetch that asks for the shell, ``Depth.FULL`` for one sent at the press of a link, and ``None`` for any other request.
+``purpose_of(request)`` and ``depth_of(request)`` from ``next.pages.responses`` read them, and a prefetch answer may be shown with no further request, so code that must act on a visit declares ``page.router(prefetch=False)``.
 
 .. autoclass:: next.views.Route
    :no-special-members:
