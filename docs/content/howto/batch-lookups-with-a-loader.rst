@@ -170,11 +170,11 @@ A key loaded once in a request is answered from memory, its error included.
 Know when a batch closes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-A batch closes once every running deferred job of the response waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default.
+A batch closes once every deferred job of the response that runs or is about to run waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default.
 A loader built with ``max_batch=`` or ``window=`` keeps its own limits, and one built without them reads ``DEFER`` each time.
 
 Where the jobs run decides how well they share a batch.
-On the pool both rails ask within one window and the batch function is called once with every key.
+On the pool the batch function is called once with the keys of both rails, unless one rail asks for its first key more than one window after the other, as a slow query or a busy machine may make it.
 On SQLite the jobs run on the request lane one after the other, so each job loads one batch of its own, which is still one query per rail rather than one per card.
 Code that runs serially, such as a fully sync page, the shell render, or the render of a reloaded boundary, calls the batch function with one key per call.
 An ``async def`` batch function runs on the event loop and serves native async I/O only, so a batch that queries the ORM is a plain ``def``.
@@ -209,11 +209,14 @@ The ``product`` fixture of the project saves a product whose two rails both have
 
    import pytest
 
-   from next.testing import parallel_boundaries
+   from next.testing import override_next_settings, parallel_boundaries
 
    @pytest.mark.django_db(transaction=True)
    def test_the_rails_on_the_pool_share_one_batch(next_client, product, batches) -> None:
-       with parallel_boundaries():
+       with (
+           parallel_boundaries(),
+           override_next_settings(DEFER={"BATCH_WINDOW": "1s"}),
+       ):
            next_client.get_stream(f"/product/{product.pk}/")
        assert len(batches) == 1
 
@@ -224,6 +227,7 @@ The ``product`` fixture of the project saves a product whose two rails both have
        assert len(batches) == 2
 
 ``parallel_boundaries()`` places the jobs on the pool, and a pool thread reads only committed rows, hence ``transaction=True``.
+The wider window keeps a loaded test machine from splitting the batch, as the batch still closes the moment both rails wait on it.
 The second test runs under the test client, where each job runs on the request thread.
 
 See also

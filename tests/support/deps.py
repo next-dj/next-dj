@@ -1,4 +1,6 @@
 import inspect
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import NamedTuple
 
 import pytest
@@ -8,8 +10,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import QuerySet
 
 from next.deps import ResolutionContext
+from next.deps.loader import count_job
 from next.deps.plan import InjectionPlan, ParameterFiller, ParameterPlan
 from next.deps.providers import ParameterProvider
+from next.deps.scope import RequestScope
 
 
 class PlanEntry(NamedTuple):
@@ -98,3 +102,17 @@ def install_visibility_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
         (Group, _visible_groups),
     ):
         monkeypatch.setattr(model._default_manager, "visible_to", hook, raising=False)
+
+
+@contextmanager
+def counted(scope: RequestScope | None, deadline: float) -> Iterator[None]:
+    """Count the code of the block as one job of the request, admitted as it starts."""
+    job = count_job(scope, deadline)
+    if job is None:
+        yield
+        return
+    try:
+        with job.running():
+            yield
+    finally:
+        job.end()

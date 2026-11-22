@@ -12,7 +12,7 @@ from asgiref.sync import AsyncToSync
 
 from next.defer import deadline
 from next.deps.cache import RequestMemo, request_memo
-from next.deps.loader import counted_job
+from next.deps.loader import CountedJob
 from next.deps.runner import run_on_request_thread, segment_runner
 from next.deps.scope import RequestScope
 from next.suspense.connections import Replayable, job_guard
@@ -75,6 +75,7 @@ def run[D](
     *,
     lane: Lane,
     queued: float,
+    count: CountedJob | None,
 ) -> Report[D]:
     """Run the sync body of `task` on this thread, or skip it past its deadline.
 
@@ -84,10 +85,17 @@ def run[D](
     if started >= task.deadline:
         return skipped(unit, task, placement)
     timing = Timing(lane, placement, started - queued)
-    return runtime.snapshot.copy().run(_run, runtime, unit, task, timing)
+    return runtime.snapshot.copy().run(_run, runtime, unit, task, timing, count)
 
 
-def _run[D](runtime: Runtime, unit: str, task: Task[D], timing: Timing) -> Report[D]:
+def _counting(count: CountedJob | None) -> AbstractContextManager[None]:
+    """Return what marks the body as the counted job of its unit, if it has one."""
+    return nullcontext() if count is None else count.running()
+
+
+def _run[D](
+    runtime: Runtime, unit: str, task: Task[D], timing: Timing, count: CountedJob | None
+) -> Report[D]:
     """Run the body, charging its site its own CPU and not that of hops it served.
 
     An exception settles the job as a logged fallback, an interrupt leaves the thread.
@@ -102,7 +110,7 @@ def _run[D](runtime: Runtime, unit: str, task: Task[D], timing: Timing) -> Repor
     served = served_cpu()
     cpu = time.thread_time_ns()
     try:
-        with deadline(task.deadline), guard, counted_job(runtime.scope, task.deadline):
+        with deadline(task.deadline), guard, _counting(count):
             result = body()
     except Exception as error:  # noqa: BLE001
         result = error
@@ -113,7 +121,13 @@ def _run[D](runtime: Runtime, unit: str, task: Task[D], timing: Timing) -> Repor
 
 
 async def arun[D](
-    runtime: Runtime, unit: str, task: Task[D], placement: Placement, *, queued: float
+    runtime: Runtime,
+    unit: str,
+    task: Task[D],
+    placement: Placement,
+    *,
+    queued: float,
+    count: CountedJob | None,
 ) -> Report[D]:
     """Run the coroutine of `task` as a task of its own in a fresh copy of the snapshot.
 
@@ -125,12 +139,12 @@ async def arun[D](
     timing = Timing(Lane.LOOP, placement, started - queued)
     loop = asyncio.get_running_loop()
     return await loop.create_task(
-        _arun(runtime, unit, task, timing), context=runtime.snapshot.copy()
+        _arun(runtime, unit, task, timing, count), context=runtime.snapshot.copy()
     )
 
 
 async def _arun[D](
-    runtime: Runtime, unit: str, task: Task[D], timing: Timing
+    runtime: Runtime, unit: str, task: Task[D], timing: Timing, count: CountedJob | None
 ) -> Report[D]:
     _enter(runtime)
     job = task.job
@@ -138,7 +152,7 @@ async def _arun[D](
     result: Rendered[D] | BaseException
     wall = time.perf_counter_ns()
     try:
-        with deadline(task.deadline), counted_job(runtime.scope, task.deadline):
+        with deadline(task.deadline), _counting(count):
             result = await body()
     except BaseException as error:
         if isinstance(error, asyncio.CancelledError) and _cancelling():

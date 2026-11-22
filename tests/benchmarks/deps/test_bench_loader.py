@@ -8,8 +8,8 @@ import pytest
 
 from next.deps import Loader
 from next.deps.cache import RequestMemo, request_memo
-from next.deps.loader import counted_job
 from next.deps.scope import RequestScope
+from tests.support.deps import counted
 
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ def _prices(keys: Sequence[int]) -> dict[int, int]:
 
 async def _job(loader: Loader[int, int], scope: RequestScope, key: int) -> int:
     """Load one key as a deferred job of the response does, counted on its scope."""
-    with counted_job(scope, time.monotonic() + 60):
+    with counted(scope, time.monotonic() + 60):
         return await loader.load(key)
 
 
@@ -109,7 +109,7 @@ class TestBenchLoaderBatching:
         """Ten jobs that load nothing, the loop and scope floor of the cases above."""
 
         async def idle(scope: RequestScope, key: int) -> int:
-            with counted_job(scope, time.monotonic() + 60):
+            with counted(scope, time.monotonic() + 60):
                 return key
 
         async def response() -> list[int]:

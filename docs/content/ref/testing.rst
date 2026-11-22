@@ -63,6 +63,7 @@ It must come from a test client, since the reload reuses the URL of the request 
 ``key`` is the wire id of the wrapper, its stable ``data-next-boundary-key``, or the component name, which is read from each token through the ``open`` of the token backend.
 The request is the one the runtime sends, the source URL with its query, ``X-Next-Request``, the wrapper id in ``X-Next-Zone``, and the token in the place the wrapper's ``data-next-transport`` names.
 Both return the ``PartialEnvelope`` of the reload, and a missing boundary raises ``LookupError``.
+``NextClient.reload_boundary(url, token)`` sends a token as the runtime does, through the configured transport, and returns the response as is, so a test sends a token another client minted and reads the refusal.
 A ``PartialEnvelope`` keeps the ``response`` that carried it, ``None`` for a view built by hand, so ``envelope_of``, ``get_boundary``, and ``follow_boundary`` answers chain into the next ``follow_boundary``.
 A lookup by id or key opens no token, and under the default ``NoBinding`` a lookup by name reads neither the session nor the user, so a ``django_assert_num_queries`` block around the call counts only what the reload does.
 
@@ -77,6 +78,27 @@ A lookup by id or key opens no token, and under the default ``NoBinding`` a look
        with django_assert_num_queries(2):
            envelope = client.follow_boundary(document, "card")
        assert envelope.ops[0]["s"] == "ready"
+
+A token bound to its user, under ``BINDING="user"``, is refused for any other account.
+
+.. code-block:: python
+   :caption: tests/test_orders.py
+
+   from django.contrib.auth.models import User
+
+   from next.testing import NextClient
+
+   def signed_in(name: str) -> NextClient:
+       client = NextClient()
+       client.force_login(User.objects.create_user(name))
+       return client
+
+   def test_the_owners_token_is_refused_for_another_account(db) -> None:
+       owner, intruder = signed_in("owner"), signed_in("intruder")
+       token = owner.boundary_token("/orders/", "order-list")
+       response = intruder.reload_boundary("/orders/", token)
+       assert response.status_code == 403
+       assert response["X-Next-Reload"] == "refused"
 
 .. automodule:: next.testing.client
    :members:
@@ -364,7 +386,9 @@ Streamed shells
 ^^^^^^^^^^^^^^^
 
 ``NextClient.get_stream(url)`` and ``read_stream(client, url)`` read a streamed page whole into a ``StreamedPage``, and ``aread_stream`` does the same with an async client.
-A ``StreamedPage`` holds the ``shell``, the ``chunks`` as ``StreamedChunk`` values, and ``final_html()``, the shell with every chunk applied as a browser applies it, and ``boundary(key_or_id)`` returns the chunk of one boundary.
+A ``StreamedPage`` holds the ``shell``, the ``chunks`` as ``StreamedChunk`` values, and ``final_html()``, the shell with every chunk applied as a browser applies it, and ``boundary(key)`` returns the chunk of one boundary.
+``key`` is the wire id, the stable ``data-next-boundary-key``, or the name ``boundary_rendered`` gives the boundary, the component name or the path a page boundary is named by, which ``get_stream``, ``read_stream``, ``aread_stream``, and the ``stream`` of a ``Navigation`` record while they read.
+A name that two chunks share, as two calls of one component do, raises ``LookupError`` that lists each wire id with its key, and a boundary no chunk settles raises ``LookupError`` too.
 A streamed response writes its shell before any job runs, and a gate makes the order of the reads deterministic as well.
 ``boundary_gate(..., after_shell=True)`` lets ``get_stream`` and ``aread_stream`` release the gate once they hold the shell, so the boundary always shows its loading UI in ``shell`` and its content arrives in its chunk.
 A gate without it holds the job past the shell until ``release()`` or the deadline, which suits a test of heartbeats or of a ``timeout`` chunk.

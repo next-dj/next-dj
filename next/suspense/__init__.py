@@ -9,7 +9,9 @@ from next.suspense.errors import (
     BoundaryPropsError,
     BoundaryRefusedError,
     BoundaryShedError,
+    BoundarySizeError,
     BoundaryTokenError,
+    BoundaryValueError,
     ExecutorStoppedError,
 )
 from next.suspense.executors import BoundaryExecutor, LaneExecutor, serve_until
@@ -87,9 +89,11 @@ __all__ = [
     "BoundaryPropsError",
     "BoundaryRefusedError",
     "BoundaryShedError",
+    "BoundarySizeError",
     "BoundaryTarget",
     "BoundaryTokenBackend",
     "BoundaryTokenError",
+    "BoundaryValueError",
     "CacheStorage",
     "CallableBinding",
     "Capacity",

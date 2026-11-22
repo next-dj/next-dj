@@ -7,7 +7,7 @@ from typing import Final, NoReturn, override
 from django.core.cache import caches
 from django.utils.crypto import salted_hmac
 
-from next.suspense.errors import BoundaryPropsError, BoundaryTokenError
+from next.suspense.errors import BoundarySizeError, BoundaryTokenError
 from next.suspense.markers import TokenRejection
 
 from .context import PURPOSE, TokenContext
@@ -34,7 +34,7 @@ class TokenStorage(ABC):
 
     @abstractmethod
     def put(self, data: bytes, context: TokenContext) -> bytes:
-        """Return the reference of `data`, raising `BoundaryPropsError` for a misfit."""
+        """Return the reference of `data`, raising `BoundarySizeError` past its cap."""
 
     @abstractmethod
     def get(self, reference: bytes, context: TokenContext) -> bytes:
@@ -79,7 +79,7 @@ class CacheStorage(TokenStorage):
                 f"the boundary claims take {len(data)} bytes, over MAX_STORED_BYTES "
                 f"of {context.max_stored_bytes}"
             )
-            raise BoundaryPropsError(msg)
+            raise BoundarySizeError(msg)
         address = content_address(data, context.keys[0])
         caches[context.cache_alias].set(
             cache_key(address), data, timeout=max(1, context.lifetime)

@@ -219,6 +219,12 @@ Errors
 .. autoexception:: next.suspense.BoundaryPropsError
    :no-members:
 
+.. autoexception:: next.suspense.BoundarySizeError
+   :no-members:
+
+.. autoexception:: next.suspense.BoundaryValueError
+   :no-members:
+
 .. autoexception:: next.suspense.BoundaryBindingError
    :no-members:
 

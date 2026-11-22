@@ -74,7 +74,8 @@ A ``Loader`` gathers the keys one request scope asks for into a few calls of a b
 The ``cart`` callable is the source of the keys, and ``prices`` reads it by name, so the loader receives one key per line and the batch function runs once for the page.
 
 ``load(key)`` is awaited on the event loop, and ``load_sync(key)`` serves a sync callable on a thread and refuses to run on an event loop.
-A batch closes once every running deferred job of the response waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default, both read from ``DEFER`` unless the loader is built with ``window=`` or ``max_batch=``.
+A batch closes once every deferred job of the response that runs or is about to run waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default, both read from ``DEFER`` unless the loader is built with ``window=`` or ``max_batch=``.
+A job is about to run from the moment a free pool worker or the event loop is handed it, while a job queued behind a busy pool or behind another job on the request lane counts only once it starts.
 The batch function returns a mapping by key or a sequence in key order.
 A key the mapping lacks raises ``MissingKeyError`` for that key alone, a short sequence and a raising batch fail every key of the batch, and a key loaded once in a request is answered from memory, its error included.
 
@@ -84,7 +85,7 @@ It applies no access scoping, unlike ``DObject``, so a page checks what the visi
 A loader batches the keys requested concurrently within one request scope, which covers the async and sync context functions of an async page and every deferred job of one response, streamed or assembled inline.
 Code that runs serially, such as a fully sync page, the shell render or the render of a reloaded boundary, calls the batch function with one key per call.
 Where the jobs of a response run decides how many keys share a batch.
-On the pool they ask within one window and share it, and on SQLite they run on the request lane one after the other, so each job loads one batch of its own, see `Lanes and placement`_.
+On the pool they share a batch, unless one of them asks for its first key more than one window after the other, and on SQLite they run on the request lane one after the other, so each job loads one batch of its own, see `Lanes and placement`_.
 :doc:`/content/howto/batch-lookups-with-a-loader` walks through a loader shared by two streamed components and the tests of both lanes.
 
 Lanes and placement

@@ -16,20 +16,14 @@ from django.test import override_settings
 
 from next.deps import DependencyCycleError, Loader, MissingKeyError, rows
 from next.deps.cache import RequestMemo, request_memo
-from next.deps.loader import (
-    _HUB,
-    _hub,
-    _loaders,
-    counted_job,
-    drain_loaders,
-    open_loaders,
-)
+from next.deps.loader import _HUB, _hub, _loaders, drain_loaders, open_loaders
 from next.deps.objects import visible_rows
 from next.deps.runner import run_isolated, segment_runner
 from next.deps.scope import RequestScope
 from next.suspense import drive
 from next.suspense.executors import background_loop
 from next.testing import make_resolution_context
+from tests.support.deps import counted
 from tests.support.errors import BackendDownError, HaltError
 
 
@@ -230,7 +224,7 @@ class TestBatching:
 
         async def scenario():
             scope = request_memo.get().scope
-            with counted_job(scope, time.monotonic() + WAIT):
+            with counted(scope, time.monotonic() + WAIT):
                 return await asyncio.gather(*(loader.load(key) for key in range(5)))
 
         assert run_request(scenario, runner=inline, opened=True) == [0, 10, 20, 30, 40]
@@ -281,7 +275,7 @@ class TestBatching:
         async def request():
             scope = scoped()
             segment_runner.set(inline)
-            with counted_job(scope, time.monotonic() + WAIT):
+            with counted(scope, time.monotonic() + WAIT):
                 return await asyncio.gather(loader.load(1), loader.load(2))
 
         async def scenario():
@@ -374,7 +368,7 @@ class TestCountedJobs:
             deadline = time.monotonic() + WAIT
 
             async def job(key: int, gate: asyncio.Event | None = None) -> object:
-                with counted_job(scope, deadline):
+                with counted(scope, deadline):
                     if gate is not None:
                         await gate.wait()
                     return await loader.load(key)
@@ -402,11 +396,11 @@ class TestCountedJobs:
             deadline = time.monotonic() + WAIT
 
             async def loading() -> object:
-                with counted_job(scope, deadline):
+                with counted(scope, deadline):
                     return await loader.load(1)
 
             async def other() -> None:
-                with counted_job(scope, deadline):
+                with counted(scope, deadline):
                     await go.wait()
                     if ending == "raises":
                         raise BackendDownError
@@ -435,11 +429,11 @@ class TestCountedJobs:
             stuck = asyncio.Event()
 
             async def blocked() -> None:
-                with counted_job(scope, time.monotonic() + 0.05):
+                with counted(scope, time.monotonic() + 0.05):
                     await stuck.wait()
 
             async def loading() -> object:
-                with counted_job(scope, time.monotonic() + WAIT):
+                with counted(scope, time.monotonic() + WAIT):
                     return await loader.load(1)
 
             held = asyncio.create_task(blocked())
@@ -461,11 +455,11 @@ class TestCountedJobs:
             go = asyncio.Event()
 
             async def late() -> object:
-                with counted_job(scope, time.monotonic() + 0.05):
+                with counted(scope, time.monotonic() + 0.05):
                     return await loader.load(1)
 
             async def other() -> None:
-                with counted_job(scope, time.monotonic() + WAIT):
+                with counted(scope, time.monotonic() + WAIT):
                     await go.wait()
 
             waiting = asyncio.create_task(late())
@@ -485,7 +479,7 @@ class TestCountedJobs:
 
         async def scenario():
             scope = request_memo.get().scope
-            with counted_job(scope, time.monotonic() - 1):
+            with counted(scope, time.monotonic() - 1):
                 await asyncio.sleep(0.01)
                 return await asyncio.gather(loader.load(1), loader.load(2))
 
@@ -498,7 +492,7 @@ class TestCountedJobs:
         barrier = threading.Barrier(2, timeout=WAIT)
 
         def job(scope: RequestScope, key: int) -> object:
-            with counted_job(scope, time.monotonic() + WAIT):
+            with counted(scope, time.monotonic() + WAIT):
                 barrier.wait()
                 return loader.load_sync(key)
 
@@ -533,7 +527,7 @@ class TestCountedJobs:
                 await started.wait()
                 return await second.load(2)
 
-            with counted_job(scope, time.monotonic() + 2 * WAIT):
+            with counted(scope, time.monotonic() + 2 * WAIT):
                 waiting = asyncio.create_task(first.load(1))
                 value = await asyncio.wait_for(later(), WAIT)
                 release.set()
@@ -559,7 +553,7 @@ class TestCountedJobs:
 
         async def scenario():
             scope = request_memo.get().scope
-            with counted_job(scope, time.monotonic() + 2 * WAIT):
+            with counted(scope, time.monotonic() + 2 * WAIT):
                 return await asyncio.wait_for(outer.load(3), WAIT)
 
         assert run_request(scenario) == 30
@@ -577,7 +571,7 @@ class TestCountedJobs:
                 return await loader.load(1)
 
             async def job() -> object:
-                with counted_job(scope, deadline):
+                with counted(scope, deadline):
                     return await scope.resolve("user", compute)
 
             return await asyncio.wait_for(asyncio.gather(job(), job()), WAIT)
@@ -599,13 +593,13 @@ class TestCountedJobs:
                 pytest.fail("a joiner computed the key")
 
             async def claiming() -> object:
-                with counted_job(scope, deadline):
+                with counted(scope, deadline):
                     return await scope.resolve("user", gated)
 
             claimant = asyncio.create_task(claiming())
             await next_turn()
             hub = _hub(scope, asyncio.get_running_loop())
-            with counted_job(scope, deadline):
+            with counted(scope, deadline):
                 joiner = asyncio.create_task(scope.resolve("user", never))
                 await next_turn()
                 parked = hub.jobs._parked
@@ -631,7 +625,7 @@ class TestCountedJobs:
             claimant = asyncio.create_task(other.resolve("user", gated))
             await next_turn()
             hub = _hub(scope, asyncio.get_running_loop())
-            with counted_job(scope, time.monotonic() + WAIT):
+            with counted(scope, time.monotonic() + WAIT):
                 joiner = asyncio.create_task(other.resolve("user", gated))
                 await next_turn()
                 parked = hub.jobs._parked
@@ -647,7 +641,7 @@ class TestCountedJobs:
 
         async def scenario():
             scope = request_memo.get().scope
-            with counted_job(scope, time.monotonic() + WAIT):
+            with counted(scope, time.monotonic() + WAIT):
                 request_memo.set(RequestMemo(RequestScope()))
                 value = await loader.load(1)
             return value, scope._tree.slots[_HUB].hub
@@ -657,7 +651,7 @@ class TestCountedJobs:
 
     def test_a_job_on_a_scope_with_no_loop_counts_nothing(self) -> None:
         scope = RequestScope()
-        with counted_job(scope, 0.0), counted_job(None, 0.0):
+        with counted(scope, 0.0), counted(None, 0.0):
             pass
         assert scope._tree.slots == {}
 
@@ -671,7 +665,7 @@ class TestCountedJobs:
                 return "ann"
 
             async def job() -> object:
-                with counted_job(scope, deadline):
+                with counted(scope, deadline):
                     return await scope.resolve("user", compute)
 
             values = await asyncio.wait_for(asyncio.gather(job(), job()), WAIT)
@@ -684,8 +678,8 @@ class TestCountedJobs:
         scope = RequestScope(loop=loop)
         open_loaders(scope, copy_context())
         with (
-            counted_job(scope, time.monotonic() + WAIT),
-            counted_job(scope, time.monotonic() + WAIT),
+            counted(scope, time.monotonic() + WAIT),
+            counted(scope, time.monotonic() + WAIT),
         ):
             pass
         assert loop.method_calls == []

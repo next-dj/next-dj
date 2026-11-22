@@ -1,7 +1,7 @@
 import pytest
 from django.core.cache import caches
 
-from next.suspense import BoundaryPropsError, BoundaryTokenError, TokenRejection
+from next.suspense import BoundarySizeError, BoundaryTokenError, TokenRejection
 from next.suspense.tokens import VERSION, CacheStorage, InlineStorage, SpillStorage
 from next.suspense.tokens.context import TokenContext
 from next.suspense.tokens.storage import CACHED, INLINE, cache_key, content_address
@@ -101,7 +101,7 @@ class TestCacheStorage:
         assert reason is TokenRejection.TOO_LARGE
 
     def test_claims_over_the_stored_cap_are_refused_at_mint(self) -> None:
-        with pytest.raises(BoundaryPropsError, match="MAX_STORED_BYTES"):
+        with pytest.raises(BoundarySizeError, match="MAX_STORED_BYTES"):
             CacheStorage().put(b"x" * 65, _context())
 
     @pytest.mark.parametrize(

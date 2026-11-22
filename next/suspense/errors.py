@@ -14,7 +14,15 @@ _REFUSED: Final = "The boundary token was refused."
 
 
 class BoundaryPropsError(ValueError):
-    """Raised at mint time for an unencodable prop or a token over `MAX_BYTES`."""
+    """The base of mint-time refusals, raised itself for a prop no token carries."""
+
+
+class BoundarySizeError(BoundaryPropsError):
+    """Raised at mint time when the values of one request outgrow a token limit."""
+
+
+class BoundaryValueError(BoundaryPropsError):
+    """Raised at mint time for a number of a carried type that is not finite."""
 
 
 class BoundaryBindingError(BoundaryPropsError):
@@ -77,6 +85,8 @@ __all__ = [
     "BoundaryPropsError",
     "BoundaryRefusedError",
     "BoundaryShedError",
+    "BoundarySizeError",
     "BoundaryTokenError",
+    "BoundaryValueError",
     "ExecutorStoppedError",
 ]

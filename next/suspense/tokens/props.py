@@ -15,7 +15,12 @@ from django.db.models import Model
 from django.http import Http404, HttpRequest
 from django.utils.safestring import SafeString
 
-from next.suspense.errors import BoundaryPropsError, BoundaryTokenError
+from next.suspense.errors import (
+    BoundaryPropsError,
+    BoundarySizeError,
+    BoundaryTokenError,
+    BoundaryValueError,
+)
 from next.suspense.markers import TokenRejection
 
 from .claims import Pairs, Scalar, Wire
@@ -98,11 +103,15 @@ def _spec(name: str, annotation: object) -> _Spec:
     return _Spec(_single(name, annotation, models=True))
 
 
+class _NonFiniteError(ValueError):
+    """A number of a carried type that is NaN or infinite."""
+
+
 def _integer(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError
     if not -_INT_BOUND <= value < _INT_BOUND:
-        raise ValueError
+        raise OverflowError
     return int(value)
 
 
@@ -111,7 +120,7 @@ def _number(value: object) -> float:
         raise TypeError
     number = float(value)
     if not math.isfinite(number):
-        raise ValueError
+        raise _NonFiniteError
     return number
 
 
@@ -128,8 +137,10 @@ def _flag(value: object) -> bool:
 
 
 def _decimal(value: object) -> str:
-    if not isinstance(value, Decimal) or not value.is_finite():
+    if not isinstance(value, Decimal):
         raise TypeError
+    if not value.is_finite():
+        raise _NonFiniteError
     return str(value)
 
 
@@ -175,8 +186,16 @@ def _pk_wire(pk: object) -> int | str:
 def _limited(name: str, wire: Scalar, limit: int) -> Scalar:
     if isinstance(wire, str) and len(wire) > limit:
         msg = f"the prop {name!r} holds text over {limit} characters"
-        raise BoundaryPropsError(msg)
+        raise BoundarySizeError(msg)
     return wire
+
+
+def _overflow(name: str) -> BoundarySizeError:
+    return BoundarySizeError(f"the prop {name!r} holds a number outside 64 bits")
+
+
+def _non_finite(name: str, value: object) -> BoundaryValueError:
+    return BoundaryValueError(f"the prop {name!r} holds {value}, which is not finite")
 
 
 def _encode_one(name: str, value: object, kind: type, limit: int) -> Scalar:
@@ -188,6 +207,10 @@ def _encode_one(name: str, value: object, kind: type, limit: int) -> Scalar:
             wire: Scalar = _pk_wire(value.pk)
         else:
             wire = _ENCODERS[kind](value)
+    except OverflowError as exc:
+        raise _overflow(name) from exc
+    except _NonFiniteError as exc:
+        raise _non_finite(name, value) from exc
     except _REFUSED as exc:
         msg = f"the prop {name!r} holds a {type(value).__name__}, not a {kind.__name__}"
         raise BoundaryPropsError(msg) from exc
@@ -228,6 +251,10 @@ def _unannotated_misfit(name: str, value: object) -> BoundaryPropsError:
 def _unannotated_one(name: str, value: object, limit: int) -> Scalar:
     try:
         wire = _native(value)
+    except OverflowError as exc:
+        raise _overflow(name) from exc
+    except _NonFiniteError as exc:
+        raise _non_finite(name, value) from exc
     except _REFUSED as exc:
         raise _unannotated_misfit(name, value) from exc
     return _limited(name, wire, limit)
@@ -269,7 +296,7 @@ def encode_props(
 ) -> Pairs[Wire]:
     """Return the wire form of `props`, each typed by `types` or by its own JSON type.
 
-    An unencodable value raises `BoundaryPropsError` in every environment.
+    A misfit raises `BoundaryPropsError`, a value too large or not finite a subclass.
     """
     return tuple(
         (name, _encode(name, props[name], types.get(name, _UNANNOTATED), limit))

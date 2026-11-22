@@ -176,6 +176,9 @@ A prop whose name a ``@component.context`` parameter takes travels as the annota
 A string marked safe travels as plain text, so the deferred render autoescapes it.
 An unannotated value that needs its annotation to come back typed, such as a ``date``, is refused rather than sent as its text.
 Every refusal raises ``BoundaryPropsError`` when the token is minted, naming the prop and the type of its value.
+Props of one request that outgrow ``MAX_BYTES``, such as a long search query, raise ``BoundarySizeError`` instead, and the page renders that boundary as a ``stream`` boundary in the same response and logs a warning to ``next.suspense``.
+A ``float`` or ``Decimal`` that is NaN or infinite, such as ``float(request.GET["ratio"])`` for ``?ratio=inf``, raises ``BoundaryValueError`` and is delivered the same way, with a warning that names the value.
+Under ``DEBUG`` the ``X-Next-Boundaries`` header lists such a boundary as ``stream``.
 ``manage.py check`` reports an annotation no token carries, and a constant a call site passes that its annotation refuses, as ``next.E243``.
 
 Retrying a boundary

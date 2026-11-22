@@ -20,7 +20,7 @@ from asgiref.sync import AsyncToSync, SyncToAsync, sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 
 from next.conf.defer import defer_count, defer_seconds
-from next.deps.loader import drain_loaders
+from next.deps.loader import CountedJob, count_job, drain_loaders
 from next.suspense.coordinator import runner
 from next.suspense.coordinator.machine import (
     Abandon,
@@ -180,6 +180,7 @@ class _Run[D]:
     __slots__ = (
         "abandoned",
         "closed",
+        "count",
         "lane",
         "queued",
         "reported",
@@ -197,6 +198,7 @@ class _Run[D]:
         self.reported: set[str] = set()
         self.work: StealableTask[None] | None = None
         self.task: asyncio.Task[None] | None = None
+        self.count: CountedJob | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +238,18 @@ def _error_of(future: Future[Any] | asyncio.Future[Any]) -> BaseException | None
     if future.cancelled():
         return asyncio.CancelledError()
     return future.exception()
+
+
+def _uncount(run: _Run[Any]) -> None:
+    """Stop counting a unit that ended or will never start, once."""
+    count, run.count = run.count, None
+    if count is not None:
+        count.end()
+
+
+def _uncounted(run: _Run[Any], _future: Future[None]) -> None:
+    """Stop counting a pool unit once its work is done, run, skipped or rejected."""
+    _uncount(run)
 
 
 def _ring(signal: Future[None]) -> None:
@@ -359,11 +373,24 @@ class _Driver[D](ABC):
         if self._taking:
             return
         self._taking = True
+        hold = self._hold(commands)
         try:
             while self._pending and self._finish is None:
                 self._command(self._pending.popleft())
         finally:
             self._taking = False
+            if hold is not None:
+                hold.end()
+
+    def _hold(self, commands: list[Command[D]]) -> CountedJob | None:
+        """Count the start of several units as a job of its own while it runs.
+
+        A unit started first may park on a key before the next one counts.
+        """
+        starts = sum(isinstance(command, RunPool | StartLoop) for command in commands)
+        if starts > 1:
+            return count_job(self._runtime.scope, self._session.deadline)
+        return None
 
     def _command(self, command: Command[D]) -> None:
         match command:
@@ -398,20 +425,37 @@ class _Driver[D](ABC):
         run.closed = True
         self._running.discard(run)
 
+    def _count(self, unit: Unit[D]) -> CountedJob | None:
+        """Count a unit among the jobs that may add a key to a batch of the request.
+
+        Its jobs run one after another, so the unit counts as one until its last ends.
+        """
+        until = max(task.deadline for task in unit.tasks)
+        return count_job(self._runtime.scope, until)
+
     def _pool(self, unit: Unit[D]) -> None:
-        """Submit a pool unit, which a full queue hands back to the machine."""
+        """Submit a pool unit, which a full queue hands back to the machine.
+
+        A unit a free worker takes counts from now, another once a thread starts it.
+        """
         run = self._register(unit, Lane.POOL)
         work = StealableTask(partial(self._pool_body, run))
         run.work = work
+        capacity = self._executor.capacity()
+        if capacity.queued < capacity.idle:
+            run.count = self._count(unit)
         try:
             self._executor.submit(work)
         except BoundaryShedError:
+            _uncount(run)
             self._shut(run)
             self._take(self._machine.full(unit.id, time.monotonic()))
             return
         except BoundaryRefusedError as error:
+            _uncount(run)
             self._refuse(run, error)
             return
+        work.future.add_done_callback(partial(_uncounted, run))
         self._watch(run, work)
 
     def _pool_body(self, run: _Run[D]) -> None:
@@ -419,6 +463,8 @@ class _Driver[D](ABC):
         here = threading.get_ident() == self._request_thread
         lane = Lane.REQUEST if here else Lane.POOL
         unit = run.unit
+        if run.count is None:
+            run.count = self._count(unit)
         for task in unit.tasks:
             if run.abandoned:
                 return
@@ -430,6 +476,7 @@ class _Driver[D](ABC):
                     unit.placement,
                     lane=lane,
                     queued=run.queued,
+                    count=run.count,
                 )
             )
 
@@ -439,11 +486,17 @@ class _Driver[D](ABC):
         for task in unit.tasks:
             self._post(
                 await runner.arun(
-                    self._runtime, unit.id, task, unit.placement, queued=run.queued
+                    self._runtime,
+                    unit.id,
+                    task,
+                    unit.placement,
+                    queued=run.queued,
+                    count=run.count,
                 )
             )
 
     def _loop_done(self, run: _Run[D], task: asyncio.Task[None]) -> None:
+        _uncount(run)
         self._post(_Closed(run, _error_of(task)))
 
     def _refuse(self, run: _Run[D], error: BaseException) -> None:
@@ -651,20 +704,28 @@ class ThreadDriver[D](_Driver[D]):
         return received
 
     def _run_backlog(self) -> None:
-        """Run the next request-lane unit here, reporting each job straight away."""
+        """Run the next request-lane unit here, reporting each job straight away.
+
+        It counts only from now, as the units queued behind it wait for its end.
+        """
         run = self._backlog.popleft()
         unit = run.unit
-        for task in unit.tasks:
-            self._report(
-                runner.run(
-                    self._runtime,
-                    unit.id,
-                    task,
-                    unit.placement,
-                    lane=Lane.REQUEST,
-                    queued=run.queued,
+        run.count = self._count(unit)
+        try:
+            for task in unit.tasks:
+                self._report(
+                    runner.run(
+                        self._runtime,
+                        unit.id,
+                        task,
+                        unit.placement,
+                        lane=Lane.REQUEST,
+                        queued=run.queued,
+                        count=run.count,
+                    )
                 )
-            )
+        finally:
+            _uncount(run)
         self._shut(run)
 
     def _steal(self, capacity: Capacity) -> bool:
@@ -751,6 +812,7 @@ class ThreadDriver[D](_Driver[D]):
         except ImproperlyConfigured as error:
             self._refuse(run, error)
             return
+        run.count = self._count(unit)
         self._background = background_loop.call_soon(self._spawn, run)
 
     def _spawn(self, run: _Run[D]) -> None:
@@ -1008,28 +1070,42 @@ class AsyncDriver[D](_Driver[D]):
             self._post(_Closed(run, None))
 
     def _hop(self, runs: list[_Run[D]]) -> None:
-        """Run request-lane units in order on the request thread."""
+        """Run request-lane units in order on the request thread, each counted alone.
+
+        A unit counts only once it starts, as the units behind it wait for its end.
+        """
         self._request_thread = threading.get_ident()
         for run in runs:
             unit = run.unit
-            for task in unit.tasks:
-                if run.abandoned:
-                    break
-                self._post(
-                    runner.run(
-                        self._runtime,
-                        unit.id,
-                        task,
-                        unit.placement,
-                        lane=Lane.REQUEST,
-                        queued=run.queued,
-                    )
-                )
+            run.count = self._count(unit)
+            try:
+                self._run_hopped(run)
+            finally:
+                _uncount(run)
             self._post(_Closed(run, None))
+
+    def _run_hopped(self, run: _Run[D]) -> None:
+        """Run the jobs of one request-lane unit until it is abandoned."""
+        unit = run.unit
+        for task in unit.tasks:
+            if run.abandoned:
+                return
+            self._post(
+                runner.run(
+                    self._runtime,
+                    unit.id,
+                    task,
+                    unit.placement,
+                    lane=Lane.REQUEST,
+                    queued=run.queued,
+                    count=run.count,
+                )
+            )
 
     @override
     def _start(self, unit: Unit[D]) -> None:
         run = self._register(unit, Lane.LOOP)
+        run.count = self._count(unit)
         task = self._loop.create_task(
             self._loop_body(run), context=contextvars.Context()
         )

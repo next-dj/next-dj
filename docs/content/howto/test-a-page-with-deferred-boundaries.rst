@@ -48,7 +48,7 @@ Its ``shell`` is the first write with every deferred body replaced by its loadin
        assert streamed.ended
 
 ``final_html()`` applies each chunk to the shell in order, as the browser would, so a test reads the settled page without parsing scripts.
-``streamed.boundary(key)`` returns the chunk of one boundary by its wire id or its stable key.
+``streamed.boundary(key)`` returns the chunk of one boundary by its wire id, its stable key, or its name, the component name or the path a page boundary is named by.
 A test of an async stack awaits ``aread_stream(AsyncClient(), url)`` of ``next.testing`` for the same result.
 ``get_stream`` raises ``AssertionError`` when the page did not stream, and names the reason when ``DEBUG`` is on.
 

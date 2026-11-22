@@ -10,6 +10,7 @@ from asgiref.sync import ThreadSensitiveContext, sync_to_async
 
 from next.defer import ErrorKind
 from next.deps import Loader
+from next.deps.runner import batch_scope
 from next.deps.scope import RequestScope
 from next.suspense import Admit, Lane, Placement, Verdict
 from next.suspense.coordinator import COSTS, Coordinator, Emit, Foreground, drivers
@@ -41,6 +42,7 @@ from tests.suspense.coordinator.drivers.doubles import (
     ident_body,
     items_of,
     left_tasks,
+    loading_body,
     loop_turns,
     meeting_body,
     new_session,
@@ -361,6 +363,32 @@ class TestAsyncDriver:
         items = items_of(asyncio.run(server()))
         assert sorted(html_of(item) for item in items.values()) == ["10", "20"]
         assert log == [[1, 2]]
+
+    def test_request_lane_jobs_queued_behind_a_parked_one_leave_its_batch(
+        self, pools
+    ) -> None:
+        log: list[object] = []
+        loader = Loader(recorded_fetch(log), window=3600)
+        coordinator = coordinator_over(pools())
+
+        async def server() -> list[Emit[str]]:
+            scope = RequestScope()
+            session = new_session(facts=ATOMIC_ASGI)
+            session.scope = scope
+            assert session.snapshot is not None
+            session.snapshot.run(batch_scope.set, scope)
+            queue_job(session, loading_body(loader, 1))
+            queue_job(session, loading_body(loader, 2))
+            try:
+                async with ThreadSensitiveContext():
+                    return [batch async for batch in coordinator.arun(session)]
+            finally:
+                await scope.close()
+
+        items = items_of(asyncio.run(server()))
+        assert sorted(html_of(item) for item in items.values()) == ["10", "20"]
+        assert {item.timing.lane for item in items.values()} == {Lane.REQUEST}
+        assert log == [[1], [2]]
 
     def test_a_full_queue_runs_units_on_the_view_thread_under_a_permit(self) -> None:
         executor = FullPool()

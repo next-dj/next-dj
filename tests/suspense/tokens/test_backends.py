@@ -15,6 +15,7 @@ from django.http import HttpRequest
 import next.realtime
 from next.suspense import (
     BoundaryPropsError,
+    BoundarySizeError,
     BoundaryTokenError,
     TokenRejection,
     boundary_token_rejected,
@@ -344,7 +345,7 @@ class TestSizeBeforeCrypto:
         assert _reason(backend, "1.1." + "A" * 3000) is TokenRejection.TOO_LARGE
 
     def test_a_token_over_max_bytes_is_refused_at_mint(self) -> None:
-        with pytest.raises(BoundaryPropsError, match="MAX_BYTES"):
+        with pytest.raises(BoundarySizeError, match="MAX_BYTES"):
             stacked(MAX_BYTES=50).issue(request_for(), claims())
 
     def test_spill_storage_mints_what_inline_storage_cannot(self) -> None:

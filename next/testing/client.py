@@ -38,14 +38,15 @@ from next.router.signals import navigation_rendered
 from next.static.runtime import LAYOUTS_PAYLOAD_KEY
 from next.suspense.manager import suspense_manager
 from next.suspense.reload import page_components
+from next.suspense.signals import boundary_rendered
 from next.suspense.tokens.transport import FIELD, HEADER
 from next.suspense.trip import mint, note_route
 
 from .actions import resolve_action_url
 from .boundaries import HeldFailures, RecordedFailure, raise_first
-from .capture import SignalEvent, capture_signals
+from .capture import SignalRecorder, capture_signals
 from .html import init_payload
-from .streaming import StreamedPage, decoded, read_stream
+from .streaming import StreamedPage, decoded, names_of, read_stream
 
 
 if TYPE_CHECKING:
@@ -287,12 +288,12 @@ class Navigation:
 
 
 def _read_envelope(
-    response: HttpResponseBase,
+    response: HttpResponseBase, recorder: SignalRecorder
 ) -> tuple[PartialEnvelope | None, StreamedPage | None]:
     """Return the envelope of a navigation response and the stream it opened, if any."""
     if isinstance(response, StreamingHttpResponse):
         writes = list(cast("Iterator[bytes]", response.streaming_content))
-        stream = StreamedPage(writes, response)
+        stream = StreamedPage(writes, response, names=names_of(recorder))
         parsed = stream.envelope
         envelope = (
             None if parsed is None else PartialEnvelope.from_envelope(parsed, response)
@@ -304,9 +305,10 @@ def _read_envelope(
     return envelope_of(cast("HttpResponse", response)), None
 
 
-def _navigation(response: HttpResponseBase, events: list[SignalEvent]) -> Navigation:
+def _navigation(response: HttpResponseBase, recorder: SignalRecorder) -> Navigation:
     """Return the navigation `response` answers, its cut read from the signal sent."""
-    envelope, stream = _read_envelope(response)
+    envelope, stream = _read_envelope(response, recorder)
+    events = recorder.events_for(navigation_rendered)
     if events:
         sent = events[-1].kwargs
         return Navigation(
@@ -441,6 +443,13 @@ class NextClient(Client):
         The token travels through the configured transport, and the envelope returns.
         """
         token = self.boundary_token(url, name, **props)
+        return envelope_of(self.reload_boundary(url, token))
+
+    def reload_boundary(self, url: str, token: str) -> HttpResponse:
+        """Send `token` to `url` as a boundary reload and return the response as is.
+
+        The token may come from another client, so a test reads the refusal it earns.
+        """
         place = suspense_manager.tokens().transport.describe()
         return self._reload(url, _ADDRESS, token, place.place, place.name)
 
@@ -475,11 +484,12 @@ class NextClient(Client):
             raise LookupError(msg)
         place, _, name = unescape(found["transport"] or "").partition(":")
         token = unescape(found["token"])
-        return self._reload(request.get_full_path(), found["id"], token, place, name)
+        url = request.get_full_path()
+        return envelope_of(self._reload(url, found["id"], token, place, name))
 
     def _reload(
         self, url: str, ident: str, token: str, place: str, name: str
-    ) -> PartialEnvelope:
+    ) -> HttpResponse:
         """Send the boundary reload the runtime sends for the wrapper `ident`."""
         sent = {REQUEST_FLAG: "1", ZONE: ident}
         field = name or FIELD
@@ -493,7 +503,7 @@ class NextClient(Client):
         else:
             sent[HEADER] = token
             response = self.get(url, headers=sent)
-        return envelope_of(cast("HttpResponse", response))
+        return cast("HttpResponse", response)
 
     def navigate(
         self,
@@ -523,9 +533,9 @@ class NextClient(Client):
             sent[PREFETCH] = "1"
         sent.update(headers or {})
         forwarded: dict[str, Any] = extra
-        with capture_signals(navigation_rendered) as recorder:
+        with capture_signals(navigation_rendered, boundary_rendered) as recorder:
             response = self.get(path, headers=sent, **forwarded)
-        return _navigation(response, recorder.events)
+            return _navigation(response, recorder)
 
     def _shown(self, origin: str) -> str:
         """Return the document a browser on `origin` shows, loaded as a plain GET."""

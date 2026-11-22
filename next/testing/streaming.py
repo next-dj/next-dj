@@ -19,7 +19,9 @@ from next.static.runtime import SCRIPT_TEXT
 from next.suspense.partial import PartialStream
 from next.suspense.policy import streaming
 from next.suspense.response import StreamingPageResponse
+from next.suspense.signals import boundary_rendered
 from next.testing.boundaries import HeldFailures, release_gates
+from next.testing.capture import SignalRecorder, capture_signals
 from next.testing.realtime import sse_events
 
 
@@ -149,10 +151,20 @@ class StreamedPage:
     cut: bool
     """Whether the body stopped before its end, a frame cut mid-way included."""
 
-    def __init__(self, writes: list[bytes], response: HttpResponseBase) -> None:
-        """Decode the writes and split them into the shell, the chunks and the rest."""
+    def __init__(
+        self,
+        writes: list[bytes],
+        response: HttpResponseBase,
+        *,
+        names: Mapping[str, str] | None = None,
+    ) -> None:
+        """Decode the writes and split them into the shell, the chunks and the rest.
+
+        `names` maps a wire id to the name of its boundary, as `boundary_rendered` sent.
+        """
         writes = decoded(response, writes)
         self.response = response
+        self._names = dict(names or {})
         self.writes = writes
         self.padded = len(writes[0]) if writes else 0
         self.chunks: list[StreamedChunk] = []
@@ -214,19 +226,43 @@ class StreamedPage:
             document = _applied(document, chunk)
         return document
 
-    def boundary(self, key_or_id: str) -> StreamedChunk:
-        """Return the chunk of the boundary with this wire id or stable key."""
-        named = {
+    def boundary(self, key: str) -> StreamedChunk:
+        """Return the chunk of a boundary by its wire id, its stable key or its name.
+
+        The name is the component name, or the path a page boundary is named by.
+        """
+        keyed = {
             found["key"]: found["id"]
             for text in (self.shell, *(chunk.html for chunk in self.chunks))
             for found in _KEYED.finditer(text)
         }
-        ident = named.get(key_or_id, key_or_id)
+        ident = keyed.get(key, key)
         for chunk in self.chunks:
             if chunk.id == ident:
                 return chunk
-        msg = f"no chunk settles the boundary {key_or_id!r}"
-        raise AssertionError(msg)
+        named = [chunk for chunk in self.chunks if self._names.get(chunk.id) == key]
+        if len(named) == 1:
+            return named[0]
+        if named:
+            keys_of = {wire: stable for stable, wire in keyed.items()}
+            listed = ", ".join(
+                f"{chunk.id} with key {keys_of.get(chunk.id)!r}" for chunk in named
+            )
+            msg = (
+                f"{len(named)} chunks settle a boundary named {key!r}, {listed}, "
+                "so name one by its wire id or its stable key"
+            )
+            raise LookupError(msg)
+        msg = f"no chunk settles the boundary {key!r}"
+        raise LookupError(msg)
+
+
+def names_of(recorder: SignalRecorder) -> dict[str, str]:
+    """Return the boundary name of each wire id the `boundary_rendered` events hold."""
+    return {
+        event.kwargs["id"]: event.kwargs["name"]
+        for event in recorder.events_for(boundary_rendered)
+    }
 
 
 def _streamed(response: HttpResponseBase, url: str) -> StreamingHttpResponse:
@@ -260,7 +296,7 @@ def read_stream(client: Client, url: str, **extra: object) -> StreamedPage:
     """
     forwarded = _accepting(extra)
     held = HeldFailures()
-    with held.recording():
+    with held.recording(), capture_signals(boundary_rendered) as rendered:
         with streaming():
             response = client.get(url, **forwarded)
         stream = _streamed(response, url)
@@ -269,7 +305,7 @@ def read_stream(client: Client, url: str, **extra: object) -> StreamedPage:
             writes.append(part)
             if len(writes) == 1:
                 release_gates()
-        page = StreamedPage(writes, stream)
+        page = StreamedPage(writes, stream, names=names_of(rendered))
     held.settle(b"".join(page.writes))
     return page
 
@@ -281,7 +317,7 @@ async def aread_stream(client: AsyncClient, url: str, **extra: object) -> Stream
     """
     forwarded = _accepting(extra)
     held = HeldFailures()
-    with held.recording():
+    with held.recording(), capture_signals(boundary_rendered) as rendered:
         with streaming():
             response = await client.get(url, **forwarded)
         stream = _streamed(response, url)
@@ -290,7 +326,7 @@ async def aread_stream(client: AsyncClient, url: str, **extra: object) -> Stream
             writes.append(part)
             if len(writes) == 1:
                 release_gates()
-        page = StreamedPage(writes, stream)
+        page = StreamedPage(writes, stream, names=names_of(rendered))
     held.settle(b"".join(page.writes))
     return page
 

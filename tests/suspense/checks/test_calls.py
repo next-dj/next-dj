@@ -389,6 +389,12 @@ class TestPropTypes:
         body = '{% component "card" sku=False %}{% component "card" sku=1.5 %}'
         assert _typed_messages(tmp_path, body, _CARD) == []
 
+    def test_a_non_finite_constant_errors(self, tmp_path: Path) -> None:
+        body = '{% component "card" sku=1e999 %}'
+        (message,) = _typed_messages(tmp_path, body, _CARD)
+        assert message.id == "next.E243"
+        assert "the prop 'sku' holds inf, which is not finite" in message.msg
+
     def test_an_annotation_no_token_carries_errors_once(self, tmp_path: Path) -> None:
         body = '{% component "card" count=1 %}{% component "card" count=2 %}'
         (message,) = _typed_messages(tmp_path, body, _UNION)

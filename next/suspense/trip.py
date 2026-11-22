@@ -18,7 +18,12 @@ from next.components.trip import (
 from next.defer import BoundaryFailure, DeferredCall
 from next.diagnostics import FailureLog
 from next.pages.responses import mark_bound_render
-from next.suspense.errors import BoundaryBindingError, BoundaryPropsError
+from next.suspense.errors import (
+    BoundaryBindingError,
+    BoundaryPropsError,
+    BoundarySizeError,
+    BoundaryValueError,
+)
 from next.suspense.manager import suspense_manager
 from next.suspense.tokens import (
     BoundaryClaims,
@@ -39,6 +44,14 @@ _DEFAULT_PLACE: Final = HeaderTransport().describe()
 _UNBOUND: Final = (
     "Component %r renders as a stream boundary in this response, as its token binding "
     "refused the visitor: %s"
+)
+_OVERSIZED: Final = (
+    "Component %r renders as a stream boundary in this response, as its props outgrow "
+    "the token: %s"
+)
+_NON_FINITE: Final = (
+    "Component %r renders as a stream boundary in this response, as its props hold a "
+    "number no token carries: %s"
 )
 _NO_RETRY: Final = "The error wrapper of %r offers no retry token: %s"
 
@@ -118,7 +131,7 @@ def trip_input(call: DeferredCall) -> TripInput | None:
 def shell_token(request: object, trip: TripInput) -> str | None:
     """Return the token attributes of a client-trip wrapper, `None` to stream instead.
 
-    A binding that refuses the visitor delivers the boundary in this response.
+    A binding that refuses the visitor or a prop the token cannot hold streams it.
     """
     if not isinstance(request, HttpRequest):
         return None
@@ -127,6 +140,22 @@ def shell_token(request: object, trip: TripInput) -> str | None:
     except BoundaryBindingError as exc:
         _failures.emit(
             logging.DEBUG, ("unbound", trip.info.name), _UNBOUND, (trip.info.name, exc)
+        )
+        return None
+    except BoundarySizeError as exc:
+        _failures.emit(
+            logging.WARNING,
+            ("oversized", trip.info.name),
+            _OVERSIZED,
+            (trip.info.name, exc),
+        )
+        return None
+    except BoundaryValueError as exc:
+        _failures.emit(
+            logging.WARNING,
+            ("non-finite", trip.info.name),
+            _NON_FINITE,
+            (trip.info.name, exc),
         )
         return None
     setattr(request, _TRIPPED_ATTR, True)

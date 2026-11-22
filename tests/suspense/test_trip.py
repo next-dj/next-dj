@@ -176,6 +176,31 @@ class TestShellToken:
         ):
             assert trip.shell_token(rf.get("/"), _input()) is None
 
+    def test_oversized_props_stream_instead_with_a_warning(
+        self, rf, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        reset_failure_logs()
+        with caplog.at_level(logging.WARNING, logger="next.suspense"):
+            assert trip.shell_token(rf.get("/"), _input(sku="x" * 3000)) is None
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert "outgrow the token" in record.getMessage()
+
+    def test_a_non_finite_prop_streams_instead_with_its_own_warning(
+        self, rf, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        reset_failure_logs()
+        with caplog.at_level(logging.WARNING, logger="next.suspense"):
+            assert trip.shell_token(rf.get("/"), _input(sku=float("inf"))) is None
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert "a number no token carries" in record.getMessage()
+        assert "holds inf" in record.getMessage()
+
+    def test_a_prop_no_token_carries_still_raises(self, rf) -> None:
+        with pytest.raises(BoundaryPropsError, match="a mapping"):
+            trip.shell_token(rf.get("/"), _input(sku={"a": 1}))
+
 
 class TestRetryToken:
     @pytest.mark.parametrize(

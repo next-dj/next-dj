@@ -47,11 +47,13 @@ def _chunk(ident: str, op: str, html: str, **wrapper: object) -> dict[str, objec
     return {"z": ident, "s": "ready", **wrapper, "e": envelope}
 
 
-def _page(*chunks: dict[str, object], shell: str = _SHELL) -> StreamedPage:
+def _page(
+    *chunks: dict[str, object], shell: str = _SHELL, names: dict[str, str] | None = None
+) -> StreamedPage:
     pad = b"<!--" + b" " * 8 + b"-->"
     writes = [shell.encode() + pad, *(_script(chunk) for chunk in chunks)]
     writes.append(_script(0) + b"</body></html>")
-    return StreamedPage(writes, HttpResponse())
+    return StreamedPage(writes, HttpResponse(), names=names)
 
 
 class TestStreamedPage:
@@ -111,8 +113,42 @@ class TestStreamedPage:
         page = _page(_chunk("b-1", "inner", "<p>a</p>"), _chunk("b-2", "inner", ""))
         assert page.boundary("b-1").html == "<p>a</p>"
         assert page.boundary("k2").id == "b-2"
-        with pytest.raises(AssertionError, match="no chunk settles"):
+        with pytest.raises(LookupError, match="no chunk settles the boundary 'k9'"):
             page.boundary("k9")
+
+    def test_a_boundary_is_found_by_its_name(self) -> None:
+        page = _page(
+            _chunk("b-1", "inner", "<p>a</p>"),
+            _chunk("b-2", "inner", "<p>b</p>"),
+            names={"b-1": "card", "b-2": "pages/slow/loading.djx"},
+        )
+        assert page.boundary("card").id == "b-1"
+        assert page.boundary("pages/slow/loading.djx").id == "b-2"
+
+    def test_an_id_or_a_key_wins_over_a_name(self) -> None:
+        page = _page(
+            _chunk("b-1", "inner", "<p>a</p>"),
+            _chunk("b-2", "inner", "<p>b</p>"),
+            names={"b-1": "k2", "b-2": "card"},
+        )
+        assert page.boundary("k2").id == "b-2"
+
+    def test_a_name_two_chunks_share_lists_both(self) -> None:
+        page = _page(
+            _chunk("b-1", "inner", "<p>a</p>"),
+            _chunk("b-2", "inner", "<p>b</p>"),
+            names={"b-1": "card", "b-2": "card"},
+        )
+        with pytest.raises(
+            LookupError, match="2 chunks settle a boundary named"
+        ) as caught:
+            page.boundary("card")
+        assert "b-1 with key 'k1', b-2 with key 'k2'" in str(caught.value)
+
+    def test_a_page_read_by_hand_knows_no_names(self) -> None:
+        page = _page(_chunk("b-1", "inner", "<p>a</p>"))
+        with pytest.raises(LookupError, match="no chunk settles the boundary 'card'"):
+            page.boundary("card")
 
     def test_an_empty_body_has_no_shell(self) -> None:
         page = StreamedPage([], HttpResponse())
@@ -358,6 +394,35 @@ class TestGatedStream:
             page = asyncio.run(aread_stream(AsyncClient(), "/one/"))
         assert "<p>card loading</p>" in page.shell
         assert page.chunks[0].state == "ready"
+
+    def test_a_chunk_is_found_by_its_component_name(self, gated_pages: Path) -> None:
+        page, _entered = self._read(gated_pages, "/one/", component="card")
+        assert page.boundary("card") is page.chunks[0]
+
+    def test_a_chunk_is_found_by_its_page_boundary_name(
+        self, gated_pages: Path
+    ) -> None:
+        with override_settings(BASE_DIR=gated_pages.parent):
+            page, _entered = self._read(gated_pages, "/slow/", page="pages/slow")
+        assert page.boundary("pages/slow/loading.djx") is page.chunks[0]
+
+    def test_the_async_reader_finds_a_chunk_by_name(self, gated_pages: Path) -> None:
+        with routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS):
+            page = asyncio.run(aread_stream(AsyncClient(), "/one/"))
+        assert page.boundary("card") is page.chunks[0]
+
+    def test_two_calls_of_one_component_are_ambiguous_by_name(
+        self, gated_pages: Path
+    ) -> None:
+        body = "<main>{% component 'card' %}{% component 'card' %}</main>"
+        write_page(gated_pages, "two", "x = 1\n", body=body)
+        with routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS):
+            page = NextClient().get_stream("/two/")
+        first, second = page.chunks
+        with pytest.raises(LookupError, match="2 chunks settle") as caught:
+            page.boundary("card")
+        assert first.id in str(caught.value)
+        assert second.id in str(caught.value)
 
     def test_a_plain_gate_holds_past_the_shell_until_the_deadline(
         self, gated_pages: Path

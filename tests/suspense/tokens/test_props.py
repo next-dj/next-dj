@@ -13,7 +13,13 @@ from django.test.utils import isolate_apps
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 
-from next.suspense import BoundaryPropsError, BoundaryTokenError, TokenRejection
+from next.suspense import (
+    BoundaryPropsError,
+    BoundarySizeError,
+    BoundaryTokenError,
+    BoundaryValueError,
+    TokenRejection,
+)
 from next.suspense.tokens import decode_props, encode_props, fetch
 from next.suspense.tokens.props import DEFAULT_LIMIT
 from tests.support.tokens import request_for
@@ -71,8 +77,6 @@ UNANNOTATED_REFUSALS = [
     ([Decimal(1)], "Decimal"),
     (TokenRejection.MALFORMED, "TokenRejection"),
     (object(), "object"),
-    (2**63, "int"),
-    (math.nan, "float"),
 ]
 
 
@@ -140,16 +144,11 @@ class TestEncodeProps:
             (int, "1"),
             (int, True),
             (int, 1.0),
-            (int, 2**63),
             (float, "1.5"),
             (float, True),
-            (float, math.nan),
-            (float, math.inf),
-            (float, 10**400),
             (bool, 1),
             (Decimal, 1),
-            (Decimal, Decimal("NaN")),
-            (Decimal, Decimal("Infinity")),
+            (Decimal, 1.5),
             (date, _MOMENT),
             (date, "2026-01-02"),
             (datetime, date(2026, 1, 2)),
@@ -198,10 +197,55 @@ class TestEncodeProps:
         with pytest.raises(BoundaryPropsError, match="which no token carries"):
             encode_props({"p": "x"}, {"p": annotation})
 
-    def test_text_over_the_limit_is_refused(self) -> None:
+    def test_text_over_the_limit_is_refused_as_oversized(self) -> None:
         assert encode_props({"p": "x" * 8}, {}, limit=8) == (("p", "x" * 8),)
-        with pytest.raises(BoundaryPropsError, match="over 8 characters"):
+        with pytest.raises(BoundarySizeError, match="over 8 characters"):
             encode_props({"p": "x" * 9}, {}, limit=8)
+
+    @pytest.mark.parametrize(
+        ("value", "types"),
+        [
+            pytest.param(2**63, {}, id="unannotated"),
+            pytest.param(-(2**63) - 1, {"p": int}, id="int"),
+            pytest.param(10**400, {"p": float}, id="float"),
+        ],
+    )
+    def test_a_number_outside_64_bits_is_refused_as_oversized(
+        self, value: int, types: dict[str, object]
+    ) -> None:
+        with pytest.raises(BoundarySizeError, match="the prop 'p' holds a number"):
+            encode_props({"p": value}, types)
+
+    @pytest.mark.parametrize(
+        ("value", "annotation"),
+        [({"a": 1}, str), (1, str), (True, float), ("x", bytes)],
+    )
+    def test_a_misfit_is_never_taken_for_oversized_or_non_finite(
+        self, value: object, annotation: object
+    ) -> None:
+        with pytest.raises(BoundaryPropsError) as caught:
+            encode_props({"p": value}, {"p": annotation})
+        assert not isinstance(caught.value, BoundarySizeError | BoundaryValueError)
+
+    @pytest.mark.parametrize(
+        ("value", "types", "shown"),
+        [
+            pytest.param(math.nan, {}, "nan", id="unannotated-nan"),
+            pytest.param([1.0, -math.inf], {}, "-inf", id="unannotated-list"),
+            pytest.param(math.inf, {"p": float}, "inf", id="float"),
+            pytest.param([math.nan], {"p": list[float]}, "nan", id="float-list"),
+            pytest.param(Decimal("NaN"), {"p": Decimal}, "NaN", id="decimal-nan"),
+            pytest.param(Decimal("sNaN"), {"p": Decimal}, "sNaN", id="decimal-snan"),
+            pytest.param(
+                Decimal("-Infinity"), {"p": Decimal}, "-Infinity", id="decimal-inf"
+            ),
+        ],
+    )
+    def test_a_non_finite_number_is_refused_as_a_value(
+        self, value: object, types: dict[str, object], shown: str
+    ) -> None:
+        with pytest.raises(BoundaryValueError, match=rf"the prop 'p' holds {shown},"):
+            encode_props({"p": value}, types)
 
     def test_the_default_limit_follows_max_bytes(self) -> None:
         assert DEFAULT_LIMIT == 2048

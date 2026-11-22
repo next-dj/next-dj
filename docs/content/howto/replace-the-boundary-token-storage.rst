@@ -74,7 +74,7 @@ A table keeps the claims, and the reference is the content address of the bytes,
    from shop.models import StoredClaims
 
    from next.suspense import (
-       BoundaryPropsError,
+       BoundarySizeError,
        BoundaryTokenError,
        TokenRejection,
        TokenStorage,
@@ -85,7 +85,7 @@ A table keeps the claims, and the reference is the content address of the bytes,
        def put(self, data: bytes, context: TokenContext) -> bytes:
            if len(data) > context.max_stored_bytes:
                msg = f"the claims take {len(data)} bytes, over MAX_STORED_BYTES"
-               raise BoundaryPropsError(msg)
+               raise BoundarySizeError(msg)
            handle = hashlib.sha256(data).hexdigest()
            expires = timezone.now() + timedelta(seconds=max(1, context.lifetime))
            StoredClaims.objects.update_or_create(
@@ -101,7 +101,7 @@ A table keeps the claims, and the reference is the content address of the bytes,
                raise BoundaryTokenError(TokenRejection.STORAGE_MISS)
            return bytes(row.data)
 
-``put`` raises ``BoundaryPropsError`` for claims it cannot hold, which surfaces when a page mints the token.
+``put`` raises ``BoundarySizeError`` for claims over its cap, and the page then renders that boundary in the same response instead of sending a token.
 ``get`` raises ``BoundaryTokenError`` with a ``TokenRejection`` for a reference it cannot answer, and a missing row is ``STORAGE_MISS``, which the browser answers with one reload of the page that mints a fresh token.
 The class is built with no arguments once per backend, so it keeps no request state.
 

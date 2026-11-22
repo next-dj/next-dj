@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,6 +15,7 @@ from django.test import Client, override_settings
 
 from next.components.registry import DeferredComponents
 from next.signals import boundary_token_rejected
+from next.suspense import BoundaryPropsError
 from next.suspense.manager import suspense_manager
 from next.suspense.tokens import BoundaryClaims
 from next.testing import (
@@ -21,6 +23,7 @@ from next.testing import (
     capture_signals,
     freeze_token_clock,
     issue_boundary_token,
+    reset_failure_logs,
 )
 from tests.support import hosts as host, routed, write_page
 from tests.support.access import COMPONENTS
@@ -231,6 +234,64 @@ _INHERITED_GATE = _STAFF_GATE.replace(
     "page.public()", "page.public(inherit=True)"
 ).replace('@context("gate")', '@context("gate", inherit_context=True)')
 
+_SEARCH = """
+from next.components import component
+
+component.defer("visible", props=("q",))
+
+
+@component.context("found")
+def found(q: str) -> str:
+    return f"found {len(q)}"
+"""
+
+_SEARCH_PAGE = """
+from django.http import HttpRequest
+
+from next import context, page
+
+page.public()
+
+
+@context("q")
+def q(request: HttpRequest) -> object:
+    asked = request.GET.get("q", "")
+    return {"q": asked} if request.GET.get("as") == "mapping" else asked
+"""
+
+_RATIO = """
+from decimal import Decimal
+
+from next.components import component
+
+component.defer("visible", props=("x", "d"))
+
+
+@component.context("shown")
+def shown(x: float, d: Decimal) -> str:
+    return f"ratio {x} {d}"
+"""
+
+_RATIO_PAGE = """
+from decimal import Decimal
+
+from django.http import HttpRequest
+
+from next import context, page
+
+page.public()
+
+
+@context("x")
+def x(request: HttpRequest) -> float:
+    return float(request.GET.get("x", "1"))
+
+
+@context("d")
+def d(request: HttpRequest) -> Decimal:
+    return Decimal(request.GET.get("d", "1"))
+"""
+
 _STAFF_PAGE = 'from next import page\n\npage.permission_required("auth.change_user")\n'
 
 _ECHO = "<p>{{ request.get_full_path }}|{{ request.META.QUERY_STRING }}</p>"
@@ -345,6 +406,24 @@ def pages(tmp_path: Path, fresh_deferred_components: DeferredComponents) -> Path
         root, "gated/[int:id]", _ROWS_PAGE, body='{% component "gated" target=target %}'
     )
     write_page(root, "echo", _PUBLIC, body=_ECHO)
+    write_component(
+        root,
+        "search",
+        module=_SEARCH,
+        body="<p>{{ found }}</p>",
+        loading="<i>searching</i>",
+        error="<b>{{ error.kind }}</b>",
+    )
+    write_page(root, "search", _SEARCH_PAGE, body='{% component "search" q=q %}')
+    write_component(
+        root,
+        "ratio",
+        module=_RATIO,
+        body="<p>{{ shown }}</p>",
+        loading="<i>measuring</i>",
+        error="<b>{{ error.kind }}</b>",
+    )
+    write_page(root, "ratio", _RATIO_PAGE, body='{% component "ratio" x=x d=d %}')
     return root
 
 
@@ -484,6 +563,106 @@ class TestShell:
         assert 'data-next-state="error"' in html
         assert "data-next-token=" in html
         assert "data-next-boundary-exp" not in html
+
+
+class TestOversizedProps:
+    """Props a request makes too large for the token deliver the boundary in place."""
+
+    @pytest.mark.parametrize(
+        ("asked", "named"),
+        [
+            pytest.param("я" * 1000, "over MAX_BYTES", id="cyrillic"),
+            pytest.param("x" * 1500, "over MAX_BYTES", id="token"),
+            pytest.param("x" * 3000, "over 2048 characters", id="prop"),
+        ],
+    )
+    def test_a_long_query_renders_the_boundary_in_the_response(
+        self, pages: Path, caplog: pytest.LogCaptureFixture, asked: str, named: str
+    ) -> None:
+        reset_failure_logs()
+        with _routed(pages), caplog.at_level(logging.WARNING, logger="next.suspense"):
+            response = Client().get(f"/search/?{urlencode({'q': asked})}")
+        html = response.content.decode()
+        assert response.status_code == 200
+        assert "data-next-token" not in html
+        assert f"<p>found {len(asked)}</p>" in html
+        assert 'data-next-state="ready"' in html
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert "'search'" in record.getMessage()
+        assert named in record.getMessage()
+
+    def test_a_short_query_keeps_its_client_trip(self, pages: Path) -> None:
+        with _routed(pages):
+            html, (found,) = _shell(Client(), "/search/?q=tea")
+        assert found["mode"] == "visible"
+        assert "<i>searching</i>" in html
+        assert "found 3" not in html
+
+    def test_a_prop_no_token_carries_still_fails_the_render(self, pages: Path) -> None:
+        with _routed(pages), pytest.raises(BoundaryPropsError, match="carries no dict"):
+            Client().get("/search/?q=tea&as=mapping")
+
+    @override_settings(DEBUG=True)
+    @pytest.mark.parametrize(
+        ("url", "listed"),
+        [
+            pytest.param("/search/?q=tea", None, id="trip"),
+            pytest.param(f"/search/?q={'x' * 3000}", "search=stream", id="oversized"),
+            pytest.param("/ratio/?x=inf", "ratio=stream", id="non-finite"),
+        ],
+    )
+    def test_debug_lists_a_degraded_boundary_as_streamed(
+        self, pages: Path, url: str, listed: str | None
+    ) -> None:
+        with _routed(pages):
+            response = Client().get(url)
+        assert response.get("X-Next-Boundaries") == listed
+
+
+class TestNonFiniteProps:
+    """A number from the request that no token carries delivers the boundary in place."""
+
+    @pytest.mark.parametrize(
+        ("query", "shown", "named"),
+        [
+            pytest.param("x=inf", "ratio inf 1", "holds inf", id="float-inf"),
+            pytest.param("x=-inf", "ratio -inf 1", "holds -inf", id="float-minus"),
+            pytest.param("x=nan", "ratio nan 1", "holds nan", id="float-nan"),
+            pytest.param("d=NaN", "ratio 1.0 NaN", "holds NaN", id="decimal-nan"),
+            pytest.param(
+                "d=Infinity", "ratio 1.0 Infinity", "holds Infinity", id="decimal-inf"
+            ),
+        ],
+    )
+    def test_a_non_finite_query_renders_the_boundary_in_the_response(
+        self,
+        pages: Path,
+        caplog: pytest.LogCaptureFixture,
+        query: str,
+        shown: str,
+        named: str,
+    ) -> None:
+        reset_failure_logs()
+        with _routed(pages), caplog.at_level(logging.WARNING, logger="next.suspense"):
+            response = Client().get(f"/ratio/?{query}")
+        html = response.content.decode()
+        assert response.status_code == 200
+        assert "data-next-token" not in html
+        assert f"<p>{shown}</p>" in html
+        assert 'data-next-state="ready"' in html
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert "'ratio'" in record.getMessage()
+        assert "a number no token carries" in record.getMessage()
+        assert named in record.getMessage()
+
+    def test_a_finite_query_keeps_its_client_trip(self, pages: Path) -> None:
+        with _routed(pages):
+            html, (found,) = _shell(Client(), "/ratio/?x=1.5&d=2.25")
+        assert found["mode"] == "visible"
+        assert "<i>measuring</i>" in html
+        assert "ratio 1.5" not in html
 
 
 class TestReload:

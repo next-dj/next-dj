@@ -7,7 +7,9 @@ from next.suspense import (
     BoundaryPropsError,
     BoundaryRefusedError,
     BoundaryShedError,
+    BoundarySizeError,
     BoundaryTokenError,
+    BoundaryValueError,
     ExecutorStoppedError,
     TokenRejection,
 )
@@ -64,6 +66,21 @@ class TestBoundaryPropsError:
         msg = "the token is over MAX_BYTES"
         with pytest.raises(ValueError, match="over MAX_BYTES"):
             raise BoundaryPropsError(msg)
+
+
+class TestBoundarySizeError:
+    """Tests for ``BoundarySizeError``."""
+
+    def test_it_is_a_mint_time_props_error(self) -> None:
+        assert issubclass(BoundarySizeError, BoundaryPropsError)
+
+
+class TestBoundaryValueError:
+    """Tests for ``BoundaryValueError``."""
+
+    def test_it_is_a_mint_time_props_error_of_its_own(self) -> None:
+        assert issubclass(BoundaryValueError, BoundaryPropsError)
+        assert not issubclass(BoundaryValueError, BoundarySizeError)
 
 
 class TestBoundaryBindingError:

@@ -25,6 +25,7 @@ from next.testing import (
     find_anchor,
     find_form,
     init_payload,
+    override_next_settings,
     parallel_boundaries,
     parse_sitemap,
 )
@@ -337,7 +338,10 @@ class TestProductRails:
     def test_the_rails_on_the_pool_share_one_batch(
         self, next_client, demo_data, batches
     ) -> None:
-        with parallel_boundaries():
+        with (
+            parallel_boundaries(),
+            override_next_settings(DEFER={"BATCH_WINDOW": "1s"}),
+        ):
             next_client.get_stream(PRODUCT_URL)
         assert batches == [sorted(set(_picks("price")) | set(_picks("category")))]
 

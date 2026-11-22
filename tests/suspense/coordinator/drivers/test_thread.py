@@ -3,7 +3,7 @@ import contextvars
 import logging
 import threading
 import time
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from unittest import mock
 from unittest.mock import Mock
 
@@ -49,14 +49,17 @@ from tests.suspense.coordinator.drivers.doubles import (
     RUNNING_TIMEOUT,
     WAIT,
     Body,
+    EagerPool,
     FailingAdmission,
     FullPool,
     HeldPool,
+    IdleFullPool,
     IdlePool,
     RejectingPool,
     ScriptedAdmission,
     StartedPool,
     StoppedPool,
+    StoppingIdlePool,
     close_scope,
     coordinator_over,
     fallback_ui,
@@ -779,6 +782,111 @@ class TestThreadDriver:
             close_scope(scope)
         assert [html_of(items[job.id]) for job in (first, second)] == ["10", "20"]
         assert log == [[1], [2]]
+
+    def test_a_pool_job_no_worker_started_yet_holds_the_batch_open(self) -> None:
+        log: list[object] = []
+        loader = Loader(recorded_fetch(log), window=3600)
+        executor = IdlePool(2)
+        held: list[bool] = []
+
+        def worker() -> None:
+            executor.submitted.wait(WAIT)
+            first, second = executor.queued
+            parked = threading.Thread(target=first.run)
+            parked.start()
+            held.append(not wait((first.future,), timeout=QUIET).done)
+            second.run()
+            parked.join(WAIT)
+
+        session = new_session()
+        scope = scoped_session(session)
+        first = queue_job(session, loading_body(loader, 1))
+        second = queue_job(session, loading_body(loader, 2))
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            items = items_of(list(coordinator_over(executor).run(session)))
+        finally:
+            thread.join(WAIT)
+            close_scope(scope)
+        assert [html_of(items[job.id]) for job in (first, second)] == ["10", "20"]
+        assert held == [True]
+        assert log == [[1, 2]]
+
+    def test_a_job_parked_before_its_sibling_is_submitted_still_shares_its_batch(
+        self,
+    ) -> None:
+        log: list[object] = []
+        loader = Loader(recorded_fetch(log), window=3600)
+        executor = EagerPool()
+        session = new_session()
+        scope = scoped_session(session)
+        first = queue_job(session, loading_body(loader, 1))
+        second = queue_job(session, loading_body(loader, 2))
+        try:
+            items = items_of(list(coordinator_over(executor).run(session)))
+        finally:
+            executor.join()
+            close_scope(scope)
+        assert [html_of(items[job.id]) for job in (first, second)] == ["10", "20"]
+        assert executor.held == [True]
+        assert log == [[1, 2]]
+
+    def test_request_lane_jobs_queued_behind_a_parked_one_leave_its_batch(self) -> None:
+        log: list[object] = []
+        loader = Loader(recorded_fetch(log), window=3600)
+        session = new_session(facts=ATOMIC_WSGI)
+        scope = scoped_session(session)
+        first = queue_job(session, loading_body(loader, 1))
+        second = queue_job(session, loading_body(loader, 2))
+        try:
+            items = items_of(list(coordinator_over(HeldPool()).run(session)))
+        finally:
+            close_scope(scope)
+        assert [html_of(items[job.id]) for job in (first, second)] == ["10", "20"]
+        assert log == [[1], [2]]
+
+    def test_a_unit_counted_on_admission_that_the_queue_sheds_leaves_its_count(
+        self,
+    ) -> None:
+        log: list[object] = []
+        loader = Loader(recorded_fetch(log), window=3600)
+        session = new_session()
+        scope = scoped_session(session)
+        job = queue_job(session, loading_body(loader, 1))
+        try:
+            items = items_of(list(coordinator_over(IdleFullPool()).run(session)))
+        finally:
+            close_scope(scope)
+        assert html_of(items[job.id]) == "10"
+        assert items[job.id].timing.lane is Lane.REQUEST
+        assert log == [[1]]
+
+    def test_a_unit_counted_on_admission_that_the_pool_refuses_leaves_its_count(
+        self,
+    ) -> None:
+        log: list[object] = []
+        loader = Loader(recorded_fetch(log), window=3600)
+        executor = StoppingIdlePool(1)
+
+        def worker() -> None:
+            executor.submitted.wait(WAIT)
+            executor.queued[0].run()
+
+        session = new_session()
+        scope = scoped_session(session)
+        refused = queue_job(session, loading_body(loader, 1))
+        loading = queue_job(session, loading_body(loader, 2))
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            items = items_of(list(coordinator_over(executor).run(session)))
+        finally:
+            thread.join(WAIT)
+            close_scope(scope)
+        assert items[refused.id].kind is ErrorKind.OVERLOADED
+        assert html_of(items[loading.id]) == "20"
+        assert log == [[2]]
 
     def test_a_parked_job_of_a_closed_stream_ends_with_its_scope(self, pools) -> None:
         loader = Loader(recorded_fetch([]), window=3600)

@@ -28,7 +28,6 @@ from next.deps import (
 from next.deps.cache import RequestMemo, request_memo
 from next.deps.context import ResolutionContext
 from next.deps.introspect import cached_type_hints
-from next.deps.loader import counted_job
 from next.deps.objects import (
     SCOPE_DEPENDENCY,
     ObjectProvider,
@@ -52,6 +51,7 @@ from tests.support import (
     typing_optional,
     write_page,
 )
+from tests.support.deps import counted
 
 
 PARENT = "permissions"
@@ -938,7 +938,7 @@ def _gathered(
         deadline = time.monotonic() + _HELD
 
         async def job(context: ResolutionContext) -> object:
-            with counted_job(scope, deadline):
+            with counted(scope, deadline):
                 return await resolver.acall(func, context)
 
         try:

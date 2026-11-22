@@ -61,7 +61,9 @@ _running: ContextVar[tuple[_Batch, ...]] = ContextVar(
     "next_deps_loader_running", default=()
 )
 
-_counted: ContextVar[_Job | None] = ContextVar("next_deps_loader_counted", default=None)
+_counted: ContextVar[CountedJob | None] = ContextVar(
+    "next_deps_loader_counted", default=None
+)
 
 
 def _current() -> object:
@@ -218,8 +220,8 @@ class _Batch:
         return [entry.key for entry in self.entries]
 
 
-class _Job:
-    """One running job of a request, counted until it returns or its deadline passes.
+class CountedJob:
+    """One job of a request that may add a key, counted until it ends or its deadline.
 
     It joins a hub only once the first load of the request made one.
     """
@@ -235,10 +237,26 @@ class _Job:
         self.waits = 0
         self.left = False
         self.timer: asyncio.TimerHandle | None = None
+        loaders.start(self)
+
+    @contextmanager
+    def running(self) -> Iterator[None]:
+        """Mark the code of this context as the job, so its waits on a key count."""
+        token = _counted.set(self)
+        hooked = join_waits.set(partial(_joining, self))
+        try:
+            yield
+        finally:
+            join_waits.reset(hooked)
+            _counted.reset(token)
+
+    def end(self) -> None:
+        """Stop counting the job, as it ended or will never start."""
+        self.loaders.stop(self)
 
 
 class _JobCount:
-    """The running jobs of one request and how many of them wait on a key, on its loop.
+    """The counted jobs of one request and how many of them wait on a key, on its loop.
 
     When every counted job waits on a key or left, `flush` closes the open batches.
     """
@@ -255,22 +273,24 @@ class _JobCount:
         self._parked = 0
         self._checking = False
 
-    def post(self, call: Callable[[_Job], None], job: _Job) -> None:
+    def post(self, call: Callable[[CountedJob], None], job: CountedJob) -> None:
         """Run `call` for `job` now on the loop thread, else hand it to the loop."""
         if running_loop() is self.loop:
             call(job)
         else:
             self.loop.call_soon_threadsafe(call, job)
 
-    def signal(self, call: Callable[[_Job], None], job: _Job | None) -> None:
+    def signal(
+        self, call: Callable[[CountedJob], None], job: CountedJob | None
+    ) -> None:
         """Hand `call` for the counted job of a thread to the loop, none uncounted."""
         if job is not None:
             self.loop.call_soon_threadsafe(call, job)
 
-    def join(self, job: _Job) -> None:
-        """Count a job that started, leaving it uncounted once its deadline passes.
+    def join(self, job: CountedJob) -> None:
+        """Count a job of the request, leaving it uncounted once its deadline passes.
 
-        A job that started before the hub existed may already wait on a key.
+        A job counted before the hub existed may already wait on a key.
         """
         job.joined = True
         self._jobs += 1
@@ -279,7 +299,7 @@ class _JobCount:
         delay = max(0.0, job.deadline - time.monotonic())
         job.timer = self.loop.call_later(delay, self.leave, job)
 
-    def park(self, job: _Job | None) -> None:
+    def park(self, job: CountedJob | None) -> None:
         """Mark `job` waiting on a key, checking after any wait, uncounted ones too."""
         if job is not None:
             job.waits += 1
@@ -287,7 +307,7 @@ class _JobCount:
                 self._parked += 1
         self.nudge()
 
-    def resume(self, job: _Job | None) -> None:
+    def resume(self, job: CountedJob | None) -> None:
         """Mark `job` running again once its last wait on a key ended."""
         if job is None:
             return
@@ -295,7 +315,7 @@ class _JobCount:
         if not job.waits and job.joined and not job.left:
             self._parked -= 1
 
-    def leave(self, job: _Job) -> None:
+    def leave(self, job: CountedJob) -> None:
         """Stop counting a job that returned or ran out of time, once."""
         if job.left:
             return
@@ -425,7 +445,7 @@ class _Hub:
         for batch in list(self._open.values()):
             self.close(batch)
 
-    def counted(self) -> _Job | None:
+    def counted(self) -> CountedJob | None:
         """Return the job counted in the current context when it runs in this hub."""
         job = _counted.get()
         return job if job is not None and job.hub is self else None
@@ -814,7 +834,7 @@ def _refuse_loop() -> None:
 class _Loaders:
     """The loader state of one request, its hub made by the first load alone.
 
-    Until then jobs are counted here off the loop, and the hub takes over those running.
+    Until then jobs are counted here off the loop, and the hub takes over the rest.
     """
 
     __slots__ = ("_context", "_jobs", "_lock", "hub", "root")
@@ -824,7 +844,7 @@ class _Loaders:
         self.root = root
         self.hub: _Hub | None = None
         self._context: Context | None = None
-        self._jobs: set[_Job] = set()
+        self._jobs: set[CountedJob] = set()
         self._lock = threading.Lock()
 
     def adopt(self, context: Context) -> None:
@@ -837,7 +857,7 @@ class _Loaders:
         hub.adopt(context)
 
     def made(self, loop: asyncio.AbstractEventLoop) -> _Hub:
-        """Return the hub, making it on `loop` and counting the jobs already running."""
+        """Return the hub, making it on `loop` with the jobs counted so far."""
         hub = self.hub
         if hub is not None:
             return hub
@@ -854,7 +874,7 @@ class _Loaders:
                 self.hub = hub
         return hub
 
-    def start(self, job: _Job) -> None:
+    def start(self, job: CountedJob) -> None:
         """Count `job` in the hub, or keep it for the hub the first load makes."""
         with self._lock:
             hub = self.hub
@@ -864,7 +884,7 @@ class _Loaders:
             job.hub = hub
         hub.jobs.post(hub.jobs.join, job)
 
-    def stop(self, job: _Job) -> None:
+    def stop(self, job: CountedJob) -> None:
         """Stop counting `job`, which the hub learns after it learned of its start."""
         with self._lock:
             hub = job.hub
@@ -899,30 +919,18 @@ def open_loaders(scope: RequestScope, context: Context) -> None:
         _loaders(scope).adopt(context)
 
 
-@contextmanager
-def counted_job(scope: RequestScope | None, deadline: float) -> Iterator[None]:
-    """Count the job running in this context among those that may add a key.
+def count_job(scope: RequestScope | None, deadline: float) -> CountedJob | None:
+    """Count a job of the request from now on, None outside a scope bound to a loop.
 
     The open batches of the request close once every counted job waits on a key or left.
     """
     if scope is None or scope.loop is None:
-        yield
-        return
-    loaders = _loaders(scope)
-    job = _Job(loaders, deadline)
-    loaders.start(job)
-    token = _counted.set(job)
-    hooked = join_waits.set(partial(_joining, job))
-    try:
-        yield
-    finally:
-        join_waits.reset(hooked)
-        _counted.reset(token)
-        loaders.stop(job)
+        return None
+    return CountedJob(_loaders(scope), deadline)
 
 
 @contextmanager
-def _joining(job: _Job, root: RequestScope) -> Iterator[None]:
+def _joining(job: CountedJob, root: RequestScope) -> Iterator[None]:
     """Count `job` waiting while it joins a key its own request computes elsewhere.
 
     It runs on the loop, and a wait before the hub exists stays on the job for the hub.
@@ -996,4 +1004,4 @@ def _fetch_rows[M: Model](
     return {row.pk: row for row in model._default_manager.filter(pk__in=keys)}
 
 
-__all__ = ["Loader", "counted_job", "drain_loaders", "open_loaders", "rows"]
+__all__ = ["CountedJob", "Loader", "count_job", "drain_loaders", "open_loaders", "rows"]

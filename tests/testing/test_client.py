@@ -4,6 +4,7 @@ from typing import override
 
 import pytest
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
 from django.test import Client, override_settings
 
@@ -442,6 +443,49 @@ class TestGetBoundary:
             pytest.raises(LookupError, match="no page view"),
         ):
             NextClient().boundary_token(csrf_url(), "card")
+
+
+def _signed_in(name: str) -> NextClient:
+    client = NextClient()
+    client.force_login(User.objects.create_user(name))
+    return client
+
+
+@pytest.mark.django_db()
+class TestReloadBoundary:
+    """`reload_boundary` sends a token as the runtime does and returns the response."""
+
+    @pytest.mark.parametrize(
+        "transport",
+        [None, "next.suspense.QueryTransport", "next.suspense.BodyTransport"],
+    )
+    def test_a_token_minted_for_one_user_is_refused_for_another(
+        self, trip_pages: Path, transport: str | None
+    ) -> None:
+        options = {"BINDING": "user"}
+        if transport is not None:
+            options["TRANSPORT"] = transport
+        with routed(
+            trip_pages,
+            COMPONENT_BACKENDS=COMPONENTS,
+            DEFER={"TOKENS": {"OPTIONS": options}},
+        ):
+            owner, intruder = _signed_in("owner"), _signed_in("intruder")
+            token = owner.boundary_token("/shop/", "card", sku="b")
+            mine = owner.reload_boundary("/shop/", token)
+            theirs = intruder.reload_boundary("/shop/", token)
+        assert envelope_of(mine).ops[0]["html"] == "<p>card b</p>"
+        assert theirs.status_code == 403
+        assert theirs["X-Next-Reload"] == "refused"
+        assert theirs.content == b""
+
+    def test_the_reload_keeps_the_query_of_the_url(self, trip_pages: Path) -> None:
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            token = client.boundary_token("/shop/?q=1", "card", sku="c")
+            response = client.reload_boundary("/shop/?q=1", token)
+        assert response.wsgi_request.GET["q"] == "1"
+        assert envelope_of(response).ops[0]["html"] == "<p>card c</p>"
 
 
 def carried(request: HttpRequest) -> str:

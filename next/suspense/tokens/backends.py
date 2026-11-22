@@ -16,7 +16,7 @@ from next.conf.merge import FROZEN_DEFAULTS
 from next.diagnostics import FailureLog
 from next.errors import SettingImportError
 from next.identity import SubjectBinding
-from next.suspense.errors import BoundaryPropsError, BoundaryTokenError
+from next.suspense.errors import BoundarySizeError, BoundaryTokenError
 from next.suspense.markers import TokenRejection
 from next.suspense.signals import boundary_token_rejected
 
@@ -265,7 +265,7 @@ class StackedTokenBackend(BoundaryTokenBackend):
                 f"the boundary token takes {len(token)} bytes, over MAX_BYTES of "
                 f"{settings.max_bytes}. SpillStorage or CacheStorage carries more."
             )
-            raise BoundaryPropsError(msg)
+            raise BoundarySizeError(msg)
         return token
 
     @override

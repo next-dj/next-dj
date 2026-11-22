@@ -115,6 +115,18 @@ class TestNavigate:
         assert "<p>loading</p>" in navigation.envelope.ops[0]["html"]
         assert navigation.kind is CutKind.SLOT
 
+    def test_a_streamed_navigation_finds_a_chunk_by_its_name(
+        self, browser: NextClient, pages: Path
+    ) -> None:
+        with streaming():
+            navigation = browser.navigate(
+                "/sec/slow/", origin="/sec/a/", headers={"Accept": STREAM_ACCEPT}
+            )
+        stream = navigation.stream
+        assert stream is not None
+        named = str(pages / "sec" / "slow" / "loading.djx")
+        assert stream.boundary(named) is stream.chunks[0]
+
     def test_a_streamed_origin_document_is_read_whole(
         self, browser: NextClient
     ) -> None:

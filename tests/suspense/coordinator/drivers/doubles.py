@@ -5,7 +5,7 @@ import inspect
 import threading
 import time
 from collections.abc import Callable, Coroutine, Iterator, Sequence
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from typing import Any
 
 from asgiref.sync import ThreadSensitiveContext, sync_to_async
@@ -44,7 +44,7 @@ from next.suspense.markers import (
 )
 from next.suspense.session import BoundarySession
 from next.tasks import StealableTask
-from tests.support.waits import WAIT
+from tests.support.waits import QUIET, WAIT
 
 
 POOL = Thresholds("pool", 300_000, 0.8, 2_000_000, 3)
@@ -322,6 +322,53 @@ class FullPool(HeldPool):
     def submit[R](self, task: StealableTask[R]) -> Future[R]:
         self.refused += 1
         raise BoundaryShedError
+
+
+class EagerPool(IdlePool):
+    """An idle pool that starts each unit on a thread, the first before its submit returns.
+
+    The first submission waits until its unit is done or `QUIET` passed.
+    """
+
+    def __init__(self) -> None:
+        """Start no thread yet."""
+        super().__init__(0)
+        self.threads: list[threading.Thread] = []
+        self.held: list[bool] = []
+
+    def submit[R](self, task: StealableTask[R]) -> Future[R]:
+        thread = threading.Thread(target=task.run)
+        self.threads.append(thread)
+        thread.start()
+        if len(self.threads) == 1:
+            self.held.append(not wait((task.future,), timeout=QUIET).done)
+        return task.future
+
+    def join(self) -> None:
+        for thread in self.threads:
+            thread.join(WAIT)
+
+
+class IdleFullPool(FullPool):
+    """A pool reporting free workers whose queue still refuses every unit."""
+
+    def capacity(self) -> Capacity:
+        return Capacity(4, 0, 0, 0.0)
+
+
+class StoppingIdlePool(IdlePool):
+    """An idle pool that refuses its first unit as stopped and queues the rest."""
+
+    def __init__(self, units: int) -> None:
+        """Refuse the first submission, then expect `units` more."""
+        super().__init__(units)
+        self.stopped = False
+
+    def submit[R](self, task: StealableTask[R]) -> Future[R]:
+        if not self.stopped:
+            self.stopped = True
+            raise ExecutorStoppedError
+        return super().submit(task)
 
 
 @contextlib.contextmanager
