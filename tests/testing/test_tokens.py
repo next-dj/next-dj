@@ -49,10 +49,11 @@ class TestIssueBoundaryToken:
     def test_component_overrides_reach_the_backend(self) -> None:
         tokens = (("max_age", 60),)
         token = issue_boundary_token(request_for(), claims(), tokens=tokens, at=NOW)
-        with freeze_token_clock(NOW + 60), pytest.raises(BoundaryTokenError):
+        with freeze_token_clock(NOW + 60), pytest.raises(BoundaryTokenError) as caught:
             suspense_manager.tokens().redeem(
                 request_for(), token, target(tokens=tokens)
             )
+        assert caught.value.reason is TokenRejection.EXPIRED
 
 
 class TestExpireBoundaryToken:
@@ -101,5 +102,6 @@ class TestExpireBoundaryToken:
     def test_a_reset_backend_follows_the_settings(self) -> None:
         with override_next_settings(DEFER={"TOKENS": {"OPTIONS": {"MAX_AGE": 5}}}):
             token = expire_boundary_token(request_for(), claims())
-            with pytest.raises(BoundaryTokenError):
+            with pytest.raises(BoundaryTokenError) as caught:
                 suspense_manager.tokens().redeem(request_for(), token, target())
+            assert caught.value.reason is TokenRejection.EXPIRED

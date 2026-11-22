@@ -10,7 +10,7 @@ import zlib
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from types import ModuleType
-from typing import ClassVar, Final, cast, override
+from typing import ClassVar, Final, Protocol, override
 
 from .errors import CodecUnavailableError
 
@@ -74,7 +74,7 @@ class CompressionBackend(ABC):
 
     @abstractmethod
     def compress_once(self, data: bytes, level: int) -> bytes:
-        """Compress one buffered body with a reused per-thread context."""
+        """Compress one buffered body in one shot."""
 
     def decoder(self) -> Decoder:
         """Return a fresh decoder of one stream or body, for tests and tools."""
@@ -115,6 +115,36 @@ def _required(library: ModuleType | None, token: str) -> ModuleType:
     if library is None:
         raise CodecUnavailableError(token)
     return library
+
+
+class _BrotliStream(Protocol):
+    """The calls a `brotli` or `brotlicffi` compressor answers."""
+
+    def process(self, data: bytes, /) -> bytes:
+        """Feed `data`, returning the bytes ready so far."""
+
+    def flush(self) -> bytes:
+        """Return everything fed so far in a decodable form."""
+
+    def finish(self) -> bytes:
+        """End the stream."""
+
+
+class _ZstdStream(Protocol):
+    """The calls a zstd stream of `compression.zstd` or `zstandard` answers."""
+
+    def compress(self, data: bytes, /) -> bytes:
+        """Feed `data`, returning the bytes ready so far."""
+
+    def flush(self, mode: int, /) -> bytes:
+        """Return what `mode` ends, a block or the whole frame."""
+
+
+class _ZstdFrames(Protocol):
+    """The one-shot call of a reused `compression.zstd` compressor."""
+
+    def compress(self, data: bytes, mode: int, /) -> bytes:
+        """Compress `data` ended as `mode` asks, a whole frame here."""
 
 
 class _Contexts(threading.local):
@@ -185,19 +215,19 @@ class _BrotliCompressor(Compressor):
         options: dict[str, int] = {"quality": level}
         if window is not None:
             options["lgwin"] = window
-        self._stream = library.Compressor(**options)
+        self._stream: _BrotliStream = library.Compressor(**options)
 
     @override
     def compress(self, data: bytes) -> bytes:
-        return cast("bytes", self._stream.process(data))
+        return self._stream.process(data)
 
     @override
     def flush(self) -> bytes:
-        return cast("bytes", self._stream.flush())
+        return self._stream.flush()
 
     @override
     def finish(self) -> bytes:
-        return cast("bytes", self._stream.finish())
+        return self._stream.finish()
 
 
 class BrotliBackend(CompressionBackend):
@@ -227,12 +257,14 @@ class BrotliBackend(CompressionBackend):
     @override
     def compress_once(self, data: bytes, level: int) -> bytes:
         library = _required(brotli_library(), self.coding)
-        return cast("bytes", library.compress(data, quality=level))
+        compressed: bytes = library.compress(data, quality=level)
+        return compressed
 
     @override
     def decoder(self) -> Decoder:
         library = _required(brotli_library(), self.coding)
-        return cast("Decoder", library.Decompressor().process)
+        decode: Decoder = library.Decompressor().process
+        return decode
 
 
 class _StdlibZstdCompressor(Compressor):
@@ -244,21 +276,21 @@ class _StdlibZstdCompressor(Compressor):
         """Open the stream with the level and the window as compression options."""
         parameter = library.CompressionParameter
         options = {parameter.compression_level: level, parameter.window_log: window}
-        self._stream = library.ZstdCompressor(options=options)
-        self._block = library.ZstdCompressor.FLUSH_BLOCK
-        self._frame = library.ZstdCompressor.FLUSH_FRAME
+        self._stream: _ZstdStream = library.ZstdCompressor(options=options)
+        self._block: int = library.ZstdCompressor.FLUSH_BLOCK
+        self._frame: int = library.ZstdCompressor.FLUSH_FRAME
 
     @override
     def compress(self, data: bytes) -> bytes:
-        return cast("bytes", self._stream.compress(data))
+        return self._stream.compress(data)
 
     @override
     def flush(self) -> bytes:
-        return cast("bytes", self._stream.flush(self._block))
+        return self._stream.flush(self._block)
 
     @override
     def finish(self) -> bytes:
-        return cast("bytes", self._stream.flush(self._frame))
+        return self._stream.flush(self._frame)
 
     @override
     def reset(self) -> bytes:
@@ -274,21 +306,21 @@ class _ZstandardCompressor(Compressor):
         """Open the stream with parameters derived from the level and the window."""
         params = library.ZstdCompressionParameters.from_level(level, window_log=window)
         self._context = library.ZstdCompressor(compression_params=params)
-        self._stream = self._context.compressobj()
-        self._block = library.COMPRESSOBJ_FLUSH_BLOCK
-        self._end = library.COMPRESSOBJ_FLUSH_FINISH
+        self._stream: _ZstdStream = self._context.compressobj()
+        self._block: int = library.COMPRESSOBJ_FLUSH_BLOCK
+        self._end: int = library.COMPRESSOBJ_FLUSH_FINISH
 
     @override
     def compress(self, data: bytes) -> bytes:
-        return cast("bytes", self._stream.compress(data))
+        return self._stream.compress(data)
 
     @override
     def flush(self) -> bytes:
-        return cast("bytes", self._stream.flush(self._block))
+        return self._stream.flush(self._block)
 
     @override
     def finish(self) -> bytes:
-        return cast("bytes", self._stream.flush(self._end))
+        return self._stream.flush(self._end)
 
     @override
     def reset(self) -> bytes:
@@ -311,27 +343,23 @@ def _zstd_context(library: ModuleType, level: int) -> OneShot:
     """
     if library.__name__ == _STDLIB_ZSTD:
         parameter = library.CompressionParameter
-        context = library.ZstdCompressor(
+        context: _ZstdFrames = library.ZstdCompressor(
             options={
                 parameter.compression_level: level,
                 parameter.window_log: ZSTD_WINDOW_LIMIT,
             }
         )
-        frame = library.ZstdCompressor.FLUSH_FRAME
+        frame: int = library.ZstdCompressor.FLUSH_FRAME
 
         def stdlib(data: bytes) -> bytes:
-            return cast("bytes", context.compress(data, frame))
+            return context.compress(data, frame)
 
         return stdlib
     params = library.ZstdCompressionParameters.from_level(
         level, window_log=ZSTD_WINDOW_LIMIT
     )
-    reused = library.ZstdCompressor(compression_params=params)
-
-    def zstandard(data: bytes) -> bytes:
-        return cast("bytes", reused.compress(data))
-
-    return zstandard
+    reused: OneShot = library.ZstdCompressor(compression_params=params).compress
+    return reused
 
 
 class ZstdBackend(CompressionBackend):
@@ -369,9 +397,13 @@ class ZstdBackend(CompressionBackend):
     @override
     def decoder(self) -> Decoder:
         library = _required(zstd_library(), self.coding)
-        if library.__name__ == _STDLIB_ZSTD:
-            return cast("Decoder", library.ZstdDecompressor().decompress)
-        return cast("Decoder", library.ZstdDecompressor().decompressobj().decompress)
+        decompressor = library.ZstdDecompressor()
+        decode: Decoder = (
+            decompressor.decompress
+            if library.__name__ == _STDLIB_ZSTD
+            else decompressor.decompressobj().decompress
+        )
+        return decode
 
 
 __all__ = [

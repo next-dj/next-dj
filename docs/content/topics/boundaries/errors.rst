@@ -33,7 +33,7 @@ The error UI
 ------------
 
 A component ``error.djx`` renders over the context of the call site, and a page ``error.djx`` renders over the context its directory and the directories above it provide, so nothing the failed subtree produced reaches it.
-Both read ``error``, a ``BoundaryError`` of strings and integers, never the exception itself.
+Both read ``error``, a ``BoundaryFailure`` of strings and integers, never the exception itself.
 
 ``error.kind``
    ``error``, ``timeout``, ``overloaded``, ``not_found``, ``forbidden``, or ``bad_request``, and in the browser also ``incomplete`` and ``network``.
@@ -77,6 +77,7 @@ Reporting
 
 Without a reporter, every contained failure is logged with its traceback on the ``next.boundaries`` logger under a fresh digest, and repeats of one failure inside a quiet period drop to ``DEBUG``.
 ``DEFER["ERRORS"]["REPORTER"]`` names a callable that takes the exception and the keywords ``name``, ``addressing``, ``kind``, and ``request``, and returns the digest to show, such as the event id of an error tracker.
+The ``name`` of a page boundary is the path of its ``loading.djx``, or of its ``error.djx`` when it has no ``loading.djx``, see :doc:`/content/ref/signals`.
 A reporter that returns a digest owns the report, so the framework logs nothing for that failure.
 A reporter that returns ``None`` has no reference for the failure, for example when its backend is off or sampled the event out, so the framework mints a digest and logs the failure as it does without a reporter.
 A reporter that raises, or returns anything other than ``None`` or a non-empty string, is a misconfiguration logged at ``ERROR``, and the failure then gets the default digest and log.
@@ -89,9 +90,15 @@ A boundary runs its subtree inside a lazy savepoint and a mark on the static col
 On a failure the database writes of the subtree roll back, and so do the assets, the collector notes, and the JS context values it registered, so the error UI is not followed by the stylesheet of a component that never rendered.
 The savepoint issues no statement until the subtree runs one, so a subtree that touches no database costs nothing.
 
+In autocommit
+~~~~~~~~~~~~~
+
 ``DEFER["ERRORS"]["ATOMIC"]`` decides what happens in autocommit, as on a ``GET`` request outside any transaction.
 ``"writes"``, the default, opens a transaction right before the first write of the subtree, ``True`` opens one before its first query, and ``False`` opens none, so a write in autocommit stays.
 In autocommit a boundary opens no connection and issues no statement of its own, so a page that does no database work does none, and a read-only page issues its reads alone, with no ``BEGIN`` and no ``SAVEPOINT``.
+
+Inside a transaction
+~~~~~~~~~~~~~~~~~~~~
 
 Inside a transaction the request or the code already opened, such as a ``POST`` under the default ``TRANSACTIONS`` rule, a ``GET`` with ``TRANSACTIONS["SAFE"]`` on or ``page.atomic(True)``, or a test under ``TestCase``, every mode protects the subtree with a savepoint.
 The outermost boundary on a connection takes its savepoint right before the first statement of its subtree, a transaction control statement aside, and releases it when the subtree ends.
@@ -107,7 +114,13 @@ While the connection is in autocommit, the default for a ``GET``, a failed read 
 No setting makes a boundary take a savepoint before its first read.
 A component that needs its failure contained at its own boundary inside a transaction writes inside the boundary, or wraps its queries in :func:`~django.db.transaction.atomic`, since either makes the boundary take its own savepoint.
 
+In tests
+~~~~~~~~
+
 pytest-django and Django's ``TestCase`` run each test inside a transaction, so a query count a test takes includes the ``SAVEPOINT`` and ``RELEASE`` pair of the outermost boundary that queried, which the same ``GET`` in autocommit never issues.
+
+What a rollback leaves
+~~~~~~~~~~~~~~~~~~~~~~
 
 The protection uses Django's public transaction API, an execute wrapper per connection, savepoints, and atomic blocks, so it covers what passes through them and nothing else.
 
@@ -135,3 +148,9 @@ A test about an error UI renders it instead, inside ``boundary_errors("render")`
            response = NextClient().get("/products/7/")
        assert b"data-next-retry" in response.content
        assert response.boundary_failures[0].name == "price_chart"
+
+.. seealso::
+
+   :doc:`/content/howto/contain-a-failure-with-an-error-boundary` for the task from the first ``error.djx`` to the test.
+   :doc:`/content/howto/run-a-page-in-a-transaction` for the transaction a boundary runs inside.
+   :repo:`audit-forms <tree/main/examples/audit-forms>`, :repo:`observability <tree/main/examples/observability>`, and :repo:`search-catalog <tree/main/examples/search-catalog>` for error UIs with a retry, a page-level one, and the tests that render them.

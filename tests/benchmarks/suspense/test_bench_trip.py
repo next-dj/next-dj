@@ -17,8 +17,8 @@ from tests.benchmarks.factories import (
     build_component,
     each_round,
 )
-from tests.pages.checks.metadata.trees import COMPONENTS
 from tests.support import plain_get, routed, write_page
+from tests.support.access import COMPONENTS
 
 
 if TYPE_CHECKING:
@@ -58,10 +58,8 @@ def _site(root: Path, boundaries: int) -> Iterator[Callable[..., HttpResponseBas
     )
     write_page(root, "home", _PUBLIC, body=f"<main>{calls}</main>")
     with routed(root, COMPONENT_BACKENDS=COMPONENTS):
-        try:
-            yield resolve("/home/").func
-        finally:
-            page_singleton.clear_template_caches()
+        yield resolve("/home/").func
+        page_singleton.clear_template_caches()
 
 
 def _reload(found: re.Match[str], token: str | None = None) -> HttpRequest:

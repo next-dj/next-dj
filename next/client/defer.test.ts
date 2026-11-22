@@ -323,19 +323,15 @@ describe("boundary tokens", () => {
     expect(h.requests).toHaveLength(1);
   });
 
-  it("reloads once when a posted reload reports an expired token", async () => {
-    document.body.innerHTML = wrapper("b-1", 'data-next-transport="body:_nb"');
+  it.each([
+    ["a posted token", "body:_nb", "/list/?q=1"],
+    ["a query token", "query:_nb", "/list/?q=1&_nb=tok-b-1"],
+  ])("reloads the page itself once on a 409 to %s", async (_name, transport, url) => {
+    document.body.innerHTML = wrapper("b-1", `data-next-transport="${transport}"`);
     const h = harness(() => failure(409));
     await h.partial.fetch(byId("b-1"));
     await h.partial.fetch(byId("b-1"));
-    expect(h.reload).toHaveBeenCalledTimes(1);
-  });
-
-  it("reloads the page itself, never the token url, on a 409 to a query token", async () => {
-    document.body.innerHTML = wrapper("b-1", 'data-next-transport="query:_nb"');
-    const h = harness(() => failure(409));
-    await h.partial.fetch(byId("b-1"));
-    expect(h.requests[0]!.url).toBe("/list/?q=1&_nb=tok-b-1");
+    expect(h.requests[0]!.url).toBe(url);
     expect(h.reload).toHaveBeenCalledTimes(1);
     expect(location.pathname + location.search).toBe("/list/?q=1");
   });

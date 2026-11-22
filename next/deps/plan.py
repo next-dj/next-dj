@@ -86,7 +86,6 @@ class AsyncPlan:
     Steps run in signature order, so each blocking segment sees the work before it.
     """
 
-    colours: tuple[tuple[str, Colour], ...]
     pure: InjectionPlan
     steps: tuple[AsyncStep, ...]
     target: Colour
@@ -247,7 +246,7 @@ def _awaited_after(steps: list[AsyncStep], entry: AwaitedEntry) -> None:
 
 def empty_async_plan(target: Colour) -> AsyncPlan:
     """Return the plan of a callable with nothing to inject."""
-    return AsyncPlan((), (), (), target, awaits=target is Colour.ASYNC)
+    return AsyncPlan((), (), target, awaits=target is Colour.ASYNC)
 
 
 def name_key(key: str, plan: AsyncPlan | None) -> None:
@@ -306,7 +305,6 @@ def compile_async_plan(
 
     An async filler makes an entry async, any blocking provider makes it blocking.
     """
-    colours: list[tuple[str, Colour]] = []
     pure: list[ParameterPlan] = []
     steps: list[AsyncStep] = []
     edges: list[_Edge] = []
@@ -319,7 +317,6 @@ def compile_async_plan(
             candidates, terminal = _claim(name, param, providers)
             afiller = _offered(terminal, param, candidates)
             if afiller is not None:
-                colours.append((name, Colour.ASYNC))
                 _awaited_after(steps, (name, _awaiting(param, candidates, afiller)))
                 continue
             filler = None if terminal is None else _filler(terminal, param)
@@ -328,15 +325,13 @@ def compile_async_plan(
                 terminal is not None and _blocks(terminal, param)
             )
             if blocking:
-                colours.append((name, Colour.BLOCKING))
                 _segment_after(steps, entry)
             else:
-                colours.append((name, Colour.PURE))
                 pure.append(entry)
     finally:
         _edges.reset(token)
     awaits = target is Colour.ASYNC or any(isinstance(s, Awaited) for s in steps)
-    plan = AsyncPlan(tuple(colours), tuple(pure), tuple(steps), target, awaits=awaits)
+    plan = AsyncPlan(tuple(pure), tuple(steps), target, awaits=awaits)
     return _sharing(plan, edges) if edges else plan
 
 

@@ -5,8 +5,9 @@ from django.conf import settings
 from django.test import override_settings
 
 from next.pages.checks import check_metadata_tag_rendered
-from tests.pages.checks.metadata.trees import framework, metadata_page, templated_page
+from tests.pages.checks.metadata.trees import metadata_page
 from tests.support import check_ids, patch_checks_router_manager
+from tests.support.trees import framework, templated_page
 
 
 class TestTagRendered:

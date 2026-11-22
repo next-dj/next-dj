@@ -4,22 +4,27 @@ from __future__ import annotations
 
 import functools
 import re
+import threading
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, cast
+from typing import TYPE_CHECKING, Final, Literal
 
 from next.boundaries import boundary_failed, contain
-from next.defer import ErrorKind
+from next.components.sources import get_components_manager
 from next.pages.boundaries import shown_source
 from next.pages.loaders import LOADING_TEMPLATE
 from next.suspense.connections import forcing_pool
-from next.suspense.render import Gate, gated
+from next.suspense.render import job_gates
+from next.utils import resolve_base_dir
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+
+    from next.defer import ErrorKind
 
 
 type Mode = Literal["raise", "render"]
@@ -41,9 +46,18 @@ class RecordedFailure:
     exception: Exception
 
 
-_recording: ContextVar[list[RecordedFailure] | None] = ContextVar(
-    "next_boundary_failures", default=None
+type _Sink = list[RecordedFailure] | HeldFailures
+
+_recording: ContextVar[tuple[_Sink, ...]] = ContextVar(
+    "next_boundary_failures", default=()
 )
+
+
+def _hand_on(sinks: Sequence[_Sink], failures: Sequence[RecordedFailure]) -> None:
+    """Append each of `failures`, in order, to every one of `sinks`."""
+    for sink in sinks:
+        for failure in failures:
+            sink.append(failure)
 
 
 @contextmanager
@@ -62,23 +76,24 @@ def boundary_errors(mode: Mode) -> Iterator[None]:
         _mode.reset(token)
 
 
-def _record(**kwargs: object) -> None:
-    """Append one `boundary_failed` send to the failures the current context records.
+def _record(
+    *,
+    name: str,
+    addressing: str,
+    kind: ErrorKind,
+    digest: str,
+    exception: Exception,
+    **signal: object,
+) -> None:
+    """Append one `boundary_failed` send to every recording open on this context.
 
     A failure on another thread or in another request leaves this context untouched.
     """
-    failures = _recording.get()
-    if failures is not None:
-        failures.append(
-            RecordedFailure(
-                id=str(kwargs["id"]),
-                name=str(kwargs["name"]),
-                addressing=str(kwargs["addressing"]),
-                kind=ErrorKind(str(kwargs["kind"])),
-                digest=str(kwargs["digest"]),
-                exception=cast("Exception", kwargs["exception"]),
-            )
-        )
+    recordings = _recording.get()
+    if recordings:
+        ident = str(signal["id"])
+        failure = RecordedFailure(ident, name, addressing, kind, digest, exception)
+        _hand_on(recordings, (failure,))
 
 
 @functools.cache
@@ -91,10 +106,10 @@ def _listen() -> None:
 
 
 @contextmanager
-def recording(failures: list[RecordedFailure]) -> Iterator[None]:
-    """Record into `failures` every failure contained in the block on this context."""
+def _recording_into(recordings: tuple[_Sink, ...]) -> Iterator[None]:
+    """Record every failure contained in the block on this context into `recordings`."""
     _listen()
-    token = _recording.set(failures)
+    token = _recording.set(recordings)
     try:
         yield
     finally:
@@ -105,16 +120,54 @@ def recording(failures: list[RecordedFailure]) -> Iterator[None]:
 def recorded_failures() -> Iterator[list[RecordedFailure]]:
     """Record every failure a boundary contains inside the block, in render order.
 
-    An enclosing recording receives them too, once the block ends.
+    Every enclosing recording receives each failure too, as it is recorded.
     """
-    outer = _recording.get()
     failures: list[RecordedFailure] = []
-    try:
-        with recording(failures):
-            yield failures
-    finally:
-        if outer is not None:
-            outer.extend(failures)
+    with _recording_into((*_recording.get(), failures)):
+        yield failures
+
+
+class HeldFailures:
+    """The failures of one response, held apart until its document is complete.
+
+    The recordings open where it is made get them once, wherever the response renders.
+    """
+
+    __slots__ = ("_lock", "_outer", "_settled", "failures")
+
+    def __init__(self) -> None:
+        """Hold no failure yet, noting the recordings open on this context."""
+        self.failures: list[RecordedFailure] = []
+        self._outer = _recording.get()
+        self._settled = False
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def recording(self) -> Iterator[None]:
+        """Record the failures of the block here alone, handing them on if it raises."""
+        with _recording_into((self,)):
+            try:
+                yield
+            except Exception:
+                self.settle(b"")
+                raise
+
+    def append(self, failure: RecordedFailure) -> None:
+        """Hold `failure`, or hand it on at once when it arrives after the settle."""
+        with self._lock:
+            if self._settled:
+                _hand_on(self._outer, (failure,))
+            else:
+                self.failures.append(failure)
+
+    def settle(self, document: str | bytes) -> tuple[RecordedFailure, ...]:
+        """Return the failures in the order of `document`, handed on the first time."""
+        with self._lock:
+            ordered = in_document_order(self.failures, document)
+            if not self._settled:
+                self._settled = True
+                _hand_on(self._outer, ordered)
+        return ordered
 
 
 def in_document_order(
@@ -145,19 +198,82 @@ def parallel_boundaries() -> Iterator[None]:
         yield
 
 
-_shell_gates: ContextVar[tuple[Gate, ...]] = ContextVar(
+class ComponentGate:
+    """A hold on the jobs of one component, open until released or out of time."""
+
+    __slots__ = ("entered", "name", "released")
+
+    def __init__(self, name: str) -> None:
+        """Hold the jobs of the component `name`, none of them entered yet."""
+        self.name = name
+        self.entered = threading.Event()
+        self.released = threading.Event()
+
+    def hold(self, at: float) -> None:
+        """Note a held job and wait until released, at most until the instant `at`."""
+        self.entered.set()
+        self.released.wait(max(0.0, at - time.monotonic()))
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Block until a job of the component is held, false once `timeout` passed."""
+        return self.entered.wait(timeout)
+
+    def release(self) -> None:
+        """Let every held job of the component and every later one run."""
+        self.released.set()
+
+
+@contextmanager
+def gated(name: str) -> Iterator[ComponentGate]:
+    """Hold every job of the component `name` inside the block until it is released."""
+    held = ComponentGate(name)
+    job_gates[name] = held
+    try:
+        yield held
+    finally:
+        if job_gates.get(name) is held:
+            del job_gates[name]
+        held.release()
+
+
+_shell_gates: ContextVar[tuple[ComponentGate, ...]] = ContextVar(
     "next_boundary_gates", default=()
 )
 
 
+def _component_name(name: str) -> str:
+    """Return `name` when a component source holds a component of that name."""
+    for backend in get_components_manager().backends:
+        if any(info.name == name for info in backend.iter_components()):
+            return name
+    msg = f"boundary_gate(component={name!r}) names no registered component"
+    raise LookupError(msg)
+
+
+def _page_name(page: Path | str) -> str:
+    """Return the name of the page boundary whose `loading.djx` sits in `page`.
+
+    A relative `page` reads from `BASE_DIR`, as the name a site carries does.
+    """
+    directory = Path(page)
+    base = resolve_base_dir()
+    if not directory.is_absolute() and base is not None:
+        directory = base / directory
+    loading = directory / LOADING_TEMPLATE
+    if not loading.is_file():
+        msg = f"boundary_gate(page={str(page)!r}) finds no {LOADING_TEMPLATE} there"
+        raise LookupError(msg)
+    return shown_source(loading)
+
+
 def _gate_name(component: str | None, page: Path | str | None) -> str:
     """Return the site name the jobs of a component or of a page boundary carry."""
-    if (component is None) == (page is None):
-        msg = "boundary_gate takes exactly one of component= or page="
-        raise TypeError(msg)
-    if component is not None:
-        return component
-    return shown_source(Path(cast("Path | str", page)) / LOADING_TEMPLATE)
+    if component is not None and page is None:
+        return _component_name(component)
+    if component is None and page is not None:
+        return _page_name(page)
+    msg = "boundary_gate takes exactly one of component= or page="
+    raise TypeError(msg)
 
 
 @contextmanager
@@ -166,7 +282,7 @@ def boundary_gate(
     component: str | None = None,
     page: Path | str | None = None,
     after_shell: bool = False,
-) -> Iterator[Gate]:
+) -> Iterator[ComponentGate]:
     """Hold every deferred job of `component`, or of the page boundary at `page`.
 
     `page` is the directory of its `loading.djx`, and `after_shell` opens after a shell.
@@ -196,14 +312,16 @@ def raise_first(failures: Sequence[RecordedFailure]) -> None:
 
 
 __all__ = [
+    "ComponentGate",
+    "HeldFailures",
     "Mode",
     "RecordedFailure",
     "boundary_errors",
     "boundary_gate",
+    "gated",
     "in_document_order",
     "parallel_boundaries",
     "raise_first",
     "recorded_failures",
-    "recording",
     "release_gates",
 ]

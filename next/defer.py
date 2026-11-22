@@ -10,7 +10,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
 
 from django.conf import settings
@@ -38,6 +38,20 @@ class Delivery(enum.StrEnum):
     INLINE = "inline"
     SHELL = "shell"
     PREFETCH = "prefetch"
+
+
+JOBLESS: Final[frozenset[Delivery]] = frozenset({Delivery.SHELL, Delivery.PREFETCH})
+"""The deliveries that answer the loading UI and run no deferred job."""
+
+
+class Depth(enum.StrEnum):
+    """How much of a page a router prefetch asks for, which `request.next.depth` names.
+
+    A shell runs no deferred job, and a full prefetch is the page a press may show.
+    """
+
+    SHELL = "shell"
+    FULL = "full"
 
 
 class WrapperTag(enum.Enum):
@@ -74,7 +88,7 @@ _STATUSES: Final[Mapping[ErrorKind, int]] = {
 RESERVED_OPTIONS: Final[frozenset[str]] = frozenset(
     {"defer", "timeout", "reload", "delay"}
 )
-"""Call-site keywords a component tag reads as boundary options, never as props."""
+"""Call-site keywords the component tag reserves, so none of them names a prop."""
 
 TOKEN_OVERRIDES: Final[frozenset[str]] = frozenset(
     {"max_age", "bucket", "binding", "max_bytes"}
@@ -91,6 +105,7 @@ MIN_KEY_LENGTH: Final = 32
 """The fewest characters a token signing key holds."""
 
 DEFAULT_TAG: Final = "div"
+"""The wrapper element of a boundary whose call site and declaration name none."""
 
 _DURATION = re.compile(r"(?P<amount>[0-9]+(?:\.[0-9]+)?)(?P<unit>ms|s)")
 _TAG = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
@@ -212,7 +227,7 @@ def _props(value: object) -> tuple[str, ...]:
             msg = f"a prop is named by a Python identifier, got {name!r}"
             raise BoundaryOptionError(msg)
         if name in RESERVED_OPTIONS:
-            msg = f"the prop {name!r} is a boundary option of the component tag"
+            msg = f"the prop {name!r} is reserved by the component tag"
             raise BoundaryOptionError(msg)
         if name in names:
             msg = f"the prop {name!r} is declared twice"
@@ -236,10 +251,6 @@ def _tag(value: object) -> str | None:
         )
         raise BoundaryOptionError(msg)
     return value
-
-
-def _duration(value: object) -> float | None:
-    return None if value is None else parse_duration(value)
 
 
 def _parallel(value: object) -> bool | None:
@@ -299,8 +310,6 @@ class BoundaryOptions:
     tag_declared: bool = False
     parallel: bool | None = None
     tokens: tuple[tuple[str, object], ...] = ()
-    reload: float | None = None
-    delay: float | None = None
 
     @classmethod
     def parse(
@@ -324,13 +333,9 @@ class BoundaryOptions:
             tokens=_tokens(tokens),
         )
 
-    def paced(self, *, reload: object = None, delay: object = None) -> BoundaryOptions:
-        """Return the options with the `reload=` and `delay=` a call site wrote."""
-        return replace(self, reload=_duration(reload), delay=_duration(delay))
-
 
 @dataclass(frozen=True, slots=True)
-class BoundaryError:
+class BoundaryFailure:
     """The `error` an `error.djx` reads, strings and integers only, never an exception.
 
     Outside `DEBUG` it has no `message` or `traceback`, which a template reads as empty.
@@ -344,18 +349,18 @@ class BoundaryError:
     @staticmethod
     def of(
         kind: ErrorKind, digest: str, *, retry: bool, message: str, traceback: str
-    ) -> BoundaryError:
+    ) -> BoundaryFailure:
         """Return the error of `kind`, with its message and traceback under `DEBUG`."""
         if settings.DEBUG:
-            return DebugBoundaryError(
+            return DebugBoundaryFailure(
                 kind, digest, kind.status, retry, message, traceback
             )
-        return BoundaryError(kind, digest, kind.status, retry)
+        return BoundaryFailure(kind, digest, kind.status, retry)
 
 
 @dataclass(frozen=True, slots=True)
-class DebugBoundaryError(BoundaryError):
-    """A `BoundaryError` with the message and the traceback a `DEBUG` page shows."""
+class DebugBoundaryFailure(BoundaryFailure):
+    """A `BoundaryFailure` with the message and the traceback a `DEBUG` page shows."""
 
     message: str = field(repr=False)
     traceback: str = field(repr=False)
@@ -390,13 +395,13 @@ class Site:
 class CallRenderer(Protocol):
     """How the component tag renders the parts of one deferred call."""
 
-    def loading(self, context: Context) -> tuple[str, BoundaryError | None]:
+    def loading(self, context: Context) -> tuple[str, BoundaryFailure | None]:
         """Render the loading UI, with the error a misfit shape at its site settled."""
 
-    def body(self, context: Context) -> tuple[str, BoundaryError | None]:
+    def body(self, context: Context) -> tuple[str, BoundaryFailure | None]:
         """Render the component inside its error boundary, with the error it showed."""
 
-    def error(self, context: Context, kind: ErrorKind) -> tuple[str, BoundaryError]:
+    def error(self, context: Context, kind: ErrorKind) -> tuple[str, BoundaryFailure]:
         """Render the error UI of `kind` without the component, with the error shown."""
 
 
@@ -449,19 +454,21 @@ def deadline(at: float | None) -> Iterator[None]:
 __all__ = [
     "DEFAULT_TAG",
     "DEFERRALS_KEY",
+    "JOBLESS",
     "MAX_DURATION",
     "MIN_KEY_LENGTH",
     "RESERVED_OPTIONS",
     "TOKEN_OVERRIDES",
     "Addressing",
-    "BoundaryError",
+    "BoundaryFailure",
     "BoundaryOptionError",
     "BoundaryOptions",
     "CallRenderer",
-    "DebugBoundaryError",
+    "DebugBoundaryFailure",
     "DeferMode",
     "DeferredCall",
     "Delivery",
+    "Depth",
     "ErrorKind",
     "Site",
     "WrapperTag",

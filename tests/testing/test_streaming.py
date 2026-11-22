@@ -1,18 +1,26 @@
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from django.http import HttpResponse, StreamingHttpResponse
-from django.test import AsyncClient, Client
+from django.test import AsyncClient, Client, override_settings
 
 from next.compression import GzipBackend
 from next.partial.headers import STREAM_ACCEPT
-from next.testing import NextClient, StreamedPage, boundary_errors, boundary_gate
+from next.testing import (
+    NextClient,
+    SseEvent,
+    StreamedPage,
+    boundary_errors,
+    boundary_gate,
+    sse_events,
+)
 from next.testing.boundaries import recorded_failures
-from next.testing.streaming import _accepting, _events, astream_chunks, read_stream
-from tests.pages.checks.metadata.trees import COMPONENTS
+from next.testing.streaming import _accepting, aread_stream, read_stream
 from tests.support import routed, write_page
+from tests.support.access import COMPONENTS
 
 
 _SHELL = (
@@ -243,9 +251,24 @@ class TestEvents:
     def test_comments_unknown_fields_and_empty_blocks_are_skipped(self) -> None:
         body = (
             "retry: 10\n\n: comment\n\nevent: one\ndata: a\r\ndata:b\r\n\r\n"
-            "data: " + chr(0x2028) + "\n\n"
+            "id: 7\rdata: " + chr(0x2028) + "\n\n"
         )
-        assert _events(body) == [("one", "a\nb"), ("message", chr(0x2028))]
+        assert sse_events(body) == (
+            [SseEvent("one", "a\nb"), SseEvent("message", chr(0x2028), "7")],
+            False,
+        )
+
+    @pytest.mark.parametrize(
+        ("tail", "cut"),
+        [
+            pytest.param("", False, id="whole"),
+            pytest.param(": ping\n", False, id="comment"),
+            pytest.param("event: two\ndata: x\n", True, id="unended"),
+        ],
+    )
+    def test_a_body_that_stops_inside_an_event_is_cut(self, tail: str, cut) -> None:
+        events, stopped = sse_events("data: a\n\n" + tail)
+        assert (events, stopped) == ([SseEvent("message", "a")], cut)
 
 
 class TestAccepting:
@@ -332,7 +355,7 @@ class TestGatedStream:
             routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS, DEFER={"DEADLINE": 2}),
             boundary_gate(component="card", after_shell=True),
         ):
-            page = asyncio.run(astream_chunks(AsyncClient(), "/one/"))
+            page = asyncio.run(aread_stream(AsyncClient(), "/one/"))
         assert "<p>card loading</p>" in page.shell
         assert page.chunks[0].state == "ready"
 
@@ -349,6 +372,32 @@ class TestGatedStream:
     @pytest.mark.parametrize("gate", [{}, {"component": "card", "page": "slow"}])
     def test_a_gate_names_exactly_one_boundary(self, gate: dict) -> None:
         with pytest.raises(TypeError, match="exactly one"), boundary_gate(**gate):
+            pass
+
+    def test_a_gate_on_a_directory_without_a_loading_djx_is_refused(
+        self, gated_pages: Path
+    ) -> None:
+        with (
+            routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS),
+            pytest.raises(LookupError, match=r"no loading\.djx"),
+            boundary_gate(page=gated_pages / "one"),
+        ):
+            pass
+
+    def test_a_relative_page_reads_from_base_dir(self, gated_pages: Path) -> None:
+        with (
+            routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS),
+            override_settings(BASE_DIR=gated_pages.parent),
+            boundary_gate(page="pages/slow") as held,
+        ):
+            assert held.name == "pages/slow/loading.djx"
+
+    def test_a_gate_on_an_unknown_component_is_refused(self, gated_pages: Path) -> None:
+        with (
+            routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS),
+            pytest.raises(LookupError, match="'crad'"),
+            boundary_gate(component="crad"),
+        ):
             pass
 
 
@@ -412,3 +461,55 @@ def test_a_reloaded_failure_names_the_wrapper_it_morphs(tmp_path: Path) -> None:
     (failure,) = failures
     (op,) = envelope.ops
     assert op["target"] == {"boundary": failure.id}
+
+
+def _down(tmp_path: Path) -> Path:
+    root = tmp_path / "pages"
+    root.mkdir()
+    (root / "layout.djx").write_text(_LAYOUT)
+    write_page(root, "down", _FAILING_PAGE, body="<main>{{ thing }}</main>")
+    (root / "down" / "loading.djx").write_text("<p>wait</p>")
+    (root / "down" / "error.djx").write_text("<p>page failed</p>")
+    return root
+
+
+def _plain(url: str) -> StreamedPage:
+    return read_stream(Client(), url)
+
+
+def _next(url: str) -> StreamedPage:
+    return NextClient().get_stream(url)
+
+
+def _async(url: str) -> StreamedPage:
+    return asyncio.run(aread_stream(AsyncClient(), url))
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize(
+    "reader", [_plain, _next, _async], ids=["read_stream", "get_stream", "aread"]
+)
+def test_a_chunk_failure_reaches_every_enclosing_block_once(
+    tmp_path: Path, reader: Callable[[str], StreamedPage]
+) -> None:
+    with (
+        routed(_down(tmp_path), COMPONENT_BACKENDS=COMPONENTS),
+        boundary_errors("render"),
+        recorded_failures() as outer,
+        recorded_failures() as inner,
+    ):
+        page = reader("/down/")
+    (chunk,) = page.chunks
+    assert [failure.id for failure in outer] == [chunk.id]
+    assert outer == inner
+
+
+@pytest.mark.django_db()
+def test_get_stream_keeps_the_chunk_failure_on_the_response(tmp_path: Path) -> None:
+    with (
+        routed(_down(tmp_path), COMPONENT_BACKENDS=COMPONENTS),
+        boundary_errors("render"),
+        recorded_failures() as outer,
+    ):
+        page = NextClient().get_stream("/down/")
+    assert outer == list(page.response.boundary_failures)

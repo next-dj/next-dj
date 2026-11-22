@@ -7,10 +7,11 @@ Module summary
 --------------
 
 Four modules carry deferred boundaries and error boundaries.
-``next.defer`` holds the vocabulary every area shares, the modes, the error kinds, the options a boundary declares, and the deadline of the current job.
-``next.boundaries`` holds the inline error boundary and the ``boundary_failed`` signal.
-``next.transactions`` holds the transaction rule of next.dj views and the lazy savepoint a boundary guards its subtree with.
+``next.defer`` holds the vocabulary every area shares, the modes, the deliveries, the prefetch depths, the error kinds, the options a boundary declares, and the deadline of the current job.
+``next.boundaries`` is the package of the inline error boundary and the ``boundary_failed`` signal.
+``next.transactions`` is the package of the transaction rule of next.dj views and the lazy savepoint a boundary guards its subtree with.
 ``next.suspense`` runs deferred jobs, decides the delivery of a response, writes a streamed page, and mints the tokens of client-trip boundaries.
+Its ``__all__`` lists the extension points and the types their signatures name, and the rest imports by the full path of its module.
 :doc:`/content/topics/boundaries/index` is the guide, and the ``DEFER`` and ``TRANSACTIONS`` scopes are in :doc:`settings`.
 
 Declarations
@@ -19,11 +20,11 @@ Declarations
 ``page.defer(*, timeout=None, parallel=None)`` at the top of a ``page.py`` bounds the job of the page boundary by ``timeout`` and places it, ``True`` pinning the pool, ``False`` the request thread, and ``None`` leaving it to placement.
 
 ``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=None, tokens=None)`` at the top of a ``component.py`` delivers the component as a boundary in ``mode``.
-``props`` names the props a reload or a retry renders from, ``tag`` the wrapper element, ``None`` adopting the root of the body, and ``tokens`` overrides ``max_age``, ``bucket``, ``binding``, or ``max_bytes`` of ``DEFER["TOKENS"]["OPTIONS"]`` for this component.
+``props`` names the props a reload or a retry renders from, ``tag`` the wrapper element, ``WrapperTag.SITE`` leaving it to the call site and ``None`` adopting the root of the body, and ``tokens`` overrides ``max_age``, ``bucket``, ``binding``, or ``max_bytes`` of ``DEFER["TOKENS"]["OPTIONS"]`` for this component.
 ``component.props(*names)`` declares the props alone, and naming props through both is an error.
 
 ``page.atomic(atomic, *, aliases=None)`` declares the transaction of a page, see :doc:`pages`, and ``page.compress(enabled)`` its compression, see :doc:`compression`.
-A declaration outside its module kind, inside a function, or with a value outside its shape declares nothing and is reported as ``next.E222`` or ``next.E240``.
+A declaration outside its module kind, inside a function, or with a value outside its shape declares nothing and is reported by ``next.E222`` or ``next.E240``.
 
 The vocabulary
 --------------
@@ -31,18 +32,31 @@ The vocabulary
 .. autoclass:: next.defer.DeferMode
    :no-special-members:
 
+.. autoclass:: next.defer.Delivery
+   :no-special-members:
+
+.. autoclass:: next.defer.Depth
+   :no-special-members:
+
+``JOBLESS`` is the set of deliveries that answer the loading UI and run no deferred job, ``SHELL`` and ``PREFETCH``.
+
+.. autoclass:: next.defer.WrapperTag
+   :no-special-members:
+
 .. autoclass:: next.defer.ErrorKind
    :no-special-members:
 
 .. autoclass:: next.defer.BoundaryOptions
-   :members: parse, paced
+   :members: parse
 
-.. autoclass:: next.defer.BoundaryError
+.. autoclass:: next.defer.BoundaryFailure
    :members: of
 
-.. autoclass:: next.defer.DebugBoundaryError
+.. autoclass:: next.defer.DebugBoundaryFailure
 
 .. autoexception:: next.defer.BoundaryOptionError
+
+``next.defer`` defines ``BoundaryOptionError``, as the modules that raise it cannot import ``next.suspense``, and ``next.suspense`` re-exports it beside the other boundary errors.
 
 .. autofunction:: next.defer.parse_duration
 
@@ -50,7 +64,8 @@ The vocabulary
 
 .. autofunction:: next.defer.deadline
 
-``RESERVED_OPTIONS`` holds ``defer``, ``timeout``, ``reload``, and ``delay``, the call-site keywords a component tag reads as boundary options and never passes as props.
+``RESERVED_OPTIONS`` holds ``defer``, ``timeout``, ``reload``, and ``delay``, the keywords a component never takes as a prop.
+A component tag reads ``defer`` and ``timeout`` as boundary options, and ``reload`` and ``delay`` belong to ``{% zone %}`` alone, so a component tag that writes either is a template syntax error.
 ``MAX_DURATION`` is one day in seconds, the longest duration an option takes.
 
 Error boundaries
@@ -77,7 +92,9 @@ Transactions
 
 .. autoclass:: next.transactions.AtomicOverride
 
-.. autofunction:: next.transactions.atomic_aliases
+.. autoclass:: next.transactions.AtomicScope
+
+.. autofunction:: next.transactions.atomic_scope
 
 .. autofunction:: next.transactions.request_atomic
 
@@ -88,15 +105,29 @@ Transactions
 .. autoclass:: next.transactions.LazySavepoint
    :members: rollback
 
-.. autofunction:: next.transactions.lazy_savepoint
-
 .. autofunction:: next.transactions.keep_savepoints
 
 .. autofunction:: next.transactions.safe_aliases
 
 .. autofunction:: next.transactions.statement_kind
 
-``AtomicMode`` is ``True``, ``False``, or ``"writes"``, the value ``DEFER["ERRORS"]["ATOMIC"]`` and ``lazy_savepoint`` take, and ``TransactionRule`` is the callable ``TRANSACTIONS["RULE"]`` names, taking the request and the ``ViewKind`` and returning alias names.
+``LazySavepoint`` has caveats that follow from the transaction a request is in.
+In autocommit, a write in an atomic block opened before the handle's transaction commits with that block, not with the subtree.
+A durable block after the first write of the subtree raises the ``RuntimeError`` Django raises, except under a ``TestCase``.
+A rollback to the savepoint keeps the ``on_commit`` hooks the subtree added.
+Once a write lands in the handle's own transaction, a database error the subtree catches dooms that transaction.
+
+.. py:data:: next.transactions.AtomicMode
+
+   ``True``, ``False``, or ``"writes"``, the value ``DEFER["ERRORS"]["ATOMIC"]`` and the ``atomic`` argument of ``LazySavepoint`` take.
+   ``True`` opens a transaction before the first statement of the subtree, ``"writes"`` before its first write, and ``False`` never.
+
+.. py:data:: next.transactions.TransactionRule
+
+   The callable ``TRANSACTIONS["RULE"]`` names, taking the ``HttpRequest`` and the ``ViewKind`` and returning the iterable of database aliases to wrap.
+
+.. autoclass:: next.transactions.StatementKind
+   :no-special-members:
 
 Delivery and streams
 --------------------
@@ -106,6 +137,9 @@ Delivery and streams
 
 .. autoclass:: next.suspense.DefaultStreamPolicy
    :no-members:
+
+.. autoclass:: next.suspense.DeliveryReason
+   :no-special-members:
 
 .. autoclass:: next.suspense.PageFacts
    :no-special-members:
@@ -132,7 +166,7 @@ Lanes
 -----
 
 .. autoclass:: next.suspense.BoundaryExecutor
-   :members: submit, steal, capacity, shutdown, abandon
+   :members: submit, steal, capacity, shutdown
 
 .. autoclass:: next.suspense.LaneExecutor
    :no-members:
@@ -142,6 +176,17 @@ Lanes
 
 .. autoclass:: next.suspense.QueueDelay
    :no-members:
+
+.. autoclass:: next.suspense.Capacity
+   :no-special-members:
+
+.. autoclass:: next.suspense.Admit
+   :no-special-members:
+
+.. autoclass:: next.tasks.StealableTask
+   :members: when_claimed, claim, run
+
+``QuitParentExecutor`` of ``next.tasks`` is the executor class a pool thread binds as its current executor, which asgiref reads as a parent to leave alone.
 
 .. autoclass:: next.suspense.connections.ThreadState
    :members: capture, apply, reset
@@ -153,6 +198,11 @@ Lanes
 
 Errors
 ------
+
+``next.suspense.BoundaryOptionError`` is ``next.defer.BoundaryOptionError``, defined there and described above.
+
+.. autoexception:: next.suspense.BoundaryRefusedError
+   :no-members:
 
 .. autoexception:: next.suspense.BoundaryShedError
    :no-members:
@@ -202,6 +252,26 @@ Tokens
      - ``HeaderTransport`` sends ``X-Next-Boundary``, ``QueryTransport`` the ``_nb`` query field, and ``BodyTransport`` a ``POST`` form field.
 
 Each name lives in ``next.suspense``, and the values are dotted paths, such as ``"next.suspense.EncryptedSeal"``.
+A project class takes the place of a shipped one by subclassing the matching base.
+``available()`` of a codec and of a seal is a class method that tells whether the library it needs imports, and a class that answers false mints no token, which ``next.E230`` and ``next.E237`` report.
+
+.. autoclass:: next.suspense.TokenCodec
+   :members: available, dumps, loads
+
+.. autoclass:: next.suspense.TokenStorage
+   :members: put, get
+
+.. autoclass:: next.suspense.TokenSeal
+   :members: encrypts, available, length, seal, open
+
+.. autoclass:: next.suspense.TokenTransport
+   :members: extract, describe
+
+.. autoclass:: next.suspense.tokens.context.TokenContext
+   :no-special-members:
+
+.. autoclass:: next.suspense.TokenRejection
+   :no-special-members:
 
 .. autoclass:: next.suspense.BoundaryTokenBackend
    :no-members:
@@ -217,7 +287,7 @@ Signals
 Checks
 ------
 
-``next.suspense.checks`` and ``next.pages.checks.deferral`` report the deferral declarations, the token settings, the bundles, the stream nonce, and the request-lane sources, see :doc:`system-checks`.
+``next.suspense.checks`` and ``next.pages.checks.declarations`` report the deferral declarations, the token settings, the bundles, the stream nonce, and the request-lane sources, see :doc:`system-checks`.
 
 See also
 --------
@@ -227,3 +297,4 @@ See also
    :doc:`/content/topics/boundaries/index` for the guide.
    :doc:`views` for the views that answer a boundary reload.
    :doc:`deps` for ``RequestScope`` and ``Loader``.
+   :repo:`search-catalog <tree/main/examples/search-catalog>` for streamed boundaries and a ``Loader``, and :repo:`observability <tree/main/examples/observability>` for a page boundary and a ``manual`` one, see :doc:`/content/misc/examples`.

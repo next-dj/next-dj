@@ -552,12 +552,13 @@ Default value.
 
    {"SAFE": False, "UNSAFE": True, "ALIASES": ("default",), "RULE": None}
 
-``SAFE`` decides for ``GET``, ``HEAD``, ``OPTIONS``, and ``TRACE``, and ``UNSAFE`` for every other method, ``True`` meaning a transaction on each alias of ``ALIASES``.
+``SAFE`` decides for ``GET``, ``HEAD``, ``OPTIONS``, and ``TRACE``, and ``UNSAFE`` for every other method, ``True`` meaning a transaction on each alias of ``ALIASES`` opened on entry, ``"writes"`` the same transaction opened right before the first write on each alias, and ``False`` none.
 ``ALIASES`` is a list of ``DATABASES`` aliases, or ``"all"`` for every alias ``DATABASES`` declares, nested the way ``ATOMIC_REQUESTS`` nests them, so the last alias holds the outermost transaction and commits last.
 An alias ``DATABASES`` does not declare is skipped, so a project without a database opens no transaction.
-``RULE`` is the dotted path of a callable taking the request and the view kind, ``page`` for a page, ``zone`` for a zone request to a page, ``boundary`` for a boundary reload, ``navigation`` for a client router navigation, or ``action`` for a form action, and returning the aliases to wrap, which replaces ``SAFE``, ``UNSAFE``, and ``ALIASES`` when set.
-Its answer passes the same filter as ``ALIASES``, so a single alias name counts as a one-item tuple, an undeclared alias is skipped, and a repeated one opens once.
-The transaction opens eagerly, so a :func:`~django.db.transaction.on_commit` hook registered before the first query still waits for the commit, and a request that wraps no alias touches no connection.
+``RULE`` is the dotted path of a callable taking the request and the view kind, ``page`` for a page, ``zone`` for a zone request to a page, ``boundary`` for a boundary reload, ``navigation`` for a client router navigation, or ``action`` for a form action, and returning the aliases to wrap on entry, or an ``AtomicOverride`` of ``next.transactions`` that names the mode too, which replaces ``SAFE``, ``UNSAFE``, and ``ALIASES`` when set.
+Its answer passes the same filter as ``ALIASES``, so a single alias name counts as a one-item tuple, an undeclared alias is skipped, and a repeated one opens once, and an ``AtomicOverride`` with a mode other than the three raises :exc:`~django.core.exceptions.ImproperlyConfigured`.
+Under ``True`` the transaction opens eagerly, so a :func:`~django.db.transaction.on_commit` hook registered before the first query still waits for the commit, and a request that wraps no alias touches no connection.
+Under ``"writes"`` the reads before the first write run in autocommit, a request that writes nothing touches no connection, and a hook registered before the first write runs at once, see :ref:`howto-run-a-page-in-a-transaction`.
 The aliases come from ``django.db.connections``, the source ``ATOMIC_REQUESTS`` reads, and the scope is read once and again after a settings reload or a change of the connection settings.
 Every view next.dj mounts for pages and form actions, zone requests included, follows this rule in place of ``ATOMIC_REQUESTS``, which other Django views keep.
 The access checks of a page and of a form action run before the transaction opens, so a refused request opens none, and the checks of a form action on its bound row run inside it, see :doc:`views` and :doc:`forms`.
@@ -567,7 +568,7 @@ A form action answers only ``POST``, so under the default ``UNSAFE`` a :func:`~d
 An action whose handler does slow work outside the database, such as a sleep, an outbound HTTP call, or sending mail, opts out with ``atomic=False`` or ``Meta.atomic = False``, so it holds no connection inside an open transaction while that work runs.
 
 A missing key takes its default, any key besides the four is reported as ``next.E035``, and a value of the wrong type is reported as ``next.E076`` and read as its default.
-``manage.py check`` reports a ``RULE`` that does not import or names no callable as ``next.E237``, the same path raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the rule is first read, and an ``ALIASES`` entry missing from ``DATABASES`` is reported as ``next.W179``.
+``manage.py check`` reports a ``RULE`` that does not import or names no callable as ``next.E219``, the same path raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the rule is first read, and an ``ALIASES`` entry missing from ``DATABASES`` is reported as ``next.W179``.
 A database alias with ``ATOMIC_REQUESTS`` set is reported as ``next.W154``, since next.dj views ignore it.
 
 Deferred work
@@ -776,6 +777,7 @@ gzip takes no window, its window is fixed at 32 KB.
 ``MIN_SIZE`` is the smallest buffered body in bytes that is compressed.
 ``CONTENT_TYPES`` lists the lower-case media types that are compressed, exactly or as a ``type/*`` family.
 ``STREAMS`` names who compresses a next.dj document stream, ``"self"`` for the stream itself and ``"middleware"`` for the middleware, the choice for a project whose other middleware rewrites streamed bodies.
+The choices of ``STREAMS`` are the members of ``StreamOwner``, and those of ``SSE_TOPICS`` the members of ``TopicMode``, both in ``next.conf.compression``.
 ``SSE`` decides whether ``text/event-stream`` responses are compressed.
 ``SSE_TOPICS`` decides how a realtime topic stream is compressed, ``"off"`` for not at all, ``"reset"`` for a fresh window per event on a codec that can drop its window, and ``"shared"`` for one window across the stream.
 ``PADDING`` is the most random characters the comment appended to each flushed write of an HTML document or an event stream carries, ``0`` turning the padding off.
@@ -828,6 +830,7 @@ Default value.
    }
 
 The browser reads every key but ``ENABLED``, ``PROGRESS``, ``SPECULATION``, ``CUT``, ``DIGEST``, and ``CURRENT["BACKEND"]`` from the ``$router`` payload entry.
+The string choices of ``SCOPE``, ``FOREIGN``, ``PREFETCH``, ``PRESS``, ``INTERCEPT``, and ``SPECULATION`` are the members of ``RouterScope``, ``ForeignMode``, ``PrefetchMode``, ``PressMode``, ``InterceptMode``, and ``Eagerness`` of ``next.conf.router``, which equal the strings, see :doc:`conf`.
 
 ``ENABLED``, default ``True``
    Switches the router on.
@@ -909,8 +912,8 @@ The browser reads every key but ``ENABLED``, ``PROGRESS``, ``SPECULATION``, ``CU
    ``CURRENT["BACKEND"]`` names the ``CurrentLinks`` subclass that marks the links.
    ``CURRENT["CONTAINERS"]`` lists the navigation containers whose links are marked, each a tag name, ``[attr]``, or ``[attr=value]`` with the value bare or quoted.
 
-A missing key takes its default, nested ``CURRENT`` keys included, and a key or value outside its shape is reported as ``next.E236`` and read as its default.
-A ``CUT``, ``DIGEST`` or ``CURRENT['BACKEND']`` path that names no usable class is reported as ``next.E237``.
+A missing key takes its default, nested ``CURRENT`` keys included, an unknown key is reported as ``next.E035``, and a value outside its shape is reported as ``next.E076`` and read as its default.
+A ``CUT``, ``DIGEST`` or ``CURRENT['BACKEND']`` path that names no usable class is reported as ``next.E219``.
 See :doc:`/content/topics/router/index`, :doc:`/content/topics/router/prefetch`, and :doc:`router`.
 
 Strictness

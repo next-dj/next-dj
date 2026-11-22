@@ -5,15 +5,19 @@ from __future__ import annotations
 import sys
 import threading
 from collections import OrderedDict
-from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Final, Literal, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from next.caches import DEFAULT_CACHE_SIZE
-from next.conf.defer import SCOPE, SHAPE, Section, Shape
-from next.conf.merge import FROZEN_DEFAULTS
-from next.conf.scopes import scope_value
-from next.defer import Addressing, DeferMode, parse_duration
+from next.conf.defer import (
+    PlacementMode,
+    defer_count,
+    defer_read,
+    defer_seconds,
+    fraction,
+    placement_choice,
+)
+from next.defer import Addressing, DeferMode
 from next.suspense.markers import Placement, Verdict
 
 
@@ -32,7 +36,7 @@ BAND: Final = 0.1
 """The share of `HANDOFF` a site's wall time must cross to change lanes."""
 
 _NS: Final = 1_000_000_000
-_PATH: Final = ("OPTIONS", "PLACEMENT")
+_PATH: Final = ("EXECUTOR", "OPTIONS", "PLACEMENT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,37 +117,15 @@ COSTS: Final = CostTable()
 """The table every response of this process places its jobs by."""
 
 
-def _section() -> Section:
-    section = cast("Section", SHAPE.keys["EXECUTOR"])
-    for key in _PATH:
-        section = cast("Section", section.keys[key])
-    return section
-
-
-def _nested(value: object, keys: tuple[str, ...]) -> object:
-    for key in keys:
-        if not isinstance(value, Mapping):
-            return None
-        value = value.get(key)
-    return value
-
-
-def _setting(key: str) -> object:
-    value = _nested(scope_value(SCOPE, "EXECUTOR"), (*_PATH, key))
-    if cast("Shape", _section().keys[key]).usable(value):
-        return value
-    return _nested(FROZEN_DEFAULTS[SCOPE], ("EXECUTOR", *_PATH, key))
-
-
 def _nanoseconds(key: str) -> int:
-    return round(parse_duration(_setting(key)) * _NS)
+    return round(defer_seconds(*_PATH, key) * _NS)
 
 
 @dataclass(frozen=True, slots=True)
 class Thresholds:
     """The `PLACEMENT` options, durations held in nanoseconds like the averages."""
 
-    mode: Literal["adaptive", "pool"]
+    mode: PlacementMode
     handoff: int
     cpu_ratio: float
     cpu_max: int
@@ -153,11 +135,11 @@ class Thresholds:
     def from_settings(cls) -> Thresholds:
         """Return the thresholds the settings hold, a misfit read as its default."""
         return cls(
-            mode=cast("Literal['adaptive', 'pool']", _setting("MODE")),
+            mode=defer_read(placement_choice, *_PATH, "MODE"),
             handoff=_nanoseconds("HANDOFF"),
-            cpu_ratio=float(cast("float", _setting("CPU_RATIO"))),
+            cpu_ratio=float(defer_read(fraction, *_PATH, "CPU_RATIO")),
             cpu_max=_nanoseconds("CPU_MAX"),
-            explore=cast("int", _setting("EXPLORE")),
+            explore=defer_count(*_PATH, "EXPLORE"),
         )
 
 

@@ -582,7 +582,7 @@ class TestAuditEntriesOfKind:
 
     def test_the_log_ordering_reads_through_its_index(self) -> None:
         newest = AuditEntry.objects.order_by("-created_at", "-pk")[:21]
-        assert "audit_newest_idx" in newest.explain()
+        assert "USING INDEX audit_newest_idx" in newest.explain()
 
 
 @pytest.mark.django_db()
@@ -594,6 +594,13 @@ class TestAuditTotals:
         create_audit_entry(source=AuditEntry.SOURCE_SIGNAL)
         create_audit_entry(source=AuditEntry.SOURCE_SIGNAL)
         assert _audit_totals.totals("") == {"backend": 1, "signal": 2}
+
+    def test_both_channels_are_counted_in_one_query(
+        self, create_audit_entry, django_assert_num_queries
+    ) -> None:
+        create_audit_entry()
+        with django_assert_num_queries(1):
+            _audit_totals.totals("")
 
     def test_a_kind_narrows_the_counts(self, create_audit_entry) -> None:
         create_audit_entry()

@@ -4,8 +4,9 @@ import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import { createPrefetch } from "./prefetch";
 import { CONTENT_TYPE } from "./protocol";
-import type { HistoryHost, Keeper, Layout, Prefetched, Settings } from "./router";
-import { chunkModules } from "./test-doubles";
+import type { Layout } from "./layout";
+import type { HistoryHost, Keeper, Prefetched, Settings } from "./router";
+import { chunkModules, historyHost } from "./test-doubles";
 import type { IntersectionAdapter } from "./triggers";
 
 interface Asked {
@@ -67,13 +68,10 @@ function shell(
 }
 
 function host(): HistoryHost {
-  return {
+  return historyHost({
     partial: surface,
     settings: () => settings,
-    context: () => ({}),
-    region: () => undefined,
     chain: () => chain,
-    key: () => "",
     ask: (href, signal, extra) => {
       asked.push({ href, signal, extra });
       const reply = replies.shift() ?? shell();
@@ -83,7 +81,7 @@ function host(): HistoryHost {
     plain: (path) => plains.includes(path),
     going: () => going,
     flush: cleared,
-  };
+  });
 }
 
 function make(observer?: IntersectionAdapter): Prefetch {
@@ -344,8 +342,7 @@ describe("the queue", () => {
 
 describe("back-off and refusals", () => {
   it("pauses for Retry-After, then doubles its own pause, until a success resets it", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
     replies = [
       new Response(null, { status: 429, headers: { "Retry-After": "5" } }),
       new Response(null, { status: 503 }),
@@ -355,7 +352,7 @@ describe("back-off and refusals", () => {
     ];
     const prefetch = make();
     const step = async (path: string, advance = 0): Promise<void> => {
-      now += advance;
+      vi.advanceTimersByTime(advance);
       await prefetch.prefetch(at(path));
     };
     await step("/a/");
@@ -393,56 +390,48 @@ describe("the cache", () => {
   });
 
   it("keeps no more answers than allowed and none past their lifetime", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
     settings = { prefetch_entries: 2, prefetch_shell_ttl: 1 };
     const prefetch = make();
     for (const path of ["/a/", "/b/", "/c/"]) await prefetch.prefetch(at(path));
     expect(prefetch.take(at("/a/"))).toBeUndefined();
     expect(prefetch.take(at("/b/"))).toBeDefined();
-    now += 1_000;
+    vi.advanceTimersByTime(1_000);
     expect(prefetch.take(at("/c/"))).toBeUndefined();
   });
 
-  it("keeps a shell for the shell lifetime and a complete page for the prefetch one", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    settings = { prefetch_ttl: 1, prefetch_shell_ttl: 3 };
-    replies = [shell(), shell({ ...SHELL, complete: true }), shell()];
-    const prefetch = make();
-    await prefetch.prefetch(at("/s/"));
-    await prefetch.prefetch(at("/c/"));
-    now += 1_000;
-    expect(prefetch.take(at("/c/"))).toBeUndefined();
-    expect(prefetch.take(at("/s/"))).toBeDefined();
-    await prefetch.prefetch(at("/s/"));
-    now += 3_000;
-    expect(prefetch.take(at("/s/"))).toBeUndefined();
-  });
-
-  it("keeps a shell five minutes and a complete page thirty seconds by default", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    settings = {};
-    replies = [shell(), shell({ ...SHELL, complete: true })];
-    const prefetch = make();
-    await prefetch.prefetch(at("/s/"));
-    await prefetch.prefetch(at("/c/"));
-    now += 30_000;
-    expect(prefetch.take(at("/c/"))).toBeUndefined();
-    now += 269_999;
-    expect(prefetch.take(at("/s/"))).toBeDefined();
-  });
+  it.each([
+    ["the configured ones", { prefetch_ttl: 1, prefetch_shell_ttl: 3 }, 1_000, 3_000],
+    ["thirty seconds and five minutes by default", {}, 30_000, 300_000],
+  ])(
+    "keeps a complete page and a shell for their lifetimes, %s",
+    async (_name, config, page, life) => {
+      vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
+      settings = config;
+      const whole = { ...SHELL, complete: true };
+      replies = [shell(), shell(), shell(whole), shell(whole)];
+      const prefetch = make();
+      for (const path of ["/s/", "/t/", "/c/", "/d/"])
+        await prefetch.prefetch(at(path));
+      vi.advanceTimersByTime(page - 1);
+      expect(prefetch.take(at("/c/"))).toBeDefined();
+      vi.advanceTimersByTime(1);
+      expect(prefetch.take(at("/d/"))).toBeUndefined();
+      vi.advanceTimersByTime(life - page - 1);
+      expect(prefetch.take(at("/s/"))).toBeDefined();
+      vi.advanceTimersByTime(1);
+      expect(prefetch.take(at("/t/"))).toBeUndefined();
+    },
+  );
 
   it("evicts the least recently stored answer when one is stored again", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
     settings = { prefetch_entries: 2, prefetch_shell_ttl: 1 };
     const prefetch = make();
     await prefetch.prefetch(at("/a/"));
-    now += 600;
+    vi.advanceTimersByTime(600);
     await prefetch.prefetch(at("/b/"));
-    now += 400;
+    vi.advanceTimersByTime(400);
     await prefetch.prefetch(at("/a/"));
     await prefetch.prefetch(at("/c/"));
     expect(hrefs()).toEqual(["/a/", "/b/", "/a/", "/c/"]);
@@ -569,6 +558,17 @@ describe("viewport", () => {
     expect(seen.watched).toEqual([byId("a")]);
   });
 
+  it("asks the router about no link a region keeps out of the viewport mode", () => {
+    settings = { prefetch: "viewport" };
+    document.body.innerHTML =
+      '<a id="a" href="/a/">a</a>' +
+      '<div data-next-prefetch="intent"><a href="/i/">i</a><a href="/j/">j</a></div>';
+    const seams = host();
+    const owned = vi.spyOn(seams, "owned");
+    createPrefetch(seams, { signal: listening.signal }, observer());
+    expect(owned.mock.calls.map(([url]) => url.pathname)).toEqual(["/a/"]);
+  });
+
   it("watches a region that opts in under the intent mode and nothing else", () => {
     document.body.innerHTML =
       '<div data-next-prefetch="viewport"><a id="v" href="/v/">v</a></div>' +
@@ -671,8 +671,7 @@ describe("viewport", () => {
   });
 
   it("makes room for links in view once the answers they wait behind expire", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
     settings = { prefetch: "viewport", prefetch_entries: 1, prefetch_ttl: 1 };
     document.body.innerHTML = '<a id="a" href="/a/">a</a><a id="b" href="/b/">b</a>';
     const seen = observer();
@@ -682,7 +681,7 @@ describe("viewport", () => {
     seen.show(byId("b"));
     await wait(0);
     expect(hrefs()).toEqual(["/a/"]);
-    now += 1_000;
+    vi.advanceTimersByTime(1_000);
     seen.show(byId("b"), false);
     seen.show(byId("b"));
     await wait(0);
@@ -729,8 +728,7 @@ describe("viewport", () => {
   });
 
   it("lets the oldest shell past the prefetch lifetime give way to a link in view", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
     settings = { prefetch: "viewport", prefetch_entries: 2, prefetch_ttl: 1 };
     document.body.innerHTML =
       '<a id="a" href="/a/">a</a><a id="b" href="/b/">b</a>' +
@@ -744,7 +742,7 @@ describe("viewport", () => {
     seen.show(byId("c"));
     await wait(0);
     expect(hrefs()).toEqual(["/a/", "/b/"]);
-    now += 1_000;
+    vi.advanceTimersByTime(1_000);
     fire(byId("a"), "pointerover");
     seen.show(byId("c"), false);
     seen.show(byId("c"));
@@ -861,6 +859,7 @@ describe("stylesheets of a prefetched page", () => {
 describe("the press", () => {
   const FULL = { "X-Next-Prefetch": "full" };
   const SHALLOW = { "X-Next-Prefetch": "1" };
+  const PLAIN = '<a id="l" href="/b/">B</a>';
 
   afterEach(() => {
     document.head.innerHTML = "";
@@ -917,20 +916,14 @@ describe("the press", () => {
   });
 
   it.each([
-    ["the default mode", {}, '<a id="l" href="/b/">B</a>', "mouse", FULL],
-    ["the default mode", {}, '<a id="l" href="/b/">B</a>', "touch", SHALLOW],
-    ["the default mode", {}, '<a id="l" href="/b/">B</a>', "pen", SHALLOW],
-    ["the mouse mode", { press: "mouse" }, '<a id="l" href="/b/">B</a>', "mouse", FULL],
-    [
-      "the mouse mode",
-      { press: "mouse" },
-      '<a id="l" href="/b/">B</a>',
-      "touch",
-      SHALLOW,
-    ],
-    ["the all mode", { press: "all" }, '<a id="l" href="/b/">B</a>', "touch", FULL],
-    ["the all mode", { press: "all" }, '<a id="l" href="/b/">B</a>', "pen", FULL],
-    ["the off mode", { press: "off" }, '<a id="l" href="/b/">B</a>', "mouse", SHALLOW],
+    ["the default mode", {}, PLAIN, "mouse", FULL],
+    ["the default mode", {}, PLAIN, "touch", SHALLOW],
+    ["the default mode", {}, PLAIN, "pen", SHALLOW],
+    ["the mouse mode", { press: "mouse" }, PLAIN, "mouse", FULL],
+    ["the mouse mode", { press: "mouse" }, PLAIN, "touch", SHALLOW],
+    ["the all mode", { press: "all" }, PLAIN, "touch", FULL],
+    ["the all mode", { press: "all" }, PLAIN, "pen", FULL],
+    ["the off mode", { press: "off" }, PLAIN, "mouse", SHALLOW],
     [
       "a link that turns it off",
       { press: "all" },
@@ -1064,7 +1057,7 @@ describe("the press", () => {
     answer(response);
     const found = (await joined)!;
     expect(found).toMatchObject({ raw: SHELL, response });
-    expect(await found.flight).toBe(reply);
+    expect(await found.flight?.answer).toBe(reply);
     expect(aborted()).toEqual([false, false]);
     await flying;
   });
@@ -1105,7 +1098,7 @@ describe("the press", () => {
     fire(document.getElementById("s")!, "pointerup", { clientX: 3, clientY: 4 });
     expect(found).toHaveBeenCalledWith(3, 4);
     expect(aborted()).toEqual([false]);
-    expect(taken(prefetch, "/b/").flight).toBeInstanceOf(Promise);
+    expect(taken(prefetch, "/b/").flight?.answer).toBeInstanceOf(Promise);
   });
 
   it("aborts the pressed request once the press outlasts its window", () => {
@@ -1126,7 +1119,7 @@ describe("the press", () => {
     const el = link();
     const prefetch = make();
     press(el);
-    expect(taken(prefetch, "/b/").flight).toBeInstanceOf(Promise);
+    expect(taken(prefetch, "/b/").flight?.answer).toBeInstanceOf(Promise);
     vi.advanceTimersByTime(1000);
     fire(document, "pointercancel");
     expect(aborted()).toEqual([false]);
@@ -1179,6 +1172,7 @@ describe("the press", () => {
       "a body that does not parse",
       () => new Response("{", { headers: { "content-type": CONTENT_TYPE } }),
     ],
+    ["a refusal", () => shell(SHELL, { status: 404 })],
   ])("aborts %s a released press received and keeps nothing", async (_name, reply) => {
     replies = [reply()];
     const el = link();
@@ -1189,6 +1183,42 @@ describe("the press", () => {
     await wait(0);
     expect(aborted()).toEqual([true]);
     expect(prefetch.take(at("/b/"))).toBeUndefined();
+  });
+
+  it("keeps the envelope a press received once the press outlasts its window", async () => {
+    vi.useFakeTimers();
+    const response = shell();
+    replies = [response];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(aborted()).toEqual([false]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(aborted()).toEqual([false]);
+    expect(prefetch.take(at("/b/"))).toEqual({ raw: SHELL, response });
+  });
+
+  it("hands a visit the refusal a press received rather than asking a third time", async () => {
+    const refusal = shell(SHELL, { status: 404 });
+    replies = [refusal];
+    const el = link();
+    const prefetch = make();
+    press(el);
+    expect(await taken(prefetch, "/b/").flight?.answer).toBe(refusal);
+    expect(hrefs()).toEqual(["/b/"]);
+  });
+
+  it("presses past a complete answer kept for an asset version the page no longer runs", async () => {
+    replies = [shell({ ...SHELL, complete: true })];
+    const el = link();
+    const prefetch = make();
+    await prefetch.prefetch(at("/b/"));
+    vi.spyOn(surface, "_headers").mockReturnValue(
+      new Headers({ "X-Next-Version": "v2" }),
+    );
+    press(el);
+    expect(extras()).toEqual([SHALLOW, FULL]);
   });
 
   it("aborts a pressed request on a drop and keeps nothing it received", async () => {
@@ -1209,7 +1239,7 @@ describe("the press", () => {
     press(el);
     const found = taken(prefetch, "/b/");
     expect(found.raw).toBeUndefined();
-    expect(await found.flight).toBeUndefined();
+    expect(await found.flight?.answer).toBeUndefined();
     await prefetch.prefetch(at("/b/"));
     expect(hrefs()).toEqual(["/b/"]);
   });
@@ -1225,8 +1255,7 @@ describe("the press", () => {
   ])(
     "pauses prefetches and drops the waiting ones on %s to a press",
     async (_name, init, pause) => {
-      let now = 1_000_000;
-      vi.spyOn(Date, "now").mockImplementation(() => now);
+      vi.useFakeTimers({ toFake: ["Date"], now: 1_000_000 });
       const answers = [held(), held(), held()];
       replies.push(new Response(null, init));
       const el = link();
@@ -1234,13 +1263,13 @@ describe("the press", () => {
       const done = ["/a/", "/c/", "/d/"].map((path) => prefetch.prefetch(at(path)));
       const waiting = prefetch.prefetch(at("/e/"));
       press(el);
-      expect(await taken(prefetch, "/b/").flight).toBeUndefined();
+      expect(await taken(prefetch, "/b/").flight?.answer).toBeUndefined();
       await waiting;
       for (const answer of answers) answer();
       await Promise.all(done);
-      now += pause - 1;
+      vi.advanceTimersByTime(pause - 1);
       await prefetch.prefetch(at("/f/"));
-      now += 2;
+      vi.advanceTimersByTime(2);
       await prefetch.prefetch(at("/f/"));
       expect(hrefs()).toEqual(["/a/", "/c/", "/d/", "/b/", "/f/"]);
     },
@@ -1251,7 +1280,7 @@ describe("the press", () => {
     const el = link();
     const prefetch = make();
     press(el);
-    expect(await taken(prefetch, "/b/").flight).toBeUndefined();
+    expect(await taken(prefetch, "/b/").flight?.answer).toBeUndefined();
     await prefetch.prefetch(at("/b/"));
     expect(hrefs()).toEqual(["/b/", "/b/"]);
   });
@@ -1265,10 +1294,14 @@ describe("the press", () => {
     await prefetch.prefetch(at("/b/"));
     press(el);
     const found = taken(prefetch, "/b/");
-    expect(found).toMatchObject({ raw: SHELL, response, flight: expect.any(Promise) });
-    found.stop!();
+    expect(found).toMatchObject({
+      raw: SHELL,
+      response,
+      flight: { answer: expect.any(Promise) },
+    });
+    found.flight!.stop();
     expect(aborted()).toEqual([false, true]);
-    expect(await found.flight).toBeUndefined();
+    expect(await found.flight?.answer).toBeUndefined();
   });
 
   it("hands a visit the pressed flight alone when nothing is kept", async () => {
@@ -1280,7 +1313,7 @@ describe("the press", () => {
     const found = taken(prefetch, "/b/#part");
     expect(found.raw).toBeUndefined();
     expect(found.response).toBeUndefined();
-    expect(await found.flight).toBe(reply);
+    expect(await found.flight?.answer).toBe(reply);
     expect(prefetch.take(at("/b/"))).toBeUndefined();
   });
 
@@ -1291,7 +1324,7 @@ describe("the press", () => {
     press(el);
     expect(prefetch.take(at("/c/"))).toBeUndefined();
     expect(aborted()).toEqual([false]);
-    expect(taken(prefetch, "/b/").flight).toBeInstanceOf(Promise);
+    expect(taken(prefetch, "/b/").flight?.answer).toBeInstanceOf(Promise);
   });
 
   it("asks nothing for the URL the router is loading", async () => {

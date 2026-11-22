@@ -8,7 +8,7 @@ import pytest
 from next.caches import BoundedCache
 from next.components import trip
 from next.components.context import ContextFunction
-from next.components.deferral import DeferDeclarations
+from next.components.defer import DeferDeclarations
 from next.components.info import ComponentInfo
 from next.defer import DeferMode
 

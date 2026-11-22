@@ -50,6 +50,8 @@ A full prefetch, sent at the press of a link, goes through the rows as a navigat
 
 A project subclasses ``StreamPolicy`` for a rule of its own, and its ``delivery(request, facts)`` reads the ``PageFacts`` of the request, ``facts.transport`` among them.
 
+.. _topics-boundaries-streaming-transport:
+
 The transport
 -------------
 
@@ -94,6 +96,8 @@ A project subclasses ``StreamTransport`` for a host of its own, and its ``facts(
                incremental_reason="edge" if edge else "wsgi",
                concurrent_reason="host",
            )
+
+.. _topics-boundaries-streaming-observing:
 
 What a deployment got
 ---------------------
@@ -155,7 +159,7 @@ Compression
 -----------
 
 A streamed page compresses itself, padded, compressed, and flushed once per write, so the browser decodes each chunk as it arrives.
-``CompressionMiddleware`` passes such a response through and compresses every other one, see :doc:`/content/ref/compression`.
+``CompressionMiddleware`` passes such a response through and compresses every other one, see :doc:`/content/topics/compression`.
 Outcomes that settle within ``COMPRESSION["COALESCE_MS"]`` of each other share one write.
 A page that sets ``no-transform``, or calls ``page.compress(False)``, streams uncompressed.
 
@@ -235,5 +239,14 @@ Tests
 -----
 
 The Django test client runs a request on a single-threaded worker, so a page renders inline there.
-``read_stream(client, url)`` and the async ``astream_chunks(client, url)`` of ``next.testing`` request the page as it streams under a threaded server and return a ``StreamedPage`` with its ``shell``, its ``chunks``, and its ``tail``, and ``NextClient.get_stream(url)`` does the same.
-``parallel_boundaries()`` runs the jobs of the block on the pool, which reads only committed rows, and ``boundary_gate(component=...)`` holds the jobs of one component until the test releases them.
+``read_stream(client, url)`` and the async ``aread_stream(client, url)`` of ``next.testing`` request the page as it streams under a threaded server and return a ``StreamedPage`` with its ``shell``, its ``chunks``, and its ``tail``, and ``NextClient.get_stream(url)`` does the same.
+A partial stream of ``text/event-stream`` frames reads through the same helpers, and ``sse_events(text)`` parses any such text into its events and a flag that tells whether the text ends inside a frame.
+``parallel_boundaries()`` runs the jobs of the block on the pool, which reads only committed rows, and ``boundary_gate(component=...)`` holds the jobs of one component until the test releases it.
+:doc:`/content/howto/test-a-page-with-deferred-boundaries` walks through each of them.
+
+.. seealso::
+
+   :doc:`/content/howto/show-a-loading-state` for the task of putting a loading UI beside a component.
+   :doc:`/content/deployment/platforms` for streaming on serverless and platform hosts.
+   :repo:`observability <tree/main/examples/observability>` streams a component and a page body behind their loading UIs.
+   :repo:`search-catalog <tree/main/examples/search-catalog>` streams two rails of a product page and batches their lookups.

@@ -147,6 +147,8 @@ export interface PartialSurface {
     cancelable?: boolean,
   ) => boolean | void;
   _reader?: StreamReader | undefined;
+  /** The loading content each streamed boundary showed before its first fill. */
+  _fallbacks?: WeakMap<Element, string> | undefined;
   _slot?: ((target: Target) => Bounds | undefined) | undefined;
   _pop?: (() => string | undefined) | undefined;
   _headers(headers: Record<string, string>): Headers;

@@ -280,7 +280,7 @@ def url_lookup(
 
 
 @dataclass(frozen=True, slots=True)
-class Gate:
+class AccessGate:
     """The row lookup builder and the login return path a caller of `enforce` brings.
 
     An open rule builds no lookup, since only a rule with requirements reads a row.
@@ -290,7 +290,7 @@ class Gate:
     next_url: Callable[[HttpRequest], str]
 
 
-_PAGE_GATE = Gate(url_lookup, methodcaller("get_full_path"))
+_PAGE_GATE = AccessGate(url_lookup, methodcaller("get_full_path"))
 
 
 def enforce(
@@ -301,7 +301,7 @@ def enforce(
     dep_cache: dict[str, Any],
     *,
     undeclared: bool,
-    gate: Gate,
+    gate: AccessGate,
 ) -> HttpResponseRedirect | None:
     """Return the login redirect `rule` owes `request`, raising a 403 or a 404 instead.
 
@@ -350,8 +350,8 @@ def forget_page_access(**kwargs: object) -> None:
 
 
 __all__ = [
+    "AccessGate",
     "AccessStamp",
-    "Gate",
     "PageAccess",
     "PageDeclarations",
     "access_stamp",

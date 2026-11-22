@@ -3,18 +3,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from django.test import RequestFactory
 
 from next.components.info import ComponentInfo
 from next.components.trip import TripInput
 from next.defer import (
-    Addressing,
-    BoundaryError,
+    BoundaryFailure,
     BoundaryOptions,
     DeferMode,
     DeferredCall,
     ErrorKind,
-    Site,
 )
 from next.diagnostics import reset_failure_logs
 from next.pages.responses import personal_render
@@ -23,6 +20,7 @@ from next.suspense.errors import BoundaryPropsError
 from next.suspense.tokens import BoundaryTokenBackend
 from next.suspense.tokens.props import DEFAULT_LIMIT
 from next.testing import override_next_settings
+from tests.support.boundaries import make_call, make_site
 
 
 _INFO = ComponentInfo(
@@ -33,7 +31,7 @@ _INFO = ComponentInfo(
     module_path=None,
     is_simple=True,
 )
-_FAILURE = BoundaryError(ErrorKind.ERROR, "d", None, retry=True)
+_FAILURE = BoundaryFailure(ErrorKind.ERROR, "d", None, retry=True)
 
 
 class _Renderer:
@@ -54,17 +52,14 @@ class _Renderer:
     def trip_input(self) -> TripInput | None:
         return self.held
 
-    def retry_input(self, failure: BoundaryError) -> TripInput | None:
+    def retry_input(self, failure: BoundaryFailure) -> TripInput | None:
         return self.held
 
 
 def _call(renderer: object, mode: DeferMode = DeferMode.LOAD) -> DeferredCall:
-    return DeferredCall(
-        site=Site(Addressing.COMPONENT, "card", mode, "", 0),
+    return make_call(
+        site=make_site(mode=mode, origin=""),
         options=BoundaryOptions(mode=mode),
-        key="k",
-        tag="div",
-        source=None,
         renderer=renderer,
     )
 
@@ -84,23 +79,23 @@ def _input(**props: object) -> TripInput:
 
 
 class TestRoute:
-    def test_the_kwargs_a_view_noted_win(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_kwargs_a_view_noted_win(self, rf) -> None:
+        request = rf.get("/")
         trip.note_route(request, {"id": 3})
         assert trip.route_kwargs(request) == {"id": 3}
 
-    def test_the_resolver_match_answers_otherwise(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_resolver_match_answers_otherwise(self, rf) -> None:
+        request = rf.get("/")
         request.resolver_match = SimpleNamespace(kwargs={"slug": "x"})
         assert trip.route_kwargs(request) == {"slug": "x"}
 
-    def test_no_route_reads_as_no_kwargs(self) -> None:
-        assert trip.route_kwargs(RequestFactory().get("/")) == {}
+    def test_no_route_reads_as_no_kwargs(self, rf) -> None:
+        assert trip.route_kwargs(rf.get("/")) == {}
 
 
 class TestMint:
-    def test_claims_carry_the_call_and_the_url(self) -> None:
-        request = RequestFactory().get("/shop/")
+    def test_claims_carry_the_call_and_the_url(self, rf) -> None:
+        request = rf.get("/shop/")
         trip.note_route(request, {"id": 5})
         claims = trip.claims_for(
             request,
@@ -113,32 +108,32 @@ class TestMint:
         assert claims.url_kwargs == (("id", "5"),)
         assert claims.perms == ("x.y",)
 
-    def test_an_unbound_token_keeps_the_render_shared(self) -> None:
-        request = RequestFactory().get("/")
+    def test_an_unbound_token_keeps_the_render_shared(self, rf) -> None:
+        request = rf.get("/")
         assert trip.mint(request, _input())
         assert not personal_render(request)
 
     def test_a_backend_beyond_the_stack_counts_as_bound(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, rf, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         backend = _Foreign()
         monkeypatch.setattr(trip.suspense_manager, "tokens", lambda: backend)
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         assert trip.mint(request, _input()) == "t"
         assert personal_render(request)
 
-    def test_an_unencodable_prop_raises(self) -> None:
-        with pytest.raises(BoundaryPropsError):
-            trip.mint(RequestFactory().get("/"), _input(sku={"a": 1}))
+    def test_an_unencodable_prop_raises(self, rf) -> None:
+        with pytest.raises(BoundaryPropsError, match="a mapping"):
+            trip.mint(rf.get("/"), _input(sku={"a": 1}))
 
-    def test_inline_claims_cap_a_prop_at_max_bytes(self) -> None:
+    def test_inline_claims_cap_a_prop_at_max_bytes(self, rf) -> None:
         with pytest.raises(BoundaryPropsError, match="over 2048 characters"):
-            trip.mint(RequestFactory().get("/"), _input(sku="x" * 3000))
+            trip.mint(rf.get("/"), _input(sku="x" * 3000))
 
-    def test_spilled_claims_carry_a_prop_past_max_bytes(self) -> None:
+    def test_spilled_claims_carry_a_prop_past_max_bytes(self, rf) -> None:
         spill = {"TOKENS": {"OPTIONS": {"STORAGE": "next.suspense.SpillStorage"}}}
         with override_next_settings(DEFER=spill):
-            token = trip.mint(RequestFactory().get("/"), _input(sku="x" * 3000))
+            token = trip.mint(rf.get("/"), _input(sku="x" * 3000))
         assert len(token) <= DEFAULT_LIMIT
 
 
@@ -170,43 +165,43 @@ class TestShellToken:
     def test_no_request_streams_instead(self) -> None:
         assert trip.shell_token(None, _input()) is None
 
-    def test_a_request_gets_the_attributes(self) -> None:
-        text = trip.shell_token(RequestFactory().get("/"), _input())
+    def test_a_request_gets_the_attributes(self, rf) -> None:
+        text = trip.shell_token(rf.get("/"), _input())
         assert text is not None
         assert text.startswith(' data-next-token="')
 
-    def test_a_refusing_binding_streams_instead(self) -> None:
+    def test_a_refusing_binding_streams_instead(self, rf) -> None:
         with override_next_settings(
             DEFER={"TOKENS": {"OPTIONS": {"BINDING": "session"}}}
         ):
-            assert trip.shell_token(RequestFactory().get("/"), _input()) is None
+            assert trip.shell_token(rf.get("/"), _input()) is None
 
 
 class TestRetryToken:
-    def test_no_request_offers_none(self) -> None:
-        assert trip.retry_token(None, _call(_Renderer(_input())), _FAILURE) == ""
+    @pytest.mark.parametrize(
+        ("asked", "renderer"),
+        [
+            pytest.param(False, _Renderer(_input()), id="no_request"),
+            pytest.param(True, object(), id="plain_renderer"),
+            pytest.param(True, _Renderer(None), id="renderer_without_input"),
+        ],
+    )
+    def test_nothing_to_retry_offers_none(self, rf, asked, renderer) -> None:
+        request = rf.get("/") if asked else None
+        assert trip.retry_token(request, _call(renderer), _FAILURE) == ""
 
-    def test_a_plain_renderer_offers_none(self) -> None:
-        assert (
-            trip.retry_token(RequestFactory().get("/"), _call(object()), _FAILURE) == ""
-        )
-
-    def test_a_renderer_without_input_offers_none(self) -> None:
-        call = _call(_Renderer(None))
-        assert trip.retry_token(RequestFactory().get("/"), call, _FAILURE) == ""
-
-    def test_an_input_offers_its_attributes(self) -> None:
+    def test_an_input_offers_its_attributes(self, rf) -> None:
         call = _call(_Renderer(_input()))
-        text = trip.retry_token(RequestFactory().get("/"), call, _FAILURE)
+        text = trip.retry_token(rf.get("/"), call, _FAILURE)
         assert "data-next-token" in text
 
     def test_an_unencodable_prop_drops_the_retry_with_a_warning(
-        self, caplog: pytest.LogCaptureFixture
+        self, rf, caplog: pytest.LogCaptureFixture
     ) -> None:
         reset_failure_logs()
         call = _call(_Renderer(_input(sku={"a": 1})))
         with caplog.at_level(logging.WARNING, logger="next.suspense"):
-            assert trip.retry_token(RequestFactory().get("/"), call, _FAILURE) == ""
+            assert trip.retry_token(rf.get("/"), call, _FAILURE) == ""
         (record,) = caplog.records
         assert record.levelno == logging.WARNING
         assert "offers no retry token" in record.getMessage()

@@ -21,6 +21,11 @@
     {% component "latency_widget" %}
   </section>
 
+  <section class="rounded-md border border-border bg-card p-6 shadow-sm">
+    <h2 class="mb-4 text-sm font-semibold text-foreground">Flush history</h2>
+    {% component "flush_history" %}
+  </section>
+
   <p class="text-sm text-muted-foreground">
     Drill down on the
     <a class="text-foreground underline" href="/stats/">stats page</a>

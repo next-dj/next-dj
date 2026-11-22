@@ -10,7 +10,15 @@ from django.test import RequestFactory
 from next.components.info import ComponentInfo
 from next.deps.objects import SCOPE_DEPENDENCY
 from next.partial import Envelope, Patches
-from next.partial.headers import LAYOUTS, NAVIGATE, ORIGIN, REQUEST_FLAG, SEC_FETCH_SITE
+from next.partial.headers import (
+    LAYOUTS,
+    NAVIGATE,
+    ORIGIN,
+    PREFETCH,
+    REQUEST_FLAG,
+    SEC_FETCH_SITE,
+    STREAM_ACCEPT,
+)
 from next.realtime import Message
 from tests.support import bound_dependency
 
@@ -128,16 +136,34 @@ def threaded_get(path: str) -> HttpRequest:
     return RequestFactory().get(path, **{"wsgi.multithread": True})
 
 
-def router_get(path: str, origin: str, layouts: str) -> HttpRequest:
-    """Return the GET the client router sends for a link on the `origin` page."""
+def router_get(
+    path: str,
+    origin: str,
+    layouts: str | None,
+    *,
+    prefetch: str | None = None,
+    streamed: bool = False,
+) -> HttpRequest:
+    """Return the GET the client router sends for a link on the `origin` page.
+
+    `layouts` is the declaration or None to send none, `prefetch` the depth of a press,
+    and `streamed` asks as a stream-reading client does under a threaded server.
+    """
     headers = {
         REQUEST_FLAG: "1",
         NAVIGATE: "1",
-        LAYOUTS: layouts,
         ORIGIN: origin,
         SEC_FETCH_SITE: "same-origin",
     }
-    return RequestFactory().get(path, headers=headers)
+    if layouts is not None:
+        headers[LAYOUTS] = layouts
+    if prefetch is not None:
+        headers[PREFETCH] = prefetch
+    extra: dict[str, object] = {}
+    if streamed:
+        headers["Accept"] = STREAM_ACCEPT
+        extra["wsgi.multithread"] = True
+    return RequestFactory().get(path, headers=headers, **extra)
 
 
 def each_round(

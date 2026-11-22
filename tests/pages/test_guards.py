@@ -14,7 +14,7 @@ from django.shortcuts import get_object_or_404, get_object_or_404 as g404, redir
 
 from next.deps import Depends, DObject
 from next.pages import Context, guards as guards_module
-from next.pages.guards import DEPTH, hidden_guards, scans_as_guard
+from next.pages.guards import hidden_guards, scans_as_guard
 
 
 _REAL_SOURCE = inspect.getsource
@@ -378,10 +378,10 @@ class TestScansAsGuard:
     def test_the_verdict_is_kept_per_function(self) -> None:
         scans_as_guard(_missing)
 
-        with mock.patch.object(guards_module, "_tree") as tree:
+        with mock.patch("inspect.getsource") as getsource:
             assert scans_as_guard(_missing) is True
 
-        tree.assert_not_called()
+        getsource.assert_not_called()
 
 
 class TestInjectedGuards:
@@ -409,9 +409,6 @@ class TestInjectedGuards:
 
 class TestHiddenGuards:
     """A function past the depth the scan follows is named when it names a guard."""
-
-    def test_the_scan_follows_three_calls_deep(self) -> None:
-        assert DEPTH == 3
 
     def test_a_guard_past_the_depth_is_named(self) -> None:
         assert hidden_guards(_deep0) == ("_deep4",)

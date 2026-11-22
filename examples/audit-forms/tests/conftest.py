@@ -3,6 +3,6 @@ from access.demo import seed_demo
 
 
 @pytest.fixture()
-def demo_data(db) -> None:
-    """Seed the shipped demo audit log for tests that read it."""
-    seed_demo()
+def demo_data(db) -> int:
+    """Seed the shipped demo audit log for tests that read it, and count its rows."""
+    return seed_demo()

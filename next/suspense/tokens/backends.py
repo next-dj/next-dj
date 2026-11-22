@@ -35,6 +35,7 @@ from .transport import HeaderTransport, TokenTransport
 logger = logging.getLogger("next.suspense")
 _failures = FailureLog(logger)
 
+_DIGESTS: Final = "_next_token_digests"
 _TOKEN: Final = re.compile(
     r"(?P<version>[1-9][0-9]{0,3})\.(?P<epoch>0|[1-9][0-9]{0,17})\."
     r"(?P<sealed>[A-Za-z0-9_.-]+)",
@@ -156,6 +157,34 @@ def _digest(binding: SubjectBinding, request: HttpRequest) -> str:
     return binding_digest(subject)
 
 
+@dataclass(frozen=True, slots=True)
+class _Issued:
+    """The digest one binding issued, with the user and the session key it bound."""
+
+    user: object
+    session: str | None
+    digest: str
+
+
+def _issued(binding: SubjectBinding, request: HttpRequest) -> str:
+    """Return the digest of the subject `binding` issues for `request`, once a subject.
+
+    A login, a logout or a cycled session in the request replaces the subject it binds.
+    """
+    digests: dict[SubjectBinding, _Issued] | None = getattr(request, _DIGESTS, None)
+    if digests is None:
+        digests = {}
+        setattr(request, _DIGESTS, digests)
+    user = getattr(request, "user", None)
+    store = getattr(request, "session", None)
+    session = None if store is None else store.session_key
+    held = digests.get(binding)
+    if held is None or held.user is not user or held.session != session:
+        digest = binding_digest(binding.issue(request))
+        held = digests[binding] = _Issued(user, session, digest)
+    return held.digest
+
+
 class StackedTokenBackend(BoundaryTokenBackend):
     """Compose a codec, a storage, a seal, a binding and a transport from settings.
 
@@ -213,7 +242,7 @@ class StackedTokenBackend(BoundaryTokenBackend):
         `SpillStorage` keeps the claims inline while the whole token fits `MAX_BYTES`.
         """
         settings = self.settings_for(tokens)
-        subject = settings.binding.issue(request)
+        digest = _issued(settings.binding, request)
         now = token_clock().now()
         stamped = settings.stamped(request, claims, now)
         header = f"{VERSION}.{settings.epoch}."
@@ -221,7 +250,7 @@ class StackedTokenBackend(BoundaryTokenBackend):
             version=VERSION,
             epoch=settings.epoch,
             ring=self.keyring.current(),
-            digest=binding_digest(subject),
+            digest=digest,
             lifetime=stamped.expires - now,
             max_stored_bytes=settings.max_stored_bytes,
             cache_alias=settings.cache_alias,

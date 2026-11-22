@@ -37,7 +37,7 @@ from next.forms.transport import (
 )
 from next.permissions.markers import OPEN
 from next.ports import marked_zones, stamp_router
-from next.transactions import ViewKind, atomic_aliases, request_atomic
+from next.transactions import ViewKind, atomic_scope, request_atomic
 
 from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
@@ -243,8 +243,8 @@ class FormActionDispatch:
         denial = _declared_view_permissions(meta, request, state)
         if denial is not None:
             return denial
-        aliases = atomic_aliases(request, ViewKind.ACTION, meta.get("atomic"))
-        with request_atomic(aliases):
+        scope = atomic_scope(request, ViewKind.ACTION, meta.get("atomic"))
+        with request_atomic(scope):
             response = FormActionDispatch._route(
                 backend, request, action_name, meta, state
             )

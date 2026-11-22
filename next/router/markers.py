@@ -55,7 +55,7 @@ class ScannedLayout:
 
 
 @dataclass(frozen=True, slots=True)
-class Shell:
+class ScannedShell:
     """A rendered page as the router reads it, its layouts outer first.
 
     `body` bounds the children of `<body>`, `None` when the page writes no body.
@@ -97,5 +97,5 @@ __all__ = [
     "Divergence",
     "LayoutKey",
     "ScannedLayout",
-    "Shell",
+    "ScannedShell",
 ]

@@ -111,7 +111,7 @@ It deduplicates the combined list by resolved path and glob, then emits ``watch_
 Reload decisions
 ----------------
 
-Two kinds of changes trigger a reload.
+Three kinds of change reach the running development server.
 
 Python module change.
    Django's reloader restarts the process.
@@ -121,6 +121,10 @@ Route set change.
    ``NextStatReloader`` diffs the discovered route set on every tick.
    A per-tree signature of directory mtimes and directory count gates the rescan, so an unchanged tree reuses the cached route set.
    A page directory that appears or goes, an intercepting page that appears or goes, and a ``template.djx`` that appears or goes beside a ``page.py`` call ``notify_file_changed``, so Django restarts the process even when no watched file mtime changed.
+
+Boundary files.
+   A ``loading.djx`` or ``error.djx`` that appears or goes beside a component moves the mtime of its directory.
+   Each tick compares the directory signatures of the page trees and of the component roots, and calls ``refresh_component_files`` only when they changed shape, so a render never stats those files.
 
 A scan that raises ``OSError``, ``ImportError``, or ``ValueError`` costs that tick its route-set comparison.
 The reloader logs the reason at debug level, keeps the set collected by the previous tick, and carries on watching ``.py`` mtimes, so a tree that cannot be walked never stops the development server.

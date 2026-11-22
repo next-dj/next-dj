@@ -1,8 +1,9 @@
-import type { HistoryHost } from "./router";
+import type { HistoryHost, Settings } from "./router";
 
 export interface Here {
   raw: string;
-  query: string;
+  path: string;
+  params: URLSearchParams;
   origin: string;
   homes: readonly string[];
 }
@@ -64,21 +65,20 @@ export function linkMark(
     resolved = here.raw.slice(0, here.raw.lastIndexOf("/") + 1) + path;
   if (resolved === undefined) return undefined;
   if (query || !path) {
-    const have = new URLSearchParams(here.query);
     const want = new URLSearchParams(rest.join("?"));
     const values = (params: URLSearchParams, name: string): string =>
       JSON.stringify(params.getAll(name).sort());
     for (const name of want.keys())
-      if (values(have, name) !== values(want, name)) return undefined;
+      if (values(here.params, name) !== values(want, name)) return undefined;
   }
   const link = normalPath(resolved);
-  const current = normalPath(here.raw);
+  const current = here.path;
   if (link === current) return "page";
   if (exact || link === "/" || !current.startsWith(`${link}/`)) return undefined;
   return here.homes.includes(link) ? undefined : "ancestor";
 }
 
-function put(el: Element, name: string, value: string | null): void {
+function sync(el: Element, name: string, value: string | null): void {
   if (el.getAttribute(name) === value) return;
   if (value === null) el.removeAttribute(name);
   else el.setAttribute(name, value);
@@ -89,31 +89,52 @@ export function createCurrent(
   listening: AddEventListenerOptions = {},
 ): void {
   const doc = document;
-  const mark = (): void => {
-    const { current, homes } = host.settings();
-    const containers = (current ?? []).filter((selector) => {
-      try {
-        doc.querySelector(selector);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (containers.length === 0) return;
-    const any = (suffix: string): string =>
-      containers.map((container) => container + suffix).join();
+  let seen: Settings | undefined;
+  let links = "";
+  let off = "";
+  let match = "";
+  let containers = "";
+  let shown = "";
+  const mark = (event: Event): void => {
+    const settings = host.settings();
+    if (settings !== seen) {
+      seen = settings;
+      shown = "";
+      const valid = (settings.current ?? []).filter((selector) => {
+        try {
+          doc.querySelector(selector);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      const any = (suffix: string): string =>
+        valid.map((container) => container + suffix).join();
+      containers = any("");
+      links = any(" a");
+      off = `a[data-next-current=off],${any("[data-next-current=off]")}`;
+      match = `a[data-next-match],${any("[data-next-match]")}`;
+    }
+    if (!containers) return;
     const base = new URL(host.partial.layers.urlFor(doc.body), location.href);
+    const { nodes = [] } = (event as CustomEvent<{ nodes?: Element[] }>).detail;
+    // Marks follow the URL and the links, so an apply that moves neither leaves them.
+    if (
+      base.href === shown &&
+      !nodes.some((node) => node.closest(containers) ?? node.querySelector(containers))
+    )
+      return;
+    shown = base.href;
     const here: Here = {
       raw: base.pathname,
-      query: base.search.slice(1),
+      path: normalPath(base.pathname),
+      params: base.searchParams,
       origin: location.origin,
-      homes: homes ?? [],
+      homes: settings.homes ?? [],
     };
-    for (const link of doc.querySelectorAll(any(" a"))) {
-      if (link.closest(`a[data-next-current=off],${any("[data-next-current=off]")}`))
-        continue;
-      const owner = link.closest(`a[data-next-match],${any("[data-next-match]")}`);
-      const modes = (owner?.getAttribute("data-next-match") ?? "")
+    for (const link of doc.querySelectorAll(links)) {
+      if (link.closest(off)) continue;
+      const modes = (link.closest(match)?.getAttribute("data-next-match") ?? "")
         .toLowerCase()
         .split(/\s+/);
       const found = linkMark(
@@ -122,8 +143,8 @@ export function createCurrent(
         modes.includes("exact"),
         modes.includes("query"),
       );
-      put(link, "data-next-current", found ?? null);
-      put(link, "aria-current", found === "page" ? found : null);
+      sync(link, "data-next-current", found ?? null);
+      sync(link, "aria-current", found === "page" ? found : null);
     }
   };
   doc.addEventListener("partial:applied", mark, listening);

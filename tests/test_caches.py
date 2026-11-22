@@ -7,6 +7,7 @@ from next.caches import (
     DEFAULT_CACHE_SIZE,
     PAGE_HEADROOM,
     BoundedCache,
+    IdentityMemo,
     LruCache,
     PageCache,
 )
@@ -240,3 +241,32 @@ class TestLruCache:
         unhashable: dict[str, str] = {}
         with pytest.raises(TypeError):
             cache.get(unhashable)
+
+
+class TestIdentityMemo:
+    """The memo builds once per key object and again for another object."""
+
+    def test_a_repeat_with_the_same_key_builds_once(self) -> None:
+        memo: IdentityMemo[list[int]] = IdentityMemo()
+        key = object()
+        first = memo.get(key, lambda: [1])
+        assert memo.get(key, lambda: [2]) is first
+
+    def test_an_equal_key_is_not_the_same_key(self) -> None:
+        memo: IdentityMemo[str] = IdentityMemo()
+        memo.get([1], lambda: "first")
+        assert memo.get([1], lambda: "second") == "second"
+
+    def test_a_new_key_replaces_the_held_one(self) -> None:
+        memo: IdentityMemo[str] = IdentityMemo()
+        old = object()
+        memo.get(old, lambda: "old")
+        memo.get(object(), lambda: "new")
+        assert memo.get(old, lambda: "again") == "again"
+
+    def test_forget_builds_again(self) -> None:
+        memo: IdentityMemo[str] = IdentityMemo()
+        key = object()
+        memo.get(key, lambda: "before")
+        memo.forget()
+        assert memo.get(key, lambda: "after") == "after"

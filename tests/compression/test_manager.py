@@ -15,7 +15,6 @@ from next.compression import (
     OPT_OUT,
     CompressionBackend,
     CompressionBackendError,
-    CompressionRegistry,
     GzipBackend,
     acompress_response,
     compress_response,
@@ -79,27 +78,31 @@ class LevelLess(CompressionBackend):
         return GzipBackend().compress_once(data, level)
 
 
-class TestRegistry:
-    """`CompressionRegistry` keeps settings order, the first backend of a coding wins."""
+class OtherGzip(GzipBackend):
+    pass
 
-    def test_first_coding_wins(self) -> None:
-        registry = CompressionRegistry()
-        first, second = GzipBackend(), GzipBackend()
-        assert registry.register(first) is True
-        assert registry.register(second) is False
-        assert registry.get("gzip") is first
-        assert registry.get("br") is None
-        assert registry.codings() == ("gzip",)
-        assert list(registry) == [first]
-        assert len(registry) == 1
-        assert registry.version == 1
+
+class UnreadBody(HttpResponse):
+    """A response whose body a refusal must never read."""
+
+    @property
+    def content(self) -> bytes:
+        raise AssertionError
+
+    @content.setter
+    def content(self, value: object) -> None:
+        HttpResponse.content.fset(self, value)
 
 
 class TestManager:
     """`CompressionManager` builds the backends on first use and offers by `ORDER`."""
 
-    def test_nothing_builds_before_a_compressible_response(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_the_first_backend_of_a_coding_wins(self) -> None:
+        with _compression(BACKENDS=[*GZIP_ONLY, f"{__name__}.OtherGzip"]):
+            assert type(compression_manager.backend("gzip")) is GzipBackend
+            assert compression_manager.backend("br") is None
+
+    def test_nothing_builds_before_a_compressible_response(self) -> None:
         compress_response(_request(), HttpResponse(b"x", content_type="image/png"))
         assert compression_manager._state is None
         compress_response(_request(), HttpResponse(BODY))
@@ -109,14 +112,14 @@ class TestManager:
         install(monkeypatch, brotli=fake_brotli())
         with _compression(ORDER=["br", "zstd", "deflate", "gzip", "br"]):
             assert compression_manager.offered() == ("br", "gzip")
-            assert compression_manager.registry.codings() == ("zstd", "br", "gzip")
+            assert compression_manager.backend("zstd") is not None
+            assert compression_manager.backend("deflate") is None
 
     def test_settings_expose_the_scope(self) -> None:
         with _compression(MIN_SIZE=10):
             assert compression_manager.settings.min_size == 10
 
-    def test_a_settings_change_rebuilds(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_settings_change_rebuilds(self) -> None:
         assert compression_manager.offered() == ("gzip",)
         with _compression(ORDER=["zstd"]):
             assert compression_manager.offered() == ()
@@ -155,7 +158,8 @@ class TestManager:
         ("dotted", "problem"),
         [
             ("next.compression.Missing", "does not import"),
-            ("next.compression.manager.compress_response", "no CompressionBackend"),
+            ("next.compression.manager.compress_response", "names no class"),
+            ("tests.support.broken.Backend", "raised RuntimeError"),
             ("next.compression.CompressionBackend", "abstract class"),
         ],
     )
@@ -169,6 +173,16 @@ class TestManager:
             assert compression_manager.offered() == ("gzip",)
         assert problem in caplog.text
         assert "skips it" in caplog.text
+
+    def test_a_backend_that_raises_on_import_logs_its_traceback(self, caplog) -> None:
+        with (
+            caplog.at_level(logging.WARNING, "next.compression.manager"),
+            _compression(BACKENDS=["tests.support.broken.Backend", *GZIP_ONLY]),
+        ):
+            compression_manager.offered()
+        (record,) = caplog.records
+        assert record.exc_info is not None
+        assert isinstance(record.exc_info[1], ImportError)
 
     def test_an_unusable_backend_raises_under_debug(self) -> None:
         with (
@@ -198,7 +212,7 @@ class TestManager:
         with _compression(BACKENDS=[dotted], ORDER=["custom"]):
             response = StreamingHttpResponse([b"x"], content_type="text/html")
             encoding = prepare_stream(_request("custom"), response)
-            backend = compression_manager.registry.get("custom")
+            backend = compression_manager.backend("custom")
         assert encoding.coding == "custom"
         assert backend.created == (2, None)
 
@@ -206,8 +220,7 @@ class TestManager:
 class TestEligibility:
     """`compress_response` encodes only what the client and the response allow."""
 
-    def test_a_large_body_is_compressed_once(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_large_body_is_compressed_once(self) -> None:
         response = compress_response(_request(), HttpResponse(BODY))
         assert response["Content-Encoding"] == "gzip"
         assert response["Vary"] == "Accept-Encoding"
@@ -215,8 +228,7 @@ class TestEligibility:
         assert body.startswith(BODY.encode())
         assert response["Content-Length"] == str(len(response.content))
 
-    def test_the_padding_follows_an_html_body(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_the_padding_follows_an_html_body(self) -> None:
         with _compression(PADDING=16):
             response = compress_response(_request(), HttpResponse(BODY))
         tail = zlib.decompress(response.content, 31)[len(BODY) :]
@@ -227,8 +239,7 @@ class TestEligibility:
     @pytest.mark.parametrize(
         ("etag", "expected"), [('"v1"', 'W/"v1"'), ('W/"v1"', 'W/"v1"')]
     )
-    def test_a_strong_etag_turns_weak(self, monkeypatch, etag, expected) -> None:
-        install(monkeypatch)
+    def test_a_strong_etag_turns_weak(self, etag, expected) -> None:
         response = HttpResponse(BODY, headers={"ETag": etag})
         assert compress_response(_request(), response)["ETag"] == expected
 
@@ -267,21 +278,33 @@ class TestEligibility:
         assert "Vary" not in response
         assert b"".join(response) == BODY.encode()
 
-    def test_a_file_response_over_an_iterator_compresses_as_a_stream(
-        self, monkeypatch
-    ) -> None:
-        install(monkeypatch)
+    def test_a_file_response_over_an_iterator_compresses_as_a_stream(self) -> None:
         response = FileResponse(iter([BODY.encode()]), content_type="text/html")
         compress_response(_request(), response)
         assert response["Content-Encoding"] == "gzip"
         assert zlib.decompress(b"".join(response), 31) == BODY.encode()
 
-    def test_no_transform_is_ignored_when_told(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_no_transform_is_ignored_when_told(self) -> None:
         response = HttpResponse(BODY, headers={"Cache-Control": "no-transform"})
         with _compression(RESPECT_NO_TRANSFORM=False):
             compress_response(_request(), response)
         assert response["Content-Encoding"] == "gzip"
+
+    @pytest.mark.parametrize(
+        ("settings", "status", "content_type"),
+        [
+            ({"ENABLED": False}, 200, "text/html"),
+            ({}, 304, "text/html"),
+            ({}, 200, "image/png"),
+        ],
+        ids=["disabled", "not-modified", "incompressible"],
+    )
+    def test_a_refused_response_keeps_its_body_unread(
+        self, settings: dict, status: int, content_type: str
+    ) -> None:
+        response = UnreadBody(BODY, status=status, content_type=content_type)
+        with _compression(**settings):
+            assert compress_response(_request(), response) is response
 
     def test_disabled_is_a_pass_through(self) -> None:
         response = HttpResponse(BODY)
@@ -298,22 +321,18 @@ class TestEligibility:
             (["application/json"], "text/html", False),
         ],
     )
-    def test_content_types_filter(
-        self, monkeypatch, content_types, content_type, encoded
-    ) -> None:
-        install(monkeypatch)
+    def test_content_types_filter(self, content_types, content_type, encoded) -> None:
         response = HttpResponse(BODY, content_type=content_type)
         with _compression(CONTENT_TYPES=content_types):
             compress_response(_request(), response)
         assert ("Content-Encoding" in response) is encoded
 
-    def test_a_body_under_min_size_still_varies(self) -> None:
+    def test_a_body_under_min_size_does_not_vary(self) -> None:
         response = compress_response(_request(), HttpResponse("<p>short</p>"))
         assert "Content-Encoding" not in response
-        assert response["Vary"] == "Accept-Encoding"
+        assert "Vary" not in response
 
-    def test_a_body_that_grows_is_kept(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_body_that_grows_is_kept(self) -> None:
         noise = os.urandom(2048)
         with _compression(MIN_SIZE=0, CONTENT_TYPES=["application/octet-stream"]):
             response = HttpResponse(noise, content_type="application/octet-stream")
@@ -338,8 +357,7 @@ class TestEligibility:
         assert "Content-Encoding" not in response
         assert "Vary" not in response
 
-    def test_exclude_answering_false_compresses(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_exclude_answering_false_compresses(self) -> None:
         with _compression(EXCLUDE=f"{__name__}.exclude_nothing"):
             response = compress_response(_request(), HttpResponse(BODY))
         assert response["Content-Encoding"] == "gzip"
@@ -349,21 +367,28 @@ class TestEligibility:
         [
             (f"{__name__}.missing", "does not import"),
             (f"{__name__}.NOT_CALLABLE", "no callable"),
+            ("tests.support.broken.exclude", "raised RuntimeError"),
         ],
     )
-    def test_an_unusable_exclude_is_skipped(
-        self, monkeypatch, caplog, dotted, problem
-    ) -> None:
-        install(monkeypatch)
+    def test_an_unusable_exclude_is_skipped(self, caplog, dotted, problem) -> None:
         with caplog.at_level(logging.WARNING), _compression(EXCLUDE=dotted):
             response = compress_response(_request(), HttpResponse(BODY))
         assert response["Content-Encoding"] == "gzip"
         assert problem in caplog.text
 
+    def test_an_exclude_that_raises_on_import_logs_its_traceback(self, caplog) -> None:
+        with (
+            caplog.at_level(logging.WARNING, "next.compression.manager"),
+            _compression(EXCLUDE="tests.support.broken.exclude"),
+        ):
+            compress_response(_request(), HttpResponse(BODY))
+        (record,) = caplog.records
+        assert record.exc_info is not None
+
     def test_a_response_of_its_own_kind_is_left_alone(self) -> None:
         response = HttpResponseBase(content_type="text/html")
         assert compress_response(_request(), response) is response
-        assert response["Vary"] == "Accept-Encoding"
+        assert "Vary" not in response
 
     def test_the_chosen_coding_follows_the_client(self, monkeypatch) -> None:
         install(monkeypatch, compression_zstd=fake_stdlib_zstd(), brotli=fake_brotli())
@@ -381,8 +406,7 @@ class TestEligibility:
 class TestStreams:
     """A stream without its own coding is wrapped and flushed per chunk."""
 
-    def test_a_sync_stream(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_sync_stream(self) -> None:
         response = StreamingHttpResponse(
             iter([b"<p>a</p>", b"<p>b</p>"]), headers={"Content-Length": "16"}
         )
@@ -391,8 +415,7 @@ class TestStreams:
         assert "Content-Length" not in response
         assert zlib.decompress(b"".join(response), 31) == b"<p>a</p><p>b</p>"
 
-    def test_an_async_stream(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_an_async_stream(self) -> None:
 
         async def source():
             yield b"<p>a</p>"
@@ -408,8 +431,7 @@ class TestStreams:
         assert zlib.decompress(asyncio.run(read()), 31) == b"<p>a</p><p>b</p>"
 
     @pytest.mark.parametrize(("sse", "encoded"), [(True, True), (False, False)])
-    def test_an_event_stream_follows_sse(self, monkeypatch, sse, encoded) -> None:
-        install(monkeypatch)
+    def test_an_event_stream_follows_sse(self, sse, encoded) -> None:
         response = StreamingHttpResponse(
             iter([b"data: 1\n\n"]), content_type="text/event-stream"
         )
@@ -423,7 +445,6 @@ class TestAsyncBuffered:
 
     @pytest.mark.parametrize(("limit", "away"), [(16, True), (10**9, False)])
     def test_the_offload_rule(self, monkeypatch, limit, away) -> None:
-        install(monkeypatch)
         offloaded = []
         to_thread = asyncio.to_thread
 
@@ -446,8 +467,7 @@ class TestAsyncBuffered:
 class TestPrepareStream:
     """`prepare_stream` negotiates for a stream that compresses itself."""
 
-    def test_a_document_stream_takes_the_coding(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_document_stream_takes_the_coding(self) -> None:
         response = StreamingHttpResponse(
             [b""], content_type="text/html", headers={"ETag": '"a"'}
         )
@@ -478,8 +498,7 @@ class TestPrepareStream:
         ("mode", "sse", "coding"),
         [("off", True, None), ("shared", False, "gzip"), ("reset", True, "gzip")],
     )
-    def test_a_topic_follows_sse_topics(self, monkeypatch, mode, sse, coding) -> None:
-        install(monkeypatch)
+    def test_a_topic_follows_sse_topics(self, mode, sse, coding) -> None:
         response = StreamingHttpResponse([b""], content_type="text/event-stream")
         with _compression(SSE_TOPICS=mode, SSE=sse):
             encoding = prepare_stream(_request(), response, topic=True)
@@ -493,8 +512,7 @@ class TestPrepareStream:
         with _compression(SSE_TOPICS="reset", ORDER=["br"]):
             assert prepare_stream(_request("br"), response, topic=True) is None
 
-    def test_a_reset_encoding_drops_the_window_per_write(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_reset_encoding_drops_the_window_per_write(self) -> None:
         response = StreamingHttpResponse([b""], content_type="text/event-stream")
         with _compression(SSE_TOPICS="reset", PADDING=0):
             encoding = prepare_stream(_request(), response, topic=True)
@@ -512,8 +530,7 @@ class TestPrepareStream:
 class TestDocumentCoding:
     """The coding a document stream goes out in, read before the response exists."""
 
-    def test_a_stream_that_encodes_itself_buffers_nowhere(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_stream_that_encodes_itself_buffers_nowhere(self) -> None:
         with override_settings(MIDDLEWARE=[GZIP_MIDDLEWARE]):
             coding = compression_manager.document_coding(_request())
         assert coding == ("gzip", False)
@@ -527,14 +544,12 @@ class TestDocumentCoding:
     @pytest.mark.parametrize(
         "scope", [{"ENABLED": False}, {"STREAMS": "middleware"}, {"ORDER": ["zstd"]}]
     )
-    def test_django_gzip_buffers_below_six_one(self, monkeypatch, scope) -> None:
-        install(monkeypatch)
+    def test_django_gzip_buffers_below_six_one(self, scope) -> None:
         with _compression(**scope), override_settings(MIDDLEWARE=[GZIP_MIDDLEWARE]):
             coding = compression_manager.document_coding(_request("gzip"))
         assert coding == ("gzip", django.VERSION[:2] < (6, 1))
 
-    def test_the_middleware_owning_streams_flushes_them(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_the_middleware_owning_streams_flushes_them(self) -> None:
         with (
             _compression(STREAMS="middleware"),
             override_settings(MIDDLEWARE=[MIDDLEWARE]),
@@ -542,8 +557,7 @@ class TestDocumentCoding:
             coding = compression_manager.document_coding(_request())
         assert coding == ("gzip", False)
 
-    def test_html_outside_content_types_is_left_to_django(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_html_outside_content_types_is_left_to_django(self) -> None:
         with _compression(CONTENT_TYPES=["application/json"]):
             assert compression_manager.document_coding(_request()) == (None, False)
 
@@ -557,8 +571,7 @@ class TestDecodeResponse:
         response["Content-Encoding"] = "identity"
         assert decode_response(response) == BODY.encode()
 
-    def test_a_buffered_body_decodes(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_buffered_body_decodes(self) -> None:
         response = compress_response(_request(), HttpResponse(BODY))
         assert decode_response(response).startswith(BODY.encode())
 

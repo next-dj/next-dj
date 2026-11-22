@@ -1,5 +1,4 @@
 import pytest
-from django.test import RequestFactory
 
 from next.suspense.tokens import (
     BodyTransport,
@@ -34,25 +33,25 @@ class TestDescriptors:
 class TestExtract:
     """Each transport reads the token from its own place only."""
 
-    def test_the_header_transport_reads_the_header(self) -> None:
-        request = RequestFactory().get("/?_nb=query", HTTP_X_NEXT_BOUNDARY="tok")
+    def test_the_header_transport_reads_the_header(self, rf) -> None:
+        request = rf.get("/?_nb=query", HTTP_X_NEXT_BOUNDARY="tok")
         assert HeaderTransport().extract(request) == "tok"
-        assert HeaderTransport().extract(RequestFactory().get("/?_nb=q")) is None
+        assert HeaderTransport().extract(rf.get("/?_nb=q")) is None
 
-    def test_an_empty_header_carries_no_token(self) -> None:
-        request = RequestFactory().get("/", HTTP_X_NEXT_BOUNDARY="")
+    def test_an_empty_header_carries_no_token(self, rf) -> None:
+        request = rf.get("/", HTTP_X_NEXT_BOUNDARY="")
         assert HeaderTransport().extract(request) is None
 
-    def test_the_query_transport_reads_the_query(self) -> None:
-        request = RequestFactory().get("/?_nb=tok", HTTP_X_NEXT_BOUNDARY="header")
+    def test_the_query_transport_reads_the_query(self, rf) -> None:
+        request = rf.get("/?_nb=tok", HTTP_X_NEXT_BOUNDARY="header")
         assert QueryTransport().extract(request) == "tok"
-        assert QueryTransport().extract(RequestFactory().get("/")) is None
+        assert QueryTransport().extract(rf.get("/")) is None
 
-    def test_the_body_transport_reads_the_form_body(self) -> None:
-        request = RequestFactory().post("/?_nb=query", {"_nb": "tok"})
+    def test_the_body_transport_reads_the_form_body(self, rf) -> None:
+        request = rf.post("/?_nb=query", {"_nb": "tok"})
         assert BodyTransport().extract(request) == "tok"
-        assert BodyTransport().extract(RequestFactory().post("/?_nb=q")) is None
+        assert BodyTransport().extract(rf.post("/?_nb=q")) is None
 
-    def test_a_repeated_field_joins_into_text_no_token_parses_as(self) -> None:
-        request = RequestFactory().get("/?_nb=a&_nb=b")
+    def test_a_repeated_field_joins_into_text_no_token_parses_as(self, rf) -> None:
+        request = rf.get("/?_nb=a&_nb=b")
         assert QueryTransport().extract(request) == "a,b"

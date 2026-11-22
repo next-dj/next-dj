@@ -8,15 +8,13 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, override
 
 from next.conf.settings import fail_loudly
-from next.deps.cache import DependencyCache
-from next.deps.context import RESERVED_KEYS, ResolutionContext
+from next.deps.context import ResolutionContext
 from next.deps.resolver import current_resolver
+from next.deps.scope import bridged_scope
 from next.diagnostics import FailureLog, exception_text, type_name
 from next.introspect import callable_name, is_coroutine_callable
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
-from next.pages.scope import render_scope
-from next.ports import run_bridged
 from next.utils import is_intercept_name, is_route_group, strip_route_groups
 
 from .fold import (
@@ -400,17 +398,7 @@ async def _afold_tail(
     """Fold `tail` over `prefix` as `_fold_tail` does, awaiting each callable."""
     state = prefix
     active = current_resolver()
-    context = ResolutionContext(
-        request=request,
-        form=None,
-        url_kwargs={
-            name: value
-            for name, value in url_kwargs.items()
-            if name not in RESERVED_KEYS
-        },
-        context_data=context_data,
-        cache=DependencyCache(dep_cache),
-    )
+    context = ResolutionContext.for_page(request, url_kwargs, dep_cache, context_data)
     for source in tail:
         func = source.func
         if func is None:
@@ -425,27 +413,6 @@ async def _afold_tail(
             continue
         state = fold_segment(state, replace(segment, trail=source.segment.trail))
     return state
-
-
-async def _scoped_fold(
-    prefix: FoldState,
-    tail: tuple[ChainSource, ...],
-    request: HttpRequest | None,
-    url_kwargs: Mapping[str, object],
-    dep_cache: dict[str, Any],
-    context_data: MutableMapping[str, object],
-) -> FoldState:
-    """Fold a chain holding an async callable in a request scope, raising a failure."""
-    async with render_scope(dep_cache):
-        return await _afold_tail(
-            prefix,
-            tail,
-            request=request,
-            url_kwargs=url_kwargs,
-            dep_cache=dep_cache,
-            context_data=context_data,
-            contain=False,
-        )
 
 
 def _overlaid(
@@ -487,16 +454,18 @@ def fold_chain(
     dynamic = any(source.func is not None for source in sources)
     context = context_data() if dynamic and context_data is not None else {}
     if any(is_coroutine_callable(source.func) for source in sources):
-        state = run_bridged(
+        state = bridged_scope(
+            dep_cache,
             partial(
-                _scoped_fold,
+                _afold_tail,
                 start,
                 tuple(sources),
-                request,
-                url_kwargs or {},
-                dep_cache,
-                context,
-            )
+                request=request,
+                url_kwargs=url_kwargs or {},
+                dep_cache=dep_cache,
+                context_data=context,
+                contain=False,
+            ),
         )
         return finish(state)
     state = _fold_tail(

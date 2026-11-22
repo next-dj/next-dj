@@ -1,24 +1,33 @@
 from collections.abc import Mapping
 
 import pytest
-from django.core.checks import run_checks
 from django.test import override_settings
 
-from next.checks import NEXT
-from next.conf.checks import check_defer_settings
 from next.conf.defaults import DEFAULTS
 from next.conf.defer import (
     SHAPE,
-    Misfit,
-    Section,
-    Shape,
+    backend_count,
+    backend_option,
+    backend_paths,
+    deadline_mode,
     defer_count,
     defer_option,
+    defer_read,
     defer_seconds,
     defer_template,
+    entry_options,
     long_token_age,
-    misfits,
+    parallel,
+    sqlite_parallel,
+    thread_local_middleware,
+    timeout_floor,
 )
+from next.conf.merge import FROZEN_DEFAULTS
+from next.conf.shapes import Misfit, Section, Shape, flag, misfits, text
+
+
+def defer_misfits(scope: Mapping[str, object]) -> list[Misfit]:
+    return misfits(scope, SHAPE, FROZEN_DEFAULTS["DEFER"])
 
 
 def _leaves(section: Section, path: tuple[str, ...] = ()):
@@ -41,7 +50,7 @@ class TestShape:
         assert sorted(_leaves(SHAPE)) == sorted(keys(DEFAULTS["DEFER"]))
 
     def test_the_defaults_fit_their_shape(self) -> None:
-        assert misfits(DEFAULTS["DEFER"]) == []
+        assert defer_misfits(DEFAULTS["DEFER"]) == []
 
     @pytest.mark.parametrize("path", sorted(_leaves(SHAPE)))
     def test_every_leaf_refuses_a_list(self, path: tuple[str, ...]) -> None:
@@ -50,7 +59,7 @@ class TestShape:
         for key in path[:-1]:
             target = target.setdefault(key, {})
         target[path[-1]] = [object()]
-        [misfit] = misfits(scope)
+        [misfit] = defer_misfits(scope)
         assert misfit.path == path
         assert misfit.found == "a list"
 
@@ -196,7 +205,7 @@ class TestMisfits:
         ],
     )
     def test_a_value_outside_its_shape_is_a_misfit(self, scope, path, found) -> None:
-        [misfit] = misfits(scope)
+        [misfit] = defer_misfits(scope)
         assert (misfit.path, misfit.found) == (path, found)
         assert misfit.expected
 
@@ -227,34 +236,19 @@ class TestMisfits:
         ],
     )
     def test_a_usable_value_is_no_misfit(self, scope) -> None:
-        assert misfits(scope) == []
-
-    def test_unknown_keys_are_reported_at_every_level(self) -> None:
-        found = misfits(
-            {
-                "SPEED": 1,
-                "ERRORS": {"LOUD": True},
-                "EXECUTOR": {"OPTIONS": {"PLACEMENT": {"GUESS": 1}}},
-            }
-        )
-        assert [(m.path, m.unknown) for m in found] == [
-            ((), ("SPEED",)),
-            (("EXECUTOR", "OPTIONS", "PLACEMENT"), ("GUESS",)),
-            (("ERRORS",), ("LOUD",)),
-        ]
-        assert "DEADLINE" in found[0].allowed
+        assert defer_misfits(scope) == []
 
     def test_a_misfit_ceiling_leaves_the_bucket_unread(self) -> None:
-        found = misfits({"TOKENS": {"OPTIONS": {"BUCKET": 900, "MAX_AGE": -1}}})
+        found = defer_misfits({"TOKENS": {"OPTIONS": {"BUCKET": 900, "MAX_AGE": -1}}})
         assert [misfit.path for misfit in found] == [("TOKENS", "OPTIONS", "MAX_AGE")]
 
     def test_a_bucket_misfit_names_its_ceiling(self) -> None:
-        [misfit] = misfits({"TOKENS": {"OPTIONS": {"BUCKET": 600}}})
+        [misfit] = defer_misfits({"TOKENS": {"OPTIONS": {"BUCKET": 600}}})
         assert misfit.expected == "an integer below MAX_AGE, which is 600, or None"
 
     def test_the_options_of_a_foreign_backend_pass_unread(self) -> None:
         scope = {"POLICY": {"BACKEND": "myapp.Policy", "OPTIONS": {"ANY": object()}}}
-        assert misfits(scope) == []
+        assert defer_misfits(scope) == []
 
     def test_the_named_shipped_backend_keeps_its_options_read(self) -> None:
         scope = {
@@ -263,7 +257,7 @@ class TestMisfits:
                 "OPTIONS": {"ANY": 1},
             }
         }
-        [misfit] = misfits(scope)
+        [misfit] = defer_misfits(scope)
         assert misfit == Misfit(
             ("POLICY", "OPTIONS"),
             unknown=("ANY",),
@@ -285,6 +279,24 @@ class TestReads:
     def test_a_misfit_reads_as_its_default(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"DEFER": {"MAX_DEPTH": "deep"}}):
             assert defer_count("MAX_DEPTH") == 4
+
+    def test_a_typed_read_answers_the_value_its_predicate_passes(self) -> None:
+        assert defer_read(text, "ADMISSION") == "next.suspense.QueueDelay"
+
+    def test_a_reader_that_disagrees_with_the_shape_is_refused(self) -> None:
+        with pytest.raises(TypeError, match=r"DEFER\['ADMISSION'\] holds"):
+            defer_read(flag, "ADMISSION")
+
+    def test_a_backend_count_reads_the_options_then_the_scope(self) -> None:
+        assert backend_count({"MAX_WORKERS": 3}, "EXECUTOR", "MAX_WORKERS") == 3
+        assert backend_count({}, "EXECUTOR", "MAX_QUEUE") == defer_count(
+            "EXECUTOR", "OPTIONS", "MAX_QUEUE"
+        )
+
+    def test_a_backend_count_refuses_what_is_no_integer(self) -> None:
+        match = r"DEFER\['EXECUTOR'\]\['OPTIONS'\]\['MAX_WORKERS'\] holds 'x'"
+        with pytest.raises(TypeError, match=match):
+            backend_count({"MAX_WORKERS": "x"}, "EXECUTOR", "MAX_WORKERS")
 
     def test_a_nested_key_keeps_its_siblings_defaults(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"DEFER": {"ERRORS": {"RAISE": True}}}):
@@ -340,6 +352,14 @@ class TestReads:
             assert defer_option("POLICY", "OPTIONS", "MISSING") is None
             assert defer_option("POLICY", "OPTIONS", "ANY", "a") == 1
 
+    def test_a_foreign_backend_option_the_framework_names_keeps_its_shape(self) -> None:
+        scope = {"EXECUTOR": {"BACKEND": "myapp.Executor", "OPTIONS": {"PARALLEL": 1}}}
+        with override_settings(NEXT_FRAMEWORK={"DEFER": scope}):
+            [misfit] = defer_misfits(scope)
+            assert misfit.path == ("EXECUTOR", "OPTIONS", "PARALLEL")
+            assert defer_option("EXECUTOR", "OPTIONS", "PARALLEL") is True
+            assert parallel() is True
+
     def test_a_section_reads_merged_over_its_defaults(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"MAX_RESTORE": 2}}}):
             assert dict(defer_option("MORE")) == {"MAX_RESTORE": 2}
@@ -366,6 +386,70 @@ class TestReads:
             assert defer_template("LOADING") is None
 
 
+class TestBackendOptions:
+    @pytest.mark.parametrize(
+        ("config", "options"),
+        [
+            (None, {}),
+            ({}, {}),
+            ({"OPTIONS": []}, {}),
+            ({"OPTIONS": {"MAX_QUEUE": 2}}, {"MAX_QUEUE": 2}),
+        ],
+    )
+    def test_the_options_of_an_entry(self, config, options) -> None:
+        assert dict(entry_options(config)) == options
+
+    def test_an_entry_option_wins_over_the_setting(self) -> None:
+        assert backend_option({"MAX_QUEUE": 2}, "EXECUTOR", "MAX_QUEUE") == 2
+
+    def test_an_omitted_option_reads_the_setting(self) -> None:
+        with override_settings(
+            NEXT_FRAMEWORK={"DEFER": {"EXECUTOR": {"OPTIONS": {"MAX_QUEUE": 7}}}}
+        ):
+            assert backend_option({}, "EXECUTOR", "MAX_QUEUE") == 7
+
+
+class TestConnectionReads:
+    def test_the_defaults(self) -> None:
+        assert backend_paths("THREAD_STATE") == ()
+        assert deadline_mode() == "state"
+        assert timeout_floor() == defer_seconds("DB_TIMEOUT_FLOOR")
+        assert parallel() is True
+        assert sqlite_parallel() is False
+        assert thread_local_middleware() == ()
+
+    def test_written_values(self) -> None:
+        scope = {
+            "CONNECTION_STATE": ["myapp.State"],
+            "DEADLINE_TO_DB": "always",
+            "DB_TIMEOUT_FLOOR": "250ms",
+            "EXECUTOR": {
+                "OPTIONS": {
+                    "PARALLEL": False,
+                    "SQLITE": "parallel",
+                    "THREAD_LOCAL_MIDDLEWARE": ["myapp.Middleware"],
+                }
+            },
+        }
+        with override_settings(NEXT_FRAMEWORK={"DEFER": scope}):
+            assert backend_paths("CONNECTION_STATE") == ("myapp.State",)
+            assert deadline_mode() == "always"
+            assert timeout_floor() == 0.25
+            assert parallel() is False
+            assert sqlite_parallel() is True
+            assert thread_local_middleware() == ("myapp.Middleware",)
+
+    def test_misfits_read_as_their_defaults(self) -> None:
+        scope = {
+            "DEADLINE_TO_DB": True,
+            "EXECUTOR": {"OPTIONS": {"PARALLEL": "no", "SQLITE": "always"}},
+        }
+        with override_settings(NEXT_FRAMEWORK={"DEFER": scope}):
+            assert deadline_mode() == "state"
+            assert parallel() is True
+            assert sqlite_parallel() is False
+
+
 class TestLongTokenAge:
     @pytest.mark.parametrize(
         ("scope", "age"),
@@ -384,117 +468,3 @@ class TestLongTokenAge:
     )
     def test_only_a_shipped_age_above_a_day_is_named(self, scope, age) -> None:
         assert long_token_age(scope) == age
-
-
-class TestCheckDeferSettings:
-    def test_silent_without_the_setting(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={}):
-            assert check_defer_settings() == []
-
-    def test_silent_on_a_non_dict_setting(self) -> None:
-        with override_settings(NEXT_FRAMEWORK=42):
-            assert check_defer_settings() == []
-
-    def test_silent_on_a_non_dict_scope(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"DEFER": []}):
-            assert check_defer_settings() == []
-
-    def test_a_misfit_value_yields_e076(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"ERRORS": {"KINDS": "brief"}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.E076"
-        assert message.msg == (
-            "NEXT_FRAMEWORK['DEFER']['ERRORS']['KINDS'] must be 'detailed' or "
-            "'opaque', got 'brief'. The framework ignores this value and keeps "
-            "its default."
-        )
-
-    def test_an_unknown_key_yields_e035(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"PAGES": 3}}}):
-            [message] = check_defer_settings()
-        assert message.id == "next.E035"
-        assert message.msg == (
-            "NEXT_FRAMEWORK['DEFER']['MORE'] has unknown keys 'PAGES'. Allowed keys "
-            "are MAX_RESTORE."
-        )
-
-    def test_a_short_token_key_yields_e233(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"KEYS": ["short"]}}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.E233"
-        assert message.msg.startswith(
-            "NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['KEYS'] must be None, a "
-            "dotted path or a list of keys of 32 characters or more, got a list."
-        )
-        assert "forge" in message.msg
-
-    @pytest.mark.parametrize("keys", [[], ""])
-    def test_an_empty_key_ring_yields_e233(self, keys: object) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"KEYS": keys}}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.E233"
-
-    @pytest.mark.parametrize("keys", [None, "myapp.secrets.ring", ["k" * 32, "f" * 40]])
-    def test_a_usable_key_ring_passes(self, keys: object) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"KEYS": keys}}}}
-        ):
-            assert check_defer_settings() == []
-
-    def test_a_bucket_from_max_age_yields_e233(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"BUCKET": 600}}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.E233"
-        assert "must be an integer below MAX_AGE, which is 600, or None" in message.msg
-        assert "born expired" in message.msg
-
-    @pytest.mark.parametrize("age", [-1, 0])
-    def test_a_max_age_below_one_yields_e233(self, age: int) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"MAX_AGE": age}}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.E233"
-        assert "an integer from 1 or a dotted path" in message.msg
-        assert "Keep MAX_AGE from 1" in (message.hint or "")
-
-    def test_spill_bytes_is_no_token_option(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"SPILL_BYTES": 128}}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.E035"
-
-    def test_a_dotted_max_age_passes(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "DEFER": {"TOKENS": {"OPTIONS": {"MAX_AGE": "myapp.tokens.age"}}}
-            }
-        ):
-            assert check_defer_settings() == []
-
-    def test_a_max_age_above_a_day_yields_w175(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"TOKENS": {"OPTIONS": {"MAX_AGE": 172_800}}}}
-        ):
-            [message] = check_defer_settings()
-        assert message.id == "next.W175"
-        assert message.msg == (
-            "NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['MAX_AGE'] is 172800 "
-            "seconds, above one day. A leaked reload token stays usable that long."
-        )
-
-    def test_registered_check_reaches_manage_py_check_path(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"DEADLINE": 0}}):
-            messages = run_checks(tags=[NEXT])
-        assert any(
-            m.id == "next.E076" and "['DEFER']['DEADLINE']" in m.msg for m in messages
-        )

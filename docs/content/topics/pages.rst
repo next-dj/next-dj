@@ -31,11 +31,11 @@ Registered template loaders.
    The ordered list under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``, whose default first entry ``DjxTemplateLoader`` resolves the sibling ``template.djx``.
 
 A ``layout.djx`` is no body source, since it only wraps the body of the page beneath it.
-A ``page.py`` with none of the three sources routes no URL, even beside or under a ``layout.djx``, and :ref:`next.E012 <ref-system-checks>` reports it unless it declares access, passes context to the pages below, or serves an ``@action`` of its directory, see *A layout is no body* under :doc:`layouts`.
+A ``page.py`` with none of the three sources routes no URL, even beside or under a ``layout.djx``, and ``next.E012`` reports it unless it declares access, passes context to the pages below, or serves an ``@action`` of its directory, see *A layout is no body* under :doc:`layouts`.
 
 See *Render order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, and the full priority table lives under *Priority resolution* below.
+Multiple body sources trigger ``next.W043``, and the full priority table lives under *Priority resolution* below.
 
 Render order
 ------------
@@ -165,7 +165,7 @@ Keyed single value.
 Unkeyed dict.
    ``@context`` on a function that returns a dict merges the dict into the template scope.
    Useful when several values share a dependency you only want to resolve once.
-   The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports :ref:`next.E029 <ref-system-checks>`.
+   The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports ``next.E029``.
    A callable that answers a non-mapping at render time raises ``next.pages.PageContextShapeError``, a :class:`TypeError` subclass carrying the name of the callable and the path of the page it was building.
 
    .. code-block:: python
@@ -225,7 +225,7 @@ Two async callables that do not read each other run concurrently.
        return await fetch_forecast()
 
 An ``@action`` handler and a form hook stay plain ``def`` functions, because the form dispatch calls them synchronously.
-An ``async def`` one, and an async generator anywhere, raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as :ref:`next.E218 <ref-system-checks>`.
+An ``async def`` one, and an async generator anywhere, raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as ``next.E218``.
 :doc:`/content/topics/boundaries/async` covers the request scope async values share, the ``Loader`` that batches lookups, and the lanes a deferred job runs on.
 
 Page access
@@ -369,7 +369,7 @@ When more than one body source applies the framework picks the highest priority 
 The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
 
-When a page directory declares more than one body source, :ref:`next.W043 <ref-system-checks>` reports it.
+When a page directory declares more than one body source, ``next.W043`` reports it.
 The highest-priority source is used and the others are never consulted.
 
 Seeding a composed body from code
@@ -661,7 +661,7 @@ Without ``DEBUG`` the client sees the generic 500 page, and Django's ``django.re
 The blast radius is the broken page and the pages below it in every mode, since what it would have declared with ``inherit=True`` is unknown, see :ref:`topics-access`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
 The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
-``manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
+``manage.py check`` reports the same failure as ``next.E017``, naming the exception type and message, which catches a broken page before traffic reaches it.
 
 See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 

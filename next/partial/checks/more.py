@@ -88,7 +88,7 @@ def check_more_has_page_window(*args: object, **kwargs: object) -> list[CheckMes
 
 @register(Tags.templates, NEXT)
 def check_pager_params_unique(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Error when two pagers of one page read the same query parameter (`next.E244`).
+    """Error when two pagers of one page read the same query parameter (`next.E236`).
 
     Each list would then read the token of the other, and a restore would mix them.
     """

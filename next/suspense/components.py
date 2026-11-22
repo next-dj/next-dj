@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import secrets
 import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -24,13 +23,12 @@ from next.defer import DeferMode, ErrorKind
 from next.pages.responses import mark_personal_render
 from next.partial.headers import partial_intent
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY
-from next.static.bundles import require_bundle
-from next.static.collector import StaticCollector
+from next.static.collector import StaticCollector, require_bundle
 from next.static.runtime import DEFER_CHUNK_KEY
 from next.suspense.markers import Caps, Job, Rendered
 from next.suspense.render import Delta, Frame, current_frame, fallback, run, unframed
-from next.suspense.response import idle, settled, shell
-from next.suspense.session import BoundarySession
+from next.suspense.response import idle, in_place, shell
+from next.suspense.session import BoundarySession, new_seal, wire_id
 from next.suspense.trip import retry_attributes, retry_token, shell_token, trip_input
 
 
@@ -45,7 +43,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("next.suspense")
 
-_SEAL_BYTES: Final = 4
 _SESSION_ATTR: Final = "_next_trip_session"
 _NOSCRIPT_ATTR: Final = "_next_noscript_link"
 
@@ -187,7 +184,7 @@ def _ident() -> str:
     held = _deferring.get()
     if held is not None:
         return held.open().next_id()
-    return f"b-{secrets.token_hex(_SEAL_BYTES)}-0"
+    return wire_id(new_seal(), 0)
 
 
 def _collector(context: Context) -> StaticCollector | None:
@@ -218,8 +215,8 @@ def _held_session(request: HttpRequest) -> BoundarySession[Delta]:
         return held
 
 
-def _admitted(request: object) -> bool:
-    """Whether one more client-trip wrapper fits `MAX_INSTANCES` of its response.
+def _take_instance(request: object) -> bool:
+    """Count one more client-trip wrapper, false once `MAX_INSTANCES` is spent.
 
     The wrapper counts on the session its stream jobs count on, in document order.
     """
@@ -227,10 +224,10 @@ def _admitted(request: object) -> bool:
         return True
     frame = current_frame()
     if frame is not None:
-        return frame.session.admit()
+        return frame.session.take_instance()
     held = _deferring.get()
     session = _held_session(request) if held is None else held.open()
-    return session.admit()
+    return session.take_instance()
 
 
 def _noscript(request: object) -> str:
@@ -345,7 +342,7 @@ class ComponentDeferrals:
             session.queue(job)
         with unframed(), _undeferred(), wrapping(job.id):
             loading, failure = call.renderer.loading(context)
-        return shell(job.id, call.tag, call.key, call.source, loading, failure)
+        return shell(job.id, call, loading, failure)
 
     def trip(self, context: Context, call: DeferredCall, trip: TripInput) -> str:
         """Return the idle wrapper of a client-trip call, its token minted now.
@@ -353,12 +350,12 @@ class ComponentDeferrals:
         A page asked for with `NOSCRIPT_PARAM` renders the call in place and privately.
         """
         request = _request(context)
-        if not _admitted(request):
+        if not _take_instance(request):
             ident = _ident()
             with unframed(), _undeferred():
                 html, failure = call.renderer.error(context, ErrorKind.TIMEOUT)
             note_retry(_collector(context), html, "")
-            return settled(ident, call.tag, call.key, call.source, html, failure)
+            return in_place(ident, call, html, failure)
         if isinstance(request, HttpRequest) and request.GET.get(NOSCRIPT_PARAM) == "1":
             mark_personal_render(request)
             return self.inline(context, call)
@@ -373,7 +370,7 @@ class ComponentDeferrals:
         if call.tag is not None:
             loading, link = loading + link, ""
         wrapper = idle(
-            ident, call.tag, call.key, call.source, (trip.mode, token), loading, refused
+            ident, call, loading, mode=trip.mode, token=token, failure=refused
         )
         return wrapper + link
 
@@ -388,7 +385,7 @@ class ComponentDeferrals:
             html, failure = call.renderer.body(context)
         retry = "" if failure is None else retry_token(_request(context), call, failure)
         note_retry(_collector(context), "", retry)
-        return settled(ident, call.tag, call.key, call.source, html, failure, retry)
+        return in_place(ident, call, html, failure, retry)
 
 
 __all__ = [

@@ -11,6 +11,7 @@ from next.components.signals import (
     components_registered,
 )
 from next.testing import SignalRecorder, capture_signals
+from tests.components.sites import ComponentSite
 
 
 @pytest.fixture()
@@ -100,3 +101,11 @@ def capture_component_rendered() -> Generator[SignalRecorder, None, None]:
     """Record ``component_rendered`` emissions."""
     with capture_signals(component_rendered) as recorder:
         yield recorder
+
+
+@pytest.fixture()
+def site(tmp_path: Path) -> Generator[ComponentSite, None, None]:
+    """Resolve components added to the site by name for the length of the test."""
+    held = ComponentSite(tmp_path)
+    with held.resolving():
+        yield held

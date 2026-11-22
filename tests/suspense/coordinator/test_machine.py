@@ -1,29 +1,21 @@
 from collections.abc import Callable, Sequence
+from functools import partial
 from typing import Final
 
 import pytest
 
-from next.defer import BoundaryOptions, DeferMode, ErrorKind
+from next.defer import DeferMode, ErrorKind
 from next.suspense import (
-    Addressing,
     Admit,
     BoundaryDeadlineError,
     BoundaryShedError,
     Capacity,
-    Caps,
-    ForegroundFacts,
-    Group,
     Job,
     Lane,
-    Outcome,
     Placement,
-    Plan,
     QueueDelay,
-    Rendered,
     Rule,
     Server,
-    Site,
-    Timing,
     Verdict,
 )
 from next.suspense.coordinator import (
@@ -45,6 +37,18 @@ from next.suspense.coordinator import (
     Wake,
     place,
 )
+from next.suspense.markers import (
+    Addressing,
+    Caps,
+    ForegroundFacts,
+    Group,
+    Outcome,
+    Plan,
+    Rendered,
+    Site,
+    Timing,
+)
+from tests.support.jobs import plain_job
 
 
 SITE = Site(Addressing.COMPONENT, "row", DeferMode.STREAM, "list.djx")
@@ -59,38 +63,7 @@ CAPACITY = Capacity(16, 0, 0, 0.0)
 type Event = Callable[[Machine[str]], list[Command[str]]]
 
 
-def _fallback(kind: ErrorKind) -> Rendered[str]:
-    return Rendered("<p>failed</p>", "", kind=kind)
-
-
-def _render() -> Rendered[str]:
-    return Rendered("<p>ready</p>", "")
-
-
-async def _arender() -> Rendered[str]:
-    return _render()
-
-
-def _job(
-    name: str,
-    *,
-    deadline: float = 10.0,
-    asynchronous: bool = False,
-    parent: str | None = None,
-    depth: int | None = None,
-) -> Job[str]:
-    return Job(
-        name,
-        "k",
-        SITE,
-        BoundaryOptions(),
-        deadline,
-        _fallback,
-        run=None if asynchronous else _render,
-        arun=_arender if asynchronous else None,
-        parent=parent,
-        depth=int(parent is not None) if depth is None else depth,
-    )
+_job = partial(plain_job, site=SITE)
 
 
 def _ok(*nested: Job[str]) -> Rendered[str]:
@@ -211,7 +184,7 @@ class TestPoolFairness:
         machine = _machine(jobs, caps=_caps(per_request=3), coalesce=0.25)
         machine.start(CAPACITY, 0.0)
         machine.finished("j0", _ok(), Timing(), 0.1)
-        machine.written("j0", 0.1)
+        machine.written(0.1)
         machine.capacity(CAPACITY, 3.5)
         assert machine.finished("j1", _ok(), Timing(), 1.0)[-1] == Wake(3.75)
 
@@ -287,7 +260,7 @@ class TestAdmission:
         assert item.kind is ErrorKind.OVERLOADED
         assert machine.end("j0") is End.SHED
         assert machine.totals == Totals(shed=1)
-        finish = _finish(machine.written("j0", 0.1))
+        finish = _finish(machine.written(0.1))
         assert finish == Finish(aborted=False, cut=False, totals=Totals(shed=1))
         assert machine.closed
 
@@ -312,6 +285,22 @@ class TestAdmission:
         assert _request(machine.capacity(lagging, 0.08)) == [["j1"]]
         assert admission.calls[-1] == (lagging, False)
 
+    @pytest.mark.parametrize("queued", [1, 16, 200])
+    def test_a_reading_behind_the_credit_admits_one_queued_unit(
+        self, queued: int
+    ) -> None:
+        admission = _Admission()
+        jobs = [_job(f"j{index}") for index in range(queued + 4)]
+        machine = _machine(jobs, caps=_caps(per_request=4), admission=admission)
+        assert _pool(machine.start(CAPACITY, 0.0)) == ["j0", "j1", "j2", "j3"]
+        steps = []
+        for now in (0.01, 0.02, 0.03):
+            admission.calls.clear()
+            assert _pool(machine.capacity(CAPACITY, now)) == []
+            steps.append(len(admission.calls))
+        assert steps == [1, 1, 1]
+        assert _pool(machine.finished("j0", _ok(), Timing(), 0.04)) == ["j4"]
+
     def test_a_reading_may_shed_a_queued_unit(self) -> None:
         admission = _Admission(Admit.POOL, Admit.SHED)
         machine = _machine(
@@ -324,6 +313,26 @@ class TestAdmission:
 
 class TestRefused:
     """Tests for ``Machine.refused``."""
+
+    def test_a_refused_unit_behind_the_credit_stays_off_the_request_lane(self) -> None:
+        def placer(job: Job[str], facts: ForegroundFacts, *, alone: bool) -> Placement:
+            return Placement(Verdict.HANDOFF if job.id == "j1" else Verdict.POOL_MODE)
+
+        machine = Machine(
+            Plan((_job("j0"), _job("j1"))),
+            _caps(per_request=1),
+            ASGI,
+            placer,
+            _Admission(Admit.POOL, Admit.REQUEST),
+            deadline=10.0,
+            coalesce=0.002,
+        )
+        commands = machine.start(CAPACITY, 0.0)
+        assert _pool(commands) == ["j0"]
+        assert _request(commands) == [["j1"]]
+        assert _pool(machine.refused("j1", 0.01)) == []
+        assert _request(machine.capacity(CAPACITY, 0.02)) == []
+        assert _pool(machine.finished("j0", _ok(), Timing(), 0.03)) == ["j1"]
 
     def test_a_unit_without_a_permit_goes_to_the_pool(self) -> None:
         machine = _machine(
@@ -445,14 +454,14 @@ class TestDeadlines:
         assert finish == Finish(
             aborted=False, cut=True, totals=Totals(late=1, timeouts=1, dropped=1)
         )
-        assert machine.written("j0", 6.5) == []
+        assert machine.written(6.5) == []
 
     @pytest.mark.parametrize(
         "event",
         [
             lambda machine: machine.capacity(CAPACITY, 20.0),
             lambda machine: machine.finished("j1", _ok(), Timing(), 20.0),
-            lambda machine: machine.written("j0", 20.0),
+            lambda machine: machine.written(20.0),
             lambda machine: machine.tick(20.0),
         ],
     )
@@ -469,7 +478,7 @@ class TestDeadlines:
         machine = _machine([_job("j0")], deadline=4.0)
         machine.start(CAPACITY, 0.0)
         machine.finished("j0", _ok(child), Timing(), 3.0)
-        commands = machine.written("j0", 4.5)
+        commands = machine.written(4.5)
         assert _pool(commands) == []
         assert _emitted(commands) == [["j0.0"]]
         assert machine.end("j0.0") is End.TIMEOUT
@@ -534,7 +543,7 @@ class TestCoalescing:
         assert _emitted(machine.finished("j0", _ok(), Timing(), 0.1)) == [["j0"]]
         assert _emits(machine.finished("j2", _ok(), Timing(), 0.2)) == []
         assert _emits(machine.finished("j1", _ok(), Timing(), 0.2005)) == []
-        assert machine.written("j0", 0.201) == [Wake(0.2 + 0.002)]
+        assert machine.written(0.201) == [Wake(0.2 + 0.002)]
         (emit,) = _emits(machine.tick(0.2 + 0.002))
         assert [item.id for item in emit.items] == ["j1", "j2"]
         assert not emit.first
@@ -544,7 +553,7 @@ class TestCoalescing:
         machine.start(CAPACITY, 0.0)
         machine.finished("j0", _ok(), Timing(), 0.1)
         machine.finished("j1", _ok(), Timing(), 0.15)
-        assert _emitted(machine.written("j0", 0.16)) == [["j1"]]
+        assert _emitted(machine.written(0.16)) == [["j1"]]
 
     def test_an_unchanged_wake_is_not_repeated(self) -> None:
         machine = _machine([_job("j0")])
@@ -561,7 +570,7 @@ class TestNested:
         machine.start(CAPACITY, 0.0)
         commands = machine.finished("j0", _ok(child), Timing(), 0.1)
         assert _pool(commands) == []
-        assert _pool(machine.written("j0", 0.2)) == ["j0.0"]
+        assert _pool(machine.written(0.2)) == ["j0.0"]
         assert _emits(machine.finished("j0.0", _ok(), Timing(), 0.3)) == []
         assert _emitted(machine.finished("j1", _ok(), Timing(), 0.301)) == [
             ["j0.0", "j1"]
@@ -652,7 +661,7 @@ class TestCancel:
         machine = _machine([_job("j0")])
         machine.start(CAPACITY, 0.0)
         machine.finished("j0", _ok(), Timing(), 0.1)
-        assert _finish(machine.written("j0", 0.2)) == Finish(
+        assert _finish(machine.written(0.2)) == Finish(
             aborted=False, cut=False, totals=Totals()
         )
         assert machine.cancel(0.3) == []
@@ -673,7 +682,7 @@ class TestLoopLane:
         )
         assert _loop(machine.start(CAPACITY, 0.0)) == ["a0", "a1"]
         assert _loop(machine.finished("a0", _ok(), Timing(), 0.1)) == []
-        assert _loop(machine.written("a0", 0.2)) == ["a2"]
+        assert _loop(machine.written(0.2)) == ["a2"]
 
     def test_a_unit_over_the_credit_starts_when_nothing_is_unwritten(self) -> None:
         members = tuple(_job(f"a{index}", asynchronous=True) for index in range(3))
@@ -754,18 +763,18 @@ class TestProtocol:
         with pytest.raises(ProtocolError):
             machine.finished("j0", _ok(), Timing(), 0.2)
 
-    def test_a_write_of_no_emitted_outcome_is_refused(self) -> None:
+    def test_a_write_with_no_batch_out_is_refused(self) -> None:
         machine = _machine([_job("j0")])
         machine.start(CAPACITY, 0.0)
         with pytest.raises(ProtocolError):
-            machine.written("j0", 0.1)
+            machine.written(0.1)
 
 
 _MASK: Final = (1 << 64) - 1
 
 
 class _Dice:
-    """A seeded splitmix64 stream, so a failing seed replays exactly."""
+    """A seeded splitmix64 stream that draws alike on every supported Python version."""
 
     def __init__(self, seed: int) -> None:
         self.state = seed
@@ -824,7 +833,7 @@ class _RandomDriver:
         self.slow = rng.choice((1.0, 0.05))
         self.running: dict[str, str] = {}
         self.refusable: set[str] = set()
-        self.writing: list[str] = []
+        self.writing: list[Emit[str]] = []
         self.emitted: dict[str, Outcome[str] | Settlement[str]] = {}
         self.written: set[str] = set()
         self.finishes: list[Finish] = []
@@ -866,7 +875,8 @@ class _RandomDriver:
             parent = self.jobs[item.id].parent
             assert parent is None or parent in self.written
             self.emitted[item.id] = item
-            self.writing.append(item.id)
+        assert not self.writing
+        self.writing.append(emit)
 
     def _result(self, job: Job[str]) -> Rendered[str] | Exception:
         pick = self.rng.random()
@@ -896,12 +906,12 @@ class _RandomDriver:
             result = self._result(self.jobs[job_id])
             self.apply(machine.finished(job_id, result, Timing(), now))
         elif roll < 0.75 and self.writing and rng.random() < self.slow:
-            job_id = self.writing.pop(0)
-            self.written.add(job_id)
-            self.apply(machine.written(job_id, now))
-            item = self.emitted[job_id]
-            if not self.finishes and isinstance(item, Outcome):
-                self.known.update(job.id for job in item.rendered.nested)
+            emit = self.writing.pop(0)
+            self.written.update(item.id for item in emit.items)
+            self.apply(machine.written(now))
+            for item in emit.items:
+                if not self.finishes and isinstance(item, Outcome):
+                    self.known.update(job.id for job in item.rendered.nested)
         elif roll < 0.8 and self.refusable:
             unit_id = rng.choice(sorted(self.refusable))
             self.refusable.discard(unit_id)

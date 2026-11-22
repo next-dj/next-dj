@@ -18,8 +18,8 @@ from next.testing import (
     override_next_settings,
 )
 from tests.forms import actions
-from tests.pages.checks.metadata.trees import COMPONENTS
 from tests.support import TWIN_ACTION, routed, write_page
+from tests.support.access import COMPONENTS
 from tests.support.forms import post_without_origin
 
 

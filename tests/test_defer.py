@@ -9,10 +9,10 @@ from next.defer import (
     DEFERRALS_KEY,
     MAX_DURATION,
     RESERVED_OPTIONS,
-    BoundaryError,
+    BoundaryFailure,
     BoundaryOptionError,
     BoundaryOptions,
-    DebugBoundaryError,
+    DebugBoundaryFailure,
     DeferMode,
     Delivery,
     ErrorKind,
@@ -223,7 +223,8 @@ class TestBoundaryOptions:
             ({"props": (1,)}, "Python identifier"),
             ({"props": ("a-b",)}, "Python identifier"),
             ({"props": ("class",)}, "Python identifier"),
-            ({"props": ("timeout",)}, "boundary option of the component tag"),
+            ({"props": ("timeout",)}, "reserved by the component tag"),
+            ({"props": ("reload",)}, "reserved by the component tag"),
             ({"props": ("a", "a")}, "declared twice"),
             ({"tag": "1x"}, "tag names an HTML element"),
             ({"tag": 3}, "tag names an HTML element"),
@@ -244,32 +245,17 @@ class TestBoundaryOptions:
             BoundaryOptions.parse(**options)
 
 
-class TestPaced:
-    """A call site's `reload=` and `delay=` are durations kept on the options."""
-
-    def test_both_are_read_as_seconds(self) -> None:
-        options = BoundaryOptions.parse().paced(reload="2s", delay="150ms")
-        assert (options.reload, options.delay) == (2.0, 0.15)
-
-    def test_absent_values_stay_unset(self) -> None:
-        assert BoundaryOptions.parse().paced() == BoundaryOptions.parse()
-
-    def test_a_misfit_is_refused(self) -> None:
-        with pytest.raises(BoundaryOptionError, match="duration"):
-            BoundaryOptions.parse().paced(delay="soon")
-
-
 class TestBoundaryError:
     def test_the_detail_is_absent_outside_debug(self) -> None:
-        error = BoundaryError.of(
+        error = BoundaryFailure.of(
             ErrorKind.NOT_FOUND, "a1b2c3d4e5f6", retry=True, message="x", traceback="tb"
         )
-        assert error == BoundaryError(ErrorKind.NOT_FOUND, "a1b2c3d4e5f6", 404, True)
+        assert error == BoundaryFailure(ErrorKind.NOT_FOUND, "a1b2c3d4e5f6", 404, True)
         assert not hasattr(error, "message")
         assert not hasattr(error, "traceback")
 
     def test_a_template_reads_the_absent_detail_as_empty(self) -> None:
-        error = BoundaryError.of(
+        error = BoundaryFailure.of(
             ErrorKind.ERROR, "a1b2c3d4e5f6", retry=True, message="x", traceback="tb"
         )
         template = Template(
@@ -279,10 +265,10 @@ class TestBoundaryError:
 
     @override_settings(DEBUG=True)
     def test_the_detail_is_kept_under_debug(self) -> None:
-        error = BoundaryError.of(
+        error = BoundaryFailure.of(
             ErrorKind.TIMEOUT, "a1b2c3d4e5f6", retry=False, message="x", traceback="tb"
         )
-        assert error == DebugBoundaryError(
+        assert error == DebugBoundaryFailure(
             ErrorKind.TIMEOUT, "a1b2c3d4e5f6", None, False, "x", "tb"
         )
         assert "tb" not in repr(error)

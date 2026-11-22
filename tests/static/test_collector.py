@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 
 import pytest
+from django.template import Context
 
+from next.seeding import COLLECTOR_KEY
 from next.static import StaticAsset, StaticCollector
 from next.static.collector import (
     _EMPTY,
@@ -22,12 +24,14 @@ from next.static.collector import (
     RaiseOnConflictPolicy,
     UrlDedup,
     default_placeholders,
+    require_bundle,
 )
 from next.static.runtime import BUNDLE_NOTE, URGENT_NOTE
 from next.static.serializers import JsonJsContextSerializer
 
 
 CSS_URL = "https://example.com/a.css"
+BUNDLE_URL = "/static/next/next.reload.min.js"
 JS_URL = "https://example.com/a.js"
 
 
@@ -876,3 +880,33 @@ class TestCollectorRequire:
         collector.rollback(mark)
         assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.defer.min.js"]
         assert collector.notes(URGENT_NOTE) == ()
+
+
+class TestRequireBundle:
+    """The one call a tag makes to declare the bundle its markup needs."""
+
+    def test_a_context_records_on_its_collector(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        require_bundle(Context({COLLECTOR_KEY: collector}), "reload")
+        assert collector.notes(BUNDLE_NOTE) == [BUNDLE_URL]
+
+    def test_a_collector_records_directly(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        require_bundle(collector, "reload", urgent=True)
+        assert collector.notes(BUNDLE_NOTE) == [BUNDLE_URL]
+        assert collector.notes(URGENT_NOTE) == [True]
+
+    @pytest.mark.parametrize(
+        "context",
+        [Context({COLLECTOR_KEY: "not a collector"}), Context()],
+        ids=["foreign-value", "no-key"],
+    )
+    def test_a_context_without_a_collector_records_nothing(
+        self, context: Context
+    ) -> None:
+        before = context.flatten()
+        assert require_bundle(context, "reload") is None
+        assert context.flatten() == before
+
+    def test_no_target_records_nothing(self) -> None:
+        assert require_bundle(None, "defer") is None

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
-import { CHUNK_TIMEOUT } from "./chunks";
+import { createPrefetch } from "./prefetch";
+import { CHUNK_ATTEMPTS, CHUNK_TIMEOUT } from "./chunks";
 import { createDefer } from "./defer";
 import { createHistory } from "./history";
 import type { DialogAdapter } from "./layers";
@@ -169,7 +170,7 @@ function fakeHost(): Host {
   return host;
 }
 
-function stubKeeper(restored = 0, hit?: Prefetched) {
+function stubKeeper(hit?: Prefetched, restored?: number) {
   const turn = {
     hold: vi.fn<Turn["hold"]>(),
     before: vi.fn<Turn["before"]>(),
@@ -1380,7 +1381,7 @@ describe("history and the pop answer", () => {
 
   it("asks nothing for a pop the history chunk restored within the prefetch lifetime", async () => {
     const { router } = setup({ router: { ...SETTINGS, prefetch_ttl: 5 } });
-    const keeper = stubKeeper(Date.now() - 4_000);
+    const keeper = stubKeeper(undefined, Date.now() - 4_000);
     router._install(() => keeper);
     serve(answer(envelope()));
     const home = history.state as Entry;
@@ -1396,7 +1397,7 @@ describe("history and the pop answer", () => {
 
   it("revalidates a pop it restored once the snapshot is older than the default lifetime", async () => {
     const { router } = setup();
-    const keeper = stubKeeper(Date.now() - 30_000);
+    const keeper = stubKeeper(undefined, Date.now() - 30_000);
     router._install(() => keeper);
     serve(answer(envelope()), answer(envelope("<main><h1>Home</h1></main>", "/")));
     const home = history.state as Entry;
@@ -1859,7 +1860,7 @@ describe("the router API", () => {
 describe("prefetched shells", () => {
   it("applies a prefetched shell at once and revalidates it behind", async () => {
     const shell = envelope('<main><h1>B</h1><p id="w">loading</p></main>');
-    const keeper = stubKeeper(0, { raw: shell, response: answer({}) });
+    const keeper = stubKeeper({ raw: shell, response: answer({}) });
     const { router, events } = setup();
     router._install(() => keeper);
     serve(answer(envelope('<main><h1>B</h1><p id="w">ready</p></main>')));
@@ -1895,7 +1896,7 @@ describe("prefetched shells", () => {
     const page = envelope('<main><h1>B</h1><p id="w">ready</p></main>', "/b/", {
       complete: true,
     });
-    const keeper = stubKeeper(0, { raw: page, response: answer({}) });
+    const keeper = stubKeeper({ raw: page, response: answer({}) });
     const { router, events, ends } = setup();
     router._install(() => keeper);
     const fetch = serve();
@@ -1911,7 +1912,7 @@ describe("prefetched shells", () => {
     const loading =
       '<main><h1>B</h1><div id="w" data-next-boundary="w" ' +
       'data-next-state="loading">loading</div></main>';
-    const keeper = stubKeeper(0, { raw: envelope(loading), response: answer({}) });
+    const keeper = stubKeeper({ raw: envelope(loading), response: answer({}) });
     const { router, host, ends } = setup();
     router._install(() => keeper);
     createReader({ partial: surface, on: () => () => undefined });
@@ -1942,7 +1943,7 @@ describe("prefetched shells", () => {
 
   it("loads the page hard and drops its request when the shell cannot apply", async () => {
     const shell = { version: "", ops: [{ op: "visit", href: "/b/" }], layouts: [] };
-    const keeper = stubKeeper(0, { raw: shell, response: answer({}) });
+    const keeper = stubKeeper({ raw: shell, response: answer({}) });
     const { router, host, ends } = setup();
     router._install(() => keeper);
     serve(
@@ -2005,13 +2006,13 @@ describe("prefetched shells", () => {
       state: { next: 1, kind: "nav", key: "k9" },
     });
     expect(document.head.querySelectorAll(`script[src="${chunk}"]`)).toHaveLength(1);
-    vi.runOnlyPendingTimers();
+    vi.advanceTimersByTime(1);
     expect(document.head.querySelectorAll(`script[src="${chunk}"]`)).toHaveLength(1);
   });
 
   it("waits for the history chunk before it lands a prefetched shell", async () => {
     const chunk = "/static/next/next.history.min.js";
-    const keeper = stubKeeper(0, { raw: envelope(), response: answer({}) });
+    const keeper = stubKeeper({ raw: envelope(), response: answer({}) });
     const { router } = setup({ router: { ...SETTINGS, history: chunk } });
     router._install(() => keeper);
     serve(answer(envelope()));
@@ -2023,16 +2024,54 @@ describe("prefetched shells", () => {
     });
     await wait(10);
     expect(keeper.swap).not.toHaveBeenCalled();
+    const errors: Detail[] = [];
+    document.addEventListener(
+      "partial:error",
+      (event) => errors.push((event as CustomEvent<Detail>).detail),
+      { signal: listening.signal },
+    );
     tag.dispatchEvent(new Event("error"));
     await visit;
     expect(keeper.swap).toHaveBeenCalledTimes(1);
     expect(heading()).toBe("B");
+    expect(errors).toEqual([
+      { kind: "asset", url: chunk, error: new Error("router chunk failed") },
+    ]);
+    expect(tag.isConnected).toBe(false);
+  });
+
+  it("asks for a failed chunk again on the next need, a few times in all", async () => {
+    const chunk = "/static/next/next.history.min.js";
+    const { router } = setup({ router: { ...SETTINGS, history: chunk } });
+    const tags = (): Element[] => [
+      ...document.head.querySelectorAll(`script[src="${chunk}"]`),
+    ];
+    const fails: number[] = [];
+    for (let attempt = 0; attempt < CHUNK_ATTEMPTS + 1; attempt += 1) {
+      const asked = router.prefetch("/c/");
+      fails.push(tags().length);
+      tags()[0]?.dispatchEvent(new Event("error"));
+      await asked;
+    }
+    expect(fails).toEqual([1, 1, 1, 0]);
+  });
+
+  it("asks for a loaded chunk no more", async () => {
+    const chunk = "/static/next/next.history.min.js";
+    const { router } = setup({ router: { ...SETTINGS, history: chunk } });
+    const first = router.prefetch("/c/");
+    const tag = document.head.querySelector(`script[src="${chunk}"]`)!;
+    tag.dispatchEvent(new Event("load"));
+    await first;
+    await router.prefetch("/d/");
+    tag.dispatchEvent(new Event("error"));
+    expect(document.head.querySelectorAll("script")).toHaveLength(1);
   });
 
   it("lands without a chunk that never answers once its wait runs out", async () => {
     vi.useFakeTimers();
     const chunk = "/static/next/next.history.min.js";
-    const keeper = stubKeeper(0, { raw: envelope(), response: answer({}) });
+    const keeper = stubKeeper({ raw: envelope(), response: answer({}) });
     const { router } = setup({ router: { ...SETTINGS, history: chunk } });
     router._install(() => keeper);
     serve(new Response(null, { status: 500 }));
@@ -2054,7 +2093,7 @@ describe("prefetched shells", () => {
   }
 
   it("loads the page hard once when the prefetched shell throws as it lands", async () => {
-    const keeper = stubKeeper(0, { raw: envelope(), response: answer({}) });
+    const keeper = stubKeeper({ raw: envelope(), response: answer({}) });
     keeper.swap.mockImplementation(() => {
       throw new Error("broken keeper");
     });
@@ -2071,7 +2110,7 @@ describe("prefetched shells", () => {
 
   it("asks for the page at once while it lands a prefetched shell", async () => {
     const shell = envelope('<main><h1>B</h1><p id="w">loading</p></main>');
-    const keeper = stubKeeper(0, { raw: shell, response: answer({}) });
+    const keeper = stubKeeper({ raw: shell, response: answer({}) });
     const { router } = setup();
     router._install(() => keeper);
     const [reply] = held();
@@ -2152,7 +2191,7 @@ describe("pressed flights", () => {
     const flight = new Promise<Response | undefined>((done) => (arrive = done));
     const stop = vi.fn(() => arrive(undefined));
     return {
-      hit: { ...extra, flight, stop },
+      hit: { ...extra, flight: { answer: flight, stop } },
       stop,
       arrive: (r?: Response) => arrive(r),
     };
@@ -2160,7 +2199,7 @@ describe("pressed flights", () => {
 
   it("adopts a streamed flight and hands its response to the reader", async () => {
     const press = pressed();
-    const keeper = stubKeeper(0, press.hit);
+    const keeper = stubKeeper(press.hit);
     const { router } = setup();
     router._install(() => keeper);
     createReader({ partial: surface, on: () => () => undefined });
@@ -2182,7 +2221,7 @@ describe("pressed flights", () => {
 
   it("adopts a flight that answers an envelope and lands it", async () => {
     const press = pressed();
-    const keeper = stubKeeper(0, press.hit);
+    const keeper = stubKeeper(press.hit);
     const { router, ends } = setup();
     router._install(() => keeper);
     const fetch = serve();
@@ -2197,7 +2236,7 @@ describe("pressed flights", () => {
 
   it("asks for the page itself once the flight brings nothing", async () => {
     const press = pressed();
-    const keeper = stubKeeper(0, press.hit);
+    const keeper = stubKeeper(press.hit);
     const { router } = setup();
     router._install(() => keeper);
     serve(answer(envelope()));
@@ -2215,7 +2254,7 @@ describe("pressed flights", () => {
   it("lands a kept shell first and fills it from the flight", async () => {
     const shell = envelope('<main><h1>B</h1><p id="w">loading</p></main>');
     const press = pressed({ raw: shell, response: answer({}) });
-    const keeper = stubKeeper(0, press.hit);
+    const keeper = stubKeeper(press.hit);
     const { router } = setup();
     router._install(() => keeper);
     const fetch = serve();
@@ -2235,7 +2274,7 @@ describe("pressed flights", () => {
       complete: true,
     });
     const press = pressed({ raw: page, response: answer({}) });
-    const keeper = stubKeeper(0, press.hit);
+    const keeper = stubKeeper(press.hit);
     const { router } = setup();
     router._install(() => keeper);
     const fetch = serve();
@@ -2292,9 +2331,27 @@ describe("pressed flights", () => {
     ).toEqual(["complete", "superseded"]);
   });
 
+  it("stops a flight still on its way once a newer visit overtakes the one it serves", async () => {
+    const press = pressed();
+    const keeper = stubKeeper();
+    let arrive: (hit: Prefetched) => void = () => undefined;
+    keeper.take.mockReturnValueOnce(new Promise((done) => (arrive = done)));
+    const { router, ends } = setup();
+    router._install(() => keeper);
+    serve(answer(envelope("<main><h1>C</h1></main>", "/c/")));
+    const first = router.visit("/b/");
+    const second = router.visit("/c/");
+    await second;
+    arrive(press.hit);
+    await first;
+    expect(press.stop).toHaveBeenCalledTimes(1);
+    expect(heading()).toBe("C");
+    expect(ends.at(-1)!.status).toBe("superseded");
+  });
+
   it("stops the flight of a path it fetches as a plain document", async () => {
     const press = pressed();
-    const keeper = stubKeeper(0, press.hit);
+    const keeper = stubKeeper(press.hit);
     const { router } = setup();
     router._install(() => ({ ...keeper, plain: (path: string) => path === "/b/" }));
     serve(new Response("<p>doc</p>", { headers: { "content-type": "text/html" } }));
@@ -2346,6 +2403,62 @@ describe("pressed flights", () => {
   });
 });
 
+describe("a press inside the router", () => {
+  function pressing(router: Router): void {
+    router._install((seams) => ({
+      ...createHistory(seams, { signal: listening.signal }),
+      ...createPrefetch(seams, { signal: listening.signal }),
+      form: submitUrl,
+    }));
+  }
+
+  function press(el: Element): void {
+    el.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }),
+    );
+  }
+
+  it("answers the click with the request its press sent", async () => {
+    const { router } = setup();
+    pressing(router);
+    serve(answer(envelope()));
+    const link = document.getElementById("b")!;
+    press(link);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.get("X-Next-Prefetch")).toBe("full");
+    const done = settled();
+    expect(click(link)).toBe(true);
+    expect((await done).status).toBe("complete");
+    expect(calls).toHaveLength(1);
+    expect(heading()).toBe("B");
+  });
+
+  it("keeps a press to its own end when Back restores a snapshot meanwhile", async () => {
+    const { router } = setup();
+    pressing(router);
+    const whole = envelope("<main><h1>C</h1></main>", "/c/", { complete: true });
+    serve(
+      answer(envelope('<main><h1>B</h1><a id="c" href="/c/">C</a></main>')),
+      answer(whole),
+    );
+    const home = history.state as Entry;
+    await router.visit("/b/");
+    vi.useFakeTimers();
+    press(document.getElementById("c")!);
+    pop(home);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heading()).toBe("Home");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.signal!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+    expect(calls[1]!.signal!.aborted).toBe(false);
+    await router.visit("/c/");
+    expect(calls).toHaveLength(2);
+    expect(heading()).toBe("C");
+  });
+});
+
 describe("foreign answers", () => {
   const PAGE_HTML = "<html><body><main><h1>F</h1></main></body></html>";
 
@@ -2384,11 +2497,50 @@ describe("foreign answers", () => {
 
   it("navigates when the session store holds no readable memo", async () => {
     const { router } = setup();
-    loaded(router);
     sessionStorage.setItem("nx:foreign", "{");
+    loaded(router);
     serve(answer(envelope()));
     await router.visit("/b/");
     expect(heading()).toBe("B");
+  });
+
+  it("reads the memo once, however many links it checks", () => {
+    sessionStorage.setItem("nx:foreign", '["/b/"]');
+    const { router } = setup();
+    const read = vi.spyOn(Storage.prototype, "getItem");
+    loaded(router);
+    const reads = read.mock.calls.length;
+    for (let index = 0; index < 5; index += 1)
+      expect(click(document.getElementById("b")!)).toBe(false);
+    expect(read).toHaveBeenCalledTimes(reads);
+  });
+
+  it("keeps the fifty URLs remembered last", async () => {
+    const paths = Array.from({ length: 51 }, (_, index) => `/f${index}/`);
+    sessionStorage.setItem("nx:foreign", JSON.stringify(paths.slice(0, 50)));
+    const { router } = setup();
+    loaded(router);
+    serve(html(), html());
+    await router.visit("/f0/");
+    expect(calls).toHaveLength(0);
+    await router.visit("/f50/");
+    const kept = JSON.parse(sessionStorage.getItem("nx:foreign")!) as string[];
+    expect(kept).toHaveLength(50);
+    expect(kept[0]).toBe("/f1/");
+    expect(kept.at(-1)).toBe("/f50/");
+  });
+
+  it("remembers a URL for the page when the session store refuses to keep it", async () => {
+    const { router, host } = setup();
+    loaded(router);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    serve(html());
+    await router.visit("/b/");
+    await router.visit("/b/");
+    expect(calls).toHaveLength(1);
+    expect(host.assigned).toHaveLength(2);
   });
 
   it("remembers nothing before the history chunk loads", async () => {

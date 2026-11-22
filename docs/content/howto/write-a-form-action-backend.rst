@@ -174,7 +174,7 @@ Mount a view of your own
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 A backend whose ``generate_urls`` mounts its own view applies ``next.transactions.skip_atomic_requests`` to the final callable, after every decorator, so ``ATOMIC_REQUESTS`` leaves it alone.
-The view then opens the transaction itself, the one ``atomic_aliases`` names for the action under the ``TRANSACTIONS`` rule and its ``atomic`` choice.
+The view then opens the transaction itself, the one ``atomic_scope`` names for the action under the ``TRANSACTIONS`` rule and its ``atomic`` choice.
 
 .. code-block:: python
    :caption: notes/backends.py
@@ -186,7 +186,7 @@ The view then opens the transaction itself, the one ``atomic_aliases`` names for
    from next.forms import FormActionBackend
    from next.transactions import (
        ViewKind,
-       atomic_aliases,
+       atomic_scope,
        request_atomic,
        skip_atomic_requests,
    )
@@ -198,8 +198,8 @@ The view then opens the transaction itself, the one ``atomic_aliases`` names for
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
            meta = self._metas[uid]
-           aliases = atomic_aliases(request, ViewKind.ACTION, meta.get("atomic"))
-           with request_atomic(aliases):
+           scope = atomic_scope(request, ViewKind.ACTION, meta.get("atomic"))
+           with request_atomic(scope):
                return self._run(request, meta)
 
 Verification

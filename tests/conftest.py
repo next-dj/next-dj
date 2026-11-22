@@ -2,7 +2,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from next.suspense import background_loop
+from next.suspense.executors import background_loop
 from tests.django_setup import setup as _configure_django_for_tests
 
 

@@ -1,5 +1,4 @@
 import type { BeforeApply } from "./apply";
-import type { Captured } from "./boundary";
 import { fireRemoved } from "./morph";
 import type { PartialSurface } from "./partial";
 import {
@@ -16,7 +15,7 @@ import type { Settled } from "./wire";
 const PENDING = `[${ATTR_STATE}=idle],[${ATTR_STATE}=loading]`;
 
 export interface ReloadHost {
-  partial: Pick<PartialSurface, "layers" | "onMount">;
+  partial: Pick<PartialSurface, "layers" | "onMount" | "_fallbacks">;
 }
 
 type Swap = [el: HTMLElement, kept: Node[], shown: string, height: string];
@@ -65,7 +64,7 @@ export function createReload(
 
   function capture(el: Element): void {
     const key = keyOf(el);
-    const live = (el as Captured).$l;
+    const live = partial._fallbacks?.get(el);
     if (!captured.has(key) && (live !== undefined || el.matches(PENDING)))
       captured.set(key, live ?? el.innerHTML);
   }
@@ -90,7 +89,7 @@ export function createReload(
       const key = keyOf(el);
       const html =
         captured.get(key) ??
-        (el as Captured).$l ??
+        partial._fallbacks?.get(el) ??
         stash(key, el.hasAttribute("data-next-adopted"));
       if (html !== undefined && el.isConnected && !held(el)) swap(swaps, el, html);
     }

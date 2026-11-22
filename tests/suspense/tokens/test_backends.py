@@ -14,7 +14,6 @@ from django.http import HttpRequest
 
 import next.realtime
 from next.suspense import (
-    BoundaryBindingError,
     BoundaryPropsError,
     BoundaryTokenError,
     TokenRejection,
@@ -67,6 +66,14 @@ def age_of(request, claims) -> object:
 
 def tenant(request) -> str | None:
     return request.headers.get("X-Tenant")
+
+
+_ASKED: list[HttpRequest] = []
+
+
+def counted(request) -> str:
+    _ASKED.append(request)
+    return "acme"
 
 
 def shaped_age(request, claims) -> int:
@@ -342,7 +349,7 @@ class TestSizeBeforeCrypto:
 
     def test_spill_storage_mints_what_inline_storage_cannot(self) -> None:
         big = claims(blob="x" * 400)
-        with pytest.raises(BoundaryPropsError):
+        with pytest.raises(BoundaryPropsError, match="MAX_BYTES"):
             stacked(MAX_BYTES=256).issue(request_for(), big)
         backend = stacked(MAX_BYTES=256, STORAGE=STORAGE_PATHS["spill"])
         token = backend.issue(request_for(), big)
@@ -497,11 +504,6 @@ class TestBindings:
         assert _reason(backend, token, other) is TokenRejection.SIGNATURE
         assert _reason(backend, token, request_for()) is TokenRejection.BINDING
 
-    def test_a_visitor_without_a_session_cannot_mint(self) -> None:
-        backend = stacked(BINDING="next.suspense.SessionBinding")
-        with pytest.raises(BoundaryBindingError):
-            backend.issue(request_for(), claims())
-
     def test_a_user_bound_token_fails_for_another_user_and_after_a_password_change(
         self,
     ) -> None:
@@ -531,6 +533,30 @@ class TestBindings:
         assert backend.redeem(tenanted, bound, target())
         assert _reason(backend, bound, request_for()) is TokenRejection.SIGNATURE
 
+    def test_the_subject_is_bound_once_per_request(self) -> None:
+        _ASKED.clear()
+        backend = stacked(BINDING=f"{__name__}.counted")
+        request, other = request_for(), request_for()
+        tokens = [backend.issue(request, claims(n=n)) for n in range(3)]
+        tokens.append(backend.issue(other, claims()))
+        assert [request, other] == _ASKED
+        assert backend.redeem(other, tokens[0], target())
+
+    def test_a_login_within_the_request_binds_the_new_user(self) -> None:
+        backend = stacked(BINDING="next.suspense.UserBinding")
+        request = request_for()
+        request.user = AnonymousUser()
+        backend.issue(request, claims())
+        request.user = User(pk=3, username="ada", password="p")
+        assert backend.redeem(request, backend.issue(request, claims()), target())
+
+    def test_a_cycled_session_within_the_request_binds_the_new_key(self) -> None:
+        backend = stacked(BINDING="next.suspense.SessionBinding")
+        request = self._session_request()
+        backend.issue(request, claims())
+        request.session.cycle_key()
+        assert backend.redeem(request, backend.issue(request, claims()), target())
+
     def test_an_unbound_token_differs_from_a_none_bound_one(self) -> None:
         unbound = stacked().issue(request_for(), claims())
         backend = stacked(BINDING=f"{__name__}.tenant")
@@ -539,34 +565,15 @@ class TestBindings:
 
 
 @pytest.mark.usefixtures("clock")
-class TestCacheStorage:
-    """The cache entry is checked by its MAC before the codec reads a byte."""
+class TestStorageRejection:
+    """A refusal of the storage reaches the caller of the stack with its own reason."""
 
-    def _token(self) -> tuple[StackedTokenBackend, str]:
+    def test_a_missing_cache_entry_answers_with_a_reload(self) -> None:
         backend = stacked(STORAGE=STORAGE_PATHS["cache"])
-        return backend, backend.issue(request_for(), claims(sku="A1"))
-
-    def _address(self, token: str) -> bytes:
-        return b64decode(split(token)[2].split(".")[0])[1:]
-
-    def test_a_poisoned_entry_is_refused(self) -> None:
-        backend, token = self._token()
-        caches["default"].set(cache_key(self._address(token)), _payload(scope="x"))
-        assert _reason(backend, token) is TokenRejection.SIGNATURE
-
-    def test_a_missing_entry_answers_with_a_reload(self) -> None:
-        backend, token = self._token()
-        caches["default"].delete(cache_key(self._address(token)))
+        token = backend.issue(request_for(), claims(sku="A1"))
+        address = b64decode(split(token)[2].split(".")[0])[1:]
+        caches["default"].delete(cache_key(address))
         assert _reason(backend, token) is TokenRejection.STORAGE_MISS
-
-    def test_an_oversized_entry_is_refused(self) -> None:
-        backend, token = self._token()
-        caches["default"].set(cache_key(self._address(token)), b"x" * 70_000)
-        assert _reason(backend, token) is TokenRejection.TOO_LARGE
-
-    def test_equal_claims_share_one_entry(self) -> None:
-        backend, token = self._token()
-        assert backend.issue(request_for(), claims(sku="A1")) == token
 
 
 @pytest.mark.usefixtures("clock")

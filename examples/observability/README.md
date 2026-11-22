@@ -8,9 +8,9 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 | URL | Description |
 | --- | --- |
-| `/` | Overview with four headline counters in a polling zone, a React sparkline, a busiest-pages widget that fetches itself once the page loads, and a render-latency table that streams in behind its `loading.djx` and whose `error.djx` stands in for it alone when the counter store loses half of a pair. |
+| `/` | Overview with four headline counters in a polling zone, a React sparkline, a busiest-pages widget that fetches itself once the page loads, and a render-latency table that streams in behind its `loading.djx` and whose `error.djx` stands in for it alone when the counter store loses half of a pair, and a flush history read only once its button is pressed. |
 | `/stats/` | Live page with the Chart.js bar chart and the window filter. `?window=1m`, `?window=5m`, and `?window=1h` each re-aggregate over real minute buckets. |
-| `/stats/pages/` | Per-page render counts pulled from the cumulative `pages.rendered` kind. |
+| `/stats/pages/` | Per-page render counts and mean render times, a page boundary whose table streams in under the stats tabs. |
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
@@ -21,7 +21,7 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
 
-The overview shows a polling zone next to a component that loads later. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders, which shows that the polling works. The busiest-pages widget below the sparkline is a deferred component: its `component.py` calls `component.defer("load")`, so the first paint ships only the `loading.djx` beside it and the browser fetches the component in one GET as soon as the page loads. The component reads its own rows through `@component.context`, which is what lets it render on that later request without the page. An `error.djx` stands in for it alone if that render fails. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so a GET of any other zone skips the four counter aggregations it would never read, while the full render still runs them, and the widget's own request never runs page callables at all.
+The overview shows a polling zone next to a component that loads later. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders, which shows that the polling works. The busiest-pages widget below the sparkline is a deferred component: its `component.py` calls `component.defer("load")`, so the first paint ships only the `loading.djx` beside it and the browser fetches the component in one GET as soon as the page loads. The component reads its own rows through `@component.context`, which is what lets it render on that later request without the page. A request of its own can fail on the way, so an `error.djx` stands in for the widget alone and offers a `data-next-retry` button that sends the request again. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so a GET of any other zone skips the four counter aggregations it would never read, while the full render still runs them, and the widget's own request never runs page callables at all.
 
 ## How to run
 
@@ -78,10 +78,11 @@ obs/
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
-    ├── template.djx          <- poll zone with the overview grid, React sparkline, deferred busiest-pages widget, streamed latency widget
+    ├── template.djx          <- poll zone with the overview grid, React sparkline, deferred busiest-pages widget, streamed latency widget, flush history on demand
     ├── _components/
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
-    │   ├── busiest_pages/    <- component.defer("load"), loading.djx and error.djx, its own top_by_kind lookup
+    │   ├── busiest_pages/    <- component.defer("load"), a skeleton loading.djx, an error.djx with a retry, its own top_by_kind lookup
+    │   ├── flush_history/    <- component.defer("manual"), the button in loading.djx, a retry in error.djx, the minutes flush_metrics ran in
     │   ├── latency_widget/   <- mean render time per page, streamed behind loading.djx, error.djx contains its failures
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
     │   ├── filter_window/    <- window filter form (template-only component)
@@ -99,7 +100,7 @@ obs/
         ├── template.djx      <- live-totals zone
         ├── template.js       <- defineOp("metric-pulse") flash handler, co-located
         ├── template.css      <- metric-pulse keyframe, co-located
-        ├── pages/
+        ├── pages/            <- page.defer(timeout="3s"), loading.djx and error.djx beside page.py, a page boundary
         ├── components/
         ├── forms/
         └── static/
@@ -348,6 +349,8 @@ scrape_configs:
       - targets: ["obs.internal:8000"]
 ```
 
+The exposition runs to tens of kilobytes of text, and Prometheus asks for it with `Accept-Encoding: gzip`, so `next.middleware.CompressionMiddleware`, second in `MIDDLEWARE` right after `SecurityMiddleware`, sends every scrape compressed with no code in the view, which `TestMetricsEndpoint` checks.
+
 In production the endpoint is better kept off the public internet altogether: a reverse proxy that serves `/metrics/` only to the monitoring network, or a separate internal port, with the token as a second line. The series name no user, but they tell an outsider how many people are connected and when.
 
 #### PromQL
@@ -417,6 +420,24 @@ The `loading.djx` beside the latency widget makes every call of it a `stream` bo
 The client router asks for that page in two depths. Hovering a link sends `X-Next-Prefetch: 1`, the shell alone with no job run. Pressing a link with the mouse sends `X-Next-Prefetch: full` before the click, an answer that runs the job and streams like a navigation, and the click that follows adopts it instead of sending a request of its own. A hovered link therefore shows the prefetched shell at the click while the full answer streams the table in. A press released off the link aborts its request, a modifier click leaves the press alone, and a touch keeps the shell prefetch, which is what `ROUTER["PRESS"] = "mouse"`, the default, asks for.
 
 `TestLatencyStream` in [`tests/test_integration.py`](tests/test_integration.py) reads the overview as a stream and the two prefetch depths through `NextClient`. [`tests/e2e/test_press.py`](tests/e2e/test_press.py) drives the five pointer paths in a browser that reports a desktop Chrome user agent, since the default bot pattern of the delivery policy matches `HeadlessChrome`, and holds the widget's job with `next.testing.boundary_gate` so the loading line is on screen until the test lets the job run.
+
+### 14. A page boundary and a widget on demand
+
+The overview streams one widget, and `/stats/pages/` streams the whole body of a page. Its directory holds a `loading.djx` and an `error.djx` beside `page.py`, which makes the page itself a boundary.
+
+```
+stats/pages/
+├── page.py          <- page.defer(timeout="3s"), @context rows
+├── template.djx     <- the table of render counts and mean render times
+├── loading.djx      <- a skeleton with an sr-only label
+└── error.djx        <- the shared alert with the digest as a reference code
+```
+
+The `rows` callable walks the whole counter index twice, once for the render counts and once for the durations it divides by them, which is the slow part of the page on a store that has seen many pages. The stats layout above the directory renders in the shell, the heading, the window label and the tabs, and the skeleton sits where the layout places the body, so a tab change shows the tabs at once and the table when its job settles. `page.defer(timeout="3s")` gives that job three seconds before the boundary settles as `timeout`.
+
+The mean of a page reads both halves of a counter pair, so the culled pair of section 12 fails this page too. The `error.djx` in the directory holds that failure where the table would be, under the same tabs. A streamed page has already sent its status, so it stays 200 with the error UI in a chunk, while a page assembled inline answers 500 with the layout around the error UI, as an error boundary of a page body does. `TestPageRendersBoundary` reads both through `get_stream` and `get`.
+
+The flush history on the overview is the other end of the scale. `flush_metrics` adds a row per counter on every run, so the table grows without bound, and nobody needs it on every visit. Its `component.py` calls `component.defer("manual")`, and its `loading.djx` holds a `<button data-next-fetch>`, so the first paint carries the button and a token, and the browser fetches the component only when the button is pressed. `MetricSnapshot.objects.flushes(limit)` groups the rows by the minute they were written in. `TestFlushHistory` asserts the button on the first paint and reads the component through `get_boundary`, as the press does.
 
 ## Out of scope
 

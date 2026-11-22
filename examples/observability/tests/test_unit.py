@@ -17,7 +17,7 @@ from obs.pages.page import totals
 from obs.pages.stats.components.page import counters as components_counters
 from obs.pages.stats.forms.page import dispatched, validation_failed
 from obs.pages.stats.page import LIVE_TOTALS_ZONE, live_stats, live_zone, window
-from obs.pages.stats.pages.page import counters as pages_counters
+from obs.pages.stats.pages.page import rows as page_rows
 from obs.pages.stats.static.page import assets, collector, dedup
 from obs.serializers import PydanticJsContextSerializer, WrappedJsContextSerializer
 from obs.signals import (
@@ -461,10 +461,11 @@ class TestContexts:
             "html_injections": 4,
         }
 
-    def test_pages_counters_sorted_descending(self) -> None:
+    def test_page_rows_carry_the_mean_beside_the_count_busiest_first(self) -> None:
         metrics.incr("pages.rendered", "/a")
+        metrics.incr("pages.duration_ms_total", "/a", by=30)
         metrics.incr("pages.rendered", "/b", by=5)
-        assert pages_counters() == [("/b", 5), ("/a", 1)]
+        assert page_rows() == [("/b", 5, None), ("/a", 1, 30.0)]
 
     def test_components_counters_sorted_descending(self) -> None:
         metrics.incr("components.rendered", "stat_card", by=2)

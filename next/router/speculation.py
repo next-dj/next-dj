@@ -6,11 +6,14 @@ import json
 import re
 from typing import TYPE_CHECKING, Final
 
+from next.conf.router import RouterScope
 from next.static.runtime import SCRIPT_ESCAPES
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from next.conf.router import Eagerness
 
 
 OFF: Final = (
@@ -26,7 +29,6 @@ GUARDED: Final = (
 """What keeps a link out of every speculation, on the link or on an ancestor."""
 
 _OWNER: Final = "[data-next-router]"
-_OPT_IN: Final = "opt-in"
 _SAME_ORIGIN: Final = "/*"
 _PATTERN_SPECIALS: Final = re.compile(r"([\\:*?+(){}#])")
 
@@ -41,10 +43,12 @@ def _prefix(path: str) -> dict[str, object]:
     return {"href_matches": _PATTERN_SPECIALS.sub(r"\\\1", path) + "*"}
 
 
-def rules(eagerness: str, scope: str, exclude: Sequence[str]) -> dict[str, object]:
+def rules(
+    eagerness: Eagerness, scope: RouterScope, exclude: Sequence[str]
+) -> dict[str, object]:
     """Return the prefetch rules for every same-origin link the router does not own."""
     unowned = [_within(OFF), *map(_prefix, exclude)]
-    if scope == _OPT_IN:
+    if scope is RouterScope.OPT_IN:
         unowned.append({"not": _within(_OWNER)})
     where = {
         "and": [
@@ -57,7 +61,9 @@ def rules(eagerness: str, scope: str, exclude: Sequence[str]) -> dict[str, objec
     return {"prefetch": [entry]}
 
 
-def encoded_rules(eagerness: str, scope: str, exclude: Sequence[str]) -> str:
+def encoded_rules(
+    eagerness: Eagerness, scope: RouterScope, exclude: Sequence[str]
+) -> str:
     """Return the rules as JSON safe inside a `<script>` element."""
     found = rules(eagerness, scope, exclude)
     return json.dumps(found, separators=(",", ":")).translate(SCRIPT_ESCAPES)

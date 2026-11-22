@@ -391,9 +391,10 @@ def dry_run_template(template: str, fields: Iterable[str]) -> None:
     template.format(**dict.fromkeys(fields, ""))
 
 
-_SCRIPT_TEXT: Final = re.compile(
+SCRIPT_TEXT: Final = re.compile(
     r"<script\b[^>]*>(?P<text>.*?)</script\s*>", re.IGNORECASE | re.DOTALL
 )
+"""A `<script>` element with its text under `text`, as a chunk template writes it."""
 _PROBE: Final = "\ue000"
 _SCRIPT_START: Final = "<script"
 _SCRIPT_OPEN: Final = re.compile(rf"{_SCRIPT_START}\b", re.IGNORECASE)
@@ -408,7 +409,7 @@ def payload_in_script(template: str) -> bool:
         rendered = template.format(payload=_PROBE, nonce_attr="")
     except TEMPLATE_ERRORS:
         return True
-    texts = _SCRIPT_TEXT.finditer(rendered)
+    texts = SCRIPT_TEXT.finditer(rendered)
     inside = sum(found["text"].count(_PROBE) for found in texts)
     return inside == rendered.count(_PROBE)
 

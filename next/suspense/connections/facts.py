@@ -11,13 +11,13 @@ from django.db import connections, transaction
 from django.db.backends.sqlite3.base import DatabaseWrapper as SQLiteWrapper
 from django.http import HttpRequest
 
-from next.suspense.drivers import server_loop
+from next.conf.defer import parallel, sqlite_parallel
+from next.suspense.bridge import server_loop
 from next.suspense.markers import Captured, ForegroundFacts, Server
 from next.suspense.transport import TransportFacts, transport_of
 from next.transactions import probe_atomic_aliases
 
 from .backends import seams
-from .config import parallel, sqlite_parallel
 from .detection import connection_sources, thread_sources
 
 
@@ -49,7 +49,7 @@ def pool_forced() -> bool:
 def server_of(
     request: HttpRequest | None, transport: TransportFacts | None = None
 ) -> Server:
-    """Return the server kind, ASGI when a running loop's `sync_to_async` runs us.
+    """Return the server kind, ASGI when the caller runs under a loop's `sync_to_async`.
 
     A non-concurrent transport makes a sync worker, and no request a threaded one.
     """

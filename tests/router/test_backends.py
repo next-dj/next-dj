@@ -9,7 +9,7 @@ from next.router import (
     LayoutKey,
     VerifiedCut,
 )
-from next.router.markers import ScannedLayout, Shell
+from next.router.markers import ScannedLayout, ScannedShell
 
 
 ROOT = "1" * 16
@@ -23,7 +23,7 @@ def _layout(ident: str, digest: str, head: str | None = None) -> ScannedLayout:
     return ScannedLayout(ident, digest, (0, 0), (0, 0), head)
 
 
-SHELL = Shell(
+SHELL = ScannedShell(
     "",
     "5ea1",
     (
@@ -95,12 +95,12 @@ class TestVerifiedCut:
         assert VerifiedCut().cut(declared, SHELL) == expected
 
     def test_a_page_without_layouts_morphs_the_body(self) -> None:
-        bare = Shell("", "5ea1", ())
+        bare = ScannedShell("", "5ea1", ())
         assert VerifiedCut().cut(_declared(), bare) == Cut(CutKind.BODY)
         assert VerifiedCut().cut(_declared((ROOT, BODY)), bare).kind is CutKind.VISIT
 
     def test_a_root_without_a_head_morphs_the_body(self) -> None:
-        shell = Shell("", "5ea1", (_layout(ROOT, BODY),))
+        shell = ScannedShell("", "5ea1", (_layout(ROOT, BODY),))
         cut = VerifiedCut().cut(_declared((ROOT, "f" * 16)), shell)
         assert cut.kind is CutKind.BODY
 

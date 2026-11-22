@@ -16,6 +16,11 @@ export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
 export const ORIGIN_FIELD = "_next_form_origin";
+/** The router's navigation headers, mirrored by next.partial.headers. */
+export const HEADER_NAVIGATE = "X-Next-Navigate";
+export const HEADER_LAYOUTS = "X-Next-Layouts";
+export const HEADER_PREFETCH = "X-Next-Prefetch";
+export const HEADER_ROUTER = "X-Next-Router";
 /** Stream metadata and control-frame event names mirrored by next.partial.keys. */
 export const TOPIC = "topic";
 export const SEQ = "seq";
@@ -265,13 +270,14 @@ export function scriptNonce(doc: Document): string | undefined {
   return value === "" ? undefined : value;
 }
 
+/** A short random key, unique enough to tell entries and marks of one page apart. */
+export const uid = (): string => Math.random().toString(36).slice(2);
+
 // A new request id. crypto.randomUUID is missing on a plain-HTTP origin although the
 // lib type declares it, so a timestamp id is the fallback.
 export function newId(): string {
   const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
-  return impl?.randomUUID
-    ? impl.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return impl?.randomUUID ? impl.randomUUID() : `${Date.now()}-${uid()}`;
 }
 
 /** Match a selector across a subtree, folding in the root when it matches too. */
@@ -290,6 +296,28 @@ export function addZone(
   const zones = batches.get(url);
   if (zones === undefined) batches.set(url, [zone]);
   else zones.push(zone);
+}
+
+/** A URL without its fragment, the page identity a navigation and a prefetch share. */
+export const bare = (href: string): string => href.replace(/#.*/s, "");
+
+/** The media type of a response, its content-type without parameters. */
+export const mime = (response: Response): string =>
+  (response.headers.get("content-type") ?? "").replace(/;.*/, "").trim();
+
+/** Whether the router header of a response carries the given word. */
+export const says = (response: Response | undefined, word: string): boolean =>
+  response?.headers.get(HEADER_ROUTER)?.includes(word) === true;
+
+const ONCE = Symbol.for("next.once");
+
+// Kept on window, since a bundle a page includes twice evaluates with fresh modules.
+export function once(flag: string, run: () => void): void {
+  const ran = ((window as unknown as Record<symbol, Set<string> | undefined>)[ONCE] ??=
+    new Set());
+  if (ran.has(flag)) return;
+  ran.add(flag);
+  run();
 }
 
 export function blank(

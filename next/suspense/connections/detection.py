@@ -11,8 +11,9 @@ from typing import Final
 from django.conf import settings
 from django.utils.module_loading import import_string
 
+from next.conf.defer import thread_local_middleware
+
 from .backends import seams
-from .config import thread_local_middleware
 
 
 ROUTERS: Final = "routers"

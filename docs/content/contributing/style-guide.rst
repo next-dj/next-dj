@@ -93,6 +93,7 @@ Cross references
 
 Use ``:doc:`` for whole page links.
 Use ``:ref:`` for anchors.
+A system check is named by its code in double back ticks, as ``next.E238``, and the name carries no link, since :doc:`/content/ref/system-checks` lists every code in one table.
 Every topic page declares an anchor at the top in the form ``.. _topics-<area>:``.
 
 Admonitions

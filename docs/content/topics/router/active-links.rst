@@ -47,7 +47,7 @@ Each entry of ``CONTAINERS`` is one simple selector in one of three shapes.
 ``[attr=value]``
    An element whose attribute holds exactly the value, written bare as an identifier or in single or double quotes, such as ``[role=navigation]`` or ``[aria-label="Primary"]``.
 
-A descendant, a class, an id, or a list in one entry is no simple selector, and :ref:`next.E236 <ref-system-checks>` reports it while the whole list falls back to its default.
+A descendant, a class, an id, or a list in one entry is no simple selector, and ``next.E076`` reports it while the whole list falls back to its default.
 Markup inside ``<script>``, ``<style>``, ``<template>``, ``<textarea>``, ``<title>``, and the other raw text elements is never scanned.
 
 The rule
@@ -167,10 +167,11 @@ A replacement backend
 ---------------------
 
 ``ROUTER["CURRENT"]["BACKEND"]`` names the ``CurrentLinks`` subclass that runs the pass, ``next.router.CurrentLinks`` by default.
-It is built with the configured containers, and its ``mark(html, path, origin="")`` returns ``html`` with the links marked for ``path``, the request path with its query, and ``origin``, the scheme and host absolute links are compared with.
+It is built with the configured containers, and its ``mark(html, path, origin=None)`` returns ``html`` with the links marked for the request.
+``path`` is a callable that answers the request path with its query, and ``origin`` one that answers the scheme and host absolute links are compared with, and each runs only once ``html`` opens a container.
 A subclass that marks links by a rule of its own overrides ``mark``, and ``current_links()`` returns the backend the settings name, or ``None`` while the pass is off.
 The ``intent`` bundle marks the links again with the default rule after each update in the browser, so the marks of a different rule hold until the first navigation or partial update of the page.
-A path that does not import or names no concrete subclass is reported as :ref:`next.E237 <ref-system-checks>`.
+A path that does not import or names no concrete subclass is reported as ``next.E219``.
 
 .. seealso::
 

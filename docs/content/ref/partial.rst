@@ -29,8 +29,6 @@ One module graph sits behind the package facade, and the table below names the p
      - The frozen value objects of the wire contract, ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta``, and their wire forms.
    * - ``errors``
      - Every exception the builder and the zone branch raise when a caller breaks a wire contract.
-   * - ``forms``
-     - ``FormShaper``, the default ``ResponseShaper`` a form backend answers partial requests through.
    * - ``guards``
      - The zones a standalone render refuses, read once for checks and the registry.
    * - ``headers``
@@ -42,11 +40,11 @@ One module graph sits behind the package facade, and the table below names the p
    * - ``manager``
      - The protocol-backend manager and the resolution of the asset version.
    * - ``more``
-     - The ``{% more %}`` tag and the ``next_page`` and ``previous_page`` filters that adapt a Django ``Page`` to it.
+     - The ``{% more %}`` tag, its ``MoreMode`` and ``UrlMode`` values, and the ``next_page`` and ``previous_page`` filters that adapt a Django ``Page`` to it.
    * - ``origin``
      - Resolution of the host page a partial request morphs out of band, with ``PartialOrigin`` and ``OriginSource``.
    * - ``paging``
-     - The pagers of a ``{% more %}`` list, ``NumberPager`` and ``KeysetPager`` on the ``Pager`` contract, the ``Window`` they return, and the ``Paging`` a context callable receives.
+     - The pagers of a ``{% more %}`` list, ``NumberPager`` and ``KeysetPager`` on the ``Pager`` contract, the ``Plan`` a pager returns, the ``Window`` that plan builds, and the ``Paging`` a context callable receives.
    * - ``patches``
      - The request-bound ``Patches`` builder and the ``PatchResponse`` it finalises.
    * - ``registry``
@@ -56,7 +54,7 @@ One module graph sits behind the package facade, and the table below names the p
      - Standalone zone rendering over the zone-scoped context of the batch, behind ``render_zone``.
    * - ``shaping``
      - The pipeline that turns a form action outcome into an envelope, split across submodules behind the package address.
-       ``shape_partial`` is its only entry on the curated ``next.partial`` surface.
+       ``shape_partial`` and ``FormShaper``, the default ``ResponseShaper`` a form backend answers partial requests through, which lives in ``shaping.shaper``, are its entries on the curated ``next.partial`` surface.
    * - ``signals``
      - The eight signals the subsystem emits.
    * - ``sse``
@@ -222,10 +220,26 @@ The ``{% more %}`` tag and its filters are listed in :doc:`template-tags`, and :
 .. autoclass:: next.partial.Window
    :members:
 
+``MoreMode`` and ``UrlMode`` of ``next.partial.more`` are the string choices of the ``{% more %}`` tag, ``mode=`` taking ``visible`` or ``manual`` and ``url=`` taking ``replace`` or ``push``, and each equals the string a template writes.
+
+.. autoclass:: next.partial.more.MoreMode
+   :no-special-members:
+
+.. autoclass:: next.partial.more.UrlMode
+   :no-special-members:
+
 .. autoclass:: next.partial.Paging
    :members:
 
+``Pager`` has one abstract method, ``plan(rows, request)``, which returns the ``Plan`` of the window the request asks for.
+A ``Plan`` holds the bounded ``slices`` to read, the ``total`` to count when ``count=True`` asks for it, and the ``finish`` step that builds the ``Window`` from what was read.
+Planning reads nothing, so ``Plan.run()`` and ``await Plan.arun()`` share every decision, and ``window`` and ``awindow`` of ``Pager`` are the concrete methods that run the plan.
+A pager of another scheme implements ``plan`` alone and is async-capable with no second code path, see :doc:`/content/howto/page-a-list-by-cursor`.
+
 .. autoclass:: next.partial.Pager
+   :members:
+
+.. autoclass:: next.partial.Plan
    :members:
 
 .. autoclass:: next.partial.NumberPager
@@ -234,7 +248,7 @@ The ``{% more %}`` tag and its filters are listed in :doc:`template-tags`, and :
 .. autoclass:: next.partial.KeysetPager
    :members:
 
-``next.partial.Rows`` is the type of the row source a pager takes, a queryset or a sequence, and a custom ``Pager`` annotates its ``window`` and ``awindow`` with it.
+``next.partial.PagedRows`` is the type of the row source a pager takes, a queryset or a sequence, and a custom ``Pager`` annotates the ``rows`` of its ``plan`` with it.
 
 ``PagingProvider`` fills every ``Paging`` parameter at priority ``25``, ahead of the provider that matches a parameter name against the context, so a context value named like the parameter does not shadow the annotation.
 A ``Paging`` annotation that names no pager, or more than one, raises ``TypeError`` when the callable is first resolved.
@@ -406,7 +420,7 @@ See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals (`
 System checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, intercept-zone, custom-verb, context-binding, infinite-list, and backend-configuration checks (``next.E060`` through ``next.E063``, ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.E214``, ``next.E215``, ``next.E220``, ``next.E232``, ``next.E235``, ``next.E244``, ``next.W067`` through ``next.W071``, and ``next.W083``).
+See :doc:`system-checks` for the zone-placement, template-compile, intercept-zone, custom-verb, context-binding, infinite-list, and backend-configuration checks (``next.E060`` through ``next.E063``, ``next.E065``, ``next.E067``, ``next.E072``, ``next.E073``, ``next.E078``, ``next.E090``, ``next.E161``, ``next.E173``, ``next.E174``, ``next.E214``, ``next.E215``, ``next.E220``, ``next.E232``, ``next.E235``, ``next.E236``, ``next.W067`` through ``next.W071``, and ``next.W083``).
 
 See also
 --------
@@ -418,3 +432,4 @@ See also
    :doc:`client` for the ``window.Next`` runtime that applies every envelope.
    :doc:`/content/topics/partial-rendering/extending` for custom verbs and server-pushed context.
    :doc:`settings` for ``PARTIAL_BACKENDS``.
+   :repo:`search-catalog <tree/main/examples/search-catalog>` for a ``NumberPager`` with a ``{% more %}`` sentinel and :repo:`audit-forms <tree/main/examples/audit-forms>` for a ``KeysetPager``, see :doc:`/content/misc/examples`.

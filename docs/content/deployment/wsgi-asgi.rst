@@ -148,6 +148,38 @@ Keep ``REALTIME['HEARTBEAT']`` and ``SSE.HEARTBEAT_SECONDS``, 25 seconds each by
 A WebSocket client closes a socket whose ``hello`` has not arrived within five seconds of opening, and the server sends ``hello`` only once the broker confirms the subscription, so a slow broker shows up as reconnects and then as SSE fallback.
 See :doc:`/content/topics/partial-rendering/sse` and :doc:`/content/howto/stream-over-websockets`.
 
+.. _deployment-compression:
+
+Compression behind a proxy
+--------------------------
+
+The application compresses its own responses when ``next.middleware.CompressionMiddleware`` is listed, and it sets ``Content-Encoding`` and ``Vary: Accept-Encoding`` itself.
+A proxy or a CDN that finds ``Content-Encoding`` on a response passes the body through, so the default needs no proxy setting.
+One layer compresses.
+Two layers repeat the work, and a layer that buffers a streamed page to compress it removes the early shell.
+
+When the proxy compresses everything it forwards, turn the application's compression off.
+
+.. code-block:: python
+   :caption: config/settings/prod.py
+
+   NEXT_FRAMEWORK = {"COMPRESSION": {"ENABLED": False}}
+
+``ENABLED`` set to ``False`` switches off the middleware and every self-compressing stream, and clears ``next.W164``.
+A proxy that compresses must forward each write of a streamed page as it arrives, and one that buffers is stated through ``DEFER["TRANSPORT"]["OPTIONS"]["INCREMENTAL"]``, see :doc:`platforms`.
+When the application compresses, the proxy keeps ``Accept-Encoding`` in the cache key through ``Vary``, forwards the header to the application, and does not strip ``Content-Encoding``.
+A page that sets ``Cache-Control: no-transform`` is left plain by the application while ``COMPRESSION["RESPECT_NO_TRANSFORM"]`` holds, and a proxy honours the same header.
+
+Check from outside the proxy, since only that request shows what the client receives.
+
+.. code-block:: bash
+   :caption: shell
+
+   curl -s -o /dev/null -D - -H "Accept-Encoding: gzip" https://example.com/ | grep -iE "content-encoding|vary"
+
+One ``Content-Encoding`` and a ``Vary`` that names ``Accept-Encoding`` mean one layer compressed.
+See :doc:`/content/topics/compression` and :doc:`/content/howto/enable-response-compression`.
+
 Health checks
 -------------
 

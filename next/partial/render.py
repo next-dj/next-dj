@@ -14,7 +14,12 @@ from next.pages.manager import defers, page
 from next.ports import render_deferred
 from next.seeding import seed_collector
 from next.static.collector import default_placeholders
-from next.templatetags.boundaries import PageBoundaryNode, contained_by, enclosing
+from next.templatetags.boundaries import (
+    PageBoundaryNode,
+    contained_by,
+    enclosing,
+    failed_by,
+)
 
 from .errors import UnknownZoneError
 from .registry import zones_of
@@ -242,9 +247,7 @@ def _failed_zones(
     )
     collector = seed_collector(page_path, context_data)
     django_context = DjangoTemplateContext(context_data)
-    shown = contained_by(
-        outward, django_context, functools.partial(_raised, caught.error)
-    )
+    shown = failed_by(outward, django_context, caught.error)
     html: dict[str, str] = {}
     bodies: dict[str, str] = {}
     for name in rendered_names:
@@ -281,11 +284,6 @@ def _outward(
         if node.source == source:
             return nodes[index:]
     return ()
-
-
-def _raised(error: Exception) -> str:
-    """Raise the failure a page boundary caught before the zone rendered."""
-    raise error
 
 
 def _constant(shown: str, _render: "Callable[[], str]") -> str:

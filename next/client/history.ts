@@ -1,7 +1,8 @@
 import type { Target } from "./apply";
+import type { Layout } from "./layout";
 import type { Bounds } from "./morph";
 import { blank } from "./protocol";
-import type { HistoryHost, Keeper, Layout } from "./router";
+import type { HistoryHost, Keeper } from "./router";
 import { createSwap, persist, retire, sheets, slice } from "./swap";
 
 type Snapshot = [
@@ -27,17 +28,18 @@ export function createHistory(
   const snapshots = new Map<string, Snapshot>();
   const plain = new Set<string>();
   const bound = (): number => host.settings().snapshots ?? 10;
-  const foreign = (add?: string): string[] => {
+  const foreign = ((): Set<string> => {
     try {
-      const raw = add === "" ? "[]" : sessionStorage.getItem(FOREIGN);
-      const list = new Set(JSON.parse(raw ?? "[]") as string[]);
-      if (add !== undefined) {
-        if (add) list.add(add);
-        sessionStorage.setItem(FOREIGN, JSON.stringify([...list].slice(-50)));
-      }
-      return [...list];
+      return new Set(JSON.parse(sessionStorage.getItem(FOREIGN) ?? "[]") as string[]);
     } catch {
-      return [];
+      return new Set();
+    }
+  })();
+  const write = (): void => {
+    try {
+      sessionStorage.setItem(FOREIGN, JSON.stringify([...foreign]));
+    } catch {
+      // A full or blocked storage only costs the next page this list.
     }
   };
 
@@ -101,10 +103,16 @@ export function createHistory(
     ...createSwap(host),
     flush() {
       snapshots.clear();
-      foreign("");
+      foreign.clear();
+      write();
     },
-    foreign: (path) => foreign().includes(path),
-    remember: (path) => void foreign(path),
+    foreign: (path) => foreign.has(path),
+    remember(path) {
+      foreign.delete(path);
+      foreign.add(path);
+      for (const old of foreign) if (foreign.size > 50) foreign.delete(old);
+      write();
+    },
     plain: (path) => plain.has(path),
     share: (path) => void plain.add(path),
     leave(key, target) {
@@ -116,7 +124,7 @@ export function createHistory(
       save(from);
       const saved = snapshots.get(to);
       const bounds = saved && host.region(saved[1]);
-      if (!saved || !bounds) return 0;
+      if (!saved || !bounds) return undefined;
       const [chain, target, content, title, kept, context, time] = saved;
       if (keep) store(from, target, bounds);
       const current = host.chain();

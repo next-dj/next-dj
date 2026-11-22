@@ -15,6 +15,7 @@ from next.deps.cache import (
 from next.deps.runner import (
     _note_adapted,
     batch_scope,
+    bridge,
     run_isolated,
     run_on_request_thread,
     run_segment,
@@ -107,6 +108,29 @@ class TestRunIsolated:
         assert cache.get("fresh") == 2
         assert cache.get("inner") is _CACHE_MISS
 
+    def test_the_merge_reads_back_only_the_keys_the_segment_added(self) -> None:
+        reads: list[str] = []
+
+        class Counted(DependencyCache):
+            def get(self, key: str) -> object:
+                reads.append(key)
+                return super().get(key)
+
+        cache = Counted({f"seed{index}": index for index in range(5)})
+        context = make_resolution_context(cache=cache)
+
+        def fill(branch):
+            branch.cache.set("seed0", "segment")
+            branch.cache.set("fresh", 2)
+
+        async def run():
+            segment_runner.set(_inline)
+            await run_isolated(fill, context)
+
+        asyncio.run(run())
+        assert reads == ["fresh"]
+        assert (cache.get("seed0"), cache.get("fresh")) == (0, 2)
+
     def test_a_failing_segment_merges_nothing(self) -> None:
         cache = DependencyCache()
         context = make_resolution_context(cache=cache)
@@ -126,8 +150,21 @@ class TestRunIsolated:
         assert "partial" not in cache
 
 
+class _Unnamed:
+    def __str__(self) -> str:
+        raise AssertionError
+
+
 class TestAdaptedLog:
     """DEBUG names each bridged site once, in a memo of bounded size."""
+
+    def test_a_site_is_named_only_under_debug(self, settings) -> None:
+        settings.DEBUG = False
+
+        async def work() -> str:
+            return "done"
+
+        assert bridge(_Unnamed(), work) == "done"
 
     def test_a_site_another_thread_logged_is_not_logged_again(
         self, caplog, monkeypatch
@@ -135,16 +172,43 @@ class TestAdaptedLog:
         adapted: BoundedCache[str, None] = BoundedCache()
         monkeypatch.setattr("next.deps.runner._adapted", adapted)
         with caplog.at_level(logging.DEBUG, logger="next.deps.runner"):
-            _note_adapted("dependency 'feed'")
-            _note_adapted("dependency 'feed'")
+            _note_adapted("dependency 'feed'", 0.0005)
+            _note_adapted("dependency 'feed'", 0.0005)
         assert [
             r.getMessage() for r in caplog.records if r.name == "next.deps.runner"
-        ] == ["Asynchronous dependency 'feed' adapted for a sync resolve."]
+        ] == [
+            (
+                "Asynchronous dependency 'feed' bridged for a sync caller at a cost "
+                "of 0.500 ms beyond its own work."
+            )
+        ]
         assert list(adapted) == ["dependency 'feed'"]
 
     def test_the_memo_drops_its_oldest_site_past_its_bound(self, monkeypatch) -> None:
         adapted: BoundedCache[str, None] = BoundedCache(2)
         monkeypatch.setattr("next.deps.runner._adapted", adapted)
         for site in ("a", "b", "c"):
-            _note_adapted(site)
+            _note_adapted(site, 0.0)
         assert list(adapted) == ["b", "c"]
+
+    def test_debug_logs_each_site_once_with_its_cost(
+        self, caplog, monkeypatch, settings
+    ) -> None:
+        settings.DEBUG = True
+        monkeypatch.setattr("next.deps.runner._adapted", BoundedCache())
+
+        async def work() -> str:
+            return "done"
+
+        with caplog.at_level(logging.DEBUG, logger="next.deps.runner"):
+            for site in ("component 'card'", "component 'card'", "component 'badge'"):
+                assert bridge(site, work) == "done"
+        messages = [
+            r.getMessage() for r in caplog.records if r.name == "next.deps.runner"
+        ]
+        assert len(messages) == 2
+        assert messages[0].startswith(
+            "Asynchronous component 'card' bridged for a sync caller at a cost of "
+        )
+        assert messages[0].endswith(" ms beyond its own work.")
+        assert messages[1].startswith("Asynchronous component 'badge'")

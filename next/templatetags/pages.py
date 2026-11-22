@@ -71,7 +71,6 @@ class RootLayoutNode(Node):
     @override
     def render(self, context: Context) -> str:
         """Render the empty string."""
-        del context
         return ""
 
 

@@ -14,7 +14,7 @@ from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
 from next.forms.signals import form_access_denied
 from next.forms.uid import ORIGIN_FIELD_NAME
-from next.transactions import request_atomic
+from next.transactions import AtomicScope, request_atomic
 
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -56,9 +56,9 @@ def audit():
 def opened(monkeypatch) -> list[tuple[str, ...]]:
     calls: list[tuple[str, ...]] = []
 
-    def recording(aliases: tuple[str, ...]) -> AbstractContextManager[None]:
-        calls.append(aliases)
-        return request_atomic(aliases)
+    def recording(scope: AtomicScope) -> AbstractContextManager[object]:
+        calls.append(scope.aliases)
+        return request_atomic(scope)
 
     monkeypatch.setattr("next.forms.dispatch.request_atomic", recording)
     return calls

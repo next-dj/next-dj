@@ -20,7 +20,7 @@ from next.ports import render_deferred
 from next.seeding import RenderFrame
 from next.static import collect_component_assets
 
-from .boundaries import in_document_order, raise_first, recorded_failures
+from .boundaries import HeldFailures, raise_first
 
 
 if TYPE_CHECKING:
@@ -40,9 +40,10 @@ def render_page(
     """
     target = Path(file_path) if not isinstance(file_path, Path) else file_path
     req = request if request is not None else RequestFactory().get("/")
-    with recorded_failures() as failures, render_boundaries():
+    held = HeldFailures()
+    with held.recording(), render_boundaries():
         html = page.render(target, req, url_kwargs)
-    raise_first(in_document_order(failures, html))
+    raise_first(held.settle(html))
     return html
 
 
@@ -79,14 +80,15 @@ def render_component_by_name(
     # Publishing `context` too would guard keys a page render leaves shadowable.
     context_data[COMPONENT_PROPS_CONTEXT_KEY] = frozenset(props or ())
     render = partial(render_component, info, context_data, request=frame.request)
-    with recorded_failures() as failures, render_boundaries():
+    held = HeldFailures()
+    with held.recording(), render_boundaries():
         if defers():
             html = render_deferred(
                 render, collector=frame.collector, request=frame.request
             )
         else:
             html = render()
-    raise_first(in_document_order(failures, html))
+    raise_first(held.settle(html))
     return html
 
 

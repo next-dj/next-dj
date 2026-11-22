@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from django.http import HttpResponse
 from django.test import RequestFactory
-from django.urls import clear_script_prefix, set_script_prefix
+from django.test.utils import override_script_prefix
 
 from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.pages.loaders import _load_python_module
@@ -17,11 +17,9 @@ _ACTION_PATH = "/_next/form/uid/"
 
 
 @pytest.fixture()
-def dispatch_post():
+def dispatch_post(rf: RequestFactory):
     """Return a POST to the dispatch endpoint, the shape an origin is posted with."""
-    return RequestFactory().post(
-        _ACTION_PATH, data={"note": "hi"}, QUERY_STRING="stale=1"
-    )
+    return rf.post(_ACTION_PATH, data={"note": "hi"}, QUERY_STRING="stale=1")
 
 
 class TestVisitRequestPresentsTheOriginUrl:
@@ -99,11 +97,8 @@ class TestVisitRequestUnderAScriptPrefix:
     """A sub-path deployment strips its mount point from `path_info`."""
 
     def test_path_info_drops_the_prefix(self, dispatch_post) -> None:
-        set_script_prefix("/app/")
-        try:
+        with override_script_prefix("/app/"):
             visit = visit_request(dispatch_post, "/app/notes/")
-        finally:
-            clear_script_prefix()
         assert (visit.path, visit.path_info) == ("/app/notes/", "/notes/")
 
 

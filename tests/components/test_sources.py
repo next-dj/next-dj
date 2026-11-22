@@ -109,7 +109,7 @@ class TestSerializedComponentContextKeys:
         )
         assert self._keys(backend) == []
 
-    def test_backend_without_component_files_is_skipped(self, tmp_path: Path) -> None:
+    def test_backend_without_component_files_is_skipped(self) -> None:
         assert self._keys(DummyComponentsBackend({})) == []
 
 

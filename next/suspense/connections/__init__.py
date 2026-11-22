@@ -6,17 +6,6 @@ from next.suspense.connections.backends import (
     ThreadState,
     seams,
 )
-from next.suspense.connections.checks import (
-    check_connection_sources,
-    check_pool_budget,
-    check_pool_timeout,
-    check_thread_sources,
-)
-from next.suspense.connections.deadline import (
-    DEADLINE_SQL,
-    deadline_statement,
-    timeout_ms,
-)
 from next.suspense.connections.detection import (
     TENANT_MIDDLEWARE,
     THREAD_LOCAL_LIBRARIES,
@@ -33,7 +22,13 @@ from next.suspense.connections.facts import (
     pool_forced,
     server_of,
 )
-from next.suspense.connections.guard import Replayable, job_guard
+from next.suspense.connections.guard import (
+    DEADLINE_SQL,
+    Replayable,
+    deadline_statement,
+    job_guard,
+    timeout_ms,
+)
 from next.suspense.connections.settle import (
     Settled,
     effects,
@@ -55,10 +50,6 @@ __all__ = [
     "States",
     "ThreadState",
     "capture_states",
-    "check_connection_sources",
-    "check_pool_budget",
-    "check_pool_timeout",
-    "check_thread_sources",
     "connection_sources",
     "deadline_statement",
     "effects",

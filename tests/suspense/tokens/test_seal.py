@@ -378,15 +378,14 @@ class TestEncryptedSealWithoutTheLibrary:
         with pytest.raises(ImproperlyConfigured, match=r"next-dj\[crypto\]"):
             EncryptedSeal()
 
-    def test_a_seal_built_before_the_library_went_reports_it(
+    def test_a_built_seal_keeps_the_library_it_was_built_with(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         install_crypto(monkeypatch)
         seal = EncryptedSeal()
         install_crypto(monkeypatch, present=False)
-        assert not seal.available()
-        with pytest.raises(ImproperlyConfigured):
-            seal.seal(b"x", _context())
+        assert not EncryptedSeal.available()
+        assert seal.open(seal.seal(b"x", _context()), _context()) == b"x"
 
 
 class TestEncryptedSealOnTheRealLibrary:

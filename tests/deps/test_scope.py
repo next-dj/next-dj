@@ -10,12 +10,9 @@ from typing import NoReturn
 import pytest
 
 from next.deps import DependencyCycleError
-from next.deps.cache import _CACHE_MISS, DependencyCache
-from next.deps.scope import RequestScope, join_waits, running_loop
-
-
-class BackendDownError(Exception):
-    """A failure a dependency raises, distinct from anything asyncio raises."""
+from next.deps.cache import _CACHE_MISS, DependencyCache, request_memo
+from next.deps.scope import RequestScope, join_waits, render_scope, running_loop
+from tests.support.errors import BackendDownError
 
 
 class Counted:
@@ -489,6 +486,10 @@ def test_a_key_computed_through_a_layer_never_reaches_the_scope() -> None:
 
         await layer.close()
         assert scope.get("user") == "ann"
+        assert await scope.resolve("theme", Counted("dark")) == "dark"
+        assert await scope.layer().resolve("card", Counted("card")) == "card"
+        with pytest.raises(RuntimeError, match="closed"):
+            await layer.resolve("late", Counted("late"))
 
     asyncio.run(scenario())
 
@@ -680,13 +681,15 @@ def test_close_cancels_the_layers_before_the_scope() -> None:
         outcomes = await asyncio.gather(*waiters, return_exceptions=True)
         assert all(isinstance(o, asyncio.CancelledError) for o in outcomes)
         assert not layer._tasks
-        assert not scope._layers
+        assert scope._layers is None
         with pytest.raises(RuntimeError, match="closed"):
             await layer.resolve("late", never)
         late = scope.layer()
         with pytest.raises(RuntimeError, match="closed"):
             await late.resolve("late", never)
-        assert not scope._layers
+        with pytest.raises(RuntimeError, match="closed"):
+            await late.resolve("late", never, shared=False)
+        assert scope._layers is None
 
     asyncio.run(scenario())
 
@@ -695,7 +698,14 @@ def test_a_layer_opened_off_the_loop_closes_with_its_scope() -> None:
     """A component render opens its layer on the rendering thread, not the loop."""
     scope = RequestScope()
     opened: list[RequestScope] = []
-    thread = threading.Thread(target=lambda: opened.append(scope.layer()))
+    closed: list[str] = []
+
+    def render() -> None:
+        layer = scope.layer()
+        layer.on_close(lambda: closed.append("layer"))
+        opened.append(layer)
+
+    thread = threading.Thread(target=render)
     thread.start()
     thread.join()
     (layer,) = opened
@@ -703,8 +713,38 @@ def test_a_layer_opened_off_the_loop_closes_with_its_scope() -> None:
 
     asyncio.run(scope.close())
 
-    assert layer._closed
-    assert not scope._layers
+    assert closed == ["layer"]
+    assert scope._layers is None
+
+
+def test_a_layer_that_owns_nothing_is_never_held() -> None:
+    """A render that claims nothing leaves no trace on the tree it reads."""
+    scope = RequestScope({"user": "ann"})
+    layer = scope.layer()
+    nested = layer.layer()
+
+    async def reads() -> object:
+        return await nested.resolve("user", never)
+
+    assert asyncio.run(reads()) == "ann"
+    assert (scope._layers, layer._layers, scope._used) == (None, None, False)
+    assert scope.close_unused() is True
+
+
+def test_a_claim_in_a_nested_layer_holds_it_and_every_layer_above() -> None:
+    async def scenario() -> None:
+        scope = RequestScope()
+        layer = scope.layer()
+        nested = layer.layer()
+        sibling = layer.layer()
+        await nested.resolve("card", Counted("card"))
+        await sibling.resolve("row", Counted("row"))
+        assert scope._layers == {layer}
+        assert layer._layers == {nested, sibling}
+        assert scope.close_unused() is False
+        await scope.close()
+
+    asyncio.run(scenario())
 
 
 def test_close_twice_is_safe_and_a_closed_scope_computes_nothing() -> None:
@@ -787,7 +827,7 @@ def test_a_slot_another_thread_filled_meanwhile_is_not_made_again() -> None:
 
     reads: list[str] = []
     scope = RequestScope()
-    scope._slots = _FilledMeanwhile()
+    scope._tree.slots = _FilledMeanwhile()
 
     assert scope.slot("hub", lambda _root: pytest.fail("made twice")) is late
     assert reads == ["hub", "hub"]
@@ -817,10 +857,11 @@ def test_a_callback_registered_on_a_closed_scope_runs_at_once() -> None:
         layer = scope.layer()
         seen: list[str] = []
         layer.on_close(lambda: seen.append("layer"))
+        layer.on_close(lambda: seen.append("again"))
         await scope.close()
-        assert seen == ["layer"]
+        assert seen == ["layer", "again"]
         scope.on_close(lambda: seen.append("late"))
-        assert seen == ["layer", "late"]
+        assert seen == ["layer", "again", "late"]
 
     asyncio.run(scenario())
 
@@ -868,7 +909,7 @@ class TestCloseUnused:
     def test_an_untouched_scope_closes_at_once(self) -> None:
         scope = RequestScope({"seed": 1})
         assert scope.close_unused() is True
-        assert scope._closed is True
+        assert scope._tree.closed is True
         assert scope.get("seed") is _CACHE_MISS
 
     def test_a_claimed_scope_is_left_to_its_loop(self) -> None:
@@ -882,14 +923,71 @@ class TestCloseUnused:
 
         assert asyncio.run(claim()) == 1
         assert scope.close_unused() is False
-        assert scope._closed is False
+        assert scope._tree.closed is False
 
     def test_a_scope_with_a_close_callback_or_a_layer_is_left_to_its_loop(self) -> None:
         hooked = RequestScope()
         hooked.on_close(lambda: None)
         layered = RequestScope()
-        layered.layer()
+        layered.layer().on_close(lambda: None)
         assert (hooked.close_unused(), layered.close_unused()) == (False, False)
+
+    def test_an_untouched_layer_closes_alone(self) -> None:
+        scope = RequestScope()
+        layer = scope.layer()
+        seen: list[str] = []
+        assert layer.close_unused() is True
+        layer.on_close(lambda: seen.append("late"))
+        assert seen == ["late"]
+        assert _reuse(scope) == 42
+        with pytest.raises(RuntimeError, match="closed"):
+            _reuse(layer)
+
+
+async def _answer() -> int:
+    return 42
+
+
+def _reuse(scope: RequestScope) -> object:
+    """Ask `scope` for a key it never held, which a closed scope refuses."""
+
+    async def main() -> object:
+        return await scope.resolve("key", _answer)
+
+    return asyncio.run(main())
+
+
+class TestRenderScope:
+    """One async render opens a request scope seeded from the shell cache."""
+
+    def test_the_scope_is_the_memo_of_the_render_and_closes_after(self) -> None:
+        async def main() -> tuple[object, RequestScope, object, object]:
+            async with render_scope({"user": "ada"}) as scope:
+                memo = request_memo.get()
+                seeded = scope.get("user")
+            return memo.scope, scope, seeded, request_memo.get()
+
+        memo_scope, scope, seeded, after = asyncio.run(main())
+
+        assert memo_scope is scope
+        assert seeded == "ada"
+        assert after is None
+        with pytest.raises(RuntimeError, match="closed"):
+            _reuse(scope)
+
+    def test_the_scope_closes_when_the_render_fails(self) -> None:
+        scopes: list[RequestScope] = []
+
+        async def main() -> None:
+            async with render_scope({}) as scope:
+                scopes.append(scope)
+                msg = "render failed"
+                raise ValueError(msg)
+
+        with pytest.raises(ValueError, match="render failed"):
+            asyncio.run(main())
+        with pytest.raises(RuntimeError, match="closed"):
+            _reuse(scopes[0])
 
 
 def test_running_loop_names_the_loop_of_the_calling_thread() -> None:

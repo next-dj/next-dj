@@ -9,22 +9,17 @@ from next.components import ComponentInfo, ComponentModuleImportError
 from next.components.renderers import _granted
 from next.permissions import UnknownAccessObjectError, add_perm
 from next.static import StaticCollector
-from tests.components.calls import CALLS
-from tests.pages.checks.metadata.trees import (
-    COMPONENTS,
-    component_template,
-    layout_root,
-    templated_page,
-)
 from tests.support import routed
-from tests.support.access import client_as
+from tests.support.access import COMPONENTS, client_as
+from tests.support.components import CALLS, write_component
+from tests.support.trees import layout_root, templated_page
 
 
 _READ = "notes.read_account"
 
 _HEADER = """
 from next.components import component
-from tests.components.calls import CALLS
+from tests.support.components import CALLS
 
 """
 
@@ -152,7 +147,7 @@ def _tree(tmp_path: Path, module: str, tag: str, template: str | None = _TEMPLAT
     if template is None:
         folder.mkdir(parents=True)
     else:
-        component_template(pages, "card", template)
+        write_component(pages, "card", body=template, loading=None)
     (folder / "component.py").write_text(_HEADER + module)
     templated_page(pages / "home", "x = 1\n", f"[{tag}]")
     return pages
@@ -219,7 +214,9 @@ class TestComponentDeclarations:
     ) -> None:
         add_perm(_READ, lambda _user, _obj: True)
         pages = _tree(tmp_path, _OBJECT_PERM, '{% component "card" %}')
-        with pytest.raises(UnknownAccessObjectError):
+        with pytest.raises(
+            UnknownAccessObjectError, match="no context callable of its chain produces"
+        ):
             _render(pages, "visitor")
 
     def test_a_keyless_context_without_the_name_is_a_wiring_error(
@@ -228,7 +225,9 @@ class TestComponentDeclarations:
         add_perm(_READ, lambda _user, _obj: True)
         module = _OBJECT_PERM + _SPREAD.replace('"account"', '"other"')
         pages = _tree(tmp_path, module, '{% component "card" %}')
-        with pytest.raises(UnknownAccessObjectError):
+        with pytest.raises(
+            UnknownAccessObjectError, match="no context callable of its chain produces"
+        ):
             _render(pages, "visitor")
 
     def test_a_row_object_bound_to_a_component_is_a_wiring_error(

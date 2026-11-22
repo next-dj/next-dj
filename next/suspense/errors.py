@@ -2,7 +2,7 @@
 
 from typing import ClassVar, Final
 
-from next.defer import ErrorKind
+from next.defer import BoundaryOptionError, ErrorKind
 from next.suspense.markers import TokenRejection
 
 
@@ -73,6 +73,7 @@ class ExecutorStoppedError(BoundaryRefusedError):
 __all__ = [
     "BoundaryBindingError",
     "BoundaryDeadlineError",
+    "BoundaryOptionError",
     "BoundaryPropsError",
     "BoundaryRefusedError",
     "BoundaryShedError",

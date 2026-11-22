@@ -13,7 +13,7 @@ import reprlib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from http.cookies import Morsel, SimpleCookie
-from typing import TYPE_CHECKING, Any, Final, TypedDict, override
+from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict, overload, override
 
 from django.core.exceptions import ImproperlyConfigured
 from django.template.response import SimpleTemplateResponse
@@ -23,6 +23,7 @@ from next.caches import PageCache
 from next.conf.compression import OPT_OUT
 from next.conf.settings import fail_loudly
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token, nonce_minted
+from next.defer import Depth
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
 from next.diagnostics import FailureLog, degraded, degraded_status
@@ -469,16 +470,6 @@ class Purpose(enum.StrEnum):
     SPECULATION = "speculation"
 
 
-class Depth(enum.StrEnum):
-    """How much of a page a router prefetch asks for, which `request.next.depth` names.
-
-    A shell runs no deferred job, and a full prefetch is the page a press may show.
-    """
-
-    SHELL = "shell"
-    FULL = "full"
-
-
 @dataclass(frozen=True, slots=True)
 class RequestInfo:
     """What next.dj tells user code about the request a page view serves."""
@@ -490,17 +481,34 @@ class RequestInfo:
 NEXT_ATTR: Final = "next"
 """The request attribute a page view sets, read by user code as `request.next`."""
 
-_INFOS: Final = {
-    (purpose, depth): RequestInfo(purpose, depth)
-    for purpose in Purpose
-    for depth in (None, *Depth)
+_INFOS: Final[dict[tuple[Purpose, Depth | None], RequestInfo]] = {
+    key: RequestInfo(*key)
+    for key in (
+        (Purpose.DOCUMENT, None),
+        (Purpose.NAVIGATION, None),
+        (Purpose.SPECULATION, None),
+        (Purpose.PREFETCH, Depth.SHELL),
+        (Purpose.PREFETCH, Depth.FULL),
+    )
 }
 
 
+@overload
+def mark_purpose(
+    request: HttpRequest, purpose: Literal[Purpose.PREFETCH], depth: Depth
+) -> None: ...
+@overload
+def mark_purpose(
+    request: HttpRequest,
+    purpose: Literal[Purpose.DOCUMENT, Purpose.NAVIGATION, Purpose.SPECULATION],
+) -> None: ...
 def mark_purpose(
     request: HttpRequest, purpose: Purpose, depth: Depth | None = None
 ) -> None:
-    """Set `request.next` to the shared info of `purpose` at `depth`."""
+    """Set `request.next` to the shared info of `purpose` at `depth`.
+
+    Only a prefetch carries a depth, and any other pair is a `KeyError`.
+    """
     setattr(request, NEXT_ATTR, _INFOS[purpose, depth])
 
 
@@ -847,6 +855,7 @@ __all__ = [
     "NO_STORE",
     "CacheControl",
     "CacheDict",
+    "Depth",
     "HeadersDict",
     "Purpose",
     "RequestInfo",
@@ -855,6 +864,7 @@ __all__ = [
     "cache_control",
     "cache_problems",
     "cookie_varies",
+    "depth_of",
     "drop_cdn_headers",
     "finish_response",
     "finish_zone_response",

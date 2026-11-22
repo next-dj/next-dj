@@ -117,7 +117,6 @@ class ComponentWidget(django_forms.Widget):
         renderer: BaseRenderer | None = None,
     ) -> SafeString:
         """Resolve the component within scope and render it to HTML."""
-        del renderer
         frame, anchor = self._render_frame()
         info = self._resolve_component(anchor, frame.request)
         if info is None:

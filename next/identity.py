@@ -1,4 +1,4 @@
-"""The subject a request proves, shared by realtime tickets and boundary tokens."""
+"""The subject a request proves, and the read-only session reads that prove it."""
 
 import functools
 from abc import ABC, abstractmethod
@@ -61,7 +61,6 @@ class TicketBinding(SubjectBinding):
 
         A custom view calls it on its reply, `issue` leaves the cookie on the request.
         """
-        del request, response
 
     @abstractmethod
     def credential(self, cookies: Mapping[str, str]) -> str | None:

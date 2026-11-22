@@ -22,6 +22,91 @@ The shell is the response as first rendered, every deferred body replaced by its
 A zone is a different thing.
 A ``{% zone %}`` is an inline reload region that actions, polls, and reloads target, it is never deferred, and a part of a page that should load later is a component with a ``loading.djx`` instead, see :doc:`/content/topics/partial-rendering/zones`.
 
+A first deferred component
+--------------------------
+
+A component whose data is slow to load gets a loading UI beside it.
+The product page below loads its product from the URL and calls a ``recommendations`` component, which ``_components/`` in ``product/`` holds.
+
+.. code-block:: text
+
+   shop/pages/product/
+       [int:pk]/
+           page.py
+           template.djx
+       _components/recommendations/
+           component.py
+           component.djx
+           loading.djx
+
+.. code-block:: python
+   :caption: shop/pages/product/[int:pk]/page.py
+
+   from django.shortcuts import get_object_or_404
+   from shop.models import Product
+
+   from next import context
+
+   @context("product")
+   def product(pk: int) -> Product:
+       return get_object_or_404(Product, pk=pk)
+
+.. code-block:: jinja
+   :caption: shop/pages/product/[int:pk]/template.djx
+
+   <h1>{{ product.name }}</h1>
+   {% component "recommendations" %}
+
+.. code-block:: python
+   :caption: shop/pages/product/_components/recommendations/component.py
+
+   from shop.models import Product
+   from shop.services import recommend
+
+   from next import component
+
+   @component.context("related")
+   def related(product: Product) -> list[Product]:
+       return recommend(product)
+
+.. code-block:: jinja
+   :caption: shop/pages/product/_components/recommendations/component.djx
+
+   <ul>{% for item in related %}<li>{{ item.name }}</li>{% endfor %}</ul>
+
+.. code-block:: jinja
+   :caption: shop/pages/product/_components/recommendations/loading.djx
+
+   <p>Finding related products&hellip;</p>
+
+The page answers at once with the paragraph in the component's place, and the response fills the component in when ``recommend`` returns.
+The ``loading.djx`` is all it takes, since its presence makes every call of the component a ``stream`` boundary.
+Two changes move the fill to the browser, the declaration in ``component.py`` and the prop on the call site.
+
+.. code-block:: python
+   :caption: shop/pages/product/_components/recommendations/component.py
+
+   from shop.models import Product
+   from shop.services import recommend
+
+   from next import component
+
+   component.defer("visible", props=("product_id",))
+
+   @component.context("related")
+   def related(product_id: int) -> list[Product]:
+       return recommend(Product.objects.get(pk=product_id))
+
+.. code-block:: jinja
+   :caption: shop/pages/product/[int:pk]/template.djx
+
+   <h1>{{ product.name }}</h1>
+   {% component "recommendations" product_id=product.pk %}
+
+The component then loads on its own request once its wrapper scrolls into view.
+That request carries the declared props and not the context of the page, so the callable takes ``product_id`` where it took ``product``, see :doc:`loading`.
+:doc:`/content/howto/show-a-loading-state` walks through the same task with a skeleton, a timeout, and the tests, and :doc:`/content/howto/contain-a-failure-with-an-error-boundary` adds the error UI.
+
 Choosing a mechanism
 --------------------
 
@@ -74,3 +159,4 @@ The pages of this guide
    :doc:`/content/ref/defer` for the boundary vocabulary, the error boundary functions, and the transaction helpers.
    :doc:`/content/ref/settings` for the ``DEFER``, ``TRANSACTIONS``, and ``COMPRESSION`` scopes.
    :doc:`/content/intro/limitations` for what deferred boundaries do not do.
+   :repo:`observability <tree/main/examples/observability>`, :repo:`search-catalog <tree/main/examples/search-catalog>`, and :repo:`audit-forms <tree/main/examples/audit-forms>` demonstrate the boundaries in running code, each page of this guide names the ones that show its subject.

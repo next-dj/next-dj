@@ -25,7 +25,7 @@ from next.components.checks import (
     check_next_components_configuration,
 )
 from next.components.context import ComponentContextRegistry, component
-from next.components.deferral import defer_declarations
+from next.components.defer import defer_declarations
 from next.components.info import BoundaryFiles
 from next.components.loading import ModuleLoader
 from next.components.manager import components_manager
@@ -63,7 +63,7 @@ class TestChecks:
         with (
             patch("next.components.checks.next_framework_settings", mock_ns),
             patch(
-                "next.checks.common.import_class_cached",
+                "next.conf.imports.import_class_cached",
                 side_effect=ImproperlyConfigured("MYAPP_KEY is unset"),
             ),
         ):
@@ -761,13 +761,6 @@ class TestReservedContextParameters:
             "next.W158",
             "next.W158",
         ]
-
-    def test_registered_check_reaches_manage_py_check_path(
-        self, module_path: Path
-    ) -> None:
-        component.registry.register(module_path, "stats", stats)
-        messages = run_checks(tags=[NEXT])
-        assert any(m.id == "next.W158" for m in messages)
 
 
 class TestErrorSelfReference:

@@ -12,9 +12,9 @@ from django.test import RequestFactory, override_settings
 from next.components.info import ComponentInfo
 from next.components.manager import components_manager
 from next.components.trip import TripInput
-from next.defer import BoundaryError, DeferMode, ErrorKind
+from next.defer import BoundaryFailure, DeferMode, ErrorKind
 from next.permissions.markers import OPEN, AccessRule, Requirement
-from next.static.collector import StaticCollector
+from next.seeding import COLLECTOR_KEY
 from next.suspense import BoundaryTokenError, TokenRejection, reload
 from next.suspense.tokens import BoundaryClaims
 from next.suspense.tokens.props import DEFAULT_LIMIT
@@ -75,8 +75,8 @@ def scripted(monkeypatch: pytest.MonkeyPatch):
     return install
 
 
-def _redeem():
-    return reload.redeem(RequestFactory().get("/home/"), "t", _PATH, {})
+def _redeem(rf: RequestFactory):
+    return reload.redeem(rf.get("/home/"), "t", _PATH, {})
 
 
 def _refusal(reason: TokenRejection) -> BoundaryTokenError:
@@ -115,9 +115,9 @@ class TestResponses:
         [(Http404(), 404), (PermissionDenied(), 403), (BadRequest(), 400)],
     )
     def test_a_guard_failure_answers_as_a_page_would(
-        self, exc: Exception, status: int
+        self, rf, exc: Exception, status: int
     ) -> None:
-        response = reload.failed(RequestFactory().get("/"), exc)
+        response = reload.failed(rf.get("/"), exc)
         assert response.status_code == status
         assert response["Cache-Control"] == "private, no-store"
         assert response["Referrer-Policy"] == "same-origin"
@@ -130,29 +130,31 @@ class TestResponses:
         [(None, False), ("same-origin", False), ("same-site", True), ("none", True)],
     )
     def test_only_a_foreign_fetch_site_is_cross_site(
-        self, site: str | None, *, crossed: bool
+        self, rf, site: str | None, *, crossed: bool
     ) -> None:
         headers = {} if site is None else {"HTTP_SEC_FETCH_SITE": site}
-        assert reload.cross_site(RequestFactory().get("/", **headers)) is crossed
+        assert reload.cross_site(rf.get("/", **headers)) is crossed
 
 
 class TestRedeem:
-    def test_the_project_settings_open_first(self, scripted) -> None:
+    def test_the_project_settings_open_first(self, rf, scripted) -> None:
         card = _info("card")
         claims = BoundaryClaims.of("card", "")
         backend = scripted({(): claims}, {("card", ""): card})
-        assert _redeem() == (claims, card)
+        assert _redeem(rf) == (claims, card)
         assert backend.opened == [()]
 
-    def test_an_expired_token_stops_at_once(self, scripted) -> None:
+    def test_an_expired_token_stops_at_once(self, rf, scripted) -> None:
         backend = scripted(
             {(): _refusal(TokenRejection.EXPIRED)}, {("card", ""): _info("card")}
         )
         with pytest.raises(BoundaryTokenError):
-            _redeem()
+            _redeem(rf)
         assert backend.announced == [(TokenRejection.EXPIRED, "")]
 
-    def test_a_component_override_opens_after_the_project_fails(self, scripted) -> None:
+    def test_a_component_override_opens_after_the_project_fails(
+        self, rf, scripted
+    ) -> None:
         bound = (("binding", "user"),)
         card = _info("card")
         claims = BoundaryClaims.of("card", "")
@@ -161,27 +163,29 @@ class TestRedeem:
             {("card", ""): card},
             {"card": bound},
         )
-        assert _redeem() == (claims, card)
+        assert _redeem(rf) == (claims, card)
         assert backend.opened == [(), bound]
         assert backend.announced == []
 
-    def test_claims_of_a_component_the_page_lacks_are_refused(self, scripted) -> None:
+    def test_claims_of_a_component_the_page_lacks_are_refused(
+        self, rf, scripted
+    ) -> None:
         backend = scripted({(): BoundaryClaims.of("ghost", "")}, {})
         with pytest.raises(BoundaryTokenError) as caught:
-            _redeem()
+            _redeem(rf)
         assert caught.value.reason is TokenRejection.URL_MISMATCH
         assert backend.announced == [(TokenRejection.URL_MISMATCH, "ghost")]
 
-    def test_claims_open_again_under_their_own_overrides(self, scripted) -> None:
+    def test_claims_open_again_under_their_own_overrides(self, rf, scripted) -> None:
         sized = (("max_bytes", 4096),)
         claims = BoundaryClaims.of("card", "")
         backend = scripted(
             {(): claims, sized: claims}, {("card", ""): _info("card")}, {"card": sized}
         )
-        _redeem()
+        _redeem(rf)
         assert backend.opened == [(), sized]
 
-    def test_a_failed_second_opening_is_announced(self, scripted) -> None:
+    def test_a_failed_second_opening_is_announced(self, rf, scripted) -> None:
         sized = (("max_bytes", 8),)
         backend = scripted(
             {
@@ -192,10 +196,10 @@ class TestRedeem:
             {"card": sized},
         )
         with pytest.raises(BoundaryTokenError):
-            _redeem()
+            _redeem(rf)
         assert backend.announced == [(TokenRejection.TOO_LARGE, "card")]
 
-    def test_every_failed_opening_announces_the_first(self, scripted) -> None:
+    def test_every_failed_opening_announces_the_first(self, rf, scripted) -> None:
         bound = (("binding", "user"),)
         backend = scripted(
             {
@@ -206,20 +210,20 @@ class TestRedeem:
             {"card": bound},
         )
         with pytest.raises(BoundaryTokenError) as caught:
-            _redeem()
+            _redeem(rf)
         assert caught.value.reason is TokenRejection.SIGNATURE
         assert backend.announced == [(TokenRejection.SIGNATURE, "")]
 
 
 class TestAnswer:
     def test_props_of_another_type_are_refused_and_announced(
-        self, scripted, monkeypatch: pytest.MonkeyPatch
+        self, rf, scripted, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         claims = BoundaryClaims.of("card", "", props=[("n", "x")])
         backend = scripted({(): claims}, {("card", ""): _info("card")})
         monkeypatch.setattr(reload, "prop_types", lambda _info: {"n": int})
         monkeypatch.setattr(reload, "run_guards", lambda *_args: None)
-        request = RequestFactory().get(
+        request = rf.get(
             "/home/", HTTP_X_NEXT_REQUEST="1", HTTP_X_NEXT_ZONE="b-0a0b0c0d-0"
         )
         response = reload.answer(request, _PATH, {}, "t", {})
@@ -229,7 +233,7 @@ class TestAnswer:
 
 class TestOpening:
     def test_a_refusal_no_override_lifts_never_reads_the_page(
-        self, scripted, monkeypatch: pytest.MonkeyPatch
+        self, rf, scripted, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         backend = scripted({(): _refusal(TokenRejection.MALFORMED)}, {})
 
@@ -238,11 +242,13 @@ class TestOpening:
 
         monkeypatch.setattr(reload, "page_components", unread)
         with pytest.raises(BoundaryTokenError):
-            _redeem()
+            _redeem(rf)
         assert backend.opened == [()]
         assert backend.announced == [(TokenRejection.MALFORMED, "")]
 
-    def test_an_override_set_that_finds_the_token_expired_stops(self, scripted) -> None:
+    def test_an_override_set_that_finds_the_token_expired_stops(
+        self, rf, scripted
+    ) -> None:
         bound = (("binding", "user"),)
         backend = scripted(
             {
@@ -253,7 +259,7 @@ class TestOpening:
             {"card": bound},
         )
         with pytest.raises(BoundaryTokenError) as caught:
-            _redeem()
+            _redeem(rf)
         assert caught.value.reason is TokenRejection.EXPIRED
         assert backend.opened == [(), bound]
         assert backend.announced == [(TokenRejection.EXPIRED, "")]
@@ -292,10 +298,8 @@ class TestPageComponents:
         monkeypatch.setattr(reload, "page_tree_depth", lambda _start: 2)
         return visited
 
-    def test_the_walk_stops_at_the_page_root(
-        self, walked: list[Path], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(reload, "_stamp", lambda: None)
+    @override_settings(DEBUG=True)
+    def test_the_walk_stops_at_the_page_root(self, walked: list[Path]) -> None:
         found = reload.page_components(Path("/pages/home/page.py"))
         assert sorted(name for name, _scope in found) == ["box", "card"]
         assert set(walked) == {
@@ -304,47 +308,34 @@ class TestPageComponents:
             Path("/pages/_components/card"),
         }
 
-    def test_a_stamp_holds_the_set_until_it_moves(
-        self, walked: list[Path], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        stamp = ["one"]
-        monkeypatch.setattr(reload, "_stamp", lambda: (stamp[0],))
+    @override_settings(DEBUG=False)
+    def test_a_set_is_held_until_the_components_move(self, walked: list[Path]) -> None:
         path = Path("/pages/home/held/page.py")
         first = reload.page_components(path)
         visits = len(walked)
         assert reload.page_components(path) is first
         assert len(walked) == visits
-        stamp[0] = "two"
+        components_manager.reset()
         reload.page_components(path)
         assert len(walked) == 2 * visits
 
-    def test_no_stamp_walks_every_time(
-        self, walked: list[Path], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(reload, "_stamp", lambda: None)
+    @override_settings(DEBUG=True)
+    def test_watched_template_edits_walk_every_time(self, walked: list[Path]) -> None:
         path = Path("/pages/home/unheld/page.py")
         reload.page_components(path)
         visits = len(walked)
         reload.page_components(path)
         assert len(walked) == 2 * visits
 
-    def test_watched_template_edits_leave_no_stamp(self) -> None:
-        with override_settings(DEBUG=True):
-            assert reload._stamp() is None
-        with override_settings(DEBUG=False):
-            stamp = reload._stamp()
-        assert stamp is not None
-        assert len(stamp) == 4
-
-    def test_a_stamp_keeps_no_replaced_backend_alive(self) -> None:
-        with override_settings(DEBUG=False):
-            stamp = reload._stamp()
-            held = weakref.ref(components_manager.backends[0])
-            assert stamp == reload._stamp()
-            components_manager.reset()
-            gc.collect()
-            assert held() is None
-            assert stamp != reload._stamp()
+    @override_settings(DEBUG=False)
+    def test_a_held_set_keeps_no_replaced_backend_alive(
+        self, walked: list[Path]
+    ) -> None:
+        reload.page_components(Path("/pages/home/weak/page.py"))
+        held = weakref.ref(components_manager.backends[0])
+        components_manager.reset()
+        gc.collect()
+        assert held() is None
 
 
 class TestGuards:
@@ -380,35 +371,100 @@ class TestGuards:
         monkeypatch.setattr(reload, "guard_steps", guards)
         return computed
 
-    def _run(self, name: str) -> None:
+    @staticmethod
+    def _run(rf: RequestFactory, name: str) -> None:
         path = Path(f"/pages/{name}/page.py")
-        reload.run_guards(path, RequestFactory().get("/"), {}, {})
+        reload.run_guards(path, rf.get("/"), {}, {})
 
     def test_a_page_without_a_guard_runs_nothing_and_reads_once(
-        self, ran: list[tuple[str, object]], monkeypatch: pytest.MonkeyPatch
+        self, rf, ran: list[tuple[str, object]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         computed = self._graph(monkeypatch, frozenset(), is_async=False)
-        self._run("open")
-        self._run("open")
+        self._run(rf, "open")
+        self._run(rf, "open")
         assert ran == []
         assert len(computed) == 1
 
     def test_a_sync_guard_runs_its_steps(
-        self, ran: list[tuple[str, object]], monkeypatch: pytest.MonkeyPatch
+        self, rf, ran: list[tuple[str, object]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._graph(monkeypatch, frozenset({0, 1}), is_async=False)
-        self._run("sync")
+        self._run(rf, "sync")
         assert ran == [("sync", frozenset({0, 1}))]
 
     def test_an_async_guard_runs_through_the_bridge(
-        self, ran: list[tuple[str, object]], monkeypatch: pytest.MonkeyPatch
+        self, rf, ran: list[tuple[str, object]], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._graph(monkeypatch, frozenset({0}), is_async=True)
-        self._run("async")
+        self._run(rf, "async")
         assert ran == [("async", frozenset({0}))]
 
 
-class TestAdmits:
+class _Isolated:
+    """A component renderer answering fixed markup, noting the bundle it needs."""
+
+    def __init__(
+        self, rendered: tuple[str, BoundaryFailure | None], retry: TripInput | None
+    ) -> None:
+        self.rendered = rendered
+        self.retry = retry
+        self.needs: str | None = None
+
+    def body(self, context):
+        if self.needs is not None:
+            context[COLLECTOR_KEY].require(self.needs)
+        return self.rendered
+
+    def error(self, context, kind):
+        return "<b>e</b>", BoundaryFailure(kind, "d", None, retry=False)
+
+    def retry_input(self, failure) -> TripInput | None:
+        return self.retry
+
+
+@pytest.fixture()
+def reloaded(rf, scripted, monkeypatch: pytest.MonkeyPatch):
+    """Return a function answering a reload of `card` with the page seams scripted."""
+
+    def answer(
+        *,
+        module: Path | None = None,
+        rule: AccessRule = OPEN,
+        user: object = None,
+        rendered: tuple[str, BoundaryFailure | None] = ("<b>x</b>", None),
+        retry: TripInput | None = None,
+        needs: str | None = None,
+    ) -> SimpleNamespace:
+        scripted(
+            {(): BoundaryClaims.of("card", "")}, {("card", ""): _info("card", module)}
+        )
+        monkeypatch.setattr(reload, "prop_types", lambda _info: {})
+        monkeypatch.setattr(reload, "run_guards", lambda *_args: None)
+        monkeypatch.setattr(reload, "declared", lambda _module: rule)
+        held = SimpleNamespace(trip=None, response=None)
+        isolated = _Isolated(rendered, retry)
+        isolated.needs = needs
+
+        def renderer(info, path, trip):
+            held.trip = trip
+            return isolated
+
+        monkeypatch.setattr(reload, "isolated_renderer", renderer)
+        request = rf.get(
+            "/home/", HTTP_X_NEXT_REQUEST="1", HTTP_X_NEXT_ZONE="b-0a0b0c0d-0"
+        )
+        request.user = user
+        held.response = reload.answer(request, _PATH, {}, "t", {})
+        return held
+
+    return answer
+
+
+def _ops(held: SimpleNamespace) -> list[dict]:
+    return json.loads(held.response.content)["ops"]
+
+
+class TestClears:
     """The rule checked before any prop decodes skips its object requirements."""
 
     _SOURCE = Path("/c/component.py")
@@ -416,65 +472,66 @@ class TestAdmits:
     def _user(self, *, signed: bool, granted: bool) -> SimpleNamespace:
         return SimpleNamespace(is_authenticated=signed, has_perm=lambda *_args: granted)
 
-    def test_an_open_rule_admits_anyone(self) -> None:
-        assert reload._admits(None, OPEN)
+    def test_an_open_rule_admits_anyone(self, reloaded) -> None:
+        assert reloaded().response.status_code == 200
 
-    def test_a_signed_out_visitor_is_refused(self) -> None:
+    def test_a_signed_out_visitor_is_refused(self, reloaded) -> None:
         rule = AccessRule((Requirement("permission", self._SOURCE, ("a.b",), "x"),))
-        assert not reload._admits(self._user(signed=False, granted=True), rule)
+        user = self._user(signed=False, granted=True)
+        held = reloaded(module=self._SOURCE, rule=rule, user=user)
+        assert held.response.status_code == 403
 
-    def test_a_missing_model_permission_is_refused(self) -> None:
+    def test_a_missing_model_permission_is_refused(self, reloaded) -> None:
         rule = AccessRule(
             (
                 Requirement("login", self._SOURCE),
                 Requirement("permission", self._SOURCE, ("a.b",)),
             )
         )
-        assert not reload._admits(self._user(signed=True, granted=False), rule)
+        user = self._user(signed=True, granted=False)
+        held = reloaded(module=self._SOURCE, rule=rule, user=user)
+        assert held.response.status_code == 403
 
-    def test_an_object_requirement_waits_for_the_props(self) -> None:
+    def test_an_object_requirement_waits_for_the_props(
+        self, reloaded, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(reload, "check", lambda *_args: None)
         rule = AccessRule((Requirement("permission", self._SOURCE, ("a.b",), "x"),))
-        assert reload._admits(self._user(signed=True, granted=False), rule)
+        user = self._user(signed=True, granted=False)
+        held = reloaded(module=self._SOURCE, rule=rule, user=user)
+        assert held.response.status_code == 200
 
 
 class TestEnvelope:
-    def test_a_retry_carries_the_token_alone(self) -> None:
-        failure = BoundaryError(ErrorKind.ERROR, "d", None, retry=True)
-        response = reload._envelope(
-            RequestFactory().get("/"),
-            "b-0a0b0c0d-0",
-            ("<b>x</b>", failure),
-            StaticCollector(),
-            "tok",
-            (None, Path("page.py")),
-        )
-        (op,) = json.loads(response.content)["ops"]
+    def test_a_retry_carries_the_token_alone(
+        self, reloaded, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failure = BoundaryFailure(ErrorKind.ERROR, "d", None, retry=True)
+        trip = TripInput(_info("card"), DeferMode.LOAD, {})
+        monkeypatch.setattr(reload, "mint", lambda _request, _trip: "tok")
+        held = reloaded(rendered=("<b>x</b>", failure), retry=trip)
+        (op,) = _ops(held)
         assert op[reload.RETRY_WITH] == "tok"
         assert "exp" not in op
 
-    def test_a_bundle_the_content_needs_rides_the_envelope(self) -> None:
-        collector = StaticCollector(
-            bundle_url=lambda name: f"/static/next/next.{name}.min.js"
-        )
-        collector.require("more")
-        response = reload._envelope(
-            RequestFactory().get("/"),
-            "b-0a0b0c0d-0",
-            ("<a data-next-url>more</a>", None),
-            collector,
-            None,
-            (None, Path("page.py")),
-        )
-        assert json.loads(response.content)["assets"] == [
-            {"kind": "js", "url": "/static/next/next.more.min.js", "load": "script"}
-        ]
+    def test_a_bundle_the_content_needs_rides_the_envelope(self, reloaded) -> None:
+        held = reloaded(rendered=("<a data-next-url>more</a>", None), needs="more")
+        assets = json.loads(held.response.content)["assets"]
+        assert [asset["kind"] for asset in assets] == ["js"]
+        assert assets[0]["url"].endswith("next.more.min.js")
 
-    def test_no_input_mints_no_retry(self) -> None:
-        assert reload._retry(RequestFactory().get("/"), None) is None
+    def test_no_input_mints_no_retry(self, reloaded) -> None:
+        failure = BoundaryFailure(ErrorKind.ERROR, "d", None, retry=True)
+        held = reloaded(rendered=("<b>x</b>", failure), retry=None)
+        (op,) = _ops(held)
+        assert reload.RETRY_WITH not in op
 
-    def test_an_unencodable_prop_mints_no_retry(self) -> None:
+    def test_an_unencodable_prop_mints_no_retry(self, reloaded) -> None:
+        failure = BoundaryFailure(ErrorKind.ERROR, "d", None, retry=True)
         trip = TripInput(_info("card"), DeferMode.LOAD, {"sku": {"a": 1}})
-        assert reload._retry(RequestFactory().get("/"), trip) is None
+        held = reloaded(rendered=("<b>x</b>", failure), retry=trip)
+        (op,) = _ops(held)
+        assert reload.RETRY_WITH not in op
 
-    def test_a_component_without_a_client_mode_reloads_as_load(self) -> None:
-        assert reload._mode(_info("card")) is DeferMode.LOAD
+    def test_a_component_without_a_client_mode_reloads_as_load(self, reloaded) -> None:
+        assert reloaded().trip.mode is DeferMode.LOAD

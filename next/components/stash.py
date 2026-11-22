@@ -1,4 +1,4 @@
-"""The loading UI stashes a zone that reloads to its loading UI hands the browser.
+"""The `<template>` stashes of loading UI a zone reload swaps in on the client.
 
 Rows of one site without a key share one boundary key, so they share one stash.
 """

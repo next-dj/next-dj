@@ -22,10 +22,13 @@ def _own_deferred_components(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _closed_without_the_database() -> Iterator[None]:
-    """Close a streamed response without touching a connection the bench cannot read."""
+def _closed_without_the_database(django_db_blocker) -> Iterator[None]:
+    """Close a streamed response over connections an earlier bench left open.
+
+    The stream releases the connections its thread holds as its body ends, and the
+    blocker would fail that check where a bench before this one used the database.
+    """
     request_finished.disconnect(close_old_connections)
-    try:
+    with django_db_blocker.unblock():
         yield
-    finally:
-        request_finished.connect(close_old_connections)
+    request_finished.connect(close_old_connections)

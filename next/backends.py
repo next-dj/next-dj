@@ -3,10 +3,10 @@
 import inspect
 import logging
 import threading
+import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
-from functools import cached_property
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from django.core.exceptions import ImproperlyConfigured
 from django.dispatch import Signal
@@ -22,6 +22,7 @@ from next.errors import (
     SettingImportError,
     SettingNotSubclassError,
 )
+from next.utils import after_fork
 
 
 logger = logging.getLogger(__name__)
@@ -175,23 +176,39 @@ class SingleBackendManager[T]:
         base: BackendRoot[T],
         default: str | None = None,
         signal: Signal | None = None,
+        config: Callable[[], object] | None = None,
     ) -> None:
-        """Bind the manager to a settings key without reading it."""
+        """Bind the manager to a settings key, or to the `config` reader, unread."""
         self._setting = setting
         self._base = base
         self._default = default
         self._signal = signal
+        self._config = config
+        self.forget()
+        _forking.add(self)
+
+    def forget(self) -> None:
+        """Drop the backend and the lock without closing it, as a forked child must."""
+        self._lock = threading.Lock()
+        self._backend: T | None = None
+
+    def forked(self) -> None:
+        """Replace the lock in a forked child, where a parent thread may hold it."""
+        self._lock = threading.Lock()
 
     def _select_config(self) -> Mapping[str, Any]:
-        raw = getattr(next_framework_settings, self._setting, None)
+        if self._config is None:
+            raw = getattr(next_framework_settings, self._setting, None)
+        else:
+            raw = self._config()
         if isinstance(raw, Mapping):
             return raw
         if isinstance(raw, list):
             return next((entry for entry in raw if isinstance(entry, Mapping)), {})
         return {}
 
-    @cached_property
-    def _backend(self) -> T:
+    def build(self) -> T:
+        """Return a new backend from the settings, which `get()` builds once."""
         config = self._select_config()
         try:
             klass = resolve_backend_class(
@@ -205,12 +222,36 @@ class SingleBackendManager[T]:
         return instance
 
     def get(self) -> T:
-        """Return the configured backend, building it on first use."""
+        """Return the configured backend, built once under a double-checked lock."""
+        held = self._backend
+        if held is None:
+            with self._lock:
+                held = self._backend
+                if held is None:
+                    held = self._backend = self.build()
+        return held
+
+    def peek(self) -> T | None:
+        """Return the backend without building it, `None` before the first `get()`."""
         return self._backend
 
-    def reset(self) -> None:
-        """Drop the cached backend so the next `get()` rereads settings."""
-        self.__dict__.pop("_backend", None)
+    def reset(self) -> T | None:
+        """Drop the backend so the next `get()` rereads settings, returning it."""
+        with self._lock:
+            held, self._backend = self._backend, None
+        return held
+
+
+_forking: Final[weakref.WeakSet[SingleBackendManager[Any]]] = weakref.WeakSet()
+
+
+def _forked() -> None:
+    """Give every live manager a free lock in a forked child, its backend kept."""
+    for manager in tuple(_forking):
+        manager.forked()
+
+
+after_fork(_forked)
 
 
 __all__ = [

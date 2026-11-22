@@ -11,14 +11,9 @@ from next.pages.checks import (
 from next.pages.checks.metadata.head import viewport_pairs
 from next.pages.metadata import Viewport
 from next.pages.metadata.scope import SITE_SOURCE
-from tests.pages.checks.metadata.trees import (
-    INHERITED_CALLABLE,
-    framework,
-    metadata_page,
-    scope,
-    templated_page,
-)
+from tests.pages.checks.metadata.trees import INHERITED_CALLABLE, metadata_page, scope
 from tests.support import I18N, check_ids, patch_checks_router_manager
+from tests.support.trees import framework, templated_page
 
 
 def _messages(tmp_path: Path, metadata: str) -> list[tuple[str, str]]:

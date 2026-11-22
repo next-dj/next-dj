@@ -131,6 +131,8 @@ Server
 - Pick WSGI or ASGI based on whether the project uses streaming responses, SSE, or WebSockets.
 - Configure the worker count based on the expected concurrency and a load run, see :ref:`deployment-capacity`.
 - Set the worker timeout above the slowest expected handler.
+- Let one layer compress responses, the application through ``CompressionMiddleware`` or the proxy with ``COMPRESSION["ENABLED"]`` set to ``False``, see :ref:`deployment-compression`.
+- Check that a page with deferred boundaries streams behind the proxy, with ``curl -N``, see :doc:`platforms`.
 
 See :doc:`wsgi-asgi` for the server choice.
 

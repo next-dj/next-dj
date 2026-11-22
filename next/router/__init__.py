@@ -3,7 +3,7 @@
 from . import checks
 from .backends import ChromeDigest, NavigationCut, VerifiedCut
 from .current import CurrentLinks, current_links
-from .markers import Cut, CutKind, Declaration, Divergence, LayoutKey, Shell
+from .markers import Cut, CutKind, Declaration, Divergence, LayoutKey, ScannedShell
 from .navigation import router_clear
 from .signals import navigation_rendered, prefetch_shed, router_cleared
 
@@ -17,7 +17,7 @@ __all__ = [
     "Divergence",
     "LayoutKey",
     "NavigationCut",
-    "Shell",
+    "ScannedShell",
     "VerifiedCut",
     "current_links",
     "navigation_rendered",

@@ -24,7 +24,7 @@
           · ~ {{ article.reading_minutes }} min read · <code class="font-mono">/posts/{{ article.slug }}/</code>
         </span>
         <span class="flex items-center gap-2">
-          <a href="/posts/{{ article.slug }}/print/" class="text-xs font-medium text-foreground hover:underline">Print view</a>
+          <a href="/posts/{{ article.slug }}/print/" data-next-prefetch="off" class="text-xs font-medium text-foreground hover:underline">Print view</a>
           {% component "share_button" %}
         </span>
       </div>

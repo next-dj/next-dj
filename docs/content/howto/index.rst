@@ -77,6 +77,26 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`share-components-across-projects`
    Reuse a UI kit across several page roots.
 
+.. rubric:: Boundaries, transactions, and the router
+
+:doc:`show-a-loading-state`
+   Send a page with a loading UI and fill a slow component in when it is ready.
+
+:doc:`contain-a-failure-with-an-error-boundary`
+   Show an error UI in place of a failed component or page body, roll back its writes, and offer a retry.
+
+:doc:`batch-lookups-with-a-loader`
+   Gather the lookups of many components into one query with a ``Loader``.
+
+:doc:`run-a-page-in-a-transaction`
+   Wrap a page in a transaction with ``page.atomic`` or take it out of one, and read what the boundaries issue.
+
+:doc:`tune-router-prefetch-and-press`
+   Tune or turn off the prefetch on hover, scroll, and press, for the project, a link, or a page.
+
+:doc:`replace-the-boundary-token-storage`
+   Keep the claims of a boundary token in a store of your own, or replace the token backend.
+
 .. rubric:: Static assets
 
 :doc:`ship-a-site-wide-stylesheet`
@@ -140,10 +160,16 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`test-a-page-with-actions`
    Test a page that posts to a registered action.
 
+:doc:`test-a-page-with-deferred-boundaries`
+   Read the shell and the chunks of a streamed page, hold a job with a gate, and reload a client-trip component.
+
 :doc:`test-a-component-in-isolation`
    Render and assert on one component without a page.
 
 .. rubric:: Integration and operations
+
+:doc:`enable-response-compression`
+   Compress responses and streamed pages, keep a page plain, and decide who compresses behind a proxy.
 
 :doc:`integrate-django-admin`
    Run Django admin alongside next.dj pages.
@@ -206,6 +232,12 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    resolve-feature-flags-with-di
    build-a-composite-component
    share-components-across-projects
+   show-a-loading-state
+   contain-a-failure-with-an-error-boundary
+   batch-lookups-with-a-loader
+   run-a-page-in-a-transaction
+   tune-router-prefetch-and-press
+   replace-the-boundary-token-storage
    ship-a-site-wide-stylesheet
    use-a-compiled-stylesheet
    add-a-new-asset-kind
@@ -226,6 +258,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    extend-a-default-backend
    test-a-page-with-actions
    test-a-component-in-isolation
+   test-a-page-with-deferred-boundaries
+   enable-response-compression
    integrate-django-admin
    scope-requests-per-tenant
    observe-framework-signals

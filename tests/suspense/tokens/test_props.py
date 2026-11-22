@@ -316,7 +316,7 @@ class TestDecodeProps:
             decode_props(request, {"p": "x" * 5}, {}, limit=4)
 
     def test_an_annotation_no_token_carries_is_refused(self) -> None:
-        with pytest.raises(BoundaryPropsError):
+        with pytest.raises(BoundaryPropsError, match="which no token carries"):
             _decoded(dict, "x")
 
     @pytest.mark.django_db()

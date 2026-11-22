@@ -3,6 +3,7 @@
 import copy
 from dataclasses import dataclass, field, fields
 
+from next.conf.defer import atomic_choice
 from next.transactions import AtomicOverride, override_of, override_problem
 
 
@@ -58,7 +59,7 @@ def checked_atomic(value: object, owner: str) -> AtomicOverride | None:
     """Return the override an `atomic` declaration makes, recording an unusable one."""
     if value is None:
         return None
-    if isinstance(value, bool):
+    if atomic_choice(value):
         return AtomicOverride(atomic=value)
     if isinstance(value, AtomicOverride):
         problem = override_problem(value.atomic, value.aliases)
@@ -66,7 +67,7 @@ def checked_atomic(value: object, owner: str) -> AtomicOverride | None:
             return override_of(value.atomic, value.aliases)
     else:
         problem = (
-            "atomic must be True, False, None or an AtomicOverride, "
+            "atomic must be True, False, 'writes', None or an AtomicOverride, "
             f"got {type(value).__name__!r}"
         )
     registration_diagnostics.invalid_atomic.append((owner, problem))

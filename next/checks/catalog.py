@@ -19,16 +19,14 @@ from next.server import checks as server_checks
 from next.site import checks as site_checks
 from next.static import checks as static_checks
 from next.suspense import checks as suspense_checks
-from next.suspense.connections import checks as connections_checks
+from next.transactions import checks as transactions_checks
 from next.urls import checks as urls_checks
-from next.views import checks as views_checks
 
 
 CHECK_MODULES: tuple[ModuleType, ...] = (
     components_checks,
     compression_checks,
     conf_checks,
-    connections_checks,
     consent_checks,
     deps_checks,
     forms_checks,
@@ -43,8 +41,8 @@ CHECK_MODULES: tuple[ModuleType, ...] = (
     site_checks,
     static_checks,
     suspense_checks,
+    transactions_checks,
     urls_checks,
-    views_checks,
 )
 """Every area's checks module except `next.apps.checks`, which `next.apps` imports."""
 

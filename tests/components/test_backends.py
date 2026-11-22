@@ -493,7 +493,7 @@ class TestWatchRoots:
         """The contract default answers that no boundary file moved."""
         assert DummyComponentsBackend({}).refresh_files() is False
 
-    def test_the_watcher_refreshes_every_backend(self, tmp_path: Path) -> None:
+    def test_the_watcher_refreshes_every_backend(self) -> None:
         """One changed backend makes the whole refresh answer that files moved."""
         moved, still = (
             MagicMock(spec=ComponentsBackend),

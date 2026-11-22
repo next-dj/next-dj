@@ -33,7 +33,7 @@ The collected layouts are composed in order, with the closest layout wrapping th
 The walk does not stop at the page root.
 A ``layout.djx`` in a directory above the page root, such as the application package directory, also joins the chain and wraps every page below it.
 Keep layout files inside the page tree unless that wrapping is intended.
-A layout above the page tree root wraps the page but serves no co-located assets, and :ref:`next.W135 <ref-system-checks>` reports a ``layout.css`` or ``layout.js`` there.
+A layout above the page tree root wraps the page but serves no co-located assets, and ``next.W135`` reports a ``layout.css`` or ``layout.js`` there.
 A ``{% layout root %}`` marker in a layout ends the walk, see :ref:`topics-layouts-root`.
 
 .. code-block:: text
@@ -63,8 +63,8 @@ A layout is no body
 
 A ``layout.djx`` wraps the body of a page and is no body itself.
 A ``page.py`` with no ``render``, no ``template``, and no template a loader finds routes no URL, whatever ``layout.djx`` sits beside it or above it.
-:ref:`next.E012 <ref-system-checks>` reports such a file when it passes nothing to the pages below it and its directory declares no action, and :ref:`next.E166 <ref-system-checks>` when it declares access without ``inherit=True`` and no action of its directory answers to that rule.
-A ``layout.djx`` in a directory with no page and no action at any depth wraps nothing, and :ref:`next.W128 <ref-system-checks>` names the outermost such directory.
+``next.E012`` reports such a file when it passes nothing to the pages below it and its directory declares no action, and ``next.E166`` when it declares access without ``inherit=True`` and no action of its directory answers to that rule.
+A ``layout.djx`` in a directory with no page and no action at any depth wraps nothing, and ``next.W128`` names the outermost such directory.
 A landing route whose whole markup belongs in the layout shell gets a ``template.djx``, and an empty one is enough.
 
 Layouts in a route group
@@ -185,10 +185,10 @@ Ancestor layouts that stand nearer to the page than the marker still wrap it.
 Checks
 ~~~~~~
 
-:ref:`next.E168 <ref-system-checks>` reports a marker that stands in the wrong place or repeats.
-:ref:`next.W133 <ref-system-checks>` reports a layout that writes ``<html`` without a working marker while a layout further out exists, since the page would carry two documents.
-:ref:`next.W134 <ref-system-checks>` reports a marker in a ``template.djx`` or a component template, where the tag has no effect.
-:ref:`next.W135 <ref-system-checks>` reports co-located assets on a layout above the page tree root.
+``next.E168`` reports a marker that stands in the wrong place or repeats.
+``next.W133`` reports a layout that writes ``<html`` without a working marker while a layout further out exists, since the page would carry two documents.
+``next.W134`` reports a marker in a ``template.djx`` or a component template, where the tag has no effect.
+``next.W135`` reports co-located assets on a layout above the page tree root.
 See :doc:`/content/howto/give-a-section-its-own-document-shell` for the full recipe.
 
 Layout template contract
@@ -444,4 +444,5 @@ See also
    :doc:`access` for the access a ``page.py`` declares over a subtree.
    :doc:`seo/metadata` for the ``{% metadata %}`` tag and the metadata a segment ``page.py`` declares.
    :doc:`multi-project` for project-level layout roots.
+   :doc:`/content/ref/system-checks` for every check id this page names.
    :doc:`/content/internals/page-discovery` for the composition pipeline.

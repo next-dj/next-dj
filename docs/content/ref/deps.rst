@@ -160,8 +160,11 @@ A component instance rendered under a request scope resolves in a layer of its r
 A value is therefore shared page-wide only when the page resolved it, since the page's providers read the request, the URL kwargs and the page context but no props or template context of a component.
 ``request_memo`` is the context variable that holds the ``RequestMemo`` of the current render, its scope and the keys it shares, and a render with no async callable sets none.
 
+``render_scope(seed)`` opens the scope of one async render over the seed of the request, and ``bridged_scope(seed, work)`` awaits ``work`` in a scope of its own from sync code through the bridge.
+Both live in ``next.deps.scope`` beside ``RequestScope``.
+
 .. automodule:: next.deps.scope
-   :members: RequestScope
+   :members: RequestScope, render_scope, bridged_scope
 
 Loader
 ~~~~~~
@@ -183,8 +186,11 @@ Segment runner
 The async replay of a plan hands each blocking step to ``segment_runner``, a context variable whose default ``run_on_request_thread`` runs the step through ``sync_to_async(thread_sensitive=True)``, on the thread Django gives the request.
 A scope swaps the runner by setting the variable, and a ``SegmentRunner`` is any callable that takes the step and returns an awaitable of its result.
 
+``bridge(site, work)`` runs the async ``work`` a sync caller meets through the bridge port, with ``site`` naming the dependency or the component the call is for.
+Under ``DEBUG`` it logs each site once with the cost of the bridge beyond the work, so a sync template that renders an async component or a sync resolve that meets an async dependency shows up in the log.
+
 .. automodule:: next.deps.runner
-   :members: SegmentRunner, run_on_request_thread, segment_runner
+   :members: SegmentRunner, run_on_request_thread, segment_runner, bridge
 
 Signals
 -------

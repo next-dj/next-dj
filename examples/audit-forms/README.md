@@ -31,12 +31,12 @@ With the client runtime loaded, the same three steps run inside a modal layer ov
 ```bash
 cd examples/audit-forms
 uv run python manage.py migrate        # schema only
-uv run python manage.py seed_demo      # eight requests and an 85-row audit log
+uv run python manage.py seed_demo      # eight requests and their audit log
 uv run python manage.py runserver      # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-`seed_demo` fills an empty audit log from [`access/demo.py`](access/demo.py). Eight requesters walk the wizard a minute apart, every third one fails validation once and every fourth one is denied once, which leaves 85 rows across both channels, enough to page through. The rows one POST leaves share a stamp. Migrations carry schema only, and the command adds nothing to a log that already has rows.
+`seed_demo` fills an empty audit log from [`access/demo.py`](access/demo.py). Eight requesters walk the wizard a minute apart, every third one fails validation once and every fourth one is denied once, which leaves a few dozen rows across both channels, enough to page through, and the command reports how many it wrote. The rows one POST leaves share a stamp. Migrations carry schema only, and the command adds nothing to a log that already has rows.
 
 Tailwind loads via the Play CDN in [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The wizard threads step data across requests through `FORM_WIZARD_BACKEND`, configured in [`config/settings.py`](config/settings.py) as `CacheFormWizardBackend` over a dedicated cache alias (section 7). Keep `SessionMiddleware` in `MIDDLEWARE`: the draft bucket is keyed by session key, and `done` hands the new request id to the audit backend through the session.
 
@@ -172,7 +172,7 @@ The example ships three composite components, each pairing one `.djx` with a `co
 
 - **`audit_row/`: `@component.context` deriving display data.** Lives at `pages/_components/audit_row/` (one scope above the admin and per-request pages so both can use it). Takes an `AuditEntry` from the parent loop and exposes `kind_class`, `source_class`, `summary`, `payload_keys`, `request_link`, and `data_attrs`. The template stays markup-only, and its `<tr>` carries `data-next-key`, the key a batch appended to the log is deduplicated by. The admin log passes `peek="audit-log-peek"`, which turns the request link into a modal opener (section 12), and the per-request trail passes nothing, since every row there links to the page already open.
 
-- **`audit_totals/`: a component that loads when seen.** Lives at `pages/_components/audit_totals/`. Its `component.py` calls `component.defer("visible", props=("kind",))` and counts the rows of each channel in `@component.context("totals")`, so it renders on its own request from the `kind` prop alone. `loading.djx` holds the skeleton blocks of the first paint and `error.djx` the message shown if the counts fail to load (section 8).
+- **`audit_totals/`: a component that loads when seen.** Lives at `pages/_components/audit_totals/`. Its `component.py` calls `component.defer("visible", props=("kind",))` and counts the rows of each channel in `@component.context("totals")`, so it renders on its own request from the `kind` prop alone. `loading.djx` holds the skeleton blocks of the first paint and `error.djx` the message and the retry shown if the request for the counts fails (section 8).
 
 ### 6. Per-request audit trail (`AuditEntry.request` FK)
 
@@ -244,7 +244,7 @@ The ordering ends in `pk` because `created_at` alone is not unique. Both channel
 
 #### Totals that load when seen
 
-The two counts above the table are the one part of the page that still reads the whole log, so they left the page context for a component that loads later. [`access/pages/_components/audit_totals/`](access/pages/_components/audit_totals/) declares the delivery and the one prop the later request renders from:
+The two counts above the table are the one part of the page that still reads the whole log. `audit_totals` in [`access/services.py`](access/services.py) takes both in one `aggregate` with a filtered `Count` per channel, so the cost is one pass over the rows of the kind, and the boundary is about not paying for that pass while the totals are off screen, not about the number of queries. The counts therefore left the page context for a component that loads later. [`access/pages/_components/audit_totals/`](access/pages/_components/audit_totals/) declares the delivery and the one prop the later request renders from:
 
 ```python
 component.defer("visible", props=("kind",))
@@ -255,7 +255,7 @@ def totals(kind: str) -> dict[str, int]:
     return audit_totals(kind=kind)
 ```
 
-On the full page render the call `{% component "audit_totals" kind=active_kind %}` renders only the `loading.djx` beside the component, two `skeleton` blocks, and no count runs. When the wrapper scrolls into view the browser fetches the component on its own request, which renders `component.djx`, two `stat_card` tiles, from the `kind` it was given. A batch the sentinel fetches therefore costs one bounded query and never a count, and a visitor restored deep into the log does not pay for totals that are off screen. The call sits in `{% zone "audit-totals" %}` because the zone is what the filter form addresses and a zone always renders inline. A filter change morphs the zone, which puts the skeleton back with the new `kind`, and the totals fetch themselves again. An `error.djx` stands in for the totals alone if that render fails, and without the runtime a `<noscript>` link under the skeleton reloads the page with the totals rendered inline.
+On the full page render the call `{% component "audit_totals" kind=active_kind %}` renders only the `loading.djx` beside the component, two `skeleton` blocks, and no count runs. When the wrapper scrolls into view the browser fetches the component on its own request, which renders `component.djx`, two `stat_card` tiles, from the `kind` it was given. A batch the sentinel fetches therefore costs one bounded query and never a count, and a visitor restored deep into the log does not pay for totals that are off screen. The call sits in `{% zone "audit-totals" %}` because the zone is what the filter form addresses and a zone always renders inline. A filter change morphs the zone, which puts the skeleton back with the new `kind`, and the totals fetch themselves again. The totals arrive on a request of their own, which can fail where the page did not, with a locked SQLite database for instance, so an `error.djx` stands in for the totals alone and offers a `data-next-retry` button that fetches them again, and without the runtime a `<noscript>` link under the skeleton reloads the page with the totals rendered inline.
 
 `TestAuditLogWindows` in the integration suite follows the tokens the way the runtime does: the first window, every next token down to the end of the log, a previous token, a restore, five malformed cursors, and the one bounded query a batch costs. [`tests/e2e/test_log.py`](tests/e2e/test_log.py) drives the scroll, the prune and the reload in a browser.
 

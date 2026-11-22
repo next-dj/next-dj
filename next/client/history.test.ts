@@ -13,7 +13,7 @@ import type { PartialSurface } from "./partial";
 import { CONTENT_TYPE } from "./protocol";
 import { createRouter } from "./router";
 import type { Entry, RouterHost } from "./router";
-import { chunkModules } from "./test-doubles";
+import { chunkModules, historyHost } from "./test-doubles";
 
 type Detail = Record<string, unknown>;
 
@@ -441,19 +441,7 @@ describe("scroll positions", () => {
       }),
     );
     const keeper = createHistory(
-      {
-        partial: surface,
-        settings: () => ({ snapshots }),
-        context: () => ({}),
-        region: () => undefined,
-        chain: () => [],
-        key: () => "",
-        ask: () => Promise.reject(new Error("offline")),
-        owned: () => true,
-        plain: () => false,
-        going: () => "",
-        flush: () => undefined,
-      },
+      historyHost({ partial: surface, settings: () => ({ snapshots }) }),
       { signal: listening.signal },
     );
     for (const key of ["a", "b", "c"]) keeper.leave(key, { slot: "L1" });

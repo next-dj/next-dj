@@ -6,7 +6,7 @@ import pytest
 from django.test import Client, RequestFactory, override_settings
 
 from next.errors import BackendImportError
-from next.pages.responses import Purpose, cookie_varies, mark_purpose
+from next.pages.responses import Depth, Purpose, cookie_varies, mark_purpose
 from next.scripts.discovery import load_scripts
 from next.scripts.manager import ScriptsManager, scripts_manager
 from next.scripts.markers import Script, Strategy
@@ -525,9 +525,11 @@ class TestEnvelopedRender:
         Script("late", src="https://cdn.example/l.js", strategy=Strategy.IDLE),
     )
 
-    def _render(self, purpose: Purpose) -> tuple[str, dict[str, object]]:
+    def _render(
+        self, purpose: Purpose, depth: Depth | None = None
+    ) -> tuple[str, dict[str, object]]:
         request = RequestFactory().get("/")
-        mark_purpose(request, purpose)
+        mark_purpose(request, purpose, depth)
         manager = ScriptsManager()
         with patch.object(manager, "tree", return_value=self.SCRIPTS):
             head, data = manager.render(
@@ -538,9 +540,18 @@ class TestEnvelopedRender:
             )
         return head, dict(data)
 
-    @pytest.mark.parametrize("purpose", [Purpose.NAVIGATION, Purpose.PREFETCH])
-    def test_an_envelope_lists_every_script(self, purpose: Purpose) -> None:
-        head, data = self._render(purpose)
+    @pytest.mark.parametrize(
+        ("purpose", "depth"),
+        [
+            (Purpose.NAVIGATION, None),
+            (Purpose.PREFETCH, Depth.SHELL),
+            (Purpose.PREFETCH, Depth.FULL),
+        ],
+    )
+    def test_an_envelope_lists_every_script(
+        self, purpose: Purpose, depth: Depth | None
+    ) -> None:
+        head, data = self._render(purpose, depth)
         assert head == ""
         assert names(data["$scripts"]) == ["early", "late"]
         assert data["$scripts"][0]["strategy"] == "blocking"

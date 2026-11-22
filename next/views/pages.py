@@ -6,13 +6,15 @@ import time
 from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any, Final, Protocol, Self, cast
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol, Self, cast
 
 from django.http import Http404, HttpRequest, HttpResponse
 
 from next.conf.router import router_enabled
+from next.defer import JOBLESS, Depth
 from next.deps.cache import render_dep_cache
 from next.deps.runner import run_segment
+from next.deps.scope import render_scope
 from next.diagnostics import watch_degraded
 from next.intercept import intercepts
 from next.introspect import is_coroutine_callable
@@ -21,9 +23,7 @@ from next.pages.boundaries import Caught, boundary_scope
 from next.pages.guards import GUARD_RAISES
 from next.pages.loaders import load_page_module, load_python_module_memo, serves
 from next.pages.manager import Built, defers, page as zone_pages
-from next.pages.navigation import page_router
 from next.pages.responses import (
-    Depth,
     depth_of,
     finish_response,
     finish_zone_response,
@@ -32,13 +32,13 @@ from next.pages.responses import (
     response_policy,
     zone_policy,
 )
-from next.pages.scope import render_scope
+from next.pages.router import page_router
 from next.pages.transactions import page_atomic
 from next.partial.headers import PartialIntent, partial_intent, set_partial_vary
 from next.partial.stream import owned, streamable
 from next.partial.view import plain_zone_response, zone_response
 from next.router.current import current_links
-from next.router.manager import router_manager
+from next.router.manager import client_router
 from next.router.markers import CutKind
 from next.router.navigation import (
     announce,
@@ -52,6 +52,7 @@ from next.router.navigation import (
     origin_vary,
     page_marking,
     passed,
+    redirects,
     refused_prefetch,
     routing,
     shed,
@@ -78,14 +79,14 @@ from next.suspense.trip import note_route, tripped
 from next.transactions import (
     SAFE_METHODS,
     ViewKind,
-    atomic_aliases,
+    atomic_scope,
     keep_savepoints,
     request_atomic,
     skip_atomic_requests,
 )
 
 from .plan import PagePlan, PagePlans
-from .routes import Route, boundary_token, route_request
+from .routes import RouteKind, boundary_token, route_request
 
 
 if TYPE_CHECKING:
@@ -99,24 +100,24 @@ if TYPE_CHECKING:
     from django.template import Template
 
     from next.pages.loaders import BoundaryChain
-    from next.pages.manager import Page, _BodyResolution
+    from next.pages.manager import Page
+    from next.pages.manager.bodies import BodyResolution
     from next.pages.responses import ResponsePolicy
     from next.partial.stream import Streamable
     from next.router.navigation import Routing
 
 
 _SUCCESS: Final = range(200, 300)
-_REDIRECTS: Final = range(300, 400)
 
 _UNDEFERRED: Final[AbstractContextManager[PageRender | None]] = nullcontext()
 _UNMARKED: Final[AbstractContextManager[None]] = nullcontext()
-_PLANNED: Final = frozenset({Route.PAGE, Route.ZONE})
+_PLANNED: Final = frozenset({RouteKind.PAGE, RouteKind.ZONE})
 
 _KINDS: Final = {
-    Route.PAGE: ViewKind.PAGE,
-    Route.ZONE: ViewKind.ZONE,
-    Route.BOUNDARY: ViewKind.BOUNDARY,
-    Route.NAVIGATE: ViewKind.NAVIGATION,
+    RouteKind.PAGE: ViewKind.PAGE,
+    RouteKind.ZONE: ViewKind.ZONE,
+    RouteKind.BOUNDARY: ViewKind.BOUNDARY,
+    RouteKind.NAVIGATE: ViewKind.NAVIGATION,
 }
 
 
@@ -127,10 +128,20 @@ class _Prepared:
     A `Caught` outcome stands for a body or a context that failed inside a boundary.
     """
 
-    outcome: _BodyResolution | Caught
+    outcome: BodyResolution | Caught
     policy: ResponsePolicy
     built: Built | None
     started: float | None
+
+
+class _Call(NamedTuple):
+    """One page request as its view decided it, handed down the serving path."""
+
+    request: HttpRequest
+    kwargs: dict[str, object]
+    intent: PartialIntent
+    route: RouteKind
+    dep_cache: dict[str, Any]
 
 
 class _RoutedPageView(Protocol):
@@ -176,7 +187,11 @@ class _Block:
     )
 
     def __init__(
-        self, request: HttpRequest, file_path: Path, chain: BoundaryChain, route: Route
+        self,
+        request: HttpRequest,
+        file_path: Path,
+        chain: BoundaryChain,
+        route: RouteKind,
     ) -> None:
         """Hold what the blocks need, entering none yet."""
         self._request = request
@@ -195,7 +210,7 @@ class _Block:
         With the router off the active-link pass is bound inside the deferral block.
         """
         request = self._request
-        if self.route is not Route.NAVIGATE and not router_enabled():
+        if self.route is not RouteKind.NAVIGATE and not router_enabled():
             deferral = _deferrals(request, self._chain)
             self.rendering = deferral.__enter__()
             self._entered = deferral
@@ -206,7 +221,7 @@ class _Block:
         stack = ExitStack()
         self._entered = stack
         purpose = purpose_of(request)
-        if self.route is Route.NAVIGATE and depth_of(request) is not Depth.SHELL:
+        if self.route is RouteKind.NAVIGATE and depth_of(request) is not Depth.SHELL:
             self.block = stack.enter_context(streamable(request))
         self.rendering = stack.enter_context(_deferrals(request, self._chain))
         self.routed = stack.enter_context(routing(request, self._file_path, purpose))
@@ -237,7 +252,7 @@ def _answer(
     A stream sets its own cache and transport headers over those the page sets, and a
     stream that never leaves the view is discarded, so its slot is not held for good.
     """
-    if held.route is Route.NAVIGATE and held.routed is not None:
+    if held.route is RouteKind.NAVIGATE and held.routed is not None:
         return _navigated(html, held, held.routed, policy, (request, file_path))
     response = page_response(html, held.rendering, request, file_path)
     if not isinstance(response, StreamingPageResponse):
@@ -264,12 +279,12 @@ def _stamped(
 def _complete(request: HttpRequest, rendering: PageRender | None) -> bool:
     """Whether a prefetch is the page a navigation would answer, no job left behind.
 
-    A prefetch that skipped a deferred job or left a client-trip wrapper is refetched.
+    A delivery that answers the shell skipped its jobs, and a client-trip wrapper waits.
     """
-    depth = depth_of(request)
-    if depth is None or tripped(request):
+    if depth_of(request) is None or tripped(request):
         return False
-    return depth is Depth.FULL or rendering is None or rendering.delivered is None
+    delivered = None if rendering is None else rendering.delivered
+    return delivered is None or delivered.delivery not in JOBLESS
 
 
 def _navigated(
@@ -285,7 +300,7 @@ def _navigated(
     """
     request, file_path = target
     shell = routed.settled(html)
-    cut = cleared(request, router_manager.cut().cut(declaration(request), shell), shell)
+    cut = cleared(request, client_router.cut().cut(declaration(request), shell), shell)
     patches = navigation_envelope(
         request,
         routed,
@@ -340,10 +355,10 @@ def _gate(request: HttpRequest, file_path: Path) -> HttpResponseBase | None:
 
 
 def _refused(
-    denial: HttpResponseBase, route: Route, request: HttpRequest
+    denial: HttpResponseBase, route: RouteKind, request: HttpRequest
 ) -> HttpResponseBase:
     """Return the refusal of a page, private, varied and stamped for a navigation."""
-    return passed(denial, request) if route is Route.NAVIGATE else denial
+    return passed(denial, request) if route is RouteKind.NAVIGATE else denial
 
 
 def unified_view(
@@ -376,11 +391,10 @@ def unified_view(
 
 
 def _transaction(
-    request: HttpRequest, route: Route, file_path: Path
-) -> AbstractContextManager[None]:
+    request: HttpRequest, route: RouteKind, file_path: Path
+) -> AbstractContextManager[object]:
     """Return the transaction the method rule or `page.atomic` gives one request."""
-    aliases = atomic_aliases(request, _KINDS[route], page_atomic(file_path))
-    return request_atomic(aliases)
+    return request_atomic(atomic_scope(request, _KINDS[route], page_atomic(file_path)))
 
 
 def _boundary_refusal(
@@ -409,16 +423,16 @@ def _admission(
     file_path: Path,
     request: HttpRequest,
     kwargs: dict[str, object],
-    route: Route,
+    route: RouteKind,
     dep_cache: dict[str, Any],
 ) -> HttpResponseBase | None:
     """Settle every access decision of a page request, `None` to serve it.
 
     It runs before the transaction opens, so a refused request opens none.
     """
-    if route is Route.BOUNDARY:
+    if route is RouteKind.BOUNDARY:
         return _boundary_refusal(file_path, request, kwargs, dep_cache)
-    if route is Route.NAVIGATE:
+    if route is RouteKind.NAVIGATE:
         early = _gate(request, file_path)
         if early is not None:
             return early
@@ -439,13 +453,13 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
         intent = partial_intent(request)
         route = route_request(request, intent)
         dep_cache = render_dep_cache(request)
-        call = (request, kwargs, intent, route, dep_cache)
+        call = _Call(request, kwargs, intent, route, dep_cache)
         if route not in _PLANNED or request.method not in SAFE_METHODS:
             return _admitted(file_path, call, serve, admitted=False)
         denied = refusal(file_path, request, kwargs, dep_cache)
         if denied is not None:
             return denied
-        if route is Route.ZONE:
+        if route is RouteKind.ZONE:
             template = zone_pages.composed_template_for(file_path)
             plan = plans.of(template)
             if plan.plain and not intercepts.of(file_path):
@@ -460,7 +474,7 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
 
     def serve(call: _Call, template: Template | None = None) -> HttpResponseBase:
         request, kwargs, intent, route, dep_cache = call
-        if route is Route.ZONE:
+        if route is RouteKind.ZONE:
             with zone_marking(request):
                 zone = zone_response(
                     file_path,
@@ -471,10 +485,7 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
                     dep_cache=dep_cache,
                 )
             return _zone_answer(zone, page, file_path, request)
-        policy = response_policy(
-            page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
-        )
-        prepare_page_render(policy, request)
+        policy = _policy(page, file_path, request, kwargs, dep_cache)
         chain = page.composed_chain(file_path)
         with _Block(request, file_path, chain, route) as held:
             html = page.render(
@@ -497,20 +508,17 @@ def _admitted(
     The access decisions come first unless the caller `admitted` the request itself,
     and the boundaries of the render share one lazy savepoint session.
     """
-    request, kwargs, _intent, route, dep_cache = call
+    request, kwargs, route = call.request, call.kwargs, call.route
     if not admitted:
-        denied = _admission(file_path, request, kwargs, route, dep_cache)
+        denied = _admission(file_path, request, kwargs, route, call.dep_cache)
         if denied is not None:
             return denied
     note_route(request, kwargs)
     with keep_savepoints(), _transaction(request, route, file_path):
-        if route is Route.BOUNDARY:
+        if route is RouteKind.BOUNDARY:
             token = boundary_token(request) or ""
-            return answer(request, file_path, kwargs, token, dep_cache)
+            return answer(request, file_path, kwargs, token, call.dep_cache)
         return serve(call)
-
-
-type _Call = tuple[HttpRequest, dict[str, object], PartialIntent, Route, dict[str, Any]]
 
 
 def _plain(
@@ -524,12 +532,9 @@ def _plain(
 
     The active-link pass is bound only for a page whose templates can open a container.
     """
-    request, kwargs, _intent, _route, dep_cache = call
+    request, kwargs, dep_cache = call.request, call.kwargs, call.dep_cache
     template, body = source
-    policy = response_policy(
-        page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
-    )
-    prepare_page_render(policy, request)
+    policy = _policy(page, file_path, request, kwargs, dep_cache)
     if plan.marks or plan.streams:
         html = _bound_render(page, file_path, source, plan, call)
     else:
@@ -554,14 +559,19 @@ def _bound_render(
     The link pass runs for a template that can open a container, and the payload says
     partials may stream wherever the project holds a component that defers.
     """
-    request, kwargs, _intent, _route, dep_cache = call
+    request = call.request
     template, body = source
     streams = plan.streams and suspense_manager.policy().streams_partials(request)
     token = partial_streams.set(streams)
     try:
         with page_marking(request) if plan.marks else _UNMARKED:
             return page.render_plain(
-                file_path, template, request, kwargs, dep_cache=dep_cache, body=body
+                file_path,
+                template,
+                request,
+                call.kwargs,
+                dep_cache=call.dep_cache,
+                body=body,
             )
     finally:
         partial_streams.reset(token)
@@ -571,16 +581,15 @@ def _plain_zone(
     page: Page, file_path: Path, template: Template, plan: PagePlan, call: _Call
 ) -> HttpResponseBase:
     """Answer a safe zone request for a plain page no intercept serves."""
-    request, kwargs, intent, _route, _dep_cache = call
-    origin = plan.links is not None
-    if plan.marks:
-        with zone_marking(request):
-            zone = plain_zone_response(
-                file_path, intent, request, dict(kwargs), template, origin=origin
-            )
-    else:
+    request = call.request
+    with zone_marking(request) if plan.marks else _UNMARKED:
         zone = plain_zone_response(
-            file_path, intent, request, dict(kwargs), template, origin=origin
+            file_path,
+            call.intent,
+            request,
+            dict(call.kwargs),
+            template,
+            origin=plan.links is not None,
         )
     return finish_zone_response(zone, zone_policy(page, file_path), request)
 
@@ -607,8 +616,12 @@ def _resolving_view(
         intent = partial_intent(request)
         route = route_request(request, intent)
         dep_cache = render_dep_cache(request)
-        call = (request, kwargs, intent, route, dep_cache)
-        if not planned or route is not Route.PAGE or request.method not in SAFE_METHODS:
+        call = _Call(request, kwargs, intent, route, dep_cache)
+        if (
+            not planned
+            or route is not RouteKind.PAGE
+            or request.method not in SAFE_METHODS
+        ):
             return _admitted(file_path, call, dispatch, admitted=False)
         denied = refusal(file_path, request, kwargs, dep_cache)
         if denied is not None:
@@ -656,21 +669,13 @@ def _plain_resolved(
     call: _Call,
 ) -> HttpResponseBase:
     """Resolve the sync body of a plain page and answer it, outside every block."""
-    request, kwargs, _intent, _route, dep_cache = call
+    request, kwargs, dep_cache = call.request, call.kwargs, call.dep_cache
     resolution = page.resolve_page_body(
         file_path, module, request, kwargs, dep_cache=dep_cache
     )
     built = resolution.http_response
     if built is not None:
-        policy = response_policy(
-            page,
-            file_path,
-            request,
-            url_kwargs=kwargs,
-            dep_cache=dep_cache,
-            response=built,
-        )
-        prepare_page_render(policy, request)
+        policy = _policy(page, file_path, request, kwargs, dep_cache, built)
         return _finish_render_response(built, policy, request, file_path)
     skeleton, plan = planned
     body = resolution.body if resolution.body is not None else ""
@@ -685,21 +690,16 @@ def _serve_sync(
     call: _Call,
 ) -> HttpResponseBase:
     """Resolve a sync body inside the page boundaries, then compose and render it."""
-    request, kwargs, intent, route, dep_cache = call
+    request, kwargs, _intent, route, dep_cache = call
     outcome = page.resolve_guarded(
         file_path, module, request, kwargs, dep_cache=dep_cache, chain=skeleton[1]
     )
-    if route is Route.ZONE:
-        return _zone(page, file_path, outcome, intent, request, kwargs, dep_cache)
+    if route is RouteKind.ZONE:
+        return _zone(page, file_path, outcome, call)
     if isinstance(outcome, Caught):
-        return _caught_response(
-            page, file_path, outcome, (request, kwargs, route), dep_cache, skeleton[1]
-        )
+        return _caught_response(page, file_path, outcome, call, skeleton[1])
     built = outcome.http_response
-    policy = response_policy(
-        page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache, response=built
-    )
-    prepare_page_render(policy, request)
+    policy = _policy(page, file_path, request, kwargs, dep_cache, built)
     if built is not None:
         return _finish_render_response(built, policy, request, file_path, route)
     body = outcome.body if outcome.body is not None else ""
@@ -711,37 +711,26 @@ def _serve_sync(
 
 
 def _zone(
-    page: Page,
-    file_path: Path,
-    outcome: _BodyResolution | Caught,
-    intent: PartialIntent,
-    request: HttpRequest,
-    kwargs: dict[str, object],
-    dep_cache: dict[str, Any],
+    page: Page, file_path: Path, outcome: BodyResolution | Caught, call: _Call
 ) -> HttpResponseBase:
     """Answer a zone GET of a resolving page, a caught body with its error UI."""
+    request = call.request
+    if isinstance(outcome, Caught):
+        caught, dynamic = outcome, False
+    elif outcome.http_response is not None:
+        return _zone_answer(outcome.http_response, page, file_path, request)
+    else:
+        caught, dynamic = None, outcome.dynamic
     with zone_marking(request):
-        if isinstance(outcome, Caught):
-            zone = zone_response(
-                file_path,
-                intent,
-                request,
-                dynamic_body=False,
-                url_kwargs=dict(kwargs),
-                dep_cache=dep_cache,
-                caught=outcome,
-            )
-        elif outcome.http_response is not None:
-            zone = outcome.http_response
-        else:
-            zone = zone_response(
-                file_path,
-                intent,
-                request,
-                dynamic_body=outcome.dynamic,
-                url_kwargs=dict(kwargs),
-                dep_cache=dep_cache,
-            )
+        zone = zone_response(
+            file_path,
+            call.intent,
+            request,
+            dynamic_body=dynamic,
+            url_kwargs=dict(call.kwargs),
+            dep_cache=call.dep_cache,
+            caught=caught,
+        )
     return _zone_answer(zone, page, file_path, request)
 
 
@@ -780,11 +769,11 @@ def _serve_rendered(
 
     The template renders on this thread after the drive.
     """
-    request, kwargs, intent, route, dep_cache = call
+    request, kwargs, _intent, route, dep_cache = call
     skeleton = page.layout_skeleton(file_path)
     chain = skeleton[1]
     with boundary_scope(chain):
-        if route is Route.ZONE:
+        if route is RouteKind.ZONE:
             outcome = drive(
                 partial(
                     _scoped_body,
@@ -797,7 +786,7 @@ def _serve_rendered(
                     chain,
                 )
             )
-            return _zone(page, file_path, outcome, intent, request, kwargs, dep_cache)
+            return _zone(page, file_path, outcome, call)
         prepared = drive(
             partial(
                 _prepare, page, file_path, module, request, kwargs, dep_cache, chain
@@ -845,7 +834,7 @@ async def _scoped_body(
     kwargs: dict[str, object],
     dep_cache: dict[str, Any],
     chain: BoundaryChain,
-) -> _BodyResolution | Caught:
+) -> BodyResolution | Caught:
     """Resolve the body of an async page for a zone GET in its request scope."""
     async with render_scope(dep_cache):
         body = page.aresolve_page_body(
@@ -862,7 +851,7 @@ def _policy(
     request: HttpRequest,
     kwargs: dict[str, object],
     dep_cache: dict[str, Any],
-    response: HttpResponseBase | None,
+    response: HttpResponseBase | None = None,
 ) -> ResponsePolicy:
     """Return the response policy of a full page and prepare its render by it."""
     policy = response_policy(
@@ -927,19 +916,11 @@ async def _prepare(
 
 
 def _caught_response(
-    page: Page,
-    file_path: Path,
-    caught: Caught,
-    call: tuple[HttpRequest, dict[str, object], Route],
-    dep_cache: dict[str, Any],
-    chain: BoundaryChain,
+    page: Page, file_path: Path, caught: Caught, call: _Call, chain: BoundaryChain
 ) -> HttpResponseBase:
     """Answer with the error UI of the boundary that caught a failed page body."""
-    request, kwargs, route = call
-    policy = response_policy(
-        page, file_path, request, url_kwargs=kwargs, dep_cache=dep_cache
-    )
-    prepare_page_render(policy, request)
+    request, kwargs, _intent, route, dep_cache = call
+    policy = _policy(page, file_path, request, kwargs, dep_cache)
     with _Block(request, file_path, chain, route) as held:
         html = page.render_caught(
             file_path, caught, request, kwargs, dep_cache=dep_cache, chain=chain
@@ -952,14 +933,14 @@ def _finish_render_response(
     policy: ResponsePolicy,
     request: HttpRequest,
     file_path: Path,
-    route: Route = Route.PAGE,
+    route: RouteKind = RouteKind.PAGE,
 ) -> HttpResponseBase:
     """Finish the full-page response `render()` returned, varying a cacheable one.
 
     A browser may serve a stored full page for a zone fetch, so `Vary` is added. A
     navigation passes a redirect to the router's fetch and loads anything else hard.
     """
-    if route is Route.NAVIGATE:
+    if route is RouteKind.NAVIGATE:
         return _navigated_response(response, policy, request, file_path)
     finish_response(response, policy, request, file_path)
     if (
@@ -979,7 +960,7 @@ def _navigated_response(
 ) -> HttpResponseBase:
     """Answer a navigation whose `render()` returned a response of its own."""
     finish_response(response, policy, request, file_path)
-    if response.status_code in _REDIRECTS and response.has_header("Location"):
+    if redirects(response):
         return passed(response, request)
     return stamp(answered(visit_envelope(request)), request)
 

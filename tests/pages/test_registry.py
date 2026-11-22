@@ -372,7 +372,7 @@ class TestKeylessContextShape:
         """Callers catching the plain `dict.update` failure keep working."""
         context_manager.register_context(test_file_path, None, lambda: 42)
 
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="non-mapping"):
             context_manager.collect_context(test_file_path)
 
 
@@ -1318,7 +1318,10 @@ class TestFailureBlame:
         registry = PageContextRegistry()
         registry.register_context(_ROOT, None, lambda: ["a"], inherit_context=True)
 
-        with blaming() as blamed, pytest.raises(PageContextShapeError):
+        with (
+            blaming() as blamed,
+            pytest.raises(PageContextShapeError, match="non-mapping"),
+        ):
             registry.collect_context(_LEAF)
 
         assert blamed.group == 0

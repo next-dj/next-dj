@@ -18,7 +18,7 @@ Two pages that compose through the same file share its id, and an edit or a depl
 
 With the router on, composition wraps the placeholder of each layout in two HTML comments that name the layout id and a seal.
 The seal is minted per response, so a look-alike comment in page content never matches a marker.
-A placeholder inside a ``{% verbatim %}`` block, inside an HTML attribute, or inside a ``<title>`` cannot carry the comments, and :ref:`next.E239 <ref-system-checks>` reports it.
+A placeholder inside a ``{% verbatim %}`` block, inside an HTML attribute, or inside a ``<title>`` cannot carry the comments, and ``next.E239`` reports it.
 
 Every routed document carries the chain it rendered in its ``$layouts`` payload entry, one ``[id, digest, seal]`` per layout, outer first.
 A navigation sends the chain the browser shows in the ``X-Next-Layouts`` header, one ``id.digest`` per layout, outer first, comma separated.
@@ -75,12 +75,12 @@ The common causes follow.
 A value that changes per page.
    A layout that prints ``request.path``, the name of the page, or a highlighted section computed in the template differs on every page.
    Move the value into a ``{% zone %}``, which a kept layout receives fresh, or into the page.
-   :ref:`next.W176 <ref-system-checks>` reports a root layout that reads the request path outside a zone.
+   ``next.W176`` reports a root layout that reads the request path outside a zone.
    Navigation links need no such care, since :doc:`active-links` marks them after the digest.
 
 A key that page context sets.
    A layout that reads, in its chrome, a key the ``@context`` callables of its pages provide, such as an active tab, a per-page id on a header button, or a page title, renders it differently on every page that sets it differently.
-   :ref:`next.W183 <ref-system-checks>` reports such a layout at startup while the router is on.
+   ``next.W183`` reports such a layout at startup while the router is on.
    The scan leaves out reads inside a ``{% zone %}`` and inside the ``{% template %}`` slot, keys a context processor provides, and keys an ``inherit_context`` callable of the layout's own directory or above provides, since that callable feeds every page below the layout alike.
    Wrap the part that reads the key in a ``{% zone %}``, which a kept layout morphs on its own, or move it into the page slot.
 
@@ -168,7 +168,7 @@ A digest subclass strips a per-response token of its own on top of the default n
        "ROUTER": {"DIGEST": "myproject.router.BuildStampDigest"},
    }
 
-A path that does not import, or names no concrete subclass, is reported as :ref:`next.E237 <ref-system-checks>`, and every navigation raises :exc:`~django.core.exceptions.ImproperlyConfigured` until it is fixed.
+A path that does not import, or names no concrete subclass, is reported as ``next.E219``, and every navigation raises :exc:`~django.core.exceptions.ImproperlyConfigured` until it is fixed.
 Each backend is built once per process and again after a settings reload.
 
 .. seealso::

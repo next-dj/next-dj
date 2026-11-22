@@ -1,35 +1,43 @@
 import { defaultObserver } from "./adapters";
 import { assetLoad } from "./apply";
 import { inPlace, isPlainActivation } from "./events";
-import { CONTENT_TYPE, HEADER_VERSION, isRecord, matching } from "./protocol";
-import type { HistoryHost, Keeper, Prefetched } from "./router";
+import {
+  CONTENT_TYPE,
+  HEADER_PREFETCH,
+  HEADER_VERSION,
+  bare,
+  isRecord,
+  matching,
+  mime,
+  says,
+} from "./protocol";
+import type { Flight, HistoryHost, Keeper, Prefetched } from "./router";
 import type { IntersectionAdapter } from "./triggers";
 
-type Wish = [
-  urgent: boolean,
-  settle: () => void,
-  done: Promise<void>,
-  el?: Element | undefined,
-  stop?: (() => void) | undefined,
-  controller?: AbortController,
-];
+interface Wish {
+  urgent: boolean;
+  settle: () => void;
+  done: Promise<void>;
+  el?: Element | undefined;
+  stop?: (() => void) | undefined;
+  controller?: AbortController;
+}
 
-type Cached = [
-  expires: number,
-  raw: Record<string, unknown>,
-  response: Response,
-  stored: number,
-];
+interface Cached {
+  expires: number;
+  raw: Record<string, unknown>;
+  response: Response;
+  stored: number;
+}
 
-type Press = [
-  url: string,
-  key: string,
-  flight: Promise<Response | undefined>,
-  controller: AbortController,
-  timer: ReturnType<typeof setTimeout>,
-  link: HTMLAnchorElement,
-  response?: Response,
-];
+interface Press {
+  url: string;
+  key: string;
+  link: HTMLAnchorElement;
+  timer: ReturnType<typeof setTimeout>;
+  flight: Flight;
+  response?: Response;
+}
 
 type Net = Navigator & { connection?: { saveData?: boolean; effectiveType?: string } };
 
@@ -38,13 +46,10 @@ const SKIP =
   "[data-next-action]";
 const MODE = "data-next-prefetch";
 const PRESS = "data-next-press";
-const DEPTH = "X-Next-Prefetch";
 const VIEWPORT = `[${MODE}=viewport] a[href],a[href][${MODE}=viewport]`;
 const RETRY = 30;
 const LIMIT = 3;
 const HOLD = 1000;
-
-const bare = (href: string): string => href.replace(/#.*/s, "");
 
 export function createPrefetch(
   host: HistoryHost,
@@ -70,7 +75,7 @@ export function createPrefetch(
   };
 
   const read = async (response: Response): Promise<unknown> => {
-    const type = (response.headers.get("content-type") ?? "").replace(/;.*/, "").trim();
+    const type = mime(response);
     return type === (cfg().type ?? CONTENT_TYPE)
       ? host.partial._parse(type, await response.text())
       : undefined;
@@ -106,8 +111,8 @@ export function createPrefetch(
     const limit = (cfg().prefetch_entries ?? 16) - flights();
     for (const [key, entry] of cache)
       if (
-        entry[0] <= now ||
-        (cache.size >= limit && entry[3] <= stale && key !== pointed)
+        entry.expires <= now ||
+        (cache.size >= limit && entry.stored <= stale && key !== pointed)
       )
         cache.delete(key);
     return cache.size < limit;
@@ -115,7 +120,7 @@ export function createPrefetch(
 
   const flights = (): number => {
     let flying = 0;
-    for (const wish of wishes.values()) if (wish[5]) flying += 1;
+    for (const wish of wishes.values()) if (wish.controller) flying += 1;
     return flying;
   };
 
@@ -127,9 +132,9 @@ export function createPrefetch(
       pause = Date.now() + 1000 * (after > 0 ? after : wait);
       if (!(after > 0)) wait = Math.min(wait * 2, 300);
       for (const [queued, held] of wishes)
-        if (!held[5]) {
+        if (!held.controller) {
           wishes.delete(queued);
-          held[1]();
+          held.settle();
         }
     } else if (response.ok) wait = RETRY;
   };
@@ -147,83 +152,94 @@ export function createPrefetch(
         ? (cfg().prefetch_ttl ?? 30)
         : (cfg().prefetch_shell_ttl ?? 300);
     cache.delete(key);
-    cache.set(key, [now + 1000 * life, raw, response, now]);
+    cache.set(key, { expires: now + 1000 * life, raw, response, stored: now });
     for (const old of cache.keys())
       if (cache.size > (cfg().prefetch_entries ?? 16)) cache.delete(old);
     warm(raw.assets, urgent);
     return true;
   };
 
+  const fresh = (found: Cached | undefined): Cached | undefined => {
+    const known = host.partial._headers({}).get(HEADER_VERSION);
+    return found &&
+      found.expires > Date.now() &&
+      !(known && known !== found.raw.version)
+      ? found
+      : undefined;
+  };
+
   const release = (kept = true): void => {
     const held = pressed;
     if (!held) return;
     pressed = undefined;
-    clearTimeout(held[4]);
-    const response = held[6];
-    if (!kept || !response || response.redirected) held[3].abort();
+    clearTimeout(held.timer);
+    const { response } = held;
+    if (!kept || !response?.ok || response.redirected) held.flight.stop();
     else
       void read(response)
-        .then((raw) => keep(held[1], raw, response, true))
+        .then((raw) => keep(held.key, raw, response, true))
         .catch(() => false)
-        .then((stored) => stored || held[3].abort());
+        .then((stored) => stored || held.flight.stop());
   };
 
   const press = (link: HTMLAnchorElement): void => {
     const url = bare(link.href);
-    if (pressed?.[0] === url) return;
+    if (pressed?.url === url) return;
     release();
     const key = keyOf(url);
-    const found = cache.get(key);
     const queued = wishes.get(url);
     if (
-      (found && found[0] > Date.now() && found[1].complete === true) ||
+      fresh(cache.get(key))?.raw.complete === true ||
       refused.has(url) ||
       pause > Date.now()
     )
       return;
-    if (queued && !queued[5]) {
+    if (queued && !queued.controller) {
       wishes.delete(url);
-      queued[1]();
+      queued.settle();
     }
     const controller = new AbortController();
-    const flight = host.ask(url, controller.signal, { [DEPTH]: "full" }).then(
-      (response) => {
-        heed(url, response);
-        if (!response.ok || response.status === 204) return undefined;
-        held[6] = response;
-        return response;
-      },
-      () => undefined,
-    );
-    const held: Press = (pressed = [
+    const held: Press = {
       url,
       key,
-      flight,
-      controller,
-      setTimeout(release, HOLD),
       link,
-    ]);
+      timer: setTimeout(release, HOLD),
+      flight: {
+        answer: host.ask(url, controller.signal, { [HEADER_PREFETCH]: "full" }).then(
+          (response) => {
+            heed(url, response);
+            const { status } = response;
+            if (status === 204 || status === 429 || status > 499) return undefined;
+            held.response = response;
+            return response;
+          },
+          () => undefined,
+        ),
+        stop: () => controller.abort(),
+      },
+    };
+    pressed = held;
   };
 
   const fly = (url: string, wish: Wish): void => {
-    const controller = (wish[5] = new AbortController());
+    const controller = (wish.controller = new AbortController());
     const { signal } = controller;
     const key = keyOf(url);
     void host
-      .ask(url, signal, { [DEPTH]: "1" })
+      .ask(url, signal, { [HEADER_PREFETCH]: "1" })
       .then(async (response) => {
         heed(url, response);
-        if (response.headers.get("X-Next-Router")?.includes("clear")) host.flush();
+        if (says(response, "clear")) host.flush();
         const raw = response.ok && !response.redirected && (await read(response));
         if (signal.aborted) return;
         tried.add(url);
-        wish[4]?.();
-        keep(key, raw, response, wish[0]);
+        wish.stop?.();
+        keep(key, raw, response, wish.urgent);
       })
       .catch(() => undefined)
       .then(() => {
         wishes.delete(url);
-        wish[1]();
+        wish.settle();
         pump();
       });
   };
@@ -232,17 +248,17 @@ export function createPrefetch(
     for (;;) {
       let pick: [string, Wish] | undefined;
       for (const entry of wishes)
-        if (!entry[1][5] && (entry[1][0] || !pick)) pick = entry;
+        if (!entry[1].controller && (entry[1].urgent || !pick)) pick = entry;
       const flying = flights();
       if (!pick || flying >= LIMIT) return;
       const [url, wish] = pick;
-      if (wish[3]?.isConnected === false) {
+      if (wish.el?.isConnected === false) {
         wishes.delete(url);
-        wish[4]?.();
-        wish[1]();
+        wish.stop?.();
+        wish.settle();
         continue;
       }
-      if (!wish[0] && (flying >= LIMIT - 1 || !room())) return;
+      if (!wish.urgent && (flying >= LIMIT - 1 || !room())) return;
       fly(url, wish);
     }
   };
@@ -257,29 +273,29 @@ export function createPrefetch(
     const held = wishes.get(url);
     if (held) {
       if (stop) {
-        held[3] = el;
-        held[4] = stop;
+        held.el = el;
+        held.stop = stop;
       }
-      if (urgent && !held[5]) {
-        held[0] = true;
+      if (urgent && !held.controller) {
+        held.urgent = true;
         wishes.delete(url);
         wishes.set(url, held);
         pump();
       }
-      return held[2];
+      return held.done;
     }
     if (
-      pressed?.[0] === url ||
+      pressed?.url === url ||
       host.going() === url ||
       !host.owned(new URL(url)) ||
-      (cache.get(keyOf(url))?.[0] ?? 0) > Date.now() ||
+      fresh(cache.get(keyOf(url))) ||
       refused.has(url) ||
       pause > Date.now()
     )
       return Promise.resolve();
     let settle!: () => void;
     const done = new Promise<void>((resolve) => (settle = resolve));
-    wishes.set(url, [urgent, settle, done, el, stop]);
+    wishes.set(url, { urgent, settle, done, el, stop });
     pump();
     return done;
   };
@@ -287,48 +303,37 @@ export function createPrefetch(
   const forget = (el: Element | undefined, pointer = false): void => {
     const url = el instanceof HTMLAnchorElement ? bare(el.href) : "";
     const wish = wishes.get(url);
-    if (!wish || wish[5] || wish[3] !== el) return;
-    if (pointer && wish[4]) wish[0] = false;
+    if (!wish || wish.controller || wish.el !== el) return;
+    if (pointer && wish.stop) wish.urgent = false;
     else {
       wishes.delete(url);
-      wish[1]();
+      wish.settle();
     }
   };
 
   const claim = (url: string): Press | undefined => {
     const held = pressed;
-    if (held?.[0] !== url) return undefined;
+    if (held?.url !== url) return undefined;
     pressed = undefined;
-    clearTimeout(held[4]);
+    clearTimeout(held.timer);
     return held;
   };
 
-  const take = (
-    href: string,
-    held = claim(bare(href)),
+  const adopt = (
+    url: string,
+    held: Press | undefined,
   ): Prefetched | Promise<Prefetched | undefined> | undefined => {
-    const url = bare(href);
     const wish = wishes.get(url);
-    if (wish?.[5]) return wish[2].then(() => take(href, held));
+    if (wish?.controller) return wish.done.then(() => adopt(url, held));
     if (wish) {
       wishes.delete(url);
-      wish[1]();
+      wish.settle();
     }
     const key = keyOf(url);
-    const found = cache.get(key);
-    const known = host.partial._headers({}).get(HEADER_VERSION);
+    const kept = fresh(cache.get(key));
     cache.delete(key);
-    const kept =
-      found && found[0] > Date.now() && !(known && known !== found[1].version)
-        ? found
-        : undefined;
     if (!kept && !held) return undefined;
-    return {
-      raw: kept?.[1],
-      response: kept?.[2],
-      flight: held?.[2],
-      stop: held && (() => held[3].abort()),
-    };
+    return { raw: kept?.raw, response: kept?.response, flight: held?.flight };
   };
 
   const check = (el: Element | null): HTMLAnchorElement | undefined =>
@@ -395,8 +400,8 @@ export function createPrefetch(
       if (seen.has(el)) continue;
       seen.add(el);
       const mode = el.closest(`[${MODE}]`)?.getAttribute(MODE) ?? cfg().prefetch;
-      const link = check(el);
-      if (mode !== "viewport" || !link) continue;
+      const link = mode === "viewport" && check(el);
+      if (!link) continue;
       const stop = observer.observe(
         el,
         (visible) => {
@@ -419,7 +424,7 @@ export function createPrefetch(
     "pointerup",
     (event) => {
       const { clientX, clientY } = event;
-      if (!pressed?.[5].contains(doc.elementFromPoint(clientX, clientY))) release();
+      if (!pressed?.link.contains(doc.elementFromPoint(clientX, clientY))) release();
     },
     listening,
   );
@@ -439,11 +444,14 @@ export function createPrefetch(
   watch(doc);
 
   return {
-    take: (href) => take(href),
+    take: (href) => {
+      const url = bare(href);
+      return adopt(url, claim(url));
+    },
     prefetch: (href) => want(href, true),
     drop: () => {
       release(false);
-      for (const wish of wishes.values()) wish[5]?.abort();
+      for (const wish of wishes.values()) wish.controller?.abort();
       cache.clear();
     },
   };

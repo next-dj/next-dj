@@ -1,7 +1,4 @@
 import { createMore } from "../more";
+import { once } from "../protocol";
 
-const next = window.Next as typeof window.Next & { $more?: true };
-if (!next.$more) {
-  next.$more = true;
-  createMore(next);
-}
+once("more", () => createMore(window.Next));

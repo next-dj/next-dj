@@ -429,6 +429,11 @@ class TestActionAtomic:
         [
             (True, AtomicOverride(atomic=True)),
             (False, AtomicOverride(atomic=False)),
+            ("writes", AtomicOverride(atomic="writes")),
+            (
+                AtomicOverride(atomic="writes", aliases=["default"]),
+                AtomicOverride(atomic="writes", aliases=("default",)),
+            ),
             (
                 AtomicOverride(atomic=True, aliases=["default"]),
                 AtomicOverride(atomic=True, aliases=("default",)),
@@ -450,8 +455,8 @@ class TestActionAtomic:
     @pytest.mark.parametrize(
         ("value", "fragment"),
         [
-            ("yes", "atomic must be True, False, None or an AtomicOverride"),
-            (AtomicOverride(atomic=1), "atomic must be True or False"),
+            ("yes", "atomic must be True, False, 'writes', None or an AtomicOverride"),
+            (AtomicOverride(atomic=1), "atomic must be True, False or 'writes', got 1"),
             (AtomicOverride(atomic=True, aliases="default"), "aliases must be"),
         ],
     )
@@ -532,7 +537,9 @@ class TestActionInheritsMetaAtomic:
         action_decorator("misfit_atomic", form_class=_MisfitForm)(_atomic_handler)
         owner, problem = registration_diagnostics.invalid_atomic[-1]
         assert owner == "Meta.atomic of '_MisfitForm'"
-        assert "atomic must be True, False, None or an AtomicOverride" in problem
+        assert (
+            "atomic must be True, False, 'writes', None or an AtomicOverride" in problem
+        )
         meta = form_action_manager.default_backend.get_meta("misfit_atomic")
         assert meta is not None
         assert "atomic" not in meta

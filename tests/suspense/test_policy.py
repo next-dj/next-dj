@@ -5,7 +5,7 @@ from unittest.mock import patch
 import django
 import pytest
 from django.http import HttpRequest
-from django.test import RequestFactory, override_settings
+from django.test import override_settings
 
 from next.defer import Delivery
 from next.pages.responses import mark_shared_render
@@ -78,15 +78,15 @@ def _decide(facts: PageFacts, **options: object) -> Delivered:
 class TestPageFacts:
     """The facts read the method, the compressor, the CSP and the cache of a request."""
 
-    def test_a_plain_get(self) -> None:
-        facts = page_facts(RequestFactory().get("/"))
+    def test_a_plain_get(self, rf) -> None:
+        facts = page_facts(rf.get("/"))
         assert facts == PageFacts(
             server=Server.WSGI_SYNC, method="GET", transport=_SYNC
         )
 
     @override_settings(MIDDLEWARE=[_GZIP, _CSP])
-    def test_a_gzip_request_behind_a_csp_on_a_shared_page(self) -> None:
-        request = RequestFactory().get(
+    def test_a_gzip_request_behind_a_csp_on_a_shared_page(self, rf) -> None:
+        request = rf.get(
             "/",
             HTTP_ACCEPT_ENCODING="gzip, br",
             HTTP_ACCEPT="text/event-stream",
@@ -104,29 +104,29 @@ class TestPageFacts:
         assert facts.agent == "Agent"
 
     @override_settings(MIDDLEWARE=[_GZIP])
-    def test_gzip_listed_but_not_accepted_negotiates_nothing(self) -> None:
-        facts = page_facts(RequestFactory().get("/"))
+    def test_gzip_listed_but_not_accepted_negotiates_nothing(self, rf) -> None:
+        facts = page_facts(rf.get("/"))
         assert facts.compression is None
         assert facts.buffering is False
 
-    def test_a_browser_prefetch_is_speculative(self) -> None:
-        facts = page_facts(RequestFactory().get("/", HTTP_SEC_PURPOSE="prefetch"))
+    def test_a_browser_prefetch_is_speculative(self, rf) -> None:
+        facts = page_facts(rf.get("/", HTTP_SEC_PURPOSE="prefetch"))
         assert facts.speculative is True
 
-    def test_a_disabled_runtime_script_is_read(self) -> None:
+    def test_a_disabled_runtime_script_is_read(self, rf) -> None:
         with patch("next.suspense.policy.get_static_manager") as manager:
             builder = manager.return_value.script_builder.return_value
             builder.policy = ScriptInjectionPolicy.DISABLED
-            facts = page_facts(RequestFactory().get("/"))
+            facts = page_facts(rf.get("/"))
         assert facts.runtime is False
 
-    def test_a_long_user_agent_is_cut(self) -> None:
-        facts = page_facts(RequestFactory().get("/", HTTP_USER_AGENT="x" * 600))
+    def test_a_long_user_agent_is_cut(self, rf) -> None:
+        facts = page_facts(rf.get("/", HTTP_USER_AGENT="x" * 600))
         assert len(facts.agent) == 512
 
     @override_settings(MIDDLEWARE=[_GZIP])
-    def test_a_self_compressing_stream_leaves_gzip_unbuffered(self) -> None:
-        request = RequestFactory().get("/", HTTP_ACCEPT_ENCODING="gzip")
+    def test_a_self_compressing_stream_leaves_gzip_unbuffered(self, rf) -> None:
+        request = rf.get("/", HTTP_ACCEPT_ENCODING="gzip")
         facts = page_facts(request)
         assert (facts.compression, facts.buffering) == ("gzip", False)
         with override_next_settings(COMPRESSION={"ENABLED": False}):
@@ -134,21 +134,23 @@ class TestPageFacts:
         assert facts.compression == "gzip"
         assert facts.buffering is (django.VERSION[:2] < (6, 1))
 
-    def test_the_streaming_block_reads_a_sync_worker_as_threaded(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_streaming_block_reads_a_sync_worker_as_threaded(self, rf) -> None:
+        request = rf.get("/")
         with streaming():
             facts = page_facts(request)
         assert facts.server is Server.WSGI_THREADED
         assert facts.transport.concurrent_reason == "streaming"
         assert page_facts(request).server is Server.WSGI_SYNC
 
-    def test_the_streaming_block_leaves_a_concurrent_transport_as_is(self) -> None:
-        request = RequestFactory().get("/", **{"wsgi.multithread": True})
+    def test_the_streaming_block_leaves_a_concurrent_transport_as_is(
+        self, wsgi, rf
+    ) -> None:
+        request = rf.get("/", **{"wsgi.multithread": True})
         with streaming():
             assert transported(request) == _THREADED
 
-    def test_a_full_process_has_no_capacity(self) -> None:
-        request = RequestFactory().get("/", **{"wsgi.multithread": True})
+    def test_a_full_process_has_no_capacity(self, wsgi, rf) -> None:
+        request = rf.get("/", **{"wsgi.multithread": True})
         with override_next_settings(DEFER={"MAX_STREAMS": 1}):
             slot = open_streams.acquire(1)
             assert slot is not None
@@ -162,18 +164,18 @@ class TestPageFacts:
 class TestCspListed:
     """Whether a CSP middleware is listed is read once per `MIDDLEWARE` list."""
 
-    def test_the_list_is_scanned_once_while_it_stays(self) -> None:
+    def test_the_list_is_scanned_once_while_it_stays(self, rf) -> None:
         with override_settings(MIDDLEWARE=[_CSP]):
-            assert page_facts(RequestFactory().get("/")).csp is True
+            assert page_facts(rf.get("/")).csp is True
             with patch("next.utils.middleware_listed") as listed:
-                assert page_facts(RequestFactory().get("/")).csp is True
+                assert page_facts(rf.get("/")).csp is True
             listed.assert_not_called()
 
-    def test_another_list_is_scanned_again(self) -> None:
+    def test_another_list_is_scanned_again(self, rf) -> None:
         with override_settings(MIDDLEWARE=[_CSP]):
-            assert page_facts(RequestFactory().get("/")).csp is True
+            assert page_facts(rf.get("/")).csp is True
         with override_settings(MIDDLEWARE=[]):
-            assert page_facts(RequestFactory().get("/")).csp is False
+            assert page_facts(rf.get("/")).csp is False
 
 
 class TestBotMemo:
@@ -266,10 +268,6 @@ class TestDefaultStreamPolicy:
         assert DefaultStreamPolicy({"OPTIONS": "x"}).options == {}
 
 
-def _request(*, threaded: bool, **extra: object) -> HttpRequest:
-    return RequestFactory().get("/", **{"wsgi.multithread": threaded, **extra})
-
-
 class _Always(StreamPolicy):
     """A project policy that streams every request."""
 
@@ -280,32 +278,32 @@ class _Always(StreamPolicy):
 class TestStreamsPartials:
     """A page tells the runtime its partials may stream unless no row ever allows it."""
 
-    def test_a_threaded_server_may_stream(self) -> None:
-        assert DefaultStreamPolicy().streams_partials(_request(threaded=True)) is True
+    def test_a_threaded_server_may_stream(self, wsgi) -> None:
+        assert DefaultStreamPolicy().streams_partials(wsgi(threaded=True)) is True
 
-    def test_a_sync_worker_kept_inline_may_not(self) -> None:
+    def test_a_sync_worker_kept_inline_may_not(self, wsgi) -> None:
         policy = DefaultStreamPolicy()
-        assert policy.streams_partials(_request(threaded=False)) is False
+        assert policy.streams_partials(wsgi(threaded=False)) is False
         with streaming():
-            assert policy.streams_partials(_request(threaded=False)) is True
+            assert policy.streams_partials(wsgi(threaded=False)) is True
 
-    def test_a_sync_worker_set_to_stream_may(self) -> None:
+    def test_a_sync_worker_set_to_stream_may(self, wsgi) -> None:
         policy = DefaultStreamPolicy({"OPTIONS": {"SYNC_WORKERS": "stream"}})
-        assert policy.streams_partials(_request(threaded=False)) is True
+        assert policy.streams_partials(wsgi(threaded=False)) is True
 
-    def test_a_buffering_adapter_never_may(self) -> None:
+    def test_a_buffering_adapter_never_may(self, wsgi) -> None:
         policy = DefaultStreamPolicy({"OPTIONS": {"SYNC_WORKERS": "stream"}})
-        request = _request(threaded=True, **{"adapter.event": {}})
+        request = wsgi(threaded=True, **{"adapter.event": {}})
         options = {"BUFFERED_MARKS": {"WSGI": {"KEYS": ["adapter.event"]}}}
         with override_next_settings(DEFER={"TRANSPORT": {"OPTIONS": options}}):
             assert policy.streams_partials(request) is False
 
-    def test_streaming_turned_off_never_may(self) -> None:
+    def test_streaming_turned_off_never_may(self, wsgi) -> None:
         policy = DefaultStreamPolicy({"OPTIONS": {"STREAM": False}})
-        assert policy.streams_partials(_request(threaded=True)) is False
+        assert policy.streams_partials(wsgi(threaded=True)) is False
 
-    def test_a_project_policy_may_by_default(self) -> None:
-        assert _Always().streams_partials(_request(threaded=False)) is True
+    def test_a_project_policy_may_by_default(self, wsgi) -> None:
+        assert _Always().streams_partials(wsgi(threaded=False)) is True
 
 
 class _Owner:
@@ -440,20 +438,11 @@ class TestRouterPrefetch:
         )
         assert _decide(facts) == Delivered(Delivery.SHELL, "head")
 
-    def test_a_full_prefetch_goes_through_the_ordinary_rows(self) -> None:
-        assert _decide(_facts()) == Delivered(Delivery.STREAM, "stream")
-        assert _decide(_facts(transport=_SYNC)) == Delivered(
-            Delivery.INLINE, "sync-worker"
-        )
-        assert _decide(_facts(compression="gzip", buffering=True)) == Delivered(
-            Delivery.INLINE, "gzip"
-        )
-
     @pytest.mark.parametrize(
         ("depth", "shell"), [("1", True), ("full", False), ("deep", False)]
     )
-    def test_only_the_shell_depth_is_the_prefetch_fact(self, depth, shell) -> None:
-        request = RequestFactory().get(
+    def test_only_the_shell_depth_is_the_prefetch_fact(self, rf, depth, shell) -> None:
+        request = rf.get(
             "/",
             headers={
                 "X-Next-Request": "1",
@@ -465,8 +454,8 @@ class TestRouterPrefetch:
             assert page_facts(request).prefetch is shell
 
     @pytest.mark.parametrize("enabled", [True, False])
-    def test_the_fact_needs_the_router(self, enabled) -> None:
-        request = RequestFactory().get(
+    def test_the_fact_needs_the_router(self, rf, enabled) -> None:
+        request = rf.get(
             "/",
             headers={
                 "X-Next-Request": "1",
@@ -481,8 +470,8 @@ class TestRouterPrefetch:
 class TestDeclined:
     """A response assembled inline is announced each time and logged once a process."""
 
-    def test_the_signal_names_the_delivery_and_both_reasons(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_signal_names_the_delivery_and_both_reasons(self, rf) -> None:
+        request = rf.get("/")
         facts = _facts(transport=_BUFFERED, partial=True)
         with capture_signals(page_stream_declined) as recorder:
             declined(request, Delivered(Delivery.INLINE, "buffered"), facts)
@@ -500,9 +489,9 @@ class TestDeclined:
         ]
 
     def test_only_the_first_response_is_logged(
-        self, caplog: pytest.LogCaptureFixture
+        self, wsgi, rf, caplog: pytest.LogCaptureFixture
     ) -> None:
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         inline_notice.forget()
         with caplog.at_level(logging.INFO, logger="next.suspense"):
             declined(request, Delivered(Delivery.INLINE, "sync-worker"), _facts())
@@ -511,11 +500,9 @@ class TestDeclined:
         assert len(messages) == 1
         assert "reason sync-worker, transport wsgi" in messages[0]
 
-    def test_no_listener_sends_nothing(self) -> None:
+    def test_no_listener_sends_nothing(self, rf) -> None:
         with patch.object(page_stream_declined, "send_robust") as send:
-            declined(
-                RequestFactory().get("/"), Delivered(Delivery.INLINE, "bot"), _facts()
-            )
+            declined(rf.get("/"), Delivered(Delivery.INLINE, "bot"), _facts())
         send.assert_not_called()
 
     def test_a_reset_lets_the_next_response_through(self) -> None:

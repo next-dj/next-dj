@@ -1,14 +1,12 @@
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
 
 import pytest
+from asgiref.current_thread_executor import CurrentThreadExecutor
 
-from next.tasks import StealableTask
-
-
-class HaltError(BaseException):
-    """An interrupt-like failure that is not an `Exception`."""
+from next.tasks import QuitParentExecutor, StealableTask
+from tests.support.errors import HaltError
 
 
 def _fail() -> None:
@@ -110,3 +108,17 @@ class TestStealableTask:
         error = task.future.exception(0)
         assert isinstance(error, RuntimeError)
         assert isinstance(error.__cause__, HaltError)
+
+
+class TestQuitParentExecutor:
+    """asgiref walks past it as a parent executor that already quit."""
+
+    def test_a_broken_child_finds_no_live_parent(self) -> None:
+        done: Future[None] = Future()
+        done.set_result(None)
+        child = CurrentThreadExecutor(QuitParentExecutor())
+        child.run_until_future(done)
+        with ThreadPoolExecutor(1) as pool:
+            submitted = pool.submit(child.submit, print)
+            with pytest.raises(RuntimeError, match="already quit"):
+                submitted.result()

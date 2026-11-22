@@ -31,7 +31,7 @@ A request to a page URL is routed once, then answered inside the transaction the
    :header-rows: 1
    :widths: 16 84
 
-   * - Route
+   * - Kind
      - Answer
    * - ``PAGE``
      - The page access check, then the response policy, the render, and a whole response or a stream, see :doc:`/content/topics/boundaries/streaming`.
@@ -48,9 +48,9 @@ A partial request carries ``X-Next-Request: 1``, a header no cross-site form can
 ``boundary_token`` reads the token through the configured transport once and drops the token field from the query string and a form body, so nothing the page renders echoes it.
 ``note_purpose`` sets ``request.next``, whose ``purpose`` names why the view renders, ``document``, ``navigation``, ``prefetch``, or ``speculation`` for a browser prefetch.
 Its ``depth`` is ``Depth.SHELL`` for a router prefetch that asks for the shell, ``Depth.FULL`` for one sent at the press of a link, and ``None`` for any other request.
-``purpose_of(request)`` and ``depth_of(request)`` from ``next.pages.responses`` read them, and a prefetch answer may be shown with no further request, so code that must act on a visit declares ``page.router(prefetch=False)``.
+``purpose_of(request)`` and ``depth_of(request)`` from ``next.pages.responses`` read them, and :ref:`topics-router-prefetch-visits` says why ``depth`` is no visit counter.
 
-.. autoclass:: next.views.Route
+.. autoclass:: next.views.RouteKind
    :no-special-members:
 
 .. autofunction:: next.views.routes.decide_route
@@ -115,7 +115,7 @@ A streamed page writes its chunks after that, so its deferred jobs run outside t
 Checks
 ------
 
-``next.views.checks`` validates the ``TRANSACTIONS`` scope, reports a ``page.atomic()``, an ``@action(atomic=...)``, or a ``Meta.atomic`` that declares nothing as ``next.E240``, and warns about ``ATOMIC_REQUESTS`` as ``next.W154``, see :doc:`system-checks`.
+The ``TRANSACTIONS`` scope, ``page.atomic()``, and ``ATOMIC_REQUESTS`` are checked in ``next.transactions.checks``, see :doc:`system-checks`.
 
 See also
 --------

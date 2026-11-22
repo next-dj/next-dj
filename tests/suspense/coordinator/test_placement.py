@@ -1,23 +1,16 @@
 import sys
 import threading
+from functools import partial
 
 import pytest
 
-from next.defer import BoundaryOptions, DeferMode, ErrorKind
-from next.suspense import (
-    Addressing,
-    ForegroundFacts,
-    Job,
-    Placement,
-    Rendered,
-    Rule,
-    Server,
-    Site,
-    Verdict,
-)
+from next.defer import DeferMode
+from next.suspense import Placement, Rule, Server, Verdict
 from next.suspense.coordinator import COSTS, Cost, CostTable, Thresholds, place
 from next.suspense.coordinator.placement import BAND, WEIGHT, gil_enabled
+from next.suspense.markers import Addressing, ForegroundFacts, Site
 from next.testing import override_next_settings
+from tests.support.jobs import plain_job
 
 
 SITE = Site(Addressing.COMPONENT, "card", DeferMode.STREAM, "shop/list.djx", 2)
@@ -27,24 +20,7 @@ ADAPTIVE = Thresholds("adaptive", 300_000, 0.8, 2_000_000, 3)
 FACTS = ForegroundFacts(Server.WSGI_THREADED)
 
 
-def _fallback(kind: ErrorKind) -> Rendered[str]:
-    return Rendered("", "", kind=kind)
-
-
-def _render() -> Rendered[str]:
-    return Rendered("<p>ready</p>", "")
-
-
-def _job(*, parallel: bool | None = None) -> Job[str]:
-    return Job(
-        "b-00000000-0",
-        "k",
-        SITE,
-        BoundaryOptions(parallel=parallel),
-        10.0,
-        _fallback,
-        run=_render,
-    )
+_job = partial(plain_job, site=SITE, key="k")
 
 
 def _table(wall: int, cpu: int, runs: int) -> CostTable:

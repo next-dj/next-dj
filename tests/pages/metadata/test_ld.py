@@ -96,7 +96,7 @@ class TestNode:
 
     def test_a_node_takes_keywords_only(self) -> None:
         build: type = ld.ListItem
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="positional argument"):
             build("Home", 1)
 
     def test_a_bare_node_is_a_thing(self) -> None:

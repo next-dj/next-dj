@@ -7,13 +7,11 @@ from django.template import Context
 from django.test import RequestFactory, override_settings
 
 from next.defer import (
-    Addressing,
-    BoundaryError,
+    BoundaryFailure,
     BoundaryOptions,
     DeferMode,
     DeferredCall,
     ErrorKind,
-    Site,
 )
 from next.pages.responses import personal_render
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY
@@ -28,10 +26,8 @@ from next.suspense.components import (
     current_deferring,
     deferring,
 )
-from next.suspense.markers import Caps
-from next.suspense.render import Delta, Frame, _frame
-from next.suspense.session import BoundarySession
 from next.testing import override_next_settings
+from tests.support.boundaries import make_call, make_site, open_session
 
 
 def _call(name: str = "card") -> DeferredCall:
@@ -40,14 +36,7 @@ def _call(name: str = "card") -> DeferredCall:
         body=lambda _context: ("B", None),
         error=Mock(),
     )
-    return DeferredCall(
-        Site(Addressing.COMPONENT, name, DeferMode.STREAM, "page.html"),
-        BoundaryOptions(),
-        "k",
-        "div",
-        None,
-        renderer,
-    )
+    return make_call("div", site=make_site(name), renderer=renderer)
 
 
 class TestCapture:
@@ -147,49 +136,55 @@ class TestSink:
         assert held.session is not None
         assert html.startswith(f'<div id="b-{held.session.seal}-0"')
 
-    def test_inside_a_job_the_call_nests(self) -> None:
-        session = BoundarySession[Delta].open(Caps.from_settings())
-        frame = Frame(session, "b-x-0", 0)
-        token = _frame.set(frame)
-        try:
-            html = ComponentDeferrals().queue(Context(), _call())
-        finally:
-            _frame.reset(token)
+    def test_inside_a_job_the_call_nests(self, in_job) -> None:
+        session = open_session()
+        frame = in_job(session)
+        html = ComponentDeferrals().queue(Context(), _call())
         [job] = frame.nested
         assert (job.parent, job.depth) == ("b-x-0", 1)
         assert session.jobs == ()
         assert html.startswith(f"<!--{job.id}:div-->")
 
-    def test_past_the_depth_outside_debug_the_call_renders_quietly(self) -> None:
-        session = BoundarySession[Delta].open(Caps.from_settings())
-        frame = Frame(session, "b-x-0", session.caps.depth - 1)
-        token = _frame.set(frame)
-        try:
-            with override_settings(DEBUG=False):
-                html = ComponentDeferrals().queue(Context(), _call("quiet"))
-        finally:
-            _frame.reset(token)
+    def test_past_the_depth_outside_debug_the_call_renders_quietly(
+        self, in_job
+    ) -> None:
+        session = open_session()
+        frame = in_job(session, depth=session.caps.depth - 1)
+        with override_settings(DEBUG=False):
+            html = ComponentDeferrals().queue(Context(), _call("quiet"))
         assert frame.nested == []
         assert html.startswith(f'<div id="b-{session.seal}-0"')
+
+    def test_past_the_depth_under_debug_the_skip_is_logged_once_per_site(
+        self, in_job, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(components_module, "_skipped", set())
+        session = open_session()
+        in_job(session, depth=session.caps.depth - 1)
+        with (
+            override_settings(DEBUG=True),
+            caplog.at_level("DEBUG", logger="next.suspense"),
+        ):
+            ComponentDeferrals().queue(Context(), _call("deep"))
+            ComponentDeferrals().queue(Context(), _call("deep"))
+        assert caplog.text.count("its loading UI is skipped") == 1
 
 
 _TRIP = SimpleNamespace(mode=DeferMode.LOAD)
 
 
 def _trip_call() -> DeferredCall:
-    failure = BoundaryError(ErrorKind.TIMEOUT, "d", None, retry=False)
+    failure = BoundaryFailure(ErrorKind.TIMEOUT, "d", None, retry=False)
     renderer = SimpleNamespace(
         loading=lambda _context: ("L", None),
         body=lambda _context: ("B", None),
         error=Mock(return_value=("E", failure)),
     )
-    return DeferredCall(
-        Site(Addressing.COMPONENT, "card", DeferMode.LOAD, "page.html"),
-        BoundaryOptions(mode=DeferMode.LOAD),
-        "k",
+    return make_call(
         "div",
-        None,
-        renderer,
+        site=make_site(mode=DeferMode.LOAD),
+        options=BoundaryOptions(mode=DeferMode.LOAD),
+        renderer=renderer,
     )
 
 
@@ -205,17 +200,19 @@ def minted(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return tokens
 
 
-def _context() -> Context:
-    return Context({REQUEST_KEY: RequestFactory().get("/")})
+@pytest.fixture()
+def context(rf: RequestFactory) -> Context:
+    """Return a template context carrying a plain GET request."""
+    return Context({REQUEST_KEY: rf.get("/")})
 
 
 class TestTripCap:
     """Client-trip wrappers count against `MAX_INSTANCES` of their response."""
 
     def test_a_wrapper_past_the_cap_settles_as_a_timeout_without_a_token(
-        self, minted: list[object]
+        self, context, minted: list[object]
     ) -> None:
-        context, first, second = _context(), _trip_call(), _trip_call()
+        first, second = _trip_call(), _trip_call()
         with override_next_settings(DEFER={"MAX_INSTANCES": 1}), deferring():
             idle = ComponentDeferrals().trip(context, first, _TRIP)
             capped = ComponentDeferrals().trip(context, second, _TRIP)
@@ -226,8 +223,9 @@ class TestTripCap:
         second.renderer.error.assert_called_once_with(context, ErrorKind.TIMEOUT)
         assert len(minted) == 1
 
-    def test_queued_stream_jobs_share_the_cap(self, minted: list[object]) -> None:
-        context = _context()
+    def test_queued_stream_jobs_share_the_cap(
+        self, context, minted: list[object]
+    ) -> None:
         with override_next_settings(DEFER={"MAX_INSTANCES": 1}), deferring():
             ComponentDeferrals().queue(context, _call())
             capped = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
@@ -235,9 +233,8 @@ class TestTripCap:
         assert minted == []
 
     def test_a_stream_job_queued_after_a_wrapper_counts_it(
-        self, minted: list[object]
+        self, context, minted: list[object]
     ) -> None:
-        context = _context()
         with override_next_settings(DEFER={"MAX_INSTANCES": 1}), deferring() as held:
             idle = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
             ComponentDeferrals().queue(context, _call())
@@ -248,25 +245,55 @@ class TestTripCap:
         assert len(session.plan().expired) == 1
 
     def test_a_wrapper_inside_a_job_counts_its_session(
-        self, minted: list[object]
+        self, context, in_job, minted: list[object]
     ) -> None:
-        session = BoundarySession[Delta].open(Caps.from_settings())
-        token = _frame.set(Frame(session, "b-x-0", 0))
-        try:
-            html = ComponentDeferrals().trip(_context(), _trip_call(), _TRIP)
-        finally:
-            _frame.reset(token)
+        session = open_session()
+        in_job(session)
+        html = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
         assert 'data-next-token="t"' in html
 
     def test_a_wrapper_outside_a_block_is_counted_on_its_request(
-        self, minted: list[object]
+        self, context, minted: list[object]
     ) -> None:
-        context = _context()
         with override_next_settings(DEFER={"MAX_INSTANCES": 1}):
             idle = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
             capped = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
         assert 'data-next-token="t"' in idle
         assert "data-next-token" not in capped
+
+    def test_a_render_without_a_request_is_never_capped(
+        self, minted: list[object]
+    ) -> None:
+        with override_next_settings(DEFER={"MAX_INSTANCES": 0}), deferring():
+            html = ComponentDeferrals().trip(Context(), _trip_call(), _TRIP)
+        assert 'data-next-state="error"' not in html
+
+    def test_the_request_of_the_block_counts_when_the_context_has_none(
+        self, rf, minted: list[object]
+    ) -> None:
+        request = rf.get("/")
+        with (
+            override_next_settings(DEFER={"MAX_INSTANCES": 1}),
+            deferring(request=request) as held,
+        ):
+            ComponentDeferrals().trip(Context(), _trip_call(), _TRIP)
+            capped = ComponentDeferrals().trip(Context(), _trip_call(), _TRIP)
+            session = held.session
+        assert session is not None
+        assert "data-next-token" not in capped
+
+
+class TestRetry:
+    """A plain call that failed retries with the token its trip input mints."""
+
+    def test_the_retry_attributes_come_from_the_trip(
+        self, rf, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        minting = Mock(return_value=' data-next-token="t"')
+        monkeypatch.setattr(components_module, "retry_attributes", minting)
+        request = rf.get("/")
+        assert ComponentDeferrals().retry(request, _TRIP) == ' data-next-token="t"'
+        minting.assert_called_once_with(request, _TRIP)
 
 
 def _adopting_call(loading: str) -> DeferredCall:
@@ -274,26 +301,22 @@ def _adopting_call(loading: str) -> DeferredCall:
         loading=lambda _context: (loading, None),
         body=lambda _context: ("<p>B</p>", None),
     )
-    return DeferredCall(
-        Site(Addressing.COMPONENT, "card", DeferMode.VISIBLE, "page.html"),
-        BoundaryOptions(mode=DeferMode.VISIBLE),
-        "k",
+    return make_call(
         None,
-        None,
-        renderer,
+        site=make_site(mode=DeferMode.VISIBLE),
+        options=BoundaryOptions(mode=DeferMode.VISIBLE),
+        renderer=renderer,
     )
 
 
 def _refusing_call() -> DeferredCall:
-    failure = BoundaryError(ErrorKind.ERROR, "d", None, retry=False)
+    failure = BoundaryFailure(ErrorKind.ERROR, "d", None, retry=False)
     renderer = SimpleNamespace(loading=lambda _context: ("L", failure))
-    return DeferredCall(
-        Site(Addressing.COMPONENT, "card", DeferMode.LOAD, "page.html"),
-        BoundaryOptions(mode=DeferMode.LOAD),
-        "k",
+    return make_call(
         "div",
-        None,
-        renderer,
+        site=make_site(mode=DeferMode.LOAD),
+        options=BoundaryOptions(mode=DeferMode.LOAD),
+        renderer=renderer,
     )
 
 
@@ -307,21 +330,23 @@ class TestNoScript:
     """An idle wrapper links a reader without scripts to the page with it in place."""
 
     def test_a_wrapper_holds_the_link_after_its_loading_ui(
-        self, minted: list[object]
+        self, rf, minted: list[object]
     ) -> None:
-        context = Context({REQUEST_KEY: RequestFactory().get("/?q=a")})
+        context = Context({REQUEST_KEY: rf.get("/?q=a")})
         html = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
         assert html.endswith(f">L{NOSCRIPT_LINK}</div>")
 
     def test_an_adopting_wrapper_is_followed_by_the_link(
-        self, minted: list[object]
+        self, rf, minted: list[object]
     ) -> None:
-        context = Context({REQUEST_KEY: RequestFactory().get("/?q=a")})
+        context = Context({REQUEST_KEY: rf.get("/?q=a")})
         html = ComponentDeferrals().trip(context, _adopting_call("<p>L</p>"), _TRIP)
         assert html.endswith(f">L</p>{NOSCRIPT_LINK}")
 
-    def test_the_link_is_built_once_per_document(self, minted: list[object]) -> None:
-        request = RequestFactory().get("/?q=a")
+    def test_the_link_is_built_once_per_document(
+        self, rf, minted: list[object]
+    ) -> None:
+        request = rf.get("/?q=a")
         context = Context({REQUEST_KEY: request})
         first = ComponentDeferrals().trip(context, _trip_call(), _TRIP)
         request.GET = request.GET.copy()
@@ -330,22 +355,24 @@ class TestNoScript:
         assert NOSCRIPT_LINK in first
         assert NOSCRIPT_LINK in second
 
-    def test_a_partial_response_carries_no_link(self, minted: list[object]) -> None:
-        request = RequestFactory().get("/?q=a", headers={"X-Next-Request": "1"})
+    def test_a_partial_response_carries_no_link(self, rf, minted: list[object]) -> None:
+        request = rf.get("/?q=a", headers={"X-Next-Request": "1"})
         html = ComponentDeferrals().trip(
             Context({REQUEST_KEY: request}), _trip_call(), _TRIP
         )
         assert "noscript" not in html
         assert 'data-next-token="t"' in html
 
-    def test_a_refused_loading_ui_carries_no_link(self, minted: list[object]) -> None:
-        html = ComponentDeferrals().trip(_context(), _refusing_call(), _TRIP)
+    def test_a_refused_loading_ui_carries_no_link(
+        self, context, minted: list[object]
+    ) -> None:
+        html = ComponentDeferrals().trip(context, _refusing_call(), _TRIP)
         assert "noscript" not in html
 
     def test_the_flagged_page_renders_the_call_in_place_privately(
-        self, minted: list[object]
+        self, rf, minted: list[object]
     ) -> None:
-        request = RequestFactory().get(f"/?q=a&{NOSCRIPT_PARAM}=1")
+        request = rf.get(f"/?q=a&{NOSCRIPT_PARAM}=1")
         context = Context({REQUEST_KEY: request})
         html = ComponentDeferrals().trip(context, _adopting_call("<p>L</p>"), _TRIP)
         assert 'data-next-state="ready"' in html
@@ -355,8 +382,8 @@ class TestNoScript:
         assert minted == []
         assert personal_render(request) is True
 
-    def test_another_flag_value_keeps_the_trip(self, minted: list[object]) -> None:
-        request = RequestFactory().get(f"/?{NOSCRIPT_PARAM}=yes")
+    def test_another_flag_value_keeps_the_trip(self, rf, minted: list[object]) -> None:
+        request = rf.get(f"/?{NOSCRIPT_PARAM}=yes")
         html = ComponentDeferrals().trip(
             Context({REQUEST_KEY: request}), _trip_call(), _TRIP
         )
@@ -367,45 +394,47 @@ class TestNoScript:
 DEFER_URL = "/static/next/next.defer.min.js"
 
 
-def _collected() -> tuple[Context, StaticCollector]:
+@pytest.fixture()
+def collected(rf: RequestFactory) -> tuple[Context, StaticCollector]:
+    """Return a context and the collector it carries, over a plain GET request."""
     collector = StaticCollector(
         bundle_url=lambda name: f"/static/next/next.{name}.min.js"
     )
-    context = Context(
-        {REQUEST_KEY: RequestFactory().get("/"), COLLECTOR_KEY: collector}
-    )
+    context = Context({REQUEST_KEY: rf.get("/"), COLLECTOR_KEY: collector})
     return context, collector
 
 
 def _failing_call(markup: str) -> DeferredCall:
-    failure = BoundaryError(ErrorKind.ERROR, "d", None, retry=True)
+    failure = BoundaryFailure(ErrorKind.ERROR, "d", None, retry=True)
     renderer = SimpleNamespace(
         loading=lambda _context: ("L", None),
         body=lambda _context: (markup, failure),
         error=Mock(return_value=(markup, failure)),
     )
-    return DeferredCall(
-        Site(Addressing.COMPONENT, "card", DeferMode.LOAD, "page.html"),
-        BoundaryOptions(mode=DeferMode.LOAD),
-        "k",
+    return make_call(
         "div",
-        None,
-        renderer,
+        site=make_site(mode=DeferMode.LOAD),
+        options=BoundaryOptions(mode=DeferMode.LOAD),
+        renderer=renderer,
     )
 
 
 class TestDeferBundleNeeds:
     """A wrapper the `defer` bundle drives records the need on the page collector."""
 
-    def test_a_load_wrapper_needs_it_urgently(self, minted: list[object]) -> None:
-        context, collector = _collected()
+    def test_a_load_wrapper_needs_it_urgently(
+        self, collected, minted: list[object]
+    ) -> None:
+        context, collector = collected
         with deferring():
             ComponentDeferrals().trip(context, _trip_call(), _TRIP)
         assert collector.notes(BUNDLE_NOTE) == [DEFER_URL]
         assert collector.notes(URGENT_NOTE) == [True]
 
-    def test_a_visible_wrapper_needs_it_lazily(self, minted: list[object]) -> None:
-        context, collector = _collected()
+    def test_a_visible_wrapper_needs_it_lazily(
+        self, collected, minted: list[object]
+    ) -> None:
+        context, collector = collected
         trip = SimpleNamespace(mode=DeferMode.VISIBLE)
         with deferring():
             ComponentDeferrals().trip(context, _trip_call(), trip)
@@ -413,35 +442,35 @@ class TestDeferBundleNeeds:
         assert collector.notes(URGENT_NOTE) == ()
 
     def test_a_capped_wrapper_offering_a_retry_needs_it(
-        self, minted: list[object], monkeypatch: pytest.MonkeyPatch
+        self, collected, minted: list[object], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(components_module, "_admitted", lambda _request: False)
-        context, collector = _collected()
+        monkeypatch.setattr(components_module, "_take_instance", lambda _request: False)
+        context, collector = collected
         retrying = _failing_call("<b data-next-retry>again</b>")
         ComponentDeferrals().trip(context, retrying, _TRIP)
         assert collector.notes(BUNDLE_NOTE) == [DEFER_URL]
         assert minted == []
 
     def test_a_capped_wrapper_without_a_retry_needs_nothing(
-        self, minted: list[object], monkeypatch: pytest.MonkeyPatch
+        self, collected, minted: list[object], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(components_module, "_admitted", lambda _request: False)
-        context, collector = _collected()
+        monkeypatch.setattr(components_module, "_take_instance", lambda _request: False)
+        context, collector = collected
         ComponentDeferrals().trip(context, _trip_call(), _TRIP)
         assert collector.notes(BUNDLE_NOTE) == ()
 
     def test_an_inline_failure_retried_by_token_needs_it(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, collected, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
             components_module, "retry_token", lambda *_args: ' data-next-token="t"'
         )
-        context, collector = _collected()
+        context, collector = collected
         html = ComponentDeferrals().inline(context, _failing_call("<b>x</b>"))
         assert 'data-next-token="t"' in html
         assert collector.notes(BUNDLE_NOTE) == [DEFER_URL]
 
-    def test_an_inline_success_needs_nothing(self) -> None:
-        context, collector = _collected()
+    def test_an_inline_success_needs_nothing(self, collected) -> None:
+        context, collector = collected
         ComponentDeferrals().inline(context, _call())
         assert collector.notes(BUNDLE_NOTE) == ()

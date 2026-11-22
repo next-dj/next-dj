@@ -45,7 +45,7 @@ def _signal_names(module: ModuleType) -> list[str]:
     ]
 
 
-_AREA_MODULES = {**_area_signal_modules(), **_flat_signal_modules()}
+_AREA_MODULES = _area_signal_modules()
 
 _AREA_SIGNALS = [
     pytest.param(name, module_name, id=f"{module_name}.{name}")
@@ -60,8 +60,8 @@ class TestAggregateSignalsModule:
     def test_area_signal_modules_are_discovered(self) -> None:
         assert {"next.forms.signals", "next.partial.signals"} <= set(_AREA_MODULES)
 
-    def test_a_flat_module_that_exports_a_signal_is_discovered(self) -> None:
-        assert _signal_names(_AREA_MODULES["next.boundaries"]) == ["boundary_failed"]
+    def test_no_flat_module_owns_a_signal(self) -> None:
+        assert _flat_signal_modules() == {}
 
     @pytest.mark.parametrize(("name", "module_name"), _AREA_SIGNALS)
     def test_area_signal_is_reexported(self, name: str, module_name: str) -> None:

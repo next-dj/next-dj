@@ -3,10 +3,9 @@
 Every 403 it answers carries `X-Next-Reload: refused`, so the browser reloads the page.
 """
 
-import re
 import weakref
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any, Final, Protocol
@@ -20,7 +19,7 @@ from next.boundaries import kind_of, render_boundaries, wrapping
 from next.caches import PageCache
 from next.components import collect_visible_components
 from next.components.context import component
-from next.components.deferral import defer_declarations
+from next.components.defer import defer_declarations
 from next.components.info import ComponentInfo
 from next.components.manager import components_manager
 from next.components.trip import (
@@ -31,16 +30,15 @@ from next.components.trip import (
     prop_types,
     token_overrides,
 )
-from next.defer import BoundaryError, CallRenderer, DeferMode
+from next.defer import BoundaryFailure, CallRenderer, DeferMode
+from next.deps.scope import bridged_scope
 from next.diagnostics import Capture
 from next.pages.gating import guard_steps
 from next.pages.graph import ContextGraph, Phase, arun_phase, run_phase
 from next.pages.guards import GUARD_RAISES
 from next.pages.loaders import page_tree_depth
 from next.pages.manager import page
-from next.pages.processors import context_processors
 from next.pages.responses import never_store
-from next.pages.scope import render_scope
 from next.partial import keys
 from next.partial.envelope import Patch
 from next.partial.headers import (
@@ -55,7 +53,6 @@ from next.partial.render import ZoneRenderResult
 from next.partial.stream import Streamable, owned, streamable
 from next.permissions.access import check, declared, holds, signed_in
 from next.permissions.markers import OPEN, AccessRule
-from next.ports import run_bridged
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
 from next.static.collector import StaticCollector
 from next.static.manager import get_static_manager
@@ -64,6 +61,8 @@ from next.suspense.errors import BoundaryPropsError, BoundaryTokenError
 from next.suspense.manager import suspense_manager
 from next.suspense.markers import TokenRejection
 from next.suspense.partial import PartialStream
+from next.suspense.render import processors_of
+from next.suspense.session import IDENT
 from next.suspense.tokens import (
     BodyTransport,
     BoundaryClaims,
@@ -79,7 +78,6 @@ from next.utils import template_edits_watched
 
 type _Found = dict[tuple[str, str], ComponentInfo]
 
-_IDENT: Final = re.compile(r"b-[0-9a-f]{8}-[0-9]{1,9}", re.ASCII)
 _SAME_ORIGIN: Final = "same-origin"
 _FORBIDDEN: Final = 403
 _RELOAD: Final = 409
@@ -162,7 +160,7 @@ def cross_site(request: HttpRequest) -> bool:
 def _addressed(request: HttpRequest) -> str | None:
     """Return the one wrapper id `X-Next-Zone` names, `None` for any other value."""
     zones = partial_intent(request).zones
-    if len(zones) != 1 or _IDENT.fullmatch(zones[0]) is None:
+    if len(zones) != 1 or IDENT.fullmatch(zones[0]) is None:
         return None
     return zones[0]
 
@@ -296,11 +294,7 @@ def redeem(
 def _context(request: HttpRequest, collector: StaticCollector, path: Path) -> Context:
     """Return the context of the processors alone, the props joining it later."""
     data: dict[str, object] = {}
-    processors = (
-        *Engine.get_default().template_context_processors,
-        *context_processors(),
-    )
-    for processor in dict.fromkeys(processors):
+    for processor in processors_of(Engine.get_default()):
         data.update(processor(request))
     data[REQUEST_KEY] = request
     data[COLLECTOR_KEY] = collector
@@ -331,10 +325,12 @@ class _Lookup:
 def _envelope(
     request: HttpRequest,
     ident: str,
-    rendered: tuple[str, BoundaryError | None],
+    rendered: tuple[str, BoundaryFailure | None],
+    *,
     collector: StaticCollector,
     retry: str | None,
-    streamed: tuple[Streamable | None, Path],
+    block: Streamable | None,
+    page_path: Path,
 ) -> HttpResponseBase:
     """Return the envelope morphing the content into the wrapper, with its state.
 
@@ -355,7 +351,6 @@ def _envelope(
     morph = envelope.ops[0]
     ops = (Patch(morph.op, morph.target, morph.html, extras), *envelope.ops[1:])
     envelope = replace(envelope, ops=ops)
-    block, page_path = streamed
     deferred = None if block is None else block.deferred
     if deferred is not None:
         stream = deferred.respond(envelope, page_path=page_path)
@@ -389,25 +384,6 @@ def _guards(page_path: Path) -> tuple[ContextGraph, frozenset[int]]:
     return held
 
 
-async def _scoped(
-    graph: ContextGraph,
-    page_path: Path,
-    phase: Phase,
-    request: HttpRequest,
-    kwargs: Mapping[str, object],
-    dep_cache: dict[str, Any],
-) -> None:
-    async with render_scope(dep_cache):
-        await arun_phase(
-            graph,
-            page_path,
-            phase,
-            request=request,
-            url_kwargs=kwargs,
-            dep_cache=dep_cache,
-        )
-
-
 def run_guards(
     page_path: Path,
     request: HttpRequest,
@@ -423,8 +399,17 @@ def run_guards(
         return
     phase = Phase(steps, {})
     if any(graph.steps[index].is_async for index in steps):
-        run_bridged(
-            partial(_scoped, graph, page_path, phase, request, kwargs, dep_cache)
+        bridged_scope(
+            dep_cache,
+            partial(
+                arun_phase,
+                graph,
+                page_path,
+                phase,
+                request=request,
+                url_kwargs=kwargs,
+                dep_cache=dep_cache,
+            ),
         )
         return
     run_phase(
@@ -432,7 +417,7 @@ def run_guards(
     )
 
 
-def _admits(user: object, rule: AccessRule) -> bool:
+def _clears(user: object, rule: AccessRule) -> bool:
     """Whether `user` passes every requirement of `rule` checked without an object."""
     if not rule.requirements:
         return True
@@ -449,27 +434,32 @@ def _headers() -> HttpResponse:
     return private(HttpResponse(b"", content_type=content_type))
 
 
-type _Admitted = tuple[Mapping[str, object], Http404 | None]
+@dataclass(frozen=True, slots=True)
+class _Reached:
+    """The page a reload reached, its URL kwargs and the cache its guards share."""
+
+    page_path: Path
+    kwargs: Mapping[str, object]
+    dep_cache: dict[str, Any]
 
 
-def _admit(
-    request: HttpRequest,
-    claims: BoundaryClaims,
-    info: ComponentInfo,
-    reached: tuple[Path, Mapping[str, object], dict[str, Any]],
-) -> _Admitted | HttpResponseBase:
+type _Authorized = tuple[Mapping[str, object], Http404 | None]
+
+
+def _authorize(
+    request: HttpRequest, claims: BoundaryClaims, info: ComponentInfo, reached: _Reached
+) -> _Authorized | HttpResponseBase:
     """Return the decoded props and a vanished row, or the answer that stops a reload.
 
     Under an object rule a vanished row refuses, so no uncleared caller learns of it.
     """
-    page_path, kwargs, dep_cache = reached
     try:
-        run_guards(page_path, request, kwargs, dep_cache)
+        run_guards(reached.page_path, request, reached.kwargs, reached.dep_cache)
     except GUARD_RAISES as exc:
         return failed(request, exc)
     user = getattr(request, "user", None)
     rule = OPEN if info.module_path is None else declared(info.module_path)
-    if (claims.perms and not holds(user, claims.perms)) or not _admits(user, rule):
+    if (claims.perms and not holds(user, claims.perms)) or not _clears(user, rule):
         return refused()
     try:
         limit = suspense_manager.tokens().prop_limit(token_overrides(info))
@@ -503,12 +493,14 @@ def answer(
         claims, info = redeem(request, token, page_path, kwargs)
     except BoundaryTokenError as exc:
         return expired() if exc.expired else refused()
-    admitted = _admit(request, claims, info, (page_path, kwargs, dep_cache))
-    if isinstance(admitted, HttpResponseBase):
-        return admitted
+    authorized = _authorize(
+        request, claims, info, _Reached(page_path, kwargs, dep_cache)
+    )
+    if isinstance(authorized, HttpResponseBase):
+        return authorized
     if request.method == _HEAD:
         return _headers()
-    props, gone = admitted
+    props, gone = authorized
     collector = StaticCollector(bundle_url=get_static_manager().chunk_url)
     context = _context(request, collector, page_path)
     trip = TripInput(info, _mode(info), props, claims.perms)
@@ -517,7 +509,15 @@ def answer(
         rendered = _render(request, context, collector, renderer, gone)
     failure = rendered[1]
     retry = None if failure is None else _retry(request, renderer.retry_input(failure))
-    return _envelope(request, ident, rendered, collector, retry, (block, page_path))
+    return _envelope(
+        request,
+        ident,
+        rendered,
+        collector=collector,
+        retry=retry,
+        block=block,
+        page_path=page_path,
+    )
 
 
 def _render(
@@ -526,18 +526,18 @@ def _render(
     collector: StaticCollector,
     renderer: IsolatedRenderer,
     gone: Exception | None,
-) -> tuple[str, BoundaryError | None]:
+) -> tuple[str, BoundaryFailure | None]:
     """Render the component inside its error boundary, nested boundaries in place.
 
     A failure the boundary lets through, a vanished row among them, shows its error UI.
     """
     if gone is not None:
         return renderer.error(context, kind_of(gone))
-    held: list[BoundaryError | None] = [None]
+    failure: BoundaryFailure | None = None
 
     def draw() -> str:
+        nonlocal failure
         html, failure = renderer.body(context)
-        held[0] = failure
         return html
 
     caught = Capture()
@@ -546,7 +546,7 @@ def _render(
         html = assembled(draw, collector=collector, request=request)
     if caught.error is not None:
         return renderer.error(context, kind_of(caught.error))
-    return html, held[0]
+    return html, failure
 
 
 __all__ = [

@@ -27,22 +27,16 @@ from next.deps.loader import (
 from next.deps.objects import visible_rows
 from next.deps.runner import run_isolated, segment_runner
 from next.deps.scope import RequestScope
-from next.suspense import background_loop, drive
+from next.suspense import drive
+from next.suspense.executors import background_loop
 from next.testing import make_resolution_context
+from tests.support.errors import BackendDownError, HaltError
 
 
 CLOSED = "scope is closed"
 WAIT = 5.0
 
 marker: ContextVar[str] = ContextVar("marker", default="unset")
-
-
-class BackendDownError(Exception):
-    """A failure a batch function raises, distinct from anything the loader raises."""
-
-
-class HaltError(BaseException):
-    """An interrupt-like failure that is not an `Exception`."""
 
 
 class Clash:
@@ -69,6 +63,20 @@ def scoped() -> RequestScope:
     scope = RequestScope()
     request_memo.set(RequestMemo(scope))
     return scope
+
+
+def run_request(scenario, *, runner=None, opened=False):
+    """Run `scenario` on a loop as one request, routing segments through `runner`."""
+
+    async def request():
+        scope = scoped()
+        if runner is not None:
+            segment_runner.set(runner)
+        if opened:
+            open_loaders(scope, copy_context())
+        return await scenario()
+
+    return asyncio.run(request())
 
 
 class LostRace:
@@ -178,12 +186,9 @@ class TestBatching:
         loader = Loader(recording(calls))
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
-            open_loaders(scope, copy_context())
             return await asyncio.gather(*(loader.load(key) for key in (1, 2, 3)))
 
-        assert asyncio.run(scenario()) == [10, 20, 30]
+        assert run_request(scenario, runner=inline, opened=True) == [10, 20, 30]
         assert calls == [[1, 2, 3]]
 
     def test_loads_from_the_loop_and_from_threads_share_one_batch(self) -> None:
@@ -191,8 +196,6 @@ class TestBatching:
         loader = Loader(recording(calls), max_batch=6, window=3600)
 
         async def scenario():
-            scoped()
-            segment_runner.set(on_thread)
             threaded = (partial(loader.load_sync, key) for key in (4, 5, 6))
             with ThreadPoolExecutor(3) as pool:
                 return await asyncio.gather(
@@ -200,7 +203,7 @@ class TestBatching:
                     *(loader.load(key) for key in (1, 2, 3)),
                 )
 
-        assert asyncio.run(scenario()) == [40, 50, 60, 10, 20, 30]
+        assert run_request(scenario, runner=on_thread) == [40, 50, 60, 10, 20, 30]
         assert [sorted(keys) for keys in calls] == [[1, 2, 3, 4, 5, 6]]
 
     def test_a_blocking_segment_loads_in_the_batch_of_its_request(self) -> None:
@@ -212,15 +215,13 @@ class TestBatching:
             return loader.load_sync(3)
 
         async def scenario():
-            scoped()
-            segment_runner.set(on_thread)
             return await asyncio.gather(
                 loader.load(1),
                 loader.load(2),
                 run_isolated(fill, make_resolution_context()),
             )
 
-        assert asyncio.run(scenario()) == [10, 20, 30]
+        assert run_request(scenario, runner=on_thread) == [10, 20, 30]
         assert [sorted(keys) for keys in calls] == [[1, 2, 3]]
 
     def test_a_full_batch_closes_and_the_waiting_job_closes_the_rest(self) -> None:
@@ -228,13 +229,11 @@ class TestBatching:
         loader = Loader(recording(calls), max_batch=2, window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
-            open_loaders(scope, copy_context())
+            scope = request_memo.get().scope
             with counted_job(scope, time.monotonic() + WAIT):
                 return await asyncio.gather(*(loader.load(key) for key in range(5)))
 
-        assert asyncio.run(scenario()) == [0, 10, 20, 30, 40]
+        assert run_request(scenario, runner=inline, opened=True) == [0, 10, 20, 30, 40]
         assert calls == [[0, 1], [2, 3], [4]]
 
     def test_the_window_closes_a_batch_its_delay_after_the_first_key(
@@ -244,9 +243,6 @@ class TestBatching:
         loader = Loader(recording(calls))
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
-            open_loaders(scope, copy_context())
             loop = asyncio.get_running_loop()
             armed: list[tuple[float, Callable[..., object], tuple[object, ...]]] = []
             ready = asyncio.Event()
@@ -265,7 +261,7 @@ class TestBatching:
             close(*args)
             return delay, await asyncio.gather(*pending)
 
-        assert asyncio.run(scenario()) == (0.001, [10, 20])
+        assert run_request(scenario, runner=inline, opened=True) == (0.001, [10, 20])
         assert calls == [[1, 2]]
 
     def test_duplicate_keys_are_sent_once(self) -> None:
@@ -273,11 +269,9 @@ class TestBatching:
         loader = Loader(recording(calls))
 
         async def scenario():
-            scoped()
-            segment_runner.set(inline)
             return await asyncio.gather(loader.load(1), loader.load(1), loader.load(2))
 
-        assert asyncio.run(scenario()) == [10, 10, 20]
+        assert run_request(scenario, runner=inline) == [10, 10, 20]
         assert calls == [[1, 2]]
 
     def test_two_requests_never_share_a_batch(self) -> None:
@@ -361,11 +355,10 @@ class TestBatching:
         loader = Loader(partial(fetch, 3))
 
         async def scenario():
-            scoped()
             return await loader.load(2)
 
         assert loader.awaits
-        assert asyncio.run(scenario()) == 6
+        assert run_request(scenario) == 6
 
 
 class TestCountedJobs:
@@ -376,8 +369,7 @@ class TestCountedJobs:
         loader = Loader(recording(calls), window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             go = asyncio.Event()
             deadline = time.monotonic() + WAIT
 
@@ -396,7 +388,7 @@ class TestCountedJobs:
             go.set()
             return held, await first, await second, await third
 
-        assert asyncio.run(scenario()) == ([], 10, 20, 30)
+        assert run_request(scenario, runner=inline) == ([], 10, 20, 30)
         assert calls == [[1, 3, 2]]
 
     @pytest.mark.parametrize("ending", ["returns", "raises", "is cancelled"])
@@ -405,8 +397,7 @@ class TestCountedJobs:
         loader = Loader(recording(calls), window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             go = asyncio.Event()
             deadline = time.monotonic() + WAIT
 
@@ -432,7 +423,7 @@ class TestCountedJobs:
             await asyncio.gather(second, return_exceptions=True)
             return held, await first
 
-        assert asyncio.run(scenario()) == ([], 10)
+        assert run_request(scenario, runner=inline) == ([], 10)
         assert calls == [[1]]
 
     def test_a_job_past_its_deadline_stops_holding_the_batch(self) -> None:
@@ -440,8 +431,7 @@ class TestCountedJobs:
         loader = Loader(recording(calls), window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             stuck = asyncio.Event()
 
             async def blocked() -> None:
@@ -459,7 +449,7 @@ class TestCountedJobs:
             await held
             return value
 
-        assert asyncio.run(scenario()) == 10
+        assert run_request(scenario, runner=inline) == 10
         assert calls == [[1]]
 
     def test_a_waiting_job_past_its_deadline_holds_no_batch_open(self) -> None:
@@ -467,8 +457,7 @@ class TestCountedJobs:
         loader = Loader(recording(calls), window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             go = asyncio.Event()
 
             async def late() -> object:
@@ -487,7 +476,7 @@ class TestCountedJobs:
             await running
             return held, await waiting
 
-        assert asyncio.run(scenario()) == ([], 10)
+        assert run_request(scenario, runner=inline) == ([], 10)
         assert calls == [[1]]
 
     def test_a_load_after_the_deadline_waits_for_the_window(self) -> None:
@@ -495,13 +484,12 @@ class TestCountedJobs:
         loader = Loader(recording(calls), window=0.01)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             with counted_job(scope, time.monotonic() - 1):
                 await asyncio.sleep(0.01)
                 return await asyncio.gather(loader.load(1), loader.load(2))
 
-        assert asyncio.run(scenario()) == [10, 20]
+        assert run_request(scenario, runner=inline) == [10, 20]
         assert calls == [[1, 2]]
 
     def test_counted_threads_share_the_batch_they_all_wait_on(self) -> None:
@@ -515,15 +503,14 @@ class TestCountedJobs:
                 return loader.load_sync(key)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(on_thread)
+            scope = request_memo.get().scope
             jobs = (partial(job, scope, key) for key in (1, 2))
             with ThreadPoolExecutor(2) as pool:
                 return await asyncio.wait_for(
                     asyncio.gather(*on_threads(pool, *jobs)), WAIT
                 )
 
-        assert asyncio.run(scenario()) == [10, 20]
+        assert run_request(scenario, runner=on_thread) == [10, 20]
         assert [sorted(keys) for keys in calls] == [[1, 2]]
 
     def test_a_waiting_job_opening_another_batch_closes_it(self) -> None:
@@ -531,8 +518,7 @@ class TestCountedJobs:
         second = Loader(recording(calls), window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             started = asyncio.Event()
             release = asyncio.Event()
 
@@ -553,7 +539,7 @@ class TestCountedJobs:
                 release.set()
                 return await waiting, value
 
-        assert asyncio.run(scenario()) == (1, 20)
+        assert run_request(scenario, runner=inline) == (1, 20)
         assert calls == [[2]]
 
     def test_a_load_inside_a_batch_function_closes_its_batch(self) -> None:
@@ -572,11 +558,11 @@ class TestCountedJobs:
         outer = Loader(nested, window=3600)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             with counted_job(scope, time.monotonic() + 2 * WAIT):
                 return await asyncio.wait_for(outer.load(3), WAIT)
 
-        assert asyncio.run(scenario()) == 30
+        assert run_request(scenario) == 30
         assert calls == [[3]]
 
     def test_a_job_joining_a_key_another_job_loads_counts_as_waiting(self) -> None:
@@ -584,8 +570,7 @@ class TestCountedJobs:
         loader = Loader(recording(calls), window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             deadline = time.monotonic() + 2 * WAIT
 
             async def compute() -> object:
@@ -597,12 +582,12 @@ class TestCountedJobs:
 
             return await asyncio.wait_for(asyncio.gather(job(), job()), WAIT)
 
-        assert asyncio.run(scenario()) == [10, 10]
+        assert run_request(scenario, runner=inline) == [10, 10]
         assert calls == [[1]]
 
     def test_a_joiner_cut_short_stops_counting_as_waiting(self) -> None:
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             gate = asyncio.Event()
             deadline = time.monotonic() + WAIT
 
@@ -623,19 +608,19 @@ class TestCountedJobs:
             with counted_job(scope, deadline):
                 joiner = asyncio.create_task(scope.resolve("user", never))
                 await next_turn()
-                parked = hub._parked
+                parked = hub.jobs._parked
                 joiner.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await joiner
-                counts = (hub._jobs, parked, hub._parked)
+                counts = (hub.jobs._jobs, parked, hub.jobs._parked)
             gate.set()
             return counts, await claimant
 
-        assert asyncio.run(scenario()) == ((2, 1, 0), "ann")
+        assert run_request(scenario) == ((2, 1, 0), "ann")
 
     def test_a_join_in_another_request_leaves_the_count_alone(self) -> None:
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             other = RequestScope()
             gate = asyncio.Event()
 
@@ -649,37 +634,36 @@ class TestCountedJobs:
             with counted_job(scope, time.monotonic() + WAIT):
                 joiner = asyncio.create_task(other.resolve("user", gated))
                 await next_turn()
-                parked = hub._parked
+                parked = hub.jobs._parked
                 gate.set()
                 value = await joiner
             return parked, value, await claimant
 
-        assert asyncio.run(scenario()) == (0, "ann", "ann")
+        assert run_request(scenario) == (0, "ann", "ann")
 
     def test_a_load_of_another_request_leaves_the_count_alone(self) -> None:
         calls: list[list[object]] = []
         loader = Loader(recording(calls), window=0.01)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             with counted_job(scope, time.monotonic() + WAIT):
                 request_memo.set(RequestMemo(RequestScope()))
                 value = await loader.load(1)
-            return value, scope._slots[_HUB].hub
+            return value, scope._tree.slots[_HUB].hub
 
-        assert asyncio.run(scenario()) == (10, None)
+        assert run_request(scenario, runner=inline) == (10, None)
         assert calls == [[1]]
 
     def test_a_job_on_a_scope_with_no_loop_counts_nothing(self) -> None:
         scope = RequestScope()
         with counted_job(scope, 0.0), counted_job(None, 0.0):
             pass
-        assert scope._slots == {}
+        assert scope._tree.slots == {}
 
     def test_a_join_that_ends_before_any_load_counts_nothing(self) -> None:
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             deadline = time.monotonic() + WAIT
 
             async def compute() -> object:
@@ -691,9 +675,9 @@ class TestCountedJobs:
                     return await scope.resolve("user", compute)
 
             values = await asyncio.wait_for(asyncio.gather(job(), job()), WAIT)
-            return values, scope._slots[_HUB].hub
+            return values, scope._tree.slots[_HUB].hub
 
-        assert asyncio.run(scenario()) == (["ann", "ann"], None)
+        assert run_request(scenario) == (["ann", "ann"], None)
 
     def test_jobs_that_never_load_leave_the_loop_alone(self) -> None:
         loop = Mock(spec=asyncio.AbstractEventLoop)
@@ -705,7 +689,7 @@ class TestCountedJobs:
         ):
             pass
         assert loop.method_calls == []
-        assert scope._slots[_HUB].hub is None
+        assert scope._tree.slots[_HUB].hub is None
 
 
 class TestOutcomes:
@@ -721,8 +705,6 @@ class TestOutcomes:
         loader = Loader(fetch)
 
         async def scenario():
-            scoped()
-            segment_runner.set(inline)
             first = await loader.load(1)
             again = await loader.load(1)
             with pytest.raises(MissingKeyError) as missing:
@@ -731,7 +713,7 @@ class TestOutcomes:
                 await loader.load(2)
             return first, again, missing.value, memoised.value
 
-        first, again, missing, memoised = asyncio.run(scenario())
+        first, again, missing, memoised = run_request(scenario, runner=inline)
         assert (first, again) == (10, 10)
         assert memoised is missing
         assert calls == [[1], [2]]
@@ -740,13 +722,11 @@ class TestOutcomes:
         loader = Loader(lambda _keys: {1: "one"})
 
         async def scenario():
-            scoped()
-            segment_runner.set(inline)
             return await asyncio.gather(
                 loader.load(1), loader.load(2), return_exceptions=True
             )
 
-        found, missing = asyncio.run(scenario())
+        found, missing = run_request(scenario, runner=inline)
         assert found == "one"
         assert isinstance(missing, MissingKeyError)
         assert isinstance(missing, LookupError)
@@ -764,8 +744,6 @@ class TestOutcomes:
         loader = Loader(fetch)
 
         async def scenario():
-            scoped()
-            segment_runner.set(inline)
             failures = await asyncio.gather(
                 loader.load(1), loader.load(2), return_exceptions=True
             )
@@ -773,7 +751,7 @@ class TestOutcomes:
                 await loader.load(1)
             return failures, again.value
 
-        [first, second], again = asyncio.run(scenario())
+        [first, second], again = run_request(scenario, runner=inline)
         assert isinstance(first, BackendDownError)
         assert first is second
         assert again is first
@@ -786,12 +764,11 @@ class TestOutcomes:
         loader = Loader(fetch)
 
         async def scenario():
-            scoped()
             return await asyncio.gather(
                 loader.load(1), loader.load(2), return_exceptions=True
             )
 
-        first, second = asyncio.run(scenario())
+        first, second = run_request(scenario)
         assert isinstance(first, BackendDownError)
         assert first is second
 
@@ -804,18 +781,18 @@ class TestOutcomes:
         loader = Loader(fetch, max_batch=2, window=3600)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             loads = asyncio.gather(
                 loader.load(1), loader.load(2), return_exceptions=True
             )
             await next_turn()
-            [driver] = scope._slots[_HUB].hub._drivers
+            [driver] = scope._tree.slots[_HUB].hub._drivers
             failures = await loads
             await driver
             return failures
 
         with caplog.at_level(logging.ERROR, logger="next.deps.loader"):
-            first, second = asyncio.run(scenario())
+            first, second = run_request(scenario)
         assert isinstance(first, HaltError)
         assert second is first
         [record] = [r for r in caplog.records if r.name == "next.deps.loader"]
@@ -828,15 +805,13 @@ class TestOutcomes:
         short = Loader(lambda _keys: [])
 
         async def scenario():
-            scoped()
-            segment_runner.set(inline)
             values = await asyncio.gather(ordered.load(1), ordered.load(2))
             failures = await asyncio.gather(
                 short.load(1), short.load(2), return_exceptions=True
             )
             return values, failures
 
-        values, [first, second] = asyncio.run(scenario())
+        values, [first, second] = run_request(scenario, runner=inline)
         assert values == [2, 4]
         assert isinstance(first, TypeError)
         assert first is second
@@ -855,8 +830,6 @@ class TestOutcomes:
         calls: list[list[object]] = []
 
         async def scenario():
-            scope = scoped()
-            open_loaders(scope, copy_context())
             started = asyncio.Event()
             gate = asyncio.Event()
 
@@ -877,7 +850,7 @@ class TestOutcomes:
             gate.set()
             return await same, await other
 
-        assert asyncio.run(scenario()) == (10, 20)
+        assert run_request(scenario, opened=True) == (10, 20)
         assert calls == [[1, 2]]
 
     def test_a_runner_that_fails_fails_the_keys_of_its_batch(self) -> None:
@@ -887,13 +860,11 @@ class TestOutcomes:
         loader = Loader(recording([]))
 
         async def scenario():
-            scoped()
-            segment_runner.set(broken)
             return await asyncio.gather(
                 loader.load(1), loader.load(2), return_exceptions=True
             )
 
-        first, second = asyncio.run(scenario())
+        first, second = run_request(scenario, runner=broken)
         assert isinstance(first, BackendDownError)
         assert second is first
 
@@ -909,7 +880,6 @@ class TestRoutes:
             raise BackendDownError
 
         async def scenario():
-            scoped()
             gone = asyncio.create_task(waiting_through(dead, loader, 1))
             await next_turn()
             gone.cancel()
@@ -917,7 +887,7 @@ class TestRoutes:
                 await gone
             return await waiting_through(inline, loader, 2), await loader.load(1)
 
-        assert asyncio.run(scenario()) == (20, 10)
+        assert run_request(scenario) == (20, 10)
         assert calls == [[1, 2]]
 
     def test_a_call_its_gone_waiter_left_unserved_runs_on_a_live_route(self) -> None:
@@ -925,7 +895,6 @@ class TestRoutes:
         loader = Loader(recording(calls), max_batch=2, window=3600)
 
         async def scenario():
-            scoped()
             reached = asyncio.Event()
             reject = asyncio.Event()
             runner = rejecting_runner(reached, reject)
@@ -939,7 +908,7 @@ class TestRoutes:
             reject.set()
             return await asyncio.wait_for(live, WAIT), await loader.load(1)
 
-        assert asyncio.run(scenario()) == (20, 10)
+        assert run_request(scenario) == (20, 10)
         assert calls == [[1, 2]]
 
     def test_a_call_no_live_waiter_can_carry_waits_for_the_next_waiter(self) -> None:
@@ -947,13 +916,13 @@ class TestRoutes:
         loader = Loader(recording(calls), max_batch=1, window=3600)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             reached = asyncio.Event()
             reject = asyncio.Event()
             runner = rejecting_runner(reached, reject)
             gone = asyncio.create_task(waiting_through(runner, loader, 1))
             await reached.wait()
-            hub = scope._slots[_HUB].hub
+            hub = scope._tree.slots[_HUB].hub
             gone.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await gone
@@ -962,7 +931,7 @@ class TestRoutes:
             assert calls == []
             return await waiting_through(inline, loader, 1)
 
-        assert asyncio.run(scenario()) == 10
+        assert run_request(scenario) == 10
         assert calls == [[1]]
 
 
@@ -973,14 +942,13 @@ class TestKeys:
         loader = Loader(recording([]))
 
         async def scenario():
-            scoped()
             with pytest.raises(TypeError, match="unhashable"):
                 await loader.load([1])
             return await asyncio.to_thread(
                 copy_context().run, outcome, partial(loader.load_sync, [1])
             )
 
-        assert isinstance(asyncio.run(scenario()), TypeError)
+        assert isinstance(run_request(scenario), TypeError)
 
     def test_a_key_failing_on_the_loop_still_answers_its_admission(self) -> None:
         """A collision compares keys on the loop, which a thread's hash cannot catch."""
@@ -988,7 +956,7 @@ class TestKeys:
         error = BackendDownError()
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             hub = _hub(scope, asyncio.get_running_loop())
             hub.enter(loader, Clash())
             admitted: Future[object] = Future()
@@ -996,14 +964,14 @@ class TestKeys:
             await scope.close()
             return admitted.exception(0)
 
-        assert asyncio.run(scenario()) is error
+        assert run_request(scenario) is error
 
     def test_an_interrupt_on_the_loop_answers_the_admission_and_goes_on(self) -> None:
         loader = Loader(recording([]), window=3600)
         error = HaltError()
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             hub = _hub(scope, asyncio.get_running_loop())
             hub.enter(loader, Clash())
             admitted: Future[object] = Future()
@@ -1012,7 +980,7 @@ class TestKeys:
             await scope.close()
             return admitted.exception(0)
 
-        assert asyncio.run(scenario()) is error
+        assert run_request(scenario) is error
 
 
 class TestThreads:
@@ -1031,8 +999,7 @@ class TestThreads:
             return threading.get_ident(), loader.load_sync(5), loader.load_sync(5)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(stuck_runner(asyncio.Event()))
+            scope = request_memo.get().scope
             with ThreadPoolExecutor(1) as pool:
                 [result] = await asyncio.wait_for(
                     asyncio.gather(*on_threads(pool, job)), WAIT
@@ -1040,7 +1007,9 @@ class TestThreads:
             await scope.close()
             return result
 
-        ident, value, again = asyncio.run(scenario())
+        ident, value, again = run_request(
+            scenario, runner=stuck_runner(asyncio.Event())
+        )
         assert (value, again) == (50, 50)
         assert ran_on == [ident]
 
@@ -1055,18 +1024,18 @@ class TestThreads:
         loader = Loader(fetch, max_batch=count, window=3600)
 
         async def scenario():
-            scoped()
-            segment_runner.set(on_thread)
             loads = (partial(loader.load_sync, key) for key in range(count))
             with ThreadPoolExecutor(count) as pool:
                 return await asyncio.gather(*on_threads(pool, *loads))
 
-        assert asyncio.run(scenario()) == [key * 10 for key in range(count)]
+        assert run_request(scenario, runner=on_thread) == [
+            key * 10 for key in range(count)
+        ]
         assert len(runners) == 1
 
     def test_a_hub_made_while_waiting_for_the_lock_is_the_one_returned(self) -> None:
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             loop = asyncio.get_running_loop()
             race = LostRace(scope, loop)
             race.state._lock = race
@@ -1074,7 +1043,7 @@ class TestThreads:
             await scope.close()
             return hub is race.winner, race.state.hub is hub
 
-        assert asyncio.run(scenario()) == (True, True)
+        assert run_request(scenario) == (True, True)
 
     def test_an_interrupt_in_a_stolen_batch_reaches_every_waiter(self) -> None:
         def fetch(keys):
@@ -1083,7 +1052,7 @@ class TestThreads:
         loader = Loader(fetch, max_batch=2, window=3600)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             reached = asyncio.Event()
             segment_runner.set(stuck_runner(reached))
             waiter = asyncio.create_task(loader.load(1))
@@ -1098,7 +1067,7 @@ class TestThreads:
             await scope.close()
             return stolen
 
-        assert isinstance(asyncio.run(scenario()), HaltError)
+        assert isinstance(run_request(scenario), HaltError)
 
     def test_a_thread_waits_for_an_async_batch_the_loop_runs(self) -> None:
         started = threading.Event()
@@ -1114,7 +1083,6 @@ class TestThreads:
         loader = Loader(fetch, max_batch=1)
 
         async def scenario():
-            scoped()
             threaded = asyncio.create_task(
                 asyncio.to_thread(copy_context().run, loader.load_sync, 1)
             )
@@ -1126,7 +1094,7 @@ class TestThreads:
             found = await asyncio.wait_for(asyncio.gather(threaded, joined), WAIT)
             return found, threading.get_ident()
 
-        found, loop_thread = asyncio.run(scenario())
+        found, loop_thread = run_request(scenario)
         assert found == [10, 10]
         assert ran_on == [loop_thread]
 
@@ -1195,7 +1163,7 @@ class TestRequestThread:
             return await loader.load(3)
 
         assert asyncio.run(work()) == 30
-        assert scope._slots[_HUB].hub.loop is home
+        assert scope._tree.slots[_HUB].hub.loop is home
         assert calls == [[3]]
 
     def test_a_sync_batch_a_loop_task_awaits_runs_on_the_view_thread(self) -> None:
@@ -1255,7 +1223,7 @@ class TestRequestThread:
         loader = Loader(fetch, max_batch=3, window=3600)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             waiter = asyncio.create_task(loader.load(1))
             await next_turn()
             with ThreadPoolExecutor(2) as pool:
@@ -1269,7 +1237,7 @@ class TestRequestThread:
                 finally:
                     await scope.close()
 
-        assert asyncio.run(scenario()) == [10, 20, 30]
+        assert run_request(scenario) == [10, 20, 30]
         assert calls == [[1, 2, 3]]
 
 
@@ -1278,7 +1246,7 @@ class TestScopeLifetime:
 
     def test_closing_the_scope_fails_the_keys_of_a_batch_no_one_started(self) -> None:
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             reached = asyncio.Event()
             segment_runner.set(stuck_runner(reached))
             loader = Loader(recording([]), max_batch=1)
@@ -1288,7 +1256,7 @@ class TestScopeLifetime:
             with pytest.raises(RuntimeError, match=CLOSED):
                 await waiter
 
-        asyncio.run(scenario())
+        run_request(scenario)
 
     def test_closing_the_scope_fails_a_running_async_batch_then_cancels_it(
         self,
@@ -1296,7 +1264,7 @@ class TestScopeLifetime:
         cancelled: list[bool] = []
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             started = asyncio.Event()
 
             async def fetch(keys):
@@ -1313,7 +1281,7 @@ class TestScopeLifetime:
             with pytest.raises(RuntimeError, match=CLOSED):
                 await waiter
 
-        asyncio.run(scenario())
+        run_request(scenario)
         assert cancelled == [True]
 
     @pytest.mark.parametrize("kind", ["sync", "async"])
@@ -1327,7 +1295,7 @@ class TestScopeLifetime:
         loader = Loader(batch, window=3600)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             waiting = asyncio.create_task(
                 asyncio.to_thread(
                     copy_context().run, outcome, partial(loader.load_sync, 1)
@@ -1335,15 +1303,15 @@ class TestScopeLifetime:
             )
             await polled(
                 lambda: (
-                    bool(scope._slots)
-                    and scope._slots[_HUB].hub is not None
-                    and scope._slots[_HUB].hub.cached(loader, 1) is not None
+                    bool(scope._tree.slots)
+                    and scope._tree.slots[_HUB].hub is not None
+                    and scope._tree.slots[_HUB].hub.cached(loader, 1) is not None
                 )
             )
             await scope.close()
             return await waiting
 
-        failed = asyncio.run(scenario())
+        failed = run_request(scenario)
         assert isinstance(failed, RuntimeError)
         assert CLOSED in str(failed)
 
@@ -1357,7 +1325,7 @@ class TestScopeLifetime:
         loader = Loader(fetch, max_batch=1)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             waiting = asyncio.create_task(
                 asyncio.to_thread(
                     copy_context().run, outcome, partial(loader.load_sync, 1)
@@ -1367,7 +1335,7 @@ class TestScopeLifetime:
             await scope.close()
             return await waiting
 
-        failed = asyncio.run(scenario())
+        failed = run_request(scenario)
         assert isinstance(failed, RuntimeError)
         assert CLOSED in str(failed)
 
@@ -1385,8 +1353,7 @@ class TestScopeLifetime:
         loader = Loader(fetch, max_batch=1)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(stuck_runner(asyncio.Event()))
+            scope = request_memo.get().scope
             waiting = asyncio.create_task(
                 asyncio.to_thread(copy_context().run, loader.load_sync, 1)
             )
@@ -1395,20 +1362,20 @@ class TestScopeLifetime:
             release.set()
             return await waiting
 
-        assert asyncio.run(scenario()) == 10
+        assert run_request(scenario, runner=stuck_runner(asyncio.Event())) == 10
 
     def test_an_admission_the_loop_has_not_reached_fails_on_close(self) -> None:
         loader = Loader(recording([]))
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             hub = _hub(scope, asyncio.get_running_loop())
             admitted = hub.admission(loader, 1)
             await scope.close()
             await next_turn()
             return admitted.exception(0), hub.cached(loader, 1)
 
-        error, entry = asyncio.run(scenario())
+        error, entry = run_request(scenario)
         assert isinstance(error, RuntimeError)
         assert CLOSED in str(error)
         assert entry is None
@@ -1417,8 +1384,7 @@ class TestScopeLifetime:
         loader = Loader(recording([]))
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             assert await loader.load(1) == 10
             await scope.close()
             late = await asyncio.to_thread(
@@ -1428,7 +1394,7 @@ class TestScopeLifetime:
                 await loader.load(3)
             return await loader.load(1), late
 
-        loaded, late = asyncio.run(scenario())
+        loaded, late = run_request(scenario, runner=inline)
         assert loaded == 10
         assert isinstance(late, RuntimeError)
 
@@ -1436,13 +1402,13 @@ class TestScopeLifetime:
         loader = Loader(recording([]))
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             await scope.close()
             return await asyncio.to_thread(
                 copy_context().run, outcome, partial(loader.load_sync, 1)
             )
 
-        failed = asyncio.run(scenario())
+        failed = run_request(scenario)
         assert isinstance(failed, RuntimeError)
         assert CLOSED in str(failed)
 
@@ -1505,11 +1471,10 @@ class TestAsyncBatches:
         loader = Loader(fetch)
 
         async def scenario():
-            scoped()
             found = await asyncio.wait_for(loader.load(1), WAIT)
             return found, threading.get_ident()
 
-        (plain, pooled), loop_thread = asyncio.run(scenario())
+        (plain, pooled), loop_thread = run_request(scenario)
         assert loop_thread not in (plain, pooled)
 
     def test_waiting_on_a_sync_loader_is_refused_and_an_async_one_allowed(self) -> None:
@@ -1528,12 +1493,10 @@ class TestAsyncBatches:
         loader = Loader(fetch)
 
         async def scenario():
-            scoped()
-            segment_runner.set(inline)
             with pytest.raises(RuntimeError, match="cannot use the Django ORM"):
                 await asyncio.wait_for(loader.load(1), WAIT)
 
-        asyncio.run(scenario())
+        run_request(scenario, runner=inline)
         assert nested_calls == [[1]]
 
     def test_a_load_outside_a_request_refuses_a_hop_as_well(self) -> None:
@@ -1566,14 +1529,12 @@ class TestCycles:
         loader = Loader(fetch, max_batch=2, window=3600)
 
         async def scenario():
-            scoped()
-            segment_runner.set(on_thread)
             return await asyncio.wait_for(
                 asyncio.gather(loader.load(1), loader.load(2), return_exceptions=True),
                 WAIT,
             )
 
-        first, second = asyncio.run(scenario())
+        first, second = run_request(scenario, runner=on_thread)
         assert isinstance(first, DependencyCycleError)
         assert second is first
         assert str(first) == "Circular dependency: fetch -> fetch[2]"
@@ -1590,12 +1551,11 @@ class TestCycles:
             return loader.load_sync(3)
 
         async def scenario():
-            scoped()
             return await asyncio.wait_for(
                 asyncio.to_thread(copy_context().run, job), WAIT
             )
 
-        assert asyncio.run(scenario()) == 31
+        assert run_request(scenario) == 31
 
     def test_a_wait_on_a_batch_an_outer_frame_runs_raises(self) -> None:
         """A fresh context lists no batch, so only the thread knows it runs one."""
@@ -1609,12 +1569,11 @@ class TestCycles:
         loader = Loader(fetch)
 
         async def scenario():
-            scoped()
             return await asyncio.wait_for(
                 asyncio.to_thread(copy_context().run, loader.load_sync, 5), WAIT
             )
 
-        found = asyncio.run(scenario())
+        found = run_request(scenario)
         assert isinstance(found, DependencyCycleError)
         assert str(found) == "Circular dependency: fetch -> fetch[5]"
 
@@ -1625,13 +1584,12 @@ class TestCycles:
         loader = Loader(fetch, max_batch=2, window=3600)
 
         async def scenario():
-            scoped()
             return await asyncio.wait_for(
                 asyncio.gather(loader.load(1), loader.load(2), return_exceptions=True),
                 WAIT,
             )
 
-        first, second = asyncio.run(scenario())
+        first, second = run_request(scenario)
         assert isinstance(first, DependencyCycleError)
         assert second is first
         assert str(first) == "Circular dependency: fetch -> fetch[2]"
@@ -1654,21 +1612,20 @@ class TestRequestContext:
             return await loader.load(key)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(inline)
+            scope = request_memo.get().scope
             await asyncio.wait_for(asyncio.create_task(job(1)), WAIT)
             request = copy_context()
             request.run(marker.set, "request")
             open_loaders(scope, request)
             await asyncio.wait_for(asyncio.create_task(job(2)), WAIT)
 
-        asyncio.run(scenario())
+        run_request(scenario, runner=inline)
         assert seen == ["job", "request"]
 
     def test_a_scope_with_no_loop_has_no_batches_to_open(self) -> None:
         scope = RequestScope()
         open_loaders(scope, copy_context())
-        assert scope._slots == {}
+        assert scope._tree.slots == {}
 
 
 class TestDrain:
@@ -1688,8 +1645,7 @@ class TestDrain:
         loader = Loader(fetch, window=3600)
 
         async def scenario():
-            scope = scoped()
-            segment_runner.set(on_thread)
+            scope = request_memo.get().scope
             waiter = asyncio.create_task(loader.load(1))
             await next_turn()
             assert len(drain_loaders(scope)) == 1
@@ -1705,17 +1661,17 @@ class TestDrain:
             )
             return drain_loaders(scope)
 
-        assert asyncio.run(scenario()) == set()
+        assert run_request(scenario, runner=on_thread) == set()
 
     def test_a_scope_of_no_loop_or_of_another_loop_drains_nothing(self) -> None:
         async def elsewhere(scope: RequestScope):
             return drain_loaders(scope)
 
         async def scenario():
-            scope = scoped()
+            scope = request_memo.get().scope
             return await asyncio.to_thread(asyncio.run, elsewhere(scope))
 
-        assert asyncio.run(scenario()) == set()
+        assert run_request(scenario) == set()
         assert drain_loaders(RequestScope()) == set()
 
 

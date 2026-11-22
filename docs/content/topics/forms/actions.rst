@@ -662,7 +662,27 @@ Such an action opts out with ``Meta.atomic = False`` on a ``Form``, ``ModelForm`
            send_reset_link(self.cleaned_data["email"])
            return HttpResponseRedirect("/password-reset/sent/")
 
-``Meta.atomic`` takes the values of ``atomic=``, ``True``, ``False``, ``None``, or an ``AtomicOverride`` of ``next.transactions`` that names its own ``aliases``, and it is read once when the class registers.
+An action that often writes nothing, a lookup or a validation round trip, takes ``Meta.atomic = "writes"`` or ``atomic="writes"`` and opens its transaction right before its first write, so a request that writes nothing opens no connection and issues no statement.
+The writes after that point still commit or roll back as one unit, while an ``on_commit`` hook registered before the first write fires at once, see :ref:`howto-run-a-page-in-a-transaction`.
+
+.. code-block:: python
+   :caption: shop/pages/coupons/page.py
+
+   from django.http import HttpRequest, HttpResponse
+   from shop.models import Coupon
+
+   from next import action
+
+   @action("check_coupon", atomic="writes")
+   def check_coupon(request: HttpRequest) -> HttpResponse:
+       code = request.POST.get("code", "")
+       coupon = Coupon.objects.filter(code=code, redeemed=False).first()
+       if coupon is None:
+           return HttpResponse("unknown code", status=400)
+       coupon.redeem()
+       return HttpResponse("redeemed")
+
+``Meta.atomic`` takes the values of ``atomic=``, ``True``, ``False``, ``"writes"``, ``None``, or an ``AtomicOverride`` of ``next.transactions`` that names its own ``aliases``, and it is read once when the class registers.
 Like the guard keys, it survives subclassing through the inherited ``Meta``.
 An ``@action(form_class=F)`` that passes no ``atomic=`` takes ``F.Meta.atomic``, an abstract or mixin form class included, and an ``atomic=`` on the decorator wins over it.
 Any other value applies nothing, leaves the action on the method rule, and is reported as ``next.E240``.

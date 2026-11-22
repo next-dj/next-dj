@@ -3,9 +3,8 @@
 It reads the static manager, so nothing the components package imports may import it.
 """
 
-from next.boundaries import new_digest, shown_kind
-from next.conf.defer import defer_option
-from next.defer import BoundaryError, ErrorKind
+from next.boundaries import errors_opaque, new_digest, shown_kind
+from next.defer import BoundaryFailure, ErrorKind
 from next.static import ScriptInjectionPolicy, get_static_manager
 
 
@@ -15,10 +14,10 @@ def retry_loads() -> bool:
     return policy is not ScriptInjectionPolicy.DISABLED
 
 
-def unrun_error(kind: ErrorKind) -> BoundaryError:
+def unrun_error(kind: ErrorKind) -> BoundaryFailure:
     """Return the error a boundary settles as without running, under its shown kind."""
-    shown = shown_kind(kind, opaque=defer_option("ERRORS", "KINDS") == "opaque")
-    return BoundaryError.of(
+    shown = shown_kind(kind, opaque=errors_opaque())
+    return BoundaryFailure.of(
         shown, new_digest(), retry=retry_loads(), message="", traceback=""
     )
 

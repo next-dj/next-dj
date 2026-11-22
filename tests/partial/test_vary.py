@@ -6,17 +6,13 @@ import pytest
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseBase, HttpResponseRedirect
 
-from next.components import registry as registry_module
-from next.components.registry import DeferredComponents
 from next.forms import Form
-from next.pages import manager as manager_module
 from next.partial.headers import ORIGIN, REQUEST_FLAG, VARY_HEADERS, ZONE
 from next.suspense.policy import streaming
 from next.suspense.tokens.transport import HEADER
-from next.templatetags import components as component_tags
 from next.testing import NextClient
-from tests.pages.checks.metadata.trees import COMPONENTS
 from tests.support import routed, write_page
+from tests.support.access import COMPONENTS
 
 
 pytestmark = pytest.mark.django_db
@@ -153,13 +149,11 @@ def _varied(response: HttpResponseBase) -> frozenset[str]:
     return frozenset(names - {"", "Cookie"})
 
 
+@pytest.mark.usefixtures("fresh_deferred_components")
 @pytest.mark.parametrize("kind", _KINDS, ids=[kind.id for kind in _KINDS])
 def test_each_response_kind_varies_on_its_request_headers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: _Kind
+    tmp_path: Path, kind: _Kind
 ) -> None:
-    fresh = DeferredComponents()
-    for module in (registry_module, manager_module, component_tags):
-        monkeypatch.setattr(module, "deferred_components", fresh)
     root = tmp_path / "pages"
     _tree(root)
     with routed(root, COMPONENT_BACKENDS=COMPONENTS, ROUTER=kind.router):

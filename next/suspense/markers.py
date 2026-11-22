@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final
 
-from next.conf.defer import SCOPE, defer_count, defer_seconds
-from next.conf.merge import FROZEN_DEFAULTS
-from next.conf.scopes import scope_value
-from next.defer import Addressing, BoundaryError, BoundaryOptions, ErrorKind, Site
+from next.caches import IdentityMemo
+from next.conf.defer import defer_count, defer_seconds
+from next.conf.settings import next_framework_settings
+from next.defer import Addressing, BoundaryFailure, BoundaryOptions, ErrorKind, Site
 
 
 if TYPE_CHECKING:
@@ -101,23 +100,17 @@ class Effects:
 
 @dataclass(frozen=True, slots=True)
 class Rendered[D]:
-    """What the render layer made of one job, `delta` holding its assets and JS context.
-
-    `kind` is `None` for ready content, `failure` the error its error UI read, `status`
-    the one it gave the response, `replay` the writes the request thread repeats, and
-    `retry` the token attributes its error wrapper offers a retry with.
-    """
+    """What the render layer made of one job, `kind` being `None` for ready content."""
 
     html: str
     delta: D
     kind: ErrorKind | None = None
     nested: tuple[Job[D], ...] = ()
     degraded: bool = False
-    replay: tuple[Callable[[], object], ...] = ()
     status: int | None = None
     effects: Effects = field(default_factory=Effects)
     intended: Exception | None = None
-    failure: BoundaryError | None = None
+    failure: BoundaryFailure | None = None
     retry: str = ""
 
     def __post_init__(self) -> None:
@@ -240,7 +233,7 @@ class Server(enum.StrEnum):
 class ForegroundFacts:
     """What the view read on the request thread, so no rule reads a connection later.
 
-    `memory` lists the in-memory aliases among `sqlite`, and the sources are uncovered.
+    The two `sources` list the state no `ConnectionState` or `ThreadState` covers.
     """
 
     server: Server
@@ -296,33 +289,6 @@ class Admit(enum.StrEnum):
     SHED = "shed"
 
 
-class Assignment(enum.StrEnum):
-    """How a queued job runs, alone, in a group of its site, or not at all."""
-
-    SEPARATE = "separate"
-    GROUPED = "grouped"
-    EXPIRED = "expired"
-
-
-def _nested(value: object, *keys: str) -> object:
-    """Return the value under `keys`, `None` where a level is no mapping."""
-    for key in keys:
-        if not isinstance(value, Mapping):
-            return None
-        value = value.get(key)
-    return value
-
-
-def _per_request() -> int:
-    """Return `EXECUTOR["OPTIONS"]["PER_REQUEST"]`, the default replacing a misfit."""
-    value = _nested(scope_value(SCOPE, "EXECUTOR"), "OPTIONS", "PER_REQUEST")
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
-        return value
-    return cast(
-        "int", _nested(FROZEN_DEFAULTS[SCOPE], "EXECUTOR", "OPTIONS", "PER_REQUEST")
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class Caps:
     """The limits one response runs under, read once when it queues its first job."""
@@ -337,16 +303,24 @@ class Caps:
 
     @classmethod
     def from_settings(cls) -> Caps:
-        """Return the caps of the `DEFER` settings, a misfit read as its default."""
-        return cls(
-            deadline=defer_seconds("DEADLINE"),
-            write_grace=defer_seconds("WRITE_GRACE"),
-            boundaries=defer_count("MAX_BOUNDARIES"),
-            per_site=defer_count("MAX_PER_SITE"),
-            depth=defer_count("MAX_DEPTH"),
-            instances=defer_count("MAX_INSTANCES"),
-            per_request=_per_request(),
-        )
+        """Return the caps of the `DEFER` settings, held until the mapping moves."""
+        return _CAPS.get(next_framework_settings.DEFER, _read_caps)
+
+
+def _read_caps() -> Caps:
+    """Read the caps of the merged `DEFER` mapping, a misfit read as its default."""
+    return Caps(
+        deadline=defer_seconds("DEADLINE"),
+        write_grace=defer_seconds("WRITE_GRACE"),
+        boundaries=defer_count("MAX_BOUNDARIES"),
+        per_site=defer_count("MAX_PER_SITE"),
+        depth=defer_count("MAX_DEPTH"),
+        instances=defer_count("MAX_INSTANCES"),
+        per_request=defer_count("EXECUTOR", "OPTIONS", "PER_REQUEST"),
+    )
+
+
+_CAPS: Final[IdentityMemo[Caps]] = IdentityMemo()
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,7 +351,6 @@ class TokenRejection(enum.StrEnum):
 __all__ = [
     "Addressing",
     "Admit",
-    "Assignment",
     "Capacity",
     "Caps",
     "Captured",

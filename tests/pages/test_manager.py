@@ -7,31 +7,78 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from django.http import Http404, HttpRequest
+from django.http import Http404, HttpRequest, HttpResponse
 from django.template import Template
-from django.test import override_settings
+from django.template.response import TemplateResponse
+from django.test import Client, RequestFactory, override_settings
 
 import next.pages.loaders as loaders_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
+    NO_BOUNDARIES,
     LayoutTemplateLoader,
     PageModuleImportError,
     TemplateLoader,
     _load_python_module,
     build_registered_loaders,
     load_python_module_memo,
+    page_boundaries,
 )
 from next.pages.registry import PageContextRegistry
 from next.static import default_manager as static_default_manager
-from next.testing import override_next_settings
+from next.testing import assert_metadata, override_next_settings
 from next.views import page_view
 from tests.support import (
     PAGE_RENDER_CASES,
+    WITH_BASE,
     PageRenderCase,
-    attribution,
+    build_nested_page,
     build_page_request,
-    handler_declared_here,
+    path_under,
+    record_path_calls,
+    routed,
+    touch_later,
+    unified_view,
+    write_page,
 )
+
+
+_BROKEN_SYNTAX = "def render( invalid syntax {\n"
+
+
+_BROKEN_IMPORT = "import missing_dep_xyz\n"
+
+
+_broken_sources = pytest.mark.parametrize(
+    "broken_source",
+    [_BROKEN_SYNTAX, _BROKEN_IMPORT],
+    ids=["syntax_error", "import_error"],
+)
+
+
+ROOT = 'metadata = {"title": {"template": "{title} | Root"}, "description": "Root"}\n'
+
+
+HEADED = Path(__file__).resolve().parent.parent / "site_pages" / "headed" / "page.py"
+
+
+PAGED = {"METADATA": {"CANONICAL_QUERY": ("page",)}}
+
+
+def _render(query: str = "") -> str:
+    with override_next_settings(**WITH_BASE):
+        response = unified_view(page, HEADED)(RequestFactory().get(f"/headed/{query}"))
+    assert isinstance(response, HttpResponse | TemplateResponse)
+    assert response.status_code == 200
+    return response.content.decode()
+
+
+@pytest.fixture(scope="module")
+def html() -> str:
+    return _render()
+
+
+HEAD = "<head>{% metadata %}</head>"
 
 
 class TestPage:
@@ -86,79 +133,6 @@ class TestPage:
         assert not page_instance._templates.composed_sources
         assert not page_instance._templates.skeleton
         assert not page_instance._templates.skeleton_sources
-
-    @pytest.mark.parametrize(
-        ("decorator_type", "expected_key"),
-        [
-            ("with_key", "user_name"),
-            ("without_key", None),
-            ("without_parentheses", None),
-        ],
-        ids=["with_key", "without_key", "without_parentheses"],
-    )
-    def test_context_decorator_variations(
-        self, page_instance, decorator_type, expected_key
-    ) -> None:
-        """``@context`` keys on the declaring file whether or not a key is given."""
-        if decorator_type == "with_key":
-
-            @page_instance.context("user_name")
-            def get_user_name() -> str:
-                return "John Doe"
-
-            func = get_user_name
-        elif decorator_type == "without_key":
-
-            @page_instance.context()
-            def get_context_data():
-                return {"key1": "value1", "key2": "value2"}
-
-            func = get_context_data
-        else:
-
-            @page_instance.context
-            def get_context_data_bare():
-                return {"key1": "value1", "key2": "value2"}
-
-            func = get_context_data_bare
-
-        registry = page_instance.contexts._context_registry
-        assert Path(__file__) in registry
-        assert expected_key in registry[Path(__file__)]
-        entry = registry[Path(__file__)][expected_key]
-        assert entry.func == func
-        assert entry.inherit_context is False
-        assert entry.serialize is False
-
-    def test_context_decorator_with_inherit_context(self, page_instance) -> None:
-        """A keyed ``@context`` records ``inherit_context`` on the registry entry."""
-
-        @page_instance.context("inherited_key", inherit_context=True)
-        def get_inherited_value() -> str:
-            return "inherited_value"
-
-        registry = page_instance.contexts._context_registry
-        assert Path(__file__) in registry
-        assert "inherited_key" in registry[Path(__file__)]
-        entry = registry[Path(__file__)]["inherited_key"]
-        assert entry.func == get_inherited_value
-        assert entry.inherit_context is True
-        assert entry.serialize is False
-
-    def test_context_decorator_without_key_inherit_context(self, page_instance) -> None:
-        """A dict-merge ``@context`` registers under ``None``, keeping inheritance."""
-
-        @page_instance.context(inherit_context=True)
-        def get_context_data():
-            return {"key1": "value1", "key2": "value2"}
-
-        registry = page_instance.contexts._context_registry
-        assert Path(__file__) in registry
-        assert None in registry[Path(__file__)]
-        entry = registry[Path(__file__)][None]
-        assert entry.func == get_context_data
-        assert entry.inherit_context is True
-        assert entry.serialize is False
 
     @pytest.mark.parametrize("case", PAGE_RENDER_CASES, ids=lambda case: case.id)
     def test_render_scenarios(
@@ -256,17 +230,6 @@ class TestPage:
         result = page_instance.render(child_page_file)
 
         assert "Child page: child_value" in result
-
-    def test_context_registry_defaultdict_behavior(
-        self, page_instance, test_file_path
-    ) -> None:
-        """Registering a key creates the per-file entry without pre-seeding it."""
-        page_instance.contexts.register_context(
-            test_file_path, "test_key", lambda: "test_value"
-        )
-
-        assert test_file_path in page_instance.contexts._context_registry
-        assert "test_key" in page_instance.contexts._context_registry[test_file_path]
 
 
 class TestPageHasTemplateAndLazyRender:
@@ -378,6 +341,21 @@ class TestPageHasTemplateAndLazyRender:
         assert inject_mock.call_args.kwargs["request"] is request
 
 
+class TestHasTemplateUnderALayout:
+    """A page with an ancestor layout has a template to render."""
+
+    def test_has_template_returns_true_when_ancestor_layout_exists(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`has_template` short-circuits to True when an ancestor layout applies."""
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        page_file = sub / "page.py"
+        page_file.write_text("")
+        assert page_instance.has_template(page_file, module=None) is True
+
+
 class TestGlobalPageInstance:
     """The module-level ``page`` singleton and its ``context`` alias."""
 
@@ -486,111 +464,6 @@ class TestGlobalPageInstance:
         assert "from_page_module" not in registry.get(Path(__file__), {})
 
 
-class TestContextMisattribution:
-    """A decorator run on a callable declared elsewhere is recorded as such."""
-
-    def test_declaring_file_matching_the_caller_records_nothing(self) -> None:
-        """A callable declared where the decorator runs is attributed cleanly."""
-        instance = Page()
-
-        @instance.context("here")
-        def declared_here() -> str:
-            return "value"
-
-        assert instance.contexts.misattributed() == ()
-
-    def test_helper_from_another_module_is_recorded_once(self) -> None:
-        """Decorating an imported helper records the pair of files it spans."""
-        instance = Page()
-
-        instance.context("greeting")(handler_declared_here)
-        instance.context("greeting_again")(handler_declared_here)
-
-        records = instance.contexts.misattributed()
-        assert [(r.registered_from, r.declared_in, r.name) for r in records] == [
-            (Path(__file__), Path(attribution.__file__), "handler_declared_here")
-        ]
-
-    def test_reset_drops_recorded_misattributions(self) -> None:
-        """A registry reset clears the diagnostic along with the registrations."""
-        instance = Page()
-        instance.context("greeting")(handler_declared_here)
-
-        instance.contexts.reset()
-
-        assert instance.contexts.misattributed() == ()
-
-
-def _silent_processor(request) -> None:
-    return None
-
-
-def _failing_processor(request) -> dict[str, object]:
-    return {"theme": request.META["HTTP_X_THEME"]}
-
-
-def _theme_processor(request) -> dict[str, object]:
-    return {"theme": "dark"}
-
-
-def _processors(*names: str) -> list[dict]:
-    return [
-        {
-            "BACKEND": "django.template.backends.django.DjangoTemplates",
-            "OPTIONS": {"context_processors": [f"{__name__}.{n}" for n in names]},
-        }
-    ]
-
-
-async def _rows() -> list[int]:
-    return [1]
-
-
-@pytest.fixture(params=["sync", "async"])
-def processed_page(request, page_instance, tmp_path) -> tuple[Page, Path]:
-    """Return a page whose context builds on the sync path or through an async one."""
-    page_file = tmp_path / "page.py"
-    page_file.write_text('template = "ok"\n')
-    if request.param == "async":
-        page_instance.contexts.register_context(page_file, "rows", _rows)
-    return page_instance, page_file
-
-
-class TestContextProcessorOutcomes:
-    """A context processor merges a dict and nothing else, its failure logged."""
-
-    def test_a_processor_returning_no_dict_adds_nothing(self, processed_page) -> None:
-        instance, page_file = processed_page
-        with override_settings(
-            TEMPLATES=_processors("_silent_processor", "_theme_processor")
-        ):
-            context = instance.build_render_context(page_file, build_page_request())
-        assert context["theme"] == "dark"
-        assert None not in context
-
-    def test_a_failing_processor_is_logged_and_skipped(
-        self, processed_page, caplog
-    ) -> None:
-        instance, page_file = processed_page
-        with override_settings(
-            TEMPLATES=_processors("_failing_processor", "_theme_processor")
-        ):
-            context = instance.build_render_context(page_file, build_page_request())
-        assert context["theme"] == "dark"
-        assert "Error in context processor _failing_processor" in caplog.text
-
-    def test_a_failing_processor_raises_under_strict_context(
-        self, processed_page
-    ) -> None:
-        instance, page_file = processed_page
-        with (
-            override_settings(TEMPLATES=_processors("_failing_processor")),
-            override_next_settings(STRICT_CONTEXT=True),
-            pytest.raises(KeyError, match="HTTP_X_THEME"),
-        ):
-            instance.build_render_context(page_file, build_page_request())
-
-
 class TestLayoutIntegration:
     """``Page`` composing page bodies through the ``layout.djx`` chain."""
 
@@ -675,14 +548,14 @@ class TestLoadPythonModule:
         invalid_file = tmp_path / "invalid.py"
         invalid_file.write_text("invalid python syntax {")
 
-        with pytest.raises(SyntaxError):
+        with pytest.raises(SyntaxError, match="never closed"):
             _load_python_module(invalid_file)
 
     def test_load_python_module_nonexistent_file(self, tmp_path) -> None:
         """A path that does not exist raises, since the memo never hands it over."""
         nonexistent_file = tmp_path / "nonexistent.py"
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileNotFoundError, match=r"nonexistent\.py"):
             _load_python_module(nonexistent_file)
 
     def test_load_python_module_no_spec_returns_none(self, tmp_path) -> None:
@@ -703,16 +576,6 @@ class TestLoadPythonModule:
         assert hasattr(result, "x")
         assert result.x == 42
         assert hasattr(result, "template")
-
-
-_BROKEN_SYNTAX = "def render( invalid syntax {\n"
-_BROKEN_IMPORT = "import missing_dep_xyz\n"
-
-_broken_sources = pytest.mark.parametrize(
-    "broken_source",
-    [_BROKEN_SYNTAX, _BROKEN_IMPORT],
-    ids=["syntax_error", "import_error"],
-)
 
 
 class TestBrokenPageImportView:
@@ -765,7 +628,10 @@ class TestBrokenPageImportView:
         _page_file, pattern = self._broken_pattern(
             page_instance, tmp_path, url_parser, broken_source
         )
-        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+        with (
+            override_settings(DEBUG=True),
+            pytest.raises(PageModuleImportError, match="failed to import"),
+        ):
             pattern.callback(build_page_request())
 
     def test_broken_page_traceback_does_not_grow_across_requests(
@@ -812,7 +678,7 @@ class TestBrokenPageImportView:
         )
         with (
             override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
-            pytest.raises(PageModuleImportError),
+            pytest.raises(PageModuleImportError, match="failed to import"),
         ):
             pattern.callback(build_page_request())
 
@@ -826,14 +692,14 @@ class TestBrokenPageImportView:
             page_instance, tmp_path, url_parser, broken_source
         )
 
-        with pytest.raises(PageModuleImportError):
+        with pytest.raises(PageModuleImportError, match="failed to import"):
             pattern.callback(build_page_request())
 
     def test_broken_page_recovers_after_fix_without_restart(
         self, page_instance, tmp_path, url_parser
     ) -> None:
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
-        with pytest.raises(PageModuleImportError):
+        with pytest.raises(PageModuleImportError, match="failed to import"):
             pattern.callback(build_page_request())
 
         stamp = page_file.stat().st_mtime + 10
@@ -884,7 +750,10 @@ class TestBrokenPageImportView:
         # Another subsystem's reload records the failure, as static discovery would.
         assert load_python_module_memo(page_file) is None
 
-        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+        with (
+            override_settings(DEBUG=True),
+            pytest.raises(PageModuleImportError, match="failed to import"),
+        ):
             pattern.callback(build_page_request())
 
     def test_render_page_broken_after_build_raises_under_debug(
@@ -905,7 +774,10 @@ class TestBrokenPageImportView:
         os.utime(page_file, (stamp, stamp))
         assert load_python_module_memo(page_file) is None
 
-        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
+        with (
+            override_settings(DEBUG=True),
+            pytest.raises(PageModuleImportError, match="failed to import"),
+        ):
             pattern.callback(build_page_request())
 
     def test_render_page_renders_under_debug_with_sibling_error_recorded(
@@ -941,140 +813,13 @@ class TestBrokenPageImportView:
 
         page_file, pattern = self._broken_pattern(page_instance, tmp_path, url_parser)
         # The build probes once, and every later request raises from the memo.
-        with pytest.raises(PageModuleImportError):
+        with pytest.raises(PageModuleImportError, match="failed to import"):
             pattern.callback(build_page_request())
         first_pass = calls.count(page_file)
-        with pytest.raises(PageModuleImportError):
+        with pytest.raises(PageModuleImportError, match="failed to import"):
             pattern.callback(build_page_request())
 
         assert calls.count(page_file) == first_pass
-
-
-class TestAuthorizationOutcomeBrokenPage:
-    """`authorization_outcome` applies the view's guard to out-of-band morphs."""
-
-    def _broken_file(self, tmp_path) -> Path:
-        page_dir = tmp_path / "sub"
-        page_dir.mkdir()
-        page_file = page_dir / "page.py"
-        page_file.write_text(_BROKEN_SYNTAX)
-        return page_file
-
-    def test_raises_under_debug(self, page_instance, tmp_path) -> None:
-        page_file = self._broken_file(tmp_path)
-        with override_settings(DEBUG=True), pytest.raises(PageModuleImportError):
-            page_instance.authorization_outcome(
-                page_file, build_page_request(), "/sub/"
-            )
-
-    def test_raises_under_strict_loading(self, page_instance, tmp_path) -> None:
-        page_file = self._broken_file(tmp_path)
-        with (
-            override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}),
-            pytest.raises(PageModuleImportError),
-        ):
-            page_instance.authorization_outcome(
-                page_file, build_page_request(), "/sub/"
-            )
-
-    def test_raises_in_prod_instead_of_404(self, page_instance, tmp_path) -> None:
-        page_file = self._broken_file(tmp_path)
-        with pytest.raises(PageModuleImportError):
-            page_instance.authorization_outcome(
-                page_file, build_page_request(), "/sub/"
-            )
-
-
-class TestAuthorizationOutcomeVirtualPage:
-    """`authorization_outcome` on a page whose body comes from `template.djx` alone."""
-
-    def test_a_page_without_a_module_resolves_its_static_body(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A `template.djx`-only page has no module to carry a guard or a render."""
-        (tmp_path / "template.djx").write_text("<p>virtual</p>")
-
-        response, dynamic = page_instance.authorization_outcome(
-            tmp_path / "page.py", build_page_request(), "/virtual/"
-        )
-
-        assert response is None
-        assert dynamic is False
-
-    def test_a_page_without_render_never_loads_its_body(
-        self, page_instance, tmp_path, monkeypatch
-    ) -> None:
-        """A page with no guard of its own loads no body to authorize."""
-        (tmp_path / "template.djx").write_text("<p>virtual</p>")
-        calls: list[Path] = []
-
-        def _record(file_path: Path, module: object) -> str:
-            calls.append(file_path)
-            return ""
-
-        monkeypatch.setattr(page_instance, "_load_static_body", _record)
-
-        page_instance.authorization_outcome(
-            tmp_path / "page.py", build_page_request(), "/virtual/"
-        )
-
-        assert calls == []
-
-
-class TestResolvePageBodyWithoutRender:
-    """`resolve_page_body` falls to the static body for a module with no render."""
-
-    def test_module_without_render_resolves_its_static_body(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A page.py carrying only a template attribute has no per-request body."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text('template = "<p>static</p>"')
-
-        module = load_python_module_memo(page_file)
-        resolution = page_instance.resolve_page_body(page_file, module, dep_cache={})
-
-        assert resolution.body == "<p>static</p>"
-        assert resolution.http_response is None
-        assert resolution.dynamic is False
-
-    def test_a_page_without_a_module_resolves_its_loader_body(
-        self, page_instance, tmp_path
-    ) -> None:
-        """A `template.djx`-only page has no module to carry a `render()`."""
-        (tmp_path / "template.djx").write_text("<p>virtual</p>")
-
-        resolution = page_instance.resolve_page_body(
-            tmp_path / "page.py", None, dep_cache={}
-        )
-
-        assert resolution.body == "<p>virtual</p>"
-        assert resolution.dynamic is False
-
-
-class TestLoadStaticBodyEdgeCases:
-    """`Page._load_static_body` edge cases."""
-
-    def test_unreadable_template_djx_returns_empty(
-        self, page_instance, tmp_path
-    ) -> None:
-        """UnicodeDecodeError on `template.djx` yields an empty body, not a crash."""
-        template_djx = tmp_path / "template.djx"
-        template_djx.write_bytes(b"\xff\xfe invalid utf-8")
-        page_file = tmp_path / "page.py"
-        page_file.write_text("")
-        assert page_instance._load_static_body(page_file, None) == ""
-
-    def test_has_template_returns_true_when_ancestor_layout_exists(
-        self, page_instance, tmp_path
-    ) -> None:
-        """`has_template` short-circuits to True when an ancestor layout applies."""
-        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
-        sub = tmp_path / "sub"
-        sub.mkdir()
-        page_file = sub / "page.py"
-        page_file.write_text("")
-        assert page_instance.has_template(page_file, module=None) is True
 
 
 class TestLayoutComposeBody:
@@ -1181,3 +926,207 @@ class TestCustomTemplateLoaderIntegration:
         page_file.write_text("")
         paths = page_instance._templates.source_paths(page_file)
         assert md in paths
+
+
+class TestUnifiedViewRendersTheHead:
+    """A layout's ``{% metadata %}`` renders the folded chain of the page it wraps."""
+
+    def test_the_head_carries_the_page_metadata(self, html: str) -> None:
+        assert html.startswith("<html><head><title>Headed</title>\n")
+        assert "<h1>headed page</h1>" in html
+
+    def test_the_description_is_escaped(self, html: str) -> None:
+        assert "<script>alert(1)</script>" not in html
+        assert 'content="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">' in html
+
+    def test_jsonld_never_closes_the_script(self, html: str) -> None:
+        assert "</script><!--" not in html
+        assert (
+            '<script type="application/ld+json">{"@context": "https://schema.org", '
+            '"@graph": [{"@type": "WebPage", "name": "\\u003C/script\\u003E\\u003C!--"}]}'
+            "</script>" in html
+        )
+
+    def test_og_is_derived_from_the_page(self, html: str) -> None:
+        assert '<meta property="og:title" content="Headed">' in html
+        assert '<meta property="og:url" content="https://acme.example/headed/">' in html
+        assert '<meta property="og:type" content="website">' in html
+
+    def test_the_canonical_is_the_self_url_under_the_base(self) -> None:
+        assert '<link rel="canonical" href="https://acme.example/headed/">' in (
+            _render("?utm=1&page=1")
+        )
+
+    @override_settings(NEXT_FRAMEWORK=PAGED)
+    def test_every_render_resolves_the_canonical_of_its_own_query(self) -> None:
+        second = _render("?utm=1&page=2")
+        third = _render("?page=3")
+        assert '<link rel="canonical" href="https://acme.example/headed/?page=2">' in (
+            second
+        )
+        assert '<link rel="canonical" href="https://acme.example/headed/?page=3">' in (
+            third
+        )
+
+
+class TestTheHeadThroughARequest:
+    """A request renders the head of the current page tree, braces in values literal."""
+
+    @override_settings(DEBUG=True)
+    def test_an_edited_ancestor_reaches_the_next_request_under_debug(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "pages"
+        ancestor = write_page(root, "", ROOT, body=HEAD)
+        write_page(root, "leaf", 'metadata = {"title": "Leaf"}\n', body=HEAD)
+        with routed(root):
+            first = Client().get("/leaf/")
+            touch_later(ancestor, ROOT.replace("Root", "Edited"))
+            second = Client().get("/leaf/")
+        assert_metadata(first, title="Leaf | Root", description="Root")
+        assert_metadata(second, title="Leaf | Edited", description="Edited")
+
+    def test_braces_in_a_title_and_a_site_name_stay_literal(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "pages"
+        write_page(
+            root,
+            "",
+            'metadata = {"title": {"template": "{title} | {site_name}"}, '
+            '"site_name": "Acme {Co}"}\n',
+            body=HEAD,
+        )
+        write_page(
+            root, "deals", 'metadata = {"title": "Deals {50%} {title}"}\n', body=HEAD
+        )
+        with routed(root):
+            response = Client().get("/deals/")
+        assert response.status_code == 200
+        assert_metadata(response, title="Deals {50%} {title} | Acme {Co}")
+
+
+class TestStaticFastPathView:
+    """A page without ``render()`` serves the cached composed template."""
+
+    def test_warm_get_opens_no_template_file(
+        self, page_instance, tmp_path, monkeypatch
+    ) -> None:
+        """The second GET reads nothing off disk and reuses the compiled template."""
+        page_file = build_nested_page(tmp_path)
+        view = unified_view(page_instance, page_file)
+
+        view(build_page_request(), title="One")
+        compiled = page_instance._templates.compiled[page_file]
+        reads = record_path_calls(monkeypatch, "read_text", path_under(tmp_path))
+        view(build_page_request(), title="Two")
+
+        assert reads == []
+        assert page_instance._templates.compiled[page_file] is compiled
+
+    def test_html_matches_the_body_resolution_path(
+        self, page_instance, tmp_path
+    ) -> None:
+        """The fast path composes the same HTML the per-request path composes."""
+        page_file = build_nested_page(tmp_path)
+        module = load_python_module_memo(page_file)
+        view = unified_view(page_instance, page_file)
+        request = build_page_request()
+
+        fast = view(request, title="Hi").content.decode()
+
+        reference = Page()
+        body = reference._load_static_body(page_file, module)
+        slow = reference.render_composed(
+            page_file, body, request, {"title": "Hi"}, dep_cache={}
+        )
+        assert fast == slow
+        assert fast == "<html><main><h1>Hi</h1></main></html>"
+
+    def test_created_layout_shows_up_without_a_restart(
+        self, page_instance, tmp_path, watched_template_edits
+    ) -> None:
+        """A ``layout.djx`` created next to the page wraps the next GET."""
+        page_file = build_nested_page(tmp_path, body="<h1>body</h1>")
+        view = unified_view(page_instance, page_file)
+        assert (
+            view(build_page_request()).content
+            == b"<html><main><h1>body</h1></main></html>"
+        )
+
+        (page_file.parent / "layout.djx").write_text(
+            "<article>{% template %}</article>"
+        )
+        touch_later(page_file.parent)
+
+        assert b"<article>" in view(build_page_request()).content
+
+    def test_deleted_layout_disappears_without_a_restart(
+        self, page_instance, tmp_path, watched_template_edits
+    ) -> None:
+        """An ancestor ``layout.djx`` deleted on disk leaves the next composition."""
+        page_file = build_nested_page(tmp_path, body="<h1>body</h1>")
+        view = unified_view(page_instance, page_file)
+        assert b"<main>" in view(build_page_request()).content
+
+        (page_file.parent.parent / "layout.djx").unlink()
+
+        assert view(build_page_request()).content == b"<html><h1>body</h1></html>"
+
+    def test_recompose_reads_the_current_template_attribute(
+        self, page_instance, tmp_path, watched_template_edits
+    ) -> None:
+        """A recomposed page reads `page.py` as it stands, not as it was built."""
+        (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
+        leaf = tmp_path / "leaf"
+        leaf.mkdir()
+        page_file = leaf / "page.py"
+        page_file.write_text('template = "<p>first</p>"')
+        view = unified_view(page_instance, page_file)
+        assert b"first" in view(build_page_request()).content
+
+        stamp = page_file.stat().st_mtime + 10
+        page_file.write_text('template = "<p>second</p>"')
+        os.utime(page_file, (stamp, stamp))
+        (tmp_path / "layout.djx").write_text("<html><body>{% template %}</body></html>")
+
+        assert b"second" in view(build_page_request()).content
+
+    def test_template_loaded_fires_on_warm_up_only(
+        self, page_instance, tmp_path, capture_template_loaded
+    ) -> None:
+        """The signal reports the composition, so a warm hit stays silent."""
+        page_file = build_nested_page(tmp_path)
+        view = unified_view(page_instance, page_file)
+
+        view(build_page_request())
+        assert [event.kwargs["file_path"] for event in capture_template_loaded] == [
+            page_file
+        ]
+
+        view(build_page_request())
+        assert len(capture_template_loaded) == 1
+
+
+class TestBoundaryChainLayers:
+    """The chain rides the layer it composed with, a lookup only without one."""
+
+    def test_a_held_skeleton_without_a_chain_looks_it_up(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_instance = Page()
+        page_instance._templates.skeleton[page_file] = "held"
+
+        text, chain = page_instance.layout_skeleton(page_file)
+
+        assert text == "held"
+        assert chain is page_boundaries(page_file)
+
+    def test_a_registered_template_drops_its_chain(self, tmp_path) -> None:
+        page_file = tmp_path / "page.py"
+        page_instance = Page()
+        page_instance._templates.composed_chains[page_file] = NO_BOUNDARIES
+
+        page_instance.register_template(page_file, "<p>x</p>")
+
+        assert page_file not in page_instance._templates.composed_chains
+        assert page_instance.composed_chain(page_file) is page_boundaries(page_file)

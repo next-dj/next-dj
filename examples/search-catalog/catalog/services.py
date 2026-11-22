@@ -4,7 +4,7 @@ from typing import Any
 
 from django.core.cache import cache
 
-from .models import Category, Filters, Lead, Product
+from .models import Category, Filters, Lead, Product, ProductQuerySet
 
 
 CACHE_KEY_PREFIX = "catalog.search."
@@ -12,36 +12,38 @@ CACHE_TTL = 60
 
 
 def _cache_key(filters: Filters, category_pk: int | None) -> str:
-    """Build a stable hash-based cache key for the given filter set."""
+    """Build a stable hash-based cache key for the rows a filter set selects."""
     payload: dict[str, Any] = {
         "q": filters.q,
         "brands": list(filters.brands),
         "price_min": str(filters.price_min) if filters.price_min is not None else None,
         "price_max": str(filters.price_max) if filters.price_max is not None else None,
         "in_stock": filters.in_stock,
-        "sort": filters.sort,
         "category": category_pk,
     }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return CACHE_KEY_PREFIX + hashlib.blake2b(blob, digest_size=16).hexdigest()
 
 
-def cached_search(
-    filters: Filters, *, category: Category | None = None
-) -> list[Product]:
-    """Return every product a filter set selects, reading from the cache when possible.
+def search(filters: Filters, *, category: Category | None = None) -> ProductQuerySet:
+    """Return the products a filter set selects, lazy so a pager reads one window."""
+    matched = Product.objects.matching(filters)
+    if category is not None:
+        matched = matched.filter(category=category)
+    return matched
 
-    The rows are cached unpaged, so one entry serves every window a pager cuts.
+
+def cached_count(filters: Filters, *, category: Category | None = None) -> int:
+    """Return how many products a filter set selects, cached for `CACHE_TTL` seconds.
+
+    The sort orders the rows without changing how many there are, so it stays out.
     """
     key = _cache_key(filters, category.pk if category else None)
-    rows = cache.get(key)
-    if rows is None:
-        matched = Product.objects.matching(filters)
-        if category is not None:
-            matched = matched.filter(category=category)
-        rows = list(matched)
-        cache.set(key, rows, CACHE_TTL)
-    return rows
+    count = cache.get(key)
+    if count is None:
+        count = search(filters, category=category).count()
+        cache.set(key, count, CACHE_TTL)
+    return count
 
 
 def featured_products(count: int) -> list[Product]:

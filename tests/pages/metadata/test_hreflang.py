@@ -43,6 +43,15 @@ def i18n() -> Iterator[None]:
         yield
 
 
+@pytest.fixture()
+def thread_urlconf() -> Iterator[None]:
+    """Give the thread the i18n URLconf over another root one, as a request has it."""
+    with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
+        set_urlconf(I18N_URLCONF)
+        yield
+        set_urlconf(None)
+
+
 @pytest.mark.usefixtures("i18n")
 class TestHreflangUrls:
     """A path lists every language its route resolves under, or nothing below two."""
@@ -98,14 +107,9 @@ class TestHreflangUrls:
         monkeypatch.setattr(hreflang_module, "reverse", fake_reverse)
         assert hreflang_urls("/headed/") == (("en", "/headed/"), ("de", "/de/headed/"))
 
+    @pytest.mark.usefixtures("thread_urlconf")
     def test_the_thread_urlconf_is_honoured(self) -> None:
-        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
-            set_urlconf(I18N_URLCONF)
-            try:
-                pairs = hreflang_urls("/headed/")
-            finally:
-                set_urlconf(None)
-        assert pairs[1] == ("de", "/de/headed/")
+        assert hreflang_urls("/headed/")[1] == ("de", "/de/headed/")
 
     def test_translations_are_memoised(self, monkeypatch) -> None:
         calls = record_calls(monkeypatch, hreflang_module, "reverse")

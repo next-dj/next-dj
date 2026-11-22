@@ -1,15 +1,15 @@
 {% load catalog_qs %}
 <nav class="flex items-center justify-between text-sm">
-  {% if page_obj.has_previous %}
+  {% if products.previous %}
     <a class="rounded-md border border-border bg-background px-3 py-1 hover:bg-accent"
-       href="?{% querystring page=page_obj.previous_page_number %}">Previous</a>
+       href="?{% querystring page=products.previous %}">Previous</a>
   {% else %}
     <span></span>
   {% endif %}
-  <span class="text-muted-foreground">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-  {% if page_obj.has_next %}
+  <span class="text-muted-foreground">{{ position }}</span>
+  {% if products.next %}
     <a class="rounded-md border border-border bg-background px-3 py-1 hover:bg-accent"
-       href="?{% querystring page=page_obj.next_page_number %}">Next</a>
+       href="?{% querystring page=products.next %}">Next</a>
   {% else %}
     <span></span>
   {% endif %}

@@ -1,35 +1,27 @@
 import inspect
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 from django.http import HttpRequest
 
-from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
+from next.deps import (
+    DDependencyBase,
+    Loader,
+    RegisteredParameterProvider,
+    ResolutionContext,
+)
+from next.partial import NumberPager
 from next.urls import get_multi_values
 
-from .models import Filters
+from .models import Filters, Product
 
 
-DEFAULT_PER_PAGE = 6
-MAX_PER_PAGE = 60
+listing = NumberPager(per_page=6)
 
-
-@dataclass(frozen=True, slots=True)
-class PageRequest:
-    """Validated paging descriptor the category listing hands its `Paginator`."""
-
-    number: int
-    per_page: int
+product_cards = Loader(Product.objects.cards)
 
 
 class DFilters(DDependencyBase["Filters"]):
     """DI marker that resolves to a `Filters` snapshot."""
-
-    __slots__ = ()
-
-
-class DPage(DDependencyBase["PageRequest"]):
-    """DI marker that resolves to a clamped `PageRequest`."""
 
     __slots__ = ()
 
@@ -73,32 +65,3 @@ class FiltersProvider(RegisteredParameterProvider):
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> Filters:
         """Return a `Filters` snapshot derived from the current request."""
         return parse_filters(context.request)
-
-
-class PageProvider(RegisteredParameterProvider):
-    """Resolve `DPage`-annotated parameters into a `PageRequest`."""
-
-    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Match `DPage` annotations when a request is attached."""
-        if param.annotation is not DPage:
-            return False
-        return getattr(context, "request", None) is not None
-
-    def static_can_handle(self, param: inspect.Parameter) -> bool | None:
-        """Rule out a foreign annotation. A match still needs an attached request."""
-        return None if param.annotation is DPage else False
-
-    def resolve(
-        self, _param: inspect.Parameter, context: ResolutionContext
-    ) -> PageRequest:
-        """Return a clamped `PageRequest` derived from `?page` and `?per_page`."""
-        g = context.request.GET
-        try:
-            number = max(1, int(g.get("page") or 1))
-        except ValueError:
-            number = 1
-        try:
-            per_page = int(g.get("per_page") or DEFAULT_PER_PAGE)
-        except ValueError:
-            per_page = DEFAULT_PER_PAGE
-        return PageRequest(number=number, per_page=min(MAX_PER_PAGE, max(1, per_page)))

@@ -103,13 +103,13 @@ def _journey(number: int) -> list[list[AuditEntry]]:
     return posts
 
 
-def seed_demo() -> None:
-    """Fill an empty audit log with the POSTs of eight requesters, a minute apart.
+def seed_demo() -> int:
+    """Fill an empty audit log with the POSTs of eight requesters and count its rows.
 
     The rows of one POST share a stamp, the tie the `pk` of the log ordering breaks.
     """
     if AuditEntry.objects.exists():
-        return
+        return 0
     posts = [post for number in range(REQUESTERS) for post in _journey(number)]
     first = timezone.now().replace(microsecond=0) - timedelta(minutes=len(posts))
     rows: list[AuditEntry] = []
@@ -119,3 +119,4 @@ def seed_demo() -> None:
             row.created_at = first + timedelta(minutes=minute)
             rows.append(row)
     AuditEntry.objects.bulk_update(rows, ["created_at"])
+    return len(rows)

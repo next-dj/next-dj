@@ -58,6 +58,9 @@ Every helper is importable from the ``next.testing`` package as well as from its
    * - ``seo``
      - ``parse_sitemap``, ``SitemapUrl``
      - Reading the URLs a sitemap or a sitemap index response lists.
+   * - ``streaming``, ``boundaries``, ``tokens``
+     - ``read_stream``, ``aread_stream``, ``StreamedPage``, ``StreamedChunk``, ``boundary_errors``, ``boundary_gate``, ``parallel_boundaries``, ``issue_boundary_token``, ``freeze_token_clock``, ``expire_boundary_token``
+     - Reading a streamed page, holding a deferred job, rendering the error UI of a boundary, and minting tokens, see `Testing deferred boundaries`_.
    * - ``realtime``
      - ``memory_broker``, ``capture_published``, ``PublishedMessages``, ``SseReader``, ``SseEvent``, ``WebSocketCommunicator``, ``MemoryPort``, ``issue_socket_ticket``, ``aissue_socket_ticket``, ``SocketTicket``, ``override_websocket_mount``
      - Isolating the broker, recording publications, and driving an SSE stream or a WebSocket, see `Testing realtime`_.
@@ -845,6 +848,14 @@ Both accept ``request``, ``form``, ``url_kwargs``, and ``context_data``, and ``m
 
 Pass ``resolve_call`` a callable whose annotated parameters a provider can fill, then assert on the returned mapping.
 Use these helpers for testing custom providers without booting the router.
+
+Testing deferred boundaries
+---------------------------
+
+``NextClient.get_stream(url)`` reads a page with ``stream`` boundaries as a threaded server streams it, and returns a ``StreamedPage`` with the ``shell`` that carries the loading UI, the ``chunks`` that settle each boundary, and ``final_html()``, the page with every chunk applied.
+``NextClient.get_boundary(url, name)`` reloads a client-trip component the way the browser does.
+A boundary that fails re-raises in the test unless the block runs under ``boundary_errors("render")``, ``boundary_gate(component=...)`` holds a job until the test releases it, and ``parallel_boundaries()`` runs the jobs of the block on the pool.
+The recipe with every helper is :doc:`/content/howto/test-a-page-with-deferred-boundaries`.
 
 Testing realtime
 ----------------

@@ -151,7 +151,7 @@ class TestMoreHasPageWindow:
 
 
 class TestPagerParamsUnique:
-    """next.E244 flags two pagers of one page reading the same query parameter."""
+    """next.E236 flags two pagers of one page reading the same query parameter."""
 
     def test_two_pagers_sharing_a_param_are_flagged(self, root: Path) -> None:
         source = (

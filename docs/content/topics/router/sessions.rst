@@ -69,9 +69,7 @@ A navigation request that also carries ``X-Next-Prefetch`` is a prefetch, at one
 ``X-Next-Prefetch: full`` is sent at the press of a link and asks for the page as a navigation gets it, deferred jobs run and the answer streamed when the transport can stream, see :doc:`prefetch`.
 ``request.next.purpose`` is ``prefetch`` for both, and ``request.next.depth`` is ``Depth.SHELL`` or ``Depth.FULL``.
 
-A prefetch answer may be shown to the visitor with no further request, a complete one after a hover and a full one after a press.
-Code that must act on a visit therefore declares ``page.router(prefetch=False)``.
-A counter that skips prefetches still counts a prefetch at the full depth, ``request.next.depth == "full"``, or counts in the browser on ``router:commit``.
+A prefetch answer may be shown to the visitor with no further request, so code that must act on a visit does not rely on the prefetch request, see :ref:`topics-router-prefetch-visits`.
 
 Two answers refuse a prefetch before any render.
 
@@ -97,7 +95,7 @@ A zone response also varies on ``X-Next-Origin`` while active links are on, beca
 
 A page cached publicly stays cacheable for document requests, see :doc:`/content/topics/caching`.
 Its navigation envelope says so in its ``shared`` field, and the router fetches that path as a plain document on later navigations within the life of the page, so a shared cache can answer, and reads the swap out of the document as ``ROUTER["FOREIGN"] = "extract"`` does.
-A page whose ``cache`` forbids every store keeps no back-forward copy in the browser, and :ref:`next.W178 <ref-system-checks>` suggests ``no_cache`` instead.
+A page whose ``cache`` forbids every store keeps no back-forward copy in the browser, and ``next.W178`` suggests ``no_cache`` instead.
 
 Security
 --------

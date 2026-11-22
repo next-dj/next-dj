@@ -1,3 +1,4 @@
+import gzip
 from io import StringIO
 
 import pytest
@@ -18,6 +19,13 @@ def test_the_home_page_is_public(next_client) -> None:
     response = next_client.get("/")
     assert response.status_code == 200
     assert b"It works" in response.content
+
+
+def test_a_page_leaves_compressed_for_a_client_that_accepts_it(next_client) -> None:
+    response = next_client.get("/", headers={"Accept-Encoding": "gzip"})
+    assert response["Content-Encoding"] == "gzip"
+    assert "Accept-Encoding" in response["Vary"]
+    assert b"It works" in gzip.decompress(response.content)
 
 
 def test_the_main_nav_marks_the_page_on_screen(next_client, alice) -> None:

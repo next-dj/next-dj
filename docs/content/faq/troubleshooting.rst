@@ -29,8 +29,8 @@ Page renders without layout
 
 A layout must contain the ``{% template %}`` placeholder, or the paired ``{% #template %}...{% /template %}`` form whose body is a fallback.
 Without one the framework skips that layout during composition, so its markup disappears from the rendered page while the body still renders through the remaining ancestor layouts.
-``manage.py check`` reports :ref:`next.W001 <ref-system-checks>` for a layout that carries no placeholder.
-A layout carrying more than one draws :ref:`next.W078 <ref-system-checks>`, because composition fills the first placeholder and every other renders its own fallback in place of the page.
+``manage.py check`` reports ``next.W001`` for a layout that carries no placeholder.
+A layout carrying more than one draws ``next.W078``, because composition fills the first placeholder and every other renders its own fallback in place of the page.
 
 Confirm that ``layout.djx`` sits in the same directory as ``page.py`` or in an ancestor directory.
 
@@ -64,7 +64,7 @@ The ``page.py`` behind the URL raised while importing.
 The view raises ``PageModuleImportError`` with the original exception as its ``__cause__``, whatever ``DEBUG`` and ``STRICT_LOADING`` hold.
 Under ``DEBUG`` the technical 500 page points at the failing line.
 Without ``DEBUG`` the client sees the generic 500 page, and the server log holds the ``Could not import page module`` record and the ``django.request`` record with the full traceback.
-``uv run python manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message.
+``uv run python manage.py check`` reports the same failure as ``next.E017``, naming the exception type and message.
 See :doc:`/content/ref/pages` for the full import-failure contract.
 
 next.E018 on multiple keyless context functions
@@ -123,7 +123,7 @@ Sign in, or hide the form from anonymous visitors in the template, since the gua
 
 The form declares ``Meta.success_message`` but the messages framework is not fully installed.
 Add ``django.contrib.messages`` to ``INSTALLED_APPS`` and ``django.contrib.messages.middleware.MessageMiddleware`` to ``MIDDLEWARE``.
-The framework raises rather than dropping the requested message silently, and ``manage.py check`` reports the gap upfront as :ref:`next.W061 <ref-system-checks>`.
+The framework raises rather than dropping the requested message silently, and ``manage.py check`` reports the gap upfront as ``next.W061``.
 
 next.E041 collision
 ~~~~~~~~~~~~~~~~~~~
@@ -143,7 +143,7 @@ Wizard draft disappears between steps
 
 The default ``SessionFormWizardBackend`` stores drafts in the session, so a lost draft means the session itself did not survive.
 Confirm that ``django.contrib.sessions`` is in ``INSTALLED_APPS`` and ``SessionMiddleware`` is enabled.
-``manage.py check`` reports :ref:`next.W056 <ref-system-checks>` when sessions are missing while wizards are registered.
+``manage.py check`` reports ``next.W056`` when sessions are missing while wizards are registered.
 With ``CacheFormWizardBackend`` the usual cause is a local-memory cache under a multi-worker server, where each worker holds its own copy of the draft.
 Point that backend at a shared cache such as Redis, and check that its ``TIMEOUT`` does not expire mid-flow.
 
@@ -433,7 +433,7 @@ The router still maps it to a URL.
 
 Captured-parameter directories (names in brackets) must serve a page, a ``page.py`` with a body or a lone ``template.djx``, at any depth the router walks, which leaves out ``_name`` folders.
 A ``layout.djx`` or a ``page.py`` without a body does not count, since neither routes a URL.
-Otherwise ``manage.py check`` reports :ref:`next.E010 <ref-system-checks>`.
+Otherwise ``manage.py check`` reports ``next.E010``.
 
 URL name not found
 ~~~~~~~~~~~~~~~~~~
@@ -451,7 +451,7 @@ Read it with a parameter named ``my_id`` annotated ``DUrl[str]``, or rename the 
 Two pages collide under the same URL pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The system check :ref:`next.E015 <ref-system-checks>` reports when the same Django URL pattern is produced from multiple sources.
+The system check ``next.E015`` reports when the same Django URL pattern is produced from multiple sources.
 This happens when two backends each walk a directory that maps to the same logical path.
 Verify that ``DIRS`` and ``APP_DIRS`` in your page backends do not overlap.
 

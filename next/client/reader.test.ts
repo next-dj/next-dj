@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier } from "./apply";
 import type { Applied, AssetBridge } from "./apply";
-import type { Chunk } from "./boundary";
+import type { Fill } from "./drain";
 import { createPartial } from "./partial";
 import {
   ACCEPT,
@@ -13,9 +13,9 @@ import {
   now,
   stamped,
 } from "./protocol";
-import { createReader } from "./reader";
+import { createReader, frames } from "./reader";
 import type { ReaderHost } from "./reader";
-import { chunkModules, manualPollClock } from "./test-doubles";
+import { chunkModules, fill, manualFrames, manualPollClock } from "./test-doubles";
 import { Wire, zoneKey } from "./wire";
 import type { Outcome, StreamReader, WireRequest } from "./wire";
 
@@ -32,15 +32,12 @@ interface Body {
   fail(error: Error): void;
 }
 
-let frames: FrameRequestCallback[] = [];
+let painter: ReturnType<typeof manualFrames>;
 let listening = new AbortController();
 
 beforeEach(() => {
-  frames = [];
   listening = new AbortController();
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
-    frames.push(callback),
-  );
+  painter = manualFrames();
   vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
   delete window.$nx;
   document.body.innerHTML = '<section data-next-zone="z">old</section>';
@@ -53,7 +50,7 @@ afterEach(() => {
 });
 
 function frame(): void {
-  for (const callback of frames.splice(0)) callback(0);
+  painter.paint();
 }
 
 async function flush(): Promise<void> {
@@ -112,13 +109,8 @@ const opening = (...ids: string[]): string =>
     },
   });
 
-const patch = (id: string, html: string, extra: Partial<Chunk> = {}): string =>
-  sse("patch", {
-    z: id,
-    s: "ready",
-    e: { ops: [{ op: "inner", target: { boundary: id }, html }], assets: [] },
-    ...extra,
-  });
+const patch = (id: string, html: string, extra: Partial<Fill> = {}): string =>
+  sse("patch", fill(id, html, extra));
 
 const end = (code: string): string => sse("end", { code });
 
@@ -496,7 +488,7 @@ describe("a streamed partial answer", () => {
     ]);
   });
 
-  it("skips a malformed frame after the first patch and reads on", async () => {
+  it("reports a malformed frame after the first patch and reads on", async () => {
     const h = harness();
     const source = body();
     h.respond(streamed(source));
@@ -513,7 +505,9 @@ describe("a streamed partial answer", () => {
     await expect(sent).resolves.toMatchObject({ status: "ok" });
     expect(text("b-1")).toBe("one");
     expect(marks("b-1")).toEqual(READY);
-    expect(h.events("partial:error")).toEqual([]);
+    expect(h.events("partial:error")).toEqual([
+      { kind: "parse", body: "{nope", error: expect.any(SyntaxError) },
+    ]);
   });
 
   it("stops at a first patch the applier rejects", async () => {
@@ -613,7 +607,7 @@ describe("a streamed partial answer", () => {
     const sent = h.load();
     source.send(HELLO + opening("b-1") + patch("b-1", "one") + end("complete"));
     await expect(sent).resolves.toMatchObject({ status: "ok" });
-    expect(frames).toHaveLength(0);
+    expect(painter.queued).toHaveLength(0);
     expect(text("b-1")).toBe("one");
   });
 });
@@ -977,10 +971,10 @@ describe("the streamed document", () => {
       e: { ops: [{ op: "inner", target: { boundary: "b-1" }, html: "one" }] },
     });
     const h = harness();
-    expect(frames).toHaveLength(0);
+    expect(painter.queued).toHaveLength(0);
     h.ready();
     h.ready();
-    expect(frames).toHaveLength(1);
+    expect(painter.queued).toHaveLength(1);
     frame();
     expect(text("b-1")).toBe("one");
     expect(h.events("partial:applied")).toHaveLength(1);
@@ -1003,5 +997,44 @@ describe("the streamed document", () => {
     frame();
     await sent;
     expect(marks("b-9")).toEqual(INCOMPLETE);
+  });
+});
+
+describe("the frames of an event stream", () => {
+  async function parsed(parts: (string | Uint8Array)[]): Promise<string[][]> {
+    const encoder = new TextEncoder();
+    const queue = parts.map((part) =>
+      typeof part === "string" ? encoder.encode(part) : part,
+    );
+    const read = (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+      const value = queue.shift();
+      return Promise.resolve(
+        value ? { done: false, value } : { done: true, value: undefined },
+      );
+    };
+    const found: string[][] = [];
+    for await (const item of frames({ read })) found.push(item);
+    return found;
+  }
+
+  const euro = new TextEncoder().encode("data: \u20ac\n\n");
+
+  it.each([
+    ["one frame", ["event: patch\ndata: 1\n\n"], [["patch", "1"]]],
+    ["a CRLF split across reads", ["event: a\r", "\ndata: x\r\n\r\n"], [["a", "x"]]],
+    ["a bare CR", ["data: x\r\r"], [["", "x"]]],
+    ["data over several lines", ["data: a\ndata: b\n\n"], [["", "a\nb"]]],
+    ["a field without its space", ["data:x\n\n"], [["", "x"]]],
+    ["a frame without data", ["event: ping\n\ndata: y\n\n"], [["", "y"]]],
+    ["a comment and a field it ignores", [": hi\nid: 3\ndata: y\n\n"], [["", "y"]]],
+    ["a line split across reads", ["da", "ta: z", "\n\n"], [["", "z"]]],
+    ["a frame the body cuts short", ["data: z\n"], []],
+    [
+      "a character split across reads",
+      [euro.slice(0, 7), euro.slice(7)],
+      [["", "\u20ac"]],
+    ],
+  ])("reads %s", async (_name, parts, expected) => {
+    expect(await parsed(parts)).toEqual(expected);
   });
 });

@@ -78,13 +78,12 @@ class TestGzipBackend:
 class TestBrotliBackend:
     """`BrotliBackend` adapts `brotli` and `brotlicffi`, unavailable without both."""
 
-    def test_unavailable_without_a_library(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_unavailable_without_a_library(self) -> None:
         backend = BrotliBackend()
         assert backend.available() is False
         with pytest.raises(CodecUnavailableError, match="'br'"):
             backend.create(4, 18)
-        with pytest.raises(CodecUnavailableError):
+        with pytest.raises(CodecUnavailableError, match="'br'"):
             backend.compress_once(b"x", 4)
 
     @pytest.mark.parametrize("name", ["brotli", "brotlicffi"])
@@ -118,13 +117,12 @@ class TestBrotliBackend:
 class TestZstdBackend:
     """`ZstdBackend` maps `compression.zstd` and `zstandard` to one contract."""
 
-    def test_unavailable_without_a_library(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_unavailable_without_a_library(self) -> None:
         backend = ZstdBackend()
         assert backend.available() is False
         with pytest.raises(CodecUnavailableError, match="'zstd'"):
             backend.create(3, 17)
-        with pytest.raises(CodecUnavailableError):
+        with pytest.raises(CodecUnavailableError, match="'zstd'"):
             backend.compress_once(b"x", 3)
 
     def test_the_standard_library_wins(self, monkeypatch) -> None:
@@ -257,11 +255,10 @@ class TestDecoders:
         decode = ZstdBackend().decoder()
         assert decode(compressor.compress(b"page") + compressor.flush()) == b"page"
 
-    def test_a_missing_library_has_no_decoder(self, monkeypatch) -> None:
-        install(monkeypatch)
-        with pytest.raises(CodecUnavailableError):
+    def test_a_missing_library_has_no_decoder(self) -> None:
+        with pytest.raises(CodecUnavailableError, match="'zstd'"):
             ZstdBackend().decoder()
-        with pytest.raises(CodecUnavailableError):
+        with pytest.raises(CodecUnavailableError, match="'br'"):
             BrotliBackend().decoder()
 
     def test_a_backend_without_a_decoder_says_so(self) -> None:
@@ -273,6 +270,7 @@ class TestDecoders:
             Plain().decoder()
 
 
+@pytest.mark.real_codecs()
 class TestRealLibraries:
     """The adapters drive the real codec libraries wherever they are installed."""
 

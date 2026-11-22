@@ -22,7 +22,7 @@ from next.forms.origin import (
 )
 from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
 from next.pages.access import forget_page_access
-from next.transactions import AtomicOverride
+from next.transactions import WRITES, AtomicOverride
 from tests.benchmarks.factories import STAND_IN_PK
 from tests.support import PermissionHolder, QuietHolder, routed
 from tests.support.access import write_guard
@@ -168,13 +168,14 @@ class TestBenchDispatchTransaction:
             pytest.param(None, id="default"),
             pytest.param(AtomicOverride(atomic=True), id="atomic"),
             pytest.param(AtomicOverride(atomic=False), id="non-atomic"),
+            pytest.param(AtomicOverride(atomic=WRITES), id="writes"),
         ],
     )
     @pytest.mark.benchmark(group="forms.dispatch.atomic")
     def test_dispatch_valid_form_by_meta_atomic(
         self, atomic: AtomicOverride | None, benchmark
     ) -> None:
-        inside = atomic is None or atomic.atomic
+        inside = atomic is None or atomic.atomic is True
         backend, meta = _declared_action(atomic)
         request = _action_request("/items/42/", name="bench")
         probe = ActionRegistration(

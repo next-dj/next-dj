@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from contextlib import nullcontext
+from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
-from .cache import _CACHE_MISS
+from next.ports import run_bridged
+
+from .cache import _CACHE_MISS, RequestMemo, request_memo
 from .errors import DependencyCycleError
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine, Mapping
+    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
     from contextlib import AbstractContextManager
     from types import TracebackType
 
@@ -62,6 +64,19 @@ class _Failure:
             raise
 
 
+class _Tree:
+    """What a root scope and its layers share, closed for every layer by the root."""
+
+    __slots__ = ("closed", "guard", "loop", "slots")
+
+    def __init__(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """Open the tree on the request loop, `None` until a resolve binds one."""
+        self.loop = loop
+        self.closed = False
+        self.guard = threading.RLock()
+        self.slots: dict[str, object] = {}
+
+
 class RequestScope:
     """Compute each shared dependency once per request as a task the scope owns.
 
@@ -73,13 +88,11 @@ class RequestScope:
         "_closed",
         "_closing",
         "_errors",
-        "_guard",
         "_layers",
-        "_loop",
         "_parent",
         "_pending",
-        "_slots",
         "_tasks",
+        "_tree",
         "_used",
         "_values",
     )
@@ -94,38 +107,42 @@ class RequestScope:
 
         That is `loop`, else the running one, so a scope built off it has it at once.
         """
-        self._values: dict[str, object] = {} if seed is None else dict(seed)
+        tree = _Tree(running_loop() if loop is None else loop)
+        self._open({} if seed is None else dict(seed), None, tree)
+
+    def _open(
+        self, values: dict[str, object], parent: RequestScope | None, tree: _Tree
+    ) -> None:
+        """Hold `values` with no work yet, the task, layer and callback sets unmade."""
+        self._values = values
         self._errors: dict[str, _Failure] = {}
         self._pending: dict[str, asyncio.Future[object] | None] = {}
         self._chains: dict[str, list[str]] = {}
-        self._tasks: set[asyncio.Task[object]] = set()
-        self._layers: set[RequestScope] = set()
-        self._parent: RequestScope | None = None
-        self._closed = False
-        self._closing: list[Callable[[], object]] = []
-        self._slots: dict[str, object] = {}
-        self._guard = threading.RLock()
+        self._tasks: set[asyncio.Task[object]] | None = None
+        self._layers: set[RequestScope] | None = None
+        self._closing: list[Callable[[], object]] | None = None
+        self._parent = parent
         self._used = False
-        self._loop = running_loop() if loop is None else loop
+        self._closed = False
+        self._tree = tree
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop | None:
         """Return the loop of the request, the one its root was built or used on."""
-        root: RequestScope = self._root()
-        return root._loop
+        return self._tree.loop
 
     def slot[T](self, key: str, make: Callable[[RequestScope], T]) -> T:
         """Return what the root scope holds under `key`, made from the root on a miss.
 
         Any thread may call it, and `make` runs once a key under the scope lock.
         """
-        root: RequestScope = self._root()
-        found = root._slots.get(key, _CACHE_MISS)
+        tree = self._tree
+        found = tree.slots.get(key, _CACHE_MISS)
         if found is _CACHE_MISS:
-            with root._guard:
-                found = root._slots.get(key, _CACHE_MISS)
+            with tree.guard:
+                found = tree.slots.get(key, _CACHE_MISS)
                 if found is _CACHE_MISS:
-                    found = root._slots[key] = make(root)
+                    found = tree.slots[key] = make(self._root())
         return cast("T", found)
 
     def on_close(self, callback: Callable[[], object]) -> None:
@@ -133,9 +150,12 @@ class RequestScope:
 
         Callbacks run before any computation is cancelled, so they can fail its waiters.
         """
-        with self._guard:
-            if not self._closed:
-                self._used = True
+        tree = self._tree
+        with tree.guard:
+            if not self._shut():
+                self._enlist()
+                if self._closing is None:
+                    self._closing = []
                 self._closing.append(callback)
                 return
         callback()
@@ -143,15 +163,10 @@ class RequestScope:
     def layer(self) -> RequestScope:
         """Return a local layer that keeps its writes and reads this scope on a miss.
 
-        Any thread may call it. Layers are held strongly, as a loop holds tasks weakly.
+        Any thread may call it. Its parent holds it from its first claim or callback on.
         """
-        child = RequestScope(loop=self._loop)
-        child._parent = self
-        with self._guard:
-            self._used = True
-            child._closed = self._closed
-            if not self._closed:
-                self._layers.add(child)
+        child: RequestScope = RequestScope.__new__(RequestScope)
+        child._open({}, self, self._tree)
         return child
 
     def get(self, key: str) -> object:
@@ -185,11 +200,12 @@ class RequestScope:
 
         `compute` is called only on a miss and at most once per claim.
         """
-        if self._closed:
+        tree = self._tree
+        if self._shut():
             msg = f'The request scope is closed, so "{key}" cannot be computed.'
             raise RuntimeError(msg)
-        if self._loop is None:
-            self._bind_loop()
+        if tree.loop is None:
+            tree.loop = asyncio.get_running_loop()
         value = self.get(key)
         if value is not _CACHE_MISS:
             return value
@@ -209,16 +225,15 @@ class RequestScope:
 
         Every map is dropped at the end, the slots stay for a late reader to see closed.
         """
-        with self._guard:
-            self._closed = True
-            callbacks, self._closing = self._closing, []
-            layers = list(self._layers)
-            self._layers.clear()
+        with self._tree.guard:
+            self._mark_closed()
+            callbacks, self._closing = self._closing or (), None
+            layers, self._layers = self._layers or (), None
         for callback in callbacks:
             callback()
         if layers:
             await asyncio.gather(*(layer.close() for layer in layers))
-        tasks = list(self._tasks)
+        tasks = list(self._tasks or ())
         for task in tasks:
             task.cancel()
         if tasks:
@@ -233,12 +248,22 @@ class RequestScope:
 
         Without a claim, a layer or a close callback its loop owns nothing to close.
         """
-        with self._guard:
+        with self._tree.guard:
             if self._used:
                 return False
-            self._closed = True
+            self._mark_closed()
         self._values.clear()
         return True
+
+    def _shut(self) -> bool:
+        return self._closed or self._tree.closed
+
+    def _mark_closed(self) -> None:
+        """Close this scope alone, or the whole request when it is the root."""
+        if self._parent is None:
+            self._tree.closed = True
+        else:
+            self._closed = True
 
     def _root(self) -> RequestScope:
         scope = self
@@ -246,25 +271,38 @@ class RequestScope:
             scope = scope._parent
         return scope
 
-    def _bind_loop(self) -> None:
-        """Adopt the running loop as the request loop, for a scope built off it."""
-        loop = asyncio.get_running_loop()
-        self._loop = loop
-        root: RequestScope = self._root()
-        if root._loop is None:
-            root._loop = loop
+    def _enlist(self) -> None:
+        """Mark the scope as owning work, so its parent holds it until the close.
+
+        A layer that never claims stays unheld, and its render drops it at the end.
+        """
+        with self._tree.guard:
+            held: RequestScope = self
+            while not held._used:
+                held._used = True
+                if held._parent is None:
+                    return
+                parent: RequestScope = held._parent
+                if parent._layers is None:
+                    parent._layers = set()
+                parent._layers.add(held)
+                held = parent
 
     async def _claim(
         self, key: str, compute: Callable[[], Coroutine[Any, Any, object]]
     ) -> object:
-        self._used = True
+        if not self._used:
+            self._enlist()
         context = copy_context()
         context.run(_OWNER.set, (self, key))
         coroutine = context.run(compute)
         self._pending[key] = None
         task = asyncio.create_task(coroutine, context=context)
-        self._tasks.add(task)
-        task.add_done_callback(partial(self._settle, key))
+        tasks = self._tasks
+        if tasks is None:
+            tasks = self._tasks = set()
+        tasks.add(task)
+        task.add_done_callback(partial(self._settle, tasks, key))
         return await self._wait(self._owner(), key, asyncio.shield(task))
 
     async def _join(self, key: str) -> object:
@@ -321,12 +359,14 @@ class RequestScope:
             paths.extend([*path, awaited] for awaited in self._chains.get(last, ()))
         return None
 
-    def _settle(self, key: str, task: asyncio.Task[object]) -> None:
+    def _settle(
+        self, tasks: set[asyncio.Task[object]], key: str, task: asyncio.Task[object]
+    ) -> None:
         """Publish the outcome of `task` before any waiter resumes.
 
         The memo owns a failure, so the waiter future marks it retrieved for the log.
         """
-        self._tasks.discard(task)
+        tasks.discard(task)
         future = self._pending.pop(key, None)
         if task.cancelled():
             if future is not None:
@@ -345,4 +385,35 @@ class RequestScope:
             future.exception()
 
 
-__all__ = ["RequestScope", "join_waits", "running_loop"]
+@asynccontextmanager
+async def render_scope(seed: Mapping[str, object]) -> AsyncIterator[RequestScope]:
+    """Open the request scope of one async render and close it once the render ends.
+
+    It is seeded from the shell cache and shared through the request memo.
+    """
+    scope = RequestScope(seed)
+    token = request_memo.set(RequestMemo(scope))
+    try:
+        yield scope
+    finally:
+        request_memo.reset(token)
+        await scope.close()
+
+
+async def _scoped[T](seed: Mapping[str, object], work: Callable[[], Awaitable[T]]) -> T:
+    async with render_scope(seed):
+        return await work()
+
+
+def bridged_scope[T](seed: Mapping[str, object], work: Callable[[], Awaitable[T]]) -> T:
+    """Await `work` through the bridge from sync code, in a render scope of its own."""
+    return run_bridged(partial(_scoped, seed, work))
+
+
+__all__ = [
+    "RequestScope",
+    "bridged_scope",
+    "join_waits",
+    "render_scope",
+    "running_loop",
+]

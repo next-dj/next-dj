@@ -64,7 +64,9 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The ``next.boundaries.contain`` function
      - ``id``, ``name``, ``addressing``, ``kind``, ``digest``, ``exception``, ``request``
      - Once per failure an error boundary contained, after it was logged or handed to ``ERRORS["REPORTER"]`` and before its ``error.djx`` renders.
-       ``addressing`` is ``"component"`` for a component boundary, ``kind`` is the ``ErrorKind`` before ``ERRORS["KINDS"]`` hides it, and ``id`` is the boundary id its wrapper carries.
+       ``addressing`` is ``"component"`` for a component boundary and ``"page"`` for a page boundary, ``kind`` is the ``ErrorKind`` before ``ERRORS["KINDS"]`` hides it, and ``id`` is the boundary id its wrapper carries.
+       ``name`` is the name of the component for a component boundary.
+       A page boundary is named by the path of its ``loading.djx`` when it has one, streamed or rendered inline, and by the path of its ``error.djx`` otherwise, relative to ``BASE_DIR`` and absolute only for a file outside it, so ``boundary_rendered`` and ``boundary_gate(page=...)`` name it the same way.
        ``request`` may be ``None`` outside a request.
        A deferred job that raised past its own boundary is announced the same way once its error UI renders, with the wire id of its wrapper.
    * - ``boundary_rendered``
@@ -226,7 +228,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        ``context_keys`` is the tuple of context keys.
        ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigation``, ``prefetch`` or ``speculation``.
        ``depth`` is the ``Depth`` of ``request.next``, ``shell`` or ``full`` for a router prefetch and ``None`` for any other request.
-       A prefetch answer may be shown with no further request, so a page-view counter that skips prefetches still counts a prefetch whose ``depth`` is ``full``, or counts in the browser on ``router:commit``, and a page that must act on a visit declares ``page.router(prefetch=False)``.
+       ``depth`` does not count visits, so see :ref:`topics-router-prefetch-visits` for how to count them.
        Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
    * - ``page_stream_declined``
      - ``next.suspense.StreamPolicy``
@@ -245,7 +247,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        ``boundaries`` is a tuple of ``(name, mode)`` pairs, one per boundary of the shell, the pairs the ``X-Next-Boundaries`` debug header lists.
        ``request_lane`` is the request-lane rule that pins a job of the page, such as ``atomic``, and ``None`` when no rule does.
        It is read as the body starts, once the transactions the view closed have committed, so it names the lane the jobs run on.
-       Under ASGI it is sent through ``asend_robust`` from the server loop.
+       Under ASGI it is sent through ``asend_robust`` from the server loop, so a synchronous receiver runs on the request thread and an async one on the loop.
    * - ``page_stream_closed``
      - ``next.suspense.StreamingPageResponse``, or ``next.suspense.PartialStream`` for a partial response
      - ``page_path``, ``sent``, ``failed``, ``late``, ``shed``, ``duration_ms``, ``aborted``, ``partial``, ``request``
@@ -519,6 +521,12 @@ Router
 
 .. automodule:: next.router.signals
    :members:
+
+Boundaries, deferred boundaries, and compression
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``boundary_failed`` is defined in ``next.boundaries.signals``.
+``boundary_rendered``, ``boundary_side_effect``, ``boundary_token_rejected``, ``page_stream_opened``, ``page_stream_closed``, and ``page_stream_declined`` are defined in ``next.suspense.signals``, and ``compression_backend_loaded`` in ``next.compression.signals``.
 
 See also
 --------

@@ -5,17 +5,18 @@ import time
 
 import pytest
 
-from next.defer import BoundaryOptions, DeferMode, ErrorKind
-from next.suspense import (
+from next.defer import BoundaryOptions, DeferMode
+from next.suspense import Job, Server
+from next.suspense.markers import (
     Addressing,
-    Assignment,
-    BoundarySession,
     Caps,
+    Captured,
+    ForegroundFacts,
     Group,
-    Job,
-    Rendered,
     Site,
 )
+from next.suspense.session import IDENT, BoundarySession, new_seal, seal_of, wire_id
+from tests.support.jobs import plain_job
 
 
 A = Site(Addressing.COMPONENT, "row", DeferMode.STREAM, "list.djx", 0)
@@ -39,31 +40,17 @@ def _session(caps: Caps) -> BoundarySession[str]:
     return session
 
 
-def _fallback(kind: ErrorKind) -> Rendered[str]:
-    return Rendered("", "", kind=kind)
-
-
-def _render() -> Rendered[str]:
-    return Rendered("<li>row</li>", "")
-
-
 def _job(session: BoundarySession[str], site: Site) -> Job[str]:
-    return Job(
-        session.next_id(),
-        "k",
-        site,
-        BoundaryOptions(),
-        session.deadline,
-        _fallback,
-        run=_render,
+    return plain_job(
+        session.next_id(), site=site, deadline=session.deadline, html="<li>row</li>"
     )
 
 
-def _queue(
-    session: BoundarySession[str], sites: list[Site]
-) -> tuple[list[Job[str]], list[Assignment]]:
+def _queue(session: BoundarySession[str], sites: list[Site]) -> list[Job[str]]:
     jobs = [_job(session, site) for site in sites]
-    return jobs, [session.queue(job) for job in jobs]
+    for job in jobs:
+        session.queue(job)
+    return jobs
 
 
 class TestOpening:
@@ -92,7 +79,6 @@ class TestOpening:
         assert session.connections == ()
         assert session.snapshot is None
         assert session.scope is None
-        assert session.ledger is None
         assert session.plan().units == ()
         assert session.plan().expired == ()
 
@@ -145,16 +131,14 @@ class TestQueue:
 
     def test_jobs_keep_document_order_and_site_counts(self) -> None:
         session = _session(_caps())
-        jobs, _ = _queue(session, [A, B, A])
+        jobs = _queue(session, [A, B, A])
         assert session.jobs == tuple(jobs)
         assert (session.instances(A), session.instances(B)) == (2, 1)
         assert session.instances(Site(Addressing.PAGE, "/", DeferMode.STREAM, "p")) == 0
 
     def test_instances_past_the_site_cap_form_groups_in_document_order(self) -> None:
         session = _session(_caps(per_site=2, per_request=3))
-        jobs, assigned = _queue(session, [A, A, B, *[A] * 7])
-        separate, grouped = Assignment.SEPARATE, Assignment.GROUPED
-        assert assigned == [separate] * 3 + [grouped] * 7
+        jobs = _queue(session, [A, A, B, *[A] * 7])
         a0, a1, b0, *rest = jobs
         assert session.plan().units == (
             a0,
@@ -180,9 +164,8 @@ class TestQueue:
 
     def test_overflow_past_the_response_cap_joins_the_groups_of_its_site(self) -> None:
         session = _session(_caps(boundaries=3, per_site=4, per_request=2))
-        jobs, assigned = _queue(session, [A, A, B, B, A, A, B, A])
+        jobs = _queue(session, [A, A, B, B, A, A, B, A])
         a0, a1, b0, b1, a2, a3, b2, a4 = jobs
-        assert assigned == [Assignment.SEPARATE] * 3 + [Assignment.GROUPED] * 5
         assert session.plan().units == (
             a0,
             a1,
@@ -194,15 +177,8 @@ class TestQueue:
 
     def test_instances_past_the_instance_cap_expire_without_running(self) -> None:
         session = _session(_caps(instances=3, per_site=1, per_request=4))
-        jobs, assigned = _queue(session, [A, A, A, A, B])
+        jobs = _queue(session, [A, A, A, A, B])
         a0, a1, a2, a3, b0 = jobs
-        assert assigned == [
-            Assignment.SEPARATE,
-            Assignment.GROUPED,
-            Assignment.GROUPED,
-            Assignment.EXPIRED,
-            Assignment.EXPIRED,
-        ]
         plan = session.plan()
         assert plan.units == (a0, Group(A, (a1, a2)))
         assert plan.expired == (a3, b0)
@@ -211,11 +187,11 @@ class TestQueue:
 
     def test_wrappers_and_jobs_share_the_instance_cap_in_document_order(self) -> None:
         session = _session(_caps(instances=2, per_site=1, per_request=4))
-        assert session.admit() is True
-        jobs, assigned = _queue(session, [A, B])
-        assert assigned == [Assignment.SEPARATE, Assignment.EXPIRED]
+        assert session.take_instance() is True
+        jobs = _queue(session, [A, B])
+        assert session.plan().units == (jobs[0],)
         assert session.plan().expired == (jobs[1],)
-        assert session.admit() is False
+        assert session.take_instance() is False
 
     def test_the_plan_is_a_snapshot(self) -> None:
         session = _session(_caps(per_site=1))
@@ -226,3 +202,36 @@ class TestQueue:
         assert isinstance(group, Group)
         assert len(group.members) == 1
         assert session.plan() != before
+
+
+class TestNarrowed:
+    """``BoundarySession.narrowed`` keeps the facts and queues a subset afresh."""
+
+    def test_the_kept_jobs_queue_again_under_the_same_facts(self) -> None:
+        session = _session(_caps(per_site=1))
+        session.facts = ForegroundFacts(Server.ASGI)
+        session.threads = (Captured(object(), "state"),)
+        first, _, third = _queue(session, [A, A, B])
+        narrowed = session.narrowed([first, third])
+        assert narrowed is not session
+        assert (narrowed.seal, narrowed.deadline) == (session.seal, session.deadline)
+        assert narrowed.facts is session.facts
+        assert narrowed.threads is session.threads
+        assert narrowed.plan().units == (first, third)
+
+
+class TestWireIds:
+    """The wire id format lives in one place, its pattern derived from the seal size."""
+
+    def test_an_id_round_trips_its_seal_and_matches_the_pattern(self) -> None:
+        seal = new_seal()
+        ident = wire_id(seal, 12)
+        assert ident == f"b-{seal}-12"
+        assert seal_of(ident) == seal
+        assert IDENT.fullmatch(ident) is not None
+
+    @pytest.mark.parametrize(
+        "ident", ["b-0badcafe", "b-0BADCAFE-1", "b-0badcaf-1", "b-0badcafe-1234567890"]
+    )
+    def test_the_pattern_refuses_a_malformed_id(self, ident: str) -> None:
+        assert IDENT.fullmatch(ident) is None

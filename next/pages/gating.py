@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from enum import Enum, auto
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from django.conf import settings
 
+from next.deps.scope import bridged_scope
 from next.introspect import callable_name
-from next.ports import run_bridged
 
 from .graph import Blame, Phase, arun_phase, closure, merged, run_phase
 from .guards import scans_as_guard
-from .scope import render_scope
 
 
 if TYPE_CHECKING:
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from next.static.serializers import JsContextSerializer
 
+    from .context import ContextResult
     from .graph import ContextGraph, Step
     from .loaders import BoundaryChain, PageBoundary
 
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 GATE_KEY: Final = "_next_page_gate"
-"""Context key of the `Gate` a gated shell hands its page boundary jobs."""
+"""Context key of the `ShellGate` a gated shell hands its page boundary jobs."""
 
 SLOW_SHELL: Final = 0.2
 """Seconds past which a `DEBUG` shell of a deferred page names its slowest callable."""
@@ -57,6 +58,15 @@ class Split:
 
 
 _NONE: Final[frozenset[int]] = frozenset()
+
+
+class _Moved(Enum):
+    """The value no shell key holds, so a key the shell lacks counts as moved."""
+
+    TOKEN = auto()
+
+
+_MOVED: Final = _Moved.TOKEN
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,10 +267,10 @@ class Advanced:
 
 
 @dataclass(frozen=True, slots=True)
-class Gate:
+class ShellGate:
     """The gated callables of one page render, with the results the earlier parts took.
 
-    The shell puts it in the context, and each page boundary job runs its own steps.
+    `merged` is what they merge into, `kept` the processor keys a job never sets.
     """
 
     plan: Plan
@@ -270,6 +280,8 @@ class Gate:
     url_kwargs: Mapping[str, object]
     dep_cache: dict[str, Any]
     results: Mapping[int, object]
+    merged: ContextResult
+    kept: frozenset[str]
 
     def level(self, loading: Path) -> int | None:
         """Return the directory level of the boundary of `loading`, `None` for none."""
@@ -305,17 +317,29 @@ class Gate:
     def advance(self, loading: Path) -> Advanced:
         """Run the steps the job of `loading` owns and return what they add.
 
-        An async step runs the steps through the graph, in a request scope of its own.
+        A key the job moved goes into its layer unless the shell tail sets it after.
         """
         selected = self.plan.split.job(loading)
         if not selected:
             return Advanced({}, {}, {})
         phase = Phase(selected, self.results)
+        graph = self.plan.graph
         if self.plan.awaits(selected):
-            taken = run_bridged(partial(self._scoped, phase))
+            taken = bridged_scope(
+                self.dep_cache,
+                partial(
+                    arun_phase,
+                    graph,
+                    self.file_path,
+                    phase,
+                    request=self.request,
+                    url_kwargs=self.url_kwargs,
+                    dep_cache=self.dep_cache,
+                ),
+            )
         else:
             taken = run_phase(
-                self.plan.graph,
+                graph,
                 self.file_path,
                 phase,
                 request=self.request,
@@ -323,34 +347,29 @@ class Gate:
                 dep_cache=self.dep_cache,
             )
         results = {**self.results, **taken}
-        graph = self.plan.graph
-        before = merged(graph, self.file_path, self.results).js_context
+        before = self.merged
         after = merged(graph, self.file_path, results)
-        layer: dict[str, object] = dict(after.context_data)
-        layer[GATE_KEY] = replace(self, results=results)
+        held = before.context_data
+        kept = self.kept
+        layer: dict[str, object] = {
+            key: value
+            for key, value in after.context_data.items()
+            if held.get(key, _MOVED) is not value and key not in kept
+        }
+        layer[GATE_KEY] = replace(self, results=results, merged=after)
+        shown = before.js_context
         published = {
-            key: value for key, value in after.js_context.items() if key not in before
+            key: value for key, value in after.js_context.items() if key not in shown
         }
         return Advanced(layer, published, after.js_context_serializers)
-
-    async def _scoped(self, phase: Phase) -> dict[int, object]:
-        async with render_scope(self.dep_cache):
-            return await arun_phase(
-                self.plan.graph,
-                self.file_path,
-                phase,
-                request=self.request,
-                url_kwargs=self.url_kwargs,
-                dep_cache=self.dep_cache,
-            )
 
 
 __all__ = [
     "GATE_KEY",
     "SLOW_SHELL",
     "Advanced",
-    "Gate",
     "Plan",
+    "ShellGate",
     "Split",
     "guard_steps",
     "note_slow",

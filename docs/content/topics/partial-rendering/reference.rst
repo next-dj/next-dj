@@ -621,7 +621,7 @@ Such a position moves the window within the rows the queryset already serves and
 Each value is converted and validated by its model field before it reaches the query, and a datetime carries a time zone exactly when ``USE_TZ`` is on.
 A token that is malformed, longer than ``max_token`` characters, or holds a value its column refuses reads the first batch instead of raising.
 A row whose token would run past ``max_token`` raises ``ValueError`` when the window is built.
-``encode(values, *, reverse)`` and ``decode(token)`` are the two methods a subclass overrides to sign or shorten tokens, and a ``Pager`` subclass that implements ``window`` and ``awindow`` pages by a scheme of its own, see :doc:`/content/howto/page-a-list-by-cursor`.
+``encode(values, *, reverse)`` and ``decode(token)`` are the two methods a subclass overrides to sign or shorten tokens, and a ``Pager`` subclass that implements ``plan`` and returns the ``Plan`` of its window pages by a scheme of its own, ``window`` and ``awindow`` running that plan, see :doc:`/content/ref/partial` and :doc:`/content/howto/page-a-list-by-cursor`.
 
 Windows
 ~~~~~~~
@@ -671,7 +671,7 @@ At the end of the list it keeps every row it read.
 A restored window that starts below the top of the list is grown back by the ``previous=`` tag above it, while the ``next=`` tag below keeps linking the batch after it.
 
 ``next.E235`` reports a ``{% more %}`` with ``prune=`` or ``url=`` on a page where no context callable a render runs, its own or one it inherits, takes an ``Annotated[Paging, <pager>]``, since the written restore address would render a single batch.
-``next.E244`` reports two distinct pagers of one page that read the same query parameter, since each list would page by the token of the other.
+``next.E236`` reports two distinct pagers of one page that read the same query parameter, since each list would page by the token of the other.
 
 Attributes
 ----------

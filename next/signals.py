@@ -3,7 +3,7 @@
 Import from here when one module subscribes to several subsystems at once.
 """
 
-from next.boundaries import boundary_failed
+from next.boundaries.signals import boundary_failed
 from next.components.signals import (
     component_backend_loaded,
     component_registered,

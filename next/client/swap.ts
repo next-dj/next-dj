@@ -1,11 +1,13 @@
 import { defaultMove } from "./adapters";
 import type { Asset } from "./apply";
 import type { ScriptsChunk, ScriptsModule } from "./chunks";
+import { focusable } from "./events";
+import { markers } from "./layout";
+import type { Layout } from "./layout";
 import { between, fireRemoved } from "./morph";
 import type { Bounds, Move } from "./morph";
-import { ATTR_ASSET, cssEscape, matching } from "./protocol";
-import { markers } from "./router";
-import type { HistoryHost, Keeper, Layout } from "./router";
+import { ATTR_ASSET, cssEscape, matching, uid } from "./protocol";
+import type { HistoryHost, Keeper } from "./router";
 
 type Sheet = HTMLLinkElement | HTMLStyleElement;
 
@@ -100,13 +102,7 @@ export function createSwap(
         nodes.flatMap((node) => matching(node, selector))[0];
       const target = pick("[data-next-focus]") ?? pick("h1") ?? nodes[0];
       if (!(target instanceof HTMLElement)) return false;
-      if (!target.hasAttribute("tabindex")) {
-        target.tabIndex = -1;
-        target.addEventListener("blur", () => target.removeAttribute("tabindex"), {
-          once: true,
-        });
-      }
-      target.focus({ preventScroll: true });
+      focusable(target).focus({ preventScroll: true });
       return doc.activeElement === target;
     },
     announce: (text) => {
@@ -124,7 +120,7 @@ export function createSwap(
       const { scripts, consent } = record;
       const sent = record.nonce;
       const runs: HTMLScriptElement[] = [];
-      const mark = Math.random().toString(36).slice(2);
+      const mark = uid();
       const [rescue, place] = persist(bounds);
       let finish: () => void;
       const finished = new Promise<void>((resolve) => (finish = resolve));

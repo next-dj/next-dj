@@ -5,8 +5,9 @@ from django.test import override_settings
 
 from next.pages.checks import check_metadata_title_templates
 from next.pages.metadata.scope import SITE_SOURCE
-from tests.pages.checks.metadata.trees import metadata_page, scope, templated_page
+from tests.pages.checks.metadata.trees import metadata_page, scope
 from tests.support import I18N, check_ids, patch_checks_router_manager
+from tests.support.trees import templated_page
 
 
 PER_LANGUAGE_TEMPLATE = """

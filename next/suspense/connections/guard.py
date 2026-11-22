@@ -1,5 +1,6 @@
 """Replay captured state around a job on a pool thread, connection state lazily."""
 
+import math
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -10,13 +11,12 @@ from typing import Final, Protocol, cast
 from django.db import connections, transaction
 from django.db.backends.base.base import BaseDatabaseWrapper
 
+from next.conf.defer import DeadlineMode, deadline_mode, timeout_floor
 from next.suspense.executors import retire_thread
 from next.suspense.markers import Captured
 from next.transactions import StatementKind, statement_kind
 
 from .backends import ConnectionState, ThreadState
-from .config import DeadlineMode, deadline_mode, timeout_floor
-from .deadline import deadline_statement
 
 
 _POSTGRESQL: Final = "postgresql"
@@ -25,6 +25,26 @@ _SAVEPOINT: Final = re.compile(r"\s*(?:RELEASE|ROLLBACK\s+TO)\b", re.IGNORECASE)
 
 type _Entries = list[tuple[ConnectionState, object]]
 type _Statement = Callable[[], tuple[str, tuple[str, str]]]
+
+DEADLINE_SQL: Final = (
+    "SELECT set_config('statement_timeout', %s, true), "
+    "set_config('idle_in_transaction_session_timeout', %s, true)"
+)
+"""Both timeouts local to the transaction, so they end with it and never leak."""
+
+
+def timeout_ms(remaining: float, floor: float) -> int:
+    """Return `remaining` seconds in whole milliseconds rounded up, at least `floor`."""
+    return max(math.ceil(remaining * 1000), math.ceil(floor * 1000))
+
+
+def deadline_statement(remaining: float, floor: float) -> tuple[str, tuple[str, str]]:
+    """Return the SQL and parameters setting both timeouts to the remaining budget.
+
+    `set_config` takes text, so the milliseconds travel as a string parameter.
+    """
+    value = str(timeout_ms(remaining, floor))
+    return DEADLINE_SQL, (value, value)
 
 
 class Replayable(Protocol):
@@ -275,4 +295,10 @@ def job_guard(states: Replayable, *, deadline: float) -> Iterator[None]:
         yield
 
 
-__all__ = ["Replayable", "job_guard"]
+__all__ = [
+    "DEADLINE_SQL",
+    "Replayable",
+    "deadline_statement",
+    "job_guard",
+    "timeout_ms",
+]

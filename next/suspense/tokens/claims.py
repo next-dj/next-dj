@@ -3,14 +3,14 @@
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Self
 
 
 VERSION: Final = 2
 """The claims version every token is minted under."""
 
 VERSIONS: Final[tuple[int, ...]] = (VERSION,)
-"""The claims versions a redeem reads, the current one first, then the one before."""
+"""The claims versions a redeem reads."""
 
 type Scalar = str | int | float | bool | None
 type Wire = Scalar | list[Scalar]
@@ -63,7 +63,7 @@ class BoundaryClaims:
         url_path: str = "/",
         url_kwargs: Mapping[str, object] | None = None,
         perms: Iterable[str] = (),
-    ) -> "BoundaryClaims":
+    ) -> Self:
         """Return the claims in canonical order, so equal claims give equal bytes."""
         return cls(
             component=component,

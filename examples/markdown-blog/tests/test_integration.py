@@ -62,6 +62,12 @@ class TestIndex:
         assert "you are at <code>/posts/hello-world/</code>" in footer
         assert "Small posts" in step.envelope.html_for_zone("tagline")
 
+    def test_the_router_prefetches_every_link_that_scrolls_into_view(
+        self, next_client
+    ) -> None:
+        router = init_payload(next_client.get("/").content.decode())["$router"]
+        assert router["prefetch"] == "viewport"
+
 
 class TestPost:
     """One dynamic route renders every Markdown file through the posts layout."""
@@ -350,6 +356,15 @@ class TestPrintView:
     def test_the_post_page_links_to_its_print_view(self, next_client) -> None:
         body = next_client.get("/posts/welcome/").content.decode()
         assert find_anchor(body, href="/posts/welcome/print/", text="Print view")
+
+    def test_the_print_view_is_a_hard_load_the_router_never_prefetches(
+        self, next_client
+    ) -> None:
+        body = next_client.get("/posts/welcome/").content.decode()
+        link = find_anchor(body, href="/posts/welcome/print/", text="Print view")
+        assert 'data-next-prefetch="off"' in link
+        step = next_client.navigate("/posts/welcome/print/", origin="/posts/welcome/")
+        assert step.kind is CutKind.VISIT
 
     def test_the_print_view_links_back_to_the_post(self, next_client) -> None:
         body = next_client.get("/posts/welcome/print/").content.decode()

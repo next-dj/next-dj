@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MockInstance } from "vitest";
 import type { Envelope } from "./apply";
 import type { LayerStack } from "./layers";
 import { createMore } from "./more";
@@ -6,9 +7,11 @@ import { createMore } from "./more";
 const PAGE_TWO = "/list/?q=1&page=2";
 
 let controller: AbortController;
+let scroll: MockInstance<typeof scrollBy>;
 
 beforeEach(() => {
   controller = new AbortController();
+  scroll = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
   vi.useFakeTimers();
   history.replaceState(null, "", "/list/?q=1");
   document.body.innerHTML = "";
@@ -116,7 +119,6 @@ describe("{% more %} extras", () => {
       'data-next-back="WzEsNV0" data-next-backs="WzEsMl0 WzEsNF0" data-next-prune="7">' +
       'More</a></div><div data-next-zone="list-less"><a href="/list/?cursor=WzEsMF0" ' +
       'data-next-target="list,list-less">Less</a></div>';
-    vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     harness().scan();
     expect(rows().map(([, batch]) => batch)).toEqual(["1", "1", "2", "2", "3", "3"]);
     requested("/list/?cursor=WzAsNl0", "list,list-more");
@@ -232,7 +234,6 @@ describe("{% more %} extras", () => {
     vi.spyOn(list, "getBoundingClientRect")
       .mockReturnValueOnce(rect(0, 500))
       .mockReturnValueOnce(rect(0, 440));
-    const scroll = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     const removed = vi.fn();
     list.firstElementChild!.addEventListener("next:removed", removed);
     landed();
@@ -255,7 +256,6 @@ describe("{% more %} extras", () => {
         'data-next-target="list,list-less" data-next-merge="prepend" hidden>Less</a>' +
         "</div></div>",
     );
-    vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     harness().scan();
     landed();
     const top = document.querySelector('[data-next-zone="list-less"]')!;
@@ -266,9 +266,22 @@ describe("{% more %} extras", () => {
     expect(less.getAttribute("href")).toBe(`${location.origin}/list/?q=1&page=1`);
   });
 
-  it("prunes without a top link to re-arm", () => {
-    feed('data-next-prune="3"');
-    const scroll = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
+  it.each([
+    ["no top link", 'data-next-prune="3"', "", null],
+    [
+      "a top link and no back token",
+      'data-next-prune="3"',
+      LESS,
+      "/list/?q=1&page=1&restore=1",
+    ],
+    [
+      "a top link and a back token",
+      'data-next-prune="3" data-next-back="1"',
+      LESS,
+      `${location.origin}/list/?q=1&page=1`,
+    ],
+  ])("prunes the oldest batch of a list with %s", (_name, more, after, href) => {
+    feed(more, after);
     harness().scan();
     landed();
     expect(rows()).toEqual([
@@ -276,24 +289,12 @@ describe("{% more %} extras", () => {
       ["d", "2"],
     ]);
     expect(scroll).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves the top link alone when the first kept batch has no back token", () => {
-    feed('data-next-prune="3"', LESS);
-    vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
-    harness().scan();
-    landed();
-    expect(rows()).toEqual([
-      ["c", "2"],
-      ["d", "2"],
-    ]);
-    const less = document.querySelector('[data-next-zone="list-less"] a')!;
-    expect(less.getAttribute("href")).toBe("/list/?q=1&page=1&restore=1");
+    const less = document.querySelector('[data-next-zone="list-less"] a');
+    expect(less?.getAttribute("href") ?? null).toBe(href);
   });
 
   it("gives a landed batch its back token, not the one of the link it mounts", () => {
     feed('data-next-prune="3" data-next-back="1"', LESS);
-    vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     const h = harness();
     h.scan();
     requested(PAGE_TWO, "list,list-more");
@@ -319,7 +320,6 @@ describe("{% more %} extras", () => {
       '<div data-next-zone="list-more"><a href="/list/?cursor=down" ' +
       'data-next-param="cursor" data-next-target="list,list-more" ' +
       'data-next-back="mid" data-next-prune="4">More</a></div>';
-    vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     harness().scan();
     requested("/list/?cursor=up", "list,list-less");
     document
@@ -341,7 +341,6 @@ describe("{% more %} extras", () => {
   });
 
   it("prunes nothing within the limit or when one batch holds every row", () => {
-    const scroll = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     feed('data-next-prune="10"');
     harness().scan();
     landed();
@@ -455,7 +454,6 @@ describe("{% more %} extras", () => {
 
   it("stamps and prunes for a link that prunes without writing the address", () => {
     feed('data-next-prune="2"');
-    vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     const h = harness();
     h.scan();
     expect(rows()[0]).toEqual(["a", "1"]);
@@ -490,7 +488,6 @@ describe("{% more %} extras", () => {
 
   it("leaves a live filter that names the sentinel zone alone", () => {
     feed('data-next-prune="1" data-next-url="replace"');
-    const scroll = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
     const h = harness();
     requested("/list/?q=2", "list,list-more");
     append("c");

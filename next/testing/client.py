@@ -42,16 +42,10 @@ from next.suspense.tokens.transport import FIELD, HEADER
 from next.suspense.trip import mint, note_route
 
 from .actions import resolve_action_url
-from .boundaries import (
-    RecordedFailure,
-    in_document_order,
-    raise_first,
-    recorded_failures,
-    recording,
-)
+from .boundaries import HeldFailures, RecordedFailure, raise_first
 from .capture import SignalEvent, capture_signals
 from .html import init_payload
-from .streaming import StreamedPage, read_stream
+from .streaming import StreamedPage, decoded, read_stream
 
 
 if TYPE_CHECKING:
@@ -189,45 +183,49 @@ class PartialEnvelope:
         raise AssertionError(msg)
 
 
-def _settle(
-    response: HttpResponseBase, failures: list[RecordedFailure], document: bytes
-) -> None:
-    """Hold the failures of the complete response and re-raise the first one."""
-    ordered = in_document_order(failures, document)
-    vars(response)["boundary_failures"] = ordered
-    raise_first(ordered)
+def _settle(response: HttpResponseBase, failures: tuple[RecordedFailure, ...]) -> None:
+    """Hold the ordered failures of the complete response and re-raise the first."""
+    vars(response)["boundary_failures"] = failures
+    raise_first(failures)
 
 
 def _consumed(
-    chunks: Iterator[bytes], response: HttpResponseBase, failures: list[RecordedFailure]
+    chunks: Iterator[bytes], response: HttpResponseBase, held: HeldFailures
 ) -> Iterator[bytes]:
-    """Yield `chunks`, recording what the render of each one contains."""
-    document = bytearray()
-    while True:
-        with recording(failures):
-            chunk = next(chunks, None)
-        if chunk is None:
-            break
-        document += chunk
-        yield chunk
-    _settle(response, failures, bytes(document))
+    """Yield `chunks`, recording what the render of each one contains.
+
+    A stream closed before its end still hands on what its chunks contained so far.
+    """
+    writes: list[bytes] = []
+    try:
+        while True:
+            with held.recording():
+                chunk = next(chunks, None)
+            if chunk is None:
+                break
+            writes.append(chunk)
+            yield chunk
+    finally:
+        failures = held.settle(b"".join(decoded(response, writes)))
+    _settle(response, failures)
 
 
 async def _aconsumed(
-    chunks: AsyncIterator[bytes],
-    response: HttpResponseBase,
-    failures: list[RecordedFailure],
+    chunks: AsyncIterator[bytes], response: HttpResponseBase, held: HeldFailures
 ) -> AsyncIterator[bytes]:
     """Yield `chunks` of an async stream, recording what each render contains."""
-    document = bytearray()
-    while True:
-        with recording(failures):
-            chunk = await anext(chunks, None)
-        if chunk is None:
-            break
-        document += chunk
-        yield chunk
-    _settle(response, failures, bytes(document))
+    writes: list[bytes] = []
+    try:
+        while True:
+            with held.recording():
+                chunk = await anext(chunks, None)
+            if chunk is None:
+                break
+            writes.append(chunk)
+            yield chunk
+    finally:
+        failures = held.settle(b"".join(decoded(response, writes)))
+    _settle(response, failures)
 
 
 def envelope_of(response: HttpResponse) -> PartialEnvelope:
@@ -357,17 +355,18 @@ class NextClient(Client):
 
         The first in document order re-raises once the response or stream is complete.
         """
-        with recorded_failures() as failures:
+        held = HeldFailures()
+        with held.recording():
             response = super().request(**request)
         sent: HttpResponseBase = response
         if isinstance(sent, StreamingHttpResponse):
             chunks = sent.streaming_content
             if isinstance(chunks, AsyncIterator):
-                sent.streaming_content = _aconsumed(chunks, sent, failures)
+                sent.streaming_content = _aconsumed(chunks, sent, held)
             else:
-                sent.streaming_content = _consumed(chunks, sent, failures)
+                sent.streaming_content = _consumed(chunks, sent, held)
             return response
-        _settle(response, failures, getattr(response, "content", b""))
+        _settle(response, held.settle(getattr(response, "content", b"")))
         return response
 
     def post_action(

@@ -131,6 +131,7 @@ class TestCrispyHelperTag:
         assert 'name="name"' in html
 
 
+@pytest.mark.django_db()
 class TestCrispyDispatch:
     """HTTP round trip for a crispy-rendered next form."""
 

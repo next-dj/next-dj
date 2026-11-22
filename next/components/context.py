@@ -25,7 +25,7 @@ from next.introspect import (
 from next.permissions.access import declaring, require_login, require_permission
 from next.utils import resolved_tree
 
-from .deferral import defer_declarations
+from .defer import defer_declarations
 
 
 if TYPE_CHECKING:

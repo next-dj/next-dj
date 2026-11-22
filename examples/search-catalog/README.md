@@ -1,8 +1,8 @@
 # Search catalog
 
-A faceted product catalog with search, brand filters, price range, in-stock toggle, sort, and pagination. The listing renders six cards per page with deduplicated co-located CSS, the category and product detail routes thread an inherited `Category` instance through the `[category]/[slug]/` chain without re-querying, and every page of one search is cut from a single `LocMemCache` entry held for 60 seconds.
+A faceted product catalog with search, brand filters, price range, in-stock toggle, sort, and pagination. The listing renders six cards per page with deduplicated co-located CSS, the category and product detail routes thread an inherited `Category` instance through the `[category]/[slug]/` chain without re-querying, every page of one search reads only its own rows, and the count of a search is held in `LocMemCache` for 60 seconds. Two recommendation rails beside a product stream in after the page and load their cards through one batched query.
 
-The example focuses on the file-router and DI subsystems of next-dj. It dogfoods the core `DQuery[T]` provider that mirrors `DUrl[T]` for query-string parameters. Two domain providers, `DFilters` and `DPage`, build typed snapshots from `request.GET`, with `DFilters` reading the brand list through the same `get_multi_values` helper `DQuery[list[str]]` resolution uses. Every filter and sort lives on the model as `Product.objects.matching(filters)`, and a `cached_search` service keyed by a stable hash of the filter set caches that read for two pagers, a `NumberPager` behind the listing that grows on scroll and a Django `Paginator` behind the category one. An `active_filters` context processor registered on the page backend surfaces a chip strip with a precomputed drop URL per chip. A three-layout chain (`marketplace` then `catalog` then `[category]`) wires the rest of the page tree.
+The example focuses on the file-router and DI subsystems of next-dj. It dogfoods the core `DQuery[T]` provider that mirrors `DUrl[T]` for query-string parameters. A domain provider, `DFilters`, builds a typed snapshot from `request.GET`, reading the brand list through the same `get_multi_values` helper `DQuery[list[str]]` resolution uses. Every filter and sort lives on the model as `Product.objects.matching(filters)`, one `NumberPager` cuts the window of both listings, growing on scroll on the all-products one and behind page links on a category, and a `cached_count` service keyed by a stable hash of the filter set caches the count beside it. An `active_filters` context processor registered on the page backend surfaces a chip strip with a precomputed drop URL per chip. A three-layout chain (`marketplace` then `catalog` then `[category]`) wires the rest of the page tree.
 
 Every category also has a landing page a CDN may cache, with a sign-up form that fetches its CSRF token only when it posts. The storefront runs Google Analytics and the Meta Pixel through two short adapters it writes itself, held back until a consent banner grants them.
 
@@ -17,7 +17,7 @@ Every category also has a landing page a CDN may cache, with a sign-up form that
 | `/catalog/?brand=Acme,Globex` | Comma-delimited filter for compact URLs. |
 | `/catalog/?q=iPhone&page=2` | Search and pagination preserved across query overrides. |
 | `/catalog/electronics/` | Category-scoped listing with a pager. Inherited `Category` shows in the breadcrumb. |
-| `/catalog/electronics/iphone-15/` | Product detail. The `Category` instance comes through inherited context, no extra query, and the head carries `Product` JSON-LD. A click on a card opens the same URL as a quick view modal over the listing. |
+| `/catalog/electronics/iphone-15/` | Product detail. The `Category` instance comes through inherited context, no extra query, and the head carries `Product` JSON-LD. Two rails below it, more in the category and at a similar price, stream in after the page. A click on a card opens the same URL as a quick view modal over the listing. |
 | `/shop/electronics/` | Category landing. Cheapest offers, a sign-up form, a consent-gated video and an FAQ with `FAQPage` JSON-LD, cached publicly for five minutes. |
 | `/sitemap.xml` | The home page, the listing, one landing and one listing per category and one entry per product, cached for five minutes. |
 
@@ -67,7 +67,7 @@ The list form accepts three wire formats. Plain repeated keys `?brand=a&brand=b`
 
 ### 3. Domain providers built on top of the core
 
-[`catalog/models.py`](catalog/models.py) defines `Filters`, the frozen search criteria `Product.objects.matching` reads. [`catalog/deps.py`](catalog/deps.py) builds it and a `PageRequest` from the raw query string so handlers stay declarative.
+[`catalog/models.py`](catalog/models.py) defines `Filters`, the frozen search criteria `Product.objects.matching` reads. [`catalog/deps.py`](catalog/deps.py) builds it from the raw query string so handlers stay declarative.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -81,12 +81,9 @@ class Filters:
 
 
 class DFilters(DDependencyBase["Filters"]): ...
-
-
-class DPage(DDependencyBase["PageRequest"]): ...
 ```
 
-`FiltersProvider.resolve` runs `parse_filters(request)` which is also reused by the active-filter context processor. The brand list inside `parse_filters` calls `next.urls.get_multi_values`, the public helper `QueryParamProvider` reads its own list values through, so all three wire formats (plain repeated, bracket suffix, comma-delimited) reach a hand-written parser exactly as they reach `DQuery[list[str]]`. `PageProvider.resolve` returns a clamped `PageRequest` whose `per_page` is bounded by `MAX_PER_PAGE = 60` and whose page number falls back to 1 on anything unparsable. Both providers answer `static_can_handle` with `False` for any annotation that is not their own marker, which drops them from the compiled plan of every unrelated parameter, and with `None` for the marker itself, because the request the value comes from is only visible to `can_handle`. `DPage` serves the category listing, which pages through Django's `Paginator`. The all-products listing takes its window from a pager of the framework instead, as section 7 shows.
+`FiltersProvider.resolve` runs `parse_filters(request)` which is also reused by the active-filter context processor. The brand list inside `parse_filters` calls `next.urls.get_multi_values`, the public helper `QueryParamProvider` reads its own list values through, so all three wire formats (plain repeated, bracket suffix, comma-delimited) reach a hand-written parser exactly as they reach `DQuery[list[str]]`. The provider answers `static_can_handle` with `False` for any annotation that is not its own marker, which drops them from the compiled plan of every unrelated parameter, and with `None` for the marker itself, because the request the value comes from is only visible to `can_handle`. The page number needs no provider of its own, both listings take their window from a pager of the framework, as section 7 shows.
 
 The home page exercises `DQuery` directly. The `featured` callable in [`catalog/pages/page.py`](catalog/pages/page.py) accepts an optional `?show=N` parameter through `show: DQuery[int] = DEFAULT_FEATURED`, with no manual `request.GET.get` plumbing. The resolved value is clamped to `MAX_FEATURED = 12`, because a query parameter that sizes a query is user input like any other.
 
@@ -105,7 +102,7 @@ Each layer contributes a meaningful piece of UI. None of the layouts are decorat
 
 ### 5. `inherit_context=True` in a real flow
 
-[`catalog/pages/catalog/[category]/page.py`](catalog/pages/catalog/%5Bcategory%5D/page.py) registers `category` as inherit-context. Everything downstream reads that one instance: `page_obj` and `all_brands` on the same page take it as a DI parameter, the breadcrumb in [`[category]/layout.djx`](catalog/pages/catalog/%5Bcategory%5D/layout.djx) reads it from the template context, and `submit_url` in the `filter_panel` component takes it to decide whether the filter form posts back to a category listing.
+[`catalog/pages/catalog/[category]/page.py`](catalog/pages/catalog/%5Bcategory%5D/page.py) registers `category` as inherit-context. Everything downstream reads that one instance: `products`, `total` and `all_brands` on the same page take it as a DI parameter, the breadcrumb in [`[category]/layout.djx`](catalog/pages/catalog/%5Bcategory%5D/layout.djx) reads it from the template context, and `submit_url` in the `filter_panel` component takes it to decide whether the filter form posts back to a category listing.
 
 ```python
 @context("category", inherit_context=True)
@@ -121,7 +118,7 @@ The product detail page in [`catalog/pages/catalog/[category]/[slug]/page.py`](c
 
 `product_card` is rendered six times on the catalog listing and three more times on the home page. Its [`component.css`](catalog/pages/_components/product_card/component.css) emits `transition` and `:hover` rules. The static collector emits exactly one `<link rel="stylesheet">` per asset URL across both pages. The [`tests/test_integration.py::TestRouting::test_product_card_css_dedup`](tests/test_integration.py) and [`test_home_page_reuses_product_card_css`](tests/test_integration.py) tests assert this directly. The component lives at [`pages/_components/`](catalog/pages/_components/) one level above the catalog tree because both the home page and the listing render it.
 
-`pagination` is a template-only component. It has `component.djx` but no `component.py`, and it reads `page_obj`, the Django `Page` of the category listing, directly from template context without any Python-side registration. This is valid: a `component.py` is only needed when the component must compute derived values or perform DI lookups.
+`pagination` reads `products`, the `Window` of the category listing, and `total` straight from the template context of its call site. Its Previous and Next links are the `previous` and `next` page numbers the window carries, and its one `@component.context` callable, `position`, turns them and the count into `Page 2 of 3`, an empty string for a page past the last one.
 
 `filter_panel` lives at [`pages/catalog/_components/filter_panel/`](catalog/pages/catalog/_components/filter_panel/), a nested `_components/` folder inside the `catalog/` subtree. The file router's page-tree walk offers every folder named by `COMPONENTS_DIR` to the components backend, which registers it scoped to the subtree that contains it. `filter_panel` is therefore visible to `/catalog/` and `/catalog/<category>/` but invisible on the home page. The [`test_filter_panel_scoped_to_catalog`](tests/test_integration.py) test verifies that `filter_panel` CSS appears in catalog pages but not on the home page.
 
@@ -147,18 +144,18 @@ As you type, the runtime debounces, issues one GET for the whole published set, 
 
 When the all-products listing has another page, the `{% more %}` tag renders the `catalog-results-more` zone holding a real `<a href="?page=2">` with `data-next-merge="append"` and `data-next-defer="visible"`. The tag reads the link off the `Window` the page hands it, whose `next` is the token of the following batch and `None` on the last one. The link keeps the active query string and replaces only the page number. The sentinel lives outside the results zone on purpose: an `append` patch grows a zone by adding its incoming children at the end, so a marker that must stay last cannot ride inside the appended list. The tag writes `data-next-target="catalog-results,catalog-results-more"`, not the full published set, because an append merge grafts incoming children onto a zone and appending a second count or pager would duplicate it. The runtime fires the GET when the sentinel scrolls into view, targeting those two zones with the append intent. The server answers with one `append` per zone: the `catalog-results` patch carries only the next page of rows, deduplicated by their `data-next-key`, and the `catalog-results-more` patch replaces the link in place, matched by the `data-next-key="catalog-results-more"` the tag writes on it, so its `href` advances to the following page. The rows therefore always land after the accumulated list and the sentinel always trails them. The `Vary` header always lists `X-Next-Merge`, so a shared cache never hands an append envelope to a client that asked for a morph. The full-page render declares the same set, which is what keeps a shared cache from answering the sentinel's zone GET with the unvaried HTML it stored for the first plain visit. Changing the search term re-morphs both zones and the accumulated list resets on its own. On the last page the tag renders its `{% empty %}` branch, the `<p data-catalog-end>` closing note, inside a `<div>` carrying the same `data-next-key`. An `append` merge only ever replaces a matching child or adds a new one, it never removes, so the shared key is what lets the same append swap the spent link out for the closing note, and because the marker carries no other `data-next-*` attribute nothing observes or fetches from it again.
 
-The sentinel also writes `prune=120 url="replace"`. After each appended page the runtime replaces the address with `?page=N&restore=1`, and once the list holds more than 120 rows it drops whole pages from the top and keeps the scroll position. The window behind both comes from a pager, a stateless module-level object in [`catalog/pages/catalog/page.py`](catalog/pages/catalog/page.py):
+The sentinel also writes `prune=120 url="replace"`. After each appended page the runtime replaces the address with `?page=N&restore=1`, and once the list holds more than 120 rows it drops whole pages from the top and keeps the scroll position. The window behind both comes from a pager, a stateless module-level object in [`catalog/deps.py`](catalog/deps.py) that both listings bind, here in [`catalog/pages/catalog/page.py`](catalog/pages/catalog/page.py):
 
 ```python
-listing = NumberPager(per_page=DEFAULT_PER_PAGE, count=True)
+listing = NumberPager(per_page=6)
 
 
 @context("products")
 def products(filters: DFilters, page: Annotated[Paging, listing]) -> Window[Product]:
-    return page.paginate(cached_search(filters))
+    return page.paginate(search(filters))
 ```
 
-`Annotated[Paging, listing]` binds the pager to the request of the render, and `page.paginate(rows)` returns a `Window`, the rows this render shows with the tokens of the windows around them. The template loops over the window itself, prints `products.count` in the header because the pager was built with `count=True`, and passes the same object to both `{% more %}` tags. A reload of `?page=3&restore=1` renders the three pages the visitor had scrolled through, up to `DEFER["MORE"]["MAX_RESTORE"]` pages back, while a plain `?page=3` renders page 3 alone. The sentinel of a restored window also writes `data-next-backs`, the page before each restored batch after the first, so the runtime splits the rows by page and the first prune after a reload drops the oldest page alone. `manage.py check` reports `next.E235` for a `prune=` or `url=` tag on a page whose callables take no `Annotated[Paging, <pager>]`, since such a reload would render one page where the address names a window. A second tag above the list, `{% more zone="catalog-results" previous=products %}`, declares the `catalog-results-less` zone. It renders a "Show earlier results" link when the window starts above page 1, and a click prepends the page before it. On page 1 the tag renders its link to the first window with the `hidden` attribute, which the runtime shows once a prune drops the first rows, pointing its `href` at the highest page it dropped. Both sentinel zones sit in the published set, so a new search resets them along with the rows. The order of the set carries no meaning. The runtime treats a request as a page of the list only when its URL equals the href of a sentinel link and its zones equal that link's target, which the live filter never matches.
+`Annotated[Paging, listing]` binds the pager to the request of the render, and `page.paginate(rows)` returns a `Window`, the rows this render shows with the tokens of the windows around them. The template loops over the window itself, prints the `total` of the search in the header, and passes the same object to both `{% more %}` tags. The pager counts nothing itself, since the count comes from the cache of section 9. A reload of `?page=3&restore=1` renders the three pages the visitor had scrolled through, up to `DEFER["MORE"]["MAX_RESTORE"]` pages back, while a plain `?page=3` renders page 3 alone. The sentinel of a restored window also writes `data-next-backs`, the page before each restored batch after the first, so the runtime splits the rows by page and the first prune after a reload drops the oldest page alone. `manage.py check` reports `next.E235` for a `prune=` or `url=` tag on a page whose callables take no `Annotated[Paging, <pager>]`, since such a reload would render one page where the address names a window. A second tag above the list, `{% more zone="catalog-results" previous=products %}`, declares the `catalog-results-less` zone. It renders a "Show earlier results" link when the window starts above page 1, and a click prepends the page before it. On page 1 the tag renders its link to the first window with the `hidden` attribute, which the runtime shows once a prune drops the first rows, pointing its `href` at the highest page it dropped. Both sentinel zones sit in the published set, so a new search resets them along with the rows. The order of the set carries no meaning. The runtime treats a request as a page of the list only when its URL equals the href of a sentinel link and its zones equal that link's target, which the live filter never matches.
 
 Without the runtime the form is a plain `<form method="get">` and the sentinel is an honest pagination link, so the catalog stays bookmarkable and crawlable.
 
@@ -179,9 +176,11 @@ return patches.response()
 
 The handler points `request.GET` at the preset's params before morphing, so the cached search, the product count, the active-filter chips, and the "Show more" link all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. The chained `.meta(preset.title)` adds a `meta` op that sets `document.title` on the client, folded through the title template of the origin page, so the tab reads `Cheapest first · next.dj catalog` after the apply just as it would after a navigation. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
 
-### 9. `cached_search` and the LocMem hit path
+### 9. `cached_count` and the LocMem hit path
 
-The read lives on the model. `ProductQuerySet.matching` in [`catalog/models.py`](catalog/models.py) applies the search term, the brands, the price range, the stock toggle and the sort, so a caller asks `Product.objects.matching(filters)` and gets an ordinary chainable queryset back. The pages never ask it themselves. A product is public, there is no visitor to narrow it by, so every read of the page tree goes through a function of [`catalog/services.py`](catalog/services.py). `cached_search` is the one function there that crosses the cache and the model. It scopes that queryset to a category when one is given and materialises every matching row into a list, so the cached value does not depend on a queryset closure that can grow stale across requests. The cache holds those rows and never a `Window`. A window carries tokens cut for the `?page` and the restore flag of one request, while the rows are the same for every page of a search, so one entry serves the whole scroll, a restored window and the category pager alike, and each pager slices the list per request and counts it with `len`. That trade suits a catalog whose result sets fit in memory. A larger one hands the pager the lazy queryset and caches the count alone. The cache key is a stable blake2b hash of a sorted JSON encoding of the filter set and the category PK. Two identical GETs produce one cache key and serve the second request from memory for `CACHE_TTL = 60` seconds, which the [`tests/test_integration.py::TestCacheHit`](tests/test_integration.py) tests verify through the cache backend's internal map.
+The read lives on the model. `ProductQuerySet.matching` in [`catalog/models.py`](catalog/models.py) applies the search term, the brands, the price range, the stock toggle and the sort, so a caller asks `Product.objects.matching(filters)` and gets an ordinary chainable queryset back. The pages never ask it themselves. A product is public, there is no visitor to narrow it by, so every read of the page tree goes through a function of [`catalog/services.py`](catalog/services.py). `search` scopes that queryset to a category when one is given and hands it to the pager still lazy, so the pager slices it into one `LIMIT ... OFFSET` query for the rows of the window, one row past its end to tell whether a next page exists. Nothing materialises the rest of the result set, however large the catalog grows.
+
+The count is the part worth caching, since it reads every matching row and is the same for every page of a search. `cached_count` is the one function that crosses the cache and the model. Its key is a stable blake2b hash of a sorted JSON encoding of the filter set without the sort and of the category PK, because an ordering changes the rows of a page but never how many there are. Every page of a scroll, a restored window, the category pager and a change of sort therefore read one entry, and two identical GETs serve the second count from memory for `CACHE_TTL = 60` seconds, which [`tests/test_integration.py::TestCacheHit`](tests/test_integration.py) verifies through the cache backend's internal map together with the single `LIMIT 7 OFFSET 6` read of a second category page.
 
 The database carries the same filter set. `Product` declares `db_index=True` on `brand` and two composite indexes, `product_cat_stock_idx` over `(category, in_stock)` and `product_price_idx` over `price`, which is what the category listing and the price range read. Both names are spelled out rather than left to Django, because the auto-generated name is truncated to a cap that moved between Django versions and an unnamed index would drift under `makemigrations --check` on part of the support matrix. [`0003_explicit_index_names`](catalog/migrations/0003_explicit_index_names.py) renames the two indexes an older run had created.
 
@@ -337,6 +336,34 @@ The marker counts from the URL trail of the directory that holds the intercept, 
 
 `TestProductPeek` in the integration suite pins the server side, the plain GET against the zone GET, the `meta` op, the 404 for a product of another category and the row in `manage.py routes`. [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, reload and the link to the full page.
 
+### 16. Rails that stream in and share one batch
+
+The product page ends in two rails, more in the same category and at a similar price. Neither is part of what the visitor came for, and in a real store each would come from a recommender that answers product ids and takes its time, so neither should hold the first byte of the product. Both are calls of one component beside the page, [`_components/rail/`](catalog/pages/catalog/%5Bcategory%5D/%5Bslug%5D/_components/rail/), and the `loading.djx` beside it makes each call a `stream` boundary of its own.
+
+```
+[slug]/_components/rail/
+├── component.py     <- component.defer(timeout="1s"), async @component.context picks
+├── component.djx    <- the picked cards through product_card
+├── loading.djx      <- a skeleton row with an sr-only label
+└── error.djx        <- the rail that timed out or failed, with a retry
+```
+
+The shell carries a skeleton in place of each rail, and each rail settles in a chunk of its own as its job ends. `component.defer(timeout="1s")` keeps the default `stream` mode and gives each job one second, after which the rail settles as `timeout` and its `error.djx` says so while the rest of the page stands. That deadline is the real failure the error UI is for, a recommender that does not answer in time. `TestProductRails` holds both jobs with `next.testing.boundary_gate` until their deadline and reads the timeout chunks through `get_stream`.
+
+`ProductQuerySet.picks_for` stands in for the recommender and answers keys only. The cards need the rows, and the two rails ask for them independently, which is the case a `Loader` in [`catalog/deps.py`](catalog/deps.py) is for:
+
+```python
+product_cards = Loader(Product.objects.cards)
+
+
+@component.context("picks")
+async def picks(product: Product, by: str) -> list[Product]:
+    keys = [key async for key in Product.objects.picks_for(product, by=by)]
+    return list(await asyncio.gather(*(product_cards.load(key) for key in keys)))
+```
+
+`ProductQuerySet.cards` is the batch function, one `in_bulk` query over the keys with the category joined so every card links without a query of its own. The loader closes a batch once every running job of the response waits on it, so when the two jobs run side by side the keys of both rails go out in one query, a key both ask for loaded once. Where the jobs run decides how far that reaches. On SQLite every job stays on the request thread, so the two rails load one after the other and each batch holds the keys of one rail. On a database whose jobs run on the pool, PostgreSQL for instance, both rails share one query. `TestProductRails` pins both, the second through `next.testing.parallel_boundaries`, which puts the jobs on the pool the way such a database would.
+
 ## Further reading
 
 - [`next/urls/markers.py`](../../next/urls/markers.py) ships both the `DUrl` provider for URL path segments and the `DQuery` provider for query-string parameters. The narrative section lives in [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst).
@@ -348,4 +375,5 @@ The marker counts from the URL trail of the directory that holds the intercept, 
 - [`next/seo/`](../../next/seo/) hosts `@sitemap.items` and `SitemapEntry` of section 12, with the `cache` attribute wrapping its views.
 - [`next/pages/responses.py`](../../next/pages/responses.py) hosts `CacheDict` and the shared-cache rules of section 13.
 - [`next/scripts/`](../../next/scripts/) and [`next/consent/`](../../next/consent/) host `scripts.py` and the consent gate of section 14.
+- [`next/deps/loader.py`](../../next/deps/loader.py) hosts the `Loader` of section 16, and [`docs/content/topics/boundaries/`](../../docs/content/topics/boundaries/) the delivery modes and the lanes its jobs run on.
 - [`next/intercept.py`](../../next/intercept.py) and [`next/partial/intercept.py`](../../next/partial/intercept.py): the intercept table and the zone selection of section 15.

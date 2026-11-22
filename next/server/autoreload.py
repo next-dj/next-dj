@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 from django.utils.autoreload import StatReloader
 
-from next.components import refresh_component_files
+from next.components import component_watch_roots, refresh_component_files
 from next.pages.loaders import has_body
 from next.pages.watch import get_pages_directories_for_watch
 from next.urls.dispatcher import scan_pages_tree
@@ -19,12 +20,13 @@ from next.urls.dispatcher import scan_pages_tree
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
-    from pathlib import Path
 
     from next.utils import InterceptPage
 
 
 logger = logging.getLogger(__name__)
+
+type _Signatures = dict[Path, tuple[float, int]]
 
 
 def _tree_dir_signature(root: Path) -> tuple[float, int]:
@@ -74,8 +76,9 @@ class NextStatReloader(StatReloader):
         """Initialise the cached route set used for tick-to-tick diffs."""
         super().__init__()
         self._previous_routes: set[tuple[str, Path, bool]] | None = None
-        self._dir_signatures: dict[Path, tuple[float, int]] = {}
+        self._dir_signatures: _Signatures = {}
         self._cached_routes: set[tuple[str, Path, bool]] | None = None
+        self._component_shape: tuple[_Signatures, _Signatures] | None = None
 
     def _check_routes(self, current: set[tuple[str, Path, bool]]) -> None:
         """Notify the reloader when the discovered route set changed."""
@@ -106,20 +109,35 @@ class NextStatReloader(StatReloader):
         self._cached_routes = routes
         return routes
 
+    def _refresh_components(self, pages: _Signatures | None) -> None:
+        """Swap in the component boundary files once a watched tree changed shape.
+
+        A boundary file that appears or goes moves the mtime of its directory.
+        """
+        shape = None
+        if pages is not None:
+            roots = component_watch_roots()
+            shape = (pages, {root: _tree_dir_signature(root) for root in roots})
+            if shape == self._component_shape:
+                return
+        self._component_shape = shape
+        refresh_component_files()
+
     @override
     def tick(self) -> Generator[None, None, None]:
         """Recompute routes, compare to the previous tick, then delegate.
 
-        Each tick also swaps in the component boundary files, which no render stats.
+        A tick also swaps in the component boundary files, which no render stats.
         """
         parent_ticker = super().tick()
         while True:
-            refresh_component_files()
             try:
                 routes = self._collect_routes()
             except (OSError, ImportError, ValueError) as e:
                 # Narrow on purpose, the watch helpers absorb what a router raises.
                 logger.debug("next route set check skipped: %s", e)
+                self._refresh_components(None)
             else:
                 self._check_routes(routes)
+                self._refresh_components(self._dir_signatures)
             yield next(parent_ticker)

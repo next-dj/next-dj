@@ -1,3 +1,5 @@
+from django.db.models import Count, Q
+
 from access.models import AccessRequest, AuditEntry, AuditEntryQuerySet
 
 
@@ -32,9 +34,8 @@ def audit_entries(*, kind: str) -> AuditEntryQuerySet:
 
 
 def audit_totals(*, kind: str) -> dict[str, int]:
-    """Return how many rows of `kind` each audit channel wrote."""
-    rows = AuditEntry.objects.of_kind(kind)
-    return {
-        "backend": rows.filter(source=AuditEntry.SOURCE_BACKEND).count(),
-        "signal": rows.filter(source=AuditEntry.SOURCE_SIGNAL).count(),
-    }
+    """Return how many rows of `kind` each audit channel wrote, in one query."""
+    return AuditEntry.objects.of_kind(kind).aggregate(
+        backend=Count("pk", filter=Q(source=AuditEntry.SOURCE_BACKEND)),
+        signal=Count("pk", filter=Q(source=AuditEntry.SOURCE_SIGNAL)),
+    )

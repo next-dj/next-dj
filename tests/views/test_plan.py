@@ -1,25 +1,21 @@
-from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from django.http import HttpResponseBase
 from django.template import Template
-from django.test import RequestFactory
 from django.utils.safestring import SafeString
 
 import next.pages.boundaries as page_boundaries
-import next.pages.manager as manager_module
 from next.components import registry as registry_module
 from next.components.registry import DeferredComponents, ErrorFiles
 from next.pages.loaders import load_python_module_memo
 from next.pages.manager import Page
 from next.pages.signals import page_rendered
-from next.pages.transactions import AtomicDeclaration, atomic_declarations
+from next.pages.transactions import AtomicDeclaration, atomic_store
 from next.partial.headers import CONTENT_TYPE, ORIGIN, VERSION
 from next.router import CurrentLinks
 from next.suspense.policy import streaming
-from next.templatetags import components as component_tags
 from next.testing import capture_signals, envelope_of, override_next_settings
+from next.transactions import AtomicScope
 from next.views import pages as view_pages
 from next.views.plan import PagePlans, sealed, spells_container
 from tests.support import (
@@ -31,39 +27,24 @@ from tests.support import (
     unified_view,
 )
 from tests.support.partial_requests import wsgi_header
+from tests.support.views import write_dynamic_page
 
 
 _LINKS = CurrentLinks()
 _ZONED = 'a {% zone "z" %}<p>zoned</p>{% endzone %} b'
 _NAV = '<nav><a href="/">Home</a></nav>'
 _TEXT = "<p>text</p>"
-_DYNAMIC = "def render(request):\n    return '<p>dynamic</p>'\n"
 
 
 @pytest.fixture()
-def quiet(monkeypatch: pytest.MonkeyPatch) -> tuple[DeferredComponents, ErrorFiles]:
+def quiet(
+    fresh_deferred_components: DeferredComponents, monkeypatch: pytest.MonkeyPatch
+) -> tuple[DeferredComponents, ErrorFiles]:
     """Start the project without a deferrable or a guarded component."""
-    deferred = DeferredComponents()
     guarded = ErrorFiles()
-    for module in (registry_module, manager_module, component_tags):
-        monkeypatch.setattr(module, "deferred_components", deferred)
     for module in (registry_module, page_boundaries):
         monkeypatch.setattr(module, "error_files", guarded)
-    return deferred, guarded
-
-
-@pytest.fixture()
-def _fresh_atomic_declarations() -> Iterator[None]:
-    atomic_declarations.reset()
-    yield
-    atomic_declarations.reset()
-
-
-def _dynamic_page(directory: Path) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    page_file = directory / "page.py"
-    page_file.write_text(_DYNAMIC)
-    return page_file
+    return fresh_deferred_components, guarded
 
 
 def _planned(page: Page, page_file: Path) -> tuple[PagePlans, Template]:
@@ -202,13 +183,13 @@ class TestPagePlan:
         assert plan.plain is False
 
     @pytest.mark.django_db()
-    @pytest.mark.usefixtures("_fresh_atomic_declarations")
+    @pytest.mark.usefixtures("fresh_atomic_declarations")
     def test_a_registry_version_bump_rebuilds_it(self, page_instance, tmp_path) -> None:
         page_file = build_nested_page(tmp_path)
         plans, template = _planned(page_instance, page_file)
         before = plans.of(template)
         namespace = vars(load_python_module_memo(page_file))
-        atomic_declarations.declare(
+        atomic_store.declare(
             page_file, AtomicDeclaration(True, None, namespace, top_level=True)
         )
         after = plans.of(template)
@@ -250,7 +231,7 @@ class TestPagePlan:
         self, page_instance, tmp_path, quiet
     ) -> None:
         deferred, guarded = quiet
-        page_file = _dynamic_page(tmp_path / "dynamic")
+        page_file = write_dynamic_page(tmp_path / "dynamic")
         plans = PagePlans(page_instance, page_file)
         chain = page_instance.layout_skeleton(page_file)[1]
         before = plans.of(chain)
@@ -265,15 +246,11 @@ class TestPagePlan:
     def test_a_render_body_has_no_backend_to_mark_with_the_pass_off(
         self, page_instance, tmp_path
     ) -> None:
-        page_file = _dynamic_page(tmp_path / "dynamic")
+        page_file = write_dynamic_page(tmp_path / "dynamic")
         plans = PagePlans(page_instance, page_file)
         chain = page_instance.layout_skeleton(page_file)[1]
         with override_next_settings(ROUTER={"CURRENT": False}):
             assert plans.of(chain).marks is False
-
-
-def _view(page: Page, page_file: Path) -> Callable[..., HttpResponseBase]:
-    return unified_view(page, page_file)
 
 
 @pytest.mark.usefixtures("quiet")
@@ -284,7 +261,7 @@ class TestPlainPage:
         self, page_instance, tmp_path
     ) -> None:
         page_file = build_nested_page(tmp_path, body="<p>{{ request.path }}plain</p>")
-        response = _view(page_instance, page_file)(build_page_request())
+        response = unified_view(page_instance, page_file)(build_page_request())
         assert response.content == b"<html><main><p>plain</p></main></html>"
         assert "X-Next-Request" in response["Vary"]
 
@@ -292,7 +269,7 @@ class TestPlainPage:
         self, page_instance, tmp_path
     ) -> None:
         page_file = build_nested_page(tmp_path, body="<p>plain</p>")
-        view = _view(page_instance, page_file)
+        view = unified_view(page_instance, page_file)
         with capture_signals(page_rendered) as recorder:
             view(build_page_request())
         (event,) = recorder.events
@@ -304,7 +281,7 @@ class TestPlainPage:
         page_file = build_nested_page(tmp_path, body=_NAV)
         request = build_page_request()
         request.path = "/"
-        response = _view(page_instance, page_file)(request)
+        response = unified_view(page_instance, page_file)(request)
         assert b'aria-current="page"' in response.content
 
     def test_a_container_a_safe_variable_holds_is_marked(
@@ -316,7 +293,7 @@ class TestPlainPage:
         )
         request = build_page_request()
         request.path = "/"
-        response = _view(page_instance, page_file)(request)
+        response = unified_view(page_instance, page_file)(request)
         assert b'aria-current="page"' in response.content
 
     def test_a_project_that_defers_marks_the_payload_of_a_plain_page(
@@ -328,7 +305,7 @@ class TestPlainPage:
         page_file = tmp_path / "page.py"
         page_file.write_text("")
         (tmp_path / "template.djx").write_text("<h1>plain</h1>")
-        view = _view(page_instance, page_file)
+        view = unified_view(page_instance, page_file)
         before = view(build_page_request()).content
         quiet[0].declare()
         with streaming():
@@ -344,7 +321,7 @@ class TestPlainPage:
         page_file.write_text(f"def render(request):\n    return {_NAV!r}\n")
         request = build_page_request()
         request.path = "/"
-        response = _view(page_instance, page_file)(request)
+        response = unified_view(page_instance, page_file)(request)
         assert b'aria-current="page"' in response.content
 
     def test_a_render_body_that_answers_itself_is_passed_on(
@@ -356,7 +333,7 @@ class TestPlainPage:
             "from django.http import HttpResponse\n\n"
             "def render(request):\n    return HttpResponse('own', status=202)\n"
         )
-        response = _view(page_instance, page_file)(build_page_request())
+        response = unified_view(page_instance, page_file)(build_page_request())
         assert (response.status_code, response.content) == (202, b"own")
 
     def test_an_empty_render_body_leaves_the_layout(
@@ -366,24 +343,24 @@ class TestPlainPage:
         page_file = tmp_path / "dynamic" / "page.py"
         page_file.parent.mkdir()
         page_file.write_text("def render(request):\n    return ''\n")
-        response = _view(page_instance, page_file)(build_page_request())
+        response = unified_view(page_instance, page_file)(build_page_request())
         assert response.content == b"<main></main>"
 
     def test_the_token_field_leaves_the_query_of_a_plain_page(
-        self, page_instance, tmp_path
+        self, page_instance, tmp_path, rf
     ) -> None:
         page_file = build_nested_page(tmp_path, body="<p>plain</p>")
-        request = RequestFactory().get("/?a=1&_nb=secret")
-        _view(page_instance, page_file)(request)
+        request = rf.get("/?a=1&_nb=secret")
+        unified_view(page_instance, page_file)(request)
         assert request.META["QUERY_STRING"] == "a=1"
         assert "_nb" not in request.GET
 
     def test_a_request_without_a_query_parses_none(
-        self, page_instance, tmp_path
+        self, page_instance, tmp_path, rf
     ) -> None:
         page_file = build_nested_page(tmp_path, body="<p>plain</p>")
-        request = RequestFactory().get("/")
-        _view(page_instance, page_file)(request)
+        request = rf.get("/")
+        unified_view(page_instance, page_file)(request)
         assert "GET" not in vars(request)
 
 
@@ -395,7 +372,7 @@ class TestPlainZone:
         self, page_instance, tmp_path
     ) -> None:
         page_file = build_nested_page(tmp_path, body=_ZONED)
-        response = _view(page_instance, page_file)(build_zone_request("z"))
+        response = unified_view(page_instance, page_file)(build_zone_request("z"))
         assert envelope_of(response).html_for_zone("z") == (
             '<div data-next-zone="z"><p>zoned</p></div>'
         )
@@ -406,7 +383,7 @@ class TestPlainZone:
         self, page_instance, tmp_path
     ) -> None:
         page_file = build_nested_page(tmp_path, body=_ZONED)
-        view = _view(page_instance, page_file)
+        view = unified_view(page_instance, page_file)
         with override_next_settings(ROUTER={"CURRENT": False}):
             response = view(build_zone_request("z"))
         assert ORIGIN not in response["Vary"]
@@ -418,22 +395,22 @@ class TestPlainZone:
         page_file = build_nested_page(tmp_path, body=body)
         request = build_zone_request("z")
         request.path = "/"
-        response = _view(page_instance, page_file)(request)
+        response = unified_view(page_instance, page_file)(request)
         assert 'aria-current="page"' in envelope_of(response).html_for_zone("z")
 
     def test_a_zone_request_without_a_query_parses_none(
-        self, page_instance, tmp_path
+        self, page_instance, tmp_path, rf
     ) -> None:
         page_file = build_nested_page(tmp_path, body=_ZONED)
-        request = RequestFactory().get("/", **partial_meta(zones="z"))
-        assert _view(page_instance, page_file)(request).status_code == 200
+        request = rf.get("/", **partial_meta(zones="z"))
+        assert unified_view(page_instance, page_file)(request).status_code == 200
         assert "GET" not in vars(request)
 
     def test_an_unknown_zone_is_refused_with_the_same_vary(
         self, page_instance, tmp_path
     ) -> None:
         page_file = build_nested_page(tmp_path, body=_ZONED)
-        response = _view(page_instance, page_file)(build_zone_request("missing"))
+        response = unified_view(page_instance, page_file)(build_zone_request("missing"))
         assert response.status_code == 400
         assert ORIGIN in response["Vary"]
 
@@ -443,7 +420,7 @@ class TestPlainZone:
         page_file = build_nested_page(tmp_path, body=_ZONED)
         request = build_zone_request("z")
         request.META[wsgi_header(VERSION)] = "stale"
-        response = _view(page_instance, page_file)(request)
+        response = unified_view(page_instance, page_file)(request)
         assert response.status_code == 409
         assert ORIGIN in response["Vary"]
 
@@ -452,14 +429,14 @@ class TestPlainZone:
 class TestNavigationOfAnUndeferredPage:
     """A navigation of a page that defers nothing gathers no deferred call."""
 
-    def test_the_envelope_morphs_the_page(self, page_instance, tmp_path) -> None:
+    def test_the_envelope_morphs_the_page(self, page_instance, tmp_path, rf) -> None:
         (tmp_path / "layout.djx").write_text(
             "<html><body>{% template %}{% collect_scripts %}</body></html>"
         )
         page_file = tmp_path / "page.py"
         page_file.write_text("")
         (tmp_path / "template.djx").write_text("<h1>plain</h1>")
-        request = RequestFactory().get(
+        request = rf.get(
             "/",
             headers={
                 "X-Next-Request": "1",
@@ -468,16 +445,14 @@ class TestNavigationOfAnUndeferredPage:
             },
         )
         with override_next_settings(ROUTER={"ENABLED": True}):
-            response = _view(page_instance, page_file)(request)
+            response = unified_view(page_instance, page_file)(request)
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
         assert b"<h1>plain</h1>" in response.content
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.usefixtures(
-    "quiet", "_fresh_atomic_declarations", "watched_template_edits"
-)
+@pytest.mark.usefixtures("quiet", "fresh_atomic_declarations", "watched_template_edits")
 class TestPlanInTheDevLoop:
     """An edit the dev loop picks up reaches the plan on the request after it."""
 
@@ -485,13 +460,13 @@ class TestPlanInTheDevLoop:
         self, page_instance, tmp_path, monkeypatch
     ) -> None:
         page_file = build_nested_page(tmp_path, body="<p>plain</p>")
-        view = _view(page_instance, page_file)
+        view = unified_view(page_instance, page_file)
         opened: list[tuple[str, ...]] = []
         original = view_pages.request_atomic
 
-        def recording(aliases: tuple[str, ...]):
-            opened.append(aliases)
-            return original(aliases)
+        def recording(scope: AtomicScope):
+            opened.append(scope.aliases)
+            return original(scope)
 
         monkeypatch.setattr(view_pages, "request_atomic", recording)
         view(build_page_request())
@@ -503,7 +478,7 @@ class TestPlanInTheDevLoop:
         self, page_instance, tmp_path
     ) -> None:
         page_file = build_nested_page(tmp_path, body="<p>plain</p>")
-        view = _view(page_instance, page_file)
+        view = unified_view(page_instance, page_file)
         request = build_page_request()
         request.path = "/"
         assert b"aria-current" not in view(request).content

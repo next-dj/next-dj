@@ -5,6 +5,7 @@ import contextlib
 import logging
 import math
 import time
+from abc import abstractmethod
 from collections.abc import AsyncIterable
 from typing import TYPE_CHECKING, Any, ClassVar, Final, TypeGuard, cast, override
 
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
     from .backends import PartialProtocolBackend
     from .patches import Patches
-    from .stream import StreamPatch, StreamPosition
+    from .stream import StreamPosition
 
     class _TopicMessage(Protocol):
         @property
@@ -54,18 +55,7 @@ if TYPE_CHECKING:
         def epoch(self) -> str: ...
 
     type ControlFrame = StreamHello | StreamSkip | StreamEnd
-    type EventItem = Patches | Envelope | _TopicMessage | ControlFrame | StreamPatch
-    type PatchItem = (
-        Patches
-        | Envelope
-        | _TopicMessage
-        | StreamHello
-        | StreamSkip
-        | StreamEnd
-        | StreamPatch
-        | None
-    )
-    PatchSource = Iterable[PatchItem] | AsyncIterable[PatchItem]
+    type EventItem = Patches | Envelope | _TopicMessage | ControlFrame
 
 
 _EVENT_STREAM = "text/event-stream"
@@ -133,8 +123,8 @@ class _Stall:
             seen = pending
 
 
-class PatchStreamWriter(StreamingHttpResponse):
-    """Shared SSE writer for manual patches and broker topic messages.
+class EventWriter[Item](StreamingHttpResponse):
+    """SSE writer over a sync or async source, framing each item it yields.
 
     Django buffers a mismatched sync/async iterator, so the constructor refuses it.
     """
@@ -145,13 +135,13 @@ class PatchStreamWriter(StreamingHttpResponse):
     def __init__(
         self,
         request: "HttpRequest",
-        source: "PatchSource",
+        source: "Iterable[Item | None] | AsyncIterable[Item | None]",
         *,
         heartbeat_seconds: float | None = None,
         clock: "Callable[[], float] | None" = None,
         server_clock: "Callable[[], float] | None" = None,
     ) -> None:
-        """Build the stream over a sync or async source of patch builders.
+        """Build the stream over a sync or async source of items to frame.
 
         The heartbeat interval defaults to the backend's `HEARTBEAT_SECONDS` option.
         """
@@ -184,7 +174,9 @@ class PatchStreamWriter(StreamingHttpResponse):
         self._finished = True
         super().close()
 
-    def _guard_source_kind(self, source: "PatchSource") -> None:
+    def _guard_source_kind(
+        self, source: "Iterable[Item | None] | AsyncIterable[Item | None]"
+    ) -> None:
         """Refuse a source kind the request's server kind would buffer.
 
         Django reads a mismatched iterator fully before the first byte, hanging it.
@@ -208,14 +200,14 @@ class PatchStreamWriter(StreamingHttpResponse):
             raise ImproperlyConfigured(msg)
 
     def _build_content(
-        self, source: "PatchSource"
+        self, source: "Iterable[Item | None] | AsyncIterable[Item | None]"
     ) -> "Iterator[bytes] | AsyncGenerator[bytes, None]":
         """Return a sync or async byte stream matching the source kind."""
         if isinstance(source, AsyncIterable):
             return self._async_stream(source)
         return self._sync_stream(source)
 
-    def _sync_stream(self, source: "Iterable[PatchItem]") -> "Iterator[bytes]":
+    def _sync_stream(self, source: "Iterable[Item | None]") -> "Iterator[bytes]":
         """Yield SSE bytes for a sync source, including source-requested heartbeats.
 
         A blocked `next()` needs a thread to interrupt, so the source yields keepalives.
@@ -239,7 +231,7 @@ class PatchStreamWriter(StreamingHttpResponse):
                 self._announce_closed(sent)
 
     @staticmethod
-    def _close_source(source: "Iterable[PatchItem]") -> None:
+    def _close_source(source: "Iterable[object]") -> None:
         """Close a generator source so a disconnect leaves nothing suspended.
 
         A plain iterable has no `close`, and closing a spent generator twice is a no-op.
@@ -249,7 +241,7 @@ class PatchStreamWriter(StreamingHttpResponse):
             close()
 
     async def _async_stream(
-        self, source: "AsyncIterable[PatchItem]"
+        self, source: "AsyncIterable[Item | None]"
     ) -> "AsyncGenerator[bytes, None]":
         """Yield SSE bytes for an async source, interleaving heartbeats.
 
@@ -257,7 +249,7 @@ class PatchStreamWriter(StreamingHttpResponse):
         """
         sent = 0
         iterator = source.__aiter__()
-        task: asyncio.Future[PatchItem] | None = None
+        task: asyncio.Future[Item | None] | None = None
         stall = _Stall()
         watch: asyncio.Task[None] | None = None
 
@@ -302,7 +294,7 @@ class PatchStreamWriter(StreamingHttpResponse):
 
     async def _cleanup_async(
         self,
-        iterator: "AsyncIterator[PatchItem]",
+        iterator: "AsyncIterator[Item | None]",
         *pending: "asyncio.Future[Any] | None",
     ) -> None:
         """Cancel an in-flight pull and the stall watch, then close the source.
@@ -324,6 +316,60 @@ class PatchStreamWriter(StreamingHttpResponse):
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                 await aclose()
 
+    @abstractmethod
+    def _event_frame(self, item: Item) -> bytes:
+        """Return the SSE frame of one item the source yields."""
+
+    def _announce_opened(self) -> None:
+        """Report that streaming starts when iteration produces its first frame.
+
+        A failing receiver is logged, so an observer never kills the stream it watches.
+        """
+        sender = type(self)
+        if sse_stream_opened.has_listeners(sender):
+            sse_stream_opened.send_robust(sender=sender, request=self._request)
+
+    async def _aannounce_opened(self) -> None:
+        """Report the stream opening from the event loop, sync receivers off it."""
+        sender = type(self)
+        if sse_stream_opened.has_listeners(sender):
+            await sse_stream_opened.asend_robust(sender=sender, request=self._request)
+
+    def _opening_frame(self) -> bytes:
+        """Return the first frame of the stream, the `retry` hint of a reconnecting."""
+        return self._retry_frame()
+
+    def _retry_frame(self) -> bytes:
+        """Return the leading SSE `retry` hint frame."""
+        return f"retry: {self._retry_ms}\n\n".encode()
+
+    def _announce_closed(self, sent: int) -> None:
+        """Fire the close signal with the stream's duration and event count."""
+        sender = type(self)
+        if sse_stream_closed.has_listeners(sender):
+            sse_stream_closed.send_robust(sender=sender, **self._closed_kwargs(sent))
+
+    async def _aannounce_closed(self, sent: int) -> None:
+        """Fire the close signal from the event loop, sync receivers off it."""
+        sender = type(self)
+        if sse_stream_closed.has_listeners(sender):
+            await sse_stream_closed.asend_robust(
+                sender=sender, **self._closed_kwargs(sent)
+            )
+
+    def _closed_kwargs(self, sent: int) -> dict[str, object]:
+        """Return the close signal arguments, the duration measured now."""
+        return {
+            "request": self._request,
+            "duration_ms": (self._clock() - self._opened_at) * 1000,
+            "envelopes_sent": sent,
+        }
+
+
+class PatchStreamWriter(EventWriter["EventItem"]):
+    """Shared SSE writer for manual patches and broker topic messages."""
+
+    @override
     def _event_frame(self, item: "EventItem") -> bytes:
         """Serialize a patch envelope or stream control object as an SSE frame."""
         backend = partial_backend_manager.get()
@@ -380,51 +426,6 @@ class PatchStreamWriter(StreamingHttpResponse):
         del frame
         return None
 
-    def _announce_opened(self) -> None:
-        """Report that streaming starts when iteration produces its first frame.
-
-        A failing receiver is logged, so an observer never kills the stream it watches.
-        """
-        sender = type(self)
-        if sse_stream_opened.has_listeners(sender):
-            sse_stream_opened.send_robust(sender=sender, request=self._request)
-
-    async def _aannounce_opened(self) -> None:
-        """Report the stream opening from the event loop, sync receivers off it."""
-        sender = type(self)
-        if sse_stream_opened.has_listeners(sender):
-            await sse_stream_opened.asend_robust(sender=sender, request=self._request)
-
-    def _opening_frame(self) -> bytes:
-        """Return the first frame of the stream, the `retry` hint of a reconnecting."""
-        return self._retry_frame()
-
-    def _retry_frame(self) -> bytes:
-        """Return the leading SSE `retry` hint frame."""
-        return f"retry: {self._retry_ms}\n\n".encode()
-
-    def _announce_closed(self, sent: int) -> None:
-        """Fire the close signal with the stream's duration and event count."""
-        sender = type(self)
-        if sse_stream_closed.has_listeners(sender):
-            sse_stream_closed.send_robust(sender=sender, **self._closed_kwargs(sent))
-
-    async def _aannounce_closed(self, sent: int) -> None:
-        """Fire the close signal from the event loop, sync receivers off it."""
-        sender = type(self)
-        if sse_stream_closed.has_listeners(sender):
-            await sse_stream_closed.asend_robust(
-                sender=sender, **self._closed_kwargs(sent)
-            )
-
-    def _closed_kwargs(self, sent: int) -> dict[str, object]:
-        """Return the close signal arguments, the duration measured now."""
-        return {
-            "request": self._request,
-            "duration_ms": (self._clock() - self._opened_at) * 1000,
-            "envelopes_sent": sent,
-        }
-
 
 def _sse_option(option: str) -> object:
     """Return one raw SSE option of the active backend, or None when it is unset."""
@@ -477,6 +478,7 @@ __all__ = [
     "HEARTBEAT_OPTION",
     "RETRY_OPTION",
     "SSE_OPTION",
+    "EventWriter",
     "PatchEventStream",
     "PatchStreamWriter",
     "heartbeat_seconds_valid",

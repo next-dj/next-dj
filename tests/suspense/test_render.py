@@ -7,17 +7,9 @@ import pytest
 from django.contrib.sessions.backends.signed_cookies import SessionStore
 from django.http import Http404
 from django.template import Context, Engine, Template
-from django.test import RequestFactory, override_settings
+from django.test import override_settings
 
-from next.defer import (
-    Addressing,
-    BoundaryError,
-    BoundaryOptions,
-    DeferMode,
-    DeferredCall,
-    ErrorKind,
-    Site,
-)
+from next.defer import BoundaryFailure, DeferredCall, ErrorKind
 from next.diagnostics import degraded_status, mark_degraded, watch_degraded
 from next.seeding import COLLECTOR_KEY
 from next.static import StaticCollector
@@ -26,7 +18,6 @@ from next.static.runtime import BUNDLE_NOTE
 from next.static.serializers import JsonJsContextSerializer
 from next.suspense import render as render_module
 from next.suspense.components import Capture
-from next.suspense.markers import Caps
 from next.suspense.render import (
     Added,
     Delta,
@@ -36,14 +27,11 @@ from next.suspense.render import (
     Recording,
     current_frame,
     fallback,
-    gated,
     run,
     unframed,
 )
-from next.suspense.session import BoundarySession
-
-
-_SITE = Site(Addressing.COMPONENT, "card", DeferMode.STREAM, "page.html")
+from next.testing.boundaries import gated
+from tests.support.boundaries import make_call, open_session
 
 
 def _asset(url: str) -> StaticAsset:
@@ -56,14 +44,14 @@ class _Renderer:
 
     body_error: Exception | None = None
     error_error: Exception | None = None
-    shown: BoundaryError | None = None
+    shown: BoundaryFailure | None = None
     write: bool = False
     error_markup: str = ""
 
-    def loading(self, context: Context) -> tuple[str, BoundaryError | None]:
+    def loading(self, context: Context) -> tuple[str, BoundaryFailure | None]:
         return "L", None
 
-    def body(self, context: Context) -> tuple[str, BoundaryError | None]:
+    def body(self, context: Context) -> tuple[str, BoundaryFailure | None]:
         if self.body_error is not None:
             raise self.body_error
         if self.write:
@@ -72,15 +60,15 @@ class _Renderer:
         depth = None if frame is None else frame.depth
         return f"{context['v']}:{depth}:{context.get('stamp')}", self.shown
 
-    def error(self, context: Context, kind: ErrorKind) -> tuple[str, BoundaryError]:
+    def error(self, context: Context, kind: ErrorKind) -> tuple[str, BoundaryFailure]:
         if self.error_error is not None:
             raise self.error_error
         markup = self.error_markup or f"E:{kind}"
-        return markup, BoundaryError(kind, "d1", kind.status, retry=False)
+        return markup, BoundaryFailure(kind, "d1", kind.status, retry=False)
 
 
 def _call(renderer: _Renderer) -> DeferredCall:
-    return DeferredCall(_SITE, BoundaryOptions(), "k", "div", None, renderer)
+    return make_call("div", "k", renderer=renderer)
 
 
 def _capture(**data: object) -> Capture:
@@ -96,9 +84,8 @@ def engine_stamp(request: object) -> dict[str, str]:
     return {"stamp": "engine", "engine": "yes"}
 
 
-def _frame() -> Frame:
-    session = BoundarySession[Delta].open(Caps.from_settings())
-    return Frame(session, "b-x-0", 0)
+def _framed() -> Frame:
+    return Frame(open_session(), "b-x-0", 0)
 
 
 class TestRecording:
@@ -176,7 +163,7 @@ class TestRun:
     """A job renders from its capture inside its frame."""
 
     def test_the_body_renders_inside_the_frame(self) -> None:
-        frame = _frame()
+        frame = _framed()
         rendered = run(_call(_Renderer()), _capture(), frame, frame.session.deadline)
         assert rendered.html == "V:0:None"
         assert rendered.kind is None
@@ -186,23 +173,23 @@ class TestRun:
 
     def test_an_escaping_exception_returns_for_the_request_thread(self) -> None:
         error = Http404("gone")
-        frame = _frame()
+        frame = _framed()
         rendered = run(_call(_Renderer(body_error=error)), _capture(), frame, 0.0)
         assert rendered.intended is error
         assert rendered.kind is ErrorKind.NOT_FOUND
         assert rendered.html == ""
 
     def test_a_failure_the_error_ui_showed_is_kept(self) -> None:
-        shown = BoundaryError(ErrorKind.ERROR, "d0", None, retry=True)
-        frame = _frame()
+        shown = BoundaryFailure(ErrorKind.ERROR, "d0", None, retry=True)
+        frame = _framed()
         rendered = run(
             _call(_Renderer(shown=shown)), _capture(), frame, frame.session.deadline
         )
         assert rendered.failure is shown
         assert rendered.kind is ErrorKind.ERROR
 
-    def test_the_page_processors_rerun_after_the_engine_ones(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_page_processors_rerun_after_the_engine_ones(self, rf) -> None:
+        request = rf.get("/")
         template = Template(
             "", engine=Engine(context_processors=[f"{__name__}.engine_stamp"])
         )
@@ -213,13 +200,13 @@ class TestRun:
             use_l10n=None,
             use_tz=None,
         )
-        frame = _frame()
+        frame = _framed()
         with patch("next.suspense.render.context_processors", return_value=[stamp]):
             rendered = run(_call(_Renderer()), capture, frame, frame.session.deadline)
         assert rendered.html == "V:0:page"
 
-    def test_the_call_site_values_sit_over_the_processors(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_call_site_values_sit_over_the_processors(self, rf) -> None:
+        request = rf.get("/")
         capture = Capture(
             {"v": "V", "request": request, "stamp": "call-site"},
             None,
@@ -227,13 +214,13 @@ class TestRun:
             use_l10n=None,
             use_tz=None,
         )
-        frame = _frame()
+        frame = _framed()
         with patch("next.suspense.render.context_processors", return_value=[stamp]):
             rendered = run(_call(_Renderer()), capture, frame, frame.session.deadline)
         assert rendered.html == "V:0:call-site"
 
-    def test_the_processors_run_once_for_every_job_of_a_request(self) -> None:
-        request = RequestFactory().get("/")
+    def test_the_processors_run_once_for_every_job_of_a_request(self, rf) -> None:
+        request = rf.get("/")
         calls: list[object] = []
 
         def counted(seen: object) -> dict[str, str]:
@@ -241,7 +228,7 @@ class TestRun:
             return {"stamp": "page"}
 
         renderer = _Renderer()
-        frame = _frame()
+        frame = _framed()
         with patch("next.suspense.render.context_processors", return_value=[counted]):
             htmls = [
                 run(
@@ -257,7 +244,7 @@ class TestRun:
             )
             other = run(
                 _call(renderer),
-                _capture(request=RequestFactory().get("/")),
+                _capture(request=rf.get("/")),
                 frame,
                 frame.session.deadline,
             )
@@ -270,10 +257,10 @@ class TestRun:
     @override_settings(
         MIDDLEWARE=["django.contrib.sessions.middleware.SessionMiddleware"]
     )
-    def test_a_request_state_write_is_reported_on_the_result(self) -> None:
-        request = RequestFactory().get("/")
+    def test_a_request_state_write_is_reported_on_the_result(self, rf) -> None:
+        request = rf.get("/")
         request.session = SessionStore()
-        frame = _frame()
+        frame = _framed()
         rendered = run(
             _call(_Renderer(write=True)),
             _capture(request=request),
@@ -287,7 +274,7 @@ class TestGated:
     """A gate holds the jobs of one component until the test releases it."""
 
     def test_a_held_job_waits_for_the_release(self) -> None:
-        frame = _frame()
+        frame = _framed()
         results: list[str] = []
         with gated("card") as gate:
             worker = threading.Thread(
@@ -305,13 +292,13 @@ class TestGated:
         assert results == ["V:0:None"]
 
     def test_a_held_job_leaves_at_its_deadline(self) -> None:
-        frame = _frame()
+        frame = _framed()
         with gated("card"):
             rendered = run(_call(_Renderer()), _capture(), frame, time.monotonic())
         assert rendered.html == "V:0:None"
 
     def test_another_component_passes_the_gate(self) -> None:
-        frame = _frame()
+        frame = _framed()
         with gated("other") as gate:
             rendered = run(_call(_Renderer()), _capture(), frame, time.monotonic() + 5)
         assert rendered.html == "V:0:None"
@@ -320,7 +307,7 @@ class TestGated:
     def test_nested_gates_of_one_component_unwind_cleanly(self) -> None:
         with gated("card") as outer, gated("card") as inner:
             assert inner is not outer
-        frame = _frame()
+        frame = _framed()
         rendered = run(_call(_Renderer()), _capture(), frame, time.monotonic())
         assert rendered.html == "V:0:None"
 
@@ -332,7 +319,7 @@ class TestFallback:
         rendered = fallback(_call(_Renderer()), _capture(), ErrorKind.TIMEOUT)
         assert rendered.html == "E:timeout"
         assert rendered.kind is ErrorKind.TIMEOUT
-        assert rendered.failure == BoundaryError(
+        assert rendered.failure == BoundaryFailure(
             ErrorKind.TIMEOUT, "d1", None, retry=False
         )
 
@@ -350,24 +337,23 @@ class TestFallback:
 class _StatusRenderer(_Renderer):
     """A renderer whose body answers with a status, as a page error UI does."""
 
-    def body(self, context: Context) -> tuple[str, BoundaryError | None]:
+    def body(self, context: Context) -> tuple[str, BoundaryFailure | None]:
         mark_degraded(500)
-        return "failed", BoundaryError(ErrorKind.ERROR, "d0", None, retry=True)
+        return "failed", BoundaryFailure(ErrorKind.ERROR, "d0", None, retry=True)
 
 
 class TestStatus:
     """A status the job's error UI set comes back for the request thread to apply."""
 
     def test_a_job_without_a_status_carries_none(self) -> None:
-        frame = _frame()
+        frame = _framed()
 
         rendered = run(_call(_Renderer()), _capture(), frame, frame.session.deadline)
 
         assert rendered.status is None
-        assert rendered.replay == ()
 
     def test_the_status_stays_off_the_request_until_applied(self) -> None:
-        frame = _frame()
+        frame = _framed()
         watch_degraded()
 
         rendered = run(
@@ -382,15 +368,11 @@ class TestStatus:
 class TestUnframed:
     """A block outside every job renders a deferred call in place."""
 
-    def test_the_frame_is_cleared_inside_and_restored_after(self) -> None:
-        frame = _frame()
-        token = render_module._frame.set(frame)
-        try:
-            with unframed():
-                assert current_frame() is None
-            assert current_frame() is frame
-        finally:
-            render_module._frame.reset(token)
+    def test_the_frame_is_cleared_inside_and_restored_after(self, in_job) -> None:
+        frame = in_job(open_session())
+        with unframed():
+            assert current_frame() is None
+        assert current_frame() is frame
 
 
 DEFER = StaticAsset(url="/static/next/next.defer.min.js", kind="js")
@@ -416,8 +398,8 @@ class TestRetryNeedsTheDeferBundle:
         assert rendered.delta.steps == ()
 
     def test_a_retry_token_of_a_failed_job_joins_the_delta(self) -> None:
-        shown = BoundaryError(ErrorKind.ERROR, "d0", None, retry=True)
-        frame = _frame()
+        shown = BoundaryFailure(ErrorKind.ERROR, "d0", None, retry=True)
+        frame = _framed()
         capture = _capture(**{COLLECTOR_KEY: _page()})
         with patch.object(
             render_module, "retry_token", return_value=' data-next-token="t"'

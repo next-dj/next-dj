@@ -7,7 +7,7 @@ from urllib.parse import unquote_plus
 from django.http import HttpRequest, QueryDict
 
 from next.conf.router import router_enabled
-from next.pages.responses import Depth, Purpose, mark_purpose
+from next.pages.responses import Purpose, mark_purpose
 from next.partial.headers import PartialIntent, partial_intent
 from next.suspense.manager import suspense_manager
 from next.suspense.tokens.transport import FIELD, BodyTransport
@@ -21,7 +21,7 @@ _CARRIED_ATTR: Final = "_next_boundary_token"
 _SPECULATIVE: Final = "prefetch"
 
 
-class Route(enum.StrEnum):
+class RouteKind(enum.StrEnum):
     """The kind of response a request to a page URL is answered with."""
 
     PAGE = "page"
@@ -87,18 +87,18 @@ def boundary_token(request: HttpRequest) -> str | None:
     return token
 
 
-def _decided(request: HttpRequest, intent: PartialIntent) -> Route:
+def _decided(request: HttpRequest, intent: PartialIntent) -> RouteKind:
     """Return the route of a request whose intent is `intent`."""
     if boundary_token(request) is not None:
-        return Route.BOUNDARY
+        return RouteKind.BOUNDARY
     if intent.zones:
-        return Route.ZONE
+        return RouteKind.ZONE
     if intent.navigate and router_enabled():
-        return Route.NAVIGATE
-    return Route.PAGE
+        return RouteKind.NAVIGATE
+    return RouteKind.PAGE
 
 
-def decide_route(request: HttpRequest) -> Route:
+def decide_route(request: HttpRequest) -> RouteKind:
     """Return `BOUNDARY` for a token with `X-Next-Request: 1`, `ZONE` for zones.
 
     A navigation is `NAVIGATE` only while the client router is on, else a plain page.
@@ -107,12 +107,11 @@ def decide_route(request: HttpRequest) -> Route:
     return _decided(request, partial_intent(request))
 
 
-def note_purpose(request: HttpRequest, route: Route) -> None:
+def note_purpose(request: HttpRequest, route: RouteKind) -> None:
     """Set `request.next` to why the view renders, a browser prefetch a speculation."""
-    if route is Route.NAVIGATE:
-        intent = partial_intent(request)
-        if intent.prefetch:
-            depth = Depth.FULL if intent.full else Depth.SHELL
+    if route is RouteKind.NAVIGATE:
+        depth = partial_intent(request).prefetch
+        if depth is not None:
             mark_purpose(request, Purpose.PREFETCH, depth)
         else:
             mark_purpose(request, Purpose.NAVIGATION)
@@ -122,7 +121,7 @@ def note_purpose(request: HttpRequest, route: Route) -> None:
         mark_purpose(request, Purpose.DOCUMENT)
 
 
-def route_request(request: HttpRequest, intent: PartialIntent) -> Route:
+def route_request(request: HttpRequest, intent: PartialIntent) -> RouteKind:
     """Return the route of `request` with its purpose noted, both from `intent`.
 
     Without the partial switch it is a page, and no token is read for it.
@@ -130,10 +129,16 @@ def route_request(request: HttpRequest, intent: PartialIntent) -> Route:
     if intent.partial:
         route = _decided(request, intent)
     else:
-        route = Route.PAGE
+        route = RouteKind.PAGE
         _without_field(request)
     note_purpose(request, route)
     return route
 
 
-__all__ = ["Route", "boundary_token", "decide_route", "note_purpose", "route_request"]
+__all__ = [
+    "RouteKind",
+    "boundary_token",
+    "decide_route",
+    "note_purpose",
+    "route_request",
+]

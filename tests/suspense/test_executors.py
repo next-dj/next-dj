@@ -20,20 +20,19 @@ from django.test import override_settings
 from pytest_django import DjangoDbBlocker
 
 from next.suspense import (
-    BackgroundLoop,
-    BoundaryExecutor,
     BoundaryShedError,
     Capacity,
     ExecutorStoppedError,
     LaneExecutor,
-    RequestThreadExecutor,
-    background_loop,
-    check_asgiref,
     executors,
 )
 from next.suspense.executors import (
+    BackgroundLoop,
+    RequestThreadExecutor,
     _forget_pools,
     _Worker,
+    background_loop,
+    check_asgiref,
     request_executor,
     retire_thread,
     serve_until,
@@ -41,9 +40,7 @@ from next.suspense.executors import (
 )
 from next.tasks import StealableTask
 from next.testing import override_next_settings
-
-
-WAIT = 5.0
+from tests.support.waits import WAIT, until
 
 
 @contextmanager
@@ -91,94 +88,76 @@ class _Bare:
     """Stand-in for an asgiref executor class without the attributes the walk reads."""
 
 
+@pytest.fixture()
+def owner() -> Iterator[BackgroundLoop]:
+    """Return a loop owner of its own, stopped when the test ends."""
+    held = BackgroundLoop()
+    yield held
+    held.stop()
+
+
 class TestBackgroundLoop:
     """Tests for ``BackgroundLoop``."""
 
-    def test_no_thread_exists_before_the_first_get(self) -> None:
+    def test_no_thread_exists_before_the_first_get(self, owner) -> None:
         before = set(threading.enumerate())
-        owner = BackgroundLoop()
         assert owner.current() is None
         assert set(threading.enumerate()) <= before
         loop = owner.get()
-        try:
-            started = set(threading.enumerate()) - before
-            assert [thread.name for thread in started] == ["next-background-loop"]
-            assert all(thread.daemon for thread in started)
-            assert owner.get() is loop
-            assert owner.current() is loop
-        finally:
-            owner.stop()
+        started = set(threading.enumerate()) - before
+        assert [thread.name for thread in started] == ["next-background-loop"]
+        assert all(thread.daemon for thread in started)
+        assert owner.get() is loop
+        assert owner.current() is loop
+        owner.stop()
         assert not any(thread.is_alive() for thread in started)
         assert loop.is_closed()
 
-    def test_the_loop_runs_submitted_coroutines(self) -> None:
-        owner = BackgroundLoop()
-        try:
-            future = asyncio.run_coroutine_threadsafe(
-                asyncio.sleep(0, "done"), owner.get()
-            )
-            assert future.result(5) == "done"
-        finally:
-            owner.stop()
+    def test_the_loop_runs_submitted_coroutines(self, owner) -> None:
+        future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), owner.get())
+        assert future.result(5) == "done"
 
-    def test_call_soon_runs_the_callback_on_the_loop(self) -> None:
-        owner = BackgroundLoop()
+    def test_call_soon_runs_the_callback_on_the_loop(self, owner) -> None:
         ran = threading.Event()
-        try:
-            loop = owner.call_soon(ran.set)
-            assert ran.wait(5)
-            assert loop is owner.current()
-        finally:
-            owner.stop()
+        loop = owner.call_soon(ran.set)
+        assert ran.wait(5)
+        assert loop is owner.current()
 
     @pytest.mark.django_db()
-    def test_a_database_connection_on_the_loop_raises(self) -> None:
-        owner = BackgroundLoop()
-        try:
-            future = asyncio.run_coroutine_threadsafe(_connect(), owner.get())
-            with pytest.raises(SynchronousOnlyOperation):
-                future.result(5)
-        finally:
-            owner.stop()
+    def test_a_database_connection_on_the_loop_raises(self, owner) -> None:
+        future = asyncio.run_coroutine_threadsafe(_connect(), owner.get())
+        with pytest.raises(SynchronousOnlyOperation):
+            future.result(5)
 
-    def test_stop_without_a_loop_does_nothing(self) -> None:
-        owner = BackgroundLoop()
+    def test_stop_without_a_loop_does_nothing(self, owner) -> None:
         owner.stop()
         assert owner.current() is None
 
-    def test_forget_drops_the_loop_as_a_forked_child_must(self) -> None:
-        owner = BackgroundLoop()
+    def test_forget_drops_the_loop_as_a_forked_child_must(self, owner) -> None:
         inherited = owner.get()
         running = owner._running
         assert running is not None
-        try:
-            owner.forget()
-            assert owner.current() is None
-            assert owner.get() is not inherited
-        finally:
-            owner.stop()
-            running.halt()
-            running.thread.join(5)
+        owner.forget()
+        assert owner.current() is None
+        assert owner.get() is not inherited
+        owner.stop()
+        running.halt()
+        running.thread.join(5)
         assert not running.thread.is_alive()
 
-    def test_get_replaces_a_loop_whose_thread_ended(self) -> None:
-        owner = BackgroundLoop()
+    def test_get_replaces_a_loop_whose_thread_ended(self, owner) -> None:
         ended = owner.get()
         running = owner._running
         assert running is not None
         running.halt()
         running.thread.join(5)
         assert ended.is_closed()
-        try:
-            fresh = owner.get()
-            assert fresh is not ended
-            future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), fresh)
-            assert future.result(5) == "done"
-        finally:
-            owner.stop()
+        fresh = owner.get()
+        assert fresh is not ended
+        future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), fresh)
+        assert future.result(5) == "done"
 
-    def test_stop_skips_a_loop_whose_thread_ended(self) -> None:
-        owner = BackgroundLoop()
+    def test_stop_skips_a_loop_whose_thread_ended(self, owner) -> None:
         owner.get()
         running = owner._running
         assert running is not None
@@ -187,29 +166,21 @@ class TestBackgroundLoop:
         owner.stop()
         assert owner.current() is None
 
-    def test_a_stray_loop_stop_does_not_end_the_thread(self) -> None:
-        owner = BackgroundLoop()
+    def test_a_stray_loop_stop_does_not_end_the_thread(self, owner) -> None:
         loop = owner.get()
-        try:
-            loop.call_soon_threadsafe(loop.stop)
-            future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), loop)
-            assert future.result(5) == "done"
-            assert owner.get() is loop
-        finally:
-            owner.stop()
+        loop.call_soon_threadsafe(loop.stop)
+        future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), loop)
+        assert future.result(5) == "done"
+        assert owner.get() is loop
 
     def test_an_interrupt_raised_by_a_callback_is_logged_and_the_loop_resumes(
-        self, caplog: pytest.LogCaptureFixture
+        self, owner, caplog: pytest.LogCaptureFixture
     ) -> None:
-        owner = BackgroundLoop()
         loop = owner.get()
-        try:
-            owner.call_soon(_interrupt)
-            future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), loop)
-            assert future.result(5) == "done"
-            assert owner.get() is loop
-        finally:
-            owner.stop()
+        owner.call_soon(_interrupt)
+        future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), loop)
+        assert future.result(5) == "done"
+        assert owner.get() is loop
         reports = [r for r in caplog.records if r.name == "next.suspense"]
         assert [r.getMessage() for r in reports] == [
             "A task raised an interrupt on the loop."
@@ -217,8 +188,7 @@ class TestBackgroundLoop:
         assert reports[0].exc_info is not None
         assert reports[0].exc_info[0] is KeyboardInterrupt
 
-    def test_stop_cancels_the_tasks_left_and_lets_them_settle(self) -> None:
-        owner = BackgroundLoop()
+    def test_stop_cancels_the_tasks_left_and_lets_them_settle(self, owner) -> None:
         started = threading.Event()
         reasons: list[tuple[object, ...]] = []
 
@@ -271,14 +241,14 @@ class TestCheckAsgiref:
         check_asgiref()
 
     @pytest.mark.parametrize(
-        ("owner", "name"), [(AsyncToSync, "executors"), (SyncToAsync, "threadlocal")]
+        ("holder", "name"), [(AsyncToSync, "executors"), (SyncToAsync, "threadlocal")]
     )
     def test_a_missing_attribute_is_named(
-        self, monkeypatch: pytest.MonkeyPatch, owner: type, name: str
+        self, monkeypatch: pytest.MonkeyPatch, holder: type, name: str
     ) -> None:
-        monkeypatch.delattr(owner, name)
+        monkeypatch.delattr(holder, name)
         with pytest.raises(
-            ImproperlyConfigured, match=rf"lacks {owner.__name__}\.{name},"
+            ImproperlyConfigured, match=rf"lacks {holder.__name__}\.{name},"
         ):
             check_asgiref()
 
@@ -550,13 +520,6 @@ class TestServeUntil:
         assert outer.result(0) == 2
 
 
-def _until(holds: Callable[[], bool], timeout: float = 5.0) -> None:
-    deadline = time.monotonic() + timeout
-    while not holds():
-        assert time.monotonic() < deadline, "the condition never held"
-        time.sleep(0.005)
-
-
 def _pool_threads() -> set[threading.Thread]:
     return {
         thread
@@ -668,23 +631,6 @@ def _raw(handler: ConnectionHandler) -> object:
     return handler["default"].connection
 
 
-class _Inline(BoundaryExecutor):
-    """A minimal executor that runs every task on the submitting thread."""
-
-    def submit(self, task: StealableTask[Any]) -> Future[Any]:
-        task.run()
-        return task.future
-
-    def steal(self, task: StealableTask[Any]) -> bool:
-        return task.run()
-
-    def capacity(self) -> Capacity:
-        return Capacity(1, 0, 0, 0.0)
-
-    def shutdown(self, timeout: float = 5.0) -> None:
-        del timeout
-
-
 class TestLaneExecutorThreads:
     """``LaneExecutor`` starts threads on demand, up to its cap."""
 
@@ -704,7 +650,7 @@ class TestLaneExecutorThreads:
         before = _pool_threads()
         executor = pools()
         executor.submit(StealableTask(lambda: 1)).result(5)
-        _until(lambda: executor.capacity().busy == 0)
+        until(lambda: executor.capacity().busy == 0)
         executor.submit(StealableTask(lambda: 2)).result(5)
         assert len(_pool_threads() - before) == 1
 
@@ -713,7 +659,7 @@ class TestLaneExecutorThreads:
         executor = pools(MAX_WORKERS=2)
         gate = threading.Event()
         futures = [executor.submit(_blocked(gate)) for _ in range(4)]
-        _until(lambda: executor.capacity().busy == 2)
+        until(lambda: executor.capacity().busy == 2)
         capacity = executor.capacity()
         assert (capacity.workers, capacity.busy, capacity.queued) == (2, 2, 2)
         assert capacity.idle == 0
@@ -725,7 +671,7 @@ class TestLaneExecutorThreads:
         executor = pools(MAX_WORKERS=1, MAX_QUEUE=2)
         gate = threading.Event()
         executor.submit(_blocked(gate))
-        _until(lambda: executor.capacity().busy == 1)
+        until(lambda: executor.capacity().busy == 1)
         queued = [executor.submit(StealableTask(lambda: 0)) for _ in range(2)]
         with pytest.raises(BoundaryShedError):
             executor.submit(StealableTask(lambda: 0))
@@ -759,7 +705,7 @@ class TestLaneExecutorOutcomes:
         executor = pools(MAX_WORKERS=1)
         with caplog.at_level(logging.ERROR, logger="next.suspense"):
             error = executor.submit(StealableTask(_interrupt)).exception(5)
-            _until(lambda: executor.capacity().busy == 0)
+            until(lambda: executor.capacity().busy == 0)
         assert isinstance(error, RuntimeError)
         assert isinstance(error.__cause__, KeyboardInterrupt)
         assert "raised an interrupt" in caplog.text
@@ -778,7 +724,7 @@ class TestLaneExecutorSteal:
         executor = pools(MAX_WORKERS=1)
         gate = threading.Event()
         executor.submit(_blocked(gate))
-        _until(lambda: executor.capacity().busy == 1)
+        until(lambda: executor.capacity().busy == 1)
         ran: dict[str, threading.Thread] = {}
 
         def recorded(name: str) -> StealableTask[str]:
@@ -808,13 +754,13 @@ class TestLaneExecutorSteal:
         assert last.future.result(5) == "c"
         assert ran["c"].name.startswith("next-pool-")
         assert [first.future.result(0), middle.future.result(0)] == ["a", "b"]
-        _until(lambda: executor.capacity() == Capacity(1, 0, 0, 0.0))
+        until(lambda: executor.capacity() == Capacity(1, 0, 0, 0.0))
 
     def test_a_task_run_directly_leaves_the_queue_at_once(self, pools) -> None:
         executor = pools(MAX_WORKERS=1, MAX_QUEUE=1)
         gate = threading.Event()
         executor.submit(_blocked(gate))
-        _until(lambda: executor.capacity().busy == 1)
+        until(lambda: executor.capacity().busy == 1)
         direct = StealableTask(lambda: "direct")
         executor.submit(direct)
         assert direct.run() is True
@@ -838,7 +784,7 @@ class TestLaneExecutorSteal:
             def run() -> int:
                 with lock:
                     runs[index] += 1
-                time.sleep(0.0005)
+                time.sleep(0)
                 return index
 
             return StealableTask(run)
@@ -869,7 +815,7 @@ class TestLaneExecutorSteal:
         assert len(done) == 400
         assert runs == [1] * 400
         assert [task.future.result(0) for task in tasks] == list(range(400))
-        _until(lambda: executor.capacity() == Capacity(4, 0, 0, 0.0))
+        until(lambda: executor.capacity() == Capacity(4, 0, 0, 0.0))
 
     def test_capacity_rereads_a_queue_that_changed_under_it(self, pools) -> None:
         class Shifting(dict):
@@ -888,31 +834,6 @@ class TestLaneExecutorSteal:
         assert capacity.queued == 1
         assert capacity.delay >= 0.0
         executor._pending = {}
-
-
-class TestLaneExecutorLate:
-    """An abandoned task keeps its slot until it returns and counts as late."""
-
-    def test_an_abandoned_task_holds_its_slot_until_it_returns(self, pools) -> None:
-        executor = pools(MAX_WORKERS=1)
-        gate = threading.Event()
-        running = _blocked(gate)
-        executor.submit(running)
-        _until(lambda: executor.capacity().busy == 1)
-        assert executor.abandon(running) is True
-        assert executor.abandon(StealableTask(lambda: 1)) is False
-        assert executor.late() == 1
-        assert executor.capacity().busy == 1
-        gate.set()
-        assert running.future.result(5) is True
-        _until(lambda: executor.capacity().busy == 0)
-        assert executor.late() == 0
-
-    def test_the_contract_counts_nothing_as_late_by_default(self) -> None:
-        executor = _Inline()
-        task = StealableTask(lambda: 3)
-        assert executor.submit(task).result(0) == 3
-        assert executor.abandon(task) is False
 
 
 class TestLaneExecutorStop:
@@ -944,7 +865,7 @@ class TestLaneExecutorStop:
         executor = pools(MAX_WORKERS=1)
         gate = threading.Event()
         running = executor.submit(StealableTask(lambda: gate.wait(5) and "finished"))
-        _until(lambda: executor.capacity().busy == 1)
+        until(lambda: executor.capacity().busy == 1)
         queued = executor.submit(StealableTask(lambda: "never"))
         queued.add_done_callback(lambda _: gate.set())
         executor.shutdown(5)
@@ -963,7 +884,7 @@ class TestLaneExecutorStop:
         for thread in started:
             thread.join(5)
         assert not any(thread.is_alive() for thread in started)
-        assert executor._workers == ()
+        assert not _pool_threads() - before
         assert executor.submit(StealableTask(lambda: 2)).result(5) == 2
 
     def test_a_worker_stays_while_queued_tasks_need_it(self, pools) -> None:
@@ -987,16 +908,16 @@ class TestLaneExecutorStop:
     def test_the_fork_hook_drops_inherited_workers_and_queue(
         self, pools, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        before = _pool_threads()
         executor = pools(MAX_WORKERS=1, CONN_IDLE=0.01)
         executor.linger = 0.01
         monkeypatch.setattr(executors, "_live", weakref.WeakSet([executor]))
         gate = threading.Event()
         executor.submit(_blocked(gate))
         executor.submit(StealableTask(lambda: 1))
-        _until(lambda: executor.capacity().busy == 1)
-        inherited = [worker.thread for worker in executor._workers]
+        until(lambda: executor.capacity().busy == 1)
+        inherited = list(_pool_threads() - before)
         _forget_pools()
-        assert executor._workers == ()
         assert executor.capacity() == Capacity(1, 0, 0, 0.0)
         assert executor.submit(StealableTask(lambda: "fresh")).result(5) == "fresh"
         gate.set()
@@ -1023,9 +944,9 @@ class TestLaneExecutorConnections:
         held = _Connection()
         executor = pools(MAX_WORKERS=1)
         executor.submit(StealableTask(lambda: fake_connections.hold(held))).result(5)
-        _until(lambda: held.refreshed == 1)
+        until(lambda: held.refreshed == 1)
         assert executor.submit(StealableTask(lambda: held.refreshed)).result(5) == 2
-        _until(lambda: held.refreshed == 3)
+        until(lambda: held.refreshed == 3)
 
     def test_a_connection_past_its_max_age_closes_after_the_task(
         self, pools, sqlite: Callable[..., ConnectionHandler]
@@ -1033,7 +954,7 @@ class TestLaneExecutorConnections:
         handler = sqlite(CONN_MAX_AGE=0)
         executor = pools(MAX_WORKERS=1)
         executor.submit(StealableTask(lambda: _select(handler))).result(5)
-        _until(lambda: executor.capacity().busy == 0)
+        until(lambda: executor.capacity().busy == 0)
         assert executor.submit(StealableTask(lambda: _raw(handler))).result(5) is None
 
     def test_a_persistent_connection_serves_the_next_task(

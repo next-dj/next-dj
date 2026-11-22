@@ -76,7 +76,7 @@ A call site overrides the mode and the timeout with literal options, so one call
    {% component "recommendations" product_id=product.pk defer="visible" timeout="2s" %}
 
 The mode comes from the call site first, then from ``component.defer()``, then from the presence of a ``loading.djx``, which means ``stream``.
-``defer=`` and ``timeout=`` take literals only, and ``reload=`` and ``delay=`` are reserved there and checked as durations without effect, so a component never receives a prop under any of the four names.
+``defer=`` and ``timeout=`` take literals only, and ``reload=`` and ``delay=`` are options of ``{% zone %}`` only, so a component call that writes either raises ``TemplateSyntaxError`` at parse time and a component never receives a prop under any of the four names.
 A ``@component.context`` callable that takes a parameter of one of those names is ``next.W158``.
 
 ``component.defer(mode, *, timeout, props, tag, parallel, tokens)`` declares the boundary.
@@ -221,3 +221,5 @@ A ``stream`` boundary of the same page still arrives as a chunk only a script ap
 
    :doc:`/content/topics/partial-rendering/zones` for ``loading.<zone>.djx``, the skeleton a ``reload="loading"`` zone shows while it reloads.
    :doc:`/content/ref/template-tags` for the options of the component tag.
+   :doc:`/content/howto/show-a-loading-state` for the task from the first file to the test.
+   :repo:`audit-forms <tree/main/examples/audit-forms>` for a component that loads when it scrolls into view with a prop, :repo:`observability <tree/main/examples/observability>` for a ``load`` component, a ``manual`` one behind a button, and a page boundary, and :repo:`search-catalog <tree/main/examples/search-catalog>` for streamed components with a timeout.

@@ -9,13 +9,9 @@ from next.pages.checks.metadata import pages as metadata_pages
 from next.pages.checks.metadata.pages import loaded_metadata_pages
 from next.pages.manager import page
 from next.testing import reset_check_caches
-from tests.pages.checks.metadata.trees import (
-    INHERITED_CALLABLE,
-    metadata_page,
-    scope,
-    templated_page,
-)
+from tests.pages.checks.metadata.trees import INHERITED_CALLABLE, metadata_page, scope
 from tests.support import file_router_config_entry, patch_checks_router_manager
+from tests.support.trees import templated_page
 
 
 class TestLoadedMetadataPages:

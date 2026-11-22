@@ -78,7 +78,7 @@ def run[D](
 ) -> Report[D]:
     """Run the sync body of `task` on this thread, or skip it past its deadline.
 
-    Only the pool lane replays the captured state, the request thread already holds it.
+    Only a pool thread replays the request thread's thread and connection states.
     """
     started = time.monotonic()
     if started >= task.deadline:
@@ -90,7 +90,7 @@ def run[D](
 def _run[D](runtime: Runtime, unit: str, task: Task[D], timing: Timing) -> Report[D]:
     """Run the body, charging its site its own CPU and not that of hops it served.
 
-    An interrupt leaves the thread that took it, which a pool keeps as a failed unit.
+    An exception settles the job as a logged fallback, an interrupt leaves the thread.
     """
     job = task.job
     body = cast("Callable[[], Rendered[D]]", job.run)
@@ -104,9 +104,7 @@ def _run[D](runtime: Runtime, unit: str, task: Task[D], timing: Timing) -> Repor
     try:
         with deadline(task.deadline), guard, counted_job(runtime.scope, task.deadline):
             result = body()
-    except BaseException as error:
-        if not isinstance(error, Exception):
-            raise
+    except Exception as error:  # noqa: BLE001
         result = error
     wall = time.perf_counter_ns() - wall
     cpu = max(0, time.thread_time_ns() - cpu - (served_cpu() - served))

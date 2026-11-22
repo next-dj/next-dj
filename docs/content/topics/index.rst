@@ -39,6 +39,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`caching`
    ``cache`` and ``headers`` in ``page.py``, what passes down the tree, and the rules that keep a shared page anonymous.
 
+:doc:`compression`
+   Content coding negotiation, buffered and streamed responses, what stays plain, and ``page.compress``.
+
 :doc:`scripts/index`
    Third-party scripts, consent, and page views.
 
@@ -101,6 +104,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    components
    seo/index
    caching
+   compression
    scripts/index
    forms/index
    static-assets/index

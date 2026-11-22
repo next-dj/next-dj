@@ -328,6 +328,15 @@ def _broken_a(b=Depends("b")) -> object:
     return b
 
 
+def _colours(plan) -> dict[str, Colour]:
+    """Return the colour of every entry, read back from where the plan put it."""
+    found = dict.fromkeys((entry[0] for entry in plan.pure), PURE)
+    for step in plan.steps:
+        colour = BLOCKING if isinstance(step, Blocking) else ASYNC
+        found.update(dict.fromkeys((entry[0] for entry in step.entries), colour))
+    return found
+
+
 def _depends_resolver(*providers) -> DependencyResolver:
     instance = DependencyResolver(*providers)
     instance.prepend_provider(DependsProvider(instance))
@@ -342,12 +351,12 @@ class TestAsyncPlanCompile:
             Claiming("pure", blocking=False), Claiming("slow"), Awaiting("fast")
         )
         plan = instance._aplan_for(_mixed)
-        assert plan.colours == (
-            ("pure", PURE),
-            ("slow", BLOCKING),
-            ("fast", ASYNC),
-            ("missing", PURE),
-        )
+        assert _colours(plan) == {
+            "pure": PURE,
+            "slow": BLOCKING,
+            "fast": ASYNC,
+            "missing": PURE,
+        }
         assert plan.target is BLOCKING
         assert plan.awaits
 
@@ -400,14 +409,14 @@ class TestAsyncPlanCompile:
         self, providers, colour
     ) -> None:
         instance = DependencyResolver(*providers())
-        assert instance._aplan_for(_one).colours == (("x", colour),)
+        assert _colours(instance._aplan_for(_one)) == {"x": colour}
 
     def test_a_provider_classifies_each_parameter_on_its_own(self) -> None:
         instance = DependencyResolver(PerParam("cheap"))
-        assert instance._aplan_for(_costed).colours == (
-            ("cheap", PURE),
-            ("dear", BLOCKING),
-        )
+        assert _colours(instance._aplan_for(_costed)) == {
+            "cheap": PURE,
+            "dear": BLOCKING,
+        }
 
     def test_an_async_hook_returning_no_callable_raises(self) -> None:
         instance = DependencyResolver(Broken("x"))
@@ -446,25 +455,25 @@ class TestAsyncPlanCache:
 
     def test_a_provider_change_recompiles_the_plan(self) -> None:
         instance = DependencyResolver(Claiming("x", blocking=False))
-        assert instance._aplan_for(_one).colours == (("x", PURE),)
+        assert _colours(instance._aplan_for(_one)) == {"x": PURE}
         instance.prepend_provider(Awaiting("x"))
-        assert instance._aplan_for(_one).colours == (("x", ASYNC),)
+        assert _colours(instance._aplan_for(_one)) == {"x": ASYNC}
 
     def test_a_binding_change_recompiles_the_plan(self) -> None:
         instance = DependencyResolver()
         instance.register_dependency("feed", _sfactory)
         before = instance._aplan_for(_reader)
-        assert before.colours == (("feed", BLOCKING),)
+        assert _colours(before) == {"feed": BLOCKING}
 
         async def feed() -> str:
             return "async"
 
         instance.register_dependency("feed", feed)
-        assert instance._aplan_for(_reader).colours == (("feed", ASYNC),)
+        assert _colours(instance._aplan_for(_reader)) == {"feed": ASYNC}
         version = instance._dependencies_version
         instance.unregister_dependency("feed")
         assert instance._dependencies_version == version + 1
-        assert instance._aplan_for(_reader).colours == (("feed", BLOCKING),)
+        assert _colours(instance._aplan_for(_reader)) == {"feed": BLOCKING}
 
     def test_forget_caches_drops_the_async_plans(self) -> None:
         instance = DependencyResolver()
@@ -803,7 +812,7 @@ class TestAresolve:
         instance = DependencyResolver(deferring, Awaiting("x"))
         runner = InlineRunner()
         context = make_resolution_context()
-        assert instance._aplan_for(_one).colours == (("x", ASYNC),)
+        assert _colours(instance._aplan_for(_one)) == {"x": ASYNC}
         assert _drive(runner, lambda: instance.aresolve(_one, context)) == {
             "x": expected
         }
@@ -1007,11 +1016,15 @@ class TestNamedAsyncDependencies:
         with caplog.at_level(logging.DEBUG, logger="next.deps.runner"):
             instance.resolve_dependencies(_reader)
             instance.resolve_dependencies(_reader)
-        assert [
+        messages = [
             record.getMessage()
             for record in caplog.records
             if record.name == "next.deps.runner"
-        ] == ["Asynchronous dependency 'feed' adapted for a sync resolve."]
+        ]
+        assert len(messages) == 1
+        assert messages[0].startswith(
+            "Asynchronous dependency 'feed' bridged for a sync caller at a cost of "
+        )
 
     def test_without_debug_a_bridge_logs_nothing(self, caplog, monkeypatch) -> None:
         monkeypatch.setattr("next.deps.runner._adapted", BoundedCache())
@@ -1035,7 +1048,7 @@ class TestNamedAsyncDependencies:
 
         instance.register_dependency("feed", feed)
         context = make_resolution_context()
-        assert instance._aplan_for(_reader).colours == (("feed", ASYNC),)
+        assert _colours(instance._aplan_for(_reader)) == {"feed": ASYNC}
         for _ in range(2):
             result = _drive(InlineRunner(), lambda: instance.aresolve(_reader, context))
             assert result == {"feed": ["item"]}
@@ -1097,7 +1110,7 @@ class TestNamedAsyncDependencies:
         instance.register_dependency("digest", digest)
         runner = InlineRunner()
         context = make_resolution_context()
-        assert instance._aplan_for(_digest_reader).colours == (("digest", ASYNC),)
+        assert _colours(instance._aplan_for(_digest_reader)) == {"digest": ASYNC}
         result = _drive(runner, lambda: instance.aresolve(_digest_reader, context))
         assert result == {"digest": 1}
         assert runner.calls == 1
@@ -1107,7 +1120,7 @@ class TestNamedAsyncDependencies:
         instance.register_dependency("digest", _nothing)
         runner = InlineRunner()
         context = make_resolution_context()
-        assert instance._aplan_for(_digest_reader).colours == (("digest", BLOCKING),)
+        assert _colours(instance._aplan_for(_digest_reader)) == {"digest": BLOCKING}
         result = _drive(runner, lambda: instance.aresolve(_digest_reader, context))
         assert result == {"digest": 3}
         assert runner.calls == 1
@@ -1156,11 +1169,11 @@ class TestDependsProviderAsync:
 
     def test_the_forms_compile_to_their_colours(self) -> None:
         instance = _depends_resolver(Claiming("p", blocking=False))
-        assert instance._aplan_for(_factories).colours == (
-            ("made", ASYNC),
-            ("plain", BLOCKING),
-            ("n", PURE),
-        )
+        assert _colours(instance._aplan_for(_factories)) == {
+            "made": ASYNC,
+            "plain": BLOCKING,
+            "n": PURE,
+        }
         context = make_resolution_context()
         result = _drive(InlineRunner(), lambda: instance.aresolve(_factories, context))
         assert result == {"made": "made-P", "plain": "plain", "n": 5}

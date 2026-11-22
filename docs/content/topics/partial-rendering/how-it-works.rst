@@ -72,7 +72,7 @@ The client compares it against the version it already holds and answers with one
 
 The view branches into that zone response before the page renders, so the layout chain is never rendered and no markup is produced only to be dropped.
 The addressed bodies still render against the page context, and a ``@context`` callable bound to another zone of the same page does not run for the batch.
-Data that is expensive to produce guards itself with ``zone_requested``, which keeps it off the full render too, and :doc:`scenarios` shows that guard in full.
+Data that is expensive to produce guards itself with ``zone_requested``, which keeps it off the full render too, see :doc:`/content/ref/partial`.
 See :doc:`/content/internals/request-lifecycle` for where the view branches.
 
 .. note::

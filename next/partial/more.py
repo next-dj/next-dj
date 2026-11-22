@@ -1,5 +1,6 @@
 """The `{% more %}` infinite-list tag and the filters that adapt a Django page to it."""
 
+import enum
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast, override
@@ -15,10 +16,19 @@ from django.utils.text import unescape_string_literal
 
 from next.conf.settings import fail_loudly
 from next.seeding import REQUEST_KEY
-from next.static.bundles import require_bundle
+from next.static.collector import require_bundle
 from next.static.runtime import MORE_CHUNK_KEY
 
-from .paging import DEFAULT_PARAM, MAX_TOKEN, RESTORE_PARAM, Window
+from .headers import MergeMode
+from .paging import (
+    _DIGITS,
+    _SLUG,
+    DEFAULT_PARAM,
+    MAX_TOKEN,
+    RESTORE_PARAM,
+    Window,
+    valid_param,
+)
 from .zone import ZoneNode, ZoneOptions, ZonePartial
 
 
@@ -45,17 +55,8 @@ _TAG: Final = "{% more %}"
 _EMPTY: Final = "empty"
 _END: Final = ("endmore",)
 _EMPTY_OR_END: Final = (_EMPTY, "endmore")
-_VISIBLE: Final = "visible"
-_MANUAL: Final = "manual"
-_MODES: Final = (_VISIBLE, _MANUAL)
-_APPEND: Final = "append"
-_PREPEND: Final = "prepend"
-_MERGES: Final = (_APPEND, _PREPEND)
 _NEXT: Final = "next"
 _PREVIOUS: Final = "previous"
-_REPLACE: Final = "replace"
-_PUSH: Final = "push"
-_URL_MODES: Final = (_REPLACE, _PUSH)
 _PRUNE: Final = "prune"
 _URL: Final = "url"
 _OPTIONS: Final = (
@@ -72,12 +73,24 @@ _OPTIONS: Final = (
 _HIDDEN: Final = " hidden"
 _MAX_DIGITS: Final = 18
 
-_SLUG: Final = re.compile(r"[A-Za-z0-9_-]+")
-_DIGITS: Final = re.compile(r"[0-9]+")
 _NUMBER: Final = re.compile(rf"[0-9]{{1,{_MAX_DIGITS}}}")
 _PIXELS: Final = re.compile(r"[0-9]{1,6}")
 _LENGTH: Final = r"-?(?:[0-9]{1,6}|[0-9]{0,6}\.[0-9]{1,4})(?:px|%)"
 _MARGIN: Final = re.compile(rf"{_LENGTH}(?: {_LENGTH}){{0,3}}")
+
+
+class MoreMode(enum.StrEnum):
+    """When a `{% more %}` link fetches its batch, on sight or on a click."""
+
+    VISIBLE = "visible"
+    MANUAL = "manual"
+
+
+class UrlMode(enum.StrEnum):
+    """How a `{% more %}` link writes the window it loaded into the address bar."""
+
+    REPLACE = "replace"
+    PUSH = "push"
 
 
 def _raw_token(value: object) -> str | None:
@@ -134,12 +147,12 @@ class MoreOptions:
 
     zone: str
     previous: bool = False
-    mode: str = _VISIBLE
-    merge: str = _APPEND
+    mode: MoreMode = MoreMode.VISIBLE
+    merge: MergeMode = MergeMode.APPEND
     margin: str | None = None
     param: str | None = None
     prune: int | None = None
-    url: str | None = None
+    url: UrlMode | None = None
 
     @property
     def windowed(self) -> bool:
@@ -160,8 +173,8 @@ class MoreOptions:
             f' {KEY_ATTR}="{key}" {TARGET_ATTR}="{self.zone},{key}" '
             f'{MERGE_ATTR}="{self.merge}"'
         )
-        if self.mode == _VISIBLE:
-            attrs += f' {DEFER_ATTR}="{_VISIBLE}"'
+        if self.mode is MoreMode.VISIBLE:
+            attrs += f' {DEFER_ATTR}="{MoreMode.VISIBLE}"'
         if self.margin is not None:
             attrs += f' {MARGIN_ATTR}="{self.margin}"'
         return attrs
@@ -313,13 +326,15 @@ def _numeral(raw: str, key: str) -> str:
     return raw if _DIGITS.fullmatch(raw) is not None else _literal(raw, key)
 
 
-def _choice(raw: str, key: str, allowed: tuple[str, ...]) -> str:
-    """Return a quoted option value from a closed set."""
+def _choice[E: enum.StrEnum](raw: str, key: str, kind: type[E]) -> E:
+    """Return a quoted option value from the closed set of `kind`."""
     value = _literal(raw, key)
-    if value not in allowed:
-        msg = f"{key}= must be one of {', '.join(allowed)}, got {value!r}."
-        raise _fail(msg)
-    return value
+    try:
+        return kind(value)
+    except ValueError:
+        allowed = ", ".join(member.value for member in kind)
+        msg = f"{key}= must be one of {allowed}, got {value!r}."
+        raise _fail(msg) from None
 
 
 def _slug(raw: str, key: str) -> str:
@@ -335,9 +350,12 @@ def _slug(raw: str, key: str) -> str:
 
 def _param(raw: str) -> str:
     """Return the query parameter that carries the token of a raw value."""
-    value = _slug(raw, "param")
-    if value == RESTORE_PARAM:
-        msg = f'param= cannot be "{RESTORE_PARAM}", which flags a restored window.'
+    value = _literal(raw, "param")
+    if not valid_param(value):
+        msg = (
+            f'param= must be an ASCII slug other than "{RESTORE_PARAM}", which flags '
+            f"a restored window, got {value!r}."
+        )
         raise _fail(msg)
     return value
 
@@ -397,11 +415,13 @@ def _options(found: dict[str, str]) -> MoreOptions:
     """Return the validated options, a `previous=` tag prepending on a click."""
     previous = _PREVIOUS in found
     default_mode, default_merge = (
-        (_MANUAL, _PREPEND) if previous else (_VISIBLE, _APPEND)
+        (MoreMode.MANUAL, MergeMode.PREPEND)
+        if previous
+        else (MoreMode.VISIBLE, MergeMode.APPEND)
     )
-    mode = _choice(found["mode"], "mode", _MODES) if "mode" in found else default_mode
+    mode = _choice(found["mode"], "mode", MoreMode) if "mode" in found else default_mode
     margin = _margin(found["margin"]) if "margin" in found else None
-    if margin is not None and mode != _VISIBLE:
+    if margin is not None and mode is not MoreMode.VISIBLE:
         msg = 'margin= applies to mode="visible" only, a manual link is never observed.'
         raise _fail(msg)
     if previous and (_PRUNE in found or _URL in found):
@@ -411,13 +431,13 @@ def _options(found: dict[str, str]) -> MoreOptions:
         zone=_slug(found["zone"], "zone"),
         previous=previous,
         mode=mode,
-        merge=_choice(found["merge"], "merge", _MERGES)
+        merge=_choice(found["merge"], "merge", MergeMode)
         if "merge" in found
         else default_merge,
         margin=margin,
         param=_param(found["param"]) if "param" in found else None,
         prune=_prune(found[_PRUNE]) if _PRUNE in found else None,
-        url=_choice(found[_URL], _URL, _URL_MODES) if _URL in found else None,
+        url=_choice(found[_URL], _URL, UrlMode) if _URL in found else None,
     )
 
 
@@ -467,8 +487,10 @@ __all__ = [
     "PRUNE_ATTR",
     "URL_ATTR",
     "MoreLinkNode",
+    "MoreMode",
     "MoreNode",
     "MoreOptions",
+    "UrlMode",
     "do_more",
     "next_page",
     "page_href",

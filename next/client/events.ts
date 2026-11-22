@@ -25,3 +25,12 @@ export function inPlace(target: string | null): boolean {
   const name = target?.toLowerCase() ?? "";
   return name === "" || name === "_self";
 }
+
+/** Let an element take focus, a tabindex it lacked removed again once it loses focus. */
+export function focusable(el: HTMLElement): HTMLElement {
+  if (!el.hasAttribute("tabindex")) {
+    el.tabIndex = -1;
+    el.addEventListener("blur", () => el.removeAttribute("tabindex"), { once: true });
+  }
+  return el;
+}

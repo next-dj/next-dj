@@ -81,6 +81,7 @@ class TestHtmxAttributePassthrough:
         assert 'value="Ada"' in html
 
 
+@pytest.mark.django_db()
 class TestHtmxMiddlewareDispatch:
     """HtmxMiddleware coexists with dispatch and feeds request.htmx."""
 

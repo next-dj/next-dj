@@ -35,7 +35,7 @@ Public API
 
    The process-wide ``Page`` coordinator that every router-built view renders through.
    ``Page`` takes ``login_required``, ``permission_required``, and ``public`` from ``PageDeclarations``, documented with ``next.pages.access`` below.
-   It takes ``atomic`` from ``TransactionDeclarations``, documented with ``next.pages.transactions`` below.
+   It takes ``atomic`` from ``AtomicDeclaring``, documented with ``next.pages.transactions`` below, ``defer`` from ``PageDeferDeclaring``, ``compress`` from ``CompressDeclaring``, and ``router`` from ``RouterDeclaring``, see `Declaration stores`_.
 
 Access declarations
 ~~~~~~~~~~~~~~~~~~~
@@ -51,7 +51,7 @@ A view answers a refusal with a redirect to the login page for an anonymous user
 ``page_access(file_path)`` returns a ``PageAccess`` with the joined ``rule`` and the first ``broken`` file, and ``owner_access(file_path)`` the rule of the page in the directory of any file of a tree, which an action answers to.
 The joined ``rule`` holds the requirements in the order the chain declared them and ``sources`` naming the files of the requirements, or the file that opened a public rule.
 ``enforce(rule, broken, request, url_kwargs, dep_cache, *, undeclared, gate)`` is the one check a page view, a zone morph, and an action dispatch run, and ``refusal(file_path, request, url_kwargs, dep_cache)`` runs it for one page.
-A ``Gate`` carries the ``lookup`` builder and the ``next_url`` a login returns to.
+An ``AccessGate`` carries the ``lookup`` builder and the ``next_url`` a login returns to.
 ``url_lookup(request, url_kwargs, dep_cache)`` builds the ``lookup`` of a page, which loads the row an ``obj=DObject[Model]`` names from the same cache a ``DObject`` parameter reads.
 ``default_login(rule)`` tells whether the default login asks a login of a rule, true only for a rule without requirements that is not public while ``LOGIN_REQUIRED`` or ``LoginRequiredMiddleware`` turns it on, and ``anonymous_admitted(access)`` tells whether an anonymous request passes the rule of a page, which the sitemap reads to leave closed pages out.
 ``routed(file_path)`` tells whether a ``page.py`` serves a URL, the same answer the router gives, and ``routed_pages(pages)`` keeps only such files of a walk of ``(trail, page_file)`` pairs, so the URL checks and the SEO discovery treat no file without a body as a route.
@@ -64,18 +64,18 @@ Transaction declaration
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``page.atomic(atomic, *, aliases=None)`` at the top of a ``page.py`` decides whether its page runs inside a request transaction, whatever the method, and wins over ``TRANSACTIONS["SAFE"]``, ``TRANSACTIONS["UNSAFE"]``, and ``TRANSACTIONS["RULE"]``, see ``TRANSACTIONS`` in :doc:`settings`.
-``page.atomic(True)`` wraps every request of the page, a ``GET`` included, and ``page.atomic(False)`` leaves every request of it, a ``POST`` included, in autocommit.
+``page.atomic(True)`` wraps every request of the page, a ``GET`` included, ``page.atomic("writes")`` wraps it from right before its first write, and ``page.atomic(False)`` leaves every request of it, a ``POST`` included, in autocommit.
 ``aliases`` of ``None`` takes ``TRANSACTIONS["ALIASES"]``, ``"all"`` takes every alias ``DATABASES`` declares, and a list or a tuple names the aliases to wrap.
 The declaration binds its own page alone, the pages below its directory follow their own ``page.py``, and a full page, a zone, a boundary, and a navigation request of the page all read it.
 The form actions the page declares do not read it and take their own choice through ``@action(atomic=...)`` or ``Meta.atomic``, see :doc:`forms`.
 The last call of a module wins, and an edited ``page.py`` that drops the call stops applying it once the module loads again.
-A call inside a function, a flag that is no bool, or an ``aliases`` value of another shape applies nothing and is reported as ``next.E240``.
+A call inside a function, a mode other than ``True``, ``False``, or ``"writes"``, or an ``aliases`` value of another shape applies nothing and is reported by ``next.E240``.
 
 Boundary declaration
 ~~~~~~~~~~~~~~~~~~~~
 
 ``page.defer(*, timeout=None, parallel=None)`` at the top of a ``page.py`` bounds the job of the page boundary a ``loading.djx`` above the page declares, and places it on the pool for ``True``, on the request thread for ``False``, or by placement for ``None``.
-The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value outside its shape declares nothing and is reported as ``next.E222``.
+The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value outside its shape declares nothing and is reported by ``next.E222``.
 See :doc:`defer` and :doc:`/content/topics/boundaries/loading`.
 
 Every page view carries the ``_non_atomic_requests`` mark for every alias, so ``ATOMIC_REQUESTS`` never wraps it, settles the access check of the page before it opens its transaction, and closes the transaction once the response object exists.
@@ -89,8 +89,34 @@ Router declaration
 
 ``page.router(*, navigate=True, prefetch=True, snapshot=True)`` at the top of a ``page.py`` declares how the client router treats its page.
 ``navigate=False`` answers every navigation with a hard load, ``prefetch=False`` refuses a prefetch with ``204`` before any render, and ``snapshot=False`` keeps the page out of the history snapshots.
-The last call of a module wins, and a flag that is no bool, a call inside a function, or a call outside a ``page.py`` declares nothing and is reported as ``next.E238``.
+The last call of a module wins, and a flag that is no bool, a call inside a function, or a call outside a ``page.py`` declares nothing and is reported by ``next.E238``.
 See :doc:`router` and :doc:`/content/topics/router/index`.
+
+Compression declaration
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``page.compress(enabled)`` at the top of a ``page.py`` keeps every response of its page plain for ``False`` and states the default for ``True``, a page that renders a secret beside reflected input opting out against BREACH.
+The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value that is no bool declares nothing and is reported by ``next.E222``.
+The choice reaches the response through the ``compress`` field of ``ResponsePolicy``, see :doc:`compression`.
+
+.. code-block:: python
+   :caption: pages/statement/page.py
+
+   from next import page
+
+   page.compress(False)
+
+Declaration stores
+~~~~~~~~~~~~~~~~~~
+
+``DeclarationStore`` of ``next.pages.declarations`` holds the last call of each ``page.py`` and what it declares.
+A later call wins, and a reload runs the module in a new namespace, so a call the edit removed stops applying.
+A call made outside a ``page.py`` or inside a function is kept apart for the check that reports it.
+``atomic_store`` of ``next.pages.transactions``, ``page_defer_store`` of ``next.pages.defer``, ``compress_store`` of ``next.pages.compression``, and ``router_store`` of ``next.pages.router`` are its four instances, and ``page_atomic``, ``page_defer``, ``page_compress``, and ``page_router`` read the declaration of the page at a ``page.py`` path.
+Each store carries a ``version`` that bumps on every change, which the derived memos of the views key on.
+
+.. automodule:: next.pages.declarations
+   :members: DeclarationStore, NESTED
 
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
@@ -110,15 +136,41 @@ Manager
 ~~~~~~~
 
 ``next.pages.manager`` is a package.
-Its ``__init__`` holds ``Page`` and the ``page`` singleton, ``templates`` holds the per-page template cache, and ``patterns`` holds the ``URLPattern`` factory the file router mounts the routed views of ``next.views`` through.
+Its ``__init__`` holds ``Page`` and the ``page`` singleton, assembled from one mixin per concern.
+``containment`` holds how a page contains a failure of its callables, ``render`` how it builds its render context, ``gating`` how a page with a ``loading.djx`` builds its shell context, ``bodies`` how it resolves its body, and ``registrations`` what a ``page.py`` registers on it, its context and its metadata.
+``templates`` holds the per-page template cache, and ``patterns`` holds the ``URLPattern`` factory the file router mounts the routed views of ``next.views`` through.
 ``Page`` and ``page`` are documented once, under `Public API`_, with the names ``next.pages`` exports.
 
 .. automodule:: next.pages.manager
    :members:
-   :exclude-members: Page, page, context, layout, resolver
+   :exclude-members: Page, page, context, layout, resolver, Built
+
+.. automodule:: next.pages.manager.render
+   :members: Built
 
 .. automodule:: next.pages.manager.templates
    :members:
+
+Page boundaries
+~~~~~~~~~~~~~~~
+
+``next.pages.jobs`` renders the boundary of a page.
+``page_boundary(source, context, ident=None)`` returns the error boundary of an ``error.djx``, ``contain_page(source, tag, context, render)`` runs a render under it, and ``PageJob`` renders a deferred page boundary as a job, its loading UI, its content, and its errors, see :doc:`defer`.
+
+.. automodule:: next.pages.jobs
+   :members: PageFallback, PageJob, page_boundary, contain_page
+
+Context graph
+~~~~~~~~~~~~~
+
+``next.pages.graph`` is the package that runs the context callables of a page along a dependency graph.
+``compile_graph`` layers each step one below the last it reads.
+``collect`` runs the steps of a ``RunOrder`` one after another and ``acollect`` overlaps the independent ones on the event loop, while ``run_phase`` and ``arun_phase`` run one phase of a render that a boundary splits.
+``merged`` folds the results in run order, a keyless callable spreading only the names still free.
+``Blame`` names the inherited group a failed run is blamed on.
+
+.. automodule:: next.pages.graph
+   :members: ContextGraph, RunOrder, Step, Phase, Blame, compile_graph, collect, acollect, run_phase, arun_phase, merged, blame, blaming, callable_keys, closure, keyless_result, keyless_shape_error
 
 Registry
 ~~~~~~~~

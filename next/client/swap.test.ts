@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Asset, Envelope } from "./apply";
+import type { Asset, Envelope, MorphPatch } from "./apply";
 import type { ScriptsChunk } from "./chunks";
 import type { Bounds, Move } from "./morph";
 import type { HistoryHost, Settings, Turn } from "./router";
 import { createSwap, persist, retire, sheets, slice } from "./swap";
+import { historyHost } from "./test-doubles";
 
 let settings: Settings;
 
@@ -21,20 +22,7 @@ afterEach(() => {
 });
 
 function host(over: Partial<HistoryHost> = {}): HistoryHost {
-  return {
-    partial: {} as HistoryHost["partial"],
-    settings: () => settings,
-    context: () => ({}),
-    region: () => undefined,
-    chain: () => [],
-    key: () => "",
-    ask: () => Promise.reject(new Error("offline")),
-    owned: () => true,
-    plain: () => false,
-    going: () => "",
-    flush: () => undefined,
-    ...over,
-  };
+  return historyHost({ settings: () => settings, ...over });
 }
 
 function bounds(): Bounds {
@@ -53,7 +41,7 @@ function envelope(assets: Asset[] = []): Envelope {
 
 function turn(
   record: Record<string, unknown> = {},
-  op: Record<string, unknown> = {},
+  op: MorphPatch = { op: "morph" },
   over: Partial<HistoryHost> = {},
 ): Turn {
   return createSwap(host(over)).swap(record, op, bounds(), "forward");
@@ -197,9 +185,9 @@ describe("inline scripts of a swap", () => {
     '<script nonce="n1" type="module">void 0</script>';
 
   it("runs again only the scripts carrying the nonce of the answer", () => {
-    const op: Record<string, unknown> = { html: `<main>${scripts}</main>` };
+    const op: MorphPatch = { op: "morph", html: `<main>${scripts}</main>` };
     const swapped = turn({ nonce: "n1" }, op, { nonce: "page" });
-    const html = op.html as string;
+    const html = op.html!;
     expect(html.match(/data-next-run/g)).toHaveLength(2);
     expect(html).toContain('nonce="evil"');
     swapIn(html.replace(/<script[^>]*>.*?<\/script>/g, ""));
@@ -216,21 +204,22 @@ describe("inline scripts of a swap", () => {
 
   it("runs nothing for an answer without a nonce", () => {
     for (const nonce of [null, ""]) {
-      const op: Record<string, unknown> = { html: `<main>${scripts}</main>` };
+      const op: MorphPatch = { op: "morph", html: `<main>${scripts}</main>` };
       turn({ nonce }, op);
       expect(op.html).toBe(`<main>${scripts}</main>`);
     }
-    const bare: Record<string, unknown> = {};
+    const bare: MorphPatch = { op: "morph" };
     turn({ nonce: "n1" }, bare);
-    expect(bare).toEqual({});
+    expect(bare).toEqual({ op: "morph" });
   });
 
   it("inserts a script without a nonce on a page without one", () => {
-    const op: Record<string, unknown> = {
+    const op: MorphPatch = {
+      op: "morph",
       html: '<main><script nonce="n1">document.body.dataset.ran = "5"</script></main>',
     };
     const swapped = turn({ nonce: "n1" }, op);
-    swapIn(op.html as string);
+    swapIn(op.html!);
     swapped.after(envelope(), [], true);
     expect(document.querySelector("main script")!.hasAttribute("nonce")).toBe(false);
     expect(document.body.dataset.ran).toBe("5");
@@ -239,11 +228,11 @@ describe("inline scripts of a swap", () => {
   it("skips a script the swap left out and runs none of a failed swap", () => {
     const html =
       '<main><script nonce="n1">document.body.dataset.ran = "7"</script></main>';
-    turn({ nonce: "n1" }, { html }).after(envelope(), [], true);
+    turn({ nonce: "n1" }, { op: "morph", html }).after(envelope(), [], true);
     expect(document.body.dataset.ran).toBeUndefined();
-    const op: Record<string, unknown> = { html };
+    const op: MorphPatch = { op: "morph", html };
     const failed = turn({ nonce: "n1" }, op);
-    swapIn(op.html as string);
+    swapIn(op.html!);
     failed.after(envelope(), [], false);
     expect(document.body.dataset.ran).toBeUndefined();
     expect(document.querySelector("main template")).not.toBeNull();
@@ -297,7 +286,7 @@ describe("the manifest and the scripts of a swap", () => {
     const ready = vi.fn(() => Promise.resolve(chunk as unknown as ScriptsChunk));
     const nodes = [document.querySelector("main")!];
     const list = [{ name: "a", src: "/a.js" }];
-    const swapped = turn({ scripts: list, consent: null }, {}, { ready });
+    const swapped = turn({ scripts: list, consent: null }, undefined, { ready });
     swapped.after(envelope(), nodes, true);
     await vi.waitFor(() => expect(chunk.consent._reveal).toHaveBeenCalledWith(nodes));
     expect(ready).toHaveBeenCalledWith("scripts");
@@ -307,14 +296,18 @@ describe("the manifest and the scripts of a swap", () => {
 
   it("loads no scripts chunk for a page without scripts or consent", () => {
     const ready = vi.fn(() => Promise.reject(new Error("unused")));
-    turn({ scripts: null, consent: null }, {}, { ready }).after(envelope(), [], true);
-    turn({ consent: { categories: [] } }, {}).after(envelope(), [], true);
+    turn({ scripts: null, consent: null }, undefined, { ready }).after(
+      envelope(),
+      [],
+      true,
+    );
+    turn({ consent: { categories: [] } }).after(envelope(), [], true);
     expect(ready).not.toHaveBeenCalled();
   });
 
   it("swallows a scripts chunk that cannot load", async () => {
     const ready = vi.fn(() => Promise.reject(new Error("offline")));
-    turn({ consent: {} }, {}, { ready }).after(envelope(), [], true);
+    turn({ consent: {} }, undefined, { ready }).after(envelope(), [], true);
     await Promise.resolve();
     expect(ready).toHaveBeenCalledTimes(1);
   });

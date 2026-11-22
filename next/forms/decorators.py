@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Final, TypedDict, Unpack, overload
 
 from next.introspect import defining_file
-from next.transactions import AtomicOverride
+from next.transactions import AtomicMode, AtomicOverride
 
 from .backends import (
     ActionGuard,
@@ -33,7 +33,7 @@ class _ActionOptions(TypedDict, total=False):
     permission_required: str | Iterable[str] | None
     requires_runtime: bool
     transport: Transport
-    atomic: bool | AtomicOverride | None
+    atomic: AtomicMode | AtomicOverride | None
 
 
 _OPTION_NAMES: Final = (
@@ -115,7 +115,7 @@ def action[C: Callable[..., Any]](
     permission_required: str | Iterable[str] | None = None,
     requires_runtime: bool = False,
     transport: Transport = "http",
-    atomic: bool | AtomicOverride | None = None,
+    atomic: AtomicMode | AtomicOverride | None = None,
 ) -> Callable[[C], C]: ...
 def action(
     name: Callable[..., Any] | str | None = None, **options: Unpack[_ActionOptions]

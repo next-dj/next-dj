@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import logging
 
 import pytest
@@ -282,6 +283,20 @@ class TestMetricsEndpoint:
         )
         assert response.status_code == 200
         assert b"next_realtime_streams_open" in response.content
+
+    @override_settings(OBS_METRICS_TOKEN=SCRAPE_TOKEN)
+    def test_a_scrape_that_accepts_gzip_receives_it_compressed(
+        self, next_client
+    ) -> None:
+        response = next_client.get(
+            METRICS_URL,
+            headers={
+                "Authorization": f"Bearer {SCRAPE_TOKEN}",
+                "Accept-Encoding": "gzip",
+            },
+        )
+        assert response["Content-Encoding"] == "gzip"
+        assert b"next_realtime_streams_open" in gzip.decompress(response.content)
 
 
 class TestRealtimePage:

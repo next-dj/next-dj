@@ -64,11 +64,11 @@ Route groups and intercepts
 Crumb trails are URL trails, so a route group leaves them like it leaves the URL, see :ref:`topics-file-router-route-groups`.
 A ``page.py`` whose own directory is a group gives no crumb.
 Its other metadata, the title and the description among them, still folds into the pages below it.
-A ``breadcrumb`` declared in the metadata of a group ``page.py`` is dropped, and :ref:`next.W136 <ref-system-checks>` reports it.
+A ``breadcrumb`` declared in the metadata of a group ``page.py`` is dropped, and ``next.W136`` reports it.
 The crumbs of a page below a group link to the group-free URLs.
 
 An intercept page builds no breadcrumbs, since its zone response renders no layout.
-:ref:`next.W138 <ref-system-checks>` reports a ``breadcrumb`` declared on one.
+``next.W138`` reports a ``breadcrumb`` declared on one.
 
 The tag
 -------

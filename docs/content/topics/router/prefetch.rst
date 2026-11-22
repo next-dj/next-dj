@@ -142,27 +142,35 @@ A shell that skipped no deferred job and left no client-trip boundary is marked 
 
 At the full depth the server answers as it answers a navigation.
 The deferred jobs run, and the answer streams when the delivery policy lets a navigation stream, see :doc:`/content/topics/boundaries/streaming`.
-Otherwise it is the assembled page in a JSON envelope, marked ``complete`` unless it left a client-trip boundary.
+Otherwise it is the assembled page in a JSON envelope.
+Either way the first frame is marked ``complete`` unless the answer skipped a deferred job or left a client-trip boundary.
+
+.. _topics-router-prefetch-visits:
+
+Counting visits
+---------------
 
 The context callables of a prefetched page do run, and a prefetch answer may be shown to the visitor with no further request, a complete one after a hover and a full one after a press.
-A page that must act on a visit declares ``page.router(prefetch=False)``, and the click then navigates with its own request.
-A counter on the server that skips prefetches still counts a prefetch at the full depth, ``request.next.depth == "full"``, or the counting happens in the browser on ``router:commit``.
+A press the visitor abandons still sent its full request, so ``request.next.depth`` counts neither the visits that were shown nor those that never happened.
+The browser counts visits on ``router:commit``, which fires when a navigation lands whatever answer it used.
+Server code that must act once per visit, such as consuming a one-time link, declares ``page.router(prefetch=False)``, and the page is then never prefetched, so the click navigates with its own request.
 
 The server's answers
 --------------------
 
+The server refuses a prefetch before any render in two cases, and :doc:`sessions` lists them.
+The browser reacts to each.
+
 ``204`` with an empty body
-   The page declares ``page.router(prefetch=False)`` or ``page.router(navigate=False)``, or it is an intercepted page under ``ROUTER["INTERCEPT"] = "links"``.
    The browser asks for the URL no more for the life of the page.
 
 ``429`` with ``Retry-After``
-   The oldest job in the pool queue of deferred boundaries waited longer than ``DEFER["EXECUTOR"]["OPTIONS"]["QUEUE_TIMEOUT"]``, see :doc:`sessions`.
    The browser pauses every prefetch for the seconds ``Retry-After`` names, and drops the links waiting in the queue, which come back the next time they scroll into view.
 
 A ``429`` without a usable ``Retry-After``, or a ``5xx``, pauses every prefetch for thirty seconds, a wait that doubles with each further failure up to five minutes, and a successful answer resets it.
 A full request meets the same answers.
-A ``204`` marks the URL as refused, and a ``429`` or a ``5xx`` pauses every prefetch.
-In each case the press leaves nothing to adopt, and the click navigates with its own request.
+After a ``204``, a ``429``, or a ``5xx`` the press leaves nothing to adopt, and the click navigates with its own request.
+Any other answer that is no success, such as a ``404`` or a ``403``, goes to the click as it is, so the navigation loads the page in full and sends no third request.
 A prefetch answer that carries ``X-Next-Router: clear`` empties the prefetch cache and drops every snapshot.
 
 Prefetching from code
@@ -216,8 +224,8 @@ The links the router owns stay with the intent prefetch.
 A browser prefetch is a document request with ``Sec-Purpose: prefetch``.
 ``request.next.purpose`` is ``speculation``, and the page is assembled whole, every deferred job included, without a stream.
 
-A string or a mapping that names another eagerness, asks for ``prerender``, or holds another key emits no rules and is reported as :ref:`next.E242 <ref-system-checks>`.
-A value that is neither ``None``, a string, nor a mapping is reported as ``next.E236`` and read as ``None``.
+A string or a mapping that names another eagerness, asks for ``prerender``, or holds another key emits no rules and is reported as ``next.E242``.
+A value that is neither ``None``, a string, nor a mapping is reported as ``next.E076`` and read as ``None``.
 
 .. seealso::
 

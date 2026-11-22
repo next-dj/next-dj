@@ -1,8 +1,8 @@
+import { once } from "../protocol";
 import { createRouter } from "../router";
 import type { Router } from "../router";
 
-const next = window.Next as typeof window.Next & { $router?: true; router?: Router };
-if (!next.$router) {
-  next.$router = true;
+const next = window.Next as typeof window.Next & { router?: Router };
+once("router", () => {
   next.router = createRouter(next);
-}
+});

@@ -3,10 +3,11 @@ from collections.abc import Callable
 import pytest
 from django.http import StreamingHttpResponse
 
-from next.suspense import assembly, policy
+from next.suspense import policy
+from next.suspense.assembly import jobs as assembly_jobs
 from next.suspense.policy import StreamSlots
-from next.suspense.render import Gate
 from next.testing import StreamedPage
+from next.testing.boundaries import ComponentGate
 
 
 type Opens = Callable[[list[bytes]], bool]
@@ -16,12 +17,12 @@ def isolated_slots(monkeypatch: pytest.MonkeyPatch) -> StreamSlots:
     """Count the streams of one test alone, apart from any another test left open."""
     fresh = StreamSlots()
     monkeypatch.setattr(policy, "open_streams", fresh)
-    monkeypatch.setattr(assembly, "open_streams", fresh)
+    monkeypatch.setattr(assembly_jobs, "open_streams", fresh)
     return fresh
 
 
 def read_releasing(
-    response: StreamingHttpResponse, gate: Gate, opens: Opens
+    response: StreamingHttpResponse, gate: ComponentGate, opens: Opens
 ) -> StreamedPage:
     """Read a sync stream, releasing `gate` once `opens` holds for the writes so far."""
     writes: list[bytes] = []
@@ -36,7 +37,7 @@ def read_releasing(
 
 
 async def aread_releasing(
-    response: StreamingHttpResponse, gate: Gate, opens: Opens
+    response: StreamingHttpResponse, gate: ComponentGate, opens: Opens
 ) -> StreamedPage:
     """Read an async stream, releasing `gate` once `opens` holds for the writes read."""
     writes: list[bytes] = []

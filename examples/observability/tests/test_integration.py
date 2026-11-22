@@ -1,4 +1,5 @@
 import re
+from io import StringIO
 
 import pytest
 from config.storages import MANIFEST_STORAGES
@@ -453,6 +454,18 @@ class TestBusiestPagesOnLoad:
         assert "stats/pages/page.py" in op["html"]
         assert "Loading the busiest pages" not in op["html"]
 
+    def test_a_failed_request_offers_a_retry(self, next_client, monkeypatch) -> None:
+        def _lost(kind: str, *, limit: int | None = None) -> list[tuple[str, int]]:
+            raise CounterLostError(kind, "obs/pages/page.py")
+
+        monkeypatch.setattr(metrics, "top_by_kind", _lost)
+        with boundary_errors("render"):
+            envelope = next_client.get_boundary("/", "busiest_pages")
+        [op] = envelope.ops
+        assert op["s"] == "error"
+        assert "The busiest pages are unavailable" in op["html"]
+        assert "data-next-retry" in op["html"]
+
     def test_the_boundary_request_skips_the_totals_provider(
         self, next_client, monkeypatch
     ) -> None:
@@ -555,21 +568,102 @@ class TestLatencyStream:
         assert chunk.state == "ready"
         assert CULLED_PAGE in chunk.html
 
-    def test_a_shell_prefetch_keeps_the_loading_ui(self, next_client) -> None:
+    @pytest.mark.parametrize(
+        ("sent", "shown", "hidden"),
+        [
+            ({"prefetch": True}, LATENCY_LOADING, "Mean ms"),
+            ({"headers": {"X-Next-Prefetch": "full"}}, "Mean ms", LATENCY_LOADING),
+        ],
+        ids=("shell", "full"),
+    )
+    def test_a_prefetch_depth_decides_whether_the_job_runs(
+        self, next_client, sent, shown, hidden
+    ) -> None:
         next_client.get("/")
-        navigation = next_client.navigate("/", origin="/stats/", prefetch=True)
+        navigation = next_client.navigate("/", origin="/stats/", **sent)
         html = navigation_html(navigation)
-        assert LATENCY_LOADING in html
-        assert "Mean ms" not in html
+        assert shown in html
+        assert hidden not in html
 
-    def test_a_press_prefetch_runs_the_job(self, next_client) -> None:
-        next_client.get("/")
-        navigation = next_client.navigate(
-            "/", origin="/stats/", headers={"X-Next-Prefetch": "full"}
+
+PAGE_RENDERS = "/stats/pages/"
+
+
+class TestPageRendersBoundary:
+    """The page renders table is a page boundary, streamed behind its `loading.djx`."""
+
+    def test_the_shell_keeps_the_layout_and_shows_the_skeleton(
+        self, next_client
+    ) -> None:
+        streamed = next_client.get_stream(PAGE_RENDERS)
+        assert "data-page-renders-skeleton" in streamed.shell
+        assert find_anchor(streamed.shell, href="/stats/pages/", text="Pages")
+        assert "Per-page render counts" not in streamed.shell
+
+    def test_a_chunk_fills_in_the_counts_and_the_means(self, next_client) -> None:
+        next_client.get("/stats/")
+        streamed = next_client.get_stream(PAGE_RENDERS)
+        [chunk] = streamed.chunks
+        assert chunk.state == "ready"
+        assert "Mean ms" in chunk.html
+        assert CULLED_PAGE in chunk.html
+
+    def test_a_render_count_without_a_duration_shows_no_mean(self, next_client) -> None:
+        metrics.incr("pages.rendered", CULLED_PAGE)
+        body = next_client.get(PAGE_RENDERS).content.decode()
+        assert CULLED_PAGE in body
+        assert "&mdash;" in body
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_a_culled_counter_streams_the_error_ui_in_place(self, next_client) -> None:
+        with boundary_errors("render"):
+            streamed = next_client.get_stream(PAGE_RENDERS)
+        [chunk] = streamed.chunks
+        assert (chunk.state, chunk.kind) == ("error", "error")
+        assert "Page renders are unavailable" in chunk.html
+        assert streamed.response.status_code == 200
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_an_inline_page_keeps_its_layout_and_answers_500(self, next_client) -> None:
+        with boundary_errors("render"):
+            response = next_client.get(PAGE_RENDERS)
+        body = response.content.decode()
+        assert response.status_code == 500
+        assert "Page renders are unavailable" in body
+        assert find_anchor(body, href="/stats/", text="Live")
+        [failure] = response.boundary_failures
+        assert (failure.name, failure.addressing) == (
+            "obs/pages/stats/pages/loading.djx",
+            "page",
         )
-        html = navigation_html(navigation)
-        assert "Mean ms" in html
-        assert LATENCY_LOADING not in html
+        assert isinstance(failure.exception, CounterLostError)
+
+
+class TestFlushHistory:
+    """The flush history waits behind a button until the visitor asks for it."""
+
+    def test_the_first_paint_ships_the_button_alone(self, next_client) -> None:
+        body = next_client.get("/").content.decode()
+        assert 'data-next-defer="manual"' in body
+        assert "Show the flush history" in body
+        assert "data-flush-history" not in body
+
+    def test_the_fetch_says_when_nothing_was_flushed(self, next_client) -> None:
+        envelope = next_client.get_boundary("/", "flush_history")
+        [op] = envelope.ops
+        assert op["s"] == "ready"
+        assert "Nothing has been flushed yet." in op["html"]
+
+    def test_the_fetch_lists_each_minute_a_flush_ran_in(self, next_client) -> None:
+        next_client.get("/stats/")
+        call_command("flush_metrics", stdout=StringIO())
+        rows = MetricSnapshot.objects.count()
+        envelope = next_client.get_boundary("/", "flush_history")
+        [op] = envelope.ops
+        assert "data-flush-history" in op["html"]
+        assert (
+            f'<td class="py-2 pl-4 text-right tabular-nums">{rows}</td>' in op["html"]
+        )
 
 
 class TestMetricPulseVerb:

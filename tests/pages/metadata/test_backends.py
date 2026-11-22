@@ -265,7 +265,9 @@ class TestRendererContract:
 
     def test_the_abc_cannot_be_instantiated(self) -> None:
         abstract: type = MetadataRenderer
-        with pytest.raises(TypeError):
+        with pytest.raises(
+            TypeError, match="Can't instantiate abstract class MetadataRenderer"
+        ):
             abstract()
 
     def test_the_default_renderer_is_the_html_one(self) -> None:
@@ -348,7 +350,7 @@ class TestConfiguredRenderer:
         dotted = "next.pages.MetadataRenderer"
         with (
             override_settings(NEXT_FRAMEWORK=_renderer_setting(dotted)),
-            pytest.raises(AbstractBackendError),
+            pytest.raises(AbstractBackendError, match="names no usable backend"),
         ):
             configured_renderer_class()
 

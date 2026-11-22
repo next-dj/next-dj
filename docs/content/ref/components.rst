@@ -61,7 +61,9 @@ Boundary declarations
 ~~~~~~~~~~~~~~~~~~~~~
 
 ``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=None, tokens=None)`` and ``component.props(*names)`` declare the boundary of the ``component.py`` that calls them, see :doc:`defer`.
+``WrapperTag.SITE``, the default ``tag``, leaves the wrapper to the call site, which adopts the root element of the loading UI and of the content inside a table, a list, a ``select``, or an ``svg`` and wraps them in a ``div`` anywhere else, while ``tag=None`` adopts the root everywhere and a ``tag`` of a name fixes the element, see :doc:`defer` and :doc:`/content/topics/boundaries/loading`.
 A ``loading.djx`` beside the component makes it a ``stream`` boundary without a declaration, and an ``error.djx`` beside it makes it an error boundary in every render.
+``next.components.calls`` renders one guarded or deferred call behind its boundary, ``CallSite`` naming the call, ``ComponentFallback`` rendering the error UI of the component, and ``DeferredRender`` rendering the call a deferred job runs.
 :doc:`/content/topics/boundaries/loading` covers the modes and the options.
 
 Manager
@@ -187,6 +189,11 @@ The same name under a deeper route trail of one tree is the documented override 
 ``component_watch_roots`` is the single reader of ``ComponentsBackend.watch_roots``, so the autoreload watcher, the link tooling, and the staticfiles finder all observe the same set of trees.
 
 .. autofunction:: next.components.get_component_paths_for_watch
+
+``refresh_component_files`` swaps in the boundary files, the ``loading.djx`` and ``error.djx``, every components backend finds on disk now and answers whether any changed.
+The development watcher calls it once per tick, so a render never stats those files.
+
+.. autofunction:: next.components.refresh_component_files
 
 Nodes
 -----

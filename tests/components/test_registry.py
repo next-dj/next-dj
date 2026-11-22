@@ -14,7 +14,7 @@ from next.components import (
     ComponentVisibilityResolver,
     component_extra_roots_from_config,
 )
-from next.components.deferral import DeferDeclarations
+from next.components.defer import DeferDeclarations
 from next.components.info import (
     BoundaryFiles,
     boundary_files,
@@ -54,6 +54,11 @@ class TestComponentRegistry:
         broken_root.resolve.side_effect = OSError
         info2 = ComponentInfo("n", broken_root, "", tmp_path / "n.djx", None, True)
         assert info2.resolved_scope_root is broken_root
+
+    def test_a_component_is_named_by_its_name_and_module(self, tmp_path: Path) -> None:
+        module = tmp_path / "component.py"
+        info = ComponentInfo("card", tmp_path, "", None, module, False)
+        assert str(info) == f"component 'card' ({module})"
 
     def test_contains_is_indexed_by_name(self, tmp_path: Path) -> None:
         """Name lookup does not scan every row."""
@@ -310,7 +315,7 @@ class TestErrorFiles:
     """Every live registry reports whether a component of it holds an `error.djx`."""
 
     @pytest.fixture()
-    def tracked(self, monkeypatch: pytest.MonkeyPatch) -> ErrorFiles:
+    def fresh_deferred_components(self, monkeypatch: pytest.MonkeyPatch) -> ErrorFiles:
         fresh = ErrorFiles()
         monkeypatch.setattr("next.components.registry.error_files", fresh)
         return fresh
@@ -340,22 +345,24 @@ class TestErrorFiles:
         assert tracker.held is False
 
     def test_a_component_without_an_error_file_holds_none(
-        self, tracked: ErrorFiles, tmp_path: Path
+        self, fresh_deferred_components: ErrorFiles, tmp_path: Path
     ) -> None:
         registry = ComponentRegistry()
         registry.register(self._info(tmp_path, "a", error=False))
         registry.register_many([self._info(tmp_path, "b", error=False)])
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
 
-    def test_register_and_clear(self, tracked: ErrorFiles, tmp_path: Path) -> None:
+    def test_register_and_clear(
+        self, fresh_deferred_components: ErrorFiles, tmp_path: Path
+    ) -> None:
         registry = ComponentRegistry()
         registry.register(self._info(tmp_path, "a", error=True))
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         registry.clear()
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
 
     def test_register_many_counts_every_error_file(
-        self, tracked: ErrorFiles, tmp_path: Path
+        self, fresh_deferred_components: ErrorFiles, tmp_path: Path
     ) -> None:
         registry = ComponentRegistry()
         registry.register_many(
@@ -364,11 +371,11 @@ class TestErrorFiles:
                 self._info(tmp_path, "b", error=False),
             ]
         )
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         assert registry._error_files == 1
 
     def test_refresh_follows_the_files_on_disk(
-        self, tracked: ErrorFiles, tmp_path: Path
+        self, fresh_deferred_components: ErrorFiles, tmp_path: Path
     ) -> None:
         (tmp_path / "widget").mkdir()
         (tmp_path / "widget" / "component.djx").write_text("<p>w</p>")
@@ -376,24 +383,24 @@ class TestErrorFiles:
         registry.register_many(
             ComponentScanner().scan_directory(tmp_path, tmp_path, "")
         )
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
         error = tmp_path / "widget" / "error.djx"
         error.write_text("<p>x</p>")
         assert registry.refresh_files() is True
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         error.unlink()
         assert registry.refresh_files() is True
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
 
     def test_a_registry_that_goes_away_holds_none(
-        self, tracked: ErrorFiles, tmp_path: Path
+        self, fresh_deferred_components: ErrorFiles, tmp_path: Path
     ) -> None:
         registry = ComponentRegistry()
         registry.register(self._info(tmp_path, "a", error=True))
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         del registry
         gc.collect()
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
 
 
 class TestComponentExtraRootsFromConfig:
@@ -557,9 +564,7 @@ class TestComponentVisibilityResolver:
         parts = res._compute_relative_parts(tmpl.resolve(), pages.resolve())
         assert parts == [""]
 
-    def test_result_and_path_cache_evict_oldest_when_full(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_result_and_path_cache_evict_oldest_when_full(self, tmp_path: Path) -> None:
         """Exceeding the LRU size evicts the oldest entries for both caches."""
         reg = ComponentRegistry()
         scope_root = (tmp_path / "scope").resolve()
@@ -777,12 +782,6 @@ class TestTheResolvedPathMemoKeysOnTheCallerSpelling:
 class TestDeferredComponents:
     """Whether any component can defer, by its files, its module or a call site."""
 
-    @pytest.fixture()
-    def tracked(self, monkeypatch: pytest.MonkeyPatch) -> DeferredComponents:
-        fresh = DeferredComponents()
-        monkeypatch.setattr("next.components.registry.deferred_components", fresh)
-        return fresh
-
     def _info(
         self, root: Path, name: str, *, loading: bool = False, module: bool = False
     ) -> ComponentInfo:
@@ -799,18 +798,18 @@ class TestDeferredComponents:
         )
 
     def test_a_loading_file_holds_until_the_registry_clears(
-        self, tracked: DeferredComponents, tmp_path: Path
+        self, fresh_deferred_components: DeferredComponents, tmp_path: Path
     ) -> None:
         registry = ComponentRegistry()
         registry.register(self._info(tmp_path, "plain"))
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
         registry.register(self._info(tmp_path, "card", loading=True))
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         registry.clear()
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
 
     def test_a_module_declaring_a_mode_holds(
-        self, tracked: DeferredComponents, tmp_path: Path, monkeypatch
+        self, fresh_deferred_components: DeferredComponents, tmp_path: Path, monkeypatch
     ) -> None:
         store = DeferDeclarations()
         store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
@@ -818,31 +817,34 @@ class TestDeferredComponents:
         monkeypatch.setattr("next.components.registry.defer_declarations", store)
         registry = ComponentRegistry()
         registry.register_many([self._info(tmp_path, "bare", module=True)])
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
         registry.register_many([self._info(tmp_path, "card", module=True)])
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         assert registry._deferring == 1
 
     def test_a_loading_file_beside_a_declared_mode_counts_once(
-        self, tracked: DeferredComponents, tmp_path: Path, monkeypatch
+        self, fresh_deferred_components: DeferredComponents, tmp_path: Path, monkeypatch
     ) -> None:
         store = DeferDeclarations()
         store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
         monkeypatch.setattr("next.components.registry.defer_declarations", store)
         registry = ComponentRegistry()
         registry.register(self._info(tmp_path, "card", loading=True, module=True))
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
         assert registry._deferring == 1
 
     def test_may_defer_raises_the_flag_for_good(
-        self, tracked: DeferredComponents
+        self, fresh_deferred_components: DeferredComponents
     ) -> None:
         may_defer()
         may_defer()
-        assert (tracked.held, tracked.declared) == (True, True)
+        assert (fresh_deferred_components.held, fresh_deferred_components.declared) == (
+            True,
+            True,
+        )
 
     def test_a_committed_mode_raises_the_flag_before_any_render(
-        self, tracked: DeferredComponents, tmp_path: Path
+        self, fresh_deferred_components: DeferredComponents, tmp_path: Path
     ) -> None:
         module_path = tmp_path / "card" / "component.py"
         module_path.parent.mkdir()
@@ -850,17 +852,19 @@ class TestDeferredComponents:
             "from next.components import component\ncomponent.defer()\n"
         )
         ModuleLoader().load(module_path)
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True
 
-    def test_a_declaration_holds_for_good(self, tracked: DeferredComponents) -> None:
+    def test_a_declaration_holds_for_good(
+        self, fresh_deferred_components: DeferredComponents
+    ) -> None:
         registry = ComponentRegistry()
-        tracked.declare()
-        tracked.note(registry, 0)
-        assert tracked.held is True
-        assert tracked.declared is True
+        fresh_deferred_components.declare()
+        fresh_deferred_components.note(registry, 0)
+        assert fresh_deferred_components.held is True
+        assert fresh_deferred_components.declared is True
 
     def test_refresh_follows_a_new_loading_file(
-        self, tracked: DeferredComponents, tmp_path: Path
+        self, fresh_deferred_components: DeferredComponents, tmp_path: Path
     ) -> None:
         (tmp_path / "widget").mkdir()
         (tmp_path / "widget" / "component.djx").write_text("<p>w</p>")
@@ -868,7 +872,7 @@ class TestDeferredComponents:
         registry.register_many(
             ComponentScanner().scan_directory(tmp_path, tmp_path, "")
         )
-        assert tracked.held is False
+        assert fresh_deferred_components.held is False
         (tmp_path / "widget" / "loading.djx").write_text("<p>.</p>")
         assert registry.refresh_files() is True
-        assert tracked.held is True
+        assert fresh_deferred_components.held is True

@@ -42,9 +42,11 @@ afterEach(() => {
 });
 
 function here(path: string, query = "", homes: string[] = []): Here {
+  const raw = path.startsWith("/") ? path : `/${path}`;
   return {
-    raw: path.startsWith("/") ? path : `/${path}`,
-    query,
+    raw,
+    path: normalPath(raw),
+    params: new URLSearchParams(query),
     origin: ORIGIN,
     homes,
   };
@@ -254,6 +256,55 @@ describe("the active-link pass", () => {
     setup({ router, page: '<nav><a id="l" href="/">x</a></nav>' });
     applied();
     expect(document.getElementById("l")!.hasAttribute("aria-current")).toBe(false);
+  });
+
+  it("leaves the marks of an apply that moves neither the URL nor a container", () => {
+    setup({
+      page: '<nav><a id="l" href="/">x</a></nav><div id="z" data-next-zone="z"></div>',
+    });
+    applied();
+    const link = document.getElementById("l")!;
+    link.removeAttribute("aria-current");
+    surface.apply({
+      version: "",
+      ops: [{ op: "inner", target: { zone: "z" }, html: "<p>poll</p>" }],
+    });
+    expect(link.hasAttribute("aria-current")).toBe(false);
+    history.replaceState(null, "", "/b/");
+    applied();
+    history.replaceState(null, "", "/");
+    applied();
+    expect(link.getAttribute("aria-current")).toBe("page");
+  });
+
+  it.each([
+    ["a link inside a container", '<a href="/">x</a>', "nav"],
+    ["a container", '<nav><a href="/">x</a></nav>', "main"],
+  ])("marks again once an apply brings %s", (_name, html, zone) => {
+    setup({
+      page:
+        '<nav><div data-next-zone="nav"></div></nav>' +
+        '<main><div data-next-zone="main"></div></main>',
+    });
+    applied();
+    surface.apply({ version: "", ops: [{ op: "inner", target: { zone }, html }] });
+    const link = document.querySelector("nav a")!;
+    expect(link.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("reads its containers again once the router boots on new settings", () => {
+    let settings: Settings = { ...SETTINGS, current: ["aside"] };
+    document.body.innerHTML = '<nav><a id="l" href="/">x</a></nav>';
+    createCurrent(
+      { partial: surface, settings: () => settings },
+      { signal: listening.signal },
+    );
+    applied();
+    const link = document.getElementById("l")!;
+    expect(link.hasAttribute("aria-current")).toBe(false);
+    settings = SETTINGS;
+    applied();
+    expect(link.getAttribute("aria-current")).toBe("page");
   });
 
   it("treats every link as a possible ancestor without the homes", () => {

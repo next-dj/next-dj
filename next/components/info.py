@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, override
 
 
 if TYPE_CHECKING:
@@ -55,6 +55,11 @@ class ComponentInfo:
         except OSError:
             resolved = self.scope_root
         object.__setattr__(self, "resolved_scope_root", resolved)
+
+    @override
+    def __str__(self) -> str:
+        """Name the component as a log reads it, its module beside its name."""
+        return f"component {self.name!r} ({self.module_path})"
 
     def current_files(self) -> BoundaryFiles | None:
         """Return the boundary files on disk now, `None` for a single-file component."""

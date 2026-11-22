@@ -10,14 +10,14 @@ from .markers import Cut, CutKind, Divergence
 
 
 if TYPE_CHECKING:
-    from .markers import Declaration, LayoutKey, ScannedLayout, Shell
+    from .markers import Declaration, LayoutKey, ScannedLayout, ScannedShell
 
 
 _HALF: Final = 16
 
 
 class ChromeDigest:
-    """Normalise the chrome of one layout and digest it, the default as is.
+    """Normalise the chrome of one layout and digest it, the shipped digest.
 
     A subclass strips a per-response token of its own on top of the default.
     """
@@ -35,7 +35,7 @@ class NavigationCut(ABC):
     """Decide where a navigation cuts the target page against the client's chain."""
 
     @abstractmethod
-    def cut(self, declared: Declaration | None, shell: Shell) -> Cut:
+    def cut(self, declared: Declaration | None, shell: ScannedShell) -> Cut:
         """Return the cut of `shell` for `declared`, `None` naming no declaration."""
 
 
@@ -47,7 +47,7 @@ class VerifiedCut(NavigationCut):
     """
 
     @override
-    def cut(self, declared: Declaration | None, shell: Shell) -> Cut:
+    def cut(self, declared: Declaration | None, shell: ScannedShell) -> Cut:
         """Return the slot, body or visit cut, naming where the chain diverged."""
         early = _unrooted(declared, shell)
         if early is not None or declared is None:
@@ -64,7 +64,7 @@ class VerifiedCut(NavigationCut):
         return Cut(CutKind.BODY, diverged_at=at, reason=reason)
 
 
-def _unrooted(declared: Declaration | None, shell: Shell) -> Cut | None:
+def _unrooted(declared: Declaration | None, shell: ScannedShell) -> Cut | None:
     """Return the cut decided before any chrome compares, `None` to compare."""
     if declared is None:
         return Cut(CutKind.BODY, diverged_at=shell.root, reason=Divergence.DECLARATION)

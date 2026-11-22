@@ -29,7 +29,7 @@ from next.components import registry
 from next.conf import next_framework_settings
 from next.conf.router import router_enabled
 from next.pages.loaders import module_counters
-from next.pages.transactions import atomic_declarations, page_atomic
+from next.pages.transactions import atomic_store, page_atomic
 from next.partial.zone import LOADING, ZoneNode
 from next.permissions.nodes import HasPermNode
 from next.router.current import current_links
@@ -96,8 +96,7 @@ _UNSPELLED: Final = (VariableNode, NowNode)
 class PagePlan:
     """What one page uses of the features a request may need, decided ahead of it.
 
-    `plain` holds for a safe request that needs none of them but the active-link pass
-    and the mark `streams` asks for, that a partial of the project may stream.
+    `plain` holds when a safe request needs no block beyond the link pass and `streams`.
     """
 
     router: bool
@@ -183,7 +182,7 @@ class PagePlans:
             connections.settings,
             _VERSION.value,
             _GENERATION.value,
-            atomic_declarations.version,
+            atomic_store.version,
             self._page.epoch,
             registry.deferred_components.held,
             registry.error_files.held,

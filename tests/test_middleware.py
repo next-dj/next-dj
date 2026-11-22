@@ -254,7 +254,8 @@ class TestCompressionMiddleware:
         middleware = CompressionMiddleware(lambda _request: HttpResponse("<p>hi</p>"))
         response = middleware(_gzip_request())
         assert response.content == b"<p>hi</p>"
-        assert response["Vary"] == "Accept-Encoding"
+        assert "Content-Encoding" not in response
+        assert "Vary" not in response
 
     def test_an_image_stays_plain(self) -> None:
         middleware = CompressionMiddleware(

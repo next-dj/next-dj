@@ -1,0 +1,10 @@
+{% #component "alert" variant="warning" title="Page renders are unavailable" %}
+  {% #slot "content" %}
+    {% if error.kind == "timeout" %}
+      <p>Reading every counter took longer than this page waits for, so the table was left out.</p>
+    {% else %}
+      <p>The counters behind this table are incomplete, so no mean render time is shown. Running <code class="font-mono">flush_metrics</code> starts the store over.</p>
+    {% endif %}
+    <p class="mt-2 text-xs text-muted-foreground">Reference <code class="font-mono">{{ error.digest }}</code></p>
+  {% /slot %}
+{% /component %}

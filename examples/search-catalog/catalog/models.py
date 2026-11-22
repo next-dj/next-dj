@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import ClassVar, Self
@@ -6,6 +7,9 @@ from django.db import models
 
 from next.urls import page_reverse
 
+
+PICKS = 4
+NEAR = (Decimal("0.5"), Decimal("1.5"))
 
 _SORT_ORDERINGS = {
     "price_asc": ("price",),
@@ -58,6 +62,23 @@ class ProductQuerySet(models.QuerySet):
             qs = qs.filter(in_stock=True)
         ordering = _SORT_ORDERINGS.get(filters.sort, _SORT_ORDERINGS["newest"])
         return qs.order_by(*ordering)
+
+    def picks_for(self, product: "Product", *, by: str) -> models.QuerySet:
+        """Return the keys of the in-stock products in the category or at a near price.
+
+        The near price runs from half to one and a half times the price of `product`.
+        """
+        alike = self.filter(in_stock=True).exclude(pk=product.pk)
+        if by == "price":
+            low, high = product.price * NEAR[0], product.price * NEAR[1]
+            alike = alike.filter(price__range=(low, high)).order_by("price")
+        else:
+            alike = alike.filter(category=product.category_id).order_by("-created_at")
+        return alike.values_list("pk", flat=True)[:PICKS]
+
+    def cards(self, keys: Sequence[int]) -> dict[int, "Product"]:
+        """Return the products `keys` name by primary key, each with its category."""
+        return self.select_related("category").in_bulk(keys)
 
 
 class Category(models.Model):

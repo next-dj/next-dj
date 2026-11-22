@@ -118,7 +118,7 @@ A page opts out on the server with ``page.router(...)`` at the top of its ``page
    A page that shows data which must never reappear from memory uses it.
 
 Each flag defaults to ``True``, and a page with no call keeps all three.
-The last call of a module wins, an edited ``page.py`` that drops the call stops applying it once the module loads again, and a call with a value that is no bool, inside a function, or outside a ``page.py`` declares nothing and is reported as :ref:`next.E238 <ref-system-checks>`.
+The last call of a module wins, an edited ``page.py`` that drops the call stops applying it once the module loads again, and a call with a value that is no bool, inside a function, or outside a ``page.py`` declares nothing and is reported as ``next.E238``.
 
 Testing
 -------

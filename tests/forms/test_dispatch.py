@@ -47,7 +47,7 @@ from next.forms.wizard import FormWizard
 from next.pages import page
 from next.pages.registry import PageContextRegistry
 from next.testing import capture_signals, override_dependency
-from next.transactions import AtomicOverride, ViewKind
+from next.transactions import WRITES, AtomicOverride, ViewKind
 from tests.support import DeferringProvider, bound_dependency
 
 
@@ -1828,6 +1828,85 @@ class TestFormClassTransaction:
         assert _ACTION_EVENTS == ["commit", "atomic=False"]
 
 
+_LAZY_ACTION = AtomicOverride(atomic=WRITES)
+
+
+async def _async_group() -> str:
+    await Group.objects.acreate(name="from-dependency")
+    return "written"
+
+
+def _async_writing_handler(*, fail: bool = False):
+    def handler(written: str = Depends("async_group")) -> HttpResponse:
+        _ACTION_EVENTS.append(f"{written} atomic={connection.in_atomic_block}")
+        if fail:
+            msg = "action failed"
+            raise ValueError(msg)
+        return HttpResponse()
+
+    return handler
+
+
+@pytest.mark.django_db(transaction=True)
+class TestLazyActionTransaction:
+    """A `"writes"` action opens its transaction at its first write, sync or async."""
+
+    @pytest.fixture(autouse=True)
+    def _clear(self):
+        _ACTION_EVENTS.clear()
+
+    def test_a_hook_before_the_write_runs_at_once(self, mock_http_request) -> None:
+        meta = _atomic_meta(_writing_handler(), atomic=_LAZY_ACTION)
+        FormActionDispatch.dispatch(
+            RegistryFormActionBackend(), _post(mock_http_request), "atomic_probe", meta
+        )
+        assert _ACTION_EVENTS == ["commit", "atomic=False"]
+        assert Group.objects.filter(name="from-action").exists()
+
+    def test_a_failure_after_the_write_rolls_back(self, mock_http_request) -> None:
+        meta = _atomic_meta(_writing_handler(fail=True), atomic=_LAZY_ACTION)
+        with pytest.raises(ValueError, match="action failed"):
+            FormActionDispatch.dispatch(
+                RegistryFormActionBackend(),
+                _post(mock_http_request),
+                "atomic_probe",
+                meta,
+            )
+        assert not Group.objects.filter(name="from-action").exists()
+
+    @pytest.mark.parametrize("fail", [False, True])
+    def test_an_async_dependency_writes_inside_the_transaction(
+        self, mock_http_request, *, fail: bool
+    ) -> None:
+        meta = _atomic_meta(_async_writing_handler(fail=fail), atomic=_LAZY_ACTION)
+        with bound_dependency("async_group", _async_group):
+            try:
+                FormActionDispatch.dispatch(
+                    RegistryFormActionBackend(),
+                    _post(mock_http_request),
+                    "atomic_probe",
+                    meta,
+                )
+            except ValueError:
+                assert fail
+        assert _ACTION_EVENTS == ["written atomic=True"]
+        assert Group.objects.filter(name="from-dependency").exists() is not fail
+        assert connection.execute_wrappers == []
+
+
+def test_a_query_free_lazy_action_needs_no_database(mock_http_request) -> None:
+    def handler() -> HttpResponse:
+        return HttpResponse("done")
+
+    meta = _atomic_meta(handler)
+    framework = {**settings.NEXT_FRAMEWORK, "TRANSACTIONS": {"UNSAFE": WRITES}}
+    with override_settings(NEXT_FRAMEWORK=framework):
+        response = FormActionDispatch.dispatch(
+            RegistryFormActionBackend(), _post(mock_http_request), "atomic_probe", meta
+        )
+    assert response.content == b"done"
+
+
 class TestActionTransactionWiring:
     def test_a_get_is_refused_before_the_transaction_decision(
         self, mock_http_request, monkeypatch
@@ -1839,7 +1918,7 @@ class TestActionTransactionWiring:
         meta = _atomic_meta(_writing_handler(), atomic=AtomicOverride(atomic=True))
         with (
             override_settings(NEXT_FRAMEWORK={"TRANSACTIONS": {"SAFE": True}}),
-            patch("next.forms.dispatch.atomic_aliases") as decide,
+            patch("next.forms.dispatch.atomic_scope") as decide,
         ):
             response = FormActionDispatch.dispatch(
                 RegistryFormActionBackend(),

@@ -110,7 +110,7 @@ class TestAsyncComponentRender:
         path.write_text("async def render():\n    return 'hi'\n")
         loader = ModuleLoader()
 
-        module, awaiting = loader.loaded(path)
+        module, awaiting, _resolves = loader.loaded(path)
         assert module is not None
         assert last_load_error(path) is None
         assert awaiting is True
@@ -121,7 +121,7 @@ class TestAsyncComponentRender:
         path = tmp_path / "component.py"
         path.write_text("async def render():\n    yield 'hi'\n")
 
-        assert ModuleLoader().loaded(path) == (None, False)
+        assert ModuleLoader().loaded(path) == Loaded(None)
         error = last_load_error(path)
         assert isinstance(error, AsyncCallableError)
         assert "is an async generator" in str(error)
@@ -130,30 +130,52 @@ class TestAsyncComponentRender:
         path = tmp_path / "component.py"
         path.write_text("def render():\n    return 'hi'\n")
 
-        module, awaiting = ModuleLoader().loaded(path)
+        module, awaiting, resolves = ModuleLoader().loaded(path)
         assert module is not None
         assert last_load_error(path) is None
         assert awaiting is False
+        assert resolves is True
+
+    @pytest.mark.parametrize(
+        ("source", "resolves"),
+        [
+            (
+                (
+                    "from next.components import context\n\n"
+                    "@context('title')\ndef title():\n    return 'hi'\n"
+                ),
+                True,
+            ),
+            ("value = 1\n", False),
+        ],
+        ids=["context", "plain"],
+    )
+    def test_the_entry_records_whether_a_render_resolves(
+        self, tmp_path: Path, source: str, *, resolves: bool
+    ) -> None:
+        path = tmp_path / "component.py"
+        path.write_text(source)
+        assert ModuleLoader().loaded(path).resolves is resolves
 
     def test_a_reload_without_the_async_render_forgets_it(self, tmp_path: Path) -> None:
         path = tmp_path / "component.py"
         path.write_text("async def render():\n    return 'hi'\n")
         cache = ModuleCache()
         ModuleLoader(cache).load(path)
-        assert cache.entry(path)[1] is True
+        assert cache.entry(path).awaiting is True
 
         cache.clear()
         assert cache.entry(path) is _CACHE_MISS
         path.write_text("def render():\n    return 'hi'\n")
         ModuleLoader(cache).load(path)
-        assert cache.entry(path)[1] is False
+        assert cache.entry(path).awaiting is False
 
     def test_a_store_over_an_async_entry_drops_its_mark(self, tmp_path: Path) -> None:
         path = tmp_path / "component.py"
         cache = ModuleCache()
         cache.set(path, None, awaiting=True)
         cache.set(path, None)
-        assert cache.entry(path) == (None, False)
+        assert cache.entry(path) == Loaded(None)
 
 
 class _PausingOrder(LruCache[Path, Loaded]):
@@ -187,7 +209,7 @@ class TestAPublishedModuleCarriesItsFlag:
         writer.start()
         try:
             assert order.published.wait(5)
-            module, awaiting = loader.loaded(path)
+            module, awaiting, _resolves = loader.loaded(path)
         finally:
             order.read.set()
             writer.join(5)

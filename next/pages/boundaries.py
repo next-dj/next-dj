@@ -29,9 +29,6 @@ if TYPE_CHECKING:
     from .loaders import BoundaryChain, ErrorBoundary
 
 
-ADDRESSING: Final = "page"
-"""The `addressing` a page boundary reports through `boundary_failed`."""
-
 FAILED_STATUS: Final = 500
 """The status of a response whose page body a page boundary contained."""
 
@@ -46,7 +43,7 @@ SHELL_KEY: Final = "_next_page_shell"
 
 
 @dataclass(frozen=True, slots=True)
-class Shell:
+class ErrorShell:
     """The context the error UI of a page boundary renders in, cut at its directory.
 
     Only inherited groups at or above the cut reach it, never what failed below.
@@ -95,7 +92,7 @@ class Caught:
 
     boundary: ErrorBoundary
     error: Exception
-    shell: Shell | None = None
+    shell: ErrorShell | None = None
 
 
 _NO_SCOPE: Final[AbstractContextManager[None]] = nullcontext()
@@ -156,13 +153,12 @@ def boundary_template(source: Path) -> Template:
 
 
 __all__ = [
-    "ADDRESSING",
     "CAUGHT_KEY",
     "FAILED_STATUS",
     "FAILURE_KEY",
     "SHELL_KEY",
     "Caught",
-    "Shell",
+    "ErrorShell",
     "boundary_scope",
     "boundary_template",
     "catching",

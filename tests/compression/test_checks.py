@@ -80,6 +80,7 @@ class TestPaths:
         ("dotted", "problem"),
         [
             ("next.compression.Missing", "does not import"),
+            ("tests.support.broken.Backend", "raised RuntimeError"),
             (f"{__name__}.CustomCompression", "no subclass of CompressionBackend"),
             ("next.compression.CompressionBackend", "abstract class"),
         ],
@@ -95,6 +96,7 @@ class TestPaths:
         ("dotted", "problem"),
         [
             (f"{__name__}.missing", "does not import"),
+            ("tests.support.broken.exclude", "raised RuntimeError"),
             (f"{__name__}.CACHE", "no callable"),
         ],
     )
@@ -117,8 +119,7 @@ class TestCodecs:
         install(monkeypatch, zstandard=fake_zstandard(), brotli=fake_brotli())
         assert check_compression_codecs() == []
 
-    def test_a_missing_core_codec_is_refused(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_a_missing_core_codec_is_refused(self) -> None:
         (message,) = check_compression_codecs()
         assert message.id == "next.E228"
         assert "offers 'zstd'" in message.msg
@@ -131,8 +132,7 @@ class TestCodecs:
         assert "offers 'br'" in message.msg
         assert "'brotli' extra" in message.hint
 
-    def test_disabled_skips_the_libraries(self, monkeypatch) -> None:
-        install(monkeypatch)
+    def test_disabled_skips_the_libraries(self) -> None:
         with _compression(ENABLED=False, SSE_TOPICS="reset", ORDER=["br"]):
             assert check_compression_codecs() == []
 
@@ -274,8 +274,7 @@ class TestCookies:
             assert check_compression_cookies() == []
 
 
-def test_the_checks_run_under_the_next_tag(monkeypatch) -> None:
-    install(monkeypatch)
+def test_the_checks_run_under_the_next_tag() -> None:
     with override_settings(MIDDLEWARE=[COMMON, MIDDLEWARE, GZIP_MIDDLEWARE]):
         found = set(_ids(run_checks(tags=[NEXT])))
     assert {"next.E227", "next.E228", "next.W165"} <= found

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import typing
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Final, Protocol, cast, runtime_checkable
+from enum import Enum, auto
+from typing import TYPE_CHECKING, Annotated, Final, Protocol, runtime_checkable
 
 from next.caches import BoundedCache
 from next.defer import DeferMode
@@ -12,14 +13,14 @@ from next.deps.introspect import cached_signature, cached_type_hints
 from next.utils import app_holding, resolve_base_dir
 
 from .context import component
-from .deferral import defer_declarations
+from .defer import defer_declarations
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-    from next.defer import BoundaryError
+    from next.defer import BoundaryFailure
 
     from .info import ComponentInfo
 
@@ -33,7 +34,12 @@ _types: BoundedCache[Path, tuple[tuple[int, int], Mapping[str, object]]] = (
     BoundedCache()
 )
 _anchored: BoundedCache[tuple[Path, Path], str | None] = BoundedCache()
-_MISS: Final = object()
+
+
+class _Miss(Enum):
+    """The answer `_anchored` holds for no pair of paths, `None` being an answer."""
+
+    TOKEN = auto()
 
 
 def client_mode(mode: DeferMode | None) -> bool:
@@ -81,9 +87,9 @@ def _under(directory: Path, base: Path) -> str | None:
     Resolving reads the disk, so the answer of one pair of paths is kept.
     """
     key = (directory, base)
-    held = _anchored.get(key, _MISS)
-    if held is not _MISS:
-        return cast("str | None", held)
+    held = _anchored.get(key, _Miss.TOKEN)
+    if held is not _Miss.TOKEN:
+        return held
     real = directory.resolve()
     root = base.resolve()
     found = real.relative_to(root).as_posix() if real.is_relative_to(root) else None
@@ -146,7 +152,7 @@ class TripSource(Protocol):
     def trip_input(self) -> TripInput | None:
         """Return the input of a client-trip shell, `None` for another call."""
 
-    def retry_input(self, failure: BoundaryError) -> TripInput | None:
+    def retry_input(self, failure: BoundaryFailure) -> TripInput | None:
         """Return the input a retry token of `failure` is minted from, if any."""
 
 

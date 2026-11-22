@@ -14,7 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from queue import Empty, SimpleQueue
-from typing import Any, Final, cast, override
+from typing import Any, Final, assert_never, cast, override
 
 from asgiref.sync import AsyncToSync, SyncToAsync, sync_to_async
 from django.core.exceptions import ImproperlyConfigured
@@ -316,6 +316,7 @@ class _Driver[D](ABC):
         self._session = session
         self._server = server
         self._runs: dict[str, _Run[D]] = {}
+        self._running: set[_Run[D]] = set()
         self._pending: deque[Command[D]] = deque()
         self._emits: deque[Emit[D]] = deque()
         self._timings: dict[str, Timing] = {}
@@ -365,28 +366,37 @@ class _Driver[D](ABC):
             self._taking = False
 
     def _command(self, command: Command[D]) -> None:
-        if isinstance(command, RunPool):
-            self._pool(command.unit)
-        elif isinstance(command, RunRequest):
-            self._request(command.units)
-        elif isinstance(command, StartLoop):
-            self._start(command.unit)
-        elif isinstance(command, Abandon):
-            for unit_id in command.ids:
-                self._drop(self._runs[unit_id])
-        elif isinstance(command, Emit):
-            for item in command.items:
-                self._timings.setdefault(item.id, item.timing)
-            self._emits.append(command)
-        elif isinstance(command, Wake):
-            self._wake(command.at)
-        else:
-            self._finish = command
+        match command:
+            case RunPool(unit=unit):
+                self._pool(unit)
+            case RunRequest(units=units):
+                self._request(units)
+            case StartLoop(unit=unit):
+                self._start(unit)
+            case Abandon(ids=ids):
+                for unit_id in ids:
+                    self._drop(self._runs[unit_id])
+            case Emit(items=items):
+                for item in items:
+                    self._timings.setdefault(item.id, item.timing)
+                self._emits.append(command)
+            case Wake(at=at):
+                self._wake(at)
+            case Finish():
+                self._finish = command
+            case _:
+                assert_never(command)
 
     def _register(self, unit: Unit[D], lane: Lane) -> _Run[D]:
         run = _Run(unit, lane, time.monotonic())
         self._runs[unit.id] = run
+        self._running.add(run)
         return run
+
+    def _shut(self, run: _Run[D]) -> None:
+        """Mark a unit ended on its lane."""
+        run.closed = True
+        self._running.discard(run)
 
     def _pool(self, unit: Unit[D]) -> None:
         """Submit a pool unit, which a full queue hands back to the machine."""
@@ -396,7 +406,7 @@ class _Driver[D](ABC):
         try:
             self._executor.submit(work)
         except BoundaryShedError:
-            run.closed = True
+            self._shut(run)
             self._take(self._machine.full(unit.id, time.monotonic()))
             return
         except BoundaryRefusedError as error:
@@ -437,21 +447,24 @@ class _Driver[D](ABC):
         self._post(_Closed(run, _error_of(task)))
 
     def _refuse(self, run: _Run[D], error: BaseException) -> None:
-        run.closed = True
+        self._shut(run)
         unit = run.unit
         for task in unit.tasks:
             timing = Timing(placement=unit.placement)
             self._report(Report(unit.id, task.job.id, error, timing))
 
     def _receive(self, message: _Message) -> None:
-        if isinstance(message, Report):
-            self._report(message)
-        elif isinstance(message, _Closed):
-            self._closed(message.run, message.error)
-        elif isinstance(message, _Refused):
-            self._take(self._machine.refused(message.unit, time.monotonic()))
-        else:
-            self._tick()
+        match message:
+            case Report():
+                self._report(message)
+            case _Closed(run=run, error=error):
+                self._closed(run, error)
+            case _Refused(unit=unit):
+                self._take(self._machine.refused(unit, time.monotonic()))
+            case _Tick():
+                self._tick()
+            case _:
+                assert_never(message)
 
     def _report(self, report: Report[D]) -> None:
         """Hand one job's result to the machine, which drops it once the job settled."""
@@ -464,7 +477,7 @@ class _Driver[D](ABC):
 
     def _closed(self, run: _Run[D], error: BaseException | None) -> None:
         """Mark a unit ended and fail the jobs a broken lane never reported."""
-        run.closed = True
+        self._shut(run)
         missing = error or RuntimeError(_UNFINISHED)
         unit = run.unit
         for task in unit.tasks:
@@ -477,16 +490,15 @@ class _Driver[D](ABC):
         if run.abandoned or run.closed:
             return
         run.abandoned = True
+        self._running.discard(run)
         work = run.work
-        if work is not None and not self._executor.steal(work):
-            self._executor.abandon(work)
+        if work is not None:
+            self._executor.steal(work)
         if run.lane is Lane.LOOP:
             self._cancel(run)
 
-    def _acknowledge(self, emit: Emit[D]) -> None:
-        now = time.monotonic()
-        for item in emit.items:
-            self._take(self._machine.written(item.id, now))
+    def _acknowledge(self) -> None:
+        self._take(self._machine.written(time.monotonic()))
 
     def _tick(self) -> None:
         self._take(self._machine.tick(time.monotonic()))
@@ -497,7 +509,7 @@ class _Driver[D](ABC):
             self._pending.clear()
             if not self._machine.closed:
                 self._take(self._cancel_machine())
-            for run in tuple(self._runs.values()):
+            for run in tuple(self._running):
                 self._drop(run)
             self._release()
             if self._finish is None:
@@ -602,7 +614,7 @@ class ThreadDriver[D](_Driver[D]):
                         self._consumer = True
                         raise
                     if isinstance(batch, Emit):
-                        self._acknowledge(batch)
+                        self._acknowledge()
                     self._idle_at = time.monotonic() + self._idle
             except Exception:
                 if self._consumer:
@@ -653,7 +665,7 @@ class ThreadDriver[D](_Driver[D]):
                     queued=run.queued,
                 )
             )
-        run.closed = True
+        self._shut(run)
 
     def _steal(self, capacity: Capacity) -> bool:
         """Run the oldest pool unit of this response no worker has started yet.
@@ -669,9 +681,7 @@ class ThreadDriver[D](_Driver[D]):
 
     def _flying(self) -> bool:
         """Whether a unit of this response runs on a worker or the loop right now."""
-        for run in self._runs.values():
-            if run.closed or run.abandoned:
-                continue
+        for run in self._running:
             if run.lane is Lane.LOOP:
                 return True
             work = run.work
@@ -831,7 +841,7 @@ class AsyncDriver[D](_Driver[D]):
                     except BaseException:
                         self._consumer = True
                         raise
-                    self._acknowledge(emit)
+                    self._acknowledge()
                 elif not self._collect():
                     await self._next_event()
         except Exception:
@@ -986,7 +996,7 @@ class AsyncDriver[D](_Driver[D]):
             if run.unit.placement.forced:
                 forced.append(run)
             else:
-                run.closed = True
+                self._shut(run)
                 self._post(_Refused(run.unit.id))
         return forced
 

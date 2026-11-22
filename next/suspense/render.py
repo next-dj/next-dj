@@ -5,18 +5,18 @@ from __future__ import annotations
 import functools
 import logging
 import threading
-import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Final, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, override
 
 from django.http import HttpRequest
-from django.template import Context
+from django.template import Context, Engine
 
 from next import diagnostics
 from next.boundaries import kind_of, note_retry, render_boundaries
+from next.caches import IdentityMemo
 from next.defer import deadline
 from next.pages.processors import context_processors
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from django.template import Template
 
-    from next.defer import BoundaryError, DeferredCall, ErrorKind
+    from next.defer import BoundaryFailure, DeferredCall, ErrorKind
     from next.static.assets import StaticAsset
     from next.static.serializers import JsContextSerializer
     from next.suspense.components import Capture
@@ -167,12 +167,23 @@ def current_frame() -> Frame | None:
 type Processor = Callable[[Any], dict[str, Any]]
 
 
-def _processors(template: Template | None) -> tuple[Processor, ...]:
-    """Return the engine processors, then the page processors, each one once."""
-    engine: tuple[Processor, ...] = ()
-    if template is not None:
-        engine = tuple(template.engine.template_context_processors)
-    return tuple(dict.fromkeys((*engine, *context_processors())))
+_MERGED: Final[IdentityMemo[dict[Engine | None, tuple[Processor, ...]]]] = (
+    IdentityMemo()
+)
+
+
+def processors_of(engine: Engine | None) -> tuple[Processor, ...]:
+    """Return the processors of `engine`, then the page processors, each one once.
+
+    The merge is held per engine until the page processors are read afresh.
+    """
+    page = context_processors()
+    merged = _MERGED.get(page, dict)
+    found = merged.get(engine)
+    if found is None:
+        own = () if engine is None else engine.template_context_processors
+        found = merged[engine] = tuple(dict.fromkeys((*own, *page)))
+    return found
 
 
 class _Processed:
@@ -216,7 +227,8 @@ def _context(capture: Capture, collector: StaticCollector) -> Context:
     data: dict[str, Any] = {}
     request = capture.data.get(REQUEST_KEY)
     if request is not None:
-        data.update(_processed(request).data(_processors(capture.template), request))
+        engine = None if capture.template is None else capture.template.engine
+        data.update(_processed(request).data(processors_of(engine), request))
     data.update(fresh_querysets(capture.data))
     data[COLLECTOR_KEY] = collector
     return Context(
@@ -249,47 +261,15 @@ def _rendered[T](capture: Capture, draw: Callable[[Context], T]) -> tuple[T, Rec
     return drawn, collector
 
 
-class Gate:
-    """A hold on the jobs of one component, open until released or out of time."""
+class JobGate(Protocol):
+    """A hold a test sets on the jobs of one component before they render."""
 
-    __slots__ = ("entered", "name", "released")
-
-    def __init__(self, name: str) -> None:
-        """Hold the jobs of the component `name`, none of them entered yet."""
-        self.name = name
-        self.entered = threading.Event()
-        self.released = threading.Event()
-
-    def wait(self, timeout: float | None = None) -> bool:
-        """Block until a job of the component is held, false once `timeout` passed."""
-        return self.entered.wait(timeout)
-
-    def release(self) -> None:
-        """Let every held job of the component and every later one run."""
-        self.released.set()
+    def hold(self, at: float) -> None:
+        """Wait until released, at most until the `time.monotonic()` instant `at`."""
 
 
-_gates: dict[str, Gate] = {}
-
-
-@contextmanager
-def gated(name: str) -> Iterator[Gate]:
-    """Hold every job of the component `name` inside the block until it is released."""
-    held = _gates[name] = Gate(name)
-    try:
-        yield held
-    finally:
-        if _gates.get(name) is held:
-            del _gates[name]
-        held.release()
-
-
-def _hold(name: str, at: float) -> None:
-    """Wait at the gate of `name` when one is set, at most until the instant `at`."""
-    held = _gates.get(name)
-    if held is not None:
-        held.entered.set()
-        held.released.wait(max(0.0, at - time.monotonic()))
+job_gates: Final[dict[str, JobGate]] = {}
+"""The gate each component name holds its jobs at, empty outside a test."""
 
 
 def _effects(request: object, build: Callable[[], Rendered[Delta]]) -> Rendered[Delta]:
@@ -317,10 +297,11 @@ def run(
 def _run(
     call: DeferredCall, capture: Capture, frame: Frame, at: float
 ) -> Rendered[Delta]:
-    def build() -> tuple[tuple[str, BoundaryError | None], Recording, int | None]:
+    def build() -> tuple[tuple[str, BoundaryFailure | None], Recording, int | None]:
         _frame.set(frame)
-        if _gates:
-            _hold(call.site.name, at)
+        gate = job_gates.get(call.site.name) if job_gates else None
+        if gate is not None:
+            gate.hold(at)
         with deadline(at):
             drawn, recording = _rendered(capture, call.renderer.body)
         return drawn, recording, diagnostics.degraded_status()
@@ -365,7 +346,7 @@ def fallback(call: DeferredCall, capture: Capture, kind: ErrorKind) -> Rendered[
     A failing error UI leaves the bare wrapper, which still reads as an error.
     """
 
-    def draw(context: Context) -> tuple[str, BoundaryError]:
+    def draw(context: Context) -> tuple[str, BoundaryFailure]:
         return call.renderer.error(context, kind)
 
     try:
@@ -384,14 +365,15 @@ __all__ = [
     "Added",
     "Delta",
     "Frame",
-    "Gate",
+    "JobGate",
     "Merged",
     "Noted",
     "Recording",
     "Step",
     "current_frame",
     "fallback",
-    "gated",
+    "job_gates",
+    "processors_of",
     "run",
     "unframed",
 ]

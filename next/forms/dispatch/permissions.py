@@ -13,8 +13,8 @@ from next.forms.signals import form_access_denied
 from next.forms.uid import posted_origin_path
 from next.pages import page
 from next.pages.access import (
+    AccessGate,
     AccessStamp,
-    Gate,
     access_stamp,
     enforce,
     owner_access,
@@ -219,7 +219,7 @@ def _action_lookup(
     return lookup
 
 
-_ACTION_GATE: Final = Gate(_action_lookup, _origin_path)
+_ACTION_GATE: Final = AccessGate(_action_lookup, _origin_path)
 
 
 @dataclass(frozen=True, slots=True)

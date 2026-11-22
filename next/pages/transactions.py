@@ -2,20 +2,12 @@
 
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from functools import partial
 
-from next.caches import PageCache
 from next.introspect import registering_site
 from next.transactions import AliasChoice, AtomicOverride, override_of, override_problem
-from next.utils import template_edits_watched
 
-from .declarations import ModuleDeclarations
-from .loaders import (
-    PAGE_MODULE,
-    load_python_module_memo,
-    module_generation,
-    module_version,
-)
+from .declarations import NESTED, DeclarationStore
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -33,7 +25,7 @@ class AtomicDeclaration:
     def problem(self) -> str | None:
         """Return why the call declares no override, `None` when it declares one."""
         if not self.top_level:
-            return "it runs inside a function rather than at the top of the module"
+            return NESTED
         return override_problem(self.atomic, self.aliases)
 
     def override(self) -> AtomicOverride | None:
@@ -43,16 +35,20 @@ class AtomicDeclaration:
         return override_of(self.atomic, self.aliases)
 
 
-class AtomicDeclarations(ModuleDeclarations[AtomicDeclaration]):
+class AtomicStore(DeclarationStore[AtomicDeclaration, AtomicOverride | None]):
     """Hold the latest `page.atomic` call of each `page.py`, the last call winning."""
 
     __slots__ = ()
 
+    def __init__(self) -> None:
+        """Start empty, a page without a valid call declaring no override."""
+        super().__init__(AtomicDeclaration.override, None)
 
-atomic_declarations = AtomicDeclarations()
+
+atomic_store = AtomicStore()
 
 
-class TransactionDeclarations:
+class AtomicDeclaring:
     """The `page.atomic` declaration of the `Page` manager."""
 
     def atomic(
@@ -60,50 +56,23 @@ class TransactionDeclarations:
     ) -> None:
         """Run this page in a transaction, or out of one, whatever the request method.
 
-        `aliases` of `None` takes `TRANSACTIONS["ALIASES"]`, and `"all"` every alias.
+        `"writes"` opens it before the first write, `aliases` of `None` on `ALIASES`.
         """
-        file_path, top_level = registering_site()
-        if file_path.name != PAGE_MODULE:
-            atomic_declarations.misplace(file_path)
-            return
-        namespace = sys._getframe(1).f_globals
-        atomic_declarations.declare(
-            file_path, AtomicDeclaration(atomic, aliases, namespace, top_level)
+        atomic_store.record(
+            registering_site(),
+            sys._getframe(1).f_globals,
+            partial(AtomicDeclaration, atomic, aliases),
         )
 
 
-type _Stamp = tuple[int, int, int]
-
-_HELD: PageCache[Path, tuple[_Stamp, AtomicOverride | None]] = PageCache()
-
-
-def _read(file_path: Path) -> AtomicOverride | None:
-    """Return the override the latest load of `file_path` declares."""
-    module = load_python_module_memo(file_path)
-    held = atomic_declarations.current(file_path, module)
-    return None if held is None else held.override()
-
-
-def page_atomic(file_path: Path) -> AtomicOverride | None:
-    """Return the transaction override of the page at `file_path`, `None` for none.
-
-    A project without a declaration answers at once, which keeps a plain `GET` free.
-    """
-    if not atomic_declarations:
-        return None
-    if template_edits_watched():
-        return _read(file_path)
-    stamp = (module_version(), module_generation(), atomic_declarations.version)
-    held = _HELD.get(file_path)
-    if held is None or held[0] != stamp:
-        held = _HELD[file_path] = (stamp, _read(file_path))
-    return held[1]
+page_atomic = atomic_store.resolved
+"""Return the transaction override of the page at a `page.py` path, `None` for none."""
 
 
 __all__ = [
     "AtomicDeclaration",
-    "AtomicDeclarations",
-    "TransactionDeclarations",
-    "atomic_declarations",
+    "AtomicDeclaring",
+    "AtomicStore",
+    "atomic_store",
     "page_atomic",
 ]

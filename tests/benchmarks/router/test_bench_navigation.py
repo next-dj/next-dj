@@ -12,7 +12,7 @@ from django.urls import resolve
 from next.pages.loaders import layout_ids
 from next.pages.manager import page as page_singleton
 from next.router import CutKind, Declaration, LayoutKey, VerifiedCut
-from next.router.manager import router_manager
+from next.router.manager import client_router
 from next.router.navigation import parse_declaration, read_shell
 from next.testing import declared_layouts
 from tests.benchmarks.factories import (
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     from django.http import HttpRequest, HttpResponseBase
 
-    from next.router import Shell
+    from next.router import ScannedShell
 
 
 _LINKS = "".join(f'<a href="/docs/topic-{i}/">Topic {i}</a>' for i in range(8))
@@ -58,10 +58,8 @@ def _site(root: Path) -> Iterator[Callable[[HttpRequest], HttpResponseBase]]:
     write_page(root, "docs/topic-1", _PUBLIC, body=_ARTICLE)
     write_page(root, "docs/topic-2", _PUBLIC, body=_ARTICLE)
     with routed(root, ROUTER=_ROUTER_ON):
-        try:
-            yield resolve("/docs/topic-2/").func
-        finally:
-            page_singleton.clear_template_caches()
+        yield resolve("/docs/topic-2/").func
+        page_singleton.clear_template_caches()
 
 
 def _document(path: str) -> str:
@@ -69,15 +67,15 @@ def _document(path: str) -> str:
     return resolve(path).func(plain_get(path)).content.decode()
 
 
-def _shell(root: Path, html: str) -> Shell:
+def _shell(root: Path, html: str) -> ScannedShell:
     """Return the digested shell of a rendered document of the target page."""
     found = _SEAL.search(html)
     assert found is not None
     ids = layout_ids(root / "docs" / "topic-2" / "page.py")
-    return read_shell(html, found[1], ids, router_manager.digest())
+    return read_shell(html, found[1], ids, client_router.digest())
 
 
-def _declared(shell: Shell, *, stale: bool = False) -> Declaration:
+def _declared(shell: ScannedShell, *, stale: bool = False) -> Declaration:
     """Return the declaration of a client showing `shell`, its last digest moved."""
     keys = [LayoutKey(layout.ident, layout.digest) for layout in shell.layouts]
     if stale:
@@ -181,7 +179,7 @@ class TestBenchCut:
             found = _SEAL.search(html)
             assert found is not None
             ids = layout_ids(tmp_path / "docs" / "topic-2" / "page.py")
-            backend = router_manager.digest()
+            backend = client_router.digest()
             shell = benchmark(read_shell, html, found[1], ids, backend)
         assert [len(layout.digest) for layout in shell.layouts] == [32, 16]
 

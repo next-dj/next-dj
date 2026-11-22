@@ -132,7 +132,7 @@ class TestJsonCodec:
 
     def test_a_float_that_is_not_finite_never_reaches_the_bytes(self) -> None:
         bad = BoundaryClaims("c", "s", props=(("p", math.nan),))
-        with pytest.raises(BoundaryPropsError):
+        with pytest.raises(BoundaryPropsError, match="outside the wire form"):
             JsonCodec().dumps(bad)
 
 
@@ -176,15 +176,14 @@ class TestMsgpackCodec:
         with pytest.raises(BoundaryPropsError, match="wire form"):
             MsgpackCodec().dumps(bad)
 
-    def test_a_library_lost_after_the_build_is_refused(
+    def test_a_built_codec_keeps_the_library_it_was_built_with(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         install_msgpack(monkeypatch)
         codec = MsgpackCodec()
         install_msgpack(monkeypatch, present=False)
-        assert not codec.available()
-        with pytest.raises(ImproperlyConfigured, match="lost"):
-            codec.dumps(_stamped())
+        assert not MsgpackCodec.available()
+        assert codec.loads(codec.dumps(_stamped()), VERSION) == _stamped()
 
     def test_the_real_library_round_trips(self) -> None:
         pytest.importorskip("msgpack")

@@ -301,7 +301,7 @@ Use a strategy when the customisation is a single algorithm rather than a comple
 
 Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping, and the metadata renderer inside the ``METADATA`` scope.
 ``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``, and ``METADATA["RENDERER"]`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all four against the base class its key declares, the last one through its ``scope`` argument.
-A value that is not a string is dropped by the settings merge for the three top-level keys, which leaves the default in place, and :ref:`next.E076 <ref-system-checks>` reports it on ``manage.py check``, while a non-string ``METADATA["RENDERER"]`` reaches the loader and is reported as ``next.E107``.
+A value that is not a string is dropped by the settings merge for the three top-level keys, which leaves the default in place, and ``next.E076`` reports it on ``manage.py check``, while a non-string ``METADATA["RENDERER"]`` reaches the loader and is reported as ``next.E107``.
 
 ``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
 Swap it to change how a request path is matched against those patterns, for example to trade the default trie for a different index.
@@ -526,4 +526,5 @@ See also
    :doc:`dependency-injection` for the provider registry and custom markers.
    :doc:`/content/howto/extend-a-default-backend` for the helper details.
    :doc:`/content/ref/conf` for the configuration surface.
+   :doc:`/content/ref/system-checks` for every check id this page names.
    :doc:`/content/internals/index` for how each subsystem composes.

@@ -87,6 +87,31 @@ export interface Lazy<T> extends LazyModule<T> {
   land(value: T): void;
 }
 
+/** Append a chunk's script, calling done once on load, error or timeout, unless cancelled. */
+export function appendScript(
+  doc: Document,
+  src: string,
+  nonce: string | undefined,
+  done: (loaded: boolean, el: HTMLScriptElement) => void,
+): () => void {
+  const el = doc.createElement("script");
+  const cancel = (): void => {
+    clearTimeout(timer);
+    el.onload = el.onerror = null;
+  };
+  const end = (loaded: boolean): void => {
+    cancel();
+    done(loaded, el);
+  };
+  el.onload = () => end(true);
+  el.onerror = () => end(false);
+  if (nonce !== undefined) el.nonce = nonce;
+  el.src = src;
+  doc.head.append(el);
+  const timer = setTimeout(end, CHUNK_TIMEOUT, false);
+  return cancel;
+}
+
 /**
  * A loader for a chunk carrying one module, with at most one fetch in flight.
  *
@@ -101,7 +126,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   let value: T | undefined;
   let pending: Promise<T | undefined> | undefined;
   let settle: ((value: T | undefined) => void) | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
   let attempts = 0;
   // A timed-out tag may still evaluate, so its subscribers outlive the attempt.
   const waiting: ((value: T) => void)[] = [];
@@ -114,15 +139,8 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
     if (url === undefined || attempts >= CHUNK_ATTEMPTS)
       return Promise.resolve(undefined);
     attempts += 1;
-    const el = doc.createElement("script");
-    if (deps.nonce !== undefined) el.nonce = deps.nonce;
-    // Per attempt, since another script may remove the tag before it reports.
-    let failed = false;
-    const fail = (): void => {
-      // Nothing to do once the module is registered or this attempt has failed.
-      if (failed || value !== undefined) return;
-      failed = true;
-      clearTimeout(timer);
+    // Any end before the module registers fails, a file that ran without it included.
+    cancel = appendScript(doc, url, deps.nonce, (_loaded, el) => {
       // A retry appends a new tag, so the failed one is removed.
       el.remove();
       pending = undefined;
@@ -132,13 +150,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
         url,
         error: new Error(`${key} chunk failed`),
       } satisfies PartialError);
-    };
-    el.onerror = fail;
-    // A file that ran without registering its module fails too, so no caller hangs.
-    el.onload = fail;
-    el.src = url;
-    doc.head.append(el);
-    timer = setTimeout(fail, CHUNK_TIMEOUT);
+    });
     pending = new Promise((resolve) => (settle = resolve));
     return pending;
   }
@@ -156,7 +168,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
     land(landed) {
       if (value !== undefined) return;
       value = landed;
-      clearTimeout(timer);
+      cancel?.();
       settle?.(landed);
       for (const fn of waiting.splice(0)) fn(landed);
     },

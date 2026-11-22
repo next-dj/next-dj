@@ -317,6 +317,21 @@ The framework renders the group and appends the `Sitemap:` line itself, absolute
 
 A callable `@page.metadata` belongs to its own page, so [`print/page.py`](blog/pages/posts/[slug]/print/page.py) titles the sheet from the front matter and marks it `noindex`. The title template from the settings still applies. `sitemap.py` lists the route in `exclude`, which keeps the sitemap check quiet for a dynamic route that is not listed.
 
+### 15. Prefetching the links in view
+
+A blog is read on phones as much as on desktops, and a touch screen has no hover to warn the router of the next tap. [`config/settings.py`](config/settings.py) therefore turns the viewport prefetch on:
+
+```python
+NEXT_FRAMEWORK = {
+    ...,
+    "ROUTER": {"PREFETCH": "viewport"},
+}
+```
+
+Every post link the router owns is prefetched once it scrolls into view, on top of the default hover and focus prefetch, so the first tap on a post in the list lands on an answer already in memory. Each prefetch renders the target page on the server, which is cheap here, since a post is a Markdown file on disk and nothing reads or writes the database. A page that acts on a visit declares `page.router(prefetch=False)` instead, and a site whose browser tests write to an in-memory SQLite database while prefetches read it keeps the default `"intent"`.
+
+The "Print view" link in [`posts/layout.djx`](blog/pages/posts/layout.djx) opts out with `data-next-prefetch="off"`. The print view starts its own root layout, so a navigation to it is a hard load: the router answers with a `visit` operation and the browser loads the URL as a new document. A prefetch of that link would render the whole print page for an answer the click never applies. `TestIndex` reads the `prefetch` mode the page hands the router, and `TestPrintView` the attribute on the link and the `visit` cut of the navigation.
+
 ## Gotchas
 
 ### A page needs a body source, and a layout is none

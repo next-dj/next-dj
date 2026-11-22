@@ -1,0 +1,9 @@
+<section class="space-y-3" data-rail-skeleton>
+  <p class="sr-only">Loading {{ props.title }}</p>
+  {% component "skeleton" height="1.5rem" extra="w-1/3" %}
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    {% for _ in "xx" %}
+      {% component "skeleton" height="6rem" %}
+    {% endfor %}
+  </div>
+</section>

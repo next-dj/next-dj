@@ -29,7 +29,7 @@ from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
 from django.utils.regex_helper import normalize
 
-from next.caches import DEFAULT_CACHE_SIZE, BoundedCache
+from next.caches import DEFAULT_CACHE_SIZE, BoundedCache, IdentityMemo
 from next.errors import InvalidDirsError
 from next.stamps import fresh, settled, snapshot
 
@@ -736,26 +736,24 @@ class _Installed:
     An override or a reload sets another list, so the held answers need no receiver.
     """
 
-    __slots__ = ("_held",)
+    __slots__ = ("_answers",)
 
     def __init__(self) -> None:
         """Start before the first read."""
-        self._held: tuple[object, dict[str, bool]] | None = None
+        self._answers: IdentityMemo[dict[str, bool]] = IdentityMemo()
 
     def lists(self, base: str) -> bool:
         """Return whether the list held now names `base` or a subclass of it."""
         middleware = settings.MIDDLEWARE
-        held = self._held
-        if held is None or held[0] is not middleware:
-            held = self._held = (middleware, {})
-        found = held[1].get(base)
+        answers = self._answers.get(middleware, dict)
+        found = answers.get(base)
         if found is None:
-            found = held[1][base] = middleware_listed(middleware or (), base)
+            found = answers[base] = middleware_listed(middleware or (), base)
         return found
 
     def forget(self) -> None:
         """Drop the answers, which also follow the classes the entries import to."""
-        self._held = None
+        self._answers.forget()
 
 
 _installed: Final = _Installed()

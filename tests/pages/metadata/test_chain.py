@@ -417,6 +417,18 @@ class TestCallables:
             meta = _fold(registry, leaf, dep_cache=cache)
         assert meta.title == "cached"
 
+    def test_an_async_callable_folds_through_the_bridge_for_a_sync_caller(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+
+        async def leaf_meta(slug: str) -> dict[str, str]:
+            return {"title": f"Async {slug}"}
+
+        registry.register(leaf, leaf_meta)
+        meta = fold_chain(registry, leaf, dep_cache={}, url_kwargs={"slug": "s"})
+        assert meta.title == "Async s"
+
     def test_a_none_value_from_a_callable_inherits(
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
@@ -663,7 +675,9 @@ class TestContainedFailures:
         """`fold_chain` lets the caller decide, so `Patches.meta` can skip its op."""
         (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
         registry.register(leaf, lambda: {"title": 3})
-        with pytest.raises(PageMetadataShapeError):
+        with pytest.raises(
+            PageMetadataShapeError, match="metadata key 'title' as 'int'"
+        ):
             fold_chain(registry, leaf, dep_cache={})
 
 
@@ -1004,6 +1018,12 @@ class TestOrigins:
             MetadataOrigin("title", str(root)),
             MetadataOrigin("*", f"leaf_meta in {leaf}"),
         )
+
+    def test_a_page_setting_no_key_names_no_source(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+        assert metadata_origins(chain_entry(registry, leaf)) == ()
 
 
 class TestThunk:

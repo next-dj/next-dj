@@ -21,7 +21,8 @@ _KEYS: Final = frozenset({"c", "e", "i", "k", "m", "p", "s", "u", "v"})
 class TokenCodec(ABC):
     """Turn claims into bytes and back, the bytes equal for equal claims."""
 
-    def available(self) -> bool:
+    @classmethod
+    def available(cls) -> bool:
         """Whether the library the codec writes with imports in this process."""
         return True
 
@@ -161,29 +162,25 @@ class MsgpackCodec(TokenCodec):
 
     def __init__(self) -> None:
         """Refuse to build without the library, so a project learns it at startup."""
-        if msgpack_library() is None:
+        library = msgpack_library()
+        if library is None:
             msg = (
                 "MsgpackCodec needs the msgpack package, which does not import. "
                 "Install msgpack or keep the default JsonCodec."
             )
             raise ImproperlyConfigured(msg)
+        self._library = library
 
+    @classmethod
     @override
-    def available(self) -> bool:
+    def available(cls) -> bool:
         return msgpack_library() is not None
-
-    def _library(self) -> ModuleType:
-        library = msgpack_library()
-        if library is None:
-            msg = "MsgpackCodec lost the msgpack package it was built with."
-            raise ImproperlyConfigured(msg)
-        return library
 
     @override
     def dumps(self, claims: BoundaryClaims) -> bytes:
         held = envelope(claims)
         try:
-            packed = self._library().packb(held, use_bin_type=True)
+            packed = self._library.packb(held, use_bin_type=True)
         except (TypeError, ValueError, OverflowError) as exc:
             msg = "a boundary prop holds a value MessagePack cannot carry"
             raise BoundaryPropsError(msg) from exc
@@ -192,7 +189,7 @@ class MsgpackCodec(TokenCodec):
     @override
     def loads(self, data: bytes, version: int) -> BoundaryClaims:
         try:
-            held = self._library().unpackb(
+            held = self._library.unpackb(
                 data, raw=False, strict_map_key=True, use_list=True
             )
         except (TypeError, ValueError) as exc:

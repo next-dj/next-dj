@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ATTR_BUSY,
   MAX_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
+  bare,
   duration,
   isBusy,
   markBusy,
+  mime,
   now,
+  once,
   requestTimeout,
+  says,
   stamp,
   stamped,
   streaming,
@@ -212,5 +216,43 @@ describe("stamp", () => {
     expect(now()).toBe(first + 1);
     expect([stamped(outer), stamped(inner)]).toEqual([first + 1, first + 1]);
     document.body.innerHTML = "";
+  });
+});
+
+describe("once", () => {
+  it("runs a flag once, whichever copy of the module asks", async () => {
+    const run = vi.fn();
+    once("probe", run);
+    vi.resetModules();
+    const copy = await import("./protocol");
+    copy.once("probe", run);
+    once("other", run);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the router headers", () => {
+  it.each([
+    ["clear, no-snapshot", "clear", true],
+    ["no-snapshot", "clear", false],
+    [null, "clear", false],
+  ])("reads %o for the word %s as %s", (value, word, expected) => {
+    const headers = value === null ? {} : { "X-Next-Router": value };
+    expect(says(new Response(null, { headers }), word)).toBe(expected);
+  });
+
+  it("reads no word off a missing response", () => {
+    expect(says(undefined, "clear")).toBe(false);
+  });
+
+  it.each([
+    [{ "content-type": "application/json; charset=utf-8" }, "application/json"],
+    [{}, ""],
+  ])("reads the media type off %o as %o", (headers, expected) => {
+    expect(mime(new Response(null, { headers }))).toBe(expected);
+  });
+
+  it("drops the fragment of a URL and keeps its query", () => {
+    expect(bare("/b/?q=1#part#more")).toBe("/b/?q=1");
   });
 });

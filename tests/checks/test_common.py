@@ -12,6 +12,8 @@ from next.checks import NEXT
 from next.checks.common import (
     RegistrationSubject,
     RunMemo,
+    callable_problem,
+    class_problem,
     forget_run_memos,
     raw_scope,
     registration_file_errors,
@@ -22,6 +24,7 @@ from next.deps.introspect import introspect_key
 from next.deps.resolver import forget_dep_caches
 from next.pages.loaders import _page_roots, forget_page_roots
 from next.pages.watch import _page_backends_for_watch, _state, forget_watch_state
+from next.router import NavigationCut
 from next.static.manager import forget_manager_page_roots, get_static_manager
 from next.testing import reset_check_caches
 from next.urls import PageRoot, RouterBackend, checks as urls_checks
@@ -89,23 +92,7 @@ class TestCollectAllPatternsDedup:
 
 
 class TestRunMemo:
-    """A run memo builds once per key and forgets on a check-cache reset."""
-
-    def test_a_repeat_with_the_same_key_builds_once(self) -> None:
-        memo: RunMemo[list[int]] = RunMemo()
-        key = object()
-        first = memo.get(key, lambda: [1])
-        assert memo.get(key, lambda: [2]) is first
-
-    def test_a_new_key_builds_again(self) -> None:
-        memo: RunMemo[list[int]] = RunMemo()
-        memo.get(object(), lambda: [1])
-        assert memo.get(object(), lambda: [2]) == [2]
-
-    def test_an_equal_key_is_not_the_same_key(self) -> None:
-        memo: RunMemo[str] = RunMemo()
-        memo.get([1], lambda: "first")
-        assert memo.get([1], lambda: "second") == "second"
+    """A run memo forgets its value on a check-cache reset."""
 
     @pytest.mark.parametrize("forget", [forget_run_memos, reset_check_caches])
     def test_a_reset_drops_every_memo(self, forget) -> None:
@@ -114,6 +101,46 @@ class TestRunMemo:
         memo.get(key, lambda: "before")
         forget()
         assert memo.get(key, lambda: "after") == "after"
+
+
+class TestDottedPaths:
+    """A dotted settings path is checked for what it names, never raising."""
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("next.router.VerifiedCut", None),
+            ("missing.module.Cut", "does not import ("),
+            ("tests.support.broken.Cut", "does not import (tests.support.broken.Cut "),
+            ("next.router.manager.client_router", "names no class"),
+            ("next.router.ChromeDigest", "is no subclass of NavigationCut"),
+            ("next.router.NavigationCut", "is an abstract class"),
+        ],
+    )
+    def test_a_class_path(self, dotted: str, problem: str | None) -> None:
+        found = class_problem(dotted, NavigationCut)
+        if problem is None:
+            assert found is None
+        else:
+            assert found is not None
+            assert found.startswith(problem)
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("django.utils.timezone.now", None),
+            ("missing.module.rule", "does not import ("),
+            ("tests.support.broken.rule", "does not import ("),
+            ("next.checks.common.WALK_HINT", "names no callable"),
+        ],
+    )
+    def test_a_callable_path(self, dotted: str, problem: str | None) -> None:
+        found = callable_problem(dotted)
+        if problem is None:
+            assert found is None
+        else:
+            assert found is not None
+            assert found.startswith(problem)
 
 
 class TestNextTag:

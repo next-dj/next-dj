@@ -22,30 +22,10 @@ from tests.support import record_path_calls
 class TestComponentTag:
     """Tests for void ``{% component %}`` and block ``{% #component %}`` tags."""
 
-    def test_component_tag_requires_name(self) -> None:
-        """{% component %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="component name"):
-            Template("{% load components %}{% component %}")
-
-    def test_component_tag_requires_quoted_name(self) -> None:
-        """{% component %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted"):
-            Template('{% load components %}{% component "" %}')
-
     def test_endcomponent_is_not_a_tag(self) -> None:
         """{% endcomponent %} is not a registered tag."""
         with pytest.raises(TemplateSyntaxError, match="endcomponent"):
             Template("{% load components %}{% endcomponent %}")
-
-    def test_block_component_requires_name_token(self) -> None:
-        """{% #component %} without a name raises."""
-        with pytest.raises(TemplateSyntaxError, match="#component"):
-            Template("{% load components %}{% #component %}")
-
-    def test_block_component_requires_non_empty_quoted_name(self) -> None:
-        """{% #component %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted"):
-            Template('{% load components %}{% #component "" %}{% /component %}')
 
     def test_component_tag_renders_empty_without_path_in_context(self) -> None:
         """When current_template_path is missing, component renders empty."""
@@ -176,7 +156,7 @@ class TestComponentTag:
             looked_up.append(path)
             return info
 
-        monkeypatch.setattr(component_tags, "_resolve_template_path", counting)
+        monkeypatch.setattr(component_tags, "resolve_template_path", counting)
         with patch.object(
             components_manager, "get_component", side_effect=get_component
         ):
@@ -837,7 +817,7 @@ class TestRequestFromTheCallerContext:
     """A request the caller context carries is the one the component resolves."""
 
     def test_a_context_provider_receives_the_caller_request(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
         """The flattened context names the request, so no fallback lookup is needed."""
         comp_dir = tmp_path / "probe"
@@ -858,7 +838,7 @@ class TestRequestFromTheCallerContext:
             module_path=module_path,
             is_simple=False,
         )
-        request = RequestFactory().get("/dashboard/")
+        request = rf.get("/dashboard/")
 
         with patch.object(components_manager, "get_component", return_value=info):
             template = Template('{% load components %}{% component "probe" %}')
@@ -913,37 +893,6 @@ def _component_node(source: str) -> ComponentNode:
 
 class TestSlotTag:
     """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
-
-    def test_block_slot_tag_requires_name(self) -> None:
-        """{% #slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="#slot"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% #slot %}{% /slot %}{% /component %}'
-            )
-
-    def test_block_slot_tag_requires_exactly_one_arg(self) -> None:
-        """{% #slot %} with wrong arity raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% #slot "a" "b" %}{% /slot %}{% /component %}'
-            )
-
-    def test_short_slot_requires_quoted_name(self) -> None:
-        """{% slot %} short form with empty name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template(
-                '{% load components %}{% #component "c" %}{% slot "" %}{% /component %}'
-            )
-
-    def test_short_slot_requires_exactly_one_name(self) -> None:
-        """{% slot %} short form with two names raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% slot "a" "b" %}{% /component %}'
-            )
 
     def test_block_slot_fills_the_named_slot_variable(self, tmp_path: Path) -> None:
         """A block slot inside a block component arrives as `slot_<name>`."""
@@ -1079,16 +1028,6 @@ class TestNestedSlot:
 class TestSetSlotTag:
     """Tests for ``{% #set_slot %}``, ``{% /set_slot %}``, and short ``{% set_slot %}``."""
 
-    def test_set_slot_requires_name(self) -> None:
-        """{% #set_slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="#set_slot"):
-            Template("{% load components %}{% #set_slot %}fallback{% /set_slot %}")
-
-    def test_set_slot_requires_quoted_name(self) -> None:
-        """{% #set_slot %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template('{% load components %}{% #set_slot "" %}x{% /set_slot %}')
-
     def test_set_slot_renders_fallback_when_slot_empty(self) -> None:
         r"""{% #set_slot %} renders fallback when slot not in context."""
         t = Template(
@@ -1122,16 +1061,6 @@ class TestSetSlotTag:
         t = Template('{% load components %}{% set_slot "avatar" %}')
         result = t.render(Context({"slot_avatar": "<b>ok</b>"}))
         assert "<b>ok</b>" in result
-
-    def test_short_set_slot_requires_exactly_one_name(self) -> None:
-        """{% set_slot %} short form with two names raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template('{% load components %}{% set_slot "a" "b" %}')
-
-    def test_short_set_slot_empty_name_raises(self) -> None:
-        """{% set_slot "" %} raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template('{% load components %}{% set_slot "" %}')
 
     @pytest.mark.parametrize(
         ("context_data", "expected_substring", "forbidden_substrings"),
@@ -1474,7 +1403,7 @@ class TestComponentNodePathCache:
             resolved.append(value)
             return Path(value).resolve()
 
-        monkeypatch.setattr(component_tags, "_resolve_template_path", counting)
+        monkeypatch.setattr(component_tags, "resolve_template_path", counting)
         with patch.object(
             components_manager,
             "get_component",

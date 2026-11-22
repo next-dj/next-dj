@@ -13,7 +13,7 @@ from next.deps.scope import RequestScope
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 _JOBS = pytest.mark.parametrize("jobs", [10, 100], ids=["ten", "hundred"])
@@ -32,22 +32,12 @@ async def _job(loader: Loader[int, int], scope: RequestScope, key: int) -> int:
         return await loader.load(key)
 
 
-async def _response(loader: Loader[int, int], jobs: int) -> list[int]:
-    """Run `jobs` concurrent jobs of one request scope, each loading its own key."""
+async def _response(loader: Loader[int, int], keys: Iterable[int]) -> list[int]:
+    """Run one job of a request scope per key, each loading its own."""
     scope = RequestScope()
     request_memo.set(RequestMemo(scope))
     try:
-        return await asyncio.gather(*(_job(loader, scope, key) for key in range(jobs)))
-    finally:
-        await scope.close()
-
-
-async def _repeated(loader: Loader[int, int], jobs: int) -> list[int]:
-    """Load one key from every job, so all but the first join its entry."""
-    scope = RequestScope()
-    request_memo.set(RequestMemo(scope))
-    try:
-        return await asyncio.gather(*(_job(loader, scope, 7) for _ in range(jobs)))
+        return await asyncio.gather(*(_job(loader, scope, key) for key in keys))
     finally:
         await scope.close()
 
@@ -56,10 +46,8 @@ async def _repeated(loader: Loader[int, int], jobs: int) -> list[int]:
 def loop() -> Iterator[asyncio.AbstractEventLoop]:
     """One event loop for every round, so no round pays for starting a loop."""
     running = asyncio.new_event_loop()
-    try:
-        yield running
-    finally:
-        running.close()
+    yield running
+    running.close()
 
 
 class TestBenchLoaderBatching:
@@ -76,7 +64,7 @@ class TestBenchLoaderBatching:
         loader = Loader(_prices, window=3600)
 
         def serve() -> list[int]:
-            return loop.run_until_complete(_response(loader, jobs))
+            return loop.run_until_complete(_response(loader, range(jobs)))
 
         _CALLS.clear()
         assert serve() == [key * 10 for key in range(jobs)]
@@ -92,7 +80,7 @@ class TestBenchLoaderBatching:
         loader = Loader(_prices, max_batch=5, window=3600)
 
         def serve() -> list[int]:
-            return loop.run_until_complete(_response(loader, jobs))
+            return loop.run_until_complete(_response(loader, range(jobs)))
 
         _CALLS.clear()
         assert serve() == [key * 10 for key in range(jobs)]
@@ -107,7 +95,7 @@ class TestBenchLoaderBatching:
         loader = Loader(_prices, window=3600)
 
         def serve() -> list[int]:
-            return loop.run_until_complete(_repeated(loader, 10))
+            return loop.run_until_complete(_response(loader, [7] * 10))
 
         _CALLS.clear()
         assert serve() == [70] * 10

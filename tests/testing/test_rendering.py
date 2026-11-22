@@ -4,19 +4,12 @@ from unittest.mock import patch
 import pytest
 from django.test import RequestFactory
 
-from next.components import (
-    ComponentInfo,
-    FileComponentsBackend,
-    components_manager,
-    registry as registry_module,
-)
+from next.components import ComponentInfo, FileComponentsBackend, components_manager
 from next.components.registry import DeferredComponents
-from next.pages import manager as manager_module
 from next.pages.manager import page
 from next.seeding import TEMPLATE_PATH_KEY
 from next.static import StaticCollector
 from next.suspense import State, boundary_rendered
-from next.templatetags import components as component_tags
 from next.testing import (
     capture_signals,
     override_component_backends,
@@ -268,22 +261,13 @@ class TestRenderComponentByNameFrame:
         assert f"<i>{page_module}</i>" in html
 
 
-@pytest.fixture()
-def flag(monkeypatch: pytest.MonkeyPatch) -> DeferredComponents:
-    """Track the deferred components of this test alone."""
-    fresh = DeferredComponents()
-    for module in (registry_module, manager_module, component_tags):
-        monkeypatch.setattr(module, "deferred_components", fresh)
-    return fresh
-
-
 _DEFERRING_TEMPLATE = '{% load components %}<div>{% component "slow" n=1 %}</div>'
 
 
 class TestRenderComponentByNameDeferral:
     """A nested deferred call settles, and a project that cannot defer pays nothing."""
 
-    @pytest.mark.usefixtures("flag")
+    @pytest.mark.usefixtures("fresh_deferred_components")
     def test_a_nested_deferred_call_runs_as_a_job_and_settles(
         self, tmp_path: Path
     ) -> None:
@@ -307,7 +291,7 @@ class TestRenderComponentByNameDeferral:
         assert event.kwargs["state"] is State.READY
 
     def test_a_project_without_a_deferred_component_opens_no_block(
-        self, tmp_path: Path, flag: DeferredComponents
+        self, tmp_path: Path, fresh_deferred_components: DeferredComponents
     ) -> None:
         root = tmp_path / "_components"
         root.mkdir()
@@ -321,5 +305,5 @@ class TestRenderComponentByNameDeferral:
         ):
             html = render_component_by_name("plain", at=tmp_path / "page.djx")
 
-        assert flag.held is False
+        assert fresh_deferred_components.held is False
         assert html == "<b>plain</b>"

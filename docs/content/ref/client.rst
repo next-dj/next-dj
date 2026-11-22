@@ -62,6 +62,7 @@ The server renders a script tag for each one a page needs, right after the runti
 The load attributes of each tag are listed under ``NEXT_JS_OPTIONS`` in :doc:`settings`, and the ``disabled`` script policy renders none, which ``next.W181`` reports.
 
 A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` once and is fetched again on its next need, three attempts in all, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+The ``history``, ``intent``, and ``reader`` bundles of the router fail the same way and share the three attempts of the router, which requests them again.
 A chunk that lands after its timeout is still delivered to every subscriber that waited for it.
 The TypeScript sources are not part of the installed package, so a project imports no TypeScript and installs no Node toolchain.
 :doc:`/content/contributing/quality-gates` describes how the bundles are built and budgeted, and :doc:`static` describes the finder that serves them.
@@ -263,7 +264,7 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
    * - ``partial:settled``
      - The document
      - No
-     - The fetch layer once a request finished, and the boundary chunks once a batch applied.
+     - The fetch layer once a request finished, and the boundary fills once a batch applied.
    * - ``partial:layer-opened``
      - The document
      - No
@@ -480,6 +481,7 @@ A name the server has not registered through ``register_patch_op`` never reaches
 ``parseHook`` widens the wire format.
 The hook owns the response body before classification and returns a value the applier parses as an envelope, so a backend answering a content type of its own is applied instead of navigated to.
 A hook that throws, and a value the applier rejects as no envelope, surface as a ``partial:error`` of kind ``parse``.
+A frame of a streamed response that is no JSON, met after the first fill landed, fires the same kind with the frame as its ``body``, and the stream goes on with the next frame.
 The registry is keyed by the bare content type, with the charset and any other parameter stripped before the lookup.
 A body no hook claims and no envelope content type covers becomes a full navigation on a safe request and a ``kind: "http"`` error on a mutation, because the action endpoint is no page to navigate to.
 
@@ -1004,9 +1006,9 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``adapters.ts``
      - Default platform adapters over the browser globals a test harness replaces.
    * - ``events.ts``
-     - The plain-activation test of a click and the in-place test of a browsing-context name, shared by the triggers, the layer openers, the router, and the intent bundle.
+     - The plain-activation test of a click and the in-place test of a browsing-context name, shared by the triggers, the layer openers, the router, and the intent bundle, and the temporary ``tabindex`` that lets an element take the focus a deferred boundary or a navigation moves to it.
    * - ``protocol.ts``
-     - The wire vocabulary shared with the server, the content type, the headers, the ``PartialError`` union, and ``pageKey``, the same-origin path and query a layer and a zone are keyed by.
+     - The wire vocabulary shared with the server, the content type, the request and router headers, the ``PartialError`` union, and ``pageKey``, the same-origin path and query a layer and a zone are keyed by.
    * - ``navigation.ts``
      - The history writes of a commit and the one ``next:navigated`` it fires, a layer's push written as it opens and announced once its body commits.
    * - ``head.ts``
@@ -1020,8 +1022,8 @@ None of these modules is reachable from application code, so the names serve rea
      - Consent and the script manifest loader, shipped in the scripts chunk.
    * - ``poll.ts``
      - The zone poller, its interval groups, and the pause and resume on tab visibility, shipped in the poll chunk.
-   * - ``boundary.ts``
-     - The queue that applies the chunks of a streamed page or partial response and marks a boundary left ``loading`` as ``incomplete``.
+   * - ``drain.ts``
+     - The queue that applies the fills of a streamed page or partial response and marks a boundary left ``loading`` as ``incomplete``.
    * - ``defer.ts``
      - The client-trip fetch, the retry and fetch controls, and the page reload a refused expired token asks for, shipped in the defer bundle.
    * - ``reload.ts``
@@ -1030,6 +1032,8 @@ None of these modules is reachable from application code, so the names serve rea
      - The pruning and the address writes of an infinite list, shipped in the more bundle.
    * - ``reader.ts``
      - The reader of a streamed response, shipped in the reader bundle.
+   * - ``layout.ts``
+     - The slot markers of the layout chain and the bounds a navigation target resolves to, shared by the router and the history bundle.
    * - ``router.ts``
      - The client router, its link and form takeover, the navigation request, the commit, the progress marks, and the loading of the history and intent bundles, shipped in the router bundle.
    * - ``history.ts``

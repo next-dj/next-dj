@@ -75,7 +75,8 @@ class TokenSeal(ABC):
     encrypts: ClassVar[bool] = False
     """Whether tokens differ on every mint, which `BUCKET` defeats."""
 
-    def available(self) -> bool:
+    @classmethod
+    def available(cls) -> bool:
         """Whether the library the seal needs imports in this process."""
         return True
 
@@ -239,10 +240,11 @@ class EncryptedSeal(TokenSeal):
 
     def __init__(self) -> None:
         """Refuse to build without `cryptography`, so a project learns it at startup."""
-        _crypto()
+        self._library = _crypto()
 
+    @classmethod
     @override
-    def available(self) -> bool:
+    def available(cls) -> bool:
         return crypto_library() is not None
 
     @override
@@ -251,7 +253,7 @@ class EncryptedSeal(TokenSeal):
 
     @override
     def seal(self, payload: bytes, context: TokenContext) -> str:
-        library = _crypto()
+        library = self._library
         key = context.keys[0]
         salt = secrets.token_bytes(_SALT_BYTES)
         cipher = library.AESGCM(token_key(library, key, salt, context)).encrypt(
@@ -261,7 +263,7 @@ class EncryptedSeal(TokenSeal):
 
     @override
     def open(self, sealed: str, context: TokenContext) -> bytes:
-        library = _crypto()
+        library = self._library
         blob = _decoded(sealed)
         if len(blob) < _HEAD + _TAG_BYTES:
             _refuse(TokenRejection.MALFORMED)

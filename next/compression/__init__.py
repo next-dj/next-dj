@@ -21,7 +21,6 @@ from .manager import (
     prepare_stream,
 )
 from .negotiation import negotiate, parse_accept_encoding
-from .registry import CompressionRegistry
 from .signals import compression_backend_loaded
 from .streams import StreamEncoding, padding
 
@@ -33,7 +32,6 @@ __all__ = [
     "CompressionBackend",
     "CompressionBackendError",
     "CompressionManager",
-    "CompressionRegistry",
     "Compressor",
     "GzipBackend",
     "StreamEncoding",

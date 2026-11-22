@@ -80,9 +80,9 @@ Components
    Renders a component by name with the given props.
    Each prop compiles into a template expression, so quoted strings, numbers, dotted lookups, and filter chains all resolve against the surrounding context.
 
-   ``defer=``, ``timeout=``, ``reload=``, and ``delay=`` are boundary options of the call, never props, and take literals only, so a template variable there raises ``TemplateSyntaxError`` at parse time.
+   ``defer=`` and ``timeout=`` are boundary options of the call, never props, and take literals only, so a template variable there raises ``TemplateSyntaxError`` at parse time.
    ``defer=`` names the delivery mode of this call, ``stream``, ``load``, ``visible``, ``manual``, or ``inline``, over the mode the ``component.py`` declares, and ``timeout=`` bounds its job, as a number of seconds or a ``"2s"`` or ``"500ms"`` literal of at most one day.
-   ``reload=`` and ``delay=`` are reserved and checked as durations, with no effect.
+   ``reload=`` and ``delay=`` are reserved names, options of ``{% zone %}`` only, and a call that writes either raises ``TemplateSyntaxError`` at parse time.
    A value outside its shape raises ``TemplateSyntaxError`` at parse time, see :doc:`/content/topics/boundaries/loading`.
 
 .. describe:: {% #component "<name>" %}...{% /component %}

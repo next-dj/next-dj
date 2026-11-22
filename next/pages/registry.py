@@ -17,17 +17,7 @@ from next.introspect import (
     refuse_async,
 )
 
-from .context import ContextResult
-from .graph import (
-    ContextGraph,
-    Step,
-    acollect,
-    blame,
-    compile_graph,
-    keyless_result,
-    keyless_shape_error,
-    watching,
-)
+from .graph import ContextGraph, RunOrder, Step, acollect, collect, compile_graph
 from .paths import page_path_info
 from .signals import context_registered
 
@@ -40,6 +30,8 @@ if TYPE_CHECKING:
 
     from next.deps.resolver import DependencyResolver
     from next.static.serializers import JsContextSerializer
+
+    from .context import ContextResult
 
 
 class PageContextEntry(NamedTuple):
@@ -147,6 +139,7 @@ class PageContextRegistry:
         self._merge_order: PageCache[Path, _PageOrder] = PageCache()
         self._inheritable: PageCache[Path, tuple[_OrderedEntries, ...]] = PageCache()
         self._graphs: PageCache[Path, ContextGraph] = PageCache()
+        self._steps: PageCache[Path, RunOrder] = PageCache()
 
     @property
     def version(self) -> int:
@@ -321,115 +314,15 @@ class PageContextRegistry:
 
         A `groups` count runs only that many leading inherited groups and no own one.
         """
-        context_data: dict[str, Any] = {}
-        js_context: dict[str, Any] = {}
-        js_context_serializers: dict[str, JsContextSerializer] = {}
-        dep_cache = render_dep_cache(request) if dep_cache is None else dep_cache
-        dep_stack: list[str] = []
-        kwargs: Mapping[str, object] = {} if url_kwargs is None else url_kwargs
-
-        inherited_context = self._collect_inherited_context(
-            file_path, request, kwargs, dep_cache, dep_stack, groups
+        return collect(
+            self.run_steps(file_path),
+            file_path,
+            request=request,
+            url_kwargs={} if url_kwargs is None else url_kwargs,
+            dep_cache=render_dep_cache(request) if dep_cache is None else dep_cache,
+            requested_zones=requested_zones,
+            groups=groups,
         )
-        context_data.update(inherited_context)
-        if groups is not None:
-            return ContextResult(
-                context_data=context_data,
-                js_context=js_context,
-                js_context_serializers=js_context_serializers,
-            )
-
-        # Read once for the merge, since each read on the shared holder is forwarded.
-        active = current_resolver()
-        order = self._page_order(file_path)
-        for key, entry in order.entries:
-            # `isdisjoint` tests the batch without allocating an intersection.
-            if (
-                requested_zones is not None
-                and entry.zones is not None
-                and entry.zones.isdisjoint(requested_zones)
-            ):
-                continue
-            resolved = active.resolve_dependencies(
-                entry.func,
-                request=request,
-                _cache=dep_cache,
-                _stack=dep_stack,
-                _context_data=context_data,
-                **kwargs,
-            )
-            result = entry.func(**resolved)
-            if key is None:
-                result = keyless_result(result, entry, file_path, order.shielded)
-                context_data.update(result)
-                if entry.serialize:
-                    # Only a shielded key can precede the one keyless callable.
-                    js_context.update(result)
-                    if entry.serializer is not None:
-                        for k in result:
-                            js_context_serializers[k] = entry.serializer
-            else:
-                context_data[key] = result
-                if entry.serialize and key not in js_context:
-                    js_context[key] = result
-                    if entry.serializer is not None:
-                        js_context_serializers[key] = entry.serializer
-
-        return ContextResult(
-            context_data=context_data,
-            js_context=js_context,
-            js_context_serializers=js_context_serializers,
-        )
-
-    def _collect_inherited_context(
-        self,
-        file_path: Path,
-        request: HttpRequest | None,
-        url_kwargs: Mapping[str, object],
-        dep_cache: dict[str, Any],
-        dep_stack: list[str],
-        count: int | None = None,
-    ) -> dict[str, Any]:
-        """Return values from ancestor `page.py` callables marked `inherit_context`.
-
-        Outer files run first and keep their keys, each file in declaration order.
-        """
-        inherited_context: dict[str, Any] = {}
-        groups = self._inheritable_groups(file_path)
-        if not groups:
-            return inherited_context
-        active = current_resolver()
-        watch = watching()
-        for position, group in enumerate(groups if count is None else groups[:count]):
-            merged: tuple[str, ...] = ()
-            for key, entry in group:
-                if key is not None and key in inherited_context and key not in merged:
-                    continue
-                try:
-                    resolved = active.resolve_dependencies(
-                        entry.func,
-                        request=request,
-                        _cache=dep_cache,
-                        _stack=dep_stack,
-                        _context_data=inherited_context,
-                        **url_kwargs,
-                    )
-                    result = entry.func(**resolved)
-                except Exception:
-                    blame(position)
-                    raise
-                if key is None and not isinstance(result, dict):
-                    blame(position)
-                    raise keyless_shape_error(entry.func, file_path)
-                if watch is not None:
-                    watch.settle(position, key, result)
-                if key is not None:
-                    inherited_context[key] = result
-                    continue
-                merged = tuple(name for name in result if name not in inherited_context)
-                for name in merged:
-                    inherited_context[name] = result[name]
-        return inherited_context
 
     async def acollect_context(
         self,
@@ -474,14 +367,28 @@ class PageContextRegistry:
 
     def _build_graph(self, file_path: Path, active: DependencyResolver) -> ContextGraph:
         """Compile the graph of `file_path`, each ancestor file a group of its own."""
-        steps = [
-            _step(key, entry, group)
-            for group, entries in enumerate(self._inheritable_groups(file_path))
-            for key, entry in entries
-        ]
-        order = self._page_order(file_path)
-        steps.extend(_step(key, entry, -1) for key, entry in order.entries)
-        return compile_graph(tuple(steps), order.shielded, active)
+        order = self.run_steps(file_path)
+        return compile_graph(order.steps, order.shielded, active)
+
+    def run_steps(self, file_path: Path) -> RunOrder:
+        """Return the steps a render of `file_path` runs, an ancestor a group each.
+
+        The page's own steps follow in group `-1`, with what its keyless merge shields.
+        """
+        order = (
+            self._steps.get(file_path) if self._memo_version == self._version else None
+        )
+        if order is None:
+            self._sync_memos()
+            steps = [
+                _step(key, entry, group)
+                for group, entries in enumerate(self._inheritable_groups(file_path))
+                for key, entry in entries
+            ]
+            own = self._page_order(file_path)
+            steps.extend(_step(key, entry, -1) for key, entry in own.entries)
+            order = self._steps[file_path] = RunOrder(tuple(steps), own.shielded)
+        return order
 
     def run_order(self, file_path: Path) -> _OrderedEntries:
         """Return every callable a render of `file_path` runs, in the order of the run.
@@ -499,6 +406,7 @@ class PageContextRegistry:
             self._merge_order.clear()
             self._inheritable.clear()
             self._graphs.clear()
+            self._steps.clear()
             self._memo_version = self._version
 
     def _page_order(self, file_path: Path) -> _PageOrder:

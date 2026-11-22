@@ -8,5 +8,6 @@ class Command(BaseCommand):
 
     def handle(self, *args: object, **options: object) -> None:
         """Seed the demo dataset and report it on stdout."""
-        seed_demo()
-        self.stdout.write(self.style.SUCCESS("Demo audit log seeded."))
+        rows = seed_demo()
+        message = f"Demo audit log seeded with {rows} rows."
+        self.stdout.write(self.style.SUCCESS(message))

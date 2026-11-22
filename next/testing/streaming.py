@@ -15,20 +15,21 @@ from next.partial import keys
 from next.partial.envelope import Envelope
 from next.partial.headers import REQUEST_FLAG, STREAM_ACCEPT
 from next.partial.stream import END_EVENT, HELLO_EVENT
+from next.static.runtime import SCRIPT_TEXT
 from next.suspense.partial import PartialStream
 from next.suspense.policy import streaming
 from next.suspense.response import StreamingPageResponse
-from next.testing.boundaries import release_gates
+from next.testing.boundaries import HeldFailures, release_gates
+from next.testing.realtime import sse_events
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from django.http.response import HttpResponseBase, StreamingHttpResponse
     from django.test import AsyncClient, Client
 
 
-_SCRIPT: Final = re.compile(
-    r"<script\b[^>]*>(?P<text>.*?)</script\s*>", re.IGNORECASE | re.DOTALL
-)
 _PUSH: Final = re.compile(r"\$nx(?:\|\|=\[\]\))?\.push\(")
 _PAD: Final = re.compile(r"(?:<!--[ A-Za-z0-9._]*-->)+\Z")
 _JSON: Final = json.JSONDecoder()
@@ -39,8 +40,6 @@ _KEYED: Final = re.compile(
 )
 _LOADING: Final = ' data-next-state="loading" aria-busy="true"'
 _HEAD_CLOSE: Final = "</head>"
-_LINE: Final = re.compile(r"\r\n|\r|\n")
-_MESSAGE: Final = "message"
 _FLAG_META: Final = "HTTP_" + REQUEST_FLAG.upper().replace("-", "_")
 
 
@@ -126,35 +125,6 @@ def _applied(document: str, chunk: StreamedChunk) -> str:
     return document
 
 
-def _read(text: str) -> tuple[list[tuple[str, str]], bool]:
-    """Return the `(event, data)` pairs of an SSE body and whether it stops mid-event.
-
-    Only CR and LF end a line, so a U+2028 inside a payload stays in its line.
-    """
-    found: list[tuple[str, str]] = []
-    name, data = _MESSAGE, list[str]()
-    pending = False
-    for line in _LINE.split(text):
-        if not line:
-            if data:
-                found.append((name, "\n".join(data)))
-            name, data, pending = _MESSAGE, [], False
-            continue
-        pending = True
-        field, _, value = line.partition(":")
-        value = value.removeprefix(" ")
-        if field == "event":
-            name = value
-        elif field == "data":
-            data.append(value)
-    return found, pending
-
-
-def _events(text: str) -> list[tuple[str, str]]:
-    """Return the `(event, data)` pairs of an SSE body, as a `fetch` reader sees it."""
-    return _read(text)[0]
-
-
 def _pushed(text: str) -> object:
     """Return the payload a script pushes to `$nx`, `None` for one that pushes none."""
     found = _PUSH.search(text)
@@ -162,6 +132,12 @@ def _pushed(text: str) -> object:
         return None
     payload, _end = _JSON.raw_decode(text, found.end())
     return payload
+
+
+def decoded(response: HttpResponseBase, writes: Sequence[bytes]) -> list[bytes]:
+    """Return `writes` decoded from the `Content-Encoding` of `response`, in order."""
+    decode = response_decoder(response)
+    return [decode(write) for write in writes]
 
 
 class StreamedPage:
@@ -175,8 +151,7 @@ class StreamedPage:
 
     def __init__(self, writes: list[bytes], response: HttpResponseBase) -> None:
         """Decode the writes and split them into the shell, the chunks and the rest."""
-        decode = response_decoder(response)
-        writes = [decode(write) for write in writes]
+        writes = decoded(response, writes)
         self.response = response
         self.writes = writes
         self.padded = len(writes[0]) if writes else 0
@@ -193,7 +168,7 @@ class StreamedPage:
         first = writes[0].decode() if writes else ""
         self.shell = _PAD.sub("", first)
         rest = b"".join(writes[1:]).decode()
-        for found in _SCRIPT.finditer(rest):
+        for found in SCRIPT_TEXT.finditer(rest):
             data = _pushed(found["text"])
             if data == keys.CHUNK_END:
                 self.ended = True
@@ -211,9 +186,10 @@ class StreamedPage:
 
     def _read_events(self, text: str) -> None:
         """Read the hello, the envelope, each boundary frame and the end code."""
-        events, pending = _read(text)
-        for name, data in events:
-            payload = json.loads(data)
+        events, pending = sse_events(text)
+        for event in events:
+            name = event.event
+            payload = json.loads(event.data)
             if name == HELLO_EVENT:
                 self.hello = payload
             elif name == END_EVENT:
@@ -283,34 +259,40 @@ def read_stream(client: Client, url: str, **extra: object) -> StreamedPage:
     and an `after_shell` boundary gate opens once the shell is read.
     """
     forwarded = _accepting(extra)
-    with streaming():
-        response = client.get(url, **forwarded)
-    stream = _streamed(response, url)
-    writes: list[bytes] = []
-    for part in stream:
-        writes.append(part)
-        if len(writes) == 1:
-            release_gates()
-    return StreamedPage(writes, stream)
+    held = HeldFailures()
+    with held.recording():
+        with streaming():
+            response = client.get(url, **forwarded)
+        stream = _streamed(response, url)
+        writes: list[bytes] = []
+        for part in stream:
+            writes.append(part)
+            if len(writes) == 1:
+                release_gates()
+        page = StreamedPage(writes, stream)
+    held.settle(b"".join(page.writes))
+    return page
 
 
-async def astream_chunks(
-    client: AsyncClient, url: str, **extra: object
-) -> StreamedPage:
+async def aread_stream(client: AsyncClient, url: str, **extra: object) -> StreamedPage:
     """GET `url` with an async client as a stream and read the whole body.
 
     An `after_shell` boundary gate opens once the shell is read.
     """
     forwarded = _accepting(extra)
-    with streaming():
-        response = await client.get(url, **forwarded)
-    stream = _streamed(response, url)
-    writes: list[bytes] = []
-    async for part in stream:
-        writes.append(part)
-        if len(writes) == 1:
-            release_gates()
-    return StreamedPage(writes, stream)
+    held = HeldFailures()
+    with held.recording():
+        with streaming():
+            response = await client.get(url, **forwarded)
+        stream = _streamed(response, url)
+        writes: list[bytes] = []
+        async for part in stream:
+            writes.append(part)
+            if len(writes) == 1:
+                release_gates()
+        page = StreamedPage(writes, stream)
+    held.settle(b"".join(page.writes))
+    return page
 
 
-__all__ = ["StreamedChunk", "StreamedPage", "astream_chunks", "read_stream"]
+__all__ = ["StreamedChunk", "StreamedPage", "aread_stream", "read_stream"]

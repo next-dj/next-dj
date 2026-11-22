@@ -1,5 +1,6 @@
 import { defaultReload } from "./adapters";
-import type { Envelope } from "./apply";
+import type { Envelope, InnerPatch, MorphPatch, ReplacePatch } from "./apply";
+import { focusable } from "./events";
 import type { PartialSurface } from "./partial";
 import {
   ATTR_BOUNDARY,
@@ -23,14 +24,11 @@ export interface DeferHost {
   partial: Pick<PartialSurface, "fetch" | "layers" | "onMount">;
 }
 
-interface BoundaryOp {
-  op?: string;
-  html?: string;
-  target?: { boundary?: string };
+type BoundaryOp = (InnerPatch | MorphPatch | ReplacePatch) & {
   s?: string;
   k?: string;
   token?: string;
-}
+};
 
 const dropped = (): Outcome => ({ status: "dropped", applied: false });
 
@@ -71,15 +69,7 @@ export function createDefer(
     const inside = el.contains(active) && active !== el ? active : null;
     const outcome = await send(sent);
     const target = doc.getElementById(el.id) ?? (el as HTMLElement);
-    if (inside !== null && !inside.isConnected) {
-      if (!target.hasAttribute("tabindex")) {
-        target.setAttribute("tabindex", "-1");
-        target.addEventListener("blur", () => target.removeAttribute("tabindex"), {
-          once: true,
-        });
-      }
-      target.focus();
-    }
+    if (inside !== null && !inside.isConnected) focusable(target).focus();
     return outcome;
   }
 

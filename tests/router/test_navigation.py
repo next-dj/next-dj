@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
@@ -12,15 +11,16 @@ from django.contrib.sessions.backends.signed_cookies import SessionStore as Sign
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.http.response import HttpResponseBase
 from django.middleware.csrf import get_token, rotate_token
-from django.test import RequestFactory, override_settings
+from django.test import override_settings
 
 from next.forms.dispatch import FormActionDispatch
 from next.intercept import Intercept, intercepts
 from next.pages import page
 from next.pages.layouts import SLOT, sealed
 from next.pages.loaders import layout_ids
-from next.pages.navigation import RouterOptions
 from next.pages.responses import Purpose
+from next.pages.router import RouterOptions
+from next.partial.patches import Envelope
 from next.router import (
     Cut,
     CutKind,
@@ -29,7 +29,7 @@ from next.router import (
     router_clear,
     router_cleared,
 )
-from next.router.markers import Declaration, LayoutKey, ScannedLayout, Shell
+from next.router.markers import Declaration, LayoutKey, ScannedLayout, ScannedShell
 from next.router.navigation import (
     CLEAR,
     DECLARATION_BYTES,
@@ -43,8 +43,8 @@ from next.router.navigation import (
     directives,
     hostlike,
     intercepted,
-    kept,
     layouts_payload,
+    marked_links,
     navigation_envelope,
     origin_vary,
     page_marking,
@@ -60,12 +60,12 @@ from next.router.navigation import (
 from next.static.runtime import html_finish, router_render
 from next.testing import capture_signals, override_next_settings
 from tests.support import unified_view
+from tests.support.navigation import NAVIGATION, declared_by, get_page, navigate, ops
 
 
 SEAL = "5ea1ed00"
 IDENT = "0123456789abcdef"
 INNER = "fedcba9876543210"
-_FACTORY = RequestFactory()
 NAV = '<nav><a href="/docs/">Docs</a><a href="/photo/1/">Photo</a></nav>'
 DOCS_MARKED = (
     '<nav><a href="/docs/" aria-current="page" data-next-current="page">Docs</a>'
@@ -76,20 +76,6 @@ PHOTO_MARKED = (
     '<a href="/photo/1/" aria-current="page" data-next-current="page">Photo</a></nav>'
 )
 CURRENT_OFF = {"ENABLED": False, "CURRENT": {"ENABLED": False}}
-ROOT_LAYOUT = (
-    '<!doctype html><html lang="en"><head>{% metadata %}</head>'
-    '<body class="{{ theme|default:"" }}">{% zone "main" %}<main>'
-    '{% zone "flash" %}<p>none</p>{% endzone %}{% template %}</main>{% endzone %}'
-    "{% collect_scripts %}</body></html>"
-)
-SECTION_LAYOUT = "<section><h2>Section {{ title }}</h2>{% template %}</section>"
-NAVIGATION = {
-    "X-Next-Request": "1",
-    "X-Next-Navigate": "1",
-    "X-Next-Origin": "/sec/a/",
-    "Sec-Fetch-Site": "same-origin",
-}
-_LAYOUTS = re.compile(r'"\$layouts":(\[.*?\]\])')
 UNPARSABLE = "http://[::1"
 
 
@@ -143,10 +129,10 @@ class TestReadShell:
 
     def test_another_seal_finds_nothing(self) -> None:
         assert read_shell(self._html(), "0badc0de", [IDENT]).layouts == ()
-        assert Shell("", SEAL, ()).root is None
+        assert ScannedShell("", SEAL, ()).root is None
 
     def test_payload_seals_only_the_layouts_below_the_cut(self) -> None:
-        shell = Shell(
+        shell = ScannedShell(
             "",
             SEAL,
             (
@@ -287,39 +273,37 @@ class TestRouting:
             assert held is None
             assert router_render.get() is None
 
-    def test_off_still_marks_the_current_links(self) -> None:
+    def test_off_still_marks_the_current_links(self, rf) -> None:
         with (
             override_next_settings(ROUTER={"ENABLED": False}),
-            routing(_FACTORY.get("/docs/"), Path("page.py"), Purpose.DOCUMENT),
+            routing(rf.get("/docs/"), Path("page.py"), Purpose.DOCUMENT),
         ):
             finish = html_finish.get()
             assert finish is not None
             assert finish(NAV) == DOCS_MARKED
         assert html_finish.get() is None
 
-    def test_the_page_block_binds_the_pass_and_unbinds_it(self) -> None:
-        with page_marking(_FACTORY.get("/docs/")) as held:
+    def test_the_page_block_binds_the_pass_and_unbinds_it(self, rf) -> None:
+        with page_marking(rf.get("/docs/")) as held:
             finish = html_finish.get()
             assert held is None
             assert finish is not None
             assert finish(NAV) == DOCS_MARKED
         assert html_finish.get() is None
 
-    def test_off_with_the_pass_off_keeps_the_html(self) -> None:
+    def test_off_with_the_pass_off_keeps_the_html(self, rf) -> None:
         with (
             override_next_settings(ROUTER=CURRENT_OFF),
-            routing(_FACTORY.get("/docs/"), Path("page.py"), Purpose.DOCUMENT),
+            routing(rf.get("/docs/"), Path("page.py"), Purpose.DOCUMENT),
         ):
             finish = html_finish.get()
             assert finish is not None
             assert finish(NAV) is NAV
 
-    def test_on_binds_the_render(self, tmp_path: Path) -> None:
+    def test_on_binds_the_render(self, tmp_path: Path, rf) -> None:
         with (
             override_next_settings(ROUTER={"ENABLED": True}),
-            routing(
-                _FACTORY.get("/"), tmp_path / "page.py", Purpose.NAVIGATION
-            ) as held,
+            routing(rf.get("/"), tmp_path / "page.py", Purpose.NAVIGATION) as held,
         ):
             assert held is not None
             assert router_render.get() is held.render
@@ -329,20 +313,20 @@ class TestRouting:
 
     @pytest.mark.parametrize("progress", [True, False])
     def test_the_render_asks_for_the_progress_bar_the_settings_name(
-        self, tmp_path: Path, *, progress: bool
+        self, tmp_path: Path, rf, *, progress: bool
     ) -> None:
         with (
             override_next_settings(ROUTER={"ENABLED": True, "PROGRESS": progress}),
-            routing(_FACTORY.get("/"), tmp_path / "page.py", Purpose.DOCUMENT) as held,
+            routing(rf.get("/"), tmp_path / "page.py", Purpose.DOCUMENT) as held,
         ):
             assert held is not None
             assert held.render.progress is progress
 
     def test_a_shell_is_read_when_the_injector_never_finished(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf
     ) -> None:
         with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(_FACTORY.get("/"), tmp_path / "page.py", Purpose.NAVIGATION)
+            held = Routing(rf.get("/"), tmp_path / "page.py", Purpose.NAVIGATION)
             html = f"<p>{held.render.mark}</p>"
             shell = held.settled(html)
             assert shell.layouts == ()
@@ -351,7 +335,7 @@ class TestRouting:
 
     @pytest.mark.parametrize("snapshot", [True, False])
     def test_the_render_carries_the_snapshot_option(
-        self, tmp_path: Path, *, snapshot: bool
+        self, tmp_path: Path, rf, *, snapshot: bool
     ) -> None:
         options = RouterOptions(snapshot=snapshot)
         with (
@@ -360,30 +344,57 @@ class TestRouting:
                 "next.router.navigation.page_router", return_value=options
             ) as read,
         ):
-            held = Routing(_FACTORY.get("/"), tmp_path / "page.py", Purpose.DOCUMENT)
+            held = Routing(rf.get("/"), tmp_path / "page.py", Purpose.DOCUMENT)
         read.assert_called_once_with(tmp_path / "page.py")
         assert held.render.snapshot is snapshot
 
-    def test_an_envelope_without_a_collector(self, tmp_path: Path) -> None:
-        request = _FACTORY.get("/x/")
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(request, tmp_path / "page.py", Purpose.NAVIGATION)
-            shell = held.settled("<p>no body</p>")
-            body = navigation_envelope(
-                request, held, shell, Cut(CutKind.BODY), shared=True, complete=True
-            ).envelope()
+    @pytest.fixture()
+    def body_envelope(self, tmp_path: Path) -> Callable[..., Envelope]:
+        """Return a builder of the envelope a body cut of `html` answers `request`."""
+
+        def build(
+            request: HttpRequest,
+            purpose: Purpose,
+            html: str,
+            *,
+            shared: bool,
+            complete: bool,
+        ) -> Envelope:
+            with override_next_settings(ROUTER={"ENABLED": True}):
+                held = Routing(request, tmp_path / "page.py", purpose)
+                shell = held.settled(html)
+                return navigation_envelope(
+                    request,
+                    held,
+                    shell,
+                    Cut(CutKind.BODY),
+                    shared=shared,
+                    complete=complete,
+                ).envelope()
+
+        return build
+
+    def test_an_envelope_without_a_collector(self, rf, body_envelope) -> None:
+        body = body_envelope(
+            rf.get("/x/"),
+            Purpose.NAVIGATION,
+            "<p>no body</p>",
+            shared=True,
+            complete=True,
+        )
         assert [patch.op for patch in body.ops] == ["visit"]
         assert "complete" not in body.as_dict()
 
-    def test_a_body_morph_with_the_full_fields(self, tmp_path: Path) -> None:
-        request = _FACTORY.get("/x/")
+    def test_a_body_morph_with_the_full_fields(self, rf, body_envelope) -> None:
+        request = rf.get("/x/")
         rotate_token(request)
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(request, tmp_path / "page.py", Purpose.NAVIGATION)
-            shell = held.settled("<body><p>x</p></body>")
-            envelope = navigation_envelope(
-                request, held, shell, Cut(CutKind.BODY), shared=True, complete=False
-            ).envelope()
+        envelope = body_envelope(
+            request,
+            Purpose.NAVIGATION,
+            "<body><p>x</p></body>",
+            shared=True,
+            complete=False,
+        )
         data = envelope.as_dict()
         assert data["ops"][0] == {
             "op": "morph",
@@ -395,74 +406,79 @@ class TestRouting:
         assert "csrf" in data
         assert json.loads(json.dumps(data))["layouts"] == []
 
-    def test_a_token_read_under_the_same_secret_stays_out(self, tmp_path: Path) -> None:
-        request = _FACTORY.get("/x/")
+    def test_a_token_read_under_the_same_secret_stays_out(
+        self, rf, body_envelope
+    ) -> None:
+        request = rf.get("/x/")
         request.COOKIES[settings.CSRF_COOKIE_NAME] = request.META["CSRF_COOKIE"] = (
             "s" * 32
         )
         get_token(request)
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(request, tmp_path / "page.py", Purpose.NAVIGATION)
-            shell = held.settled("<body><p>x</p></body>")
-            envelope = navigation_envelope(
-                request, held, shell, Cut(CutKind.BODY), shared=True, complete=False
-            ).envelope()
+        envelope = body_envelope(
+            request,
+            Purpose.NAVIGATION,
+            "<body><p>x</p></body>",
+            shared=True,
+            complete=False,
+        )
         assert "csrf" not in envelope.as_dict()
 
-    def test_a_complete_prefetch_says_so(self, tmp_path: Path) -> None:
-        request = _FACTORY.get("/x/")
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(request, tmp_path / "page.py", Purpose.PREFETCH)
-            shell = held.settled("<body><p>x</p></body>")
-            envelope = navigation_envelope(
-                request, held, shell, Cut(CutKind.BODY), shared=False, complete=True
-            ).envelope()
+    def test_a_complete_prefetch_says_so(self, rf, body_envelope) -> None:
+        envelope = body_envelope(
+            rf.get("/x/"),
+            Purpose.PREFETCH,
+            "<body><p>x</p></body>",
+            shared=False,
+            complete=True,
+        )
         data = envelope.as_dict()
         assert data["complete"] is True
         assert list(data)[-1] == "complete"
 
-    def test_an_unrotated_token_sends_no_csrf(self, tmp_path: Path) -> None:
-        request = _FACTORY.get("/x/")
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(request, tmp_path / "page.py", Purpose.NAVIGATION)
-            shell = held.settled("<body></body>")
-            envelope = navigation_envelope(
-                request, held, shell, Cut(CutKind.BODY), shared=False, complete=False
-            ).envelope()
+    def test_an_unrotated_token_sends_no_csrf(self, rf, body_envelope) -> None:
+        envelope = body_envelope(
+            rf.get("/x/"),
+            Purpose.NAVIGATION,
+            "<body></body>",
+            shared=False,
+            complete=False,
+        )
         assert envelope.csrf is None
 
     @pytest.mark.parametrize("origin", [UNPARSABLE, "https://example.com/x/"])
     def test_an_unusable_origin_pushes_the_entry(
-        self, tmp_path: Path, origin: str
+        self, rf, body_envelope, origin: str
     ) -> None:
-        request = _FACTORY.get(
+        request = rf.get(
             "/x/", headers={"X-Next-Request": "1", "X-Next-Origin": origin}
         )
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(request, tmp_path / "page.py", Purpose.NAVIGATION)
-            shell = held.settled("<body></body>")
-            envelope = navigation_envelope(
-                request, held, shell, Cut(CutKind.BODY), shared=False, complete=False
-            ).envelope()
+        envelope = body_envelope(
+            request, Purpose.NAVIGATION, "<body></body>", shared=False, complete=False
+        )
         url = [op.as_dict() for op in envelope.ops if op.op == "url"]
         assert url == [{"op": "url", "action": "push", "href": "/x/"}]
 
-    def test_the_seam_keeps_the_html(self) -> None:
-        assert kept("<nav></nav>", _FACTORY.get("/")) == "<nav></nav>"
+    def test_the_seam_keeps_the_html(self, rf) -> None:
+        assert marked_links("<nav></nav>", rf.get("/")) == "<nav></nav>"
 
-    def test_a_page_without_a_container_reads_no_path_and_no_host(self) -> None:
-        request = _FACTORY.get("/docs/")
+    def test_a_page_without_a_container_reads_no_path_and_no_host(self, rf) -> None:
+        request = rf.get("/docs/")
         html = '<p><a href="/docs/">Docs</a></p>'
         with (
             mock.patch.object(request, "get_full_path") as path,
             mock.patch.object(request, "get_host") as host,
         ):
-            assert kept(html, request) is html
+            assert marked_links(html, request) is html
         path.assert_not_called()
         host.assert_not_called()
 
-    def test_a_page_with_a_container_is_marked(self) -> None:
-        assert kept(NAV, _FACTORY.get("/docs/")) == DOCS_MARKED
+    def test_a_page_with_a_container_is_marked(self, rf) -> None:
+        assert marked_links(NAV, rf.get("/docs/")) == DOCS_MARKED
+
+    def test_the_document_is_folded_once(self, rf) -> None:
+        with mock.patch("next.router.current.fold", side_effect=str.lower) as folded:
+            assert marked_links(NAV, rf.get("/docs/")) == DOCS_MARKED
+        assert [call.args for call in folded.call_args_list].count((NAV,)) == 1
 
 
 class TestZoneMarking:
@@ -474,39 +490,39 @@ class TestZoneMarking:
         assert html_finish.get() is None
         return marks
 
-    def test_off_binds_no_pass(self) -> None:
+    def test_off_binds_no_pass(self, rf) -> None:
         with override_next_settings(ROUTER=CURRENT_OFF):
-            assert self._marks(_FACTORY.get("/docs/")) is None
+            assert self._marks(rf.get("/docs/")) is None
 
-    def test_a_zone_refresh_marks_its_own_page(self) -> None:
-        marks = self._marks(_FACTORY.get("/photo/1/", headers={"X-Next-Request": "1"}))
+    def test_a_zone_refresh_marks_its_own_page(self, rf) -> None:
+        marks = self._marks(rf.get("/photo/1/", headers={"X-Next-Request": "1"}))
         assert marks is not None
         assert marks(NAV) == PHOTO_MARKED
 
-    def test_a_layer_marks_the_page_beneath(self) -> None:
-        request = _FACTORY.get(
+    def test_a_layer_marks_the_page_beneath(self, rf) -> None:
+        request = rf.get(
             "/photo/1/", headers={"X-Next-Request": "1", "X-Next-Origin": "/docs/"}
         )
         marks = self._marks(request)
         assert marks is not None
         assert marks(NAV) == DOCS_MARKED
 
-    def test_an_unparsable_origin_marks_its_own_page(self) -> None:
-        request = _FACTORY.get(
+    def test_an_unparsable_origin_marks_its_own_page(self, rf) -> None:
+        request = rf.get(
             "/photo/1/", headers={"X-Next-Request": "1", "X-Next-Origin": UNPARSABLE}
         )
         marks = self._marks(request)
         assert marks is not None
         assert marks(NAV) == PHOTO_MARKED
 
-    def test_html_without_a_container_is_the_same_object(self) -> None:
-        marks = self._marks(_FACTORY.get("/docs/"))
+    def test_html_without_a_container_is_the_same_object(self, rf) -> None:
+        marks = self._marks(rf.get("/docs/"))
         assert marks is not None
         html = '<p><a href="/docs/">Docs</a></p>'
         assert marks(html) is html
 
-    def test_html_without_a_container_reads_no_path_and_no_host(self) -> None:
-        request = _FACTORY.get("/docs/")
+    def test_html_without_a_container_reads_no_path_and_no_host(self, rf) -> None:
+        request = rf.get("/docs/")
         marks = self._marks(request)
         assert marks is not None
         with (
@@ -517,8 +533,8 @@ class TestZoneMarking:
         path.assert_not_called()
         host.assert_not_called()
 
-    def test_the_path_and_the_host_are_read_once_for_every_zone(self) -> None:
-        request = _FACTORY.get("/docs/")
+    def test_the_path_and_the_host_are_read_once_for_every_zone(self, rf) -> None:
+        request = rf.get("/docs/")
         marks = self._marks(request)
         assert marks is not None
         with (
@@ -545,14 +561,14 @@ class TestActionMarking:
         assert html_finish.get() is None
         return marks
 
-    def test_the_posted_origin_names_the_page(self) -> None:
-        request = _FACTORY.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
+    def test_the_posted_origin_names_the_page(self, rf) -> None:
+        request = rf.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
         marks = self._marks(request)
         assert marks is not None
         assert marks(NAV) == DOCS_MARKED
 
-    def test_a_layer_marks_the_page_beneath(self) -> None:
-        request = _FACTORY.post(
+    def test_a_layer_marks_the_page_beneath(self, rf) -> None:
+        request = rf.post(
             "/_next/form/x/",
             {"_next_form_origin": "/docs/"},
             headers={"X-Next-Request": "1", "X-Next-Origin": "/photo/1/"},
@@ -561,17 +577,17 @@ class TestActionMarking:
         assert marks is not None
         assert marks(NAV) == PHOTO_MARKED
 
-    def test_no_origin_binds_no_pass(self) -> None:
-        assert self._marks(_FACTORY.post("/_next/form/x/")) is None
+    def test_no_origin_binds_no_pass(self, rf) -> None:
+        assert self._marks(rf.post("/_next/form/x/")) is None
 
-    def test_off_binds_no_pass(self) -> None:
-        request = _FACTORY.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
+    def test_off_binds_no_pass(self, rf) -> None:
+        request = rf.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
         with override_next_settings(ROUTER=CURRENT_OFF):
             assert self._marks(request) is None
 
     @pytest.mark.django_db()
-    def test_the_dispatch_marks_inside_the_action(self) -> None:
-        request = _FACTORY.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
+    def test_the_dispatch_marks_inside_the_action(self, rf) -> None:
+        request = rf.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
         seen: list[str] = []
 
         def transported(*_args: object) -> HttpResponse:
@@ -588,55 +604,51 @@ class TestActionMarking:
         assert html_finish.get() is None
 
 
+@pytest.mark.usefixtures("router_on")
 class TestPassed:
     """A response a navigation passes on is private, and a hidden redirect a visit."""
 
-    @pytest.fixture(autouse=True)
-    def router_on(self) -> Iterator[None]:
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            yield
-
-    def test_a_plain_redirect_passes_through(self) -> None:
-        response = passed(HttpResponseRedirect("/next/"), _FACTORY.get("/x/"))
+    def test_a_plain_redirect_passes_through(self, rf) -> None:
+        response = passed(HttpResponseRedirect("/next/"), rf.get("/x/"))
         assert response.status_code == 302
         assert response["Cache-Control"] == "private, no-store"
         assert not response.has_header("X-Next-Router")
 
-    def test_a_cleared_redirect_rides_a_visit(self) -> None:
-        request = _FACTORY.get("/x/")
+    def test_a_cleared_redirect_rides_a_visit(self, rf) -> None:
+        request = rf.get("/x/")
         router_clear(request, "logout")
         redirect = HttpResponseRedirect("next/")
         redirect.set_cookie("kept", "1")
         response = passed(redirect, request)
         assert response.status_code == 200
-        assert _ops(response) == [{"op": "visit", "href": "/x/next/"}]
+        assert ops(response) == [{"op": "visit", "href": "/x/next/"}]
         assert response["X-Next-Router"] == CLEAR
         assert response.cookies["kept"].value == "1"
 
-    def test_a_rotated_token_rides_a_visit(self) -> None:
-        request = _FACTORY.get("/x/")
+    def test_a_rotated_token_rides_a_visit(self, rf) -> None:
+        request = rf.get("/x/")
         rotate_token(request)
         response = passed(HttpResponseRedirect("/next/"), request)
-        assert _ops(response) == [{"op": "visit", "href": "/next/"}]
+        assert ops(response) == [{"op": "visit", "href": "/next/"}]
         assert not response.has_header("X-Next-Router")
 
-    def test_an_offsite_target_visits_outside(self) -> None:
-        request = _FACTORY.get("/x/")
+    def test_an_offsite_target_visits_outside(self, rf) -> None:
+        request = rf.get("/x/")
         router_clear(request, "login")
         response = passed(HttpResponseRedirect("https://id.example.com/a"), request)
-        assert _ops(response) == [
+        assert ops(response) == [
             {"op": "visit", "href": "https://id.example.com/a", "external": True}
         ]
 
-    def test_a_cleared_refusal_is_stamped(self) -> None:
-        request = _FACTORY.get("/x/")
+    def test_a_cleared_refusal_is_stamped(self, rf) -> None:
+        request = rf.get("/x/")
         router_clear(request)
         response = passed(HttpResponse(status=403), request)
         assert response.status_code == 403
         assert response["X-Next-Router"] == CLEAR
 
-    def test_a_redirect_without_a_location_passes_through(self) -> None:
-        request = _FACTORY.get("/x/")
+    def test_a_redirect_without_a_location_passes_through(self, rf) -> None:
+        request = rf.get("/x/")
         router_clear(request)
         response = passed(HttpResponse(status=304), request)
         assert response.status_code == 304
@@ -645,7 +657,7 @@ class TestPassed:
 class TestCleared:
     """A response that clears the router keeps no layout of the old session."""
 
-    SHELL = Shell("", SEAL, (ScannedLayout(IDENT, "d", (0, 0), (0, 0)),))
+    SHELL = ScannedShell("", SEAL, (ScannedLayout(IDENT, "d", (0, 0), (0, 0)),))
 
     def test_a_clear_gives_up_the_kept_layouts(self) -> None:
         request = HttpRequest()
@@ -667,14 +679,14 @@ class TestCleared:
 class TestHostlike:
     """A path opening with `//` loads hard as its single-slash path."""
 
-    def test_the_visit_runs_the_slashes_into_one(self) -> None:
-        request = _FACTORY.get("/%2F%2Fevil.com/x")
+    def test_the_visit_runs_the_slashes_into_one(self, rf) -> None:
+        request = rf.get("/%2F%2Fevil.com/x")
         assert hostlike(request)
         ops = visit_envelope(request).envelope().as_dict()["ops"]
         assert ops == [{"op": "visit", "href": "/evil.com/x"}]
 
-    def test_a_plain_path_is_no_host(self) -> None:
-        assert not hostlike(_FACTORY.get("/sec/a/"))
+    def test_a_plain_path_is_no_host(self, rf) -> None:
+        assert not hostlike(rf.get("/sec/a/"))
 
 
 class TestDirectives:
@@ -689,8 +701,8 @@ class TestDirectives:
         assert directives(request) == (CLEAR,)
         assert directives(request, snapshot=False) == (CLEAR, NO_SNAPSHOT)
 
-    def test_a_cycled_session_clears(self) -> None:
-        request = _FACTORY.get("/")
+    def test_a_cycled_session_clears(self, rf) -> None:
+        request = rf.get("/")
         request.COOKIES["sessionid"] = "old"
         request.session = mock.Mock(session_key="new")
         with capture_signals(router_cleared) as recorder:
@@ -705,15 +717,15 @@ class TestDirectives:
             pytest.param(SignedStore(), id="signed-cookies"),
         ],
     )
-    def test_an_unchanged_session_does_not(self, session: object) -> None:
-        request = _FACTORY.get("/")
+    def test_an_unchanged_session_does_not(self, session: object, rf) -> None:
+        request = rf.get("/")
         request.COOKIES["sessionid"] = "same"
         if session is not None:
             request.session = session
         assert directives(request) == ()
 
-    def test_a_fresh_visitor_does_not(self) -> None:
-        request = _FACTORY.get("/")
+    def test_a_fresh_visitor_does_not(self, rf) -> None:
+        request = rf.get("/")
         request.session = mock.Mock(session_key="new")
         assert directives(request) == ()
 
@@ -728,13 +740,13 @@ class TestDirectives:
             stamp(response, request)
         assert response["X-Next-Router"] == CLEAR
 
-    def test_no_stale_version_without_one(self) -> None:
-        request = _FACTORY.get("/", headers={"X-Next-Request": "1"})
+    def test_no_stale_version_without_one(self, rf) -> None:
+        request = rf.get("/", headers={"X-Next-Request": "1"})
         assert stale(request) is None
 
     @pytest.mark.django_db()
-    def test_an_action_that_logs_in_clears(self) -> None:
-        request = _FACTORY.post("/_next/form/x/")
+    def test_an_action_that_logs_in_clears(self, rf) -> None:
+        request = rf.post("/_next/form/x/")
         user = mock.Mock(last_login=None)
 
         def transported(*_args: object) -> HttpResponse:
@@ -751,115 +763,71 @@ class TestDirectives:
         assert response["X-Next-Router"] == CLEAR
 
 
-def _page(directory: Path, source: str = "") -> Path:
-    directory.mkdir(parents=True)
-    page_file = directory / "page.py"
-    page_file.write_text(
-        "from next.pages import context\n"
-        "@context('title')\n"
-        "def title():\n"
-        "    return 'same'\n" + source
-    )
-    (directory / "template.djx").write_text(f"<h1>{directory.name}</h1>")
-    return page_file
-
-
-@pytest.fixture()
-def pages(tmp_path: Path) -> dict[str, Path]:
-    root = tmp_path / "pages"
-    root.mkdir()
-    (root / "layout.djx").write_text(ROOT_LAYOUT)
-    section = root / "sec"
-    section.mkdir()
-    (section / "layout.djx").write_text(SECTION_LAYOUT)
-    themed = "@context('theme')\ndef theme():\n    return 'dark'\n"
-    return {
-        "a": _page(section / "a"),
-        "b": _page(section / "b"),
-        "themed": _page(section / "themed", themed),
-    }
-
-
-def _request(path: str, headers: dict[str, str]) -> HttpRequest:
-    return _FACTORY.get(path, headers=headers)
-
-
-def _declared(page_file: Path) -> str:
-    response = unified_view(page, page_file)(_request("/sec/a/", {}))
-    found = _LAYOUTS.search(response.content.decode())
-    assert found is not None
-    return ",".join(
-        f"{ident}.{digest}" for ident, digest, _seal in json.loads(found[1])
-    )
-
-
-def _ops(response: HttpResponseBase) -> list[dict[str, object]]:
-    return json.loads(response.content)["ops"]
-
-
+@pytest.mark.usefixtures("router_on")
 class TestNavigationCut:
     """The cut a routed page view answers a navigation with."""
 
-    @pytest.fixture(autouse=True)
-    def router_on(self) -> Iterator[None]:
-        with override_next_settings(ROUTER={"ENABLED": True}):
-            yield
-
-    def _navigate(self, page_file: Path, path: str, layouts: str) -> HttpResponseBase:
-        request = _request(path, {**NAVIGATION, "X-Next-Layouts": layouts})
-        return unified_view(page, page_file)(request)
-
     def test_a_zone_around_the_slot_is_kept_as_chrome(
-        self, pages: dict[str, Path]
+        self, layout_pages: dict[str, Path]
     ) -> None:
-        response = self._navigate(pages["b"], "/sec/b/", _declared(pages["a"]))
-        targets = [op.get("target") for op in _ops(response) if op["op"] == "morph"]
+        response = navigate(
+            layout_pages["b"], "/sec/b/", declared_by(layout_pages["a"])
+        )
+        targets = [op.get("target") for op in ops(response) if op["op"] == "morph"]
         assert len(targets) == 2
         assert "slot" in targets[0]
         assert targets[1] == {"zone": "flash"}
-        assert _ops(response)[0]["html"] == "<h1>b</h1>"
+        assert ops(response)[0]["html"] == "<h1>B</h1>"
 
-    def test_a_differing_body_tag_loads_hard(self, pages: dict[str, Path]) -> None:
-        response = self._navigate(
-            pages["themed"], "/sec/themed/", _declared(pages["a"])
+    def test_a_differing_body_tag_loads_hard(
+        self, layout_pages: dict[str, Path]
+    ) -> None:
+        response = navigate(
+            layout_pages["themed"], "/sec/themed/", declared_by(layout_pages["a"])
         )
-        assert [op["op"] for op in _ops(response)] == ["visit"]
+        assert [op["op"] for op in ops(response)] == ["visit"]
 
-    def test_a_login_keeps_no_layout(self, pages: dict[str, Path]) -> None:
-        request = _request(
-            "/sec/b/", {**NAVIGATION, "X-Next-Layouts": _declared(pages["a"])}
+    def test_a_login_keeps_no_layout(self, layout_pages: dict[str, Path], rf) -> None:
+        request = rf.get(
+            "/sec/b/",
+            headers={**NAVIGATION, "X-Next-Layouts": declared_by(layout_pages["a"])},
         )
         user = mock.Mock(last_login=None)
         user_logged_in.send(sender=type(user), request=request, user=user)
         with override_settings(DEBUG=True):
-            response = unified_view(page, pages["b"])(request)
-        assert _ops(response)[0]["target"] == {"body": True}
+            response = unified_view(page, layout_pages["b"])(request)
+        assert ops(response)[0]["target"] == {"body": True}
         assert response["X-Next-Router"] == CLEAR
         assert response["X-Next-Navigate"].endswith(" clear")
 
     def test_a_host_like_path_loads_its_single_slash_path(
-        self, pages: dict[str, Path]
+        self, layout_pages: dict[str, Path]
     ) -> None:
-        response = self._navigate(
-            pages["a"], "/%2F%2Fevil.com/x", _declared(pages["a"])
+        response = navigate(
+            layout_pages["a"], "/%2F%2Fevil.com/x", declared_by(layout_pages["a"])
         )
         assert response.status_code == 200
-        assert _ops(response) == [{"op": "visit", "href": "/evil.com/x"}]
+        assert ops(response) == [{"op": "visit", "href": "/evil.com/x"}]
 
     @pytest.mark.parametrize("zone", [True, False])
     def test_an_unparsable_origin_is_no_origin(
-        self, pages: dict[str, Path], *, zone: bool
+        self, layout_pages: dict[str, Path], *, zone: bool
     ) -> None:
         extra = {"X-Next-Zone": "flash"} if zone else {}
         headers = {**NAVIGATION, "X-Next-Origin": UNPARSABLE, **extra}
         if zone:
             del headers["X-Next-Navigate"]
-        response = unified_view(page, pages["b"])(_request("/sec/b/", headers))
+        response = get_page(layout_pages["b"], "/sec/b/", **headers)
         assert response.status_code == 200
 
-    def test_a_zone_response_varies_on_the_origin(self, pages: dict[str, Path]) -> None:
-        request = _request("/sec/a/", {"X-Next-Request": "1", "X-Next-Zone": "flash"})
-        response = unified_view(page, pages["a"])(request)
+    def test_a_zone_response_varies_on_the_origin(
+        self, layout_pages: dict[str, Path]
+    ) -> None:
+        response = get_page(
+            layout_pages["a"],
+            "/sec/a/",
+            **{"X-Next-Request": "1", "X-Next-Zone": "flash"},
+        )
         varied = {name.strip() for name in response["Vary"].split(",")}
         assert "X-Next-Origin" in varied
 
@@ -870,13 +838,15 @@ MODAL = '{% zone "modal" %}<p>modal</p>{% endzone %}'
 class TestIntercepted:
     """Under `INTERCEPT = "links"` a link to an intercepted page opens its layer."""
 
-    def _intercept(self, pages: dict[str, Path], template: str) -> Iterator[None]:
-        modal = pages["a"].parent / "(..)b"
+    def _intercept(
+        self, layout_pages: dict[str, Path], template: str
+    ) -> Iterator[None]:
+        modal = layout_pages["a"].parent / "(..)b"
         modal.mkdir()
         (modal / "page.py").write_text("x = 1\n")
         (modal / "template.djx").write_text(template)
-        root = pages["a"].parents[2]
-        rule = Intercept(pages["b"], modal / "page.py", "(..)")
+        root = layout_pages["a"].parents[2]
+        rule = Intercept(layout_pages["b"], modal / "page.py", "(..)")
         with override_next_settings(ROUTER={"ENABLED": True, "INTERCEPT": "links"}):
             intercepts.publish(root, [rule])
             try:
@@ -885,50 +855,57 @@ class TestIntercepted:
                 intercepts.publish(root, [])
 
     @pytest.fixture()
-    def layered(self, pages: dict[str, Path]) -> Iterator[None]:
-        yield from self._intercept(pages, MODAL)
+    def layered(self, layout_pages: dict[str, Path]) -> Iterator[None]:
+        yield from self._intercept(layout_pages, MODAL)
 
     @pytest.fixture()
-    def zoneless(self, pages: dict[str, Path]) -> Iterator[None]:
-        yield from self._intercept(pages, "<p>modal</p>")
+    def zoneless(self, layout_pages: dict[str, Path]) -> Iterator[None]:
+        yield from self._intercept(layout_pages, "<p>modal</p>")
 
     def _navigate(
-        self, pages: dict[str, Path], headers: dict[str, str]
+        self, layout_pages: dict[str, Path], headers: dict[str, str]
     ) -> HttpResponseBase:
-        return unified_view(page, pages["b"])(_request("/sec/b/", headers))
+        return get_page(layout_pages["b"], "/sec/b/", **headers)
 
     @pytest.mark.usefixtures("layered")
-    def test_a_link_opens_the_layer(self, pages: dict[str, Path]) -> None:
-        response = self._navigate(pages, NAVIGATION)
-        assert _ops(response) == [
+    def test_a_link_opens_the_layer(self, layout_pages: dict[str, Path]) -> None:
+        response = self._navigate(layout_pages, NAVIGATION)
+        assert ops(response) == [
             {"op": "layer.open", "zone": "modal", "href": "/sec/b/"}
         ]
         assert "layouts" not in json.loads(response.content)
         assert response["Cache-Control"] == "private, no-store"
 
     @pytest.mark.usefixtures("layered")
-    def test_a_prefetch_is_refused(self, pages: dict[str, Path]) -> None:
-        response = self._navigate(pages, {**NAVIGATION, "X-Next-Prefetch": "1"})
+    def test_a_prefetch_is_refused(self, layout_pages: dict[str, Path]) -> None:
+        response = self._navigate(layout_pages, {**NAVIGATION, "X-Next-Prefetch": "1"})
         assert response.status_code == 204
 
     @pytest.mark.usefixtures("layered")
     @pytest.mark.parametrize("origin", ["/sec/b/", ""])
     def test_the_page_shown_or_no_origin_renders(
-        self, pages: dict[str, Path], origin: str
+        self, layout_pages: dict[str, Path], origin: str
     ) -> None:
-        response = self._navigate(pages, {**NAVIGATION, "X-Next-Origin": origin})
-        assert "layer.open" not in [op["op"] for op in _ops(response)]
+        response = self._navigate(layout_pages, {**NAVIGATION, "X-Next-Origin": origin})
+        assert "layer.open" not in [op["op"] for op in ops(response)]
 
     @pytest.mark.usefixtures("zoneless")
-    def test_an_intercept_serving_no_zone_renders(self, pages: dict[str, Path]) -> None:
-        response = self._navigate(pages, NAVIGATION)
-        assert "layer.open" not in [op["op"] for op in _ops(response)]
+    def test_an_intercept_serving_no_zone_renders(
+        self, layout_pages: dict[str, Path]
+    ) -> None:
+        response = self._navigate(layout_pages, NAVIGATION)
+        assert "layer.open" not in [op["op"] for op in ops(response)]
 
     @pytest.mark.usefixtures("layered")
-    def test_an_unparsable_origin_renders(self, pages: dict[str, Path]) -> None:
-        response = self._navigate(pages, {**NAVIGATION, "X-Next-Origin": UNPARSABLE})
-        assert "layer.open" not in [op["op"] for op in _ops(response)]
+    def test_an_unparsable_origin_renders(self, layout_pages: dict[str, Path]) -> None:
+        response = self._navigate(
+            layout_pages, {**NAVIGATION, "X-Next-Origin": UNPARSABLE}
+        )
+        assert "layer.open" not in [op["op"] for op in ops(response)]
 
-    def test_opt_in_renders(self, pages: dict[str, Path]) -> None:
+    def test_opt_in_renders(self, layout_pages: dict[str, Path], rf) -> None:
         with override_next_settings(ROUTER={"ENABLED": True}):
-            assert intercepted(_request("/sec/b/", NAVIGATION), pages["b"]) is None
+            assert (
+                intercepted(rf.get("/sec/b/", headers=NAVIGATION), layout_pages["b"])
+                is None
+            )

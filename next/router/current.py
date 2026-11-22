@@ -13,15 +13,19 @@ from django.core.exceptions import DisallowedHost
 from django.http import HttpRequest
 
 from next.backends import resolve_backend_class
-from next.caches import BoundedCache
+from next.caches import BoundedCache, IdentityMemo
 from next.conf import next_framework_settings
-from next.conf.router import CONTAINER_SELECTOR, is_simple_selector
+from next.conf.merge import FROZEN_DEFAULTS
+from next.conf.router import CONTAINER_SELECTOR, CURRENT, SCOPE, router_settings
 from next.paths import ANCESTOR_MARK, PAGE_MARK, home_paths, normal_path, path_mark
 
 from .digest import fold
 
 
-CONTAINERS: Final[tuple[str, ...]] = ("nav", "[role=navigation]", "[data-next-nav]")
+_DEFAULTS: Final = FROZEN_DEFAULTS[SCOPE][CURRENT]
+_SHIPPED: Final[str] = _DEFAULTS["BACKEND"]
+
+CONTAINERS: Final[tuple[str, ...]] = tuple(_DEFAULTS["CONTAINERS"])
 """The selectors of the navigation containers whose links are marked by default."""
 
 _SPACE: Final = r"\t\n\f\r "
@@ -76,7 +80,6 @@ _VOID: Final = frozenset(
 _TAG_ENDS: Final = "\t\n\f\r />"
 _SPACE_CHARS: Final = "\t\n\f\r "
 _URL_TRIM: Final = "".join(chr(code) for code in range(33))
-_UNREAD: Final = object()
 _INSIDE_MEMO: Final = 64
 _LINK_MEMO: Final = 2048
 _LINK_LIMIT: Final = 512
@@ -652,6 +655,13 @@ class _Scan:
         return "".join(parts)
 
 
+def _opened(html: str, containers: tuple[str, ...]) -> tuple[_Plan, str] | None:
+    """Return the plan of `containers` and the folded `html` when it opens one."""
+    plan = _plan(containers)
+    low = fold(html)
+    return (plan, low) if plan.opened(low) else None
+
+
 def mark_current(
     html: str,
     path: str,
@@ -665,10 +675,10 @@ def mark_current(
 
     A document without a container opener comes back as the very object passed in.
     """
-    plan = _plan(containers)
-    low = fold(html)
-    if not plan.opened(low):
+    opened = _opened(html, containers)
+    if opened is None:
         return html
+    plan, low = opened
     return _Scan(html, low, plan, _Current(path, query, origin, homes)).run()
 
 
@@ -680,88 +690,52 @@ class CurrentLinks:
         self.containers = containers
 
     def holds(self, html: str) -> bool:
-        """Whether `html` opens a container, asked before a path or an origin is read.
-
-        A subclass that marks links outside the containers answers for its own pass.
-        """
+        """Whether `html` opens a container, which a template plan asks once."""
         return _plan(self.containers).opened(fold(html))
 
-    def mark(self, html: str, path: str, origin: str = "") -> str:
-        """Return `html` marked against `path`, a request path with its query string."""
-        location, _, query = path.partition("#")[0].partition("?")
-        return mark_current(
-            html,
-            location,
-            query,
-            containers=self.containers,
-            origin=origin,
-            homes=home_paths,
-        )
+    def mark(
+        self,
+        html: str,
+        path: Callable[[], str],
+        origin: Callable[[], str] | None = None,
+    ) -> str:
+        """Return `html` marked against the request path with its query `path` reads.
+
+        The path and the origin are read only once `html` opens a container.
+        """
+        opened = _opened(html, self.containers)
+        if opened is None:
+            return html
+        plan, low = opened
+        location, _, query = path().partition("#")[0].partition("?")
+        host = "" if origin is None else origin()
+        current = _Current(location, query, host, home_paths)
+        return _Scan(html, low, plan, current).run()
 
 
-@dataclass(frozen=True, slots=True)
-class CurrentSettings:
-    """The `ROUTER["CURRENT"]` scope read once, each unusable key at its default."""
-
-    enabled: bool
-    backend: str | None
-    containers: tuple[str, ...]
-
-
-def read_current(router: object) -> CurrentSettings:
-    """Return the active-link settings a merged `ROUTER` value asks for."""
-    scope = router.get("CURRENT", True) if isinstance(router, Mapping) else True
-    if not isinstance(scope, Mapping):
-        return CurrentSettings(scope is not False, None, CONTAINERS)
-    enabled = scope.get("ENABLED", True) is not False
-    backend = scope.get("BACKEND")
-    containers = scope.get("CONTAINERS", CONTAINERS)
-    if not isinstance(containers, list | tuple) or not all(
-        map(is_simple_selector, containers)
-    ):
-        containers = CONTAINERS
-    return CurrentSettings(
-        enabled=enabled,
-        backend=backend if isinstance(backend, str) and backend else None,
-        containers=tuple(containers),
+def _links() -> CurrentLinks | None:
+    """Build the backend `ROUTER["CURRENT"]` names, `None` while the pass is off."""
+    current = router_settings()
+    if not current.current_enabled:
+        return None
+    dotted = current.current_backend
+    klass = (
+        CurrentLinks
+        if dotted == _SHIPPED
+        else resolve_backend_class({"BACKEND": dotted}, base=CurrentLinks)
     )
+    return klass(current.current_containers)
 
 
-class _Memo:
-    """Hold the backend built from the merged `ROUTER` mapping held now."""
-
-    __slots__ = ("held", "links")
-
-    def __init__(self) -> None:
-        """Start before the first read."""
-        self.held: object = _UNREAD
-        self.links: CurrentLinks | None = None
-
-    def get(self) -> CurrentLinks | None:
-        """Return the backend of the current mapping, built again when it moved."""
-        held = getattr(next_framework_settings, "ROUTER", None)
-        if held is not self.held:
-            current = read_current(held)
-            links: CurrentLinks | None = None
-            if current.enabled:
-                klass = (
-                    CurrentLinks
-                    if current.backend is None
-                    else resolve_backend_class(
-                        {"BACKEND": current.backend}, base=CurrentLinks
-                    )
-                )
-                links = klass(current.containers)
-            self.held, self.links = held, links
-        return self.links
-
-
-_memo = _Memo()
+_LINKS: Final[IdentityMemo[CurrentLinks | None]] = IdentityMemo()
 
 
 def current_links() -> CurrentLinks | None:
-    """Return the active-link backend the settings name, `None` while it is off."""
-    return _memo.get()
+    """Return the active-link backend the settings name, `None` while it is off.
+
+    The backend is built again once the settings replace the merged `ROUTER` mapping.
+    """
+    return _LINKS.get(next_framework_settings.ROUTER, _links)
 
 
 def origin_of(request: HttpRequest) -> str:
@@ -773,12 +747,4 @@ def origin_of(request: HttpRequest) -> str:
     return f"{request.scheme}://{host}"
 
 
-__all__ = [
-    "CONTAINERS",
-    "CurrentLinks",
-    "CurrentSettings",
-    "current_links",
-    "mark_current",
-    "origin_of",
-    "read_current",
-]
+__all__ = ["CONTAINERS", "CurrentLinks", "current_links", "mark_current", "origin_of"]

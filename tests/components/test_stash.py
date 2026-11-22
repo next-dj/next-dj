@@ -9,7 +9,7 @@ from next.components.stash import (
 )
 from next.defer import (
     Addressing,
-    BoundaryError,
+    BoundaryFailure,
     BoundaryOptions,
     DeferMode,
     DeferredCall,
@@ -25,15 +25,15 @@ class _Renderer:
         self.html = loading
         self.calls = 0
 
-    def loading(self, _context: Context) -> tuple[str, BoundaryError | None]:
+    def loading(self, _context: Context) -> tuple[str, BoundaryFailure | None]:
         self.calls += 1
         return self.html, None
 
-    def body(self, _context: Context) -> tuple[str, BoundaryError | None]:
+    def body(self, _context: Context) -> tuple[str, BoundaryFailure | None]:
         return "B", None
 
-    def error(self, _context: Context, kind: ErrorKind) -> tuple[str, BoundaryError]:
-        return "E", BoundaryError(kind, "d", None, retry=False)
+    def error(self, _context: Context, kind: ErrorKind) -> tuple[str, BoundaryFailure]:
+        return "E", BoundaryFailure(kind, "d", None, retry=False)
 
 
 def _call(key: str, renderer: _Renderer) -> DeferredCall:

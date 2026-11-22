@@ -12,7 +12,7 @@ from weakref import WeakSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 # Far above a project's page count, so it only limits memory against endless keys.
@@ -164,10 +164,37 @@ class LruCache[K, V](BoundedCache[K, V]):
         return value
 
 
+class IdentityMemo[V]:
+    """Hold one value, kept while the key it was built for is the same object.
+
+    The key and the value share one tuple, so a racing read never pairs them wrong.
+    """
+
+    __slots__ = ("_held",)
+
+    def __init__(self) -> None:
+        """Start empty."""
+        self._held: tuple[object, V] | None = None
+
+    def get(self, key: object, build: Callable[[], V]) -> V:
+        """Return the value held for `key`, building and keeping it on a miss."""
+        held = self._held
+        if held is not None and held[0] is key:
+            return held[1]
+        value = build()
+        self._held = (key, value)
+        return value
+
+    def forget(self) -> None:
+        """Drop the held value, so the next read builds again."""
+        self._held = None
+
+
 __all__ = [
     "DEFAULT_CACHE_SIZE",
     "PAGE_HEADROOM",
     "BoundedCache",
+    "IdentityMemo",
     "LruCache",
     "PageCache",
 ]

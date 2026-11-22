@@ -38,7 +38,7 @@ from next.forms.registration import registration_diagnostics
 from next.introspect import defining_file
 from next.pages.loaders import _load_python_module
 from next.transactions import AtomicOverride
-from next.views.checks import check_atomic_declarations
+from next.transactions.checks import check_atomic_declarations
 from tests.support import importable_dir
 
 
@@ -908,6 +908,7 @@ class TestMetaAtomic:
         [
             (True, AtomicOverride(atomic=True)),
             (False, AtomicOverride(atomic=False)),
+            ("writes", AtomicOverride(atomic="writes")),
             (
                 AtomicOverride(atomic=True, aliases=["default"]),
                 AtomicOverride(atomic=True, aliases=("default",)),
@@ -961,7 +962,7 @@ class TestMetaAtomic:
     @pytest.mark.parametrize(
         ("value", "fragment"),
         [
-            ("no", "atomic must be True, False, None or an AtomicOverride"),
+            ("no", "atomic must be True, False, 'writes', None or an AtomicOverride"),
             (AtomicOverride(atomic=True, aliases="default"), "aliases must be"),
         ],
     )

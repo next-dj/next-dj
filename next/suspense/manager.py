@@ -1,12 +1,13 @@
 """The façade over the backends of deferred execution, each built on first use."""
 
-import threading
-from typing import TYPE_CHECKING, cast
+from functools import partial
+from typing import TYPE_CHECKING, Final, override
 
-from next.backends import instantiate_backend, resolve_backend_class
-from next.conf.defer import SCOPE, defer_option
-from next.errors import BackendImportError, SettingImportError
-from next.suspense.admission import Admission
+from next.backends import BackendRoot, SingleBackendManager, resolve_backend_class
+from next.conf.defer import SCOPE, defer_option, defer_read
+from next.conf.shapes import text
+from next.errors import SettingImportError
+from next.suspense.backends import Admission
 from next.suspense.executors import BoundaryExecutor
 from next.suspense.policy import StreamPolicy
 from next.suspense.tokens import BoundaryTokenBackend
@@ -15,125 +16,86 @@ from next.utils import after_fork
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from next.suspense.markers import Capacity
 
 
-_ADMISSION = "ADMISSION"
+_ADMISSION: Final = "ADMISSION"
 
 
-def _build_executor() -> BoundaryExecutor:
-    """Build the executor `DEFER["EXECUTOR"]` names, with its merged options."""
-    config = cast("Mapping[str, object]", defer_option("EXECUTOR"))
-    try:
-        klass = resolve_backend_class(config, base=BoundaryExecutor)
-    except ImportError as exc:
-        raise BackendImportError(SCOPE, exc) from exc
-    return instantiate_backend(klass, config)
+class _AdmissionManager(SingleBackendManager[Admission]):
+    """Hold the admission `DEFER["ADMISSION"]` names by a bare path, with no options."""
+
+    @override
+    def build(self) -> Admission:
+        """Return the admission the path names, its default for a misfit."""
+        dotted = defer_read(text, _ADMISSION)
+        try:
+            klass = resolve_backend_class({"BACKEND": dotted}, base=Admission)
+        except ImportError as exc:
+            raise SettingImportError(_ADMISSION, dotted, exc, scope=SCOPE) from exc
+        return klass()
 
 
-def _build_policy() -> StreamPolicy:
-    """Build the delivery policy `DEFER["POLICY"]` names, with its merged options."""
-    config = cast("Mapping[str, object]", defer_option("POLICY"))
-    try:
-        klass = resolve_backend_class(config, base=StreamPolicy)
-    except ImportError as exc:
-        raise BackendImportError(SCOPE, exc) from exc
-    return instantiate_backend(klass, config)
-
-
-def _build_tokens() -> BoundaryTokenBackend:
-    """Build the token backend `DEFER["TOKENS"]` names, with its merged options."""
-    config = cast("Mapping[str, object]", defer_option("TOKENS"))
-    try:
-        klass = resolve_backend_class(config, base=BoundaryTokenBackend)
-    except ImportError as exc:
-        raise BackendImportError(SCOPE, exc) from exc
-    return instantiate_backend(klass, config)
-
-
-def _build_admission() -> Admission:
-    """Build the admission `DEFER["ADMISSION"]` names, its default for a misfit."""
-    dotted = cast("str", defer_option(_ADMISSION))
-    try:
-        klass = resolve_backend_class({"BACKEND": dotted}, base=Admission)
-    except ImportError as exc:
-        raise SettingImportError(_ADMISSION, dotted, exc, scope=SCOPE) from exc
-    return klass()
+def _entry[T](key: str, base: BackendRoot[T]) -> SingleBackendManager[T]:
+    """Return the holder of the backend the `DEFER` entry `key` names."""
+    return SingleBackendManager(SCOPE, base=base, config=partial(defer_option, key))
 
 
 class SuspenseManager:
     """Hold the pool executor, the admission, the policy, the transport and the tokens.
 
-    The executor and the admission build together on the first job, the rest alone.
+    Each holder builds under its own double-checked lock, and `forget` swaps the locks.
     """
 
     def __init__(self) -> None:
         """Hold no backend until the first use."""
-        self.forget()
+        self._executor = _entry("EXECUTOR", BoundaryExecutor)
+        self._admission = _AdmissionManager(_ADMISSION, base=Admission)
+        self._policy = _entry("POLICY", StreamPolicy)
+        self._tokens = _entry("TOKENS", BoundaryTokenBackend)
 
     def forget(self) -> None:
         """Drop the backends without stopping them, as a forked child must."""
-        self._lock = threading.Lock()
-        self._backends: tuple[BoundaryExecutor, Admission] | None = None
-        self._policy: StreamPolicy | None = None
-        self._tokens: BoundaryTokenBackend | None = None
+        self._executor.forget()
+        self._admission.forget()
+        self._policy.forget()
+        self._tokens.forget()
         transports.forget()
 
     def executor(self) -> BoundaryExecutor:
-        """Return the pool executor, building the backends on the first call."""
-        return self._ensure_backends()[0]
+        """Return the pool executor, building it on the first call."""
+        return self._executor.get()
 
     def admission(self) -> Admission:
-        """Return the admission, building the backends on the first call."""
-        return self._ensure_backends()[1]
+        """Return the admission, building it on the first call."""
+        return self._admission.get()
 
     def capacity(self) -> "Capacity | None":
         """Return the pool lane reading, `None` while no job has built the executor."""
-        held = self._backends
-        return None if held is None else held[0].capacity()
+        held = self._executor.peek()
+        return None if held is None else held.capacity()
 
     def policy(self) -> StreamPolicy:
         """Return the delivery policy, building it on the first call."""
-        held = self._policy
-        if held is None:
-            with self._lock:
-                held = self._policy or _build_policy()
-                self._policy = held
-        return held
+        return self._policy.get()
 
     def transport(self) -> StreamTransport:
         """Return the transport backend, building it on the first call."""
-        return transports.backend()
+        return transports.get()
 
     def tokens(self) -> BoundaryTokenBackend:
         """Return the boundary token backend, building it on the first call."""
-        held = self._tokens
-        if held is None:
-            with self._lock:
-                held = self._tokens or _build_tokens()
-                self._tokens = held
-        return held
-
-    def _ensure_backends(self) -> tuple[BoundaryExecutor, Admission]:
-        """Build both backends once, double-checked under the lock."""
-        held = self._backends
-        if held is None:
-            with self._lock:
-                held = self._backends or (_build_executor(), _build_admission())
-                self._backends = held
-        return held
+        return self._tokens.get()
 
     def reset(self) -> None:
         """Stop the executor and drop every backend, so a next use rereads settings."""
-        with self._lock:
-            held, self._backends = self._backends, None
-            self._policy = None
-            self._tokens = None
+        executor = self._executor.reset()
+        self._admission.reset()
+        self._policy.reset()
+        self._tokens.reset()
         transports.reset()
-        if held is not None:
-            held[0].shutdown()
+        if executor is not None:
+            executor.shutdown()
 
 
 suspense_manager = SuspenseManager()

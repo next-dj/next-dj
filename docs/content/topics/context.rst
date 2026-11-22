@@ -155,7 +155,18 @@ A zone GET that asks for any other zone skips the callable before its dependenci
        return list(AuditEntry.objects.all()[:100])
 
 A full page render carries no zone batch and runs every page level callable, tagged or not.
-When the callable must also stay idle on a full render, keep the ``zone_requested`` guard inside its body, see :doc:`partial-rendering/scenarios`.
+When the callable must also stay idle on a full render, it checks ``zone_requested`` inside its body, see :doc:`/content/ref/partial`.
+
+.. code-block:: python
+
+   from next import context
+   from next.partial import zone_requested
+
+   @context("entries", zone="audit-table")
+   def entries(request) -> list[AuditEntry]:
+       if not zone_requested(request, "audit-table"):
+           return []
+       return list(AuditEntry.objects.all()[:100])
 
 A zone declared inside the body of a requested zone counts as requested with it, so its bound callables run when the outer body renders.
 
@@ -255,6 +266,7 @@ The framework computes the template scope in this order.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update``, so a processor key overwrites a page or inherited value.
+   A callable a deferred page boundary runs later keeps this order, so the processor value wins there too.
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
 
 A later step that uses the same key overrides earlier values.

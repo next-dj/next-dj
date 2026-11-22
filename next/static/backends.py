@@ -103,7 +103,6 @@ class StaticFilesBackend(StaticBackend):
     @override
     def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
         """Return the staticfiles URL for `next/<logical_name><suffix>`, memoised."""
-        del kind
         suffix = source_path.suffix
         cache_key = ("file", logical_name, suffix)
         cached = self._url_cache.get(cache_key)

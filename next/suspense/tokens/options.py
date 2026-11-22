@@ -3,7 +3,7 @@
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Final, cast
+from typing import Final, Self, cast
 
 from django.apps import apps
 from django.core.exceptions import ImproperlyConfigured
@@ -81,7 +81,7 @@ class TokenSettings:
             raise ImproperlyConfigured(msg)
 
     @classmethod
-    def read(cls, options: Mapping[str, object]) -> "TokenSettings":
+    def read(cls, options: Mapping[str, object]) -> Self:
         """Return the settings of a merged `OPTIONS` mapping, raising on a misfit."""
         binding = options.get("BINDING")
         alias = options.get("CACHE_ALIAS")
@@ -98,7 +98,7 @@ class TokenSettings:
             epoch=_count(options, "EPOCH", 0),
         )
 
-    def overridden(self, tokens: Pairs[object]) -> "TokenSettings":
+    def overridden(self, tokens: Pairs[object]) -> Self:
         """Return the settings with one component's `tokens` overrides merged over."""
         if not tokens:
             return self

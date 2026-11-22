@@ -292,22 +292,19 @@ def _read_text(value: object, limit: int) -> str:
     return value
 
 
-def _read_integer(value: object, limit: int) -> int:
-    del limit
+def _read_integer(value: object) -> int:
     if type(value) is not int:
         raise TypeError
     return _integer(value)
 
 
-def _read_number(value: object, limit: int) -> float:
-    del limit
+def _read_number(value: object) -> float:
     if type(value) is not float or not math.isfinite(value):
         raise TypeError
     return value
 
 
-def _read_flag(value: object, limit: int) -> bool:
-    del limit
+def _read_flag(value: object) -> bool:
     if type(value) is not bool:
         raise TypeError
     return value
@@ -320,42 +317,42 @@ def _canonical[T](value: T, written: str, text: str) -> T:
     return value
 
 
-def _read_decimal(value: object, limit: int) -> Decimal:
-    text = _read_text(value, limit)
+def _read_decimal(text: str) -> Decimal:
     number = Decimal(text)
     if not number.is_finite():
         raise ValueError
     return _canonical(number, str(number), text)
 
 
-def _read_day(value: object, limit: int) -> date:
-    text = _read_text(value, limit)
+def _read_day(text: str) -> date:
     day = date.fromisoformat(text)
     return _canonical(day, day.isoformat(), text)
 
 
-def _read_moment(value: object, limit: int) -> datetime:
-    text = _read_text(value, limit)
+def _read_moment(text: str) -> datetime:
     moment = datetime.fromisoformat(text)
     return _canonical(moment, moment.isoformat(), text)
 
 
-def _read_uuid(value: object, limit: int) -> UUID:
-    text = _read_text(value, limit)
+def _read_uuid(text: str) -> UUID:
     uuid = UUID(text)
     return _canonical(uuid, str(uuid), text)
 
 
-_READERS: Final[Mapping[type, Callable[[object, int], object]]] = {
-    str: _read_text,
+_READERS: Final[Mapping[type, Callable[[object], object]]] = {
     int: _read_integer,
     float: _read_number,
     bool: _read_flag,
+}
+
+_TEXT_READERS: Final[Mapping[type, Callable[[str], object]]] = {
+    str: str,
     Decimal: _read_decimal,
     date: _read_day,
     datetime: _read_moment,
     UUID: _read_uuid,
 }
+"""The readers of the types that travel as text, each given text within the limit."""
 
 
 def _pk(value: object, model: type[Model], limit: int) -> object:
@@ -393,7 +390,10 @@ def _read(
     if issubclass(kind, Model):
         return _row(request, value, kind, fetch, limit)
     try:
-        return _READERS[kind](value, limit)
+        reader = _READERS.get(kind)
+        if reader is not None:
+            return reader(value)
+        return _TEXT_READERS[kind](_read_text(value, limit))
     except _REFUSED as exc:
         raise _malformed() from exc
 

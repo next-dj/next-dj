@@ -4,10 +4,12 @@ import pkgutil
 from importlib import import_module
 from types import ModuleType
 
+import pytest
 from django.core.checks.registry import registry
 
 import next.checks as checks_package
 from next.apps import checks as apps_checks
+from next.checks import NEXT
 from next.checks.catalog import CHECK_MODULES
 
 
@@ -60,6 +62,13 @@ def _registered_checks() -> set[object]:
     return registry.registered_checks | registry.deployment_checks
 
 
+def _qualified(check: object) -> str:
+    return f"{check.__module__}.{check.__qualname__}"
+
+
+_DEFINED = sorted(_defined_checks(), key=_qualified)
+
+
 def _is_catalogued(module_name: str) -> bool:
     return any(
         module_name == module.__name__ or module_name.startswith(f"{module.__name__}.")
@@ -80,14 +89,18 @@ class TestCatalog:
     def test_the_apps_checks_stay_out_of_the_catalogue(self) -> None:
         assert apps_checks not in CHECK_MODULES
 
-    def test_every_catalogued_check_is_registered(self) -> None:
-        defined = _defined_checks()
-        assert defined
-        assert defined <= _registered_checks()
+    def test_the_catalogue_defines_checks(self) -> None:
+        assert _DEFINED
+
+    @pytest.mark.parametrize("check", _DEFINED, ids=_qualified)
+    def test_every_catalogued_check_reaches_the_check_command(self, check) -> None:
+        reached = registry.get_checks(include_deployment_checks=True)
+        assert check in reached
+        assert NEXT in check.tags
 
     def test_every_registered_framework_check_is_catalogued(self) -> None:
         stray = sorted(
-            f"{check.__module__}.{check.__qualname__}"
+            _qualified(check)
             for check in _registered_checks()
             if check.__module__.startswith("next.")
             and not _is_catalogued(check.__module__)

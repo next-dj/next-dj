@@ -45,6 +45,22 @@ Modules
    A package whose ``__init__`` defines the ``Page`` coordinator that loads templates, collects context, composes layouts, renders, and builds the page ``URLPattern``.
    The process-wide singleton is exposed as ``next.pages.page`` and the class as ``next.pages.Page``.
    The package also implements the ``@context`` decorator.
+   ``Page`` takes its methods from one mixin per concern, each in its own submodule below.
+
+``next.pages.manager.containment``.
+   Holds ``PageContainment``, how a page contains a failure of its callables in the boundary that holds it.
+
+``next.pages.manager.render``.
+   Holds ``ContextRender``, how a page builds its render context, plain or inside its page boundaries, and the ``Built`` pair of a context and its start time.
+
+``next.pages.manager.gating``.
+   Holds ``PageGating``, how a page with a ``loading.djx`` plans its gates and builds its shell context, its guards first.
+
+``next.pages.manager.bodies``.
+   Holds ``PageBodies``, how a page resolves its body, the static source or what ``render()`` returns, and ``BodyResolution``, the verdict the routed views read.
+
+``next.pages.manager.registrations``.
+   Holds ``PageRegistrations``, what a ``page.py`` registers on the page manager, its context and its metadata.
 
 ``next.pages.manager.templates``.
    Holds ``PageTemplateCache``, the per-page composed source, compiled ``Template``, and layout skeleton layers, each with the mtime snapshot that dates it.
@@ -202,7 +218,7 @@ The user-facing rules for layout discovery, the placeholder contract, and the co
 Body source priority
 --------------------
 
-``Page.resolve_page_body`` in ``next.pages.manager`` picks the highest priority body source, a ``render()`` first and otherwise the static body that ``Page._load_static_body`` reads from the ``template`` attribute or the first loader that claims the page.
+``PageBodies.resolve_page_body`` in ``next.pages.manager.bodies`` picks the highest priority body source, a ``render()`` first and otherwise the static body that ``PageBodies._load_static_body`` reads from the ``template`` attribute or the first loader that claims the page.
 See :doc:`/content/topics/pages` for the full priority order and the ``next.W043`` conflict warning.
 
 Context resolution

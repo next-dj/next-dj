@@ -1,4 +1,5 @@
 import logging
+import re
 from http.cookies import SimpleCookie
 from pathlib import Path
 from unittest.mock import patch
@@ -679,9 +680,11 @@ class TestSharedDowngrade:
             Client().get("/")
         assert caplog.text.count("is sent with Cache-Control: private") == 1
 
-    def test_a_cookie_set_after_the_view_takes_the_cache_back(self, tmp_path) -> None:
+    def test_a_cookie_set_after_the_view_takes_the_cache_back(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         response = HttpResponse("x")
         policy = ResponsePolicy(cache_control({"public": True, "s_maxage": 60}))
         finish_response(response, policy, request, file_path)
@@ -780,10 +783,10 @@ class TestLateCookies:
         assert not response.cookies
 
     def test_a_consent_read_while_the_template_renders_varies_and_goes_private(
-        self, tmp_path
+        self, tmp_path, rf: RequestFactory
     ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         response = SimpleTemplateResponse(engines["django"].from_string("x"))
         finish_response(response, ResponsePolicy(cache_control(60)), request, file_path)
         vary_on_cookie(request)
@@ -792,10 +795,10 @@ class TestLateCookies:
         assert response["Vary"] == "Cookie"
 
     def test_a_lazy_private_page_varies_on_consent_after_its_render(
-        self, tmp_path
+        self, tmp_path, rf: RequestFactory
     ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         response = SimpleTemplateResponse(engines["django"].from_string("x"))
         finish_response(response, ResponsePolicy(), request, file_path)
         vary_on_cookie(request)
@@ -803,11 +806,13 @@ class TestLateCookies:
         assert response["Vary"] == "Cookie"
         assert "Cache-Control" not in response
 
-    def test_a_cached_copy_is_stored_without_its_guard(self, tmp_path) -> None:
+    def test_a_cached_copy_is_stored_without_its_guard(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
         response = HttpResponse("x")
         policy = ResponsePolicy(cache_control(60))
-        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        finish_response(response, policy, rf.get("/"), file_path)
         assert isinstance(response.cookies, SharedCookies)
         response.cookies["kept"] = "1"
         cache.set("next-test-shared", response)
@@ -826,19 +831,23 @@ class TestLateCookies:
         ],
         ids=["update", "load_text", "load_mapping"],
     )
-    def test_every_write_to_the_jar_takes_it_private(self, tmp_path, write) -> None:
+    def test_every_write_to_the_jar_takes_it_private(
+        self, tmp_path, write, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
         response = HttpResponse("x")
         policy = ResponsePolicy(cache_control(60))
-        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        finish_response(response, policy, rf.get("/"), file_path)
         write(response.cookies)
         assert response["Cache-Control"] == "private, max-age=60"
 
-    def test_an_empty_write_keeps_the_page_shared(self, tmp_path) -> None:
+    def test_an_empty_write_keeps_the_page_shared(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
         response = HttpResponse("x")
         policy = ResponsePolicy(cache_control(60))
-        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        finish_response(response, policy, rf.get("/"), file_path)
         response.cookies.update({})
         assert response["Cache-Control"] == "public, max-age=60"
 
@@ -887,10 +896,10 @@ class TestCacheMethods:
         assert "Cookie" in response["Vary"]
 
     def test_a_post_never_defers_the_token_or_marks_a_shared_render(
-        self, tmp_path
+        self, tmp_path, rf: RequestFactory
     ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\ncache = 60\n")
-        request = RequestFactory().post("/")
+        request = rf.post("/")
         policy = response_policy(page, file_path, request, url_kwargs={})
         assert policy.cache is None
         assert not policy.shared
@@ -1168,8 +1177,10 @@ class TestCsrfDeferral:
             ("lazy", None, True),
         ],
     )
-    def test_the_mode_and_the_policy_decide(self, delivery, cache, deferred) -> None:
-        request = RequestFactory().get("/")
+    def test_the_mode_and_the_policy_decide(
+        self, delivery, cache, deferred, rf: RequestFactory
+    ) -> None:
+        request = rf.get("/")
         policy = ResponsePolicy(cache_control(cache))
         with override_settings(NEXT_FRAMEWORK={"CSRF_DELIVERY": delivery}):
             prepare_page_render(policy, request)
@@ -1195,10 +1206,12 @@ class TestCsrfDeferral:
 class TestPolicyMemo:
     """The static part of a policy is read once per module load."""
 
-    def test_the_policy_is_memoised_until_a_module_reload(self, tmp_path) -> None:
+    def test_the_policy_is_memoised_until_a_module_reload(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         root = _tree(tmp_path, ("", "template = 'x'\ncache = 60\n"))
         file_path = root / "page.py"
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         with routed(root):
             first = response_policy(page, file_path, request, url_kwargs={})
             assert response_policy(page, file_path, request, url_kwargs={}) is first
@@ -1207,7 +1220,7 @@ class TestPolicyMemo:
             assert response_policy(page, file_path, request, url_kwargs={}) is not first
 
     def test_a_load_elsewhere_keeps_the_policy_and_skips_the_stamps_after(
-        self, tmp_path
+        self, tmp_path, rf: RequestFactory
     ) -> None:
         root = _tree(
             tmp_path,
@@ -1215,7 +1228,7 @@ class TestPolicyMemo:
             ("other", "template = 'y'\n"),
         )
         file_path = root / "page.py"
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         with routed(root):
             first = response_policy(page, file_path, request, url_kwargs={})
             generation = module_generation()
@@ -1225,10 +1238,12 @@ class TestPolicyMemo:
             with patch("next.pages.loaders.module_stamps", side_effect=AssertionError):
                 assert response_policy(page, file_path, request, url_kwargs={}) is first
 
-    def test_an_edit_loaded_elsewhere_rebuilds_the_policy(self, tmp_path) -> None:
+    def test_an_edit_loaded_elsewhere_rebuilds_the_policy(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         root = _tree(tmp_path, ("", "template = 'x'\ncache = 60\n"))
         file_path = root / "page.py"
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         with routed(root):
             assert response_policy(page, file_path, request, url_kwargs={}).shared
             file_path.write_text("template = 'x'\ncache = False\n")
@@ -1237,10 +1252,12 @@ class TestPolicyMemo:
             policy = response_policy(page, file_path, request, url_kwargs={})
         assert policy.cache is NO_STORE
 
-    def test_a_load_landing_mid_read_is_not_vouched_for(self, tmp_path) -> None:
+    def test_a_load_landing_mid_read_is_not_vouched_for(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         root = _tree(tmp_path, ("", "template = 'x'\ncache = 60\n"))
         file_path = root / "page.py"
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         edits: list[Path] = []
 
         def edited_mid_read(value: object) -> CacheControl | None:
@@ -1256,10 +1273,12 @@ class TestPolicyMemo:
             policy = response_policy(page, file_path, request, url_kwargs={})
         assert policy.cache is NO_STORE
 
-    def test_a_watched_tree_reads_an_edit_at_once(self, tmp_path) -> None:
+    def test_a_watched_tree_reads_an_edit_at_once(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         root = _tree(tmp_path, ("", "template = 'x'\ncache = 60\n"))
         file_path = root / "page.py"
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         with routed(root), override_settings(DEBUG=True):
             assert response_policy(page, file_path, request, url_kwargs={}).shared
             file_path.write_text("template = 'x'\ncache = False\n")
@@ -1267,11 +1286,13 @@ class TestPolicyMemo:
             policy = response_policy(page, file_path, request, url_kwargs={})
         assert policy.cache is NO_STORE
 
-    def test_a_page_without_a_module_has_an_empty_policy(self, tmp_path) -> None:
+    def test_a_page_without_a_module_has_an_empty_policy(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         root = tmp_path / "pages"
         (root / "about").mkdir(parents=True)
         (root / "about" / "template.djx").write_text("x")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         with routed(root):
             policy = response_policy(
                 page, root / "about" / "page.py", request, url_kwargs={}
@@ -1352,10 +1373,10 @@ class TestSealing:
         assert "CDN-Cache-Control" not in response
 
     def test_a_head_resolved_while_the_template_renders_reaches_the_header(
-        self, tmp_path
+        self, tmp_path, rf: RequestFactory
     ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         resolved = resolve_metadata(Metadata(robots="noindex"), request=request)
 
         def head() -> str:
@@ -1395,12 +1416,12 @@ class TestCdnHeaders:
         assert response["CDN-Cache-Control"] == "max-age=600"
 
     @pytest.mark.parametrize("name", CACHING_HEADERS[:3])
-    def test_a_late_cookie_drops_them(self, tmp_path, name) -> None:
+    def test_a_late_cookie_drops_them(self, tmp_path, name, rf: RequestFactory) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
         response = HttpResponse("x")
         response[name] = "max-age=600"
         policy = ResponsePolicy(cache_control(60))
-        finish_response(response, policy, RequestFactory().get("/"), file_path)
+        finish_response(response, policy, rf.get("/"), file_path)
         response.cookies["sid"] = "1"
         assert response["Cache-Control"] == "private, max-age=60"
         assert name not in response
@@ -1448,9 +1469,11 @@ class TestZoneSkipsTheCallableCache:
         assert full["Cache-Control"] == "public, max-age=60"
         assert module.CALLS == [1]
 
-    def test_a_method_without_a_cache_reads_one_policy(self, tmp_path) -> None:
+    def test_a_method_without_a_cache_reads_one_policy(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\ncache = 60\n")
-        request = RequestFactory().post("/")
+        request = rf.post("/")
         first = response_policy(page, file_path, request, url_kwargs={})
         assert response_policy(page, file_path, request, url_kwargs={}) is first
 
@@ -1520,9 +1543,9 @@ class TestPrivateWarningRate:
 class TestBoundRender:
     """A render that minted a visitor-bound token is sent private."""
 
-    def test_an_uncached_page_turns_private(self, tmp_path) -> None:
+    def test_an_uncached_page_turns_private(self, tmp_path, rf: RequestFactory) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         mark_bound_render(request)
         response = finish_response(
             HttpResponse("x"), ResponsePolicy(), request, file_path
@@ -1530,18 +1553,22 @@ class TestBoundRender:
         assert response["Cache-Control"] == "private"
         assert personal_render(request)
 
-    def test_a_lazy_render_that_mints_turns_private_after_it(self, tmp_path) -> None:
+    def test_a_lazy_render_that_mints_turns_private_after_it(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         response = SimpleTemplateResponse(engines["django"].from_string("x"))
         finish_response(response, ResponsePolicy(), request, file_path)
         mark_bound_render(request)
         response.render()
         assert response["Cache-Control"] == "private"
 
-    def test_a_failed_response_keeps_its_headers(self, tmp_path) -> None:
+    def test_a_failed_response_keeps_its_headers(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         file_path = write_page(tmp_path, "", "template = 'x'\n")
-        request = RequestFactory().get("/")
+        request = rf.get("/")
         mark_bound_render(request)
         response = HttpResponse("x", status=404)
         finish_response(response, ResponsePolicy(), request, file_path)
@@ -1559,31 +1586,44 @@ class TestRequestDepth:
 
     def test_an_info_has_no_depth_by_default(self) -> None:
         assert RequestInfo().depth is None
-        assert RequestInfo(Purpose.PREFETCH).depth is None
 
-    def test_a_purpose_without_a_depth(self) -> None:
-        request = RequestFactory().get("/")
+    @pytest.mark.parametrize(
+        ("purpose", "depth"),
+        [
+            (Purpose.NAVIGATION, Depth.FULL),
+            (Purpose.DOCUMENT, Depth.SHELL),
+            (Purpose.PREFETCH, None),
+        ],
+    )
+    def test_an_impossible_pair_is_refused(
+        self, purpose: Purpose, depth: Depth | None, rf: RequestFactory
+    ) -> None:
+        with pytest.raises(KeyError, match=re.escape(repr((purpose, depth)))):
+            mark_purpose(rf.get("/"), purpose, depth)
+
+    def test_a_purpose_without_a_depth(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
         mark_purpose(request, Purpose.NAVIGATION)
         assert purpose_of(request) is Purpose.NAVIGATION
         assert depth_of(request) is None
         assert request.next == RequestInfo(Purpose.NAVIGATION)
 
     @pytest.mark.parametrize("depth", list(Depth))
-    def test_a_marked_depth(self, depth: Depth) -> None:
-        request = RequestFactory().get("/")
+    def test_a_marked_depth(self, depth: Depth, rf: RequestFactory) -> None:
+        request = rf.get("/")
         mark_purpose(request, Purpose.PREFETCH, depth)
         assert purpose_of(request) is Purpose.PREFETCH
         assert depth_of(request) is depth
         assert request.next == RequestInfo(Purpose.PREFETCH, depth)
 
-    def test_the_info_is_shared(self) -> None:
-        first, second = RequestFactory().get("/"), RequestFactory().get("/")
+    def test_the_info_is_shared(self, rf: RequestFactory) -> None:
+        first, second = rf.get("/"), rf.get("/")
         mark_purpose(first, Purpose.PREFETCH, Depth.FULL)
         mark_purpose(second, Purpose.PREFETCH, Depth.FULL)
         assert first.next is second.next
 
-    def test_an_unmarked_request_has_no_depth(self) -> None:
-        assert depth_of(RequestFactory().get("/")) is None
+    def test_an_unmarked_request_has_no_depth(self, rf: RequestFactory) -> None:
+        assert depth_of(rf.get("/")) is None
 
     def test_an_object_that_is_no_request_has_no_depth(self) -> None:
         assert depth_of(object()) is None

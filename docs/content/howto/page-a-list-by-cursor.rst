@@ -68,7 +68,26 @@ Declare the pager once at module level, name it in the annotation of the context
        return page.paginate(Post.objects.filter(published=True))
 
 The queryset carries the filters and the pager applies the ordering itself, so an ``order_by()`` on the queryset is not read.
-The window iterates over its rows, so the template loops over it and passes the same value to both tags.
+The window iterates over its rows, so the template loops over it and passes the same value to the tag.
+
+.. code-block:: jinja
+   :caption: feed/pages/feed/template.djx
+
+   {% zone "feed" tag="ul" %}
+     {% for post in rows %}
+       <li data-next-key="{{ post.pk }}">{{ post.title }}</li>
+     {% endfor %}
+   {% endzone %}
+
+   {% more zone="feed" next=rows %}Show more{% empty %}End of the feed.{% endmore %}
+
+The tag below the list links ``?cursor=<token>`` for the batch after the rows and fetches it when the link scrolls into view.
+A header that shows the total builds the pager with ``count=True`` and reads ``rows.count``, at the price of one counting query a render.
+
+Keep the address and the memory in step
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two options of the tag make a long list behave after many batches.
 
 .. code-block:: jinja
    :caption: feed/pages/feed/template.djx
@@ -83,10 +102,8 @@ The window iterates over its rows, so the template loops over it and passes the 
 
    {% more zone="feed" next=rows prune=40 url="replace" %}Show more{% empty %}End of the feed.{% endmore %}
 
-The tag below the list links ``?cursor=<token>`` for the batch after the rows and fetches it when the link scrolls into view.
 ``url="replace"`` writes ``?cursor=<token>&restore=1`` into the address bar after each batch, and a reload of that address renders the batch the token names with the whole batches before it, ``DEFER["MORE"]["MAX_RESTORE"]`` batches at most.
 ``prune=40`` drops whole batches from the top once the list holds more than 40 rows, and the tag above the list loads them back.
-A header that shows the total builds the pager with ``count=True`` and reads ``rows.count``, at the price of one counting query a render.
 
 Follow the ordering rule
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -226,19 +243,22 @@ Write a pager of another scheme
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A list that pages by neither a number nor a position subclasses ``Pager``.
-The subclass implements ``window(rows, request)`` and ``awindow(rows, request)``, each returning a ``Window``, and keeps no request state, since one instance serves every render.
+The subclass implements ``plan(rows, request)``, which returns a ``Plan``, and keeps no request state, since one instance serves every render.
+A plan holds the slices the window reads and a ``finish`` step that builds the ``Window`` from what they fetched, and it reads nothing itself.
+``window`` and ``awindow`` are the base class's own, one running the plan on the thread and the other awaiting it, so a pager written this way serves a sync and an async callable with the decision written once.
 A directory that loads one initial letter at a time is such a scheme.
 
 .. code-block:: python
    :caption: people/paging.py
 
    import string
-   from typing import Any, override
+   from functools import partial
+   from typing import override
 
    from django.db.models import QuerySet
    from django.http import HttpRequest
 
-   from next.partial import Pager, Rows, Window
+   from next.partial import PagedRows, Pager, Plan, Window
 
    LETTERS = string.ascii_lowercase
 
@@ -251,14 +271,20 @@ A directory that loads one initial letter at a time is such a scheme.
            raw = "" if request is None else request.GET.get(self.param, "")
            return raw if len(raw) == 1 and raw in LETTERS else LETTERS[0]
 
-       def _section[T](self, rows: Rows[T], letter: str) -> QuerySet[Any, T]:
+       @override
+       def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
            if not isinstance(rows, QuerySet):
                msg = "LetterPager pages a queryset."
                raise TypeError(msg)
+           letter = self._letter(request)
            lookup = {f"{self.field}__istartswith": letter}
-           return rows.filter(**lookup).order_by(self.field, "pk")
+           section = rows.filter(**lookup).order_by(self.field, "pk")
+           return Plan((section,), None, partial(self._finish, letter))
 
-       def _build[T](self, letter: str, found: list[T]) -> Window[T]:
+       def _finish[T](
+           self, letter: str, fetched: list[list[T]], count: int | None
+       ) -> Window[T]:
+           [found] = fetched
            at = LETTERS.index(letter)
            following = LETTERS[at + 1] if at + 1 < len(LETTERS) else None
            return Window(
@@ -269,19 +295,9 @@ A directory that loads one initial letter at a time is such a scheme.
                back=letter if following else None,
            )
 
-       @override
-       def window[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-           letter = self._letter(request)
-           return self._build(letter, list(self._section(rows, letter)))
-
-       @override
-       async def awindow[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-           letter = self._letter(request)
-           section = self._section(rows, letter)
-           return self._build(letter, [row async for row in section])
-
 The base constructor checks ``param`` and ``per_page``, and a window of this pager is one section, so ``per_page`` is ``1``.
-The decision of which rows to read is taken once and shared, so the sync and the async method differ only in how they read them.
+The first field of the plan, ``slices``, holds one queryset here, the section of the letter, and the second, ``total``, holds the source to count or ``None`` for no count, which the pager here never asks.
+``finish`` receives the rows of each slice in order and the count, and returns the window.
 A query value the pager does not recognise reads the first window, as the shipped pagers do, and ``request`` is ``None`` for a render without a request.
 
 The fields of the ``Window`` are the contract with ``{% more %}``.
@@ -319,7 +335,7 @@ Run the system checks.
 
    uv run python manage.py check
 
-``next.E235`` reports a ``{% more %}`` with ``prune=`` or ``url=`` on a page whose context callables take no pager, and ``next.E244`` reports two pagers of one page that read the same query parameter, which a ``param=`` of its own on each pager clears.
+``next.E235`` reports a ``{% more %}`` with ``prune=`` or ``url=`` on a page whose context callables take no pager, and ``next.E236`` reports two pagers of one page that read the same query parameter, which a ``param=`` of its own on each pager clears.
 
 Open the feed and read the link below the list, whose ``href`` is ``?cursor=`` followed by a token.
 Scroll until two batches have loaded, and the address bar shows ``?cursor=<token>&restore=1``.
@@ -337,3 +353,4 @@ See also
    :doc:`/content/topics/partial-rendering/scenarios` for the infinite scroll of a catalogue paged by number.
    :doc:`/content/ref/settings` for ``DEFER["MORE"]["MAX_RESTORE"]``.
    :doc:`read-query-parameters` for the rest of the query string.
+   :repo:`search-catalog <tree/main/examples/search-catalog>` for a paged catalogue with ``NumberPager`` and :repo:`audit-forms <tree/main/examples/audit-forms>` for an audit log paged by ``KeysetPager``.

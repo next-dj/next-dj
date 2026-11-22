@@ -1,20 +1,21 @@
 """Shared helpers used by per-subpackage system-check modules.
 
-It also re-exports the discovery helpers and the `next.conf` key and shape errors.
+It also re-exports the discovery helpers and the `next.conf` errors and path probes.
 """
 
 from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
+from next.caches import IdentityMemo
 from next.conf.checks import error_for_wrong_shape, errors_for_unknown_keys
 from next.conf.defaults import USER_SETTING
-from next.conf.imports import import_class_cached
+from next.conf.imports import callable_problem, class_problem, import_backend_class
 from next.discovery import (
     PageRootsError,
     discover_page_registrations,
@@ -69,31 +70,15 @@ def takes_request(func: Callable[..., Any]) -> bool:
     return True
 
 
-class RunMemo[T]:
-    """Hold one value a check run builds once, kept while its key is the same object.
+class RunMemo[T](IdentityMemo[T]):
+    """Hold one value a check run builds once, dropped by `forget_run_memos`."""
 
-    The memo keeps a reference to the key, so a new object cannot reuse its `id`.
-    """
-
-    __slots__ = ("_held",)
+    __slots__ = ()
 
     def __init__(self) -> None:
         """Start empty and register with `forget_run_memos`."""
-        self._held: tuple[object, T] | None = None
+        super().__init__()
         _RUN_MEMOS.append(self)
-
-    def get(self, key: object, build: Callable[[], T]) -> T:
-        """Return the value held for `key`, building and keeping it on a miss."""
-        held = self._held
-        if held is not None and held[0] is key:
-            return held[1]
-        value = build()
-        self._held = (key, value)
-        return value
-
-    def forget(self) -> None:
-        """Drop the held value."""
-        self._held = None
 
 
 _RUN_MEMOS: list[RunMemo[Any]] = []
@@ -131,16 +116,63 @@ def registration_file_errors(
     return errors
 
 
-def import_backend_class(dotted_path: str) -> type[Any]:
-    """Import a dotted backend path, folding any import-time failure into ImportError.
+class Declaring(Protocol):
+    """One declaring call as written, which says why it applies nothing."""
 
-    A raising backend module would otherwise abort the whole check run.
-    """
-    try:
-        return import_class_cached(dotted_path)
-    except Exception as exc:
-        msg = f"{dotted_path} raised {type(exc).__name__}: {exc}"
-        raise ImportError(msg) from exc
+    def problem(self) -> str | None:
+        """Return why the call declares nothing, `None` when it applies."""
+
+
+class DeclarationLedger(Protocol):
+    """The calls each module made, and the modules outside the kind a call is for."""
+
+    def loaded(self) -> Iterable[tuple[Path, Declaring]]:
+        """Yield each file with the call its latest load made."""
+
+    def outside(self) -> Iterable[Path]:
+        """Return each module that made the call outside the kind it is for."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeclaringCall:
+    """How the errors of one declaring call, as `page.router()`, read."""
+
+    call: str
+    code: str
+    module: str
+    owner: str
+    declares: str = "nothing"
+
+
+def misplaced_error(subject: DeclaringCall, file_path: Path) -> CheckMessage:
+    """Build the error of a call made outside the module kind it is for."""
+    return Error(
+        f"{subject.call} in {file_path} declares {subject.declares}, since the call "
+        f"sits outside a {subject.module} and so names no {subject.owner}.",
+        hint=f"Call {subject.call} at the top of the {subject.module} of the "
+        f"{subject.owner} it is for.",
+        obj=settings,
+        id=subject.code,
+    )
+
+
+def declaration_errors(
+    subject: DeclaringCall, ledger: DeclarationLedger, *, consequence: str, hint: str
+) -> list[CheckMessage]:
+    """Report each call of `ledger` that applies nothing or sits outside its module."""
+    errors: list[CheckMessage] = [
+        Error(
+            f"{subject.call} in {file_path} declares {subject.declares}, since "
+            f"{problem}. {consequence}",
+            hint=hint,
+            obj=settings,
+            id=subject.code,
+        )
+        for file_path, declaration in ledger.loaded()
+        if (problem := declaration.problem()) is not None
+    ]
+    errors.extend(misplaced_error(subject, file_path) for file_path in ledger.outside())
+    return errors
 
 
 def async_refusal(error: BaseException | None) -> AsyncCallableError | None:
@@ -223,11 +255,17 @@ def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
 
 __all__ = [
     "WALK_HINT",
+    "DeclarationLedger",
+    "Declaring",
+    "DeclaringCall",
     "PageRootsError",
     "RegistrationSubject",
     "RunMemo",
     "async_callable_error",
     "async_refusal",
+    "callable_problem",
+    "class_problem",
+    "declaration_errors",
     "discover_page_registrations",
     "error_for_wrong_shape",
     "errors_for_unknown_keys",
@@ -240,6 +278,7 @@ __all__ = [
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
     "iter_scanned_pages",
+    "misplaced_error",
     "page_tree_skip_names",
     "raw_scope",
     "read_page_roots",

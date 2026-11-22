@@ -50,6 +50,50 @@ def _check_id_literals() -> dict[str, set[str]]:
 
 _CHECK_ID_LITERALS = _check_id_literals()
 
+
+def _dotted(module: str) -> str:
+    return module.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
+
+
+def _check_id_mentions() -> dict[str, set[str]]:
+    """Map every check id to the modules that hold it or read a constant bound to it.
+
+    A `codes` module only names the ids, and the modules reading its constants emit.
+    """
+    trees = {
+        _dotted(path.relative_to(_NEXT_ROOT.parent).as_posix()): ast.parse(
+            path.read_text(encoding="utf-8")
+        )
+        for path in sorted(_NEXT_ROOT.rglob("*.py"))
+    }
+    constants: dict[str, str] = {}
+    for tree in trees.values():
+        for node in tree.body:
+            if (
+                isinstance(node, ast.AnnAssign | ast.Assign)
+                and isinstance(node.value, ast.Constant)
+                and _CHECK_ID.match(str(node.value.value))
+            ):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        constants[target.id] = str(node.value.value)
+    mentions: dict[str, set[str]] = collections.defaultdict(set)
+    for check_id, modules in _CHECK_ID_LITERALS.items():
+        mentions[check_id].update(_dotted(module) for module in modules)
+    for module, tree in trees.items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in constants:
+                mentions[constants[node.id]].add(module)
+    return dict(mentions)
+
+
+_CHECK_ID_MENTIONS = _check_id_mentions()
+_ID_HELPERS = frozenset({"next.checks.common", "next.conf.checks"})
+"""The modules that build the message of an id for the check modules calling them."""
+
 _RETIRED_IDS = frozenset(
     {"next.E001", "next.E014", "next.E023", "next.E026", "next.E064", "next.E066"}
     | {"next.E081", "next.E091", "next.E109"}
@@ -69,6 +113,14 @@ _CHECKS_REFERENCE = (
     / "system-checks.rst"
 )
 _REFERENCE_ROW = re.compile(r"^   \* - ``(next\.[EWI]\d{3})``$", re.MULTILINE)
+_EMITTED_BY = re.compile(
+    r"^   \* - ``(next\.[EWI]\d{3})``\n(?:     - .*\n(?:       .*\n)*)     - (.*)$",
+    re.MULTILINE,
+)
+
+
+def _named(module: str, cell: set[str]) -> bool:
+    return any(module == name or module.startswith(f"{name}.") for name in cell)
 
 
 class TestLeafPackage:
@@ -144,3 +196,35 @@ class TestCheckIdAllocation:
         rows = _REFERENCE_ROW.findall(_CHECKS_REFERENCE.read_text(encoding="utf-8"))
         assert len(rows) == len(set(rows))
         assert sorted(rows) == sorted(_CHECK_ID_LITERALS)
+
+    @pytest.mark.skipif(
+        not _CHECKS_REFERENCE.is_file(), reason="the documentation is not checked out"
+    )
+    def test_the_reference_table_names_the_modules_that_emit_each_id(self) -> None:
+        text = _CHECKS_REFERENCE.read_text(encoding="utf-8")
+        cells = {
+            check_id: set(re.findall(r"``([\w.]+)``", cell))
+            for check_id, cell in _EMITTED_BY.findall(text)
+        }
+        modules = {
+            _dotted(path.relative_to(_NEXT_ROOT.parent).as_posix())
+            for path in _NEXT_ROOT.rglob("*.py")
+        }
+        unknown = {
+            check_id: sorted(cell - modules)
+            for check_id, cell in cells.items()
+            if cell - modules
+        }
+        unnamed = {
+            check_id: sorted(missing)
+            for check_id, found in _CHECK_ID_MENTIONS.items()
+            if (
+                missing := {
+                    module
+                    for module in found - _ID_HELPERS
+                    if not module.endswith(".codes")
+                    and not _named(module, cells.get(check_id, set()))
+                }
+            )
+        }
+        assert (unknown, unnamed) == ({}, {})

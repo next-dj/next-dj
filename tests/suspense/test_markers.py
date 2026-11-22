@@ -1,29 +1,24 @@
 import dataclasses
 from dataclasses import dataclass
+from functools import partial
 
 import pytest
 
 from next.defer import BoundaryOptions, DeferMode, ErrorKind
-from next.suspense import (
+from next.suspense import Capacity, Job, Lane, Placement, Rule, Server, State, Verdict
+from next.suspense.markers import (
     Addressing,
-    Capacity,
     Caps,
     Effects,
     ForegroundFacts,
     Group,
-    Job,
-    Lane,
     Outcome,
-    Placement,
     Rendered,
-    Rule,
-    Server,
     Site,
-    State,
     Timing,
-    Verdict,
 )
 from next.testing import override_next_settings
+from tests.support.jobs import plain_job
 
 
 SITE = Site(Addressing.COMPONENT, "card", DeferMode.STREAM, "shop/list.djx", 2)
@@ -43,18 +38,9 @@ async def _arender() -> Rendered[str]:
     return _render()
 
 
-def _job(site: Site = SITE, *, parent: str | None = None, depth: int = 0) -> Job[str]:
-    return Job(
-        "b-00000000-0",
-        "1a2b3c4d",
-        site,
-        BoundaryOptions(),
-        100.0,
-        _fallback,
-        run=_render,
-        parent=parent,
-        depth=depth,
-    )
+_job = partial(
+    plain_job, "b-00000000-0", key="1a2b3c4d", site=SITE, deadline=100.0, delta="assets"
+)
 
 
 class TestPlacement:
@@ -127,7 +113,6 @@ class TestRendered:
         assert rendered.state is State.READY
         assert rendered.nested == ()
         assert not rendered.degraded
-        assert rendered.replay == ()
         assert not rendered.effects
         assert rendered.intended is None
 
@@ -220,7 +205,7 @@ class TestGroup:
 
     def test_a_member_of_another_site_is_refused(self) -> None:
         with pytest.raises(ValueError, match="belongs to the site 'card'"):
-            Group(SITE, (_job(), _job(OTHER)))
+            Group(SITE, (_job(), _job(site=OTHER)))
 
 
 class TestOutcome:

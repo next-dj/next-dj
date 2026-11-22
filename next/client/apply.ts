@@ -116,6 +116,7 @@ export interface VisitPatch {
 export interface ContextPatch {
   op: "context";
   data?: unknown;
+  replace?: boolean;
 }
 
 // Each key is the resolved tag value, null removing the tag and absent leaving it.

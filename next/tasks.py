@@ -1,9 +1,21 @@
-"""A unit of work that runs at most once, on whichever caller claims it first."""
+"""Work that runs at most once on its first claimant, and executors asgiref skips."""
 
 import threading
 from collections.abc import Callable
-from concurrent.futures import Future
-from typing import Any
+from concurrent.futures import Executor, Future
+from contextlib import nullcontext
+from typing import Any, ClassVar
+
+
+class QuitParentExecutor(Executor):
+    """An executor asgiref reads as a quit parent when bound as its current executor.
+
+    asgiref walks the attributes of its own thread executor, which these stand in for.
+    """
+
+    _work_ready: ClassVar[nullcontext[None]] = nullcontext()
+    _broken: ClassVar[bool] = True
+    _old_executor: ClassVar[None] = None
 
 
 class StealableTask[R]:
@@ -75,4 +87,4 @@ class StealableTask[R]:
             hook()
 
 
-__all__ = ["StealableTask"]
+__all__ = ["QuitParentExecutor", "StealableTask"]

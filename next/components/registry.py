@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, override
 
 from next.caches import BoundedCache, LruCache
 
-from .deferral import defer_declarations
+from .defer import defer_declarations
 from .signals import component_registered, components_registered
 
 
@@ -20,22 +20,22 @@ if TYPE_CHECKING:
     from .info import ComponentInfo
 
 
-class ErrorFiles:
-    """Whether any live component registry holds a component with an `error.djx`.
+class RegistryTally:
+    """Whether any live component registry counts a component of one kind.
 
-    A render reads `held` alone, so a project without component boundaries pays nothing.
+    A render reads `held` alone, so a project without such components pays nothing.
     """
 
     __slots__ = ("_counts", "_lock", "held")
 
     def __init__(self) -> None:
-        """Start with no registry holding one."""
+        """Start with no registry counting one."""
         self._counts: dict[int, int] = {}
         self._lock = threading.Lock()
         self.held = False
 
     def note(self, registry: ComponentRegistry, count: int) -> None:
-        """Record how many components of `registry` hold an `error.djx` now."""
+        """Record how many components of `registry` count now."""
         self._set(id(registry), count)
 
     def forget(self, key: int) -> None:
@@ -55,10 +55,16 @@ class ErrorFiles:
         return bool(self._counts)
 
 
+class ErrorFiles(RegistryTally):
+    """Whether any live component registry holds a component with an `error.djx`."""
+
+    __slots__ = ()
+
+
 error_files = ErrorFiles()
 
 
-class DeferredComponents(ErrorFiles):
+class DeferredComponents(RegistryTally):
     """Whether any component can defer, by its `loading.djx`, module or call site.
 
     A declaration made after a scan, or a call-site `defer=`, raises it for good.
@@ -399,6 +405,7 @@ __all__ = [
     "ComponentVisibilityResolver",
     "DeferredComponents",
     "ErrorFiles",
+    "RegistryTally",
     "deferred_components",
     "error_files",
     "may_defer",

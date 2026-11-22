@@ -24,13 +24,12 @@ The two facts
    The server serves other requests while one response streams.
    A transport that is not concurrent would hold its only worker while a slow client reads, so the response is assembled inline under the ``sync-worker`` reason, unless ``DEFER["POLICY"]["OPTIONS"]["SYNC_WORKERS"]`` is ``"stream"``.
 
-A page assembled inline still runs its deferred jobs in parallel, so it costs the slowest job rather than the sum of them, and it only loses the early shell.
+A page assembled inline loses the early shell and nothing else, see :ref:`topics-boundaries-streaming-transport`.
 
 Stating the truth
 -----------------
 
-No standard lets a server, a proxy, or a CDN declare that it buffers a response.
-The default transport knows no host and no adapter, so it trusts the server's claims, which can be wrong for a given host.
+The default transport trusts the server's claims, which can be wrong for a given host, see :ref:`topics-boundaries-streaming-transport`.
 ``DEFER["TRANSPORT"]["OPTIONS"]`` states each fact explicitly, and a stated fact wins over every mark and every claim.
 
 .. list-table::
@@ -88,9 +87,8 @@ A host whose answer depends on more than a request key takes a ``StreamTransport
 Telling what a deployment got
 -----------------------------
 
-Under ``DEBUG`` the ``X-Next-Stream`` header of a page with boundaries reads ``stream``, or ``inline`` with the reason, such as ``inline (buffered)``.
-In production the first response with deferred work that a process assembles inline logs one ``INFO`` record on the ``next.suspense`` logger with the reason and the transport reason, so the platform logs show it with no setup.
-The ``page_stream_declined`` signal reports every such response with the same reasons, for a metric that counts why pages do not stream.
+The ``X-Next-Stream`` header, the first ``INFO`` record of a process, and the ``page_stream_declined`` signal each name why a page did not stream, see :ref:`topics-boundaries-streaming-observing`.
+The log record needs no setup, so the platform logs already show the reason.
 
 Verifying a stream end to end
 -----------------------------

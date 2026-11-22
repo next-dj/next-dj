@@ -1,17 +1,16 @@
 """The seam telling whether a response reaches its client chunk by chunk."""
 
-import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, cast, override
+from functools import partial
+from typing import Final, override
 
 from django.core.handlers.asgi import ASGIRequest
 from django.http import HttpRequest
 
-from next.backends import instantiate_backend, resolve_backend_class
-from next.conf.defer import SCOPE, defer_option
-from next.errors import BackendImportError
+from next.backends import SingleBackendManager
+from next.conf.defer import SCOPE, backend_option, defer_option, entry_options
 
 
 _OPTION: Final = "option"
@@ -47,10 +46,7 @@ class StreamTransport(ABC):
 
     def __init__(self, config: Mapping[str, object] | None = None) -> None:
         """Keep the `OPTIONS` of the settings entry."""
-        options = (config or {}).get("OPTIONS")
-        self.options: Mapping[str, object] = (
-            options if isinstance(options, Mapping) else {}
-        )
+        self.options: Mapping[str, object] = entry_options(config)
 
     @abstractmethod
     def facts(self, request: HttpRequest) -> TransportFacts:
@@ -146,9 +142,7 @@ class DefaultStreamTransport(StreamTransport):
         self._threaded_facts = _answers(self._wsgi, claim, held or (True, _THREADS))
 
     def _option(self, key: str) -> object:
-        if key in self.options:
-            return self.options[key]
-        return defer_option(_KEY, "OPTIONS", key)
+        return backend_option(self.options, _KEY, key)
 
     def _flag(self, key: str) -> bool | None:
         value = self._option(key)
@@ -164,50 +158,10 @@ class DefaultStreamTransport(StreamTransport):
         return answers[self._wsgi.found(meta)]
 
 
-def _build() -> StreamTransport:
-    """Build the transport `DEFER["TRANSPORT"]` names, with its merged options."""
-    config = cast("Mapping[str, object]", defer_option(_KEY))
-    try:
-        klass = resolve_backend_class(config, base=StreamTransport)
-    except ImportError as exc:
-        raise BackendImportError(SCOPE, exc) from exc
-    return instantiate_backend(klass, config)
-
-
-class Transports:
-    """Hold the transport backend, built on first use and dropped with the others.
-
-    It sits below the suspense manager, which the policy and the facts cannot import.
-    """
-
-    __slots__ = ("_backend", "_lock")
-
-    def __init__(self) -> None:
-        """Hold no backend until the first use."""
-        self.forget()
-
-    def forget(self) -> None:
-        """Drop the backend, as a forked child must."""
-        self._lock = threading.Lock()
-        self._backend: StreamTransport | None = None
-
-    def reset(self) -> None:
-        """Drop the backend, so the next use rereads the settings."""
-        with self._lock:
-            self._backend = None
-
-    def backend(self) -> StreamTransport:
-        """Return the transport backend, building it on the first call."""
-        held = self._backend
-        if held is None:
-            with self._lock:
-                held = self._backend or _build()
-                self._backend = held
-        return held
-
-
-transports: Final = Transports()
-"""The transport backend of this process."""
+transports: Final = SingleBackendManager(
+    SCOPE, base=StreamTransport, config=partial(defer_option, _KEY)
+)
+"""The transport backend of this process, below the manager the policy cannot import."""
 
 
 def transport_of(request: HttpRequest) -> TransportFacts:
@@ -218,7 +172,7 @@ def transport_of(request: HttpRequest) -> TransportFacts:
     held = vars(request)
     facts = held.get(_ATTR)
     if not isinstance(facts, TransportFacts):
-        facts = transports.backend().facts(request)
+        facts = transports.get().facts(request)
         held[_ATTR] = facts
     return facts
 
@@ -227,7 +181,6 @@ __all__ = [
     "DefaultStreamTransport",
     "StreamTransport",
     "TransportFacts",
-    "Transports",
     "transport_of",
     "transports",
 ]

@@ -19,6 +19,7 @@ from next.caches import PageCache
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.router import router_enabled
+from next.defer import DEFAULT_TAG
 from next.introspect import is_coroutine_callable, refuse_async
 from next.pages.errors import PageModuleImportError
 from next.permissions.access import declarations
@@ -553,7 +554,7 @@ def _resolved(path: Path) -> Path:
 def _layout_at(
     directory: Path, *, linked: bool, name: str = LAYOUT_TEMPLATE
 ) -> tuple[Path, int] | None:
-    """Return the `layout.djx` of `directory` by its resolved name, with its mtime.
+    """Return the file `name` of `directory` by its resolved name, with its mtime.
 
     Only a link is resolved, since a plain file under a real directory names itself.
     A miss builds no `Path`, as a walk probes far more directories than hold a file.
@@ -871,11 +872,11 @@ def layout_stamps(
 def _wrapper_of(layout_files: Sequence[Path], slot: int) -> str | None:
     """Return the wrapper element the layout around `slot` leaves its placeholder."""
     if slot >= len(layout_files):
-        return "div"
+        return DEFAULT_TAG
     text = template_source(layout_files[slot])
     spans = None if text is None else placeholder_spans(text)
     if text is None or not spans:
-        return "div"
+        return DEFAULT_TAG
     return wrapper_tag(text[: spans[0][0]])
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
@@ -11,7 +12,8 @@ from django.apps import apps
 from django.conf import settings
 from django.urls import NoReverseMatch, get_script_prefix, get_urlconf, reverse
 
-from next.backends import resolve_setting_class
+from next.backends import BackendRoot, resolve_setting_class
+from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.router import (
     SCOPE,
     router_enabled,
@@ -136,7 +138,55 @@ def _placed(held: _Places, build: Callable[[], str]) -> str:
     return found
 
 
-class RouterManager:
+def _seam[T](
+    key: str,
+    dotted: str,
+    *,
+    base: BackendRoot[T],
+    shipped: BackendRoot[T],
+    base_path: str,
+) -> T:
+    """Build the backend a seam path names, read from `router_settings()`.
+
+    A misfit value reads there as its default, which names the shipped class.
+    """
+    if dotted == FROZEN_DEFAULTS[SCOPE][key]:
+        return shipped()
+    return resolve_setting_class(
+        key, scope=SCOPE, base=base, shipped=shipped, base_path=base_path
+    )()
+
+
+@dataclass(frozen=True, slots=True)
+class _Seams:
+    """The cut and the digest one read of the `ROUTER` settings builds."""
+
+    cut: NavigationCut
+    digest: ChromeDigest
+
+
+def _seams() -> _Seams:
+    """Build the cut and the digest `ROUTER["CUT"]` and `ROUTER["DIGEST"]` name."""
+    current = router_settings()
+    return _Seams(
+        cut=_seam(
+            "CUT",
+            current.cut,
+            base=NavigationCut,
+            shipped=VerifiedCut,
+            base_path="next.router.NavigationCut",
+        ),
+        digest=_seam(
+            "DIGEST",
+            current.digest,
+            base=ChromeDigest,
+            shipped=ChromeDigest,
+            base_path="next.router.ChromeDigest",
+        ),
+    )
+
+
+class ClientRouterManager:
     """Hold the cut and digest backends, built once, and the `$router` entry.
 
     The backends are named by `ROUTER["CUT"]` and `ROUTER["DIGEST"]`.
@@ -145,51 +195,41 @@ class RouterManager:
     def __init__(self) -> None:
         """Hold nothing until the first navigation or routed document."""
         self.composed: bool | None = None
-        self.forget()
-
-    def forget(self) -> None:
-        """Drop the backends, the entry and the rules, so a next use reads settings."""
         self._lock = threading.Lock()
-        self._cut: NavigationCut | None = None
-        self._digest: ChromeDigest | None = None
+        self._seams: _Seams | None = None
         self._entries: _Places = {}
         self._speculations: _Places = {}
 
+    def forget(self) -> None:
+        """Drop the backends, the entry and the rules, so a next use reads settings.
+
+        It waits out a build under way, so no backend of the old settings outlives it.
+        """
+        with self._lock:
+            self._seams = None
+            self._entries = {}
+            self._speculations = {}
+
+    def forked(self) -> None:
+        """Start a forked child with a fresh lock and nothing built."""
+        self._lock = threading.Lock()
+        self.forget()
+
+    def _built(self) -> _Seams:
+        """Build the backends under the lock, unless a racing call already did."""
+        with self._lock:
+            seams = self._seams
+            if seams is None:
+                seams = self._seams = _seams()
+        return seams
+
     def cut(self) -> NavigationCut:
         """Return the cut `ROUTER["CUT"]` names, built on the first call."""
-        held = self._cut
-        if held is None:
-            with self._lock:
-                held = (
-                    self._cut
-                    or resolve_setting_class(
-                        "CUT",
-                        scope=SCOPE,
-                        base=NavigationCut,
-                        shipped=VerifiedCut,
-                        base_path="next.router.NavigationCut",
-                    )()
-                )
-                self._cut = held
-        return held
+        return (self._seams or self._built()).cut
 
     def digest(self) -> ChromeDigest:
         """Return the digest `ROUTER["DIGEST"]` names, built on the first call."""
-        held = self._digest
-        if held is None:
-            with self._lock:
-                held = (
-                    self._digest
-                    or resolve_setting_class(
-                        "DIGEST",
-                        scope=SCOPE,
-                        base=ChromeDigest,
-                        shipped=ChromeDigest,
-                        base_path="next.router.ChromeDigest",
-                    )()
-                )
-                self._digest = held
-        return held
+        return (self._seams or self._built()).digest
 
     def entry(self) -> str:
         """Return the encoded `$router` entry, built once per prefix and URLconf."""
@@ -200,8 +240,8 @@ class RouterManager:
         return _placed(self._speculations, speculation_rules)
 
 
-router_manager = RouterManager()
-after_fork(router_manager.forget)
+client_router = ClientRouterManager()
+after_fork(client_router.forked)
 
 
 def forget_router(**kwargs: object) -> None:
@@ -209,26 +249,26 @@ def forget_router(**kwargs: object) -> None:
 
     Composition splices the slot tag only while the router is on.
     """
-    router_manager.forget()
+    client_router.forget()
     enabled = router_enabled()
-    if router_manager.composed is not enabled:
+    if client_router.composed is not enabled:
         page.clear_template_caches()
-    router_manager.composed = enabled
+    client_router.composed = enabled
 
 
 def forget_router_entry(*, setting: str, **kwargs: object) -> None:
     """Drop the `$router` entry and the rules once a setting they read moves."""
     if setting in _ENTRY_SETTINGS:
-        router_manager.forget()
+        client_router.forget()
 
 
 __all__ = [
-    "RouterManager",
+    "ClientRouterManager",
     "asset_prefixes",
+    "client_router",
     "exclude_prefixes",
     "forget_router",
     "forget_router_entry",
     "router_entry",
-    "router_manager",
     "speculation_rules",
 ]

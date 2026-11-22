@@ -15,7 +15,7 @@ from next.components.trip import (
     prop_types,
     token_overrides,
 )
-from next.defer import BoundaryError, DeferredCall
+from next.defer import BoundaryFailure, DeferredCall
 from next.diagnostics import FailureLog
 from next.pages.responses import mark_bound_render
 from next.suspense.errors import BoundaryBindingError, BoundaryPropsError
@@ -150,7 +150,7 @@ def retry_attributes(request: object, trip: TripInput) -> str:
     return token_attributes(token)
 
 
-def retry_token(request: object, call: DeferredCall, failure: BoundaryError) -> str:
+def retry_token(request: object, call: DeferredCall, failure: BoundaryFailure) -> str:
     """Return the token attributes the error wrapper of `call` offers a retry with.
 
     The rule must have passed, as the renderer names no input otherwise.

@@ -23,7 +23,7 @@ Every public name is importable from the package root.
        Divergence,
        LayoutKey,
        NavigationCut,
-       Shell,
+       ScannedShell,
        VerifiedCut,
        current_links,
        navigation_rendered,
@@ -38,7 +38,7 @@ Page declaration
 ``page.router(*, navigate=True, prefetch=True, snapshot=True)`` at the top of a ``page.py`` declares how the router treats its page.
 ``navigate=False`` answers every navigation with a hard load of the URL and refuses every prefetch, ``prefetch=False`` answers a prefetch ``204`` with an empty body before any render, and ``snapshot=False`` keeps the page out of the history snapshots.
 The declaration binds its own page alone, the last call of a module wins, and an edited ``page.py`` that drops the call stops applying it once the module loads again.
-A flag that is no bool, a call inside a function, and a call outside a ``page.py`` declare nothing and are reported as ``next.E238``, and the page keeps the defaults.
+A flag that is no bool, a call inside a function, and a call outside a ``page.py`` declare nothing and are reported by ``next.E238``, and the page keeps the defaults.
 
 Cut and digest
 --------------
@@ -53,6 +53,13 @@ Cut and digest
 
 .. autoclass:: next.router.ChromeDigest
    :members: normalise, digest
+
+``next.router.manager.client_router`` is the process-wide ``ClientRouterManager``.
+``cut()`` and ``digest()`` return the two backends, ``entry()`` the encoded ``$router`` entry, and ``speculation()`` the encoded rules, each built on first use.
+``forget()`` drops them when the settings reload, and ``forked()`` does the same in a forked worker with a fresh lock.
+
+.. autoclass:: next.router.manager.ClientRouterManager
+   :members: cut, digest, entry, speculation, forget, forked
 
 The default normalisation leaves out every top-level zone but one that wraps the slot, the ``{% metadata %}`` head tags, and the placeholders the static injector fills, drops every ``nonce`` attribute, and empties the ``value`` that follows ``name="csrfmiddlewaretoken"`` inside the same tag.
 Every other per-render value stays in the digest and makes the layout diverge, see :doc:`/content/topics/router/layouts`.
@@ -73,9 +80,9 @@ Value objects
 
 .. autoclass:: next.router.Declaration
 
-.. autoclass:: next.router.Shell
+.. autoclass:: next.router.ScannedShell
 
-``Shell.layouts`` holds one scanned layout per layout of the page, outer first, each with its ``ident``, its ``digest``, the bounds of its slot, and the digest of its head part for the root layout.
+``ScannedShell.layouts`` holds one scanned layout per layout of the page, outer first, each with its ``ident``, its ``digest``, the bounds of its slot, and the digest of its head part for the root layout.
 
 Active links
 ------------
@@ -136,10 +143,10 @@ A navigation is a ``GET`` of the page URL with these request headers.
      - ``text/event-stream`` first when the browser can read a streamed navigation.
 
 The answer is a patch envelope, or an event stream that opens with one, whose top-level fields add ``layouts``, ``[id, digest, seal]`` per layout of the new chain with a ``null`` seal for each kept one, ``root``, the id of the root layout, ``nonce``, ``scripts``, ``consent``, and ``shared``, whether a shared cache may store the document of the page.
-A shell that skipped no deferred job and left no client-trip boundary also carries ``complete: true``, as does a full answer that is not streamed and left no client-trip boundary, and the navigation after it applies that answer without a request of its own.
+A prefetch answer that skipped no deferred job and left no client-trip boundary also carries ``complete: true``, whatever its depth, and the navigation after it applies that answer without a request of its own.
 A navigation after any other prefetch answer sends its request at the click, beside the prefetched shell it applies.
 The click after a press adopts the response of the press as its navigation.
-A prefetch answer may be shown with no further request, so a page that must act on a visit declares ``page.router(prefetch=False)``, which refuses both depths with ``204``.
+A prefetch answer may be shown with no further request, see :ref:`topics-router-prefetch-visits` for what that means for code that acts on a visit.
 A slot morph targets ``{"slot": id}``, a body morph ``{"body": true}``, and a hard load is a ``visit`` operation.
 
 .. list-table::
@@ -184,7 +191,7 @@ A routed document carries two entries in its init payload.
 
 ``$router``
    The settings the browser reads.
-   ``scope``, ``exclude``, ``foreign``, ``prefetch``, ``prefetch_delay``, ``prefetch_ttl``, ``prefetch_shell_ttl``, ``prefetch_entries``, ``press``, ``snapshots``, ``progress_delay``, ``transitions``, ``intercept``, and ``max_layouts`` copy the ``ROUTER`` keys of the same name, and ``exclude`` lists the derived prefixes of ``STATIC_URL``, ``MEDIA_URL``, and the admin site first.
+   ``scope``, ``exclude``, ``foreign``, ``prefetch``, ``prefetch_delay``, ``prefetch_ttl``, ``prefetch_shell_ttl``, ``prefetch_entries``, ``press``, ``snapshots``, ``progress_delay``, ``transitions``, ``intercept``, and ``max_layouts`` copy the ``ROUTER`` keys of the same name, the string choices being the values of ``RouterScope``, ``PrefetchMode``, ``PressMode``, ``ForeignMode``, and ``InterceptMode`` of ``next.conf.router``, and ``exclude`` lists the derived prefixes of ``STATIC_URL``, ``MEDIA_URL``, and the admin site first.
    ``current`` lists the active-link containers and ``homes`` the home paths, both ``null`` while active links are off.
    ``reader``, ``history``, and ``intent`` hold the URLs of those bundles when the page resolves them, ``type`` names the content type of a partial backend whose answers are not the stock one, and ``snapshot`` is ``false`` for a page that refuses snapshots.
 
@@ -201,3 +208,4 @@ The rules are built once per script prefix and URLconf, and again once a setting
    :doc:`/content/topics/router/index` for the guide.
    :doc:`views` for the ``NAVIGATE`` route and the purpose of a request.
    :doc:`ports` for ``RouterStamp``, which sets ``X-Next-Router`` on a form action response.
+   :repo:`markdown-blog <tree/main/examples/markdown-blog>` for the viewport prefetch and :repo:`observability <tree/main/examples/observability>` for the press of a link, see :doc:`/content/misc/examples`.

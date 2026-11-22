@@ -23,18 +23,13 @@ from next.partial import (
 )
 from next.partial.registry import register_patch_op
 from next.testing import reset_check_caches
-from tests.pages.checks.metadata.trees import (
-    component_template,
-    framework,
-    layout_root,
-    templated_page,
-)
 from tests.support import (
     PARTIAL_ROUTER_MANAGER_TARGETS,
     RootPagesRouter,
     patch_checks_router_manager_with_routers,
     patched_router_manager,
 )
+from tests.support.components import write_component
 from tests.support.guards import (
     CHILDREN_BODY,
     GUARDED_CHILDREN,
@@ -47,6 +42,7 @@ from tests.support.guards import (
     fill_slot,
     wrap,
 )
+from tests.support.trees import framework, layout_root, templated_page
 
 
 @contextmanager
@@ -308,8 +304,8 @@ class TestZoneInGuardedComponentPart:
 
     def _messages(self, pages: Path, component: str | None, body: str) -> list:
         if component is not None:
-            component_template(pages, "guarded", component)
-        component_template(pages, "plain", PLAIN_COMPONENT)
+            write_component(pages, "guarded", body=component, loading=None)
+        write_component(pages, "plain", body=PLAIN_COMPONENT, loading=None)
         templated_page(pages / "hello", "x = 1\n", body)
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             return checks.check_zone_not_in_has_perm()

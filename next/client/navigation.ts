@@ -5,7 +5,7 @@
 import { defaultHistory, defaultReload } from "./adapters";
 import type { HistoryAdapter } from "./apply";
 import { normTitle } from "./head";
-import { currentUrl, fire } from "./protocol";
+import { currentUrl, fire, uid } from "./protocol";
 import type { PartialError } from "./protocol";
 
 export type NavigationAction = "push" | "replace" | "pop" | "none";
@@ -104,8 +104,7 @@ export function createNavigation(deps: NavigationDeps): Navigation {
   // A pushState that throws (a browser rate limit) loses the entry and is reported.
   function record(intent: Intent, kind = "nav"): boolean {
     try {
-      const key = Math.random().toString(36).slice(2);
-      history[intent.action](intent.href, { next: 1, kind, key });
+      history[intent.action](intent.href, { next: 1, kind, key: uid() });
       here = currentUrl(doc);
       wrote = true;
       return true;

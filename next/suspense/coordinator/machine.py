@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import enum
 import heapq
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
@@ -35,7 +36,7 @@ _AFTER_FINISH: Final = "a command followed Finish"
 
 
 class ProtocolError(RuntimeError):
-    """Raised when a driver breaks the event protocol or the machine its invariants."""
+    """Raised when a driver breaks the event protocol."""
 
 
 class Placer(Protocol):
@@ -48,7 +49,7 @@ class Placer(Protocol):
 
 
 class Admitter(Protocol):
-    """The admission backend, consulted for every pool-placed unit before it runs."""
+    """The admission backend, its verdict a function of `capacity` and `forced` only."""
 
     def admit(self, capacity: Capacity, *, forced: bool) -> Admit:
         """Return whether the unit goes to the pool, the request thread or is shed."""
@@ -169,6 +170,12 @@ type Command[D] = (
 )
 
 
+class _Phase(enum.Enum):
+    QUEUED = enum.auto()
+    RUNNING = enum.auto()
+    ABANDONED = enum.auto()
+
+
 @dataclass(slots=True, eq=False)
 class _Entry[D]:
     job: Job[D]
@@ -189,8 +196,7 @@ class _Unit[D]:
     placement: Placement
     lane: Lane
     grouped: bool = False
-    dispatched: bool = False
-    abandoned: bool = False
+    phase: _Phase = _Phase.QUEUED
     keep_off_request: bool = False
     open: int = 0
 
@@ -198,32 +204,15 @@ class _Unit[D]:
     def ordinal(self) -> tuple[int, ...]:
         return self.entries[0].ordinal
 
+    def pending(self) -> bool:
+        return any(entry.end is None for entry in self.entries)
+
     def live(self) -> list[_Entry[D]]:
         return [entry for entry in self.entries if entry.end is None]
 
 
 def _ordinal[D](unit: _Unit[D]) -> tuple[int, ...]:
     return unit.ordinal
-
-
-@dataclass(slots=True)
-class _Counts:
-    late: int = 0
-    shed: int = 0
-    timeouts: int = 0
-    abandoned: int = 0
-    cancelled: int = 0
-    dropped: int = 0
-
-    def frozen(self) -> Totals:
-        return Totals(
-            self.late,
-            self.shed,
-            self.timeouts,
-            self.abandoned,
-            self.cancelled,
-            self.dropped,
-        )
 
 
 class Machine[D]:
@@ -249,16 +238,14 @@ class Machine[D]:
         "_heap",
         "_live",
         "_loop",
-        "_loop_open",
         "_now",
+        "_open",
         "_placer",
         "_plan",
         "_pool",
-        "_pool_open",
         "_ready",
         "_ready_since",
         "_request",
-        "_request_open",
         "_started",
         "_units",
         "_unwritten",
@@ -287,19 +274,17 @@ class Machine[D]:
         self._coalesce = coalesce
         self._capacity = Capacity(0, 0, 0, 0.0)
         self._commands: list[Command[D]] = []
-        self._counts = _Counts()
+        self._counts: Counter[str] = Counter()
         self._entries: dict[str, _Entry[D]] = {}
         self._heap: list[tuple[float, tuple[int, ...], str]] = []
         self._pool: list[_Unit[D]] = []
         self._request: list[_Unit[D]] = []
         self._loop: list[_Unit[D]] = []
         self._ready: list[tuple[tuple[int, ...], Outcome[D] | Settlement[D]]] = []
-        self._writing: set[str] = set()
+        self._writing: tuple[Outcome[D] | Settlement[D], ...] = ()
         self._emitted: set[str] = set()
         self._ready_since = 0.0
-        self._pool_open = 0
-        self._request_open = 0
-        self._loop_open = 0
+        self._open = dict.fromkeys(Lane, 0)
         self._unwritten = 0
         self._live = 0
         self._now = 0.0
@@ -326,7 +311,7 @@ class Machine[D]:
     @property
     def totals(self) -> Totals:
         """Return the counts the signals report so far."""
-        return self._counts.frozen()
+        return Totals(**self._counts)
 
     def end(self, job_id: str) -> End | None:
         """Return how the job settled, `None` while it is pending."""
@@ -357,7 +342,7 @@ class Machine[D]:
         return self._advance(now) or self._after(now)
 
     def capacity(self, capacity: Capacity, now: float) -> list[Command[D]]:
-        """Take a fresh pool reading and admit again every unit still queued."""
+        """Take a fresh pool reading and admit the units past the credit again."""
         if self._closed:
             return []
         now = self._started_clock(now)
@@ -398,33 +383,34 @@ class Machine[D]:
             return done
         entry.reported = True
         unit = entry.unit
-        if not unit.abandoned:
+        if unit.phase is _Phase.RUNNING:
             unit.open -= 1
             if not unit.open:
-                self._vacate(unit)
+                self._open[unit.lane] -= 1
         if entry.end is None:
             self._accept(entry, unit, result, timing, now)
         return self._after(now)
 
-    def written(self, job_id: str, now: float) -> list[Command[D]]:
-        """Release the credit of one written outcome and submit the jobs it nests."""
+    def written(self, now: float) -> list[Command[D]]:
+        """Release the credit of the batch being written and submit what it nests."""
         if self._closed:
             return []
         now = self._started_clock(now)
-        if job_id not in self._writing:
-            msg = f"the outcome {job_id} was not being written"
+        if not self._writing:
+            msg = "no batch was being written"
             raise ProtocolError(msg)
         if done := self._advance(now):
             return done
-        self._writing.discard(job_id)
-        entry = self._entries[job_id]
-        if entry.credited:
-            entry.credited = False
-            self._unwritten -= 1
-        if isinstance(entry.item, Outcome):
-            for index, job in enumerate(entry.item.rendered.nested):
-                child = self._add(job, (*entry.ordinal, index))
-                self._queue((child,), grouped=False, alone=False)
+        batch, self._writing = self._writing, ()
+        for item in batch:
+            entry = self._entries[item.id]
+            if entry.credited:
+                entry.credited = False
+                self._unwritten -= 1
+            if isinstance(item, Outcome):
+                for index, job in enumerate(item.rendered.nested):
+                    child = self._add(job, (*entry.ordinal, index))
+                    self._queue((child,), grouped=False, alone=False)
         return self._after(now)
 
     def refused(self, unit_id: str, now: float) -> list[Command[D]]:
@@ -435,18 +421,14 @@ class Machine[D]:
         unit = self._units.get(unit_id)
         if (
             unit is None
-            or not unit.dispatched
+            or unit.phase is not _Phase.RUNNING
             or unit.lane is not Lane.REQUEST
             or unit.placement.forced
             or any(entry.reported for entry in unit.entries)
         ):
             msg = f"the unit {unit_id} was not waiting for a foreground permit"
             raise ProtocolError(msg)
-        for entry in unit.entries:
-            entry.commanded = False
-        unit.dispatched = False
-        unit.open = 0
-        self._request_open -= 1
+        self._requeue(unit)
         unit.placement = Placement(Verdict.FOREGROUND_FULL)
         unit.lane = Lane.POOL
         unit.keep_off_request = True
@@ -464,17 +446,13 @@ class Machine[D]:
         unit = self._units.get(unit_id)
         if (
             unit is None
-            or not unit.dispatched
+            or unit.phase is not _Phase.RUNNING
             or unit.lane is not Lane.POOL
             or any(entry.reported for entry in unit.entries)
         ):
             msg = f"the unit {unit_id} was not submitted to the pool"
             raise ProtocolError(msg)
-        for entry in unit.entries:
-            entry.commanded = False
-        unit.dispatched = False
-        unit.open = 0
-        self._pool_open -= 1
+        self._requeue(unit)
         if unit.keep_off_request:
             self._shed(unit, now)
         else:
@@ -493,12 +471,12 @@ class Machine[D]:
                 continue
             unit = entry.unit
             end = End.CANCELLED
-            if unit is not None and unit.dispatched and not unit.abandoned:
+            if unit is not None and unit.phase is _Phase.RUNNING:
                 abandoned[unit.id] = None
                 if unit.lane is not Lane.LOOP:
                     end = End.ABANDONED
             self._end(entry, end, None, now)
-        self._counts.dropped += len(self._ready)
+        self._counts["dropped"] += len(self._ready)
         self._ready.clear()
         if abandoned:
             self._command(Abandon(tuple(abandoned)))
@@ -548,7 +526,7 @@ class Machine[D]:
         self._expire(now)
         if now < self._deadline + self._caps.write_grace:
             return []
-        self._counts.dropped += len(self._ready)
+        self._counts["dropped"] += len(self._ready)
         self._ready.clear()
         self._finish(aborted=False, cut=True)
         return self._out()
@@ -562,25 +540,24 @@ class Machine[D]:
 
     def _timeout(self, entry: _Entry[D], now: float) -> None:
         unit = entry.unit
-        if unit is None or not unit.dispatched:
+        if unit is None or unit.phase is _Phase.QUEUED:
             placement = None if unit is None else unit.placement
             timing = Timing(placement=placement)
         else:
             timing = Timing(unit.lane, unit.placement)
             if unit.lane is not Lane.LOOP:
-                self._counts.late += 1
+                self._counts["late"] += 1
         self._end(
             entry, End.TIMEOUT, Settlement(entry.job, ErrorKind.TIMEOUT, timing), now
         )
         if (
             unit is not None
-            and unit.dispatched
+            and unit.phase is _Phase.RUNNING
             and unit.lane is Lane.LOOP
-            and not unit.abandoned
-            and not unit.live()
+            and not unit.pending()
         ):
-            unit.abandoned = True
-            self._loop_open -= 1
+            unit.phase = _Phase.ABANDONED
+            self._open[Lane.LOOP] -= 1
             self._command(Abandon((unit.id,)))
 
     def _accept(
@@ -626,7 +603,7 @@ class Machine[D]:
         self._live -= 1
         counter = _COUNTERS.get(end)
         if counter is not None:
-            setattr(self._counts, counter, getattr(self._counts, counter) + 1)
+            self._counts[counter] += 1
         if item is not None:
             self._release(entry, now)
 
@@ -643,13 +620,12 @@ class Machine[D]:
             if member.item is not None
         )
 
-    def _vacate(self, unit: _Unit[D]) -> None:
-        if unit.lane is Lane.POOL:
-            self._pool_open -= 1
-        elif unit.lane is Lane.REQUEST:
-            self._request_open -= 1
-        else:
-            self._loop_open -= 1
+    def _requeue(self, unit: _Unit[D]) -> None:
+        for entry in unit.entries:
+            entry.commanded = False
+        unit.phase = _Phase.QUEUED
+        unit.open = 0
+        self._open[unit.lane] -= 1
 
     def _dispatch(self, unit: _Unit[D]) -> Unit[D]:
         tasks: list[Task[D]] = []
@@ -658,14 +634,9 @@ class Machine[D]:
                 raise AssertionError(_COMMANDED_TWICE, entry.job.id)
             entry.commanded = True
             tasks.append(Task(entry.job, entry.deadline))
-        unit.dispatched = True
+        unit.phase = _Phase.RUNNING
         unit.open = len(tasks)
-        if unit.lane is Lane.POOL:
-            self._pool_open += 1
-        elif unit.lane is Lane.REQUEST:
-            self._request_open += 1
-        else:
-            self._loop_open += 1
+        self._open[unit.lane] += 1
         return Unit(unit.id, tuple(tasks), unit.placement)
 
     def _shed(self, unit: _Unit[D], now: float) -> None:
@@ -675,11 +646,15 @@ class Machine[D]:
             self._end(entry, End.SHED, item, now)
 
     def _pump_pool(self, now: float, *, everyone: bool) -> None:
+        """Admit the queued units the credit takes, `everyone` admitting past it.
+
+        Past the credit one verdict serves the queue, so the first unit left holds all.
+        """
         queue, self._pool = self._pool, []
         for position, unit in enumerate(queue):
-            if not unit.live():
+            if not unit.pending():
                 continue
-            free = self._pool_open < self._caps.per_request
+            free = self._open[Lane.POOL] < self._caps.per_request
             if not (free or everyone):
                 self._pool.extend(queue[position:])
                 return
@@ -693,16 +668,19 @@ class Machine[D]:
                 bisect.insort(self._request, unit, key=_ordinal)
             elif free:
                 self._command(RunPool(self._dispatch(unit)))
+            elif verdict is Admit.POOL:
+                self._pool.extend(queue[position:])
+                return
             else:
                 self._pool.append(unit)
 
     def _pump_request(self) -> None:
-        if self._request_open:
+        if self._open[Lane.REQUEST]:
             return
         units: list[Unit[D]] = []
         while self._request:
             unit = self._request.pop(0)
-            if not unit.live():
+            if not unit.pending():
                 continue
             units.append(self._dispatch(unit))
             if self._facts.server is not Server.ASGI:
@@ -713,7 +691,7 @@ class Machine[D]:
     def _pump_loop(self) -> None:
         atomic = bool(self._facts.atomic)
         credit = self._caps.per_request * 2
-        while self._loop and not (atomic and self._loop_open):
+        while self._loop and not (atomic and self._open[Lane.LOOP]):
             live = self._loop[0].live()
             if live and self._unwritten and self._unwritten + len(live) > credit:
                 return
@@ -737,7 +715,7 @@ class Machine[D]:
             if item.id in self._emitted:
                 raise AssertionError(_EMITTED_TWICE, item.id)
             self._emitted.add(item.id)
-            self._writing.add(item.id)
+        self._writing = items
         self._command(Emit(items, first=self._first))
         self._first = False
 
@@ -767,7 +745,7 @@ class Machine[D]:
         return self._out()
 
     def _finish(self, *, aborted: bool, cut: bool) -> None:
-        self._command(Finish(aborted, cut, self._counts.frozen()))
+        self._command(Finish(aborted, cut, Totals(**self._counts)))
         self._closed = True
 
     def _command(self, command: Command[D]) -> None:
@@ -790,7 +768,7 @@ _ENDS: Final = {
     ErrorKind.OVERLOADED: End.SHED,
 }
 
-_COUNTERS: Final = {
+_COUNTERS: Final[dict[End, str]] = {
     End.TIMEOUT: "timeouts",
     End.SHED: "shed",
     End.ABANDONED: "abandoned",

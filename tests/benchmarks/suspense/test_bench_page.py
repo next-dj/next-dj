@@ -6,27 +6,20 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
-from django.test import RequestFactory
+from django.http import StreamingHttpResponse
 from django.urls import resolve
 
 from next.pages.manager import page as page_singleton
-from next.partial.headers import (
-    NAVIGATE,
-    ORIGIN,
-    PREFETCH,
-    REQUEST_FLAG,
-    SEC_FETCH_SITE,
-)
-from next.suspense import StreamingPageResponse
 from tests.benchmarks.factories import (
     REQUEST_ROUNDS,
     REQUEST_WARMUP_ROUNDS,
     build_component,
     each_round,
+    router_get,
     threaded_get,
 )
-from tests.pages.checks.metadata.trees import COMPONENTS
 from tests.support import plain_get, routed, write_page
+from tests.support.access import COMPONENTS
 
 
 if TYPE_CHECKING:
@@ -80,22 +73,8 @@ def _site(
     if error:
         (root / "cards" / "error.djx").write_text("<b>{{ error.kind }}</b>")
     with routed(root, COMPONENT_BACKENDS=COMPONENTS, ROUTER={"ENABLED": router}):
-        try:
-            yield resolve("/cards/").func
-        finally:
-            page_singleton.clear_template_caches()
-
-
-def _full_prefetch() -> HttpRequest:
-    """Return the GET a press sends, which asks for the page with its jobs run."""
-    headers = {
-        REQUEST_FLAG: "1",
-        NAVIGATE: "1",
-        PREFETCH: "full",
-        ORIGIN: "/",
-        SEC_FETCH_SITE: "same-origin",
-    }
-    return RequestFactory().get("/cards/", headers=headers)
+        yield resolve("/cards/").func
+        page_singleton.clear_template_caches()
 
 
 def _read(
@@ -103,7 +82,7 @@ def _read(
 ) -> bytes:
     """Return the whole body of a streamed page, closed as the server closes it."""
     response = view(request)
-    assert isinstance(response, StreamingPageResponse)
+    assert isinstance(response, StreamingHttpResponse)
     try:
         return b"".join(response.streaming_content)
     finally:
@@ -207,14 +186,34 @@ class TestBenchFullPrefetch:
     @_BOUNDARIES
     @pytest.mark.benchmark(group="suspense.page")
     def test_full_prefetch(self, tmp_path: Path, boundaries: int, benchmark) -> None:
+        build = partial(router_get, "/cards/", "/", None, prefetch="full")
         with _site(tmp_path, _cards(boundaries), router=True) as view:
-            envelope = json.loads(view(_full_prefetch()).content)
+            envelope = json.loads(view(build()).content)
             assert envelope["complete"] is True
             assert envelope["ops"][0]["html"].count(" ready</p>") == boundaries
             assert "loading" not in envelope["ops"][0]["html"]
             benchmark.pedantic(
                 view,
-                setup=each_round(_full_prefetch),
+                setup=each_round(build),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
+
+    @_BOUNDARIES
+    @pytest.mark.parametrize("depth", [None, "full"], ids=["navigation", "full"])
+    @pytest.mark.benchmark(group="suspense.page")
+    def test_streamed(
+        self, tmp_path: Path, boundaries: int, depth: str | None, benchmark
+    ) -> None:
+        """The same request under a threaded server, its streamed body read whole."""
+        build = partial(router_get, "/cards/", "/", None, prefetch=depth, streamed=True)
+        with _site(tmp_path, _cards(boundaries), router=True) as view:
+            body = _read(view, build())
+            assert body.count(b'"s":"ready"') == boundaries
+            assert body.endswith(b'event: end\ndata: {"code":"complete"}\n\n')
+            benchmark.pedantic(
+                partial(_read, view),
+                setup=each_round(build),
                 rounds=REQUEST_ROUNDS,
                 warmup_rounds=REQUEST_WARMUP_ROUNDS,
             )

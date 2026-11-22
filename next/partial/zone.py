@@ -18,7 +18,7 @@ from next.defer import BoundaryOptionError, parse_duration
 from next.pages.layouts import ZONE, seal_region
 from next.pages.skeletons import render_skeleton, zone_skeleton
 from next.seeding import TEMPLATE_PATH_KEY
-from next.static.bundles import require_bundle
+from next.static.collector import require_bundle
 from next.static.runtime import RELOAD_CHUNK_KEY
 from next.utils import child_nodelists
 

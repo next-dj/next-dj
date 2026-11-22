@@ -19,14 +19,15 @@ The router ships as three lazy bundles, so a page pays for the first click alone
    It loads as an ``async`` script right after the runtime on every routed document, and ``Next.router`` exists once it has evaluated.
 
 ``history``
-   The snapshots, the scroll restore, the client pass of :doc:`active-links`, the default focus move and announcement, persisted elements, view transitions, the retirement of page stylesheets, the inline scripts a navigation runs, and the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``.
+   The snapshots, the scroll restore, the default focus move and announcement, persisted elements, view transitions, the retirement of page stylesheets, the inline scripts a navigation runs, and the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``.
 
 ``intent``
-   The intent and viewport prefetch and the cache of prefetched answers, see :doc:`prefetch`.
+   The intent, press, and viewport prefetch and the cache of prefetched answers, see :doc:`prefetch`, the client pass of :doc:`active-links`, and the navigation of a ``GET`` form.
 
 The ``$router`` payload entry names the ``history`` and ``intent`` bundles and the stream ``reader`` by URL, and the router loads the three as scripts carrying its own nonce once the page is idle, or after two seconds at the latest where the browser has ``requestIdleCallback``.
 A browser without ``requestIdleCallback`` loads them right after the router starts.
 It loads them at once when the document opens on a history entry the router wrote before, such as after a reload of the tab, and every navigation and every ``Next.router.prefetch()`` waits for them, fifteen seconds at most, before it applies anything.
+A bundle that fails to load fires ``partial:error`` of kind ``asset`` and is requested again, three attempts for the router in all.
 
 One navigation
 --------------
@@ -205,7 +206,7 @@ A navigation applies its markup as every patch does, with each ``<script>`` elem
 The one exception is an inline script in the swapped slot or body whose ``nonce`` equals the CSP nonce of the response, with no ``src`` and a JavaScript or module type.
 The router lifts such a script out before the swap and runs it after the swap as a fresh script carrying the nonce of the page.
 Every other inline script, every inline script in a zone of the kept chrome, and every inline script of a response without a CSP nonce never runs.
-:ref:`next.W177 <ref-system-checks>` reports an inline script without a nonce in a page or layout template while the router is on.
+``next.W177`` reports an inline script without a nonce in a page or layout template while the router is on.
 
 The scripts of the page arrive through the asset operations of the envelope instead, and code that should run on every page lives in a co-located script, whose mount hooks run for the inserted content, see :doc:`/content/topics/partial-rendering/co-located-js`.
 A script a ``{% use_script %}`` or ``{% use_module %}`` declares runs after the swap, once the new markup is in place, and the runtime inserts it with ``async`` off, so the scripts one navigation brings run in the order the server lists them.

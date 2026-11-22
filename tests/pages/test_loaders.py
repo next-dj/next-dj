@@ -412,7 +412,7 @@ class TestLayoutTemplateLoader:
 
         assert LayoutTemplateLoader()._get_pages_dirs_for_config(config) == expected
 
-    def test_get_pages_dirs_for_config_empty_when_dirs_missing(self, tmp_path) -> None:
+    def test_get_pages_dirs_for_config_empty_when_dirs_missing(self) -> None:
         """Missing ``DIRS`` behaves like an empty list."""
         loader = LayoutTemplateLoader()
         result = loader._get_pages_dirs_for_config({})
@@ -504,7 +504,7 @@ class TestLayoutTemplateLoader:
             first = shared_layouts()
 
             assert first is shared_layouts()
-            with pytest.raises(AttributeError):
+            with pytest.raises(AttributeError, match="no attribute 'append'"):
                 first.append(tmp_path / "late.djx")
 
     def test_find_layout_files_with_additional_layouts_already_present(
@@ -1146,7 +1146,8 @@ class TestContextProcessors:
             return {"request_var": "from_processor"}
 
         with patch(
-            "next.pages.manager._get_context_processors", return_value=[test_processor]
+            "next.pages.manager.render._get_context_processors",
+            return_value=[test_processor],
         ):
             result = page_instance.render(
                 page_file, mock_request, url_kwargs={"title": "Test Title"}
@@ -1165,7 +1166,8 @@ class TestContextProcessors:
             return {"request_var": "from_processor"}
 
         with patch(
-            "next.pages.manager._get_context_processors", return_value=[test_processor]
+            "next.pages.manager.render._get_context_processors",
+            return_value=[test_processor],
         ):
             result = page_instance.render(page_file, url_kwargs={"title": "Test Title"})
 
@@ -1181,7 +1183,9 @@ class TestContextProcessors:
         mock_request = HttpRequest()
         mock_request.META = {}
 
-        with patch("next.pages.manager._get_context_processors", return_value=[]):
+        with patch(
+            "next.pages.manager.render._get_context_processors", return_value=[]
+        ):
             result = page_instance.render(
                 page_file, mock_request, url_kwargs={"title": "Test Title"}
             )
@@ -1206,10 +1210,10 @@ class TestContextProcessors:
 
         with (
             patch(
-                "next.pages.manager._get_context_processors",
+                "next.pages.manager.render._get_context_processors",
                 return_value=[error_processor, good_processor],
             ),
-            patch("next.pages.manager.logger") as mock_logger,
+            patch("next.pages.manager.render.logger") as mock_logger,
         ):
             result = page_instance.render(
                 page_file, mock_request, url_kwargs={"title": "Test Title"}
@@ -1236,7 +1240,7 @@ class TestContextProcessors:
         with (
             override_settings(NEXT_FRAMEWORK={"STRICT_CONTEXT": True}),
             patch(
-                "next.pages.manager._get_context_processors",
+                "next.pages.manager.render._get_context_processors",
                 return_value=[error_processor],
             ),
             pytest.raises(ValueError, match="boom"),
@@ -1263,7 +1267,7 @@ class TestContextProcessors:
             return {"good_var": "good_value"}
 
         with patch(
-            "next.pages.manager._get_context_processors",
+            "next.pages.manager.render._get_context_processors",
             return_value=[non_dict_processor, good_processor],
         ):
             result = page_instance.render(
@@ -1419,7 +1423,7 @@ class TestBuildRegisteredLoaders:
         loaders = build_registered_loaders()
 
         assert loaders is build_registered_loaders()
-        with pytest.raises(AttributeError):
+        with pytest.raises(AttributeError, match="no attribute 'append'"):
             loaders.append(PythonTemplateLoader())
 
 

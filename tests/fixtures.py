@@ -15,19 +15,23 @@ from django.test import override_settings
 from django.utils.encoding import iri_to_uri
 
 from next import stamps, utils
+from next.components import registry as registry_module
+from next.components.registry import DeferredComponents
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.deps.objects import forget_object_rows
 from next.diagnostics import reset_failure_logs, watch_degraded
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.intercept import intercepts
-from next.pages import Page
+from next.pages import Page, manager as manager_module
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
+from next.pages.transactions import atomic_store
 from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
 from next.server import NextStatReloader
-from next.testing import reset_check_caches
+from next.templatetags import components as component_tags
+from next.testing import override_next_settings, reset_check_caches
 from next.urls import URLPatternParser
 from tests.support import (
     OBJECT_PERMISSION_BACKENDS,
@@ -41,6 +45,7 @@ from tests.support import (
     tick_scenario,
 )
 from tests.support.access import restored_declarations
+from tests.support.navigation import layout_tree
 
 
 _REDIRECT_CAP = 16384
@@ -344,3 +349,33 @@ def findable_templates(
         return full
 
     return write
+
+
+@pytest.fixture()
+def fresh_deferred_components(monkeypatch: pytest.MonkeyPatch) -> DeferredComponents:
+    """Track the deferred components of this test alone, as every reader sees them."""
+    fresh = DeferredComponents()
+    for module in (registry_module, manager_module, component_tags):
+        monkeypatch.setattr(module, "deferred_components", fresh)
+    return fresh
+
+
+@pytest.fixture()
+def router_on() -> Generator[None, None, None]:
+    """Run the test with the client router enabled."""
+    with override_next_settings(ROUTER={"ENABLED": True}):
+        yield
+
+
+@pytest.fixture()
+def fresh_atomic_declarations() -> Generator[None, None, None]:
+    """Start and end the test with no `page.atomic` declarations."""
+    atomic_store.reset()
+    yield
+    atomic_store.reset()
+
+
+@pytest.fixture()
+def layout_pages(tmp_path: Path) -> dict[str, Path]:
+    """Write a page tree under two layouts and return its `page.py` files by name."""
+    return layout_tree(tmp_path / "pages")

@@ -1,5 +1,6 @@
 """The policy deciding once per request how a page delivers its deferred calls."""
 
+import enum
 import functools
 import logging
 import re
@@ -15,9 +16,9 @@ from typing import Final, override
 from django.http import HttpRequest
 
 from next.compression import compression_manager
-from next.conf.defer import defer_count, defer_option
+from next.conf.defer import backend_option, defer_count, defer_option, entry_options
 from next.conf.router import router_enabled
-from next.defer import Delivery
+from next.defer import Delivery, Depth
 from next.pages.responses import shared_render
 from next.partial.headers import accepts_event_stream, partial_intent
 from next.static import ScriptInjectionPolicy, get_static_manager
@@ -45,6 +46,26 @@ _GET: Final = "GET"
 _PREFETCH: Final = "prefetch"
 _AUTO_PER_WORKER: Final = 4
 _STREAMING: Final = "streaming"
+
+
+class DeliveryReason(enum.StrEnum):
+    """The row of the shipped policy and the stream slot check that chose a delivery."""
+
+    HEAD = "head"
+    PREFETCH = "prefetch"
+    STREAM = "stream"
+    METHOD = "method"
+    BOT = "bot"
+    CACHE = "cache"
+    GZIP = "gzip"
+    BUFFERED = "buffered"
+    SYNC_WORKER = "sync-worker"
+    RUNTIME = "runtime"
+    CAPACITY = "capacity"
+    PARTIAL = "partial"
+    OPTION = "option"
+
+
 _INLINE: Final = (
     "A response with deferred boundaries was assembled inline rather than streamed, "
     "reason %s, transport %s. Only the first one is logged, page_stream_declined "
@@ -177,12 +198,7 @@ def streaming() -> Iterator[None]:
 
 @dataclass(frozen=True, slots=True)
 class PageFacts:
-    """What one request tells the policy, read on the thread that runs the view.
-
-    `compression` is the coding the stream goes out in, `buffering` whether a middleware
-    buffers it, `runtime` whether the runtime loads, `capacity` whether a slot is free,
-    and `prefetch` whether the client router asks for the shell alone, no job run.
-    """
+    """What one request tells the policy, read on the thread that runs the view."""
 
     server: Server
     method: str
@@ -202,7 +218,10 @@ class PageFacts:
 
 @dataclass(frozen=True, slots=True)
 class Delivered:
-    """How one response delivers its deferred boundaries, and the row that chose it."""
+    """How one response delivers its deferred boundaries, and the row that chose it.
+
+    A project policy names its own rows, the shipped one a `DeliveryReason`.
+    """
 
     delivery: Delivery
     reason: str
@@ -237,7 +256,7 @@ def page_facts(request: HttpRequest) -> PageFacts:
         is not ScriptInjectionPolicy.DISABLED,
         speculative=_PREFETCH in request.META.get("HTTP_SEC_PURPOSE", ""),
         capacity=open_streams.open < stream_limit(server),
-        prefetch=intent.prefetch and not intent.full and router_enabled(),
+        prefetch=intent.prefetch is Depth.SHELL and router_enabled(),
     )
 
 
@@ -246,10 +265,7 @@ class StreamPolicy(ABC):
 
     def __init__(self, config: Mapping[str, object] | None = None) -> None:
         """Keep the `OPTIONS` of the settings entry."""
-        options = (config or {}).get("OPTIONS")
-        self.options: Mapping[str, object] = (
-            options if isinstance(options, Mapping) else {}
-        )
+        self.options: Mapping[str, object] = entry_options(config)
 
     @abstractmethod
     def delivery(self, request: HttpRequest, facts: PageFacts) -> Delivered:
@@ -282,52 +298,56 @@ class DefaultStreamPolicy(StreamPolicy):
     and so is a partial request whose client reads no `text/event-stream`.
     """
 
-    def _option(self, key: str) -> object:
-        if key in self.options:
-            return self.options[key]
-        return defer_option("POLICY", "OPTIONS", key)
-
     def _bot(self, agent: str) -> bool:
-        pattern = self._option("BOTS")
+        pattern = backend_option(self.options, "POLICY", "BOTS")
         text = pattern if isinstance(pattern, str) and pattern else BOTS
         return bool(agent) and _is_bot(text, agent)
 
-    def _reason(self, facts: PageFacts) -> str | None:
+    def _reason(self, facts: PageFacts) -> DeliveryReason | None:
         """Return why the response is assembled inline, `None` when it streams.
 
         The rows are read in order, so the agent is matched only past the first two.
         """
         if facts.speculative:
-            return _PREFETCH
+            return DeliveryReason.PREFETCH
         if facts.method != _GET:
-            return "method"
+            return DeliveryReason.METHOD
         if self._bot(facts.agent):
-            return "bot"
+            return DeliveryReason.BOT
         rows = (
-            ("cache", facts.shared_cache),
-            ("gzip", facts.compression == "gzip" and facts.buffering),
-            ("buffered", not facts.transport.incremental),
+            (DeliveryReason.CACHE, facts.shared_cache),
+            (DeliveryReason.GZIP, facts.compression == "gzip" and facts.buffering),
+            (DeliveryReason.BUFFERED, not facts.transport.incremental),
             (
-                "sync-worker",
+                DeliveryReason.SYNC_WORKER,
                 not facts.transport.concurrent
-                and self._option("SYNC_WORKERS") == "inline",
+                and backend_option(self.options, "POLICY", "SYNC_WORKERS") == "inline",
             ),
-            ("runtime", not facts.runtime),
-            ("capacity", not facts.capacity),
-            ("partial", facts.partial and not facts.accepts_stream),
-            ("option", self._option("STREAM") is False),
+            (DeliveryReason.RUNTIME, not facts.runtime),
+            (DeliveryReason.CAPACITY, not facts.capacity),
+            (DeliveryReason.PARTIAL, facts.partial and not facts.accepts_stream),
+            (
+                DeliveryReason.OPTION,
+                backend_option(self.options, "POLICY", "STREAM") is False,
+            ),
         )
-        return next((reason for reason, holds in rows if holds), None)
+        for reason, holds in rows:
+            if holds:
+                return reason
+        return None
 
     @override
     def streams_partials(self, request: HttpRequest) -> bool:
         """Return false under `STREAM=False`, behind a buffer or on an inline worker."""
-        if self._option("STREAM") is False:
+        if backend_option(self.options, "POLICY", "STREAM") is False:
             return False
         transport = transported(request)
         if not transport.incremental:
             return False
-        return transport.concurrent or self._option("SYNC_WORKERS") != "inline"
+        return (
+            transport.concurrent
+            or backend_option(self.options, "POLICY", "SYNC_WORKERS") != "inline"
+        )
 
     @override
     def delivery(self, request: HttpRequest, facts: PageFacts) -> Delivered:
@@ -336,12 +356,12 @@ class DefaultStreamPolicy(StreamPolicy):
         A shell prefetch is decided before every other row, so it never opens a stream.
         """
         if facts.method == _HEAD:
-            return Delivered(Delivery.SHELL, "head")
+            return Delivered(Delivery.SHELL, DeliveryReason.HEAD)
         if facts.prefetch:
-            return Delivered(Delivery.PREFETCH, _PREFETCH)
+            return Delivered(Delivery.PREFETCH, DeliveryReason.PREFETCH)
         reason = self._reason(facts)
         if reason is None:
-            return Delivered(Delivery.STREAM, "stream")
+            return Delivered(Delivery.STREAM, DeliveryReason.STREAM)
         return Delivered(Delivery.INLINE, reason)
 
 
@@ -397,6 +417,7 @@ __all__ = [
     "BOTS",
     "DefaultStreamPolicy",
     "Delivered",
+    "DeliveryReason",
     "PageFacts",
     "StreamPolicy",
     "StreamSlot",

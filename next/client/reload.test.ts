@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Captured } from "./boundary";
 import type { LayerStack } from "./layers";
 import { createReload } from "./reload";
 
 let controller: AbortController;
+let fallbacks: WeakMap<Element, string>;
 
 beforeEach(() => {
   controller = new AbortController();
+  fallbacks = new WeakMap();
   vi.useFakeTimers();
   document.head.innerHTML = "";
   document.body.innerHTML = "";
@@ -75,7 +76,10 @@ function harness() {
     for (const el of document.querySelectorAll(selector)) callback(el);
     return () => undefined;
   };
-  createReload({ partial: { layers, onMount } }, { signal: controller.signal });
+  createReload(
+    { partial: { layers, onMount, _fallbacks: fallbacks } },
+    { signal: controller.signal },
+  );
   return { resolveZone };
 }
 
@@ -88,7 +92,7 @@ describe("a zone reload showing loading content", () => {
   }
 
   function live(id: string, html = "<i>wait</i>"): void {
-    (byId(id) as Captured).$l = html;
+    fallbacks.set(byId(id), html);
   }
 
   it("swaps each ready boundary to its loading content once the delay passes", () => {
@@ -296,7 +300,7 @@ describe("a zone reload showing loading content", () => {
     emit("partial:before-apply", { boundaries });
     byId("b-1").setAttribute("data-next-state", "ready");
     byId("b-1").innerHTML = "<p>done</p>";
-    delete (byId("b-4") as Captured).$l;
+    fallbacks.delete(byId("b-4"));
     requested("/list/", "z");
     vi.advanceTimersByTime(150);
     expect(["b-1", "b-2", "b-3", "b-4"].map((id) => byId(id).innerHTML)).toEqual([

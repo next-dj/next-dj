@@ -95,7 +95,7 @@ class TestShapeErrors:
         assert str(excinfo.value) == f"{SOURCE} {excinfo.value.detail}"
 
     def test_shape_error_is_a_type_error(self) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="declares metadata as 'list'"):
             _segment(["x"])
 
 

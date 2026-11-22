@@ -4,17 +4,21 @@ from next.compression import OPT_OUT as COMPRESSION_OPT_OUT
 from next.conf.compression import OPT_OUT
 from next.conf.defaults import DEFAULTS
 from next.conf.router import (
-    CURRENT_SHAPES,
-    SHAPES,
-    Misfit,
+    SHAPE,
+    Eagerness,
+    ForeignMode,
+    InterceptMode,
+    PrefetchMode,
+    PressMode,
+    RouterScope,
     is_simple_selector,
-    misfits,
     read_settings,
     router_enabled,
     router_settings,
     speculation_eagerness,
     speculation_problem,
 )
+from next.conf.shapes import Misfit, Section, misfits
 from next.testing import override_next_settings
 
 
@@ -52,8 +56,18 @@ class TestReadSettings:
         assert current.exclude == ()
 
     def test_the_shapes_cover_every_default_key(self) -> None:
-        assert set(SHAPES) == set(DEFAULTS["ROUTER"])
-        assert set(CURRENT_SHAPES) == set(DEFAULTS["ROUTER"]["CURRENT"])
+        current = SHAPE.keys["CURRENT"]
+        assert isinstance(current, Section)
+        assert set(SHAPE.keys) == set(DEFAULTS["ROUTER"])
+        assert set(current.keys) == set(DEFAULTS["ROUTER"]["CURRENT"])
+
+    def test_the_modes_read_as_their_enums(self) -> None:
+        current = read_settings({"SCOPE": "opt-in", "INTERCEPT": "links"})
+        assert current.scope is RouterScope.OPT_IN
+        assert current.intercept is InterceptMode.LINKS
+        assert current.foreign is ForeignMode.HARD
+        assert current.prefetch is PrefetchMode.INTENT
+        assert current.press is PressMode.MOUSE
 
     def test_written_values_are_read_and_misfits_dropped(self) -> None:
         current = read_settings(
@@ -100,7 +114,7 @@ class TestMisfits:
     """Every unknown key and value outside its shape is named with its path."""
 
     def test_a_clean_scope(self) -> None:
-        assert misfits(DEFAULTS["ROUTER"]) == []
+        assert misfits(DEFAULTS["ROUTER"], SHAPE) == []
 
     def test_every_misfit(self) -> None:
         found = misfits(
@@ -114,9 +128,12 @@ class TestMisfits:
                 "EXCLUDE": ["files/"],
                 "SPECULATION": 3,
                 "CURRENT": {"CONTAINERS": ["nav a"], "EXTRA": True},
-            }
+            },
+            SHAPE,
         )
-        assert Misfit((), unknown=("BOGUS",)) in found
+        assert (
+            Misfit((), unknown=("BOGUS",), allowed=tuple(sorted(SHAPE.keys))) in found
+        )
         assert Misfit(("SCOPE",), "'all' or 'opt-in'", "'some'") in found
         assert Misfit(("PREFETCH_DELAY",), "a number of seconds above 0", "0") in found
         assert Misfit(("PROGRESS",), "True or False", "'on'") in found
@@ -127,14 +144,14 @@ class TestMisfits:
         )
         paths = {misfit.path for misfit in found}
         assert {("EXCLUDE",), ("SPECULATION",), ("CURRENT", "CONTAINERS")} <= paths
-        assert Misfit(("CURRENT",), unknown=("EXTRA",)) in found
+        assert ("CURRENT",) in {m.path for m in found if m.unknown == ("EXTRA",)}
 
     def test_a_bool_current_fits(self) -> None:
-        assert misfits({"CURRENT": False}) == []
-        assert misfits({"CURRENT": True}) == []
+        assert misfits({"CURRENT": False}, SHAPE) == []
+        assert misfits({"CURRENT": True}, SHAPE) == []
 
     def test_a_current_that_is_no_mapping(self) -> None:
-        assert misfits({"CURRENT": "off"}) == [
+        assert misfits({"CURRENT": "off"}, SHAPE) == [
             Misfit(("CURRENT",), "True, False or a dict", "'off'")
         ]
 
@@ -167,7 +184,7 @@ class TestMisfits:
 
     def test_a_bool_is_no_count(self) -> None:
         assert Misfit(("SNAPSHOTS",), "an integer from 1", "True") in misfits(
-            {"SNAPSHOTS": True, "PREFETCH_TTL": True}
+            {"SNAPSHOTS": True, "PREFETCH_TTL": True}, SHAPE
         )
 
 
@@ -187,7 +204,9 @@ class TestSpeculation:
         ids=repr,
     )
     def test_the_eagerness(self, value: object, eagerness: str | None) -> None:
-        assert speculation_eagerness(value) == eagerness
+        found = speculation_eagerness(value)
+        assert found == eagerness
+        assert found is None or isinstance(found, Eagerness)
 
     @pytest.mark.parametrize(
         ("value", "problem"),

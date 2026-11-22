@@ -6,20 +6,26 @@ from io import StringIO
 import pytest
 from catalog import services as catalog_services
 from catalog.demo import CATEGORIES
+from catalog.deps import product_cards
 from catalog.landing import FAQ, LEAD_ZONE
 from catalog.models import Category, Lead, Product
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
 from django.core.checks import run_checks
 from django.core.management import call_command
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from next.testing import (
     NextClient,
     assert_metadata,
+    boundary_errors,
+    boundary_gate,
     envelope_of,
     find_anchor,
     find_form,
     init_payload,
+    parallel_boundaries,
     parse_sitemap,
 )
 
@@ -268,6 +274,80 @@ class TestActiveFilterChip:
         assert "data-active-filter" not in body
 
 
+PRODUCT_URL = "/catalog/clothing/item-07/"
+
+
+def _picks(by: str) -> list[int]:
+    """Return the keys the rail `by` picks beside the product of `PRODUCT_URL`."""
+    product = Product.objects.get(slug="item-07")
+    return list(Product.objects.picks_for(product, by=by))
+
+
+@pytest.fixture()
+def batches(monkeypatch) -> list[list[int]]:
+    """Record the keys of every call the product loader makes to its batch."""
+    calls: list[list[int]] = []
+    batch = product_cards.batch
+
+    def recorded(keys):
+        calls.append(sorted(keys))
+        return batch(keys)
+
+    monkeypatch.setattr(product_cards, "batch", recorded)
+    return calls
+
+
+class TestProductRails:
+    """Two rails stream in beside the product and load their cards through one batch."""
+
+    def test_the_shell_ships_a_skeleton_per_rail(self, next_client, demo_data) -> None:
+        streamed = next_client.get_stream(PRODUCT_URL)
+        assert streamed.shell.count("data-rail-skeleton") == 2
+        assert "Loading At a similar price" in streamed.shell
+        assert "data-product-card" not in streamed.shell
+
+    def test_each_rail_settles_in_a_chunk_of_its_own(
+        self, next_client, demo_data
+    ) -> None:
+        streamed = next_client.get_stream(PRODUCT_URL)
+        assert [chunk.state for chunk in streamed.chunks] == ["ready", "ready"]
+        final = streamed.final_html()
+        assert 'data-rail="price"' in final
+        assert 'data-rail="category"' in final
+        shown = len(_picks("price")) + len(_picks("category"))
+        assert final.count("data-product-card") == shown
+
+    def test_a_rail_past_its_timeout_gives_way_to_its_error_ui(
+        self, next_client, demo_data
+    ) -> None:
+        with boundary_errors("render"), boundary_gate(component="rail"):
+            streamed = next_client.get_stream(PRODUCT_URL)
+        assert [chunk.kind for chunk in streamed.chunks] == ["timeout", "timeout"]
+        final = streamed.final_html()
+        assert final.count("These picks took too long to find") == 2
+        assert "data-next-retry" in final
+        assert "data-product-card" not in final
+
+    def test_a_rail_with_nothing_in_stock_says_so(self, next_client, demo_data) -> None:
+        Product.objects.exclude(slug="item-07").update(in_stock=False)
+        body = next_client.get(PRODUCT_URL).content.decode()
+        assert body.count("Nothing else in stock yet.") == 2
+
+    @pytest.mark.django_db(transaction=True)
+    def test_the_rails_on_the_pool_share_one_batch(
+        self, next_client, demo_data, batches
+    ) -> None:
+        with parallel_boundaries():
+            next_client.get_stream(PRODUCT_URL)
+        assert batches == [sorted(set(_picks("price")) | set(_picks("category")))]
+
+    def test_the_rails_on_the_request_thread_load_one_after_the_other(
+        self, next_client, demo_data, batches
+    ) -> None:
+        next_client.get(PRODUCT_URL)
+        assert batches == [sorted(_picks("category")), sorted(_picks("price"))]
+
+
 class TestInheritContext:
     """Cover the `inherit_context=True` pathway."""
 
@@ -281,7 +361,7 @@ class TestInheritContext:
 
 
 class TestCacheHit:
-    """Cover the LocMem cache hit path of `cached_search`."""
+    """Cover the LocMem cache hit path of `cached_count`."""
 
     def test_two_identical_requests_share_one_cache_key(
         self, next_client, demo_data
@@ -302,10 +382,20 @@ class TestCacheHit:
     def test_every_window_of_a_search_shares_one_cache_entry(
         self, next_client, demo_data
     ) -> None:
-        """Cut each page and each restored window from the rows one entry holds."""
-        for query in ("", "?page=2", "?page=3&restore=1", "?page=999"):
+        """Count a search once for each page, each restored window and each sort."""
+        for query in ("", "?page=2", "?page=3&restore=1", "?page=999", "?sort=name"):
             next_client.get(f"/catalog/{query}")
         assert len(_cache_keys()) == 1
+
+    def test_a_window_reads_only_its_own_rows(self, next_client, demo_data) -> None:
+        """Read one page through `LIMIT` once the count sits in the cache."""
+        next_client.get("/catalog/electronics/")
+        with CaptureQueriesContext(connection) as captured:
+            next_client.get("/catalog/electronics/?page=2")
+        reads = [q["sql"] for q in captured if 'FROM "catalog_product"' in q["sql"]]
+        listing = [sql for sql in reads if "LIMIT 7 OFFSET 6" in sql]
+        assert len(listing) == 1
+        assert not [sql for sql in reads if "COUNT(" in sql]
 
 
 class TestResultsZone:
@@ -615,7 +705,7 @@ class TestFilterZoneScope:
 
 
 class TestCategoryPager:
-    """A category listing pages through a Django `Paginator` over the cached rows."""
+    """A category listing pages through the same `NumberPager` with plain links."""
 
     def test_the_first_page_links_forward_only(self, next_client, demo_data) -> None:
         body = next_client.get("/catalog/electronics/").content.decode()
@@ -638,10 +728,14 @@ class TestCategoryPager:
         body = next_client.get("/catalog/electronics/?sort=name").content.decode()
         assert find_anchor(body, href="?sort=name&page=2", text="Next")
 
-    def test_per_page_resizes_the_pages(self, next_client, demo_data) -> None:
-        body = next_client.get("/catalog/electronics/?per_page=3").content.decode()
-        assert "Page 1 of 3" in body
-        assert len(_slug_set(body)) == 3
+    def test_a_page_past_the_last_shows_no_rows_and_no_position(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/electronics/?page=9").content.decode()
+        assert not _slug_set(body)
+        assert "Page " not in body
+        with pytest.raises(LookupError):
+            find_anchor(body, text="Next")
 
 
 class TestWindowedListing:

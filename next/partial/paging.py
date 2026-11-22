@@ -7,9 +7,18 @@ from abc import ABC, abstractmethod
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import UTC, datetime, time, tzinfo
 from functools import partial
-from typing import TYPE_CHECKING, Annotated, Any, Final, get_args, get_origin, override
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Final,
+    get_args,
+    get_origin,
+    overload,
+    override,
+)
 
 from django.conf import settings
 from django.core.exceptions import (
@@ -18,6 +27,7 @@ from django.core.exceptions import (
     ValidationError,
 )
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import connections
 from django.db.models import Field, Model, Q, QuerySet
 from django.http import HttpRequest
 from django.utils import timezone
@@ -46,7 +56,7 @@ _DIGITS: Final = re.compile(r"[0-9]+")
 _MAX_DIGITS: Final = 19
 _MAX_OFFSET: Final = 2**63 - 2
 
-type Rows[T] = QuerySet[Any, T] | Sequence[T]
+type PagedRows[T] = QuerySet[Any, T] | Sequence[T]
 type _Finish[T] = Callable[[list[list[T]], int | None], Window[T]]
 type _Order = tuple[tuple[str, bool], ...]
 
@@ -83,6 +93,20 @@ class Window[T]:
         """Return how many rows the window holds."""
         return len(self.rows)
 
+    @overload
+    def __getitem__(self, index: int) -> T: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> Sequence[T]: ...
+
+    def __getitem__(self, index: int | slice) -> T | Sequence[T]:
+        """Return a row or a slice of the rows, so `first`, `last` and `slice` work."""
+        return self.rows[index]
+
+    def __reversed__(self) -> Iterator[T]:
+        """Iterate the rows backwards, so a template loops over them reversed."""
+        return reversed(self.rows)
+
 
 def _query(request: HttpRequest | None, param: str) -> tuple[str | None, bool]:
     """Return the raw token the request names under `param` and its restore flag."""
@@ -92,32 +116,32 @@ def _query(request: HttpRequest | None, param: str) -> tuple[str | None, bool]:
     return query.get(param), query.get(RESTORE_PARAM) == _RESTORED
 
 
-async def _alist[T](rows: Rows[T]) -> list[T]:
+async def _alist[T](rows: PagedRows[T]) -> list[T]:
     """Return the rows of a slice, a queryset read through its async iterator."""
     if isinstance(rows, QuerySet):
         return [row async for row in rows]
     return list(rows)
 
 
-def _count[T](rows: Rows[T]) -> int:
+def _count[T](rows: PagedRows[T]) -> int:
     """Return how many rows the source holds."""
     return rows.count() if isinstance(rows, QuerySet) else len(rows)
 
 
-async def _acount[T](rows: Rows[T]) -> int:
+async def _acount[T](rows: PagedRows[T]) -> int:
     """Return how many rows the source holds, a queryset counted without blocking."""
     return await rows.acount() if isinstance(rows, QuerySet) else len(rows)
 
 
 @dataclass(frozen=True, slots=True)
-class _Plan[T]:
+class Plan[T]:
     """The bounded slices one window reads and the step that builds it from them.
 
     Planning reads nothing, so the sync and the async path share every decision.
     """
 
-    slices: tuple[Rows[T], ...]
-    total: Rows[T] | None
+    slices: tuple[PagedRows[T], ...]
+    total: PagedRows[T] | None
     finish: _Finish[T]
 
     def run(self) -> Window[T]:
@@ -157,12 +181,18 @@ class Pager(ABC):
         self.count = count
 
     @abstractmethod
-    def window[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-        """Return the window of `rows` the request asks for, read synchronously."""
+    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
+        """Return the slices the window of `rows` the request asks for reads."""
 
-    @abstractmethod
-    async def awindow[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
+    def window[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Window[T]:
+        """Return the window of `rows` the request asks for, read synchronously."""
+        return self.plan(rows, request).run()
+
+    async def awindow[T](
+        self, rows: PagedRows[T], request: HttpRequest | None
+    ) -> Window[T]:
         """Return the window of `rows` the request asks for, a queryset awaited."""
+        return await self.plan(rows, request).arun()
 
 
 class NumberPager(Pager):
@@ -188,7 +218,8 @@ class NumberPager(Pager):
         number = int(raw)
         return number if 1 <= number <= self._ceiling else 1
 
-    def _plan[T](self, rows: Rows[T], request: HttpRequest | None) -> _Plan[T]:
+    @override
+    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
         """Return the one slice a run of pages reads, one row past its end."""
         raw, restore = _query(request, self.param)
         last = self._number(raw)
@@ -199,7 +230,7 @@ class NumberPager(Pager):
         part = rows[(first - 1) * per_page : last * per_page + 1]
         total = rows if self.count else None
         finish: _Finish[T] = partial(self._finish, first, last)
-        return _Plan((part,), total, finish)
+        return Plan((part,), total, finish)
 
     def _finish[T](
         self, first: int, last: int, fetched: list[list[T]], count: int | None
@@ -220,16 +251,6 @@ class NumberPager(Pager):
             backs=tuple(str(number) for number in range(first, end)),
             count=count,
         )
-
-    @override
-    def window[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-        """Return the page or the restored run of pages the request names."""
-        return self._plan(rows, request).run()
-
-    @override
-    async def awindow[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-        """Return the page or the restored run of pages, a queryset awaited."""
-        return await self._plan(rows, request).arun()
 
 
 class _PositionEncoder(DjangoJSONEncoder):
@@ -383,27 +404,39 @@ def _storable(value: object) -> bool:
     """Return whether a converted value is one a non-null column holds and compares."""
     if isinstance(value, str):
         return "\x00" not in value
+    if isinstance(value, float):
+        return math.isfinite(value)
     if isinstance(value, datetime):
         return timezone.is_aware(value) == settings.USE_TZ
     return value is not None
 
 
 def _typed(
-    columns: tuple[_Column, ...], raw: tuple[object, ...]
+    columns: tuple[_Column, ...], raw: tuple[object, ...], zone: tzinfo | None
 ) -> tuple[Any, ...] | None:
-    """Return the token values converted by their fields, `None` when one is refused."""
+    """Return the token values converted by their fields, `None` when one is refused.
+
+    An aware datetime moves into the database zone, so one that overflows is refused.
+    """
     values: list[object] = []
     for column, value in zip(columns, raw, strict=True):
         field = column.field
         try:
             typed = field.to_python(value)
             field.run_validators(typed)
-        except (ValidationError, TypeError, ValueError):
+            if isinstance(typed, datetime) and timezone.is_aware(typed):
+                typed = typed.astimezone(zone)
+        except (ValidationError, TypeError, ValueError, OverflowError):
             return None
         if not _storable(typed):
             return None
         values.append(typed)
     return tuple(values)
+
+
+def _zone[T](rows: PagedRows[T]) -> tzinfo | None:
+    """Return the zone the database of a queryset reads datetimes in, UTC in memory."""
+    return connections[rows.db].timezone if isinstance(rows, QuerySet) else UTC
 
 
 def _seek_filter(
@@ -431,7 +464,7 @@ def _seek_filter(
     return chain
 
 
-def _head[T](rows: Rows[T], shape: _Shape, limit: int) -> Rows[T]:
+def _head[T](rows: PagedRows[T], shape: _Shape, limit: int) -> PagedRows[T]:
     """Return the first `limit` rows under the ordering."""
     if isinstance(rows, QuerySet):
         return rows.order_by(*shape.forward)[:limit]
@@ -439,14 +472,14 @@ def _head[T](rows: Rows[T], shape: _Shape, limit: int) -> Rows[T]:
 
 
 def _seek[T](
-    rows: Rows[T],
+    rows: PagedRows[T],
     shape: _Shape,
     values: tuple[Any, ...],
     *,
     backward: bool,
     limit: int,
     inclusive: bool = False,
-) -> Rows[T]:
+) -> PagedRows[T]:
     """Return up to `limit` rows past a position, nearest first.
 
     A queryset is filtered and ordered, a sequence already in the ordering bisected.
@@ -528,16 +561,6 @@ class KeysetPager(Pager):
             return None
         return reverse, tuple(values)
 
-    @override
-    def window[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-        """Return the batch the token of the request names, or the first batch."""
-        return self._plan(rows, request).run()
-
-    @override
-    async def awindow[T](self, rows: Rows[T], request: HttpRequest | None) -> Window[T]:
-        """Return the batch the token of the request names, a queryset awaited."""
-        return await self._plan(rows, request).arun()
-
     def _shape(self, model: type[Model]) -> _Shape:
         """Return the ordering settled against `model`, checked once per model."""
         shape = self._shapes.get(model)
@@ -561,49 +584,52 @@ class KeysetPager(Pager):
         """Return the token of the position of `row`."""
         return self._sealed(shape.values(row), reverse=reverse)
 
-    def _position(self, raw: str, shape: _Shape) -> tuple[bool, tuple[Any, ...]] | None:
+    def _position(
+        self, raw: str, shape: _Shape, zone: tzinfo | None
+    ) -> tuple[bool, tuple[Any, ...]] | None:
         """Return the direction and the typed position of a token, `None` if refused."""
         if len(raw) > self.max_token:
             return None
         decoded = self.decode(raw)
         if decoded is None or len(decoded[1]) != len(shape.columns):
             return None
-        values = _typed(shape.columns, decoded[1])
+        values = _typed(shape.columns, decoded[1], zone)
         return None if values is None else (decoded[0], values)
 
-    def _plan[T](self, rows: Rows[T], request: HttpRequest | None) -> _Plan[T]:
-        """Return the bounded slices the window reads and the step that builds it."""
+    @override
+    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
+        """Return the slices the batch the token names reads, or the first batch."""
         total = rows if self.count else None
         if isinstance(rows, QuerySet):
             model: type[Model] = rows.model
         elif rows:
             model = _model_of(rows[0])
         else:
-            return _Plan((), total, self._empty)
+            return Plan((), total, self._empty)
         shape = self._shape(model)
         raw, restore = _query(request, self.param)
-        position = None if raw is None else self._position(raw, shape)
+        position = None if raw is None else self._position(raw, shape, _zone(rows))
         per_page = self.per_page
         finish: _Finish[T]
         if position is None:
             finish = partial(self._first, shape)
-            return _Plan((_head(rows, shape, per_page + 1),), total, finish)
+            return Plan((_head(rows, shape, per_page + 1),), total, finish)
         reverse, values = position
         reach = defer_count("MORE", "MAX_RESTORE") if restore else 1
         if reverse:
             limit = reach * per_page
             part = _seek(rows, shape, values, backward=True, limit=limit + 1)
             finish = partial(self._backward, shape, values, limit)
-            return _Plan((part,), total, finish)
+            return Plan((part,), total, finish)
         after = _seek(rows, shape, values, backward=False, limit=per_page + 1)
         if reach == 1:
-            return _Plan((after,), total, partial(self._forward, shape))
+            return Plan((after,), total, partial(self._forward, shape))
         limit = (reach - 1) * per_page
         before = _seek(
             rows, shape, values, backward=True, inclusive=True, limit=limit + 1
         )
         finish = partial(self._restored, shape, limit)
-        return _Plan((after, before), total, finish)
+        return Plan((after, before), total, finish)
 
     def _empty[T](self, _fetched: list[list[T]], count: int | None) -> Window[T]:
         """Return the window of a source with no row."""
@@ -724,11 +750,11 @@ class Paging:
     pager: Pager
     request: HttpRequest | None
 
-    def paginate[T](self, rows: Rows[T]) -> Window[T]:
+    def paginate[T](self, rows: PagedRows[T]) -> Window[T]:
         """Return the window of `rows` the request asks for."""
         return self.pager.window(rows, self.request)
 
-    async def apaginate[T](self, rows: Rows[T]) -> Window[T]:
+    async def apaginate[T](self, rows: PagedRows[T]) -> Window[T]:
         """Return the window of `rows` the request asks for, a queryset awaited."""
         return await self.pager.awindow(rows, self.request)
 
@@ -795,10 +821,11 @@ __all__ = [
     "RESTORE_PARAM",
     "KeysetPager",
     "NumberPager",
+    "PagedRows",
     "Pager",
     "Paging",
     "PagingProvider",
-    "Rows",
+    "Plan",
     "Window",
     "pager_of",
     "valid_param",

@@ -10,6 +10,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
+from django.template import Context
+
+from next.seeding import COLLECTOR_KEY
+
 from .assets import StaticAsset, default_kinds
 from .runtime import BUNDLE_NOTE, DECLARED_CHUNK_KEYS, URGENT_NOTE
 from .serializers import JsContextSerializer, resolve_serializer
@@ -546,3 +550,15 @@ class StaticCollector:
             key: json.loads(self._encoded_fragment(key, value, default))
             for key, value in self._js_context.items()
         }
+
+
+def require_bundle(
+    target: Context | StaticCollector | None, name: str, *, urgent: bool = False
+) -> None:
+    """Record on the collector of `target` that the render needs the bundle `name`.
+
+    A render without a collector, such as a bare template render, records nothing.
+    """
+    collector = target.get(COLLECTOR_KEY) if isinstance(target, Context) else target
+    if isinstance(collector, StaticCollector):
+        collector.require(name, urgent=urgent)

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Iterator
 from contextlib import aclosing
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Final, override
 
 from django.utils.cache import patch_vary_headers
@@ -14,7 +13,7 @@ from django.utils.cache import patch_vary_headers
 from next.compression import OPT_OUT, prepare_stream
 from next.defer import ErrorKind
 from next.partial import keys
-from next.partial.sse import PatchStreamWriter
+from next.partial.sse import EventWriter
 from next.partial.stream import (
     END_EVENT,
     HELLO_EVENT,
@@ -23,17 +22,16 @@ from next.partial.stream import (
     StreamHello,
     StreamPatch,
 )
-from next.suspense.response import Admitted, Lifetime
+from next.suspense.response import Lifetime, StreamGrant
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
     from django.http import HttpRequest
 
     from next.compression import StreamEncoding
     from next.partial.envelope import Envelope
-    from next.partial.sse import EventItem, PatchSource
     from next.suspense.response import Batches, Payloads, Piece
 
 
@@ -74,17 +72,10 @@ def frame(event: str, data: Mapping[str, object]) -> bytes:
     return f"event: {event}\ndata: {payload}\n\n".encode()
 
 
-@dataclass(frozen=True, slots=True)
-class _Frames(StreamPatch):
-    """The `patch` frames of one batch, serialised where a failure is contained."""
-
-    frames: bytes = b""
+type _Item = bytes | None
 
 
-type _Item = _Frames | None
-
-
-class PartialStream(PatchStreamWriter):
+class PartialStream(EventWriter[bytes]):
     """A partial response sent as its envelope, a frame per settled boundary, its end.
 
     It is read once, so it writes no `id:` and no `retry:` field.
@@ -100,7 +91,7 @@ class PartialStream(PatchStreamWriter):
         payloads: Payloads,
         *,
         deadline: float,
-        admitted: Admitted | None = None,
+        grant: StreamGrant | None = None,
         compress: bool = True,
     ) -> None:
         """Build the opening frames, then hold the jobs and settle headers and coding.
@@ -112,7 +103,7 @@ class PartialStream(PatchStreamWriter):
         self._payloads = payloads
         self._deadline = deadline
         self._life = Lifetime(
-            request, batches, admitted or Admitted(), sender=PartialStream, partial=True
+            request, batches, grant or StreamGrant(), sender=PartialStream, partial=True
         )
         self._complete = False
         self._timed_out = False
@@ -157,7 +148,7 @@ class PartialStream(PatchStreamWriter):
 
     @override
     def _build_content(
-        self, source: PatchSource
+        self, source: Iterable[bytes | None] | AsyncIterable[bytes | None]
     ) -> Iterator[bytes] | AsyncGenerator[bytes, None]:
         """Return the frames of the writer, each compressed when a coding was agreed."""
         content = super()._build_content(source)
@@ -186,16 +177,14 @@ class PartialStream(PatchStreamWriter):
                 yield chunk
 
     @override
+    def _event_frame(self, item: bytes) -> bytes:
+        """Return the frames of one batch, serialised where a failure is contained."""
+        return item
+
+    @override
     def _opening_frame(self) -> bytes:
         """Return the hello and the envelope the view already serialised."""
         return self._opening
-
-    @override
-    def _event_frame(self, item: EventItem) -> bytes:
-        """Serialize a frame of the partial wire, any other item as the writer does."""
-        if isinstance(item, _Frames):
-            return item.frames
-        return super()._event_frame(item)
 
     @override
     def _announce_opened(self) -> None:
@@ -210,13 +199,11 @@ class PartialStream(PatchStreamWriter):
     @override
     def _announce_closed(self, sent: int) -> None:
         """End the stream once, aborted unless its end frame was written."""
-        del sent
         self._life.end(aborted=not self._complete)
 
     @override
     async def _aannounce_closed(self, sent: int) -> None:
         """End the stream once from the server loop."""
-        del sent
         await self._life.aend(aborted=not self._complete)
 
     def _items(self) -> Iterator[_Item]:
@@ -227,13 +214,13 @@ class PartialStream(PatchStreamWriter):
         runs = self._batches.run(idle=self._heartbeat_seconds)
         try:
             while (frames := self._next(runs)) is not None:
-                yield _Frames({}, frames) if frames else None
+                yield frames or None
         finally:
             runs.close()
         life = self._life
         life.released()
         owed = life.owed(self._frame) if life.broken else b""
-        yield _Frames({}, owed + self._end())
+        yield owed + self._end()
         self._complete = True
 
     async def _aitems(self) -> AsyncIterator[_Item]:
@@ -241,13 +228,13 @@ class PartialStream(PatchStreamWriter):
         runs = self._batches.arun()
         try:
             while (frames := await self._anext(runs)) is not None:
-                yield _Frames({}, frames)
+                yield frames
         finally:
             await runs.aclose()
         life = self._life
         await life.areleased()
         owed = await life.aowed(self._frame) if life.broken else b""
-        yield _Frames({}, owed + self._end())
+        yield owed + self._end()
         self._complete = True
 
     def _next(self, runs: Iterator[tuple[Piece, ...]]) -> bytes | None:
@@ -274,7 +261,7 @@ class PartialStream(PatchStreamWriter):
 
     def _frame(self, piece: Piece) -> bytes:
         """Return the `patch` frame of one settled piece."""
-        return frame(PATCH_EVENT, self._payloads.written(piece))
+        return frame(PATCH_EVENT, self._payloads.payload(piece))
 
     def _count(self, pieces: tuple[Piece, ...]) -> None:
         """Count one batch, noting whether a boundary of it timed out."""
@@ -283,7 +270,7 @@ class PartialStream(PatchStreamWriter):
         self._timed_out = self._timed_out or timed_out
 
     def _end(self) -> bytes:
-        """Return the `end` frame, after the error frames a failure left owed."""
+        """Return the `end` frame of the stream."""
         return frame(END_EVENT, StreamEnd(self._code()).as_dict())
 
     def _code(self) -> str:

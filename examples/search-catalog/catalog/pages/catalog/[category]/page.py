@@ -1,12 +1,14 @@
-from catalog.deps import DFilters, DPage
-from catalog.models import Category
-from catalog.services import brands, cached_search
+from typing import Annotated
+
+from catalog.deps import DFilters, listing
+from catalog.models import Category, Product
+from catalog.services import brands, cached_count, search
 from catalog.zones import CATEGORY_ZONES, zone_target
-from django.core.paginator import Page, Paginator
 from django.shortcuts import get_object_or_404
 
 from next import context, page
 from next.pages import MetadataDict
+from next.partial import Paging, Window
 
 
 @context("filter_zones")
@@ -30,11 +32,18 @@ def category_meta(category: Category) -> MetadataDict:
     return {"title": category.name}
 
 
-@context("page_obj")
-def page_obj(category: Category, filters: DFilters, page: DPage) -> Page:
-    """Return the page of the cached search scoped to the current category."""
-    rows = cached_search(filters, category=category)
-    return Paginator(rows, page.per_page).get_page(page.number)
+@context("products")
+def products(
+    category: Category, filters: DFilters, page: Annotated[Paging, listing]
+) -> Window[Product]:
+    """Return the page of the search scoped to the current category."""
+    return page.paginate(search(filters, category=category))
+
+
+@context("total")
+def total(category: Category, filters: DFilters) -> int:
+    """Return how many products of the category the search selects."""
+    return cached_count(filters, category=category)
 
 
 @context("all_brands")

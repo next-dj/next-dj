@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
@@ -10,9 +10,14 @@ from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, re
 from next.checks import NEXT
 
 from .defaults import USER_SETTING
-from .defer import SCOPE as DEFER_SCOPE, Misfit, long_token_age, misfits
 from .merge import OPTIONAL_STR_KEYS, UNSET, accepted_value
 from .settings import NextFrameworkSettings
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from .shapes import Misfit
 
 
 def errors_for_unknown_keys(
@@ -22,15 +27,20 @@ def errors_for_unknown_keys(
     unknown = sorted(k for k in config if k not in allowed)
     if not unknown:
         return []
-    unknown_fmt = ", ".join(repr(k) for k in unknown)
-    allowed_fmt = ", ".join(sorted(allowed))
-    return [
-        Error(
-            f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
-            obj=settings,
-            id="next.E035",
-        )
-    ]
+    return [_unknown_keys_error(prefix, unknown, sorted(allowed))]
+
+
+def _unknown_keys_error(
+    prefix: str, unknown: Iterable[object], allowed: Iterable[str]
+) -> CheckMessage:
+    """Build the `next.E035` error naming the unknown keys and the allowed ones."""
+    unknown_fmt = ", ".join(repr(key) for key in unknown)
+    allowed_fmt = ", ".join(allowed)
+    return Error(
+        f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
+        obj=settings,
+        id="next.E035",
+    )
 
 
 @register(NEXT)
@@ -149,6 +159,14 @@ def error_for_wrong_shape(prefix: str, expected: str, found: str) -> CheckMessag
     )
 
 
+def error_for_misfit(prefix: str, misfit: Misfit) -> CheckMessage:
+    """Return the `next.E035` or `next.E076` error for one misfit below `prefix`."""
+    where = prefix + "".join(f"[{key!r}]" for key in misfit.path)
+    if misfit.unknown:
+        return _unknown_keys_error(where, misfit.unknown, misfit.allowed)
+    return error_for_wrong_shape(where, misfit.expected, misfit.found)
+
+
 def error_for_unusable_path(
     prefix: str, dotted: str, problem: str, consequence: str, hint: str
 ) -> CheckMessage:
@@ -161,92 +179,11 @@ def error_for_unusable_path(
     )
 
 
-def error_for_unusable_seam(
-    prefix: str, dotted: str, problem: str, consequence: str, hint: str
-) -> CheckMessage:
-    """Return the `next.E237` error for a router or transaction path that names nothing.
-
-    The router seams and the transaction rule share it, so the id lives in one place.
-    """
-    return Error(
-        f"{prefix} {dotted!r} {problem}, so {consequence}.",
-        hint=hint,
-        obj=settings,
-        id="next.E237",
-    )
-
-
-_TOKEN_KEYS: Final = ("TOKENS", "OPTIONS", "KEYS")
-_TOKEN_LIFETIME: Final = frozenset(
-    {("TOKENS", "OPTIONS", "MAX_AGE"), ("TOKENS", "OPTIONS", "BUCKET")}
-)
-
-
-def _token_error(prefix: str, misfit: Misfit) -> CheckMessage:
-    """Build the `next.E233` error for a token key or lifetime outside its shape."""
-    if misfit.path == _TOKEN_KEYS:
-        why = "A short key lets anyone forge reload tokens"
-        hint = "Generate each key with secrets.token_urlsafe(32) or drop KEYS."
-    else:
-        why = "A token whose bucket reaches its lifetime is born expired"
-        hint = "Keep MAX_AGE from 1 and BUCKET below MAX_AGE, or drop BUCKET."
-    return Error(
-        f"{prefix} must be {misfit.expected}, got {misfit.found}. {why}, so the "
-        "framework ignores this value and keeps its default.",
-        hint=hint,
-        obj=settings,
-        id="next.E233",
-    )
-
-
-def _defer_message(misfit: Misfit) -> CheckMessage:
-    """Build the `next.E035`, `next.E076` or `next.E233` error for a `DEFER` misfit."""
-    where = "".join(f"[{key!r}]" for key in (DEFER_SCOPE, *misfit.path))
-    prefix = f"NEXT_FRAMEWORK{where}"
-    if misfit.path == _TOKEN_KEYS or misfit.path in _TOKEN_LIFETIME:
-        return _token_error(prefix, misfit)
-    if misfit.unknown:
-        unknown = ", ".join(repr(key) for key in misfit.unknown)
-        return Error(
-            f"{prefix} has unknown keys {unknown}. Allowed keys are "
-            f"{', '.join(misfit.allowed)}.",
-            obj=settings,
-            id="next.E035",
-        )
-    return error_for_wrong_shape(prefix, misfit.expected, misfit.found)
-
-
-@register(NEXT)
-def check_defer_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Validate the keys and the value shapes of the `DEFER` scope, at every level.
-
-    The `OPTIONS` of a backend other than the shipped one belong to that backend.
-    """
-    raw = getattr(settings, USER_SETTING, None)
-    scope = raw.get(DEFER_SCOPE) if isinstance(raw, dict) else None
-    if not isinstance(scope, dict):
-        return []
-    messages = [_defer_message(misfit) for misfit in misfits(scope)]
-    age = long_token_age(scope)
-    if age is not None:
-        messages.append(
-            DjangoWarning(
-                f"NEXT_FRAMEWORK['DEFER']['TOKENS']['OPTIONS']['MAX_AGE'] is {age} "
-                "seconds, above one day. A leaked reload token stays usable that long.",
-                hint="Keep MAX_AGE at 86400 or below.",
-                obj=settings,
-                id="next.W175",
-            )
-        )
-    return messages
-
-
 __all__ = [
-    "check_defer_settings",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
+    "error_for_misfit",
     "error_for_unusable_path",
-    "error_for_unusable_seam",
     "error_for_wrong_shape",
     "errors_for_unknown_keys",
 ]

@@ -1,22 +1,38 @@
 import { defaultRouterHost } from "./adapters";
-import type { BeforeApply, Envelope, Target } from "./apply";
-import { CHUNK_TIMEOUT } from "./chunks";
+import type {
+  BeforeApply,
+  ContextPatch,
+  Envelope,
+  LayerOpenPatch,
+  MorphPatch,
+  Target,
+  UrlPatch,
+  VisitPatch,
+} from "./apply";
+import { CHUNK_ATTEMPTS, appendScript } from "./chunks";
 import type { ScriptsChunk } from "./chunks";
 import { isPlainActivation } from "./events";
+import { locate } from "./layout";
+import type { Layout } from "./layout";
 import { between } from "./morph";
 import type { Bounds } from "./morph";
 import type { PartialSurface } from "./partial";
 import {
   CONTENT_TYPE,
   EVENT_STREAM,
+  HEADER_LAYOUTS,
+  HEADER_NAVIGATE,
   HEADER_ORIGIN,
   STREAM_ACCEPT,
+  bare,
   blank,
   isRecord,
+  mime,
+  says,
+  uid,
 } from "./protocol";
+import type { PartialError } from "./protocol";
 import type { Outcome } from "./wire";
-
-export type Layout = [id: string, digest: string, seal: string];
 
 export interface Entry {
   next: 1;
@@ -66,11 +82,16 @@ export interface Settings {
   type?: string;
 }
 
+/** A request already on its way for a page, its answer never rejecting. */
+export interface Flight {
+  answer: Promise<Response | undefined>;
+  stop: () => void;
+}
+
 export interface Prefetched {
   raw?: Record<string, unknown> | undefined;
   response?: Response | undefined;
-  flight?: Promise<Response | undefined> | undefined;
-  stop?: (() => void) | undefined;
+  flight?: Flight | undefined;
 }
 
 export interface Turn {
@@ -101,13 +122,13 @@ export interface HistoryHost {
 
 export interface Keeper {
   leave(key: string, target?: Target): void;
-  pop(from: string, to: string, keep: boolean, owner: string): number;
+  pop(from: string, to: string, keep: boolean, owner: string): number | undefined;
   place(key: string): boolean;
   top(hash: string): boolean;
   flush(): void;
   swap(
     record: Record<string, unknown>,
-    op: Record<string, unknown>,
+    op: MorphPatch,
     bounds: Bounds,
     kind: string,
   ): Turn;
@@ -156,9 +177,18 @@ interface How extends VisitOptions {
   pop?: boolean;
 }
 
-type Swap = [aim: Target, bounds: Bounds, op: Record<string, unknown>];
+// The ops a navigation reads or fits, every other op passes through it untouched.
+type Steered = ContextPatch | LayerOpenPatch | MorphPatch | UrlPatch | VisitPatch;
 
-const SLOT = "nx:s";
+type Slotted = [target: Target, bounds: Bounds, op: MorphPatch];
+
+interface Plan {
+  slotted?: Slotted;
+  away?: string;
+  broken: boolean;
+  layer: boolean;
+}
+
 const IDLE = 2e3;
 const DROPPED: Outcome = { status: "dropped", applied: false };
 const PENDING = "data-next-pending";
@@ -169,18 +199,41 @@ const OFF =
   "[data-next-router=off]," +
   "[data-next-reload]:not([data-next-zone]):not([data-next-boundary])";
 
-export function markers(root: Document, id: string, seal: string): Bounds | undefined {
-  const walk = root.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
-  let start: Node | undefined;
-  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
-    const data = (node as Comment).data;
-    if (data === `${SLOT} ${id} ${seal}`) start = node;
-    else if (start && data === `/${SLOT} ${id} ${seal}`)
-      return start.parentNode === node.parentNode
-        ? [node.parentElement as Element, start, node]
-        : undefined;
+function plan(
+  ops: readonly Steered[],
+  region: (target: Target) => Bounds | undefined,
+  context: Readonly<Record<string, unknown>>,
+  replace: boolean,
+  hash: string,
+): Plan {
+  const found: Plan = { broken: false, layer: false };
+  for (const op of ops) {
+    if (!isRecord(op)) continue;
+    switch (op.op) {
+      case "visit":
+        found.broken = true;
+        if (typeof op.href === "string") found.away = op.href;
+        break;
+      case "layer.open":
+        found.layer = true;
+        break;
+      case "morph": {
+        const { target } = op;
+        if (!isRecord(target) || !("slot" in target || target.body === true)) break;
+        const bounds = region(target);
+        if (bounds) found.slotted = [target, bounds, op];
+        else found.broken = true;
+        break;
+      }
+      case "url":
+        if (replace) op.action = "replace";
+        if (typeof op.href === "string") op.href += hash;
+        break;
+      case "context":
+        if (op.replace === true && isRecord(op.data)) blank(op.data, context);
+    }
   }
-  return undefined;
+  return found;
 }
 
 export function createRouter(
@@ -192,25 +245,26 @@ export function createRouter(
   const doc = document;
   const html = doc.documentElement;
   const nonce = (doc.currentScript as HTMLScriptElement | null)?.nonce;
+  const loads = new Map<string, Promise<unknown>>();
   let cfg: Settings = {};
   let chain: Layout[] = [];
   let key = "";
   let shown = "";
   let snap = true;
   let keeper: Partial<Keeper> = {};
-  let pending: unknown;
-  let reading: unknown;
   let active: AbortController | undefined;
   let bound = "";
   let focus: RouterOptions["focus"];
   let announce: RouterOptions["announce"];
   let unmark = (): void => undefined;
   let turns = 0;
+  let failures = 0;
   let stop = (): void => undefined;
 
   const here = (): string => location.pathname + location.search;
-  const now = (): string => (host.state() as Partial<Entry> | null)?.key ?? "";
-  const mint = (): string => Math.random().toString(36).slice(2);
+  const entry = (): Partial<Entry> | null | undefined =>
+    host.state() as Partial<Entry> | null | undefined;
+  const now = (): string => entry()?.key ?? "";
   const stamp = (): void => host.replace({ next: 1, kind: "nav", key }, location.href);
   const emit = (name: string, detail: Record<string, unknown>): void =>
     void partial._fire(`router:${name}`, detail);
@@ -222,28 +276,33 @@ export function createRouter(
     const url = new URL(href, doc.baseURI);
     if (/^https?:$/.test(url.protocol)) host.assign(url.href);
   };
-  const load = (src: string | undefined): Promise<unknown> =>
-    new Promise((done) => {
-      if (!src) return done(0);
-      const script = doc.createElement("script");
-      script.src = src;
-      if (nonce) script.nonce = nonce;
-      script.onload = script.onerror = done;
-      setTimeout(done, CHUNK_TIMEOUT);
-      doc.head.append(script);
-    });
-  const grab = (): unknown =>
-    (pending ??= Promise.all([cfg.history, cfg.intent].map(load)));
-  const read = (): unknown => partial._reader ?? (reading ??= load(cfg.reader));
-  const says = (response: Response | undefined, word: string): boolean =>
-    response?.headers.get("X-Next-Router")?.includes(word) === true;
-
-  const find = (id: string): Bounds | undefined => {
-    const seal = chain.find((layout) => layout[0] === id)?.[2];
-    return seal === undefined ? undefined : markers(doc, id, seal);
+  // The attempts are shared, since a host that fails one chunk fails them all.
+  const load = (src: string | undefined): Promise<unknown> | undefined => {
+    if (!src) return undefined;
+    const loading =
+      loads.get(src) ??
+      new Promise((done) =>
+        appendScript(doc, src, nonce, (loaded, el) => {
+          if (!loaded) {
+            el.remove();
+            if (++failures < CHUNK_ATTEMPTS) loads.delete(src);
+            partial._fire("partial:error", {
+              kind: "asset",
+              url: src,
+              error: new Error("router chunk failed"),
+            } satisfies PartialError);
+          }
+          done(loaded);
+        }),
+      );
+    loads.set(src, loading);
+    return loading;
   };
-  const region = (target: Target): Bounds | undefined =>
-    target.body ? [doc.body, null, null] : find(target.slot ?? "");
+  const grab = (): Promise<unknown> =>
+    Promise.all([load(cfg.history), load(cfg.intent)]);
+  const read = (): unknown => partial._reader ?? load(cfg.reader);
+
+  const region = (target: Target): Bounds | undefined => locate(doc, chain, target);
 
   const owned = (url: URL, el?: Element): boolean =>
     url.origin === location.origin &&
@@ -264,8 +323,8 @@ export function createRouter(
     while (declared.join().length > 1024) declared.pop();
     return fetch(href, {
       headers: partial._headers({
-        "X-Next-Navigate": "1",
-        "X-Next-Layouts": declared.join(),
+        [HEADER_NAVIGATE]: "1",
+        [HEADER_LAYOUTS]: declared.join(),
         [HEADER_ORIGIN]: here(),
         ...(cfg.reader || partial._reader ? { Accept: STREAM_ACCEPT } : {}),
         ...extra,
@@ -279,19 +338,20 @@ export function createRouter(
     const path = target.pathname + target.search;
     const hit = pop ? undefined : keeper.take?.(target.href);
     const detail = { url: target.href, trigger, cached: hit !== undefined };
-    if (!pop && partial._fire("router:before", detail, true) === false) {
-      void Promise.resolve(hit).then((found) => found?.stop?.());
-      return;
-    }
+    // A vetoed or an overtaken visit stops a pressed flight, even one still on its way.
+    const drop = (): void =>
+      void Promise.resolve(hit).then((found) => found?.flight?.stop());
+    if (!pop && partial._fire("router:before", detail, true) === false) return drop();
     active?.abort();
     turns += 1;
     const controller = (active = new AbortController());
-    bound = target.href.replace(/#.*/s, "");
     const { signal } = controller;
+    signal.addEventListener("abort", drop);
+    bound = bare(target.href);
     const replace = how.replace === true || partial.layers.size() > 0;
     const motion = pop ? "back" : replace ? "replace" : "forward";
-    const entry = key;
-    const area = find(chain.at(-1)?.[0] ?? "")?.[0] ?? doc.body;
+    const from = key;
+    const area = region({ slot: chain.at(-1)?.[0] ?? "" })?.[0] ?? doc.body;
     const loading = grab();
     let url = target;
     let status = "complete";
@@ -315,49 +375,31 @@ export function createRouter(
         const first = lands++ === 0;
         const record: Record<string, unknown> = isRecord(raw) ? raw : {};
         const { layouts } = record;
-        const ops = Array.isArray(record.ops) ? (record.ops as unknown[]) : [];
         const keepable = !says(response, "no-snapshot");
-        let broken = !isRecord(raw);
-        let shaped = Array.isArray(layouts);
-        let away = target.href;
-        let swap: Swap | undefined;
-        for (const op of ops) {
-          if (!isRecord(op)) continue;
-          const { target: aim, data } = op;
-          if (op.op === "visit") {
-            broken = true;
-            if (typeof op.href === "string") away = op.href;
-          }
-          if (op.op === "layer.open") shaped ||= cfg.intercept === "links";
-          if (
-            op.op === "morph" &&
-            isRecord(aim) &&
-            ("slot" in aim || aim.body === true)
-          ) {
-            const bounds = region(aim as Target);
-            if (bounds) swap = [aim as Target, bounds, op];
-            else broken = true;
-          }
-          if (op.op === "url") {
-            op.action = replace || pop || !first ? "replace" : op.action;
-            if (typeof op.href === "string") op.href += url.hash;
-          }
-          if (op.op === "context" && op.replace === true && isRecord(data))
-            blank(data, next.context);
-        }
-        if (signal.aborted || broken || !shaped) {
+        const { slotted, away, broken, layer } = plan(
+          Array.isArray(record.ops) ? (record.ops as Steered[]) : [],
+          region,
+          next.context,
+          replace || pop === true || !first,
+          target.hash,
+        );
+        const shaped = Array.isArray(layouts) || (layer && cfg.intercept === "links");
+        if (signal.aborted || broken || !isRecord(raw) || !shaped) {
           if (says(response, "clear")) flush();
           fail(undefined, away);
           resolve(DROPPED);
           return;
         }
+        const [aim, bounds, morph] = slotted ?? [];
         const turn =
-          first && swap ? keeper.swap?.(record, swap[2], swap[1], motion) : undefined;
+          first && bounds && morph
+            ? keeper.swap?.(record, morph, bounds, motion)
+            : undefined;
         const swapping = (event: Event): void => {
           const { hold } = (event as CustomEvent<BeforeApply>).detail;
-          if (first && !pop) keeper.leave?.(entry, snap ? swap?.[0] : undefined);
+          if (first && !pop) keeper.leave?.(from, snap ? aim : undefined);
           turn?.hold(hold);
-          const nodes = swap ? between(swap[1]) : [];
+          const nodes = bounds ? between(bounds) : [];
           emit("before-swap", { url: url.href, layouts, hold, nodes });
         };
         doc.addEventListener("partial:before-apply", swapping);
@@ -393,7 +435,7 @@ export function createRouter(
               partial._sweep();
               if (!first) return;
               const place = (): boolean | undefined =>
-                pop ? keeper.place?.(entry) : keeper.top?.(url.hash);
+                pop ? keeper.place?.(from) : keeper.top?.(url.hash);
               if (scroll !== false && place() === false) again = place;
               const speak = announce ?? keeper.announce;
               if (pop || scroll === false || !(focus ?? keeper.focus)?.(nodes))
@@ -436,21 +478,18 @@ export function createRouter(
     };
     const stream = async (found?: Prefetched): Promise<void> => {
       try {
-        const bare = keeper.plain?.(path) === true;
-        signal.addEventListener("abort", () => found?.stop?.());
-        if (bare) found?.stop?.();
-        const response = bare
+        const plainly = keeper.plain?.(path) === true;
+        if (plainly) found?.flight?.stop();
+        const response = plainly
           ? await fetch(target.href, { signal, mode: "same-origin" })
-          : ((found?.flight && (await found.flight)) ??
+          : ((found?.flight && (await found.flight.answer)) ??
             (await ask(target.href, signal)));
         url = new URL(response.url || target.href);
         url.hash = target.hash;
         const at = url.pathname + url.search;
-        const type = (response.headers.get("content-type") ?? "")
-          .replace(/;.*/, "")
-          .trim();
+        const type = mime(response);
         const streamed = type === EVENT_STREAM;
-        const markup = type === "text/html" && (bare || cfg.foreign === "extract");
+        const markup = type === "text/html" && (plainly || cfg.foreign === "extract");
         if (streamed) await read();
         const reader = streamed ? partial._reader : undefined;
         await loading;
@@ -461,7 +500,7 @@ export function createRouter(
             open: () => undefined,
             land: (_body, parse) => land(parse(), response),
           });
-        else if (!bare && type === (cfg.type ?? CONTENT_TYPE))
+        else if (!plainly && type === (cfg.type ?? CONTENT_TYPE))
           await land(partial._parse(type, await response.text()), response);
         else if (keeper.extract && markup) {
           keeper.share?.(path);
@@ -477,7 +516,7 @@ export function createRouter(
     try {
       const found = hit instanceof Promise ? await hit : hit;
       const whole = found?.raw?.complete === true;
-      if (whole) found.stop?.();
+      if (whole) found.flight?.stop();
       await Promise.all([early(found).catch(fail), whole || stream(found)]);
       if (!signal.aborted) again();
     } finally {
@@ -519,7 +558,7 @@ export function createRouter(
 
   partial._slot = region;
   partial._pop = () => {
-    const state = host.state() as Partial<Entry> | null | undefined;
+    const state = entry();
     const from = key;
     if (state?.next === 1) key = state.key ?? "";
     if (here() === shown) {
@@ -531,11 +570,11 @@ export function createRouter(
     const turn = turns;
     queueMicrotask(() => {
       if (turn !== turns) return;
-      const at = keeper.pop?.(from, key, snap, path) ?? 0;
-      if (Date.now() - at < (cfg.prefetch_ttl ?? 30) * 1000) {
+      const at = keeper.pop?.(from, key, snap, path);
+      if (at !== undefined && Date.now() - at < (cfg.prefetch_ttl ?? 30) * 1000) {
         active?.abort();
         snap = true;
-      } else void go(new URL(location.href), { pop: true, scroll: !at });
+      } else void go(new URL(location.href), { pop: true, scroll: at === undefined });
     });
     return path;
   };
@@ -546,14 +585,14 @@ export function createRouter(
     chain = (Array.isArray(context.$layouts) ? context.$layouts : []) as Layout[];
     snap = cfg.snapshot !== false;
     shown = here();
-    const state = host.state() as Partial<Entry> | null | undefined;
+    const state = entry();
     const kept = state?.next === 1 ? (state.key ?? "") : "";
-    key = kept || mint();
+    key = kept || uid();
     if (!state || state.next === 1) stamp();
     stop();
     stop = host.listen(on);
     emit("end", { url: location.href, status: "complete", initial: true });
-    if (kept) grab();
+    if (kept) void grab();
     const idle = (): void => void [grab(), read()];
     void (
       (window as Partial<Window>).requestIdleCallback?.(idle, { timeout: IDLE }) ??
@@ -584,7 +623,7 @@ export function createRouter(
     "hashchange",
     () => {
       if (host.state()) return;
-      key = mint();
+      key = uid();
       stamp();
     },
     listening,

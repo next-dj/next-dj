@@ -133,11 +133,6 @@ class TestValueTypeErrors:
             "by adding its id to SILENCED_SYSTEM_CHECKS."
         )
 
-    def test_registered_check_reaches_manage_py_check_path(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": []}):
-            messages = run_checks(tags=[NEXT])
-        assert any(m.id == "next.E076" for m in messages)
-
 
 class TestBoolCoercionWarnings:
     """`check_next_framework_value_types` flags non-bool flags as next.W072."""

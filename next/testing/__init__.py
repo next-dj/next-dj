@@ -68,10 +68,11 @@ from .realtime import (
     issue_socket_ticket,
     memory_broker,
     override_websocket_mount,
+    sse_events,
 )
 from .rendering import render_component_by_name, render_page
 from .seo import SitemapUrl, parse_sitemap
-from .streaming import StreamedChunk, StreamedPage, astream_chunks, read_stream
+from .streaming import StreamedChunk, StreamedPage, aread_stream, read_stream
 from .tokens import expire_boundary_token, freeze_token_clock, issue_boundary_token
 
 
@@ -93,10 +94,10 @@ __all__ = [
     "StreamedPage",
     "WebSocketCommunicator",
     "aissue_socket_ticket",
+    "aread_stream",
     "assert_has_class",
     "assert_metadata",
     "assert_missing_class",
-    "astream_chunks",
     "boundary_errors",
     "boundary_gate",
     "build_form_for",
@@ -144,4 +145,5 @@ __all__ = [
     "reset_seo",
     "resolve_action_url",
     "resolve_call",
+    "sse_events",
 ]

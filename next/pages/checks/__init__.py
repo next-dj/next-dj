@@ -13,7 +13,7 @@ from .contexts import (
     check_context_registration_files,
     check_single_keyless_context,
 )
-from .deferral import check_boundary_declarations
+from .declarations import check_boundary_declarations
 from .gating import check_gated_reads, check_hidden_guards
 from .groups import check_parenthesised_directory_names, check_pointless_route_groups
 from .intercepts import (

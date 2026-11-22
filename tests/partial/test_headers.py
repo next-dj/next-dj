@@ -5,11 +5,11 @@ from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 from django.utils.cache import patch_vary_headers
 
+from next.defer import Depth
 from next.partial import is_partial_request, partial_intent
 from next.partial.headers import (
     ACCEPT,
     CONTENT_TYPE,
-    FULL_DEPTH,
     STREAM_ACCEPT,
     VARY_HEADERS,
     MergeMode,
@@ -312,36 +312,35 @@ class TestNavigationIntent:
             }
         )
         intent = partial_intent(request)
-        assert (intent.navigate, intent.layouts, intent.prefetch) == (True, "a.b", True)
+        assert (intent.navigate, intent.layouts, intent.prefetch) == (
+            True,
+            "a.b",
+            Depth.SHELL,
+        )
 
     def test_layouts_and_prefetch_need_the_navigation(self) -> None:
         request = _request_with_headers(
             **{"X-Next-Request": "1", "X-Next-Layouts": "a.b", "X-Next-Prefetch": "1"}
         )
         intent = partial_intent(request)
-        assert (intent.navigate, intent.layouts, intent.prefetch) == (
-            False,
-            None,
-            False,
-        )
+        assert (intent.navigate, intent.layouts, intent.prefetch) == (False, None, None)
 
     @pytest.mark.parametrize(
-        ("value", "prefetch", "full"),
-        [("1", True, False), ("full", True, True), ("deep", False, False)],
+        ("value", "depth"),
+        [("1", Depth.SHELL), ("full", Depth.FULL), ("deep", None), (None, None)],
     )
-    def test_the_prefetch_depth(self, value, prefetch, full) -> None:
-        request = _request_with_headers(
-            **{"X-Next-Request": "1", "X-Next-Navigate": "1", "X-Next-Prefetch": value}
-        )
-        intent = partial_intent(request)
-        assert (intent.prefetch, intent.full) == (prefetch, full)
+    def test_the_prefetch_depth(self, value, depth) -> None:
+        headers = {"X-Next-Request": "1", "X-Next-Navigate": "1"}
+        if value is not None:
+            headers["X-Next-Prefetch"] = value
+        intent = partial_intent(_request_with_headers(**headers))
+        assert intent.prefetch is depth
 
     def test_a_full_prefetch_needs_the_navigation(self) -> None:
         request = _request_with_headers(
-            **{"X-Next-Request": "1", "X-Next-Prefetch": FULL_DEPTH}
+            **{"X-Next-Request": "1", "X-Next-Prefetch": "full"}
         )
-        intent = partial_intent(request)
-        assert (intent.prefetch, intent.full) == (False, False)
+        assert partial_intent(request).prefetch is None
 
     def test_the_navigation_headers_are_varied(self) -> None:
         assert {"X-Next-Navigate", "X-Next-Layouts", "X-Next-Prefetch"} <= set(

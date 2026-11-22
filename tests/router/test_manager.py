@@ -1,10 +1,12 @@
 import json
+import threading
 from unittest import mock
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
-from django.urls import NoReverseMatch, clear_script_prefix, set_script_prefix
+from django.test.utils import override_script_prefix
+from django.urls import NoReverseMatch
 
 from next.pages import page
 from next.partial.headers import CONTENT_TYPE
@@ -14,25 +16,26 @@ from next.router import (
     Cut,
     Declaration,
     NavigationCut,
-    Shell,
+    ScannedShell,
     VerifiedCut,
     manager as router_module,
 )
 from next.router.manager import (
-    RouterManager,
+    ClientRouterManager,
+    client_router,
     exclude_prefixes,
     forget_router,
     forget_router_entry,
     router_entry,
-    router_manager,
     speculation_rules,
 )
 from next.testing import override_next_settings
 from tests.support import I18N_ROUTED
+from tests.support.races import LockWonByAnotherThread
 
 
 class _Cut(NavigationCut):
-    def cut(self, declared: Declaration | None, shell: Shell) -> Cut:
+    def cut(self, declared: Declaration | None, shell: ScannedShell) -> Cut:
         return VerifiedCut().cut(declared, shell)
 
 
@@ -40,7 +43,7 @@ class TestBackends:
     """The cut and the digest are built once from their settings paths."""
 
     def test_the_defaults(self) -> None:
-        manager = RouterManager()
+        manager = ClientRouterManager()
         assert type(manager.cut()) is VerifiedCut
         assert manager.cut() is manager.cut()
         assert type(manager.digest()) is ChromeDigest
@@ -48,14 +51,58 @@ class TestBackends:
 
     def test_a_named_cut(self) -> None:
         with override_next_settings(ROUTER={"CUT": f"{__name__}._Cut"}):
-            assert type(RouterManager().cut()) is _Cut
+            assert type(ClientRouterManager().cut()) is _Cut
+
+    @pytest.mark.parametrize("value", [123, "", None, ["next.router.VerifiedCut"]])
+    def test_a_misfit_seam_keeps_the_shipped_backend(self, value: object) -> None:
+        with override_next_settings(ROUTER={"CUT": value, "DIGEST": value}):
+            manager = ClientRouterManager()
+            assert type(manager.cut()) is VerifiedCut
+            assert type(manager.digest()) is ChromeDigest
 
     def test_an_unusable_digest_raises(self) -> None:
         with (
             override_next_settings(ROUTER={"DIGEST": "next.router.VerifiedCut"}),
-            pytest.raises(ImproperlyConfigured),
+            pytest.raises(ImproperlyConfigured, match="DIGEST"),
         ):
-            RouterManager().digest()
+            ClientRouterManager().digest()
+
+    def test_a_racing_call_keeps_the_backends_the_winner_built(self) -> None:
+        manager = ClientRouterManager()
+        built = ClientRouterManager().cut(), ClientRouterManager().digest()
+        winner = router_module._Seams(*built)
+        manager._lock = LockWonByAnotherThread(manager, "_seams", value=winner)
+        assert (manager.cut(), manager.digest()) == built
+
+    def test_a_forget_waits_out_a_build_under_way(self) -> None:
+        manager = ClientRouterManager()
+        building, release = threading.Event(), threading.Event()
+        build = router_module._seams
+
+        def slow() -> router_module._Seams:
+            building.set()
+            release.wait(5)
+            return build()
+
+        with mock.patch.object(router_module, "_seams", side_effect=slow):
+            builder = threading.Thread(target=manager.cut)
+            builder.start()
+            building.wait(5)
+            forgetter = threading.Thread(target=manager.forget)
+            forgetter.start()
+            forgetter.join(0.05)
+            release.set()
+            builder.join(5)
+            forgetter.join(5)
+        assert manager._seams is None
+
+    def test_a_forked_child_starts_with_a_fresh_lock(self) -> None:
+        manager = ClientRouterManager()
+        manager.cut()
+        held = manager._lock
+        manager.forked()
+        assert manager._lock is not held
+        assert manager._seams is None
 
 
 class TestEntry:
@@ -136,31 +183,25 @@ class TestEntry:
             assert router_module._admin_prefix() is None
 
     def test_the_entry_is_held(self) -> None:
-        manager = RouterManager()
+        manager = ClientRouterManager()
         assert manager.entry() is manager.entry()
 
     @override_settings(**I18N_ROUTED)
     def test_each_script_prefix_holds_its_own_entry(self) -> None:
-        manager = RouterManager()
+        manager = ClientRouterManager()
         root = manager.entry()
-        set_script_prefix("/app/")
-        try:
+        with override_script_prefix("/app/"):
             mounted = manager.entry()
             assert manager.entry() is mounted
-        finally:
-            clear_script_prefix()
         assert json.loads(mounted)["homes"] == ["/", "/app", "/app/de"]
         assert manager.entry() is root
 
     def test_a_crowd_of_places_starts_over(self) -> None:
-        manager = RouterManager()
+        manager = ClientRouterManager()
         first = manager.entry()
-        try:
-            for index in range(64):
-                set_script_prefix(f"/p{index}/")
+        for index in range(64):
+            with override_script_prefix(f"/p{index}/"):
                 manager.entry()
-        finally:
-            clear_script_prefix()
         assert manager.entry() is not first
 
 
@@ -189,7 +230,7 @@ class TestSpeculation:
         assert "not" in unowned["or"][-1]
 
     def test_the_rules_are_held(self) -> None:
-        manager = RouterManager()
+        manager = ClientRouterManager()
         with mock.patch.object(
             router_module, "speculation_rules", return_value="{}"
         ) as built:
@@ -202,20 +243,20 @@ class TestForget:
 
     def test_a_switch_clears_the_templates_once(self) -> None:
         with mock.patch.object(page, "clear_template_caches") as cleared:
-            router_manager.composed = None
+            client_router.composed = None
             forget_router()
             forget_router()
         assert cleared.call_count == 1
 
     def test_an_entry_setting_drops_the_entry(self) -> None:
-        first = router_manager.entry()
+        first = client_router.entry()
         forget_router_entry(setting="DEBUG")
-        assert router_manager.entry() is first
+        assert client_router.entry() is first
         forget_router_entry(setting="STATIC_URL")
-        assert router_manager.entry() is not first
+        assert client_router.entry() is not first
 
     @pytest.mark.parametrize("setting", ["LANGUAGES", "FORCE_SCRIPT_NAME"])
     def test_a_home_setting_drops_the_entry(self, setting) -> None:
-        first = router_manager.entry()
+        first = client_router.entry()
         forget_router_entry(setting=setting)
-        assert router_manager.entry() is not first
+        assert client_router.entry() is not first

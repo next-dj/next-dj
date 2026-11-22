@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import threading
 from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, override
 
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
@@ -23,6 +25,7 @@ from next.conf import fail_loudly
 from next.deps import ResolutionContext, render_dep_cache
 from next.deps.cache import DependencyCache, request_memo
 from next.deps.resolver import current_resolver
+from next.deps.runner import bridge
 from next.introspect import callable_name
 from next.permissions.access import check, declared
 from next.permissions.errors import UnknownAccessObjectError
@@ -37,8 +40,7 @@ from next.seeding import (
 from next.stamps import fresh, snapshot
 from next.utils import template_edits_watched
 
-from .boundary import current_attempt
-from .bridge import bridge
+from .boundaries import current_attempt
 from .context import component
 from .errors import ComponentContextConflictError, ComponentModuleImportError
 from .loading import last_load_error
@@ -56,7 +58,7 @@ if TYPE_CHECKING:
 
     from .context import ContextFunction
     from .info import ComponentInfo
-    from .loading import ModuleLoader
+    from .loading import Loaded, ModuleLoader
 
 
 # Prop names published by the call site, so a keyless context cannot take them.
@@ -320,7 +322,13 @@ def _reject_collisions(
     raise ComponentContextConflictError(info.name, function, conflicts)
 
 
-_UNRUN: Any = object()
+class _Unrun(Enum):
+    """The result a context function has not produced yet, so `_run` calls it."""
+
+    TOKEN = auto()
+
+
+_UNRUN: Final = _Unrun.TOKEN
 
 
 class _ContextRun:
@@ -638,28 +646,30 @@ class CompositeComponentRenderer:
     ) -> str:
         """Render `info` via `component.py:render` or fall back to the template.
 
-        Under a request scope the instance resolves in a layer of its own render unit.
+        Under a request scope a render that resolves takes a layer of its own unit.
         """
+        module_path = info.module_path
+        if module_path is None:
+            return ""
+        loaded = self._module_loader.loaded(module_path)
         memo = request_memo.get()
-        if memo is None:
-            return self._render(info, context_data, request)
+        if memo is None or not loaded.resolves:
+            return self._render(info, module_path, loaded, context_data, request)
         token = request_memo.set(memo.instance())
         try:
-            return self._render(info, context_data, request)
+            return self._render(info, module_path, loaded, context_data, request)
         finally:
             request_memo.reset(token)
 
     def _render(
         self,
         info: ComponentInfo,
+        module_path: Path,
+        loaded: Loaded,
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
     ) -> str:
-        module_path = info.module_path
-        if module_path is None:
-            return ""
-
-        module, awaiting = self._module_loader.loaded(module_path)
+        module = loaded.module
         if module is None:
             return _unloaded(module_path)
 
@@ -667,7 +677,7 @@ class CompositeComponentRenderer:
         if callable(render_func):
             if not _granted(info, context_data, request):
                 return ""
-            if awaiting:
+            if loaded.awaiting:
                 return self._render_bridged(info, render_func, context_data, request)
             return self._render_with_function(render_func, context_data, request)
 
@@ -767,6 +777,17 @@ class ComponentRenderer:
         return ""
 
 
+_DASH_BEFORE_DASH = re.compile(r"-(?=-)")
+
+
+def comment_safe(text: str) -> str:
+    """Break every `--` run so `text` cannot terminate an HTML comment early.
+
+    An odd run would still close it, so a space follows each dash before a dash.
+    """
+    return _DASH_BEFORE_DASH.sub("- ", text)
+
+
 __all__ = [
     "CachedComponentTemplateLoader",
     "ComponentRenderStrategy",
@@ -775,5 +796,6 @@ __all__ = [
     "CompositeComponentRenderer",
     "SimpleComponentRenderer",
     "TemplateSource",
+    "comment_safe",
     "render_error_template",
 ]

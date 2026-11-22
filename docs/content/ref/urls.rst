@@ -321,27 +321,27 @@ Checks
         - An entry carries a key outside its allowed set, ``BACKEND``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, and ``PAGES_DIR`` for a file router, ``BACKEND`` alone otherwise.
 
 ``check_router_manager``.
-   Reports :ref:`next.E007 <ref-system-checks>` once per run for a router that cannot be built, since every check that walks the routers skips that failure silently.
+   Reports ``next.E007`` once per run for a router that cannot be built, since every check that walks the routers skips that failure silently.
 
 ``check_url_patterns``.
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
-   Fails with :ref:`next.E015 <ref-system-checks>` when two file routes convert to exactly the same Django path string.
+   Fails with ``next.E015`` when two file routes convert to exactly the same Django path string.
    Routes are compared from the URLconf root, the prefixes of ``pages()`` includes too, so two trees placed onto one URL conflict as well.
-   Fails with :ref:`next.E028 <ref-system-checks>` when a route repeats a captured parameter name, listing every conflicting name.
-   Fails with :ref:`next.E152 <ref-system-checks>` when a page captures a name the ``pages()`` prefix of its tree captures already, naming the page and the prefix.
-   Fails with :ref:`next.E082 <ref-system-checks>` for any other refusal the parser raises for a bracket segment, so a page the router left unrouted for a name the route compiler would reject is named at check time.
-   Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
+   Fails with ``next.E028`` when a route repeats a captured parameter name, listing every conflicting name.
+   Fails with ``next.E152`` when a page captures a name the ``pages()`` prefix of its tree captures already, naming the page and the prefix.
+   Fails with ``next.E082`` for any other refusal the parser raises for a bracket segment, so a page the router left unrouted for a name the route compiler would reject is named at check time.
+   Reports ``next.E016`` when pattern collection from a router raises.
 
 ``check_reserved_url_parameters``.
-   Fails with :ref:`next.E217 <ref-system-checks>` when a bracket segment takes a name dependency injection reserves, such as ``form``, ``request`` or ``self``.
+   Fails with ``next.E217`` when a bracket segment takes a name dependency injection reserves, such as ``form``, ``request`` or ``self``.
    ``check_url_patterns`` leaves that refusal to this check, so it surfaces once.
 
 ``check_reverse_name_collisions``.
-   Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name within one namespace.
-   It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so :ref:`next.E016 <ref-system-checks>` surfaces only once.
+   Fails with ``next.E039`` when two distinct routes collapse to the same reverse URL name within one namespace.
+   It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so ``next.E016`` surfaces only once.
 
 ``check_framework_routes_reachable``.
-   Fails with :ref:`next.E149 <ref-system-checks>` when ``ROOT_URLCONF`` resolves a framework endpoint such as ``_next/csrf/`` to another view.
+   Fails with ``next.E149`` when ``ROOT_URLCONF`` resolves a framework endpoint such as ``_next/csrf/`` to another view.
 
 .. automodule:: next.urls.checks
    :members:

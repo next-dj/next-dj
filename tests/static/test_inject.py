@@ -733,6 +733,11 @@ class TestStreamSplit:
         assert split_of(collector) is None
         assert SCRIPTS_PLACEHOLDER not in out
 
+    def test_a_split_asked_for_reads_none_until_the_injector_answers(self) -> None:
+        collector = StaticCollector()
+        collector.note(SPLIT_NOTE, None)
+        assert split_of(collector) is None
+
 
 class TestInjectForwardsRequest:
     """`inject` forwards the active request to the backend rendering each tag."""

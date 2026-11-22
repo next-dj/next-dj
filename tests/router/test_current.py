@@ -1,24 +1,24 @@
 import re
-import time
 from collections.abc import Iterator
+from unittest import mock
 
 import pytest
-from django.test import RequestFactory, override_settings
-from django.urls import clear_script_prefix, set_script_prefix
+from django.test import override_settings
+from django.test.utils import override_script_prefix
 
 from next.paths import ANCESTOR_MARK, PAGE_MARK
 from next.router import current
 from next.router.current import (
     CONTAINERS,
     CurrentLinks,
-    CurrentSettings,
+    _Scan,
     current_links,
     mark_current,
     origin_of,
-    read_current,
 )
 from next.testing import override_next_settings
 from tests.support import I18N_ROUTED
+from tests.support.markup import HOSTILE, flood
 
 
 ORIGIN = "https://example.com"
@@ -567,38 +567,26 @@ class TestRobustness:
             assert marked(out) == out
 
 
-HOSTILE = (
-    '<nav><a x="',
-    "<nav><!--",
-    "<nav><script></scriptx",
-    '<nav><a href="/docs/intro">',
-    "<nav><",
-    "<nav><a b ",
-    "<div title='<nav>'>",
-    "</div x='>'><nav>",
-    "<nav><div data-next-nav>",
-    '<nav><a aria-current=x aria-current="y" href=/docs>',
-)
-
-
-def _fastest(html: str) -> float:
-    best = float("inf")
-    for _ in range(3):
-        start = time.perf_counter()
+def _steps(html: str) -> int:
+    """Count the markup pieces the walk consumes and the closers it searches for."""
+    with (
+        mock.patch.object(_Scan, "step", autospec=True, side_effect=_Scan.step) as step,
+        mock.patch.object(
+            _Scan, "raw_end", autospec=True, side_effect=_Scan.raw_end
+        ) as raw,
+        mock.patch.object(current, "_after", wraps=current._after) as after,
+    ):
         marked(html)
-        best = min(best, time.perf_counter() - start)
-    return best
+    return step.call_count + raw.call_count + after.call_count
 
 
-class TestLinearTime:
-    """Four times the input costs about four times the time, a quadratic guard."""
+class TestLinearWork:
+    """Twice the input takes at most twice the walk steps, a count that times nothing."""
 
-    @pytest.mark.parametrize("unit", HOSTILE)
+    @pytest.mark.parametrize("unit", list(HOSTILE.values()), ids=list(HOSTILE))
     def test_hostile_input(self, unit) -> None:
-        html = unit * (50_000 // len(unit))
-        single = _fastest(html)
-        quadruple = _fastest(html * 4)
-        assert quadruple < 10 * single + 0.05
+        html = flood(unit, 50_000)
+        assert _steps(html * 2) <= 2 * _steps(html) + 1
 
 
 class TestHomes:
@@ -645,16 +633,13 @@ class TestHomes:
     @override_settings(**I18N_ROUTED)
     def test_the_backend_reads_the_language_roots(self) -> None:
         html = '<nav><a href="/de/">x</a><a href="/de/blog/">y</a></nav>'
-        out = CurrentLinks().mark(html, "/de/blog/post/")
+        out = CurrentLinks().mark(html, lambda: "/de/blog/post/")
         assert out == html.replace('"/de/blog/">', f'"/de/blog/"{ANCESTOR_MARK}>')
 
     def test_the_backend_reads_the_script_prefix(self) -> None:
         html = '<nav><a href="/app/">x</a><a href="/app/docs/">y</a></nav>'
-        set_script_prefix("/app/")
-        try:
-            out = CurrentLinks().mark(html, "/app/docs/intro/")
-        finally:
-            clear_script_prefix()
+        with override_script_prefix("/app/"):
+            out = CurrentLinks().mark(html, lambda: "/app/docs/intro/")
         assert out == html.replace('"/app/docs/">', f'"/app/docs/"{ANCESTOR_MARK}>')
 
 
@@ -663,17 +648,17 @@ class TestCurrentLinks:
 
     def test_the_query_and_fragment_are_split_off(self) -> None:
         html = '<nav><a data-next-match="query" href="/a?x=1">x</a></nav>'
-        assert PAGE_MARK in CurrentLinks().mark(html, "/a?x=1#top")
-        assert CurrentLinks().mark(html, "/a?x=2") is html
+        assert PAGE_MARK in CurrentLinks().mark(html, lambda: "/a?x=1#top")
+        assert CurrentLinks().mark(html, lambda: "/a?x=2") is html
 
     def test_the_origin_reaches_the_rule(self) -> None:
         html = '<nav><a href="https://example.com/a">x</a></nav>'
-        assert PAGE_MARK in CurrentLinks().mark(html, "/a", ORIGIN)
-        assert CurrentLinks().mark(html, "/a") is html
+        assert PAGE_MARK in CurrentLinks().mark(html, lambda: "/a", lambda: ORIGIN)
+        assert CurrentLinks().mark(html, lambda: "/a") is html
 
     def test_containers_come_from_the_constructor(self) -> None:
         html = '<header><a href="/a"></header><nav><a href="/a"></nav>'
-        out = CurrentLinks(("header",)).mark(html, "/a")
+        out = CurrentLinks(("header",)).mark(html, lambda: "/a")
         assert out.index(PAGE_MARK) < out.index("<nav>")
         assert out.count(PAGE_MARK) == 1
 
@@ -699,41 +684,6 @@ class TestCurrentLinks:
         assert links.holds("<nav></nav>") is False
 
 
-class TestReadCurrent:
-    """The `ROUTER["CURRENT"]` scope reads with a default for every unusable key."""
-
-    @pytest.mark.parametrize(
-        ("router", "expected"),
-        [
-            (None, CurrentSettings(True, None, CONTAINERS)),
-            ({}, CurrentSettings(True, None, CONTAINERS)),
-            ({"CURRENT": False}, CurrentSettings(False, None, CONTAINERS)),
-            ({"CURRENT": True}, CurrentSettings(True, None, CONTAINERS)),
-            ({"CURRENT": None}, CurrentSettings(True, None, CONTAINERS)),
-            ({"CURRENT": {"ENABLED": 0}}, CurrentSettings(True, None, CONTAINERS)),
-            ({"CURRENT": {"ENABLED": False}}, CurrentSettings(False, None, CONTAINERS)),
-            (
-                {"CURRENT": {"BACKEND": "pkg.Links", "CONTAINERS": ["nav", "[x]"]}},
-                CurrentSettings(True, "pkg.Links", ("nav", "[x]")),
-            ),
-            (
-                {"CURRENT": {"CONTAINERS": ["nav", 3]}},
-                CurrentSettings(True, None, CONTAINERS),
-            ),
-            (
-                {"CURRENT": {"CONTAINERS": ["header", ".menu"]}},
-                CurrentSettings(True, None, CONTAINERS),
-            ),
-            (
-                {"CURRENT": {"BACKEND": "", "CONTAINERS": "nav"}},
-                CurrentSettings(True, None, CONTAINERS),
-            ),
-        ],
-    )
-    def test_read(self, router, expected) -> None:
-        assert read_current(router) == expected
-
-
 class TestCurrentLinksSetting:
     """`current_links` builds the named backend once per settings state."""
 
@@ -743,9 +693,28 @@ class TestCurrentLinksSetting:
         assert links.containers == CONTAINERS
         assert current_links() is links
 
-    def test_off(self) -> None:
-        with override_next_settings(ROUTER={"CURRENT": False}):
+    @pytest.mark.parametrize("current", [False, {"ENABLED": False}])
+    def test_off(self, current: object) -> None:
+        with override_next_settings(ROUTER={"CURRENT": current}):
             assert current_links() is None
+
+    @pytest.mark.parametrize(
+        "current",
+        [
+            None,
+            {"ENABLED": 0},
+            {"BACKEND": ""},
+            {"CONTAINERS": ["nav", 3]},
+            {"CONTAINERS": ["header", ".menu"]},
+            {"CONTAINERS": "nav"},
+        ],
+        ids=repr,
+    )
+    def test_a_misfit_reads_as_the_shipped_backend(self, current: object) -> None:
+        with override_next_settings(ROUTER={"CURRENT": current}):
+            links = current_links()
+            assert type(links) is CurrentLinks
+            assert links.containers == CONTAINERS
 
     def test_a_named_backend(self) -> None:
         backend = f"{UpperLinks.__module__}.UpperLinks"
@@ -760,13 +729,13 @@ class TestOriginOf:
     """The origin names the scheme and the validated host of the request."""
 
     @override_settings(ALLOWED_HOSTS=["example.com"])
-    def test_an_allowed_host(self) -> None:
-        request = RequestFactory().get("/", HTTP_HOST="example.com", secure=True)
+    def test_an_allowed_host(self, rf) -> None:
+        request = rf.get("/", HTTP_HOST="example.com", secure=True)
         assert origin_of(request) == ORIGIN
 
     @override_settings(ALLOWED_HOSTS=["example.com"])
-    def test_a_disallowed_host(self) -> None:
-        request = RequestFactory().get("/", HTTP_HOST="evil.com")
+    def test_a_disallowed_host(self, rf) -> None:
+        request = rf.get("/", HTTP_HOST="evil.com")
         assert origin_of(request) == ""
 
 
@@ -833,13 +802,11 @@ class TestWalkedContainers:
     def test_a_changed_container_is_walked_again(self) -> None:
         before = '<nav><a href="/docs/intro">a</a></nav>'
         after = '<nav><a href="/docs/intro">a</a><a href="/docs/intro/">b</a></nav>'
-        _forget()
         assert marked(before).count(PAGE_MARK) == 1
         assert marked(after).count(PAGE_MARK) == 2
         assert marked(before).count(PAGE_MARK) == 1
 
     def test_the_containers_of_one_opener_stay_bounded(self) -> None:
-        _forget()
         for index in range(current._REGION_VARIANTS + 3):
             marked(f'<nav><a href="/docs/intro">{index}</a></nav>')
         held = current._regions(current._plan(CONTAINERS).selectors, "<nav>")
@@ -849,13 +816,11 @@ class TestWalkedContainers:
         )
 
     def test_the_openers_stay_bounded(self) -> None:
-        _forget()
         for index in range(current._REGION_MEMO + 8):
             marked(f'<nav id="n{index}"><a href="/docs/intro">x</a></nav>')
         assert len(current._walked) == current._REGION_MEMO
 
     def test_a_container_past_the_limit_is_walked_every_time(self) -> None:
-        _forget()
         links = '<a href="/docs/intro">x</a>' * (current._REGION_LIMIT // 20)
         html = f"<nav>{links}</nav>"
         once = marked(html)
@@ -864,7 +829,6 @@ class TestWalkedContainers:
         assert not current._regions(current._plan(CONTAINERS).selectors, "<nav>")
 
     def test_an_opener_past_the_limit_is_never_remembered(self) -> None:
-        _forget()
         html = f'<nav title="{"t" * current._LINK_LIMIT}"><a href="/docs/intro"></nav>'
         once = marked(html)
         assert once.count(PAGE_MARK) == 1
@@ -872,7 +836,6 @@ class TestWalkedContainers:
         assert len(current._walked) == 0
 
     def test_an_unclosed_container_is_never_remembered(self) -> None:
-        _forget()
         html = '<nav><a href="/docs/intro">'
         assert marked(html).count(PAGE_MARK) == 1
         assert not current._regions(current._plan(CONTAINERS).selectors, "<nav>")
@@ -880,7 +843,6 @@ class TestWalkedContainers:
 
     def test_one_selector_list_never_replays_for_another(self) -> None:
         html = '<nav data-side><a href="/docs/intro">x</a></nav>'
-        _forget()
         assert marked(html).count(PAGE_MARK) == 1
         assert marked(html, containers=("[data-other]",)) is html
 
@@ -889,16 +851,18 @@ class TestLinkMemo:
     """An anchor tag is parsed once for every request, within a bound."""
 
     def test_a_repeated_link_is_parsed_once(self) -> None:
-        _forget()
         marked('<nav><a href="/docs/intro">a</a><a href="/docs/intro">b</a></nav>')
         info = current._known_link.cache_info()
         assert (info.misses, info.hits) == (1, 1)
 
     def test_the_parsed_links_stay_bounded(self) -> None:
-        assert current._known_link.cache_info().maxsize == current._LINK_MEMO
+        links = "".join(
+            f'<a href="/docs/{index}">x</a>' for index in range(current._LINK_MEMO + 10)
+        )
+        marked(f"<nav>{links}</nav>")
+        assert current._known_link.cache_info().currsize == current._LINK_MEMO
 
     def test_a_link_past_the_limit_is_parsed_but_never_kept(self) -> None:
-        _forget()
         html = f'<nav><a title="{"t" * current._LINK_LIMIT}" href="/docs/intro"></nav>'
         assert marked(html).count(PAGE_MARK) == 1
         assert current._known_link.cache_info().currsize == 0

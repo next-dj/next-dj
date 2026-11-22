@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from next.conf.router import Eagerness, RouterScope
 from next.router.speculation import GUARDED, OFF, encoded_rules, rules
 
 
@@ -22,7 +23,7 @@ class TestRules:
     """The rules prefetch only the same-origin links the router leaves to the browser."""
 
     def test_the_links_the_router_leaves(self) -> None:
-        found = rules("moderate", "all", ("/static/", "/files(1)/"))
+        found = rules(Eagerness.MODERATE, RouterScope.ALL, ("/static/", "/files(1)/"))
         (entry,) = found["prefetch"]
         assert isinstance(entry, dict)
         assert (entry["source"], entry["eagerness"]) == ("document", "moderate")
@@ -41,17 +42,17 @@ class TestRules:
         assert "prerender" not in found
 
     def test_opt_in_leaves_the_links_outside_the_router(self) -> None:
-        _, unowned, _ = _where(rules("eager", "opt-in", ()))
+        _, unowned, _ = _where(rules(Eagerness.EAGER, RouterScope.OPT_IN, ()))
         owner = "[data-next-router]"
         assert unowned["or"][-1] == {
             "not": {"selector_matches": f":is({owner}),:is({owner}) *"}
         }
 
     def test_the_encoding_is_safe_in_a_script(self) -> None:
-        text = encoded_rules("eager", "all", ("/a<b>/",))
+        text = encoded_rules(Eagerness.EAGER, RouterScope.ALL, ("/a<b>/",))
         assert "<" not in text
         assert ">" not in text
-        assert json.loads(text) == rules("eager", "all", ("/a<b>/",))
+        assert json.loads(text) == rules(Eagerness.EAGER, RouterScope.ALL, ("/a<b>/",))
 
 
 @pytest.mark.skipif(not CLIENT_ROUTER.exists(), reason="needs the source checkout")

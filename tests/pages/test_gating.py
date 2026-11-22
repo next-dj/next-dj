@@ -12,19 +12,19 @@ from next.deps.objects import SCOPE_DEPENDENCY
 from next.pages.gating import (
     GATE_KEY,
     SLOW_SHELL,
-    Gate,
     Plan,
+    ShellGate,
     Split,
     guard_steps,
     note_slow,
     plan_gating,
 )
-from next.pages.graph import Blame, Phase, run_phase
+from next.pages.graph import Blame, Phase, merged, run_phase
 from next.pages.loaders import BoundaryChain, PageBoundary
 from next.pages.registry import PageContextRegistry
 from next.static.serializers import JsonJsContextSerializer
 from next.testing import NextClient
-from tests.support import bound_dependency, routed, write_page
+from tests.support import bound_dependency, file_router_config_entry, routed, write_page
 
 
 ROOT = Path("/gating/page.py")
@@ -42,13 +42,13 @@ def _loading(level: int, source: Path, error: Path | None = None) -> PageBoundar
 
 
 def _plan(
-    registry: PageContextRegistry,
+    layered_registry: PageContextRegistry,
     *boundaries: PageBoundary,
     metadata: frozenset[str] = frozenset(),
 ) -> Plan:
     return plan_gating(
-        registry.graph(LEAF),
-        registry.inherited_levels(LEAF),
+        layered_registry.graph(LEAF),
+        layered_registry.inherited_levels(LEAF),
         boundaries,
         metadata,
         LEAF,
@@ -68,7 +68,7 @@ def _row(group: DObject[Group]) -> str:
 
 
 @pytest.fixture()
-def registry() -> PageContextRegistry:
+def layered_registry() -> PageContextRegistry:
     """Return a registry with one inherited callable per ancestor and two own ones."""
     held = PageContextRegistry()
     held.register_context(ROOT, "site", lambda: "S", inherit_context=True)
@@ -82,49 +82,57 @@ class TestSplit:
     """The innermost boundary above a callable's directory runs it, else the shell."""
 
     def test_a_boundary_of_the_page_directory_gates_only_the_page(
-        self, registry
+        self, layered_registry
     ) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert _keys(plan, plan.split.shell) == {"site", "section"}
         assert _keys(plan, plan.split.job(LEAF_LOADING)) == {"body", "extra"}
 
     def test_the_callables_of_the_boundary_directory_stay_in_the_shell(
-        self, registry
+        self, layered_registry
     ) -> None:
-        plan = _plan(registry, _loading(1, MID_LOADING))
+        plan = _plan(layered_registry, _loading(1, MID_LOADING))
 
         assert _keys(plan, plan.split.shell) == {"site", "section"}
 
     def test_nested_boundaries_run_each_callable_in_the_innermost_above_it(
-        self, registry
+        self, layered_registry
     ) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING), _loading(2, ROOT_LOADING))
+        plan = _plan(
+            layered_registry, _loading(0, LEAF_LOADING), _loading(2, ROOT_LOADING)
+        )
 
         assert _keys(plan, plan.split.shell) == {"site"}
         assert _keys(plan, plan.split.job(ROOT_LOADING)) == {"section"}
         assert _keys(plan, plan.split.job(LEAF_LOADING)) == {"body", "extra"}
 
-    def test_an_unknown_loading_file_owns_nothing(self, registry) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+    def test_an_unknown_loading_file_owns_nothing(self, layered_registry) -> None:
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert plan.split.job(Path("/elsewhere/loading.djx")) == frozenset()
 
-    def test_the_levels_name_the_directory_each_callable_feeds(self, registry) -> None:
-        registry.register_context(LEAF, "nav", lambda: "N", inherit_context=True)
+    def test_the_levels_name_the_directory_each_callable_feeds(
+        self, layered_registry
+    ) -> None:
+        layered_registry.register_context(
+            LEAF, "nav", lambda: "N", inherit_context=True
+        )
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert plan.levels == (2, 1, 0, -1, -1)
         assert plan.inherited == (2, 1)
 
     def test_an_own_inheritable_callable_feeds_the_layout_of_its_directory(
-        self, registry
+        self, layered_registry
     ) -> None:
-        registry.register_context(LEAF, "nav", lambda: "N", inherit_context=True)
+        layered_registry.register_context(
+            LEAF, "nav", lambda: "N", inherit_context=True
+        )
 
-        own = _plan(registry, _loading(0, LEAF_LOADING))
-        above = _plan(registry, _loading(1, MID_LOADING))
+        own = _plan(layered_registry, _loading(0, LEAF_LOADING))
+        above = _plan(layered_registry, _loading(1, MID_LOADING))
 
         assert "nav" in _keys(own, own.split.shell)
         assert "nav" in _keys(above, above.split.job(MID_LOADING))
@@ -133,36 +141,36 @@ class TestSplit:
 class TestGuards:
     """A gated guard runs in the shell, with every callable it reads."""
 
-    def test_a_declared_guard_moves_with_what_it_reads(self, registry) -> None:
-        registry.declare_guard(LEAF, "extra", guard=True)
+    def test_a_declared_guard_moves_with_what_it_reads(self, layered_registry) -> None:
+        layered_registry.declare_guard(LEAF, "extra", guard=True)
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert _keys(plan, plan.split.shell) == {"site", "section", "body", "extra"}
         assert plan.split.job(LEAF_LOADING) == frozenset()
 
-    def test_a_scanned_guard_moves_to_the_shell(self, registry) -> None:
-        registry.register_context(LEAF, "found", _missing)
+    def test_a_scanned_guard_moves_to_the_shell(self, layered_registry) -> None:
+        layered_registry.register_context(LEAF, "found", _missing)
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert "found" in _keys(plan, plan.split.shell)
         assert _keys(plan, frozenset(plan.split.guards)) == {"found"}
 
-    def test_a_url_addressed_row_moves_to_the_shell(self, registry) -> None:
-        registry.register_context(LEAF, "row", _row)
+    def test_a_url_addressed_row_moves_to_the_shell(self, layered_registry) -> None:
+        layered_registry.register_context(LEAF, "row", _row)
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert _keys(plan, frozenset(plan.split.guards)) == {"row"}
         assert "row" not in _keys(plan, plan.split.job(LEAF_LOADING))
 
     def test_a_guard_takes_every_callable_before_it_into_the_shell(
-        self, registry
+        self, layered_registry
     ) -> None:
-        registry.register_context(LEAF, "zz_found", _missing)
+        layered_registry.register_context(LEAF, "zz_found", _missing)
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert _keys(plan, plan.split.shell) == {
             "site",
@@ -177,29 +185,37 @@ class TestGuards:
             "zz_found",
         }
 
-    def test_a_callable_after_the_last_guard_stays_in_the_job(self, registry) -> None:
-        registry.register_context(LEAF, "aa_found", _missing)
+    def test_a_callable_after_the_last_guard_stays_in_the_job(
+        self, layered_registry
+    ) -> None:
+        layered_registry.register_context(LEAF, "aa_found", _missing)
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert _keys(plan, plan.split.job(LEAF_LOADING)) == {"body", "extra"}
 
-    def test_guard_false_keeps_a_scanned_guard_in_the_job(self, registry) -> None:
-        registry.register_context(LEAF, "found", _missing)
-        registry.declare_guard(LEAF, "found", guard=False)
+    def test_guard_false_keeps_a_scanned_guard_in_the_job(
+        self, layered_registry
+    ) -> None:
+        layered_registry.register_context(LEAF, "found", _missing)
+        layered_registry.declare_guard(LEAF, "found", guard=False)
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert "found" in _keys(plan, plan.split.job(LEAF_LOADING))
 
-    def test_debug_logs_each_promotion(self, registry, caplog) -> None:
+    def test_debug_logs_each_promotion(self, layered_registry, caplog) -> None:
         with (
             override_settings(DEBUG=True),
             caplog.at_level(logging.DEBUG, "next.pages.gating"),
         ):
-            _plan(registry, _loading(0, LEAF_LOADING), metadata=frozenset({"body"}))
-            registry.register_context(LEAF, "found", _missing)
-            _plan(registry, _loading(0, LEAF_LOADING))
+            _plan(
+                layered_registry,
+                _loading(0, LEAF_LOADING),
+                metadata=frozenset({"body"}),
+            )
+            layered_registry.register_context(LEAF, "found", _missing)
+            _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         messages = [record.getMessage() for record in caplog.records]
         assert any("'_missing'" in message and "404" in message for message in messages)
@@ -207,13 +223,13 @@ class TestGuards:
         assert any("gated @context callables" in message for message in messages)
 
     def test_debug_logs_nothing_for_a_plan_that_promotes_nothing(
-        self, registry, caplog
+        self, layered_registry, caplog
     ) -> None:
         with (
             override_settings(DEBUG=True),
             caplog.at_level(logging.DEBUG, "next.pages.gating"),
         ):
-            plan = _plan(registry, _loading(0, LEAF_LOADING))
+            plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert plan.split.promoted == ()
         assert caplog.records == []
@@ -222,12 +238,12 @@ class TestGuards:
 class TestGuardSteps:
     """A reload runs every step up to the last guard, whatever the boundaries."""
 
-    def test_a_graph_without_a_guard_runs_nothing(self, registry) -> None:
-        assert guard_steps(registry.graph(LEAF)) == frozenset()
+    def test_a_graph_without_a_guard_runs_nothing(self, layered_registry) -> None:
+        assert guard_steps(layered_registry.graph(LEAF)) == frozenset()
 
-    def test_every_step_up_to_the_last_guard_runs(self, registry) -> None:
-        registry.register_context(LEAF, "body_found", _missing)
-        graph = registry.graph(LEAF)
+    def test_every_step_up_to_the_last_guard_runs(self, layered_registry) -> None:
+        layered_registry.register_context(LEAF, "body_found", _missing)
+        graph = layered_registry.graph(LEAF)
 
         steps = guard_steps(graph)
 
@@ -238,9 +254,11 @@ class TestGuardSteps:
             "body_found",
         }
 
-    def test_an_inherited_guard_runs_alone_before_the_page(self, registry) -> None:
-        registry.declare_guard(ROOT, "site", guard=True)
-        graph = registry.graph(LEAF)
+    def test_an_inherited_guard_runs_alone_before_the_page(
+        self, layered_registry
+    ) -> None:
+        layered_registry.declare_guard(ROOT, "site", guard=True)
+        graph = layered_registry.graph(LEAF)
 
         steps = guard_steps(graph)
 
@@ -250,28 +268,40 @@ class TestGuardSteps:
 class TestMetadata:
     """A key the page metadata reads pulls its gated provider into the shell."""
 
-    def test_a_gated_provider_is_pulled_with_what_it_reads(self, registry) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING), metadata=frozenset({"extra"}))
+    def test_a_gated_provider_is_pulled_with_what_it_reads(
+        self, layered_registry
+    ) -> None:
+        plan = _plan(
+            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"extra"})
+        )
 
         assert _keys(plan, plan.split.shell) == {"site", "section", "body", "extra"}
         assert [key for _index, key in plan.split.pulled] == ["extra"]
 
-    def test_a_key_the_shell_provides_pulls_nothing(self, registry) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING), metadata=frozenset({"site"}))
+    def test_a_key_the_shell_provides_pulls_nothing(self, layered_registry) -> None:
+        plan = _plan(
+            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"site"})
+        )
 
         assert plan.split.pulled == ()
 
-    def test_a_key_no_keyed_callable_provides_pulls_nothing(self, registry) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING), metadata=frozenset({"slug"}))
+    def test_a_key_no_keyed_callable_provides_pulls_nothing(
+        self, layered_registry
+    ) -> None:
+        plan = _plan(
+            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"slug"})
+        )
 
         assert plan.split.pulled == ()
 
     def test_a_key_no_keyed_callable_provides_pulls_the_gated_keyless_ones(
-        self, registry
+        self, layered_registry
     ) -> None:
-        registry.register_context(LEAF, None, lambda: {"title": "T"})
+        layered_registry.register_context(LEAF, None, lambda: {"title": "T"})
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING), metadata=frozenset({"title"}))
+        plan = _plan(
+            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"title"})
+        )
 
         steps = plan.graph.steps
         assert [(steps[index].key, key) for index, key in plan.split.pulled] == [
@@ -281,13 +311,15 @@ class TestMetadata:
         assert _keys(plan, plan.split.job(LEAF_LOADING)) == {"body", "extra"}
 
     def test_a_keyless_callable_the_shell_runs_pulls_nothing_more(
-        self, registry
+        self, layered_registry
     ) -> None:
-        registry.register_context(
+        layered_registry.register_context(
             MID, None, lambda: {"title": "T"}, inherit_context=True
         )
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING), metadata=frozenset({"title"}))
+        plan = _plan(
+            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"title"})
+        )
 
         assert plan.split.pulled == ()
 
@@ -295,34 +327,38 @@ class TestMetadata:
 class TestPlan:
     """The plan answers what the checks and the shell ask of it."""
 
-    def test_the_gated_keys_are_those_only_a_job_provides(self, registry) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+    def test_the_gated_keys_are_those_only_a_job_provides(
+        self, layered_registry
+    ) -> None:
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert set(plan.gated()) == {"body", "extra"}
 
-    def test_a_keyless_job_callable_provides_no_gated_key(self, registry) -> None:
-        registry.register_context(LEAF, None, lambda: {"title": "T"})
+    def test_a_keyless_job_callable_provides_no_gated_key(
+        self, layered_registry
+    ) -> None:
+        layered_registry.register_context(LEAF, None, lambda: {"title": "T"})
 
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert set(plan.gated()) == {"body", "extra"}
 
     @pytest.mark.parametrize(("group", "level"), [(-1, -1), (0, 2), (1, 1), (5, -1)])
     def test_the_failed_level_reads_the_blamed_group(
-        self, registry, group: int, level: int
+        self, layered_registry, group: int, level: int
     ) -> None:
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
         blamed = Blame()
         blamed.group = group
 
         assert plan.failed_level(blamed) == level
 
-    def test_awaits_tells_whether_a_step_is_async(self, registry) -> None:
+    def test_awaits_tells_whether_a_step_is_async(self, layered_registry) -> None:
         async def later() -> str:
             return "L"
 
-        registry.register_context(LEAF, "later", later)
-        plan = _plan(registry, _loading(0, LEAF_LOADING))
+        layered_registry.register_context(LEAF, "later", later)
+        plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert plan.awaits(plan.split.job(LEAF_LOADING)) is True
         assert plan.awaits(plan.split.shell) is False
@@ -338,8 +374,8 @@ class TestNoteSlow:
     """A slow shell names its slowest callable under `DEBUG`."""
 
     @pytest.fixture()
-    def plan(self, registry) -> Plan:
-        return _plan(registry, _loading(1, MID_LOADING))
+    def plan(self, layered_registry) -> Plan:
+        return _plan(layered_registry, _loading(1, MID_LOADING))
 
     @pytest.mark.parametrize(
         ("timings", "elapsed"), [(None, 1.0), ({}, 1.0), ({0: 0.1}, SLOW_SHELL)]
@@ -371,8 +407,10 @@ class TestNoteSlow:
         assert "sits above every loading.djx" in caplog.records[0].getMessage()
 
 
-def _gate(registry: PageContextRegistry, *boundaries: PageBoundary) -> Gate:
-    plan = _plan(registry, *boundaries)
+def _gate(
+    layered_registry: PageContextRegistry, *boundaries: PageBoundary
+) -> ShellGate:
+    plan = _plan(layered_registry, *boundaries)
     results = run_phase(
         plan.graph,
         LEAF,
@@ -381,29 +419,35 @@ def _gate(registry: PageContextRegistry, *boundaries: PageBoundary) -> Gate:
         url_kwargs={},
         dep_cache={},
     )
-    return Gate(plan, BoundaryChain.of(boundaries), LEAF, None, {}, {}, results)
+    chain = BoundaryChain.of(boundaries)
+    taken = merged(plan.graph, LEAF, results)
+    return ShellGate(plan, chain, LEAF, None, {}, {}, results, taken, frozenset())
 
 
 class TestGate:
     """Each page boundary job runs its own callables over what the shell took."""
 
-    def test_the_level_of_a_boundary_reads_from_its_file(self, registry) -> None:
-        gate = _gate(registry, _loading(0, LEAF_LOADING))
+    def test_the_level_of_a_boundary_reads_from_its_file(
+        self, layered_registry
+    ) -> None:
+        gate = _gate(layered_registry, _loading(0, LEAF_LOADING))
 
         assert gate.level(LEAF_LOADING) == 0
         assert gate.level(MID_LOADING) is None
 
-    def test_a_directory_below_the_boundary_sits_inside_its_job(self, registry) -> None:
-        gate = _gate(registry, _loading(1, MID_LOADING))
+    def test_a_directory_below_the_boundary_sits_inside_its_job(
+        self, layered_registry
+    ) -> None:
+        gate = _gate(layered_registry, _loading(1, MID_LOADING))
 
         assert gate.inside(MID_LOADING, 0) is True
         assert gate.inside(MID_LOADING, 1) is False
         assert gate.inside(LEAF_LOADING, 0) is False
 
     def test_the_blame_holds_the_inherited_results_then_the_failed_ones(
-        self, registry
+        self, layered_registry
     ) -> None:
-        gate = _gate(registry, _loading(0, LEAF_LOADING))
+        gate = _gate(layered_registry, _loading(0, LEAF_LOADING))
         failed = Blame()
         failed.settle(1, "late", "L")
 
@@ -416,43 +460,46 @@ class TestGate:
         ]
         assert gate.blame().cut(2) == {"site": "S", "section": "M"}
 
-    def test_a_job_adds_the_merged_context_and_the_next_gate(self, registry) -> None:
-        gate = _gate(registry, _loading(0, LEAF_LOADING))
+    def test_a_job_adds_the_merged_context_and_the_next_gate(
+        self, layered_registry
+    ) -> None:
+        gate = _gate(layered_registry, _loading(0, LEAF_LOADING))
 
         advanced = gate.advance(LEAF_LOADING)
 
         assert advanced.layer["extra"] == "B!"
-        assert advanced.layer["site"] == "S"
+        assert "site" not in advanced.layer
         following = advanced.layer[GATE_KEY]
-        assert isinstance(following, Gate)
+        assert isinstance(following, ShellGate)
         assert set(following.results) == {0, 1, 2, 3}
+        assert following.merged.context_data["site"] == "S"
 
-    def test_a_job_with_nothing_gated_adds_nothing(self, registry) -> None:
-        gate = _gate(registry, _loading(0, LEAF_LOADING))
+    def test_a_job_with_nothing_gated_adds_nothing(self, layered_registry) -> None:
+        gate = _gate(layered_registry, _loading(0, LEAF_LOADING))
 
         advanced = gate.advance(MID_LOADING)
 
         assert advanced.layer == {}
         assert advanced.published == {}
 
-    def test_a_job_publishes_only_what_it_serialized(self, registry) -> None:
+    def test_a_job_publishes_only_what_it_serialized(self, layered_registry) -> None:
         serializer = JsonJsContextSerializer()
-        registry.register_context(
+        layered_registry.register_context(
             LEAF, "shown", lambda: 1, serialize=True, serializer=serializer
         )
-        gate = _gate(registry, _loading(0, LEAF_LOADING))
+        gate = _gate(layered_registry, _loading(0, LEAF_LOADING))
 
         advanced = gate.advance(LEAF_LOADING)
 
         assert advanced.published == {"shown": 1}
         assert advanced.serializers == {"shown": serializer}
 
-    def test_an_async_callable_runs_through_the_graph(self, registry) -> None:
+    def test_an_async_callable_runs_through_the_graph(self, layered_registry) -> None:
         async def later(body: str) -> str:
             return body + "?"
 
-        registry.register_context(LEAF, "later", later)
-        gate = _gate(registry, _loading(0, LEAF_LOADING))
+        layered_registry.register_context(LEAF, "later", later)
+        gate = _gate(layered_registry, _loading(0, LEAF_LOADING))
 
         assert gate.advance(LEAF_LOADING).layer["later"] == "B?"
 
@@ -506,3 +553,49 @@ class TestStreamedRow:
 
         assert page.response.status_code == 200
         assert "<b>t:x</b>" in page.final_html()
+
+
+_TITLED_PAGE = """
+from next.pages import context
+
+
+@context("title")
+def title() -> str:
+    return "C"
+"""
+
+
+def title_processor(request) -> dict[str, object]:
+    return {"title": "P"}
+
+
+class TestProcessorKeys:
+    """A context processor wins over a key a job computes, as it does inline."""
+
+    @pytest.mark.parametrize(
+        ("deferred", "streamed"),
+        [(False, False), (True, False), (True, True)],
+        ids=["inline", "deferred", "streamed"],
+    )
+    def test_the_processor_value_shows_however_the_page_renders(
+        self, tmp_path: Path, *, deferred: bool, streamed: bool
+    ) -> None:
+        root = tmp_path / "pages"
+        root.mkdir()
+        (root / "layout.djx").write_text(_SHELL)
+        shop = root / "shop"
+        shop.mkdir()
+        if deferred:
+            (shop / "loading.djx").write_text("<p>loading</p>")
+        write_page(shop, "item", _TITLED_PAGE, body="<b>{{ title }}</b>")
+        processors = {"context_processors": [f"{__name__}.title_processor"]}
+        entry = file_router_config_entry(pages_dir=root, options=processors)
+        client = NextClient()
+        with routed(root, PAGE_BACKENDS=[entry]):
+            if streamed:
+                page = client.get_stream("/shop/item/")
+                assert page.chunks
+                html = page.final_html()
+            else:
+                html = client.get("/shop/item/").content.decode()
+        assert "<b>P</b>" in html

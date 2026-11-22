@@ -19,16 +19,16 @@ from django.contrib.sessions.backends.signed_cookies import SessionStore as Sign
 from django.http import HttpResponse
 
 from next.conf.defer import defer_seconds
-from next.conf.router import LINKS, router_enabled, router_settings
+from next.conf.router import InterceptMode, router_enabled, router_settings
 from next.csrf import csrf_payload, secret_changed
 from next.forms.uid import posted_origin_path, validated_origin_path
 from next.intercept import intercepts
 from next.pages.layouts import mint_seal
 from next.pages.loaders import layout_chain, layout_ids, template_source
 from next.pages.metadata.resolve import published_metadata
-from next.pages.navigation import page_router
 from next.pages.placeholder import placeholder_spans
 from next.pages.responses import depth_of, never_store, purpose_of
+from next.pages.router import page_router
 from next.partial import keys
 from next.partial.errors import CrossSiteHrefError
 from next.partial.headers import (
@@ -55,7 +55,7 @@ from next.suspense.manager import suspense_manager
 
 from .current import current_links, origin_of
 from .digest import body_bounds, chrome, chrome_zones, find_slot, split_head, zone_html
-from .manager import router_manager
+from .manager import client_router
 from .markers import (
     Cut,
     CutKind,
@@ -63,7 +63,7 @@ from .markers import (
     Divergence,
     LayoutKey,
     ScannedLayout,
-    Shell,
+    ScannedShell,
 )
 from .signals import navigation_rendered, prefetch_shed, router_cleared
 
@@ -141,7 +141,7 @@ def _digests(
 
 def read_shell(
     html: str, seal: str, ids: Sequence[str], backend: ChromeDigest | None = None
-) -> Shell:
+) -> ScannedShell:
     """Return the layouts of `ids` that `html` holds, nested outer first, digested.
 
     Without `backend` only the bounds are read. A missing slot ends the chain there.
@@ -159,20 +159,20 @@ def read_shell(
             digest, head = _digests(text, seal, backend, root=not layouts)
         layouts.append(ScannedLayout(ident, digest, inner, outer, head))
         region = inner
-    return Shell(html, seal, tuple(layouts), body=body_bounds(html))
+    return ScannedShell(html, seal, tuple(layouts), body=body_bounds(html))
 
 
-def _relocated(shell: Shell, html: str) -> Shell:
+def _relocated(shell: ScannedShell, html: str) -> ScannedShell:
     """Return `shell` with the bounds of its layouts read again from `html`."""
     moved = read_shell(html, shell.seal, [layout.ident for layout in shell.layouts])
     layouts = tuple(
         ScannedLayout(old.ident, old.digest, new.slot, new.outer, old.head)
         for old, new in zip(shell.layouts, moved.layouts, strict=False)
     )
-    return Shell(html, shell.seal, layouts, body=moved.body)
+    return ScannedShell(html, shell.seal, layouts, body=moved.body)
 
 
-def layouts_payload(shell: Shell, kept: int = 0) -> list[list[str | None]]:
+def layouts_payload(shell: ScannedShell, kept: int = 0) -> list[list[str | None]]:
     """Return `[id, digest, seal]` per layout, the seal null for the `kept` ones."""
     return [
         [layout.ident, layout.digest, None if index < kept else shell.seal]
@@ -180,12 +180,12 @@ def layouts_payload(shell: Shell, kept: int = 0) -> list[list[str | None]]:
     ]
 
 
-def kept(html: str, request: HttpRequest) -> str:
+def marked_links(html: str, request: HttpRequest) -> str:
     """Return `html` with its current links marked, once its digests are taken."""
     links = current_links()
-    if links is None or not links.holds(html):
+    if links is None:
         return html
-    return links.mark(html, request.get_full_path(), origin_of(request))
+    return links.mark(html, request.get_full_path, partial(origin_of, request))
 
 
 class Routing:
@@ -200,13 +200,13 @@ class Routing:
         self.purpose = purpose
         self.render = RouterRender(
             mint_seal(request),
-            router_manager.entry(),
+            client_router.entry(),
             self.finish,
             snapshot=page_router(file_path).snapshot,
-            speculation=router_manager.speculation(),
+            speculation=client_router.speculation(),
             progress=router_settings().progress,
         )
-        self.shell: Shell | None = None
+        self.shell: ScannedShell | None = None
         self.html: str | None = None
 
     @property
@@ -218,21 +218,21 @@ class Routing:
         """Digest the layouts of `html`, fill `$layouts` and run the passes after."""
         return self._read(html)[0]
 
-    def settled(self, html: str) -> Shell:
+    def settled(self, html: str) -> ScannedShell:
         """Return the shell of `html`, read here when the injector never finished it."""
         shell = self.shell
         if shell is not None and self.html is html:
             return shell
         return self._read(html)[1]
 
-    def _read(self, html: str) -> tuple[str, Shell]:
+    def _read(self, html: str) -> tuple[str, ScannedShell]:
         """Return the finished HTML and its shell, holding both."""
         shell = read_shell(
-            html, self.seal, layout_ids(self.file_path), router_manager.digest()
+            html, self.seal, layout_ids(self.file_path), client_router.digest()
         )
         payload = json.dumps(layouts_payload(shell), separators=(",", ":"))
         html = html.replace(self.render.mark, payload, 1)
-        html = kept(html, self.request)
+        html = marked_links(html, self.request)
         self.shell = shell = _relocated(shell, html)
         self.html = html
         return html, shell
@@ -263,7 +263,7 @@ class _Marking:
 
 def page_marking(request: HttpRequest) -> AbstractContextManager[None]:
     """Mark the current links of the page the block renders for `request`."""
-    return _Marking(partial(kept, request=request))
+    return _Marking(partial(marked_links, request=request))
 
 
 @contextmanager
@@ -321,17 +321,22 @@ class _ZoneMarks:
 
     def __call__(self, html: str) -> str:
         """Return `html` marked for the page the client shows, itself when unmarked."""
-        links = self._links
-        if not links.holds(html):
-            return html
-        request = self._request
+        return self._links.mark(html, self.path, self.origin)
+
+    def path(self) -> str:
+        """Return the path of the page the client shows, read once a zone needs it."""
         path = self._path
         if path is None:
+            request = self._request
             path = self._path = _origin(request) or request.get_full_path()
+        return path
+
+    def origin(self) -> str:
+        """Return the scheme and host of the request, read once a zone needs them."""
         origin = self._origin
         if origin is None:
-            origin = self._origin = origin_of(request)
-        return links.mark(html, path, origin)
+            origin = self._origin = origin_of(self._request)
+        return origin
 
 
 def zone_marking(request: HttpRequest) -> AbstractContextManager[None]:
@@ -376,7 +381,7 @@ def _context(collector: StaticCollector | None) -> dict[str, object]:
     }
 
 
-def _chrome_zones(patches: Patches, shell: Shell, layout: ScannedLayout) -> None:
+def _chrome_zones(patches: Patches, shell: ScannedShell, layout: ScannedLayout) -> None:
     """Morph every zone in the kept chrome, a DOM no-op for one that did not change."""
     html = shell.html
     for name, bounds in chrome_zones(html, shell.seal, layout.slot):
@@ -386,7 +391,7 @@ def _chrome_zones(patches: Patches, shell: Shell, layout: ScannedLayout) -> None
 def navigation_envelope(
     request: HttpRequest,
     routed: Routing,
-    shell: Shell,
+    shell: ScannedShell,
     cut: Cut,
     *,
     shared: bool,
@@ -474,7 +479,7 @@ def intercepted(request: HttpRequest, file_path: Path) -> HttpResponseBase | Non
 
     A navigation to the page shown, or one with no origin, renders the page instead.
     """
-    if router_settings().intercept != LINKS:
+    if router_settings().intercept != InterceptMode.LINKS:
         return None
     href = _href(request)
     origin = _origin(request)
@@ -488,7 +493,7 @@ def intercepted(request: HttpRequest, file_path: Path) -> HttpResponseBase | Non
     return stamp(answered(Patches(request).layer_open(zone=zone, href=href)), request)
 
 
-def cleared(request: HttpRequest, cut: Cut, shell: Shell) -> Cut:
+def cleared(request: HttpRequest, cut: Cut, shell: ScannedShell) -> Cut:
     """Return `cut`, a kept layout given up for a body morph once the router clears.
 
     Kept chrome may still show what the session held before it changed.
@@ -519,9 +524,14 @@ def passed(response: HttpResponseBase, request: HttpRequest) -> HttpResponseBase
     return stamp(response, request)
 
 
+def redirects(response: HttpResponseBase) -> bool:
+    """Whether `response` is a redirect with a `Location` the router's fetch follows."""
+    return response.status_code in _REDIRECTS and response.has_header("Location")
+
+
 def _hidden(response: HttpResponseBase, request: HttpRequest) -> bool:
     """Whether `response` redirects past a clear or a CSRF token the client must see."""
-    if response.status_code not in _REDIRECTS or not response.has_header("Location"):
+    if not redirects(response):
         return False
     return _clearing(request) or secret_changed(request)
 
@@ -740,14 +750,15 @@ __all__ = [
     "directives",
     "hostlike",
     "intercepted",
-    "kept",
     "layouts_payload",
+    "marked_links",
     "navigation_envelope",
     "origin_vary",
     "page_marking",
     "parse_declaration",
     "passed",
     "read_shell",
+    "redirects",
     "refused_prefetch",
     "router_clear",
     "routing",

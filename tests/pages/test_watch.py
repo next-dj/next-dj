@@ -369,7 +369,7 @@ class TestRouterFailuresNeverReachTheWatcher:
             in reports[0].getMessage()
         )
 
-    def test_the_same_failure_is_logged_once(self, tmp_path, caplog) -> None:
+    def test_the_same_failure_is_logged_once(self, caplog) -> None:
         """These helpers run per reloader tick, so a repeat must stay quiet."""
         with (
             patch.object(
@@ -386,9 +386,7 @@ class TestRouterFailuresNeverReachTheWatcher:
         assert len(_watch_tracebacks(caplog)) == 1
         assert _watch_tracebacks(caplog)[0].getMessage().endswith(_RECONFIGURE_PROMISE)
 
-    def test_a_settings_reload_lets_the_failure_be_reported_again(
-        self, tmp_path, caplog
-    ) -> None:
+    def test_a_settings_reload_lets_the_failure_be_reported_again(self, caplog) -> None:
         """A reconfigured project is diagnosed again rather than staying silent."""
         with patch.object(
             RouterAccessImpl, "create_backend", return_value=RaisingRootsRouter()

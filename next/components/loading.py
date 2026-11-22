@@ -7,19 +7,19 @@ from __future__ import annotations
 
 import enum
 import logging
-from types import ModuleType
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple
 
 from next.caches import BoundedCache, LruCache
 from next.permissions.access import declarations
 from next.utils import exec_module_file
 
-from .context import awaits
-from .deferral import defer_declarations
+from .context import awaits, component
+from .defer import defer_declarations
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from types import ModuleType
 
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,15 @@ def last_load_error(file_path: Path) -> Exception | None:
     return _load_errors.get(file_path)
 
 
-type Loaded = tuple[ModuleType | None, bool]
-"""A loaded module, `None` for a failed import, and whether its `render` is async."""
+class Loaded(NamedTuple):
+    """A loaded module, `None` for a failed import, with what each render reads of it.
+
+    `awaiting` marks an async `render`, `resolves` a `render` or a context function.
+    """
+
+    module: ModuleType | None
+    awaiting: bool = False
+    resolves: bool = False
 
 
 class ModuleCache:
@@ -75,16 +82,21 @@ class ModuleCache:
     def get(self, path: Path) -> ModuleType | Literal[_Miss.MISS] | None:
         """Return the cached module, a cached `None`, or the miss sentinel."""
         entry = self._order.get(path, _CACHE_MISS)
-        return entry if entry is _CACHE_MISS else entry[0]
+        return entry if entry is _CACHE_MISS else entry.module
 
     def set(
-        self, path: Path, module: ModuleType | None, *, awaiting: bool = False
+        self,
+        path: Path,
+        module: ModuleType | None,
+        *,
+        awaiting: bool = False,
+        resolves: bool = False,
     ) -> None:
         """Store the module (or `None` on failure) under `path`, evicting when full.
 
-        `awaiting` records an `async def render`, read on every render of the module.
+        `awaiting` and `resolves` are read on every render, so they are kept with it.
         """
-        self._order[path] = (module, awaiting)
+        self._order[path] = Loaded(module, awaiting, resolves)
 
     def clear(self) -> None:
         """Drop every entry from the cache."""
@@ -111,7 +123,7 @@ class ModuleLoader:
         entry = self._cache.entry(path)
         if entry is _CACHE_MISS:
             entry = self._fill(path)
-        return entry[0]
+        return entry.module
 
     def loaded(self, path: Path) -> Loaded:
         """Return the module for `path` with its async-render flag, in one read."""
@@ -123,12 +135,13 @@ class ModuleLoader:
     def _fill(self, path: Path) -> Loaded:
         """Load `path` from disk and cache the module with its async-render flag."""
         entry = self._load_from_disk(path)
-        module, awaiting = entry
-        self._cache.set(path, module, awaiting=awaiting)
+        self._cache.set(
+            path, entry.module, awaiting=entry.awaiting, resolves=entry.resolves
+        )
         return entry
 
     def _load_from_disk(self, path: Path) -> Loaded:
-        """Execute `path` as a module, answering it and whether its `render` is async.
+        """Execute `path` as a module, answering it with what each render reads of it.
 
         A failure is recorded for the render to refuse, and declarations swap in after.
         """
@@ -140,10 +153,11 @@ class ModuleLoader:
         except Exception as exc:
             logger.exception("Could not import component module %s", path)
             _load_errors[path] = _detached(exc)
-            return None, False
-        else:
-            _load_errors.pop(path)
-            return module, awaiting
+            return Loaded(None)
+        _load_errors.pop(path)
+        if callable(render):
+            return Loaded(module, awaiting=awaiting, resolves=True)
+        return Loaded(module, resolves=bool(component.lookup(path)[0]))
 
 
 __all__ = ["ModuleCache", "ModuleLoader", "last_load_error"]

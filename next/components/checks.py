@@ -30,7 +30,7 @@ from next.introspect import callable_name
 
 from .backends import ComponentsBackend
 from .context import component
-from .deferral import defer_declarations
+from .defer import defer_declarations
 from .loading import last_load_error
 from .nodes import ComponentTagNode
 from .sources import get_components_manager

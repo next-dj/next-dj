@@ -1,13 +1,14 @@
 import pytest
 
 from next.conf.compression import (
-    SHAPES,
-    Misfit,
+    SHAPE,
+    StreamOwner,
+    TopicMode,
     compression_settings,
-    misfits,
     read_settings,
 )
 from next.conf.defaults import DEFAULTS
+from next.conf.shapes import Misfit, Shape, misfits
 from next.testing import override_next_settings
 
 
@@ -37,7 +38,7 @@ class TestReadSettings:
         assert "text/*" in current.content_types
 
     def test_the_shapes_cover_every_default_key(self) -> None:
-        assert set(SHAPES) == set(DEFAULTS["COMPRESSION"])
+        assert set(SHAPE.keys) == set(DEFAULTS["COMPRESSION"])
 
     def test_a_codec_mapping_lays_over_its_default(self) -> None:
         current = read_settings({"LEVELS": {"gzip": 6}, "WINDOWS": {"br": 20}})
@@ -59,8 +60,8 @@ class TestReadSettings:
         assert current.enabled is False
         assert current.order == ("gzip",)
         assert current.min_size == 0
-        assert current.streams == "middleware"
-        assert current.sse_topics == "reset"
+        assert current.streams is StreamOwner.MIDDLEWARE
+        assert current.sse_topics is TopicMode.RESET
         assert current.coalesce_ms == 0.5
         assert current.exclude == "myapp.rules.exclude"
 
@@ -105,14 +106,16 @@ class TestReadSettings:
     ],
 )
 def test_shapes(key: str, value: object, usable) -> None:
-    assert SHAPES[key][0](value) is usable
+    shape = SHAPE.keys[key]
+    assert isinstance(shape, Shape)
+    assert shape.usable(value) is usable
 
 
 def test_misfits_name_the_key_and_the_value() -> None:
-    found = misfits({"MIN_SIZE": "big", "ORDER": {"gzip": 1}, "SSE": True, "X": 1})
+    found = misfits({"MIN_SIZE": "big", "ORDER": {"gzip": 1}, "SSE": True}, SHAPE)
     assert found == [
-        Misfit("ORDER", "a list of codec tokens", "a dict"),
-        Misfit("MIN_SIZE", "an integer from 0", "'big'"),
+        Misfit(("ORDER",), "a list of codec tokens", "a dict"),
+        Misfit(("MIN_SIZE",), "an integer from 0", "'big'"),
     ]
 
 

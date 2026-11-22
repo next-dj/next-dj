@@ -2,7 +2,6 @@
 
 import asyncio
 import functools
-import inspect
 import logging
 import re
 import threading
@@ -14,16 +13,26 @@ import django
 from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
 from django.http.response import HttpResponseBase
 from django.utils.cache import patch_vary_headers
-from django.utils.module_loading import import_string
 
-from next.conf.compression import OPT_OUT, CompressionSettings, compression_settings
+from next.conf.compression import (
+    OPT_OUT,
+    CompressionSettings,
+    StreamOwner,
+    TopicMode,
+    compression_settings,
+)
+from next.conf.imports import (
+    class_fault,
+    import_backend_class,
+    import_problem,
+    import_target,
+)
 from next.conf.settings import fail_loudly
 from next.utils import middleware_installed
 
 from .backends import CompressionBackend, Compressor, Decoder
 from .errors import CompressionBackendError
 from .negotiation import negotiate
-from .registry import CompressionRegistry
 from .signals import compression_backend_loaded
 from .streams import EVENT_STREAM, StreamEncoding, media_type, padding
 
@@ -41,37 +50,37 @@ _IDENTITY: Final = "identity"
 _ACCEPT: Final = "HTTP_ACCEPT_ENCODING"
 _HEAD: Final = "HEAD"
 _WILDCARD: Final = "/*"
-_SELF: Final = "self"
-_OFF: Final = "off"
-_RESET: Final = "reset"
 _HTML: Final = "text/html"
 _GZIP: Final = "gzip"
 _ACCEPTS_GZIP: Final = re.compile(r"\bgzip\b")
 _FLUSHING_GZIP: Final = (6, 1)
 
-type Exclude = Callable[[HttpRequest, HttpResponseBase], bool]
+type Exclude = Callable[[HttpRequest, HttpResponseBase], object]
 
 
-def _refused(key: str, dotted: str, problem: str) -> None:
-    """Raise the path error under `DEBUG` or `STRICT_LOADING`, else log and skip it."""
+def _refused(
+    key: str, dotted: str, problem: str, cause: ImportError | None = None
+) -> None:
+    """Raise the path error under `DEBUG` or `STRICT_LOADING`, else log and skip it.
+
+    The log carries the import failure behind it, so the module's traceback survives.
+    """
     error = CompressionBackendError(key, dotted, problem)
     if fail_loudly():
-        raise error
-    logger.warning("%s The framework skips it.", error)
+        raise error from cause
+    logger.warning("%s The framework skips it.", error, exc_info=cause)
 
 
 def _load_backend(dotted: str) -> CompressionBackend | None:
     """Build the backend `dotted` names, `None` for a path that names no backend."""
     try:
-        klass = import_string(dotted)
+        klass: type[CompressionBackend] = import_backend_class(dotted)
     except ImportError as exc:
-        _refused("BACKENDS", dotted, f"does not import ({exc})")
+        _refused("BACKENDS", dotted, import_problem(exc), exc)
         return None
-    if not (isinstance(klass, type) and issubclass(klass, CompressionBackend)):
-        _refused("BACKENDS", dotted, "is no CompressionBackend subclass")
-        return None
-    if inspect.isabstract(klass):
-        _refused("BACKENDS", dotted, "is an abstract class")
+    problem = class_fault(klass, CompressionBackend)
+    if problem is not None:
+        _refused("BACKENDS", dotted, problem)
         return None
     backend = klass()
     compression_backend_loaded.send(
@@ -85,14 +94,14 @@ def _load_exclude(dotted: str | None) -> Exclude | None:
     if dotted is None:
         return None
     try:
-        target = import_string(dotted)
+        target = import_target(dotted)
     except ImportError as exc:
-        _refused("EXCLUDE", dotted, f"does not import ({exc})")
+        _refused("EXCLUDE", dotted, import_problem(exc), exc)
         return None
     if not callable(target):
         _refused("EXCLUDE", dotted, "names no callable")
         return None
-    return cast("Exclude", target)
+    return target
 
 
 def in_range(value: object, bounds: tuple[int, int] | None) -> bool:
@@ -125,16 +134,12 @@ class _State:
     """The backends one `COMPRESSION` mapping builds, with the codings it offers."""
 
     settings: CompressionSettings
-    registry: CompressionRegistry
+    loaded: Mapping[str, CompressionBackend]
     offered: tuple[str, ...]
     resetting: tuple[str, ...]
     levels: Mapping[str, int]
     windows: Mapping[str, int | None]
     exclude: Exclude | None
-
-    def backend(self, coding: str) -> CompressionBackend:
-        """Return the backend of an offered coding."""
-        return cast("CompressionBackend", self.registry.get(coding))
 
     def create(self, backend: CompressionBackend) -> Compressor:
         """Return a stream compressor of `backend` at its level and window."""
@@ -144,20 +149,20 @@ class _State:
 
 def _build(settings: CompressionSettings) -> _State:
     """Load the `BACKENDS` and pick the available codings `ORDER` offers."""
-    registry = CompressionRegistry()
+    loaded: dict[str, CompressionBackend] = {}
     for dotted in settings.backends:
         backend = _load_backend(dotted)
         if backend is not None:
-            registry.register(backend)
-    chosen = (registry.get(coding) for coding in dict.fromkeys(settings.order))
+            loaded.setdefault(backend.coding, backend)
+    chosen = (loaded.get(coding) for coding in dict.fromkeys(settings.order))
     usable = [b for b in chosen if b is not None and b.available()]
     return _State(
         settings=settings,
-        registry=registry,
+        loaded=loaded,
         offered=tuple(b.coding for b in usable),
         resetting=tuple(b.coding for b in usable if b.resets),
-        levels={b.coding: _level(b, settings.levels) for b in registry},
-        windows={b.coding: _window(b, settings.windows) for b in registry},
+        levels={b.coding: _level(b, settings.levels) for b in loaded.values()},
+        windows={b.coding: _window(b, settings.windows) for b in loaded.values()},
         exclude=_load_exclude(settings.exclude),
     )
 
@@ -204,6 +209,16 @@ def _encodable(response: HttpResponseBase, settings: CompressionSettings) -> boo
     return not (settings.respect_no_transform and _no_transform(response))
 
 
+def eligible(
+    response: HttpResponseBase, settings: CompressionSettings, *, events: bool
+) -> bool:
+    """Whether the response and its media type allow a coding, its body left unread."""
+    if not _encodable(response, settings):
+        return False
+    media = media_type(response.get("Content-Type", ""))
+    return (media != EVENT_STREAM or events) and compressible(media, settings)
+
+
 class CompressionManager:
     """Hold the codec backends of the process, built on the first compressible response.
 
@@ -232,10 +247,9 @@ class CompressionManager:
                     self._state = state
         return state
 
-    @property
-    def registry(self) -> CompressionRegistry:
-        """Return the loaded backends."""
-        return self._ensure_backends().registry
+    def backend(self, coding: str) -> CompressionBackend | None:
+        """Return the loaded backend of `coding`, the first `BACKENDS` names for it."""
+        return self._ensure_backends().loaded.get(coding)
 
     def offered(self) -> tuple[str, ...]:
         """Return the available codings in server order, the ones negotiation picks."""
@@ -251,14 +265,20 @@ class CompressionManager:
     ) -> tuple[_State, CompressionBackend] | None:
         """Return the backend to encode `response` with, patching `Vary` once it may.
 
-        `events` admits an event stream, `resetting` only codecs that drop their window.
+        `resetting` keeps the codecs that drop their window between messages.
         """
-        settings = compression_settings()
-        if not _encodable(response, settings):
+        if not eligible(response, compression_settings(), events=events):
             return None
-        media = media_type(response.get("Content-Type", ""))
-        if (media == EVENT_STREAM and not events) or not compressible(media, settings):
-            return None
+        return self.chosen(request, response, resetting=resetting)
+
+    def chosen(
+        self,
+        request: HttpRequest,
+        response: HttpResponseBase,
+        *,
+        resetting: bool = False,
+    ) -> tuple[_State, CompressionBackend] | None:
+        """Return the backend for an eligible `response`, patching `Vary` as it may."""
         state = self._ensure_backends()
         if state.exclude is not None and state.exclude(request, response):
             return None
@@ -269,7 +289,7 @@ class CompressionManager:
         coding = negotiate(request.META.get(_ACCEPT, ""), offered)
         if coding is None:
             return None
-        return state, state.backend(coding)
+        return state, state.loaded[coding]
 
     def document_coding(self, request: HttpRequest) -> tuple[str | None, bool]:
         """Return the coding a document stream reaches `request` in, and if it buffers.
@@ -281,7 +301,7 @@ class CompressionManager:
         if settings.enabled and compressible(_HTML, settings):
             coding = negotiate(accept, self._ensure_backends().offered)
             if coding is not None and (
-                settings.streams == _SELF or middleware_installed(MIDDLEWARE)
+                settings.streams == StreamOwner.SELF or middleware_installed(MIDDLEWARE)
             ):
                 return coding, False
         if middleware_installed(GZIP_MIDDLEWARE) and _ACCEPTS_GZIP.search(accept):
@@ -331,12 +351,16 @@ def _stream_through(
 
 @dataclass(frozen=True, slots=True)
 class _Buffered:
-    """One buffered body to compress once, padded, with its backend and level."""
+    """One buffered body to compress once, padded, with its backend and level.
+
+    `size` is the length of the body the response holds, read before the padding.
+    """
 
     response: HttpResponse
     backend: CompressionBackend
     level: int
     body: bytes
+    size: int
 
     def compress(self) -> bytes:
         """Return the body compressed in one shot."""
@@ -345,7 +369,7 @@ class _Buffered:
     def apply(self, compressed: bytes) -> HttpResponse:
         """Keep the compressed body only when it is smaller than the original."""
         response = self.response
-        if len(compressed) < len(response.content):
+        if len(compressed) < self.size:
             response.content = compressed
             response.headers["Content-Length"] = str(len(compressed))
             _mark_encoded(response, self.backend.coding)
@@ -359,23 +383,28 @@ def _plan(
 
     The response comes back as is when nothing is left to compress.
     """
-    found = compression_manager.negotiated(
-        request, response, events=compression_settings().sse
-    )
+    settings = compression_settings()
+    if isinstance(response, StreamingHttpResponse):
+        streamed = compression_manager.negotiated(
+            request, response, events=settings.sse
+        )
+        if streamed is not None:
+            _stream_through(response, *streamed)
+        return response
+    if not isinstance(response, HttpResponse) or not eligible(
+        response, settings, events=settings.sse
+    ):
+        return response
+    content = response.content
+    size = len(content)
+    if size < settings.min_size:
+        return response
+    found = compression_manager.chosen(request, response)
     if found is None:
         return response
     state, backend = found
-    if isinstance(response, StreamingHttpResponse):
-        _stream_through(response, state, backend)
-        return response
-    if not isinstance(response, HttpResponse):
-        return response
-    settings = state.settings
-    content = response.content
-    if len(content) < settings.min_size:
-        return response
-    body = content + padding(response.get("Content-Type", ""), settings.padding)
-    return _Buffered(response, backend, state.levels[backend.coding], body)
+    body = content + padding(response.get("Content-Type", ""), state.settings.padding)
+    return _Buffered(response, backend, state.levels[backend.coding], body, size)
 
 
 def compress_response(
@@ -415,13 +444,16 @@ def prepare_stream(
     settings = compression_settings()
     content_type = response.get("Content-Type", "")
     events = media_type(content_type) == EVENT_STREAM
-    if not events and settings.streams != _SELF:
+    if not events and settings.streams != StreamOwner.SELF:
         return None
     mode = settings.sse_topics if topic else None
     found: tuple[_State, CompressionBackend] | None = None
-    if mode != _OFF:
+    if mode != TopicMode.OFF:
         found = compression_manager.negotiated(
-            request, response, events=topic or settings.sse, resetting=mode == _RESET
+            request,
+            response,
+            events=topic or settings.sse,
+            resetting=mode == TopicMode.RESET,
         )
     if found is None:
         setattr(response, OPT_OUT, False)
@@ -435,7 +467,7 @@ def prepare_stream(
         content_type=content_type,
         pad=settings.padding,
         offload_bytes=settings.offload_bytes,
-        reset=mode == _RESET,
+        reset=mode == TopicMode.RESET,
     )
 
 
@@ -451,7 +483,7 @@ def response_decoder(response: HttpResponseBase) -> Decoder:
     coding = response.get("Content-Encoding", "").strip().lower()
     if not coding or coding == _IDENTITY:
         return _identity
-    backend = compression_manager.registry.get(coding)
+    backend = compression_manager.backend(coding)
     if backend is None:
         msg = f"No COMPRESSION backend decodes the coding {coding!r}."
         raise ValueError(msg)

@@ -63,7 +63,7 @@ class TestLayoutId:
 class TestSeal:
     """The router seal lives on the request a page view routes."""
 
-    def test_minted_once(self) -> None:
+    def test_a_request_mints_one_seal_and_keeps_it(self) -> None:
         request = HttpRequest()
         assert request_seal(request) is None
         seal = mint_seal(request)
@@ -127,13 +127,13 @@ class TestComposition:
         (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
         return tmp_path / "leaf" / "page.py"
 
-    def test_off_composes_as_before(self, tmp_path: Path) -> None:
+    def test_a_disabled_router_leaves_the_slot_unwrapped(self, tmp_path: Path) -> None:
         page_file = self._tree(tmp_path)
         with override_next_settings(ROUTER={"ENABLED": False}):
             composed = LayoutTemplateLoader().compose_body("<p>x</p>", page_file)
         assert composed == "<main>{% #template %}<p>x</p>{% /template %}</main>"
 
-    def test_on_wraps_the_slot(self, tmp_path: Path) -> None:
+    def test_an_enabled_router_wraps_the_slot(self, tmp_path: Path) -> None:
         page_file = self._tree(tmp_path)
         with override_next_settings(ROUTER={"ENABLED": True}):
             composed = LayoutTemplateLoader().compose_body("<p>x</p>", page_file)
@@ -147,18 +147,18 @@ class TestComposition:
 class TestSlotNode:
     """The slot tag writes the sealed comments only for a routed request."""
 
-    def test_plain_without_a_seal(self) -> None:
+    def test_a_slot_without_a_seal_renders_plain(self) -> None:
         source = "<main>{% next:slot abc %}<p>x</p>{% /next:slot %}</main>"
         assert Template(source).render(Context({})) == "<main><p>x</p></main>"
 
-    def test_sealed_with_one(self) -> None:
+    def test_a_slot_with_a_seal_renders_sealed(self) -> None:
         request = HttpRequest()
         seal = mint_seal(request)
         source = "{% next:slot abc %}<p>x</p>{% /next:slot %}"
         html = Template(source).render(Context({"request": request}))
         assert html == sealed(SLOT, seal, "<p>x</p>", "abc")
 
-    def test_an_extends_content_takes_the_rest(self, tmp_path: Path) -> None:
+    def test_an_extends_content_takes_the_rest(self) -> None:
         source = "{% next:slot abc %}{% extends base %}{% /next:slot %}"
         base = Template("<b>base</b>")
         assert Template(source).render(Context({"base": base})) == "<b>base</b>"
@@ -186,5 +186,7 @@ class TestSlotProblem:
             ("{% verbatim %}<p>x</p>{% endverbatim %}{% template %}", None),
         ],
     )
-    def test_the_site(self, source: str, problem: str | None) -> None:
+    def test_the_slot_problem_of_a_layout_source_is_named(
+        self, source: str, problem: str | None
+    ) -> None:
         assert slot_problem(source) == problem

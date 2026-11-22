@@ -57,13 +57,21 @@ A ``Loader`` gathers the keys one request scope asks for into a few calls of a b
 
    import asyncio
 
+   from django.http import HttpRequest
    from shop.loaders import price_of
+   from shop.models import CartLine, Price
 
    from next import context
 
+   @context("cart")
+   def cart(request: HttpRequest) -> list[CartLine]:
+       return list(CartLine.objects.filter(session=request.session.session_key))
+
    @context("prices")
-   async def prices(cart_ids: list[int]) -> list[object]:
-       return await asyncio.gather(*(price_of.load(pk) for pk in cart_ids))
+   async def prices(cart: list[CartLine]) -> list[Price]:
+       return await asyncio.gather(*(price_of.load(line.product_id) for line in cart))
+
+The ``cart`` callable is the source of the keys, and ``prices`` reads it by name, so the loader receives one key per line and the batch function runs once for the page.
 
 ``load(key)`` is awaited on the event loop, and ``load_sync(key)`` serves a sync callable on a thread and refuses to run on an event loop.
 A batch closes once every running deferred job of the response waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default, both read from ``DEFER`` unless the loader is built with ``window=`` or ``max_batch=``.
@@ -75,6 +83,9 @@ It applies no access scoping, unlike ``DObject``, so a page checks what the visi
 
 A loader batches the keys requested concurrently within one request scope, which covers the async and sync context functions of an async page and every deferred job of one response, streamed or assembled inline.
 Code that runs serially, such as a fully sync page, the shell render or the render of a reloaded boundary, calls the batch function with one key per call.
+Where the jobs of a response run decides how many keys share a batch.
+On the pool they ask within one window and share it, and on SQLite they run on the request lane one after the other, so each job loads one batch of its own, see `Lanes and placement`_.
+:doc:`/content/howto/batch-lookups-with-a-loader` walks through a loader shared by two streamed components and the tests of both lanes.
 
 Lanes and placement
 -------------------
@@ -125,3 +136,8 @@ Limits
 - A batch function that loads a key of its own batch, directly or through a callable it runs, fails that batch, since the wait would wait on itself.
 - A sync batch function runs on the thread of whichever waiting job claims its batch first, the request thread or a pool thread, under the database connection, the transaction, and the statement timeout of that job.
   Every other job waiting on the batch receives what that call read, so a batch the request thread claims sees the uncommitted writes of the request, one a pool job claims sees committed rows only, and under ``DEFER["DEADLINE_TO_DB"]`` the query carries the remaining time of the claiming job.
+
+.. seealso::
+
+   :doc:`/content/howto/batch-lookups-with-a-loader` for a loader shared by two streamed components.
+   :repo:`search-catalog <tree/main/examples/search-catalog>` for the loader and the tests of both lanes.

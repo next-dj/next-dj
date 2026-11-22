@@ -117,8 +117,7 @@ class TestChunkLists:
         assert {"reload", "more", "reader", "router", "history", "intent"} <= installing
         for key in installing:
             entry = _entry_source(key)
-            assert f"if (!next.${key}) {{" in entry, key
-            assert f"next.${key} = true;" in entry, key
+            assert f'once("{key}", ' in entry, key
             assert key not in modules, key
 
     def test_each_chunk_entry_is_named_by_its_key(self) -> None:

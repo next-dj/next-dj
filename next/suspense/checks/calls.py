@@ -1,12 +1,18 @@
 """The checks of client-trip component calls and of components that declare props."""
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
+from django.core.checks import (
+    CheckMessage,
+    Error,
+    Tags,
+    Warning as DjangoWarning,
+    register,
+)
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError
 from django.http import HttpRequest
@@ -14,8 +20,10 @@ from django.template import Engine, Template, TemplateSyntaxError
 from django.template.base import Node, NodeList, TextNode
 from django.template.defaulttags import IfNode
 
+from next.checks import NEXT
+from next.checks.common import RunMemo
 from next.components.context import component
-from next.components.deferral import defer_declarations
+from next.components.defer import defer_declarations
 from next.components.info import ComponentInfo
 from next.components.reads import reads
 from next.components.sources import get_components_manager
@@ -44,6 +52,21 @@ _PROCESSOR_FAILURES: Final = (
     TypeError,
     ValueError,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _Sources:
+    """The components of one check run and the compiled template of each that has one.
+
+    A template that fails to read or compile is left out, its own check names it.
+    """
+
+    components: tuple[ComponentInfo, ...]
+    templates: dict[Path, Template]
+
+
+_sources: RunMemo[_Sources] = RunMemo()
+_NO_SOURCES: Final = _Sources((), {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,13 +138,40 @@ def _calls(template: Template, anchor: Path) -> Iterator[Call]:
         yield Call(node, info, _mode(node, info), anchor, guarded)
 
 
-def _components() -> Iterator[ComponentInfo]:
-    """Yield every component of the listed backends, each `component.py` imported."""
-    if not next_framework_settings.COMPONENT_BACKENDS:
-        return
+def _compiled(infos: tuple[ComponentInfo, ...]) -> dict[Path, Template]:
+    """Return the compiled template of every component, skipping one that fails."""
+    templates: dict[Path, Template] = {}
+    for info in infos:
+        path = info.template_path
+        if path is None or path in templates:
+            continue
+        try:
+            templates[path] = Template(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, TemplateSyntaxError):
+            continue
+    return templates
+
+
+def _collect() -> _Sources:
+    """Import every `component.py` of the listed backends and compile each template."""
+    infos: list[ComponentInfo] = []
     for backend in get_components_manager().backends:
         backend.import_component_modules()
-        yield from backend.iter_components()
+        infos.extend(backend.iter_components())
+    components = tuple(infos)
+    return _Sources(components, _compiled(components))
+
+
+def _read() -> _Sources:
+    """Return the components and templates of this run, read once per run."""
+    if not next_framework_settings.COMPONENT_BACKENDS:
+        return _NO_SOURCES
+    return _sources.get(get_components_manager(), _collect)
+
+
+def _components() -> tuple[ComponentInfo, ...]:
+    """Return every component of the listed backends, each `component.py` imported."""
+    return _read().components
 
 
 def deferred_components() -> Iterator[ComponentInfo]:
@@ -135,16 +185,9 @@ def deferred_components() -> Iterator[ComponentInfo]:
             yield info
 
 
-def _component_templates() -> Iterator[tuple[Path, Template]]:
-    """Yield the compiled template of every component, skipping one that fails."""
-    for info in tuple(_components()):
-        path = info.template_path
-        if path is None:
-            continue
-        try:
-            yield path, Template(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, TemplateSyntaxError):
-            continue
+def _component_templates() -> Iterable[tuple[Path, Template]]:
+    """Return the compiled template of every component, compiled once per run."""
+    return _read().templates.items()
 
 
 def client_calls() -> Iterator[Call]:
@@ -240,6 +283,7 @@ def mints_tokens() -> bool:
     return next(client_calls(), None) is not None
 
 
+@register(Tags.templates, NEXT)
 def check_client_calls(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report the calls the reload path cannot serve (`E224`, `E225`, `W159`)."""
     messages: dict[tuple[str | None, str], CheckMessage] = {}
@@ -302,6 +346,7 @@ def _constant_error(call: Call) -> CheckMessage | None:
     return None
 
 
+@register(Tags.templates, NEXT)
 def check_prop_types(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Refuse a declared prop no boundary token can carry (`next.E243`).
 
@@ -309,7 +354,7 @@ def check_prop_types(*args: object, **kwargs: object) -> list[CheckMessage]:
     """
     messages: dict[tuple[str | None, str], CheckMessage] = {}
     refused: set[Path | None] = set()
-    for info in tuple(_components()):
+    for info in _components():
         for message in _annotation_errors(info):
             messages[message.id, message.msg] = message
             refused.add(info.module_path)
@@ -358,17 +403,15 @@ def _stray(info: ComponentInfo, processors: frozenset[str]) -> list[str]:
     if path is None or module is None:
         return []
     keys = _context_keys(module)
-    if keys is None:
-        return []
-    try:
-        template = Template(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, TemplateSyntaxError):
+    template = _read().templates.get(path)
+    if keys is None or template is None:
         return []
     read, assigned = reads(template.nodelist)
     known = keys | processors | assigned | set(declared_props(info))
     return sorted(name for name in read - known if not _given(name))
 
 
+@register(Tags.templates, NEXT)
 def check_declared_props(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about a variable a props-declaring component reads but is never given.
 
@@ -387,7 +430,7 @@ def check_declared_props(*args: object, **kwargs: object) -> list[CheckMessage]:
             obj=str(info.template_path),
             id="next.W156",
         )
-        for info in tuple(_components())
+        for info in _components()
         if declared_props(info) and (stray := _stray(info, processors))
     ]
 

@@ -7,7 +7,7 @@ Module summary
 --------------
 
 ``next.compression`` encodes responses in the content coding a client accepts, zstd, brotli or gzip, negotiated per request from ``Accept-Encoding``.
-It imports no other next.dj area, only Django, the standard library, the settings layer ``next.conf``, and the check tag of ``next.checks``.
+It imports no other area package, only Django, the standard library, and the shared layers ``next.conf``, ``next.checks``, and ``next.utils``.
 ``NEXT_FRAMEWORK["COMPRESSION"]`` configures it, see :doc:`settings`.
 
 Codecs
@@ -85,9 +85,9 @@ The project scaffold lists it there, and the framework never inserts middleware 
 
 A response is left as it is when compression is off, when it already carries ``Content-Encoding``, for a status of 1xx, 204, 206 or 304, with a ``Content-Range``, with ``next_compress`` set to ``False`` on it, as a ``FileResponse`` over a file, or with ``Cache-Control: no-transform`` while ``RESPECT_NO_TRANSFORM`` holds.
 A file response keeps the server's ``wsgi.file_wrapper`` path and is sent as it is, since its blocks are too small to compress and flush one by one, so a static file is precompressed by the storage or the proxy instead.
-A media type outside ``CONTENT_TYPES``, an event stream while ``SSE`` is off, and a response the ``EXCLUDE`` callable keeps plain are left as they are without ``Vary``.
+A media type outside ``CONTENT_TYPES``, an event stream while ``SSE`` is off, a response the ``EXCLUDE`` callable keeps plain, a buffered body under ``MIN_SIZE``, and a response that is neither an ``HttpResponse`` nor a stream are left as they are without ``Vary``.
 Every other response gets ``Vary: Accept-Encoding``, and a ``HEAD`` request stops there.
-A buffered body under ``MIN_SIZE`` stays plain, and a larger one is compressed once, kept only when it comes out smaller, with ``Content-Length`` rewritten.
+A larger buffered body is compressed once, kept only when it comes out smaller, with ``Content-Length`` rewritten.
 A streamed body that does not compress itself is wrapped, each chunk compressed and flushed so the client decodes it at once, empty output never sent, ``Content-Length`` removed, and the source closed however the stream stops.
 An async stream stays async, and under ASGI a buffered body or a chunk larger than ``OFFLOAD_BYTES`` is compressed in a worker thread.
 A strong ``ETag`` becomes weak, as the encoded bytes differ from the identity ones.
@@ -111,6 +111,8 @@ An event stream follows ``SSE``, and with ``topic=True`` a realtime topic stream
 ``StreamEncoding.write(chunk)`` answers the chunk padded, compressed and flushed, ``awrite(chunk)`` the same in a worker thread when the chunk is above ``OFFLOAD_BYTES`` or ``offload=True`` asks for it, and ``end()`` the bytes that end the stream.
 ``wrap(chunks)`` and ``awrap(chunks)`` encode a whole sync or async iterator, which is what the middleware runs.
 ``offloads(data)`` answers whether a buffer is above ``OFFLOAD_BYTES``.
+
+``compression_manager.backend(coding)`` answers the loaded backend of a coding, the first ``BACKENDS`` entry that names it, and ``None`` for a coding no entry offers.
 
 ``decode_response(response)`` answers the whole body of a response decoded from its ``Content-Encoding``, and ``response_decoder(response)`` the write-by-write decoder of that coding, so a test reads a compressed page or stream as plain bytes.
 
@@ -145,6 +147,13 @@ Opting out
 The call binds its own page alone, the last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value that is no bool applies nothing and is reported as ``next.E222``.
 It reaches the response through the ``compress`` field of the page's ``ResponsePolicy``, which marks the response with ``next_compress = False`` before the stream negotiates and before the middleware runs.
 
+.. code-block:: python
+   :caption: pages/statement/page.py
+
+   from next import page
+
+   page.compress(False)
+
 A plain Django view takes the ``no_compress`` decorator of ``next.compression``, sync or async, which marks each of its responses the same way, and a view may also set ``response.next_compress = False`` itself.
 
 .. code-block:: python
@@ -161,7 +170,8 @@ A plain Django view takes the ``no_compress`` decorator of ``next.compression``,
 Proxies
 -------
 
-The application sets ``Content-Encoding`` and ``Vary``, so nginx, Caddy, Cloudflare and CloudFront pass the body through without compressing it again.
+The application sets ``Content-Encoding`` and ``Vary: Accept-Encoding`` on every response it compresses.
+A proxy or a CDN in front of the application has to keep ``Accept-Encoding`` in its cache key, forward the header, and leave an encoded body as it is, which a request from outside the proxy confirms, see :ref:`deployment-compression`.
 ``no-transform`` is not added to ordinary pages, as it would block edge optimisations.
 
 Checks and signals
@@ -169,3 +179,12 @@ Checks and signals
 
 ``next.compression.checks`` reports the ``COMPRESSION`` shape (``next.E035``, ``next.E076``), unusable paths (``next.E219``), codec problems (``next.E228``), the middleware pair (``next.E227``), a missing middleware (``next.W164``), the middleware listed too low (``next.W165``), and cross-site cookies (``next.W166``), see :doc:`system-checks`.
 ``compression_backend_loaded`` is sent with the backend class as the sender and ``config`` and ``instance`` once per backend the manager builds.
+
+See also
+--------
+
+.. seealso::
+
+   :doc:`settings` for the ``COMPRESSION`` keys.
+   :doc:`system-checks` for the checks.
+   :repo:`observability <tree/main/examples/observability>` for a compressed scrape and :repo:`_template <tree/main/examples/_template>` for the middleware placement, see :doc:`/content/misc/examples`.

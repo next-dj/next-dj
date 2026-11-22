@@ -39,8 +39,9 @@ from next.forms.manager import (
 )
 from next.forms.registration import registration_diagnostics
 from next.pages.loaders import load_page_module
-from next.partial import FormShaper, forms as partial_forms
+from next.partial import FormShaper
 from next.partial.headers import partial_intent
+from next.partial.shaping import shaper as partial_shaper
 from tests.support import isolated_form_registries
 from tests.support.apps import fake_app_configs
 from tests.support.forms import DECLINING_SHAPER, DecliningShaper
@@ -1738,9 +1739,9 @@ def refused_shaping():
     """Spy on the intent the default shaper reads, failing any envelope it builds."""
     refused = AssertionError("a plain submission entered a partial envelope builder")
     with (
-        patch.object(partial_forms, "partial_intent", wraps=partial_intent) as reads,
-        patch.object(partial_forms, "shape_partial", side_effect=refused),
-        patch.object(partial_forms, "shape_validate", side_effect=refused),
+        patch.object(partial_shaper, "partial_intent", wraps=partial_intent) as reads,
+        patch.object(partial_shaper, "shape_partial", side_effect=refused),
+        patch.object(partial_shaper, "shape_validate", side_effect=refused),
     ):
         yield reads
 

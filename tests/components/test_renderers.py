@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import threading
 from pathlib import Path
 from unittest.mock import patch
@@ -18,10 +19,12 @@ from next.components import (
     render_component,
 )
 from next.components.context import ContextFunction
-from next.components.loading import ModuleLoader
+from next.components.loading import Loaded, ModuleLoader
 from next.components.renderers import (
     _RESERVED_CONTEXT_KEYS,
     COMPONENT_PROPS_CONTEXT_KEY,
+    ComponentTemplateLoader,
+    CompositeComponentRenderer,
     _BridgedContextRun,
 )
 from next.deps import Depends, ResolutionContext
@@ -392,7 +395,7 @@ class TestCallerContextOwnership:
     """`render_component` reads the caller's mapping and never writes to it."""
 
     def test_simple_render_leaves_the_caller_dict_untouched(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
         """The request and csrf keys are set on the render copy, not on the argument."""
         (tmp_path / "card.djx").write_text("<div>{{ title }} {{ csrf_token }}</div>")
@@ -405,7 +408,7 @@ class TestCallerContextOwnership:
             is_simple=True,
         )
         context_data = {"title": "Hi"}
-        request = RequestFactory().get("/")
+        request = rf.get("/")
 
         html = render_component(info, context_data, request=request)
 
@@ -450,7 +453,7 @@ class TestCallerContextOwnership:
 
         with (
             patch("next.components.renderers.component", mgr),
-            patch.object(ModuleLoader, "loaded", return_value=(None, False)),
+            patch.object(ModuleLoader, "loaded", return_value=Loaded(None)),
         ):
             html = render_component(info, {"title": "Hi"})
 
@@ -844,6 +847,26 @@ def _page_scope(*shared: str, seed: dict[str, object] | None = None):
 class TestInstancesUnderARequestScope:
     """Two instances of one component never read each other's values from the scope."""
 
+    @pytest.mark.parametrize("module", [None, "raise LookupError\n", "# empty\n"])
+    def test_a_render_resolving_nothing_takes_no_layer(
+        self, tmp_path: Path, module: str | None
+    ) -> None:
+        _mgr, info, module_path = build_composite_component(
+            tmp_path, template="<b>{{ title }}</b>"
+        )
+        if module is None:
+            info = dataclasses.replace(info, module_path=None)
+        else:
+            module_path.write_text(module)
+        loader = ModuleLoader()
+        renderer = CompositeComponentRenderer(loader, ComponentTemplateLoader(loader))
+        with (
+            _page_scope(),
+            patch.object(RequestMemo, "instance", side_effect=AssertionError),
+        ):
+            html = renderer.render(info, {"title": "x"}, None)
+        assert html == ("<b>x</b>" if module == "# empty\n" else "")
+
     def _shouting(
         self, tmp_path: Path, title
     ) -> tuple[ComponentContextManager, ComponentInfo]:
@@ -904,6 +927,7 @@ class TestInstancesUnderARequestScope:
         with (
             bound_dependency("shout", _shout),
             patch("next.components.renderers.component", mgr),
+            patch("next.components.loading.component", mgr),
             patch.object(components_manager, "get_component", return_value=info),
             _page_scope("shout"),
         ):

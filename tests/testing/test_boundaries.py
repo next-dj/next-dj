@@ -1,17 +1,18 @@
 import asyncio
 import contextvars
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from django.http import StreamingHttpResponse
-from django.test import Client
+from django.http import HttpResponse, HttpResponseBase, StreamingHttpResponse
+from django.test import AsyncClient, Client, override_settings
 
 from next.boundaries import Boundary, boundary_failed, contain
 from next.components import ComponentInfo
-from next.defer import BoundaryError, ErrorKind
+from next.compression import GzipBackend
+from next.defer import Addressing, BoundaryFailure, ErrorKind
 from next.suspense.connections import pool_forced
 from next.testing import (
     NextClient,
@@ -22,19 +23,18 @@ from next.testing import (
     render_page,
 )
 from next.testing.boundaries import (
+    HeldFailures,
     RecordedFailure,
     in_document_order,
     raise_first,
     recorded_failures,
 )
 from next.testing.rendering import render_component_by_name
-from tests.pages.checks.metadata.trees import (
-    COMPONENTS,
-    component_template,
-    layout_root,
-    templated_page,
-)
+from next.testing.streaming import aread_stream, read_stream
 from tests.support import routed
+from tests.support.access import COMPONENTS
+from tests.support.components import write_component
+from tests.support.trees import layout_root, templated_page
 
 
 DOWN = "widget down"
@@ -44,13 +44,13 @@ class _Fallback:
     def retry(self) -> bool:
         return True
 
-    def retry_token(self, error: BoundaryError) -> str:
+    def retry_token(self, error: BoundaryFailure) -> str:
         return ""
 
     def tag(self) -> str | None:
         return "div"
 
-    def render(self, error: BoundaryError, kind: ErrorKind) -> str:
+    def render(self, error: BoundaryFailure, kind: ErrorKind) -> str:
         return "E"
 
 
@@ -58,7 +58,7 @@ def _fail(name: str, exc: Exception) -> str:
     def render() -> str:
         raise exc
 
-    return contain(Boundary(name, "component"), render, _Fallback())
+    return contain(Boundary(name, Addressing.COMPONENT), render, _Fallback())
 
 
 def _mode() -> str:
@@ -148,14 +148,22 @@ class TestRecordedFailures:
             thread.join()
         assert [failure.name for failure in failures] == ["job"]
 
-    def test_an_enclosing_block_receives_the_inner_failures(self) -> None:
+    def test_every_enclosing_block_receives_a_failure_as_it_is_recorded(self) -> None:
         with recorded_failures() as outer:
             _fail("a", ValueError())
-            with recorded_failures() as inner:
+            with recorded_failures() as middle, recorded_failures() as inner:
                 _fail("b", ValueError())
-                assert [failure.name for failure in outer] == ["a"]
+                assert [failure.name for failure in outer] == ["a", "b"]
         assert [failure.name for failure in inner] == ["b"]
+        assert [failure.name for failure in middle] == ["b"]
         assert [failure.name for failure in outer] == ["a", "b"]
+
+    def test_a_job_outliving_its_blocks_still_reaches_each_of_them(self) -> None:
+        with recorded_failures() as outer, recorded_failures() as inner:
+            context = contextvars.copy_context()
+        context.run(_fail, "late", ValueError())
+        assert [failure.name for failure in outer] == ["late"]
+        assert [failure.name for failure in inner] == ["late"]
 
     def test_the_receiver_is_connected_once(self) -> None:
         with recorded_failures():
@@ -265,7 +273,7 @@ def value():
 @pytest.fixture()
 def widget_pages(tmp_path: Path) -> Iterator[Path]:
     pages = layout_root(tmp_path)
-    component_template(pages, "widget", "<b>{{ value }}</b>")
+    write_component(pages, "widget", body="<b>{{ value }}</b>", loading=None)
     folder = pages / "_components" / "widget"
     (folder / "component.py").write_text(_FAILING_MODULE)
     (folder / "error.djx").write_text("<p>{{ error.kind }}</p>")
@@ -296,6 +304,57 @@ class TestNextClient:
     def test_a_calm_response_holds_no_failure(self) -> None:
         response = NextClient().get("/calm/")
         assert response.boundary_failures == ()
+
+
+_FAILING_PAGE = """
+from next.pages import context
+
+
+@context("value")
+def value():
+    raise RuntimeError("widget down")
+"""
+
+
+@pytest.mark.django_db()
+class TestPageBoundaryName:
+    """A page boundary is named by its `loading.djx`, else its `error.djx`, under `BASE_DIR`."""
+
+    def test_the_name_holds_no_host_directory(self, tmp_path: Path) -> None:
+        pages = layout_root(tmp_path)
+        templated_page(pages / "stats", _FAILING_PAGE, "<p>{{ value }}</p>")
+        (pages / "stats" / "error.djx").write_text("<p>{{ error.kind }}</p>")
+        with (
+            routed(pages),
+            override_settings(BASE_DIR=tmp_path),
+            boundary_errors("render"),
+        ):
+            response = NextClient().get("/stats/")
+        (failure,) = response.boundary_failures
+        assert failure.addressing == "page"
+        assert failure.name == "pages/stats/error.djx"
+
+    @pytest.mark.parametrize("streamed", [True, False], ids=["streamed", "inline"])
+    def test_a_deferred_boundary_is_named_by_its_loading_djx(
+        self, tmp_path: Path, *, streamed: bool
+    ) -> None:
+        pages = layout_root(tmp_path)
+        templated_page(pages / "stats", _FAILING_PAGE, "<p>{{ value }}</p>")
+        (pages / "stats" / "error.djx").write_text("<p>{{ error.kind }}</p>")
+        (pages / "stats" / "loading.djx").write_text("<p>wait</p>")
+        with (
+            routed(pages),
+            override_settings(BASE_DIR=tmp_path),
+            boundary_errors("render"),
+            recorded_failures() as failures,
+        ):
+            if streamed:
+                read_stream(Client(), "/stats/")
+            else:
+                Client().get("/stats/")
+        (failure,) = failures
+        assert failure.addressing == "page"
+        assert failure.name == "pages/stats/loading.djx"
 
 
 def _streamed(*names: str) -> Iterator[bytes]:
@@ -344,6 +403,144 @@ class TestStreamedResponses:
         assert [failure.name for failure in got.boundary_failures] == ["a", "b"]
 
 
+def _late_first(*_args: object, **_kwargs: object) -> str:
+    late = _fail("late", KeyError("late"))
+    early = _fail("early", KeyError("early"))
+    return early + late
+
+
+def _names(failures: Sequence[RecordedFailure]) -> list[str]:
+    return [failure.name for failure in failures]
+
+
+class TestEnclosingRecordings:
+    """A helper hands each failure on to every enclosing recording once, in order."""
+
+    def test_a_response_hands_its_failures_on_in_document_order(self) -> None:
+        with (
+            patch.object(
+                Client, "request", side_effect=lambda **_: HttpResponse(_late_first())
+            ),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            got = NextClient().get("/page/")
+        assert _names(got.boundary_failures) == ["early", "late"]
+        assert _names(outer) == ["early", "late"]
+
+    def test_a_raised_failure_reaches_the_enclosing_block_first(self) -> None:
+        with (
+            patch.object(
+                Client, "request", side_effect=lambda **_: HttpResponse(_late_first())
+            ),
+            recorded_failures() as outer,
+            pytest.raises(KeyError, match="early"),
+        ):
+            NextClient().get("/page/")
+        assert _names(outer) == ["early", "late"]
+
+    def test_a_stream_read_after_the_block_reaches_the_block(self) -> None:
+        response = StreamingHttpResponse(_streamed("a", "b"))
+        with (
+            patch.object(Client, "request", return_value=response),
+            recorded_failures() as outer,
+        ):
+            got = NextClient().get("/stream/")
+        assert outer == []
+        with boundary_errors("render"):
+            b"".join(got.streaming_content)
+        assert _names(outer) == ["a", "b"]
+        assert outer == list(got.boundary_failures)
+
+    def test_a_block_around_the_request_and_the_read_sees_each_failure_once(
+        self,
+    ) -> None:
+        response = StreamingHttpResponse(_streamed("a", "b"))
+        with (
+            patch.object(Client, "request", return_value=response),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            with recorded_failures() as inner:
+                got = NextClient().get("/stream/")
+            b"".join(got.streaming_content)
+        assert _names(outer) == ["a", "b"]
+        assert _names(inner) == ["a", "b"]
+
+    def test_an_async_stream_read_on_another_thread_reaches_the_block(self) -> None:
+        response = StreamingHttpResponse(_astreamed("a", "b"))
+        with (
+            patch.object(Client, "request", return_value=response),
+            recorded_failures() as outer,
+        ):
+            got = NextClient().get("/stream/")
+
+        async def consume() -> None:
+            async for _chunk in got.streaming_content:
+                pass
+
+        def read() -> None:
+            with boundary_errors("render"):
+                asyncio.run(consume())
+
+        thread = threading.Thread(target=read)
+        thread.start()
+        thread.join()
+        assert _names(outer) == ["a", "b"]
+
+    @pytest.mark.django_db()
+    def test_an_abandoned_stream_hands_on_what_it_rendered(self) -> None:
+        response = StreamingHttpResponse(_streamed("a", "b"))
+        with (
+            patch.object(Client, "request", return_value=response),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            got = NextClient().get("/stream/")
+            next(iter(got.streaming_content))
+            got.close()
+        assert _names(outer) == ["a"]
+        assert "boundary_failures" not in vars(got)
+
+    def test_render_page_hands_its_failures_on_in_document_order(self) -> None:
+        with (
+            patch("next.testing.rendering.page.render", side_effect=_late_first),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            render_page("/nowhere/page.py")
+        assert _names(outer) == ["early", "late"]
+
+    def test_render_component_hands_its_failures_on_in_document_order(
+        self, tmp_path: Path
+    ) -> None:
+        info = ComponentInfo("card", tmp_path, "", tmp_path / "card.djx", None, True)
+        with (
+            patch(
+                "next.testing.rendering.components_manager.get_component",
+                return_value=info,
+            ),
+            patch("next.testing.rendering.render_component", side_effect=_late_first),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            render_component_by_name("card", at=tmp_path / "page.djx")
+        assert _names(outer) == ["early", "late"]
+
+    def test_an_uncontained_error_still_hands_the_failures_on(self) -> None:
+        def broken(*_: object) -> str:
+            _fail("card", KeyError("card"))
+            raise LookupError(DOWN)
+
+        with (
+            patch("next.testing.rendering.page.render", side_effect=broken),
+            recorded_failures() as outer,
+            pytest.raises(LookupError, match=DOWN),
+        ):
+            render_page("/nowhere/page.py")
+        assert _names(outer) == ["card"]
+
+
 class TestDeferredHelpers:
     """The helpers that force the pool and hold a component's jobs."""
 
@@ -353,8 +550,100 @@ class TestDeferredHelpers:
             assert pool_forced() is True
         assert pool_forced() is False
 
+    @pytest.mark.usefixtures("widget_pages")
     def test_boundary_gate_holds_the_named_component(self) -> None:
-        with boundary_gate(component="card") as gate:
-            assert gate.name == "card"
+        with boundary_gate(component="widget") as gate:
+            assert gate.name == "widget"
             assert gate.wait(0) is False
         assert gate.released.is_set()
+
+
+_END = b"<script>(self.$nx||=[]).push(0)</script>"
+
+
+def _late_first_stream(end: bytes = _END) -> Iterator[bytes]:
+    yield _late_first().encode()
+    yield end
+
+
+async def _alate_first_stream() -> AsyncIterator[bytes]:
+    for part in _late_first_stream():
+        yield part
+
+
+def _any_stream(response: HttpResponseBase, _url: str) -> HttpResponseBase:
+    return response
+
+
+class TestReaderOrder:
+    """A stream reader hands the failures on in the order of the document."""
+
+    def test_read_stream_orders_by_the_document(self) -> None:
+        response = StreamingHttpResponse(_late_first_stream())
+        with (
+            patch.object(Client, "request", return_value=response),
+            patch("next.testing.streaming._streamed", side_effect=_any_stream),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            read_stream(Client(), "/late/")
+        assert _names(outer) == ["early", "late"]
+
+    def test_aread_stream_orders_by_the_document(self) -> None:
+        response = StreamingHttpResponse(_alate_first_stream())
+        with (
+            patch.object(AsyncClient, "request", AsyncMock(return_value=response)),
+            patch("next.testing.streaming._streamed", side_effect=_any_stream),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            asyncio.run(aread_stream(AsyncClient(), "/late/"))
+        assert _names(outer) == ["early", "late"]
+
+    def test_a_refused_body_hands_its_failures_on_in_render_order(self) -> None:
+        response = StreamingHttpResponse(_late_first_stream(end=b""))
+        with (
+            patch.object(Client, "request", return_value=response),
+            patch("next.testing.streaming._streamed", side_effect=_any_stream),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+            pytest.raises(AssertionError, match="no chunk"),
+        ):
+            read_stream(Client(), "/late/")
+        assert _names(outer) == ["late", "early"]
+
+
+def _gzipped_late_first() -> Iterator[bytes]:
+    compressor = GzipBackend().create(4, None)
+    yield compressor.compress(_late_first().encode()) + compressor.flush()
+    yield compressor.finish()
+
+
+class TestLateAndEncodedFailures:
+    """A failure after the response settled, or in an encoded body, is not lost."""
+
+    def test_a_failure_recorded_after_the_settle_reaches_the_blocks(self) -> None:
+        with recorded_failures() as outer, recorded_failures() as inner:
+            held = HeldFailures()
+            with held.recording():
+                _fail("early", ValueError())
+                context = contextvars.copy_context()
+        assert _names(held.settle("")) == ["early"]
+        context.run(_fail, "late", ValueError())
+        assert _names(outer) == ["early", "late"]
+        assert _names(inner) == ["early", "late"]
+        assert _names(held.settle("")) == ["early"]
+        assert _names(outer) == ["early", "late"]
+
+    def test_a_compressed_stream_orders_by_its_decoded_document(self) -> None:
+        response = StreamingHttpResponse(_gzipped_late_first())
+        response["Content-Encoding"] = "gzip"
+        with (
+            patch.object(Client, "request", return_value=response),
+            boundary_errors("render"),
+            recorded_failures() as outer,
+        ):
+            got = NextClient().get("/stream/")
+            b"".join(got.streaming_content)
+        assert _names(got.boundary_failures) == ["early", "late"]
+        assert _names(outer) == ["early", "late"]

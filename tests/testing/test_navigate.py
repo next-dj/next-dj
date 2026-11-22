@@ -11,19 +11,8 @@ from next.testing import NextClient, declared_layouts
 from tests.support import routed
 
 
-ROOT_LAYOUT = (
-    '<!doctype html><html lang="en"><head>{% collect_styles %}</head><body>'
-    "<main>{% template %}</main>{% collect_scripts %}</body></html>"
-)
-SECTION_LAYOUT = "<section>{% template %}</section>"
 _IDENT = "a" * 16
 _DIGEST = "b" * 16
-
-
-def _page(directory: Path, body: str, source: str = "") -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / "page.py").write_text("from next.pages import page\n" + source)
-    (directory / "template.djx").write_text(body)
 
 
 def _document(chain: object) -> str:
@@ -31,20 +20,9 @@ def _document(chain: object) -> str:
 
 
 @pytest.fixture()
-def pages(tmp_path: Path) -> Path:
-    root = tmp_path / "pages"
-    root.mkdir()
-    (root / "layout.djx").write_text(ROOT_LAYOUT)
-    section = root / "sec"
-    section.mkdir()
-    (section / "layout.djx").write_text(SECTION_LAYOUT)
-    _page(section / "a", "<h1>A</h1>")
-    _page(section / "b", "<h1>B</h1>")
-    _page(section / "slow", "<h1>{{ late }}</h1>", "late = 1\n")
-    (section / "slow" / "loading.djx").write_text("<p>loading</p>")
-    _page(section / "hard", "<h1>hard</h1>", "page.router(navigate=False)\n")
-    _page(section / "quiet", "<h1>quiet</h1>", "page.router(prefetch=False)\n")
-    return root
+def pages(layout_pages: dict[str, Path]) -> Path:
+    """Return the root of the shared page tree."""
+    return layout_pages["other"].parents[1]
 
 
 @pytest.fixture()
@@ -117,7 +95,7 @@ class TestNavigate:
         assert navigation.envelope.op_verbs() == ["visit"]
 
     def test_a_refused_prefetch_cuts_nothing(self, browser: NextClient) -> None:
-        navigation = browser.navigate("/sec/quiet/", origin="/sec/a/", prefetch=True)
+        navigation = browser.navigate("/sec/opted/", origin="/sec/a/", prefetch=True)
         assert navigation.response.status_code == 204
         assert navigation.response.wsgi_request.headers["X-Next-Prefetch"] == "1"
         assert navigation.kind is None
@@ -141,6 +119,6 @@ class TestNavigate:
         self, browser: NextClient
     ) -> None:
         with streaming():
-            navigation = browser.navigate("/sec/b/", origin="/sec/slow/")
+            navigation = browser.navigate("/sec/slow/", origin="/sec/slow/")
         assert navigation.kind is CutKind.SLOT
         assert len(navigation.kept) == 2

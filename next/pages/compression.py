@@ -2,19 +2,11 @@
 
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from functools import partial
 
-from next.caches import PageCache
 from next.introspect import registering_site
-from next.utils import template_edits_watched
 
-from .declarations import ModuleDeclarations
-from .loaders import (
-    PAGE_MODULE,
-    load_python_module_memo,
-    module_generation,
-    module_version,
-)
+from .declarations import NESTED, DeclarationStore
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -31,7 +23,7 @@ class CompressDeclaration:
     def problem(self) -> str | None:
         """Return why the call declares nothing, `None` when it declares a choice."""
         if not self.top_level:
-            return "it runs inside a function rather than at the top of the module"
+            return NESTED
         if not isinstance(self.enabled, bool):
             return f"enabled is {self.enabled!r}, which is no bool"
         return None
@@ -43,16 +35,20 @@ class CompressDeclaration:
         return bool(self.enabled)
 
 
-class CompressDeclarations(ModuleDeclarations[CompressDeclaration]):
+class CompressStore(DeclarationStore[CompressDeclaration, bool | None]):
     """Hold the latest `page.compress` call of each `page.py`, the last call winning."""
 
     __slots__ = ()
 
+    def __init__(self) -> None:
+        """Start empty, a page without a valid call declaring no choice."""
+        super().__init__(CompressDeclaration.choice, None)
 
-compress_declarations = CompressDeclarations()
+
+compress_store = CompressStore()
 
 
-class CompressionDeclarations:
+class CompressDeclaring:
     """The `page.compress` declaration of the `Page` manager."""
 
     def compress(self, enabled: object, /) -> None:
@@ -60,48 +56,21 @@ class CompressionDeclarations:
 
         A page that renders a secret beside reflected input opts out against BREACH.
         """
-        file_path, top_level = registering_site()
-        if file_path.name != PAGE_MODULE:
-            compress_declarations.misplace(file_path)
-            return
-        namespace = sys._getframe(1).f_globals
-        compress_declarations.declare(
-            file_path, CompressDeclaration(enabled, namespace, top_level)
+        compress_store.record(
+            registering_site(),
+            sys._getframe(1).f_globals,
+            partial(CompressDeclaration, enabled),
         )
 
 
-type _Stamp = tuple[int, int, int]
-
-_HELD: PageCache[Path, tuple[_Stamp, bool | None]] = PageCache()
-
-
-def _read(file_path: Path) -> bool | None:
-    """Return the choice the latest load of `file_path` declares."""
-    module = load_python_module_memo(file_path)
-    held = compress_declarations.current(file_path, module)
-    return None if held is None else held.choice()
-
-
-def page_compress(file_path: Path) -> bool | None:
-    """Return the compression choice of the page at `file_path`, `None` for none.
-
-    A project without a declaration answers at once, which keeps a plain `GET` free.
-    """
-    if not compress_declarations:
-        return None
-    if template_edits_watched():
-        return _read(file_path)
-    stamp = (module_version(), module_generation(), compress_declarations.version)
-    held = _HELD.get(file_path)
-    if held is None or held[0] != stamp:
-        held = _HELD[file_path] = (stamp, _read(file_path))
-    return held[1]
+page_compress = compress_store.resolved
+"""Return the compression choice of the page at a `page.py` path, `None` for none."""
 
 
 __all__ = [
     "CompressDeclaration",
-    "CompressDeclarations",
-    "CompressionDeclarations",
-    "compress_declarations",
+    "CompressDeclaring",
+    "CompressStore",
+    "compress_store",
     "page_compress",
 ]

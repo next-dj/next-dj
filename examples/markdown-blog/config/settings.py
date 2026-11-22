@@ -99,6 +99,7 @@ NEXT_FRAMEWORK = {
         "blog.loaders.MarkdownTemplateLoader",
         "next.pages.loaders.DjxTemplateLoader",
     ],
+    "ROUTER": {"PREFETCH": "viewport"},
     "STATIC_VERSION": "v1",
     "SITE": {"URL": "https://blog.example", "NAME": "next.dj blog", "INDEXABLE": True},
     "METADATA": {

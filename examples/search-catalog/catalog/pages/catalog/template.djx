@@ -1,7 +1,7 @@
 <header class="flex items-baseline justify-between">
   <h1 class="text-2xl font-semibold">All products</h1>
   {% zone "catalog-count" %}
-    <p class="text-sm text-muted-foreground">{{ products.count }} products</p>
+    <p class="text-sm text-muted-foreground">{{ total }} products</p>
   {% endzone %}
 </header>
 

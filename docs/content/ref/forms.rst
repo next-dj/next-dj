@@ -87,7 +87,7 @@ Decorator
 .. autofunction:: next.forms.action
 
 ``atomic=`` decides whether the action runs inside a request transaction and wins over ``TRANSACTIONS``, see :doc:`settings`.
-``True`` and ``False`` turn the transaction on or off on ``TRANSACTIONS["ALIASES"]``, and an ``AtomicOverride`` of ``next.transactions`` names its own ``aliases``, ``"all"`` or a list of database aliases.
+``True`` and ``False`` turn the transaction on or off on ``TRANSACTIONS["ALIASES"]``, ``"writes"`` opens it right before the first write, and an ``AtomicOverride`` of ``next.transactions`` names its own ``aliases``, ``"all"`` or a list of database aliases.
 Without it a ``POST`` runs inside a transaction by the default rule, with or without ``ATOMIC_REQUESTS``.
 The dispatch view carries the ``_non_atomic_requests`` mark for every alias, runs the access checks of the action before it opens the transaction, and closes it once the response object exists, so a refused request opens none, an exception rolls back, and a returned response commits whatever its status.
 The checks on the bound row run inside the transaction, and their refusal sends ``form_access_denied`` once it has rolled back.

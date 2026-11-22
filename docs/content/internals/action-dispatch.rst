@@ -159,7 +159,7 @@ Modules
 ``next.forms.autodiscover``.
    The import of every installed app's ``forms`` module, so shared forms register on startup.
 
-``next.partial.forms``.
+``next.partial.shaping.shaper``.
    ``FormShaper``, the default ``ResponseShaper`` a backend imports from its ``OPTIONS["SHAPER"]`` dotted path on first use, so the forms path never imports ``next.partial``.
 
 ``next.partial.shaping``.

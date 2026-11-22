@@ -9,10 +9,10 @@ import time
 import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping
-from concurrent.futures import Executor, Future, wait
-from contextlib import contextmanager, nullcontext, suppress
+from concurrent.futures import Future, wait
+from contextlib import contextmanager, suppress
 from queue import Empty, SimpleQueue
-from typing import Any, ClassVar, cast, override
+from typing import Any, override
 
 from asgiref.current_thread_executor import CurrentThreadExecutor
 from asgiref.local import Local
@@ -22,11 +22,11 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, InterfaceError, connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 
-from next.conf.defer import defer_option
+from next.conf.defer import backend_count, backend_option, entry_options
 from next.defer import parse_duration
 from next.suspense.errors import BoundaryShedError, ExecutorStoppedError
 from next.suspense.markers import Capacity
-from next.tasks import StealableTask
+from next.tasks import QuitParentExecutor, StealableTask
 from next.utils import after_fork
 
 
@@ -198,15 +198,8 @@ def check_asgiref() -> None:
     raise ImproperlyConfigured(msg)
 
 
-class RequestThreadExecutor(Executor):
-    """Queue thread-sensitive hops for the request thread, which runs them as it waits.
-
-    Bound as `AsyncToSync.executors.current`, it reads as a quit parent to asgiref.
-    """
-
-    _work_ready: ClassVar[nullcontext[None]] = nullcontext()
-    _broken: ClassVar[bool] = True
-    _old_executor: ClassVar[None] = None
+class RequestThreadExecutor(QuitParentExecutor):
+    """Queue thread-sensitive hops for the request thread, which runs them waiting."""
 
     def __init__(self) -> None:
         """Open an empty queue served by the thread that creates it."""
@@ -359,21 +352,15 @@ class BoundaryExecutor(ABC):
     def shutdown(self, timeout: float = 5.0) -> None:
         """Refuse new tasks, fail queued ones and wait up to `timeout` for the rest."""
 
-    def abandon(self, task: StealableTask[Any]) -> bool:
-        """Count a running `task` its waiter left as late, false when none runs it."""
-        del task
-        return False
-
 
 class _Worker:
-    """One pool thread, the task it runs and the task its waiter abandoned."""
+    """One pool thread and the task it runs."""
 
-    __slots__ = ("abandoned", "current", "retiring", "thread")
+    __slots__ = ("current", "retiring", "thread")
 
     def __init__(self, serve: Callable[["_Worker"], None], name: str) -> None:
         """Create the thread that serves this worker, not started yet."""
         self.current: StealableTask[Any] | None = None
-        self.abandoned: StealableTask[Any] | None = None
         self.retiring = False
         self.thread = threading.Thread(
             target=serve, args=(self,), name=name, daemon=True
@@ -410,13 +397,6 @@ def _restore_wrappers(saved: _Wrappers) -> None:
     """Put back the execute wrappers each connection had before a task, none if new."""
     for conn in connections.all(initialized_only=True):
         conn.execute_wrappers = list(saved.get(conn.alias, ()))
-
-
-def _option(options: Mapping[str, object], key: str) -> object:
-    """Return `key` of the entry's `OPTIONS`, the setting when the entry omits it."""
-    if key in options:
-        return options[key]
-    return defer_option("EXECUTOR", "OPTIONS", key)
 
 
 def _close(conn: BaseDatabaseWrapper) -> None:
@@ -456,11 +436,12 @@ class LaneExecutor(BoundaryExecutor):
 
     def __init__(self, config: Mapping[str, object] | None = None) -> None:
         """Read the `OPTIONS` of the settings entry, starting no thread."""
-        options = (config or {}).get("OPTIONS")
-        held = options if isinstance(options, Mapping) else {}
-        self.max_workers = cast("int", _option(held, "MAX_WORKERS"))
-        self.max_queue = cast("int", _option(held, "MAX_QUEUE"))
-        self.conn_idle = parse_duration(_option(held, "CONN_IDLE"))
+        options = entry_options(config)
+        self.max_workers = backend_count(options, "EXECUTOR", "MAX_WORKERS")
+        self.max_queue = backend_count(options, "EXECUTOR", "MAX_QUEUE")
+        self.conn_idle = parse_duration(
+            backend_option(options, "EXECUTOR", "CONN_IDLE")
+        )
         self._stopped = False
         self._discarded: set[str] = set()
         self.forget()
@@ -507,22 +488,6 @@ class LaneExecutor(BoundaryExecutor):
             oldest = next(iter(pending.copy().values()), None)
         delay = 0.0 if oldest is None else max(0.0, time.monotonic() - oldest)
         return Capacity(self.max_workers, busy, queued, delay)
-
-    @override
-    def abandon(self, task: StealableTask[Any]) -> bool:
-        """Count `task` as late until it returns, false when no worker runs it."""
-        for worker in self._workers:
-            if worker.current is task:
-                worker.abandoned = task
-                return True
-        return False
-
-    def late(self) -> int:
-        """Return the abandoned tasks that still hold a worker."""
-        return sum(
-            worker.abandoned is not None and worker.abandoned is worker.current
-            for worker in self._workers
-        )
 
     @override
     def shutdown(self, timeout: float = 5.0) -> None:
@@ -615,7 +580,6 @@ class LaneExecutor(BoundaryExecutor):
             self._release_connections()
         finally:
             worker.current = None
-            worker.abandoned = None
         return True
 
     def _release_connections(self) -> None:

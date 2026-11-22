@@ -158,7 +158,7 @@ class TestFitPageCaches:
     """The page caches are sized by the distinct pages a list of patterns mounts."""
 
     def test_each_page_is_counted_once(
-        self, page_instance, tmp_path, url_parser, monkeypatch: pytest.MonkeyPatch
+        self, page_instance, tmp_path, url_parser
     ) -> None:
         patterns: list[object] = [url_path("plain/", HttpRequest), "marker"]
         for name in ("a", "b"):

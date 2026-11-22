@@ -7,6 +7,8 @@ import threading
 from contextvars import ContextVar
 from dataclasses import replace
 from functools import partial
+from itertools import islice
+from time import perf_counter
 from typing import TYPE_CHECKING, Protocol
 
 from asgiref.sync import sync_to_async
@@ -84,35 +86,55 @@ async def run_isolated[T](
 ) -> T:
     """Run `fill` as one segment against a private copy of the context cache.
 
-    The copy merges back once the runner returns, so no in-progress mark crosses.
+    Only keys added past the copy merge back, so no in-progress mark crosses.
     """
     private = DependencyCache(dict(context.cache.finished()))
+    copied = len(private)
     branch = replace(context, cache=private, stack=list(context.stack))
     value = await run_segment(partial(_unscoped, fill, branch))
     cache = context.cache
-    for key, found in private.finished().items():
+    for key, found in islice(private.finished().items(), copied, None):
         if cache.get(key) is _CACHE_MISS:
             cache.set(key, found)
     return value
 
 
-def bridge[T](site: str, work: Callable[[], Awaitable[T]]) -> T:
-    """Run the async `work` a sync resolve meets through the bridge port.
+def bridge[T](site: object, work: Callable[[], Awaitable[T]]) -> T:
+    """Run the async `work` a sync caller meets through the bridge port.
 
-    DEBUG logs each site once, the way Django logs a middleware it adapts.
+    DEBUG logs each site once by its `str`, built only there, with the cost of the hop.
     """
-    if settings.DEBUG and site not in _adapted:
-        _note_adapted(site)
-    return run_bridged(work)
+    if not settings.DEBUG:
+        return run_bridged(work)
+    label = str(site)
+    if label in _adapted:
+        return run_bridged(work)
+    marks: list[float] = []
+
+    async def measured() -> T:
+        marks.append(perf_counter())
+        value = await work()
+        marks.append(perf_counter())
+        return value
+
+    started = perf_counter()
+    value = run_bridged(measured)
+    _note_adapted(label, perf_counter() - started - (marks[1] - marks[0]))
+    return value
 
 
-def _note_adapted(site: str) -> None:
+def _note_adapted(site: str, cost: float) -> None:
     """Log `site` once across threads, under a lock only the DEBUG path takes."""
     with _adapted_lock:
         if site in _adapted:
             return
         _adapted[site] = None
-    logger.debug("Asynchronous %s adapted for a sync resolve.", site)
+    logger.debug(
+        "Asynchronous %s bridged for a sync caller at a cost of %.3f ms beyond its "
+        "own work.",
+        site,
+        cost * 1000,
+    )
 
 
 __all__ = [

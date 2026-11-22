@@ -25,7 +25,6 @@ Depths = list[str | None]
 
 @pytest.fixture()
 def router_requests(page: Page, base_url: str) -> list[Request]:
-    """Record every client router request for the overview, prefetches included."""
     sent: list[Request] = []
     overview = f"{base_url}/"
 
@@ -39,6 +38,15 @@ def router_requests(page: Page, base_url: str) -> list[Request]:
 
 def depths(sent: list[Request]) -> Depths:
     return [request.headers.get("x-next-prefetch") for request in sent]
+
+
+def pressed_once(sent: list[Request]) -> list[Request]:
+    sent_depths = depths(sent)
+    assert sent_depths.count("full") == 1
+    assert None not in sent_depths
+    return [
+        request for request in sent if request.headers.get("x-next-prefetch") == "full"
+    ]
 
 
 def is_depth(base_url: str, depth: str) -> Callable[[Request], bool]:
@@ -98,8 +106,7 @@ def test_a_mouse_press_sends_the_one_request_the_click_streams_from(
         gate.release()
         expect_ready(page)
 
-    assert depths(router_requests) == ["full"]
-    [pressed] = router_requests
+    [pressed] = pressed_once(router_requests)
     response = pressed.response()
     assert response is not None
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -145,7 +152,7 @@ def test_a_press_released_off_the_link_aborts_the_request_and_stays(
     assert "net::ERR_ABORTED" in (pressed.value.failure or "")
     expect(page).to_have_url(f"{base_url}/stats/")
     expect(heading).to_be_visible()
-    assert depths(router_requests) == ["full"]
+    pressed_once(router_requests)
 
 
 def test_a_modifier_click_opens_a_tab_without_the_press_request(

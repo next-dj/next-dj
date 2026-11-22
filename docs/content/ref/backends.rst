@@ -18,6 +18,10 @@ The two loading paths differ in how they treat a misconfigured entry.
 ``load_backends`` logs and skips it, so the family keeps serving with the remaining backends.
 ``SingleBackendManager`` raises :class:`~django.core.exceptions.ImproperlyConfigured` instead, because a family with one backend has nothing to fall back to.
 
+``SingleBackendManager`` takes a ``config`` reader beside the settings key, for a family whose entry sits inside a nested mapping such as ``DEFER``.
+``get()`` builds the backend once under a double-checked lock, ``build()`` returns a new one from the settings without keeping it, ``peek()`` answers the backend without building it, ``reset()`` drops it and returns the one it dropped, so a caller can close it, and ``forget()`` drops it and the lock without closing, for a backend a forked child cannot share.
+Every manager replaces its lock in a forked child through ``forked()``, keeping its backend, so a lock a parent thread held never blocks the child.
+
 Announcing a load
 ~~~~~~~~~~~~~~~~~
 

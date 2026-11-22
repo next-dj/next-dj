@@ -99,7 +99,7 @@ Services
 
 next.dj recommends that a function in ``services.py`` that acts on behalf of the scope takes it as its first argument and everything else as keyword-only arguments, ``f(scope, *, ...)``, the scope being the user in most projects.
 The fixed shape makes every call site easy to find and keeps the access question inside the function that writes.
-A public read that does not depend on who asks takes no scope, as ``cached_search`` in ``catalog/services.py`` of the ``examples/search-catalog`` project shows.
+A public read that does not depend on who asks takes no scope, as ``search`` in ``catalog/services.py`` of the ``examples/search-catalog`` project shows.
 A service receives plain values and returns model instances or plain values, and it never sees ``request`` or builds a response.
 
 .. code-block:: python

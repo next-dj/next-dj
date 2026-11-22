@@ -6,10 +6,16 @@ from pathlib import Path
 
 import pytest
 from access.demo import REQUESTERS
-from access.models import AccessRequest, AccessRequestQuerySet, AuditEntry
+from access.models import (
+    AccessRequest,
+    AccessRequestQuerySet,
+    AuditEntry,
+    AuditEntryQuerySet,
+)
 from django.core.cache import caches
 from django.core.checks import run_checks
 from django.core.management import call_command
+from django.db import OperationalError
 from django.http import HttpRequest
 
 from next.forms import FormActionNotFoundError
@@ -21,6 +27,7 @@ from next.forms.signals import (
 from next.testing import (
     SignalRecorder,
     assert_metadata,
+    boundary_errors,
     envelope_of,
     find_anchor,
     find_form,
@@ -111,7 +118,6 @@ def submitted_request(next_client) -> AccessRequest:
 
 
 LOG_URL = "/admin/audit/"
-DEMO_ROWS = 85
 LOG_ZONES = "audit-rows,audit-rows-more,audit-rows-less,audit-totals"
 OLDER = "Show older rows"
 NEWER = "Show newer rows"
@@ -526,7 +532,7 @@ class TestAuditTotals:
         backend = AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count()
         assert "data-audit-totals" in op["html"]
         assert f">{backend}</p>" in op["html"]
-        assert f">{DEMO_ROWS - backend}</p>" in op["html"]
+        assert f">{demo_data - backend}</p>" in op["html"]
 
     def test_the_kind_prop_narrows_the_totals(self, next_client, demo_data) -> None:
         envelope = next_client.get_boundary(
@@ -537,6 +543,19 @@ class TestAuditTotals:
         assert denied
         assert ">0</p>" in html
         assert f">{denied}</p>" in html
+
+    def test_a_failed_count_offers_a_retry(self, next_client, monkeypatch) -> None:
+        def locked(self, kind: str) -> AuditEntryQuerySet:
+            msg = "database is locked"
+            raise OperationalError(msg)
+
+        monkeypatch.setattr(AuditEntryQuerySet, "of_kind", locked)
+        with boundary_errors("render"):
+            envelope = next_client.get_boundary(LOG_URL, "audit_totals", kind="")
+        [op] = envelope.ops
+        assert op["s"] == "error"
+        assert "The totals could not be loaded." in op["html"]
+        assert "data-next-retry" in op["html"]
 
     def test_a_visitor_without_the_runtime_gets_the_totals_inline(
         self, next_client, demo_data
@@ -599,7 +618,7 @@ class TestAuditLogWindows:
             more = envelope.html_for_zone("audit-rows-more")
 
         assert keys == _log_order()
-        assert len(keys) == DEMO_ROWS
+        assert len(keys) == demo_data
         assert "End of the log." in more
         assert 'data-next-key="audit-rows-more"' in more
 
@@ -676,21 +695,24 @@ class TestDemoData:
     def test_the_seed_command_fills_an_empty_log(self) -> None:
         out = StringIO()
         call_command("seed_demo", stdout=out)
-        assert "Demo audit log seeded." in out.getvalue()
-        assert AuditEntry.objects.count() == DEMO_ROWS
+        rows = AuditEntry.objects.count()
+        assert f"Demo audit log seeded with {rows} rows." in out.getvalue()
+        assert rows > REQUESTERS
         assert AccessRequest.objects.count() == REQUESTERS
         assert set(AuditEntry.objects.values_list("kind", flat=True)) == set(
             AuditEntry.KINDS
         )
 
     def test_seeding_twice_keeps_one_copy(self, demo_data) -> None:
-        call_command("seed_demo", stdout=StringIO())
-        assert AuditEntry.objects.count() == DEMO_ROWS
+        out = StringIO()
+        call_command("seed_demo", stdout=out)
+        assert "seeded with 0 rows" in out.getvalue()
+        assert AuditEntry.objects.count() == demo_data
         assert AccessRequest.objects.count() == REQUESTERS
 
     def test_the_rows_of_one_post_share_a_stamp(self, demo_data) -> None:
         stamps = AuditEntry.objects.values_list("created_at", flat=True)
-        assert len(set(stamps)) < DEMO_ROWS
+        assert len(set(stamps)) < demo_data
         linked = AuditEntry.objects.filings()
         assert linked.count() == REQUESTERS
 

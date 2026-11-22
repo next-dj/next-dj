@@ -75,7 +75,9 @@ _STYLESHEET: Final = "link"
 _OPENING: Final = re.compile(r"<[a-zA-Z][a-zA-Z0-9-]*")
 
 SPLIT_NOTE: Final = "next:split"
-"""The note a streamed render asks for the split under, the injector answering there."""
+"""The note a streamed render asks for the split under, answered by `split_of`."""
+
+_SPLIT_AT: Final = "next:split-at"
 
 # Storage URLs of the listed chunks, page URLs, serializer type and encoded entry.
 type _ChunksMemo = tuple[
@@ -523,7 +525,7 @@ def _split(html: str, collector: StaticCollector, mark: str) -> str:
         html = html[:at] + html[at + len(mark) :]
     body = html.rfind(_BODY_CLOSE)
     split = max(at, body)
-    collector.note(SPLIT_NOTE, len(html) if split < 0 else split)
+    collector.note(_SPLIT_AT, len(html) if split < 0 else split)
     return html
 
 
@@ -532,7 +534,7 @@ def split_of(collector: StaticCollector) -> int | None:
 
     A streamed page writes its shell up to there, its chunks, then the rest.
     """
-    noted = collector.notes(SPLIT_NOTE)
+    noted = collector.notes(_SPLIT_AT)
     found = noted[-1] if noted else None
     return found if isinstance(found, int) else None
 

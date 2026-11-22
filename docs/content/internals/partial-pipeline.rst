@@ -18,7 +18,7 @@ A form dispatch that happens to be partial gets the patches its outcome implies,
 
 Both paths build a ``Patches`` builder, turn it into an ``Envelope``, and hand that to the active protocol backend for serialisation.
 The page view in ``next.views`` sits above ``next.partial`` and calls it directly.
-The form dispatcher never imports it and asks the backend's ``ResponseShaper``, which defaults to ``FormShaper`` from ``next.partial.forms`` through the ``OPTIONS["SHAPER"]`` dotted path.
+The form dispatcher never imports it and asks the backend's ``ResponseShaper``, which defaults to ``FormShaper`` from ``next.partial.shaping.shaper`` through the ``OPTIONS["SHAPER"]`` dotted path.
 
 Pipeline
 --------
@@ -100,7 +100,7 @@ Modules
 ``next.partial.origin``.
    ``resolve_partial_origin``, which names the host page a request morphs out of band.
 
-``next.partial.forms``.
+``next.partial.shaping.shaper``.
    ``FormShaper``, the default ``ResponseShaper`` of every form backend.
 
 ``next.partial.errors``.
@@ -118,7 +118,7 @@ A page is mounted under one view, built by ``unified_view`` in ``next.views.page
 A page whose body comes from files on disk takes the static branch, and a page with a ``render()`` function takes the resolving branch.
 Both branches do the same thing at the end.
 They read the intent through ``partial_intent``.
-``decide_route`` in ``next.views.routes`` maps a non-empty ``intent.zones`` to ``Route.ZONE``, which hands off to ``zone_response``, and anything else renders the full page and stamps the partial ``Vary`` headers on the way out.
+``decide_route`` in ``next.views.routes`` maps a non-empty ``intent.zones`` to ``RouteKind.ZONE``, which hands off to ``zone_response``, and anything else renders the full page and stamps the partial ``Vary`` headers on the way out.
 
 The resolving branch resolves the page body first, so a ``render()`` that returns its own ``HttpResponse`` short-circuits before the partial branch is reached at all.
 It also passes the ``dynamic`` flag through, because a body a ``render()`` produced per request has no compiled zone source to re-render, which is the 400 the zone branch answers with.

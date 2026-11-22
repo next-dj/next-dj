@@ -4,7 +4,8 @@ from urllib.parse import quote, unquote
 
 import pytest
 from django.test import override_settings
-from django.urls import clear_script_prefix, set_script_prefix, set_urlconf
+from django.test.utils import override_script_prefix
+from django.urls import set_urlconf
 
 from next import paths
 from next.paths import (
@@ -30,9 +31,14 @@ def _unread() -> frozenset[str]:
 
 @pytest.fixture()
 def mounted() -> Iterator[None]:
-    set_script_prefix("/app/")
+    with override_script_prefix("/app/"):
+        yield
+
+
+@pytest.fixture()
+def request_urlconf() -> Iterator[None]:
     yield
-    clear_script_prefix()
+    set_urlconf(None)
 
 
 class TestNormalPath:
@@ -135,12 +141,10 @@ class TestHomePaths:
         assert home_paths() == {"/", "/pt-br"}
 
     @override_settings(**I18N, ROOT_URLCONF=NAMESPACED_URLCONF)
+    @pytest.mark.usefixtures("request_urlconf")
     def test_the_urlconf_of_the_request_wins(self) -> None:
         set_urlconf(I18N_PREFIXED_URLCONF)
-        try:
-            assert home_paths() == {"/", "/en", "/de"}
-        finally:
-            set_urlconf(None)
+        assert home_paths() == {"/", "/en", "/de"}
 
 
 class TestHomes:

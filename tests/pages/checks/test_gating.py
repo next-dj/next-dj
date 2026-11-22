@@ -1,6 +1,8 @@
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from django.core.checks import CheckMessage
 
 from next.pages.checks.gating import check_gated_reads, check_hidden_guards
 from next.pages.loaders import forget_layout_texts
@@ -64,7 +66,19 @@ def _tree(root: Path, source: str, layout: str = "<html>{% template %}</html>") 
     return write_page(root, "shop", source)
 
 
-@pytest.mark.usefixtures("framework_providers")
+pytestmark = pytest.mark.usefixtures("framework_providers")
+
+
+def _flags(messages: list[CheckMessage]) -> list[tuple[str, str | None]]:
+    return [(message.id, message.obj) for message in messages]
+
+
+@pytest.fixture(autouse=True)
+def _router(tmp_path: Path) -> Iterator[None]:
+    with patch_checks_router_manager(pages_directory=tmp_path):
+        yield
+
+
 class TestGatedReads:
     """next.W152 flags a read outside a page boundary of a key the boundary gates."""
 
@@ -75,24 +89,21 @@ class TestGatedReads:
             tmp_path, _GATED, "<html><title>{{ product }}</title>{% template %}</html>"
         )
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            messages = check_gated_reads()
+        messages = check_gated_reads()
 
-        assert [(m.id, m.obj) for m in messages] == [("next.W152", str(page_file))]
+        assert _flags(messages) == [("next.W152", str(page_file))]
         assert "'product'" in messages[0].msg
 
     def test_a_layout_reading_no_gated_key_is_quiet(self, tmp_path: Path) -> None:
         _tree(tmp_path, _GATED, "<html>{{ other }}{% template %}</html>")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_gated_reads() == []
+        assert check_gated_reads() == []
 
     def test_a_page_without_a_loading_file_is_quiet(self, tmp_path: Path) -> None:
         (tmp_path / "layout.djx").write_text("<html>{{ product }}{% template %}</html>")
         write_page(tmp_path, "shop", _GATED)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_gated_reads() == []
+        assert check_gated_reads() == []
 
     def test_a_loading_file_reading_a_gated_key_is_flagged(
         self, tmp_path: Path
@@ -101,10 +112,9 @@ class TestGatedReads:
         (tmp_path / "shop" / "loading.djx").write_text("<p>{{ summary }}</p>")
         forget_layout_texts()
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            messages = check_gated_reads()
+        messages = check_gated_reads()
 
-        assert [(m.id, m.obj) for m in messages] == [("next.W152", str(page_file))]
+        assert _flags(messages) == [("next.W152", str(page_file))]
         assert "'summary'" in messages[0].msg
         assert "loading UI" in messages[0].msg
 
@@ -112,30 +122,26 @@ class TestGatedReads:
         _tree(tmp_path, _WRAPPING, "<html>{{ product }}{% template %}</html>")
         write_page(tmp_path, "shop/item", body="<p>item</p>")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_gated_reads() == []
+        assert check_gated_reads() == []
 
     def test_metadata_reading_a_gated_key_is_flagged(self, tmp_path: Path) -> None:
         page_file = _tree(tmp_path, _TITLED)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            messages = check_gated_reads()
+        messages = check_gated_reads()
 
-        assert [(m.id, m.obj) for m in messages] == [("next.W152", str(page_file))]
+        assert _flags(messages) == [("next.W152", str(page_file))]
         assert "'headline'" in messages[0].msg
 
 
-@pytest.mark.usefixtures("framework_providers")
 class TestHiddenGuards:
     """next.W169 flags a gated callable that guards only through a helper."""
 
     def test_a_guard_past_the_scan_depth_is_flagged(self, tmp_path: Path) -> None:
         page_file = _tree(tmp_path, _DEEP)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            messages = check_hidden_guards()
+        messages = check_hidden_guards()
 
-        assert [(m.id, m.obj) for m in messages] == [("next.W169", str(page_file))]
+        assert _flags(messages) == [("next.W169", str(page_file))]
         assert "'item'" in messages[0].msg
         assert "four" in messages[0].msg
 
@@ -144,11 +150,9 @@ class TestHiddenGuards:
     ) -> None:
         _tree(tmp_path, _HELPED)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_hidden_guards() == []
+        assert check_hidden_guards() == []
 
     def test_a_page_with_plain_callables_is_quiet(self, tmp_path: Path) -> None:
         _tree(tmp_path, _GATED)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
-            assert check_hidden_guards() == []
+        assert check_hidden_guards() == []

@@ -14,11 +14,7 @@ from next.pages.checks import (
     check_page_metadata_shape,
 )
 from next.testing import override_next_settings
-from tests.pages.checks.metadata.trees import (
-    NAMED_CALLABLE,
-    metadata_page,
-    templated_page,
-)
+from tests.pages.checks.metadata.trees import NAMED_CALLABLE, metadata_page
 from tests.support import (
     BASE,
     I18N_URLCONF,
@@ -26,6 +22,7 @@ from tests.support import (
     importable_dir,
     patch_checks_router_manager,
 )
+from tests.support.trees import templated_page
 
 
 DICT_AND_CALLABLE = """
