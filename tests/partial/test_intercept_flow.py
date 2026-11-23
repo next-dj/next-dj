@@ -80,13 +80,6 @@ def _shared_missing(request, exception=None) -> HttpResponse:
     return response
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 def _site(
     root: Path,
     *,

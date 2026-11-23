@@ -1,6 +1,7 @@
 import inspect
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import pytest
@@ -13,6 +14,7 @@ from next.deps import ResolutionContext
 from next.deps.loader import count_job
 from next.deps.plan import InjectionPlan, ParameterFiller, ParameterPlan
 from next.deps.providers import ParameterProvider
+from next.deps.resolver import DependencyResolver
 from next.deps.scope import RequestScope
 
 
@@ -116,3 +118,21 @@ def counted(scope: RequestScope | None, deadline: float) -> Iterator[None]:
             yield
     finally:
         job.end()
+
+
+@dataclass(slots=True)
+class UnhashableHandler:
+    """Callable object no mapping can key, the way an `eq=True` dataclass is."""
+
+    tag: str = "x"
+
+    def __call__(self, plain: int = 3) -> int:
+        return plain
+
+
+def themed_resolver() -> DependencyResolver:
+    """Fresh resolver with its providers loaded and the `theme` dependency bound."""
+    planned = DependencyResolver()
+    planned.dependency("theme")(lambda: "dark")
+    planned._sync_providers()
+    return planned

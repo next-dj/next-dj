@@ -3,7 +3,6 @@ import importlib
 import logging
 import threading
 from collections.abc import Awaitable, Iterator
-from dataclasses import dataclass
 
 import pytest
 from django.http import Http404
@@ -26,11 +25,12 @@ from next.deps.scope import RequestScope
 from next.errors import AsyncCallableError
 from next.testing import make_resolution_context
 from tests.support import inspect_parameter
+from tests.support.deps import UnhashableHandler
 
 
 _resolver_module = importlib.import_module("next.deps.resolver")
 
-PURE = Colour.PURE
+PURE = "pure"
 BLOCKING = Colour.BLOCKING
 ASYNC = Colour.ASYNC
 
@@ -248,14 +248,6 @@ def _unresolvable(value=None) -> None:
 _unresolvable.__annotations__["value"] = "NoSuchTypeAtAll"
 
 
-@dataclass
-class _UnhashableHandler:
-    tag: str = "x"
-
-    def __call__(self, plain: int = 3) -> int:
-        return plain
-
-
 def _both(a=Depends("a"), b=Depends("b")) -> str:
     return a + b
 
@@ -328,9 +320,11 @@ def _broken_a(b=Depends("b")) -> object:
     return b
 
 
-def _colours(plan) -> dict[str, Colour]:
+def _colours(plan) -> dict[str, Colour | str]:
     """Return the colour of every entry, read back from where the plan put it."""
-    found = dict.fromkeys((entry[0] for entry in plan.pure), PURE)
+    found: dict[str, Colour | str] = dict.fromkeys(
+        (entry[0] for entry in plan.pure), PURE
+    )
     for step in plan.steps:
         colour = BLOCKING if isinstance(step, Blocking) else ASYNC
         found.update(dict.fromkeys((entry[0] for entry in step.entries), colour))
@@ -494,7 +488,7 @@ class TestAsyncPlanCache:
     def test_an_unhashable_callable_compiles_per_resolve(self) -> None:
         instance = DependencyResolver()
         context = make_resolution_context()
-        handler = _UnhashableHandler()
+        handler = UnhashableHandler()
         result = _drive(InlineRunner(), lambda: instance.aresolve(handler, context))
         assert result == {"plain": 3}
         assert not instance._aplan_cache

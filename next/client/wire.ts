@@ -135,6 +135,8 @@ export interface WireRequest {
   navigate?: boolean;
   background?: boolean;
   boundaries?: Element[];
+  // Sends the request in place of the fetch seam, a prefetched answer standing in.
+  send?: FetchAdapter | undefined;
 }
 
 /** What a recognised envelope arrives with, read by name like ApplyOptions. */
@@ -552,7 +554,7 @@ export class Wire {
       const response =
         tunneled instanceof Response
           ? tunneled
-          : await bounded(this.#fetch(target, init), deadline.signal);
+          : await bounded((request.send ?? this.#fetch)(target, init), deadline.signal);
       // A safe-GET response that a newer request superseded is dropped unreported.
       if (!isCurrent()) return none("dropped");
       return await this.#classify(

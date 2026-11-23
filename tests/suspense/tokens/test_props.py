@@ -46,7 +46,6 @@ ROUND_TRIPS = [
     (list[int], [1, 2], [1, 2]),
     (list[str], ("a", "b"), ["a", "b"]),
     (int | None, None, None),
-    (typing.Union.__getitem__((int, None)), 4, 4),
     (list[date] | None, [date(2026, 1, 2)], ["2026-01-02"]),
 ]
 
@@ -194,7 +193,8 @@ class TestEncodeProps:
     def test_an_annotation_no_token_carries_is_refused(
         self, annotation: object
     ) -> None:
-        with pytest.raises(BoundaryPropsError, match="which no token carries"):
+        refusal = r"which no token carries\. .*list\[X\] of those.* as X \| None\.$"
+        with pytest.raises(BoundaryPropsError, match=refusal):
             encode_props({"p": "x"}, {"p": annotation})
 
     def test_text_over_the_limit_is_refused_as_oversized(self) -> None:

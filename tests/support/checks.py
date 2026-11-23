@@ -29,9 +29,14 @@ def located(messages: list[CheckMessage], root: Path) -> list[tuple[str, str]]:
     ]
 
 
+def write_file(path: Path, text: str) -> Path:
+    """Write `text` to `path`, creating the directories it needs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
 def write_files(root: Path, files: Mapping[str, str]) -> None:
     """Write each `files` entry under `root`, creating the directories it needs."""
     for relative, source in files.items():
-        file = root / relative
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(source)
+        write_file(root / relative, source)

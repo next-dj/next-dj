@@ -259,9 +259,10 @@ class TestImportOrder:
 
     def test_the_probe_reports_a_module_that_fails_to_import(self) -> None:
         names = ["next.pages", "next.pages.manager", "next.nowhere"]
-        assert _import_each_first(names) == {
-            "next.nowhere": "ModuleNotFoundError: No module named 'next.nowhere'"
-        }
+        failures = _import_each_first(names)
+        assert list(failures) == ["next.nowhere"]
+        missing = "ModuleNotFoundError: No module named 'next.nowhere'"
+        assert failures["next.nowhere"].startswith(missing)
 
     def test_an_app_listed_before_next_imports_its_areas(self, tmp_path: Path) -> None:
         package = tmp_path / "earlyapp"

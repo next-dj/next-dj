@@ -17,9 +17,9 @@ Its ``__all__`` lists the extension points and the types their signatures name, 
 Declarations
 ------------
 
-``page.defer(*, timeout=None, parallel=None)`` at the top of a ``page.py`` bounds the job of the page boundary by ``timeout`` and places it, ``True`` pinning the pool, ``False`` the request thread, and ``None`` leaving it to placement.
+``page.defer(*, timeout=None, parallel=True)`` at the top of a ``page.py`` bounds the job of the page boundary by ``timeout``, and ``parallel=False`` keeps that job on the request thread.
 
-``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=None, tokens=None)`` at the top of a ``component.py`` delivers the component as a boundary in ``mode``.
+``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=True, tokens=None)`` at the top of a ``component.py`` delivers the component as a boundary in ``mode``.
 ``props`` names the props a reload or a retry renders from, ``tag`` the wrapper element, ``WrapperTag.SITE`` leaving it to the call site and ``None`` adopting the root of the body, and ``tokens`` overrides ``max_age``, ``bucket``, ``binding``, or ``max_bytes`` of ``DEFER["TOKENS"]["OPTIONS"]`` for this component.
 ``component.props(*names)`` declares the props alone, and naming props through both is an error.
 
@@ -119,12 +119,14 @@ Once a write lands in the handle's own transaction, a database error the subtree
 
 .. py:data:: next.transactions.AtomicMode
 
-   ``True``, ``False``, or ``"writes"``, the value ``DEFER["ERRORS"]["ATOMIC"]`` and the ``atomic`` argument of ``LazySavepoint`` take.
-   ``True`` opens a transaction before the first statement of the subtree, ``"writes"`` before its first write, and ``False`` never.
+   ``True``, ``False``, or ``"writes"``, the one vocabulary of every transaction choice.
+   ``TRANSACTIONS["SAFE"]`` and ``TRANSACTIONS["UNSAFE"]``, ``page.atomic()``, ``@action(atomic=...)``, ``Meta.atomic`` on a form class, ``AtomicOverride.atomic``, ``DEFER["ERRORS"]["ATOMIC"]``, and the ``atomic`` argument of ``LazySavepoint`` all take it.
+   For a view, ``True`` opens the transaction on entry, before any statement, ``"writes"`` opens it right before the first write on each alias, and ``False`` opens none.
+   Inside an error boundary that runs in autocommit, ``True`` opens the subtree's transaction before its first statement, ``"writes"`` before its first write, and ``False`` never, while a boundary inside a transaction takes a savepoint at its first statement there whatever the mode.
 
 .. py:data:: next.transactions.TransactionRule
 
-   The callable ``TRANSACTIONS["RULE"]`` names, taking the ``HttpRequest`` and the ``ViewKind`` and returning the iterable of database aliases to wrap.
+   The callable ``TRANSACTIONS["RULE"]`` names, taking the ``HttpRequest`` and the ``ViewKind`` and returning either the iterable of database aliases to wrap on entry or an ``AtomicOverride`` that names the mode and the aliases.
 
 .. autoclass:: next.transactions.StatementKind
    :no-special-members:

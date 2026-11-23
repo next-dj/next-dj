@@ -1,3 +1,4 @@
+import pytest
 from django.test import override_settings
 
 from next.defer import BoundaryFailure, DebugBoundaryFailure, DeferMode, ErrorKind
@@ -69,21 +70,25 @@ class TestMarkup:
         )
 
     @override_settings(DEBUG=True)
-    def test_a_debug_adopted_error_with_no_content_shows_digest_and_detail(
-        self,
+    @pytest.mark.parametrize(
+        ("detail", "tail"),
+        [
+            pytest.param(
+                "why",
+                'data-next-error-digest="d1" data-next-error-detail="why"></template>',
+                id="with-a-message",
+            ),
+            pytest.param(
+                "", 'data-next-error-digest="d1"></template>', id="without-a-message"
+            ),
+        ],
+    )
+    def test_a_debug_adopted_error_with_no_content_shows_its_digest(
+        self, detail: str, tail: str
     ) -> None:
-        failure = DebugBoundaryFailure(ErrorKind.ERROR, "d1", None, False, "why", "")
-        assert in_place("b-1-0", make_call(None, "k"), "", failure).endswith(
-            'data-next-error="error" data-next-error-digest="d1" '
-            'data-next-error-detail="why"></template>'
-        )
-
-    @override_settings(DEBUG=True)
-    def test_a_debug_error_without_a_message_shows_its_digest(self) -> None:
-        failure = DebugBoundaryFailure(ErrorKind.ERROR, "d1", None, False, "", "")
-        assert in_place("b-1-0", make_call(None, "k"), "", failure).endswith(
-            'data-next-error-digest="d1"></template>'
-        )
+        failure = DebugBoundaryFailure(ErrorKind.ERROR, "d1", None, False, detail, "")
+        markup = in_place("b-1-0", make_call(None, "k"), "", failure)
+        assert markup.endswith('data-next-error="error" ' + tail)
 
     def test_a_refused_loading_ui_settles_the_shell_as_an_error(self) -> None:
         failure = BoundaryFailure(ErrorKind.ERROR, "d1", None, retry=False)

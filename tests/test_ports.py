@@ -12,12 +12,15 @@ from django.urls import path
 from next.forms.manager import FormActionManager
 from next.forms.ports import ActionOwnersImpl
 from next.pages.ports import PageScanImpl
+from next.partial.layers import stash_layers
 from next.ports import (
     PortSlot,
     action_owners_slot,
     async_bridge_slot,
+    context_propagator_slot,
     deferrals_slot,
     form_routes_slot,
+    layer_loading_slot,
     marked_zones,
     page_scan_slot,
     page_scripts_slot,
@@ -27,6 +30,7 @@ from next.ports import (
     run_bridged,
     seo_routes_slot,
     stamp_router,
+    stash_layer_loading,
     static_assets_slot,
     thread_wait_slot,
     wait_served,
@@ -38,6 +42,7 @@ from next.seo.ports import SeoRoutesImpl
 from next.static.ports import StaticAssetsImpl
 from next.suspense import drive, serve_until
 from next.suspense.assembly import inline_sink
+from next.suspense.bridge import BridgePropagator, contexts_carry_locals
 from next.urls.manager import _LazyUrlPatterns
 from next.urls.ports import RouterAccessImpl
 
@@ -55,6 +60,7 @@ PROCESS_SLOTS = [
 SLOT_SUBJECTS = [
     "action owners port",
     "async bridge port",
+    "context propagator port",
     "deferrals port",
     "form routes port",
     "page scan port",
@@ -125,6 +131,13 @@ class TestAppComposition:
     def test_the_wait_slot_holds_the_hop_server(self) -> None:
         assert thread_wait_slot.get() is serve_until
 
+    def test_the_propagator_slot_holds_a_bridge_that_hops_only_when_asgiref_needs_it(
+        self,
+    ) -> None:
+        propagator = context_propagator_slot.get()
+        assert isinstance(propagator, BridgePropagator)
+        assert propagator.plain is contexts_carry_locals()
+
     def test_the_deferrals_slot_holds_the_assembled_inline_sink(self) -> None:
         assert deferrals_slot.get() is inline_sink
 
@@ -133,6 +146,9 @@ class TestAppComposition:
 
     def test_the_zone_marking_slot_holds_the_action_marking(self) -> None:
         assert zone_marking_slot.get() is action_marking
+
+    def test_the_layer_loading_slot_holds_the_layer_stash(self) -> None:
+        assert layer_loading_slot.get() is stash_layers
 
 
 class TestStampRouter:
@@ -182,6 +198,29 @@ class TestMarkedZones:
         slot: PortSlot[object] = PortSlot("zone marking port")
         with patch("next.ports.zone_marking_slot", slot), marked_zones(object()):
             pass
+
+
+class TestStashLayerLoading:
+    """`stash_layer_loading` runs the bound layer loading pass, bound or not."""
+
+    def test_a_bound_pass_receives_the_render(self) -> None:
+        slot: PortSlot[object] = PortSlot("layer loading port")
+        seen: list[object] = []
+
+        def bound(html, collector, request):
+            seen.extend((html, collector, request))
+            return "stashed"
+
+        slot.set(bound)
+        collector, request = object(), object()
+        with patch("next.ports.layer_loading_slot", slot):
+            assert stash_layer_loading("<a>", collector, request) == "stashed"
+        assert seen == ["<a>", collector, request]
+
+    def test_an_unbound_pass_keeps_the_html(self) -> None:
+        slot: PortSlot[object] = PortSlot("layer loading port")
+        with patch("next.ports.layer_loading_slot", slot):
+            assert stash_layer_loading("<a>", object(), None) == "<a>"
 
 
 async def _answer() -> str:

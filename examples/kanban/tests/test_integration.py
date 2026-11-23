@@ -666,6 +666,31 @@ class TestBoardPeek:
         assert 'data-next-layer="board-peek"' in anchor
         assert body.count(f'href="/board/{board.pk}/"') == 2
 
+    def test_the_index_carries_the_loading_state_of_the_peek_once(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        Board.objects.create(title="Second", slug="second")
+        body = next_client.get("/").content.decode()
+        stash = '<template data-next-layer="board-peek">'
+        assert body.count(stash) == 1
+        loading = body[body.index(stash) : body.index("</template>", body.index(stash))]
+        assert "data-board-peek-loading" in loading
+        assert loading.count("animate-pulse") == 7
+        assert body.index(stash) < body.index(
+            'data-next-layer="board-peek"', body.index(stash) + len(stash)
+        )
+        assert "next.reload.min.js" in body
+
+    def test_a_layer_prefetch_answers_the_summary_the_peek_shows(
+        self, next_client: NextClient, board: Board
+    ) -> None:
+        opened = next_client.get_zones(f"/board/{board.pk}/", "board-peek")
+        prefetched = next_client.get_zones(
+            f"/board/{board.pk}/", "board-peek", headers={"X-Next-Prefetch": "full"}
+        )
+        assert prefetched.status_code == 200
+        assert envelope_of(prefetched).ops == envelope_of(opened).ops
+
     def test_a_plain_get_renders_the_real_board(
         self, next_client: NextClient, board: Board
     ) -> None:

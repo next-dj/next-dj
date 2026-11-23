@@ -564,7 +564,7 @@ class TestLatencyStream:
         streamed = next_client.get_stream("/")
         assert LATENCY_LOADING in streamed.shell
         assert "Mean ms" not in streamed.shell
-        [chunk] = streamed.chunks
+        chunk = streamed.boundary("latency_widget")
         assert chunk.state == "ready"
         assert CULLED_PAGE in chunk.html
 
@@ -587,6 +587,7 @@ class TestLatencyStream:
 
 
 PAGE_RENDERS = "/stats/pages/"
+PAGE_RENDERS_BOUNDARY = "obs/pages/stats/pages/loading.djx"
 
 
 class TestPageRendersBoundary:
@@ -603,7 +604,7 @@ class TestPageRendersBoundary:
     def test_a_chunk_fills_in_the_counts_and_the_means(self, next_client) -> None:
         next_client.get("/stats/")
         streamed = next_client.get_stream(PAGE_RENDERS)
-        [chunk] = streamed.chunks
+        chunk = streamed.boundary(PAGE_RENDERS_BOUNDARY)
         assert chunk.state == "ready"
         assert "Mean ms" in chunk.html
         assert CULLED_PAGE in chunk.html
@@ -618,7 +619,7 @@ class TestPageRendersBoundary:
     def test_a_culled_counter_streams_the_error_ui_in_place(self, next_client) -> None:
         with boundary_errors("render"):
             streamed = next_client.get_stream(PAGE_RENDERS)
-        [chunk] = streamed.chunks
+        chunk = streamed.boundary(PAGE_RENDERS_BOUNDARY)
         assert (chunk.state, chunk.kind) == ("error", "error")
         assert "Page renders are unavailable" in chunk.html
         assert streamed.response.status_code == 200

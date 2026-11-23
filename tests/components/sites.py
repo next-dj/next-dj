@@ -13,11 +13,12 @@ from next.defer import stable_key
 from next.seeding import COLLECTOR_KEY
 from next.static import StaticCollector
 from next.static.assets import StaticAsset
-from next.suspense.assembly import finish, run_sequentially
+from next.suspense.assembly import finish
 from next.suspense.components import deferring
 from next.suspense.render import Delta
 from next.suspense.session import BoundarySession
 from tests.support import component_info
+from tests.support.boundaries import run_sequentially
 
 
 BOOM = "boom"

@@ -303,7 +303,7 @@ class RequestScope:
             tasks = self._tasks = set()
         tasks.add(task)
         task.add_done_callback(partial(self._settle, tasks, key))
-        return await self._wait(self._owner(), key, asyncio.shield(task))
+        return await self._wait(self._owner(), key, task)
 
     async def _join(self, key: str) -> object:
         owner = self._owner()
@@ -317,16 +317,22 @@ class RequestScope:
         hook = join_waits.get()
         waits = nullcontext() if hook is None else hook(self._root())
         with waits:
-            return await self._wait(owner, key, asyncio.shield(future))
+            return await self._wait(owner, key, future)
 
     async def _wait(
-        self, owner: str | None, key: str, waiter: asyncio.Future[object]
+        self, owner: str | None, key: str, outcome: asyncio.Future[object]
     ) -> object:
+        """Wait for `outcome`, which a cancel of the waiter leaves running.
+
+        Not `asyncio.shield`, as on 3.14 its cancelled waiter logs a memoised failure.
+        """
         chain = None if owner is None else self._chains.setdefault(owner, [])
         if chain is not None:
             chain.append(key)
         try:
-            return await waiter
+            if not outcome.done():
+                await asyncio.wait((outcome,))
+            return outcome.result()
         except BaseException as error:
             failure = self._errors.get(key)
             if failure is not None and failure.error is error:

@@ -144,13 +144,6 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
                     "PARALLEL": True,
                     "SQLITE": "foreground",
                     "THREAD_LOCAL_MIDDLEWARE": (),
-                    "PLACEMENT": {
-                        "MODE": "adaptive",
-                        "HANDOFF": 0.0003,
-                        "CPU_RATIO": 0.8,
-                        "CPU_MAX": 0.002,
-                        "EXPLORE": 3,
-                    },
                 },
             },
             "POLICY": {

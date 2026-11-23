@@ -48,6 +48,7 @@ from tests.support import (
     bound_dependency,
     inspect_parameter,
 )
+from tests.support.deps import UnhashableHandler
 
 
 _IN_PROGRESS_SENTINEL = _IN_PROGRESS
@@ -886,16 +887,6 @@ class _HooklessProvider:
         return None
 
 
-@dataclass
-class _UnhashableHandler:
-    """Callable object no mapping can key, the way an `eq=True` dataclass is."""
-
-    tag: str = "x"
-
-    def __call__(self, plain: int = 3) -> int:
-        return plain
-
-
 class _Point(NamedTuple):
     """Class whose parameters live on the generated `__new__`, not on `__init__`."""
 
@@ -1025,13 +1016,13 @@ class TestUnhashableCallable:
 
     def test_resolve_compiles_a_plan_without_caching_it(self) -> None:
         instance = DependencyResolver()
-        handler = _UnhashableHandler()
+        handler = UnhashableHandler()
         assert instance.resolve_dependencies(handler) == {"plain": 3}
         assert not instance._plan_cache
 
     def test_provides_answers_from_a_fresh_plan(self) -> None:
         instance = DependencyResolver()
-        handler = _UnhashableHandler()
+        handler = UnhashableHandler()
         param = inspect.signature(handler).parameters["plain"]
         empty = make_resolution_context()
         filled = make_resolution_context(url_kwargs={"plain": 5})
@@ -1042,7 +1033,7 @@ class TestUnhashableCallable:
         assert DependencyResolver().resolve_dependencies(_UnhashableValue()) == {}
 
     def test_the_memo_helpers_inspect_it_afresh(self) -> None:
-        handler = _UnhashableHandler()
+        handler = UnhashableHandler()
         assert list(cached_signature(handler).parameters) == ["plain"]
         assert cached_type_hints(handler)["plain"] is int
         assert cached_accepts_var_keyword(handler) is False

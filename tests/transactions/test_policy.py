@@ -258,18 +258,24 @@ class TestRule:
             assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ()
         assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
 
-    def test_a_path_that_does_not_import_raises(self) -> None:
-        with (
-            _transactions(RULE="tests.missing.rule"),
-            pytest.raises(ImproperlyConfigured, match="could not be imported"),
-        ):
-            atomic_scope(_request("POST"), ViewKind.PAGE)
-
-    def test_a_path_to_no_callable_raises(self) -> None:
-        with (
-            _transactions(RULE="tests.transactions.test_policy.not_callable"),
-            pytest.raises(ImproperlyConfigured, match="names no callable"),
-        ):
+    @pytest.mark.parametrize(
+        ("rule", "match"),
+        [
+            pytest.param("tests.missing.rule", "could not be imported", id="no-import"),
+            pytest.param(
+                "tests.transactions.test_policy.not_callable",
+                "names no callable",
+                id="no-callable",
+            ),
+            pytest.param(
+                "tests.transactions.test_policy.rule_misfit_override",
+                "got 'reads'",
+                id="override-applying-nothing",
+            ),
+        ],
+    )
+    def test_an_unusable_rule_raises(self, rule: str, match: str) -> None:
+        with _transactions(RULE=rule), pytest.raises(ImproperlyConfigured, match=match):
             atomic_scope(_request("POST"), ViewKind.PAGE)
 
     def test_an_override_answer_chooses_the_mode(self) -> None:
@@ -280,13 +286,6 @@ class TestRule:
     def test_an_alias_answer_opens_on_entry(self) -> None:
         with _transactions(RULE="tests.transactions.test_policy.rule_one_name"):
             assert atomic_scope(_request("GET"), ViewKind.PAGE) == EAGER
-
-    def test_an_override_answer_that_applies_nothing_raises(self) -> None:
-        with (
-            _transactions(RULE="tests.transactions.test_policy.rule_misfit_override"),
-            pytest.raises(ImproperlyConfigured, match="got 'reads'"),
-        ):
-            atomic_scope(_request("POST"), ViewKind.PAGE)
 
     def test_a_rule_that_is_no_path_keeps_the_method_table(self) -> None:
         with _transactions(RULE=42):

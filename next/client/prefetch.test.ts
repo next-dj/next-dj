@@ -1335,3 +1335,249 @@ describe("the press", () => {
     expect(hrefs()).toEqual(["/c/"]);
   });
 });
+
+describe("layer links", () => {
+  const LAYER =
+    '<a id="l" href="/m/" data-next-layer="sheet"><span id="s">M</span></a>';
+
+  interface Sent {
+    url: string;
+    headers: Headers;
+    signal: AbortSignal;
+  }
+
+  let sent: Sent[];
+  let answers: Reply[];
+
+  beforeEach(() => {
+    sent = [];
+    answers = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init = {}) => {
+      const signal = init.signal!;
+      sent.push({ url: input as string, headers: new Headers(init.headers), signal });
+      const reply = answers.shift() ?? zone();
+      return reply instanceof Response ? Promise.resolve(reply) : reply(signal);
+    });
+  });
+
+  function zone(
+    init: { status?: number; headers?: Record<string, string> } = {},
+  ): Response {
+    return new Response('{"ops":[]}', {
+      ...init,
+      headers: {
+        "content-type": CONTENT_TYPE,
+        "X-Next-Version": "v1",
+        ...init.headers,
+      },
+    });
+  }
+
+  function opener(markup = LAYER): Element {
+    document.body.innerHTML = markup;
+    return document.getElementById("l")!;
+  }
+
+  function press(el: Element, pointerType = "mouse"): void {
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType }));
+  }
+
+  function hover(el: Element): Promise<void> {
+    fire(el, "pointerover");
+    return wait(40);
+  }
+
+  const send = (
+    href = "/m/",
+    name = "sheet",
+  ): ReturnType<NonNullable<PartialSurface["_take"]>> => surface._take?.(href, name);
+
+  const request = (): [string, RequestInit] => [
+    at("/m/"),
+    { signal: new AbortController().signal },
+  ];
+
+  it("prefetches a hovered layer link as a full zone request for the page it opens over", async () => {
+    make();
+    await hover(opener());
+    expect(asked).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toBe(at("/m/"));
+    expect(Object.fromEntries(sent[0]!.headers)).toMatchObject({
+      accept: expect.stringContaining(CONTENT_TYPE),
+      "x-next-request": "1",
+      "x-next-zone": "sheet",
+      "x-next-origin": location.pathname + location.search,
+      "x-next-prefetch": "full",
+    });
+    expect(sent[0]!.headers.get("accept")).not.toContain("text/event-stream");
+  });
+
+  it("hands the kept answer to the layer once, and never to a navigation", async () => {
+    const reply = zone();
+    answers = [reply];
+    const prefetch = make();
+    await hover(opener());
+    expect(prefetch.take(at("/m/"))).toBeUndefined();
+    const taken = send();
+    expect(taken).toBeDefined();
+    expect(await taken!(...request())).toBe(reply);
+    expect(send()).toBeUndefined();
+  });
+
+  it("keeps a layer answer and a navigation answer of one URL apart", async () => {
+    const prefetch = make();
+    await prefetch.prefetch(at("/m/"));
+    expect(send()).toBeUndefined();
+    await hover(opener());
+    expect(send("/m/", "other")).toBeUndefined();
+    expect(send()).toBeDefined();
+    expect(prefetch.take(at("/m/"))).toBeDefined();
+  });
+
+  it("forgets a layer answer prefetched over another page", async () => {
+    make();
+    await hover(opener());
+    history.replaceState(null, "", "/elsewhere/");
+    try {
+      expect(send()).toBeUndefined();
+    } finally {
+      history.replaceState(null, "", "/");
+    }
+  });
+
+  it.each([
+    ["a failed answer", () => zone({ status: 500 })],
+    ["a refused prefetch", () => new Response(null, { status: 204 })],
+    [
+      "an answer of another type",
+      () => new Response("<p>x</p>", { headers: { "content-type": "text/html" } }),
+    ],
+    [
+      "a redirected answer",
+      () => {
+        const response = zone();
+        Object.defineProperty(response, "redirected", { value: true });
+        return response;
+      },
+    ],
+  ])("keeps no layer answer for %s", async (_name, reply) => {
+    answers = [reply()];
+    make();
+    await hover(opener());
+    expect(send()).toBeUndefined();
+  });
+
+  it("asks a refused layer link no more", async () => {
+    answers = [new Response(null, { status: 204 })];
+    make();
+    const el = opener();
+    await hover(el);
+    fire(el, "pointerout");
+    await hover(el);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("drops a kept layer answer of an asset version the page no longer runs", async () => {
+    make();
+    await hover(opener());
+    vi.spyOn(surface, "_headers").mockReturnValue(
+      new Headers({ "X-Next-Version": "v2" }),
+    );
+    expect(send()).toBeUndefined();
+  });
+
+  it("leaves a layer link with its prefetch turned off alone", async () => {
+    make();
+    await hover(
+      opener(
+        '<a id="l" href="/m/" data-next-layer="sheet" data-next-prefetch="off">M</a>',
+      ),
+    );
+    expect(sent).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  it("owns a layer link by its URL alone, a plain link by the element", async () => {
+    const owned = vi.fn<HistoryHost["owned"]>().mockReturnValue(true);
+    createPrefetch({ ...host(), owned }, { signal: listening.signal });
+    await hover(opener());
+    expect(owned).toHaveBeenCalledWith(new URL(at("/m/")), undefined);
+  });
+
+  it("sends the press of a layer link at once and hands its flight to the layer", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    answers = [() => new Promise<Response>((done) => (answer = done))];
+    make();
+    press(opener());
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.headers.get("x-next-prefetch")).toBe("full");
+    const taken = send();
+    const reply = zone();
+    const landing = taken!(...request());
+    answer(reply);
+    expect(await landing).toBe(reply);
+  });
+
+  it("waits for a layer prefetch still in flight", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    answers = [() => new Promise<Response>((done) => (answer = done))];
+    make();
+    fire(opener(), "pointerover");
+    await wait(40);
+    const taken = send();
+    const reply = zone();
+    const landing = taken!(...request());
+    answer(reply);
+    expect(await landing).toBe(reply);
+  });
+
+  it("fetches itself once a pressed layer flight comes back empty", async () => {
+    answers = [new Response(null, { status: 429 }), zone()];
+    make();
+    press(opener());
+    const [url, init] = request();
+    const reply = await send()!(url, init);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.url).toBe(url);
+    expect(reply.status).toBe(200);
+  });
+
+  it("stops a pressed layer flight once the layer drops its request", () => {
+    answers = [
+      (signal) =>
+        new Promise<Response>((_done, fail) =>
+          signal.addEventListener("abort", () => fail(signal.reason as Error)),
+        ),
+    ];
+    make();
+    press(opener());
+    const controller = new AbortController();
+    void send()!(at("/m/"), { signal: controller.signal }).catch(() => undefined);
+    return wait(0).then(() => {
+      controller.abort();
+      expect(sent[0]!.signal.aborted).toBe(true);
+    });
+  });
+
+  it("stops a pressed flight a kept answer makes needless", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const reply = zone();
+    answers = [
+      () => new Promise<Response>((done) => (answer = done)),
+      (signal) =>
+        new Promise<Response>((_done, fail) =>
+          signal.addEventListener("abort", () => fail(signal.reason as Error)),
+        ),
+    ];
+    make();
+    const el = opener();
+    await hover(el);
+    press(el);
+    expect(sent).toHaveLength(2);
+    const landing = send()!(...request());
+    answer(reply);
+    expect(await landing).toBe(reply);
+    expect(sent[1]!.signal.aborted).toBe(true);
+  });
+});

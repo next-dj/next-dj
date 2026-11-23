@@ -1,6 +1,7 @@
-from collections.abc import Callable, Coroutine
+import time
+from collections.abc import Callable, Coroutine, Iterator
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock
 
 from next.defer import (
@@ -13,7 +14,8 @@ from next.defer import (
     ErrorKind,
     Site,
 )
-from next.suspense.markers import Caps, Job, Rendered
+from next.ports import run_bridged
+from next.suspense.markers import Caps, Job, Outcome, Rendered
 from next.suspense.render import Delta
 from next.suspense.session import BoundarySession
 from next.testing import override_next_settings
@@ -155,6 +157,31 @@ def make_call(
     )
 
 
+def _run_inline(job: Job[Delta], expired: frozenset[str]) -> Iterator[Outcome[Delta]]:
+    """Run `job` here, then its nested jobs, a job out of time settling as `timeout`."""
+    if job.id in expired or time.monotonic() >= job.deadline:
+        yield Outcome(job.id, job.fallback(ErrorKind.TIMEOUT))
+        return
+    body = job.run
+    if body is None:
+        arun = cast("Callable[[], Coroutine[Any, Any, Rendered[Delta]]]", job.arun)
+        rendered = run_bridged(arun)
+    else:
+        rendered = body()
+    yield Outcome(job.id, rendered)
+    for nested in rendered.nested:
+        yield from _run_inline(nested, expired)
+
+
+def run_sequentially(
+    session: BoundarySession[Delta],
+) -> Iterator[tuple[Outcome[Delta], ...]]:
+    """Run every job on the calling thread in document order, one batch per job."""
+    expired = frozenset(job.id for job in session.plan().expired)
+    for job in session.jobs:
+        yield tuple(_run_inline(job, expired))
+
+
 __all__ = [
     "COMPONENT_SITE",
     "RecordingFallback",
@@ -165,4 +192,5 @@ __all__ = [
     "make_site",
     "open_session",
     "raising",
+    "run_sequentially",
 ]

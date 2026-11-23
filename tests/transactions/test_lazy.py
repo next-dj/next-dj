@@ -1,12 +1,6 @@
-import re
-from collections.abc import Iterator
-from contextlib import contextmanager
-
 import pytest
 from django.contrib.auth.models import Group
 from django.db import connection, connections, transaction
-from django.db.backends.base.base import BaseDatabaseWrapper
-from django.test.utils import CaptureQueriesContext
 
 from next.transactions import (
     WRITES,
@@ -17,50 +11,15 @@ from next.transactions import (
     request_atomic,
     savepoints,
 )
+from tests.support.statements import fresh_default, statement_log
 
 
 LAZY = AtomicScope(("default",), atomic=WRITES)
 MODES: tuple[AtomicMode, ...] = (True, WRITES, False)
 
-_SAVEPOINT_NAME = re.compile(r'"s\d+_x\d+"')
-_TABLE = re.compile(r'^(INSERT INTO|DELETE FROM|UPDATE) "(\w+)".*')
-
-
-def _statement(sql: str) -> str:
-    sql = _SAVEPOINT_NAME.sub("sp", sql)
-    if sql.startswith("SELECT"):
-        return "SELECT"
-    return _TABLE.sub(r"\1 \2", sql)
-
-
-@contextmanager
-def _log() -> Iterator[list[str]]:
-    statements: list[str] = []
-    with CaptureQueriesContext(connection) as queries:
-        yield statements
-    statements.extend(_statement(query["sql"]) for query in queries.captured_queries)
-
 
 def _names() -> list[str]:
     return sorted(Group.objects.values_list("name", flat=True))
-
-
-def _close(wrapper: BaseDatabaseWrapper) -> None:
-    if wrapper.connection is not None:
-        wrapper.connection.close()
-
-
-@contextmanager
-def _fresh_default() -> Iterator[None]:
-    """Swap in a new `default` connection object and close it on the way out."""
-    original = connections["default"]
-    del connections["default"]
-    try:
-        yield
-    finally:
-        fresh = connections["default"]
-        connections["default"] = original
-        _close(fresh)
 
 
 def _fail() -> None:
@@ -108,20 +67,20 @@ class TestLazyViewTransaction:
     """A `"writes"` view opens its transaction before its first write and not sooner."""
 
     def test_a_query_free_view_issues_nothing(self) -> None:
-        with _log() as log, request_atomic(LAZY):
+        with statement_log() as log, request_atomic(LAZY):
             assert not connection.in_atomic_block
         assert log == []
         assert connection.execute_wrappers == []
 
     def test_a_query_free_view_opens_no_connection(self) -> None:
-        with _fresh_default():
+        with fresh_default():
             fresh = connections["default"]
             with request_atomic(LAZY):
                 pass
             assert fresh.connection is None
 
     def test_reads_run_in_autocommit_until_the_first_write(self) -> None:
-        with _log() as log, request_atomic(LAZY):
+        with statement_log() as log, request_atomic(LAZY):
             list(Group.objects.all())
             assert not connection.in_atomic_block
             Group.objects.create(name="one")
@@ -165,7 +124,7 @@ class TestLazyViewTransaction:
         assert _names() == ["created"]
 
     def test_a_connection_a_subtree_meets_later_stays_out_of_the_view(self) -> None:
-        with request_atomic(LAZY), LazySavepoint() as point, _fresh_default():
+        with request_atomic(LAZY), LazySavepoint() as point, fresh_default():
             fresh = connections["default"]
             Group.objects.create(name="subtree")
             point.rollback()
@@ -254,7 +213,7 @@ class TestPendingViewProbe:
             assert probe_atomic_aliases() == ()
 
     def test_a_reading_boundary_that_opens_on_reads_opens_the_view(self) -> None:
-        with _log() as log, request_atomic(LAZY):
+        with statement_log() as log, request_atomic(LAZY):
             with LazySavepoint(probe_atomic_aliases(), atomic=True):
                 list(Group.objects.all())
             assert connection.in_atomic_block

@@ -71,10 +71,14 @@ A navigation request that also carries ``X-Next-Prefetch`` is a prefetch, at one
 
 A prefetch answer may be shown to the visitor with no further request, so code that must act on a visit does not rely on the prefetch request, see :ref:`topics-router-prefetch-visits`.
 
+A zone request of a layer link that carries ``X-Next-Prefetch`` is a layer prefetch, at the full depth whatever the value.
+It renders the zone as the layer open does and keeps the purpose of a zone request, see :doc:`prefetch`.
+
 Two answers refuse a prefetch before any render.
 
 ``204`` with an empty body
    The page declares ``page.router(prefetch=False)`` or ``page.router(navigate=False)``, or it is an intercepted page under ``ROUTER["INTERCEPT"] = "links"``.
+   A layer prefetch is refused when the page or the intercept serving its zone declares ``page.router(prefetch=False)``.
 
 ``429`` with ``Retry-After``
    The oldest job in the pool queue of deferred boundaries waited longer than ``DEFER["EXECUTOR"]["OPTIONS"]["QUEUE_TIMEOUT"]``, so a speculative render would only add load.

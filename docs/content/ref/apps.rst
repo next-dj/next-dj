@@ -17,8 +17,10 @@ Importing ``next.apps`` registers the framework system checks, because the packa
 #. ``router_reloaded`` receivers connected
 #. ``user_logged_in`` receiver ``clear_on_login`` connected
 #. ``user_logged_out`` receiver ``clear_on_logout`` connected
+#. ``connection_created`` receiver ``cover_new_connection`` connected
 #. ``apply_resolver_setting()``
 #. ``async_bridge_slot.set(drive)``
+#. ``context_propagator_slot.set(BridgePropagator(plain=contexts_carry_locals()))``
 #. ``thread_wait_slot.set(serve_until)``
 #. ``deferrals_slot.set(inline_sink)``
 #. ``action_owners_slot.set(ActionOwnersImpl())``
@@ -38,7 +40,7 @@ Importing ``next.apps`` registers the framework system checks, because the packa
 #. ``autodiscover.install()``
 #. ``components.install()``
 
-Every framework receiver of ``setting_changed``, ``settings_reloaded``, ``router_reloaded``, ``user_logged_in``, and ``user_logged_out`` is connected in the connect steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
+Every framework receiver of ``setting_changed``, ``settings_reloaded``, ``router_reloaded``, ``user_logged_in``, ``user_logged_out``, and ``connection_created`` is connected in the connect steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
 Each signal below lists its receivers in the order they run, and each is connected with ``dispatch_uid`` set to its module and qualified name, so a second ``ready`` call connects nothing twice.
 
 - ``setting_changed`` runs ``reload_on_setting_changed`` of ``next.conf.settings`` first, which rebuilds the merged ``NEXT_FRAMEWORK`` and sends ``settings_reloaded``, then the receivers that read Django settings directly, among them ``forget_app_page_roots``, ``reload_app_routers``, ``staticfiles.reinstall_finders``, and ``templates.reinstall_builtins``.
@@ -46,6 +48,7 @@ Each signal below lists its receivers in the order they run, and each is connect
 - ``router_reloaded`` runs ``forget_watch_state``, ``forget_shared_layouts``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, ``forget_object_rows``, ``forget_seo_sources``, ``forget_translated_urls``, and ``forget_scripts``.
   A reload that replaces the routers from code changes what they report without touching settings, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
 - ``user_logged_in`` and ``user_logged_out`` run ``clear_on_login`` and ``clear_on_logout`` of ``next.router.navigation``, which mark the request so its response tells the client router to drop what it cached for the previous identity, see :doc:`router`.
+- ``connection_created`` runs ``cover_new_connection`` of ``next.transactions``, which puts a connection the thread opens while a lazy savepoint watches every connection under that savepoint, as the connections already open are, see :doc:`defer`.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
 It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``permissions.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
@@ -58,6 +61,7 @@ The ``realtime`` sweep imports the modules that ``REALTIME["HANDLERS"]`` selects
 The ``set`` steps bind every :doc:`next.ports <ports>` slot, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
+The ``context_propagator_slot`` binding probes once whether the installed asgiref carries a ``Local`` value through a context on another thread, and ``plain`` records the answer, see :doc:`ports`.
 The ``seo_routes_version.move()`` step right after the ``seo_routes_slot`` binding moves the counter of ``next.urls.manager`` the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port just bound.
 
 Public API

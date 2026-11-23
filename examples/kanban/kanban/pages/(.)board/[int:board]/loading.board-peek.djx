@@ -1,0 +1,11 @@
+<div data-board-peek-loading aria-hidden="true" class="w-full max-w-[30rem] space-y-3">
+  <div class="h-6 w-48 animate-pulse rounded bg-muted"></div>
+  <ul class="divide-y divide-border rounded-md border border-border">
+    {% for row in "123" %}
+      <li class="flex items-center justify-between px-3 py-2">
+        <span class="h-4 w-24 animate-pulse rounded bg-muted"></span>
+        <span class="h-4 w-16 animate-pulse rounded bg-muted"></span>
+      </li>
+    {% endfor %}
+  </ul>
+</div>

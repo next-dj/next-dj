@@ -2,17 +2,20 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
 from contextvars import Context, ContextVar, copy_context
 from functools import partial
 from unittest.mock import Mock
 
 import pytest
+from asgiref.local import Local
 from asgiref.sync import ThreadSensitiveContext, async_to_sync, sync_to_async
 from django.contrib.auth.models import Group
 from django.db import connection
 from django.test import override_settings
+from django.utils import translation
 
 from next.deps import DependencyCycleError, Loader, MissingKeyError, rows
 from next.deps.cache import RequestMemo, request_memo
@@ -20,8 +23,9 @@ from next.deps.loader import _HUB, _hub, _loaders, drain_loaders, open_loaders
 from next.deps.objects import visible_rows
 from next.deps.runner import run_isolated, segment_runner
 from next.deps.scope import RequestScope
-from next.suspense import drive
+from next.suspense import bridge, drive
 from next.suspense.executors import background_loop
+from next.tasks import ContextSnapshot
 from next.testing import make_resolution_context
 from tests.support.deps import counted
 from tests.support.errors import BackendDownError, HaltError
@@ -31,6 +35,7 @@ CLOSED = "scope is closed"
 WAIT = 5.0
 
 marker: ContextVar[str] = ContextVar("marker", default="unset")
+request_local = Local()
 
 
 class Clash:
@@ -67,7 +72,7 @@ def run_request(scenario, *, runner=None, opened=False):
         if runner is not None:
             segment_runner.set(runner)
         if opened:
-            open_loaders(scope, copy_context())
+            open_loaders(scope, ContextSnapshot(copy_context()))
         return await scenario()
 
     return asyncio.run(request())
@@ -134,6 +139,44 @@ async def waiting_through(runner, loader: Loader[int, int], key: int) -> object:
     """Load `key` from a loop task whose route runs segments through `runner`."""
     segment_runner.set(runner)
     return await loader.load(key)
+
+
+def unstoppable_runner(reached: asyncio.Event, release: asyncio.Event):
+    """Return a runner whose call outlives a cancel, as a thread call does, then fails."""
+
+    async def unstoppable(segment):
+        reached.set()
+        while not release.is_set():
+            with suppress(asyncio.CancelledError):
+                await release.wait()
+        raise BackendDownError
+
+    return unstoppable
+
+
+def _with_request_local[**P, R](
+    call: Callable[P, R], *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Call `call` after the request set `request_local`, as a middleware would."""
+    request_local.value = "set"
+    return call(*args, **kwargs)
+
+
+def _load_on_a_pool(loader: Loader[int, object]) -> Callable[[], Awaitable[object]]:
+    """Return a scenario loading key 2 from a pool thread that claims the batch."""
+
+    async def scenario() -> object:
+        scope = request_memo.get().scope
+        with ThreadPoolExecutor(1) as pool:
+            load = sync_to_async(
+                partial(loader.load_sync, 2), thread_sensitive=False, executor=pool
+            )
+            try:
+                return await asyncio.wait_for(load(), WAIT)
+            finally:
+                await scope.close()
+
+    return scenario
 
 
 def on_threads(pool: ThreadPoolExecutor, *calls: Callable[[], object]):
@@ -676,7 +719,7 @@ class TestCountedJobs:
     def test_jobs_that_never_load_leave_the_loop_alone(self) -> None:
         loop = Mock(spec=asyncio.AbstractEventLoop)
         scope = RequestScope(loop=loop)
-        open_loaders(scope, copy_context())
+        open_loaders(scope, ContextSnapshot(copy_context()))
         with (
             counted(scope, time.monotonic() + WAIT),
             counted(scope, time.monotonic() + WAIT),
@@ -1101,7 +1144,7 @@ class TestThreads:
 
         async def owner():
             scope = scoped()
-            open_loaders(scope, copy_context())
+            open_loaders(scope, ContextSnapshot(copy_context()))
             return await asyncio.to_thread(copy_context().run, asyncio.run, elsewhere())
 
         assert asyncio.run(owner()) == 20
@@ -1149,16 +1192,133 @@ class TestRequestThread:
     def test_a_load_on_another_loop_hops_to_the_loop_of_the_request(self) -> None:
         calls: list[list[object]] = []
         loader = Loader(recording(calls))
-        home = background_loop.get()
-        scope = RequestScope(loop=home)
+        loop = background_loop.get()
+        scope = RequestScope(loop=loop)
 
         async def work() -> object:
             request_memo.set(RequestMemo(scope))
             return await loader.load(3)
 
         assert asyncio.run(work()) == 30
-        assert scope._tree.slots[_HUB].hub.loop is home
+        assert scope._tree.slots[_HUB].hub.loop is loop
         assert calls == [[3]]
+
+    def test_a_batch_on_the_loop_of_the_request_reads_its_variables(
+        self, carry
+    ) -> None:
+        async def batch(keys: Sequence[int]) -> dict[int, str]:
+            return dict.fromkeys(keys, marker.get())
+
+        loader = Loader(batch)
+        scope = RequestScope(loop=background_loop.get())
+
+        async def work() -> object:
+            request_memo.set(RequestMemo(scope))
+            marker.set("request")
+            return await loader.load(3)
+
+        assert asyncio.run(work()) == "request"
+
+    def test_async_batches_of_one_hub_share_one_carry_onto_its_loop(
+        self, hops, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        landings: list[int] = []
+        landed = bridge._landed
+
+        async def counted() -> Context:
+            landings.append(threading.get_ident())
+            return await landed()
+
+        async def batch(keys: Sequence[int]) -> dict[int, object]:
+            return dict.fromkeys(keys, getattr(request_local, "value", None))
+
+        monkeypatch.setattr(bridge, "_landed", counted)
+        loader = Loader(batch)
+        scope = RequestScope(loop=background_loop.get())
+
+        async def work() -> list[object]:
+            request_memo.set(RequestMemo(scope))
+            return [await loader.load(3), await loader.load(4)]
+
+        assert copy_context().run(_with_request_local, asyncio.run, work()) == [
+            "set",
+            "set",
+        ]
+        assert len(landings) == 1
+
+    def test_a_batch_on_the_loop_of_the_request_reads_its_language(self, hops) -> None:
+        async def batch(keys: Sequence[int]) -> dict[int, str]:
+            return dict.fromkeys(keys, translation.get_language())
+
+        loader = Loader(batch)
+        scope = RequestScope(loop=background_loop.get())
+
+        async def work() -> object:
+            request_memo.set(RequestMemo(scope))
+            return await loader.load(3)
+
+        with translation.override("de"):
+            assert asyncio.run(work()) == "de"
+
+    def test_a_batch_on_the_loop_of_the_request_reads_a_local_of_the_request(
+        self, hops
+    ) -> None:
+        async def batch(keys: Sequence[int]) -> dict[int, object]:
+            return dict.fromkeys(keys, getattr(request_local, "value", None))
+
+        loader = Loader(batch)
+        scope = RequestScope(loop=background_loop.get())
+
+        async def work() -> object:
+            request_memo.set(RequestMemo(scope))
+            return await loader.load(3)
+
+        assert copy_context().run(_with_request_local, asyncio.run, work()) == "set"
+
+    def test_a_sync_batch_a_waiting_thread_runs_reads_the_language(self, hops) -> None:
+        def fetch(keys: Sequence[int]) -> dict[int, str]:
+            return dict.fromkeys(keys, translation.get_language())
+
+        with translation.override("de"):
+            assert run_request(_load_on_a_pool(Loader(fetch)), opened=True) == "de"
+
+    def test_a_sync_batch_a_waiting_thread_runs_reads_a_local_of_the_request(
+        self, hops
+    ) -> None:
+        def fetch(keys: Sequence[int]) -> dict[int, object]:
+            return dict.fromkeys(keys, getattr(request_local, "value", None))
+
+        scenario = _load_on_a_pool(Loader(fetch))
+        assert (
+            copy_context().run(_with_request_local, run_request, scenario, opened=True)
+            == "set"
+        )
+
+    def test_a_sync_batch_a_loop_task_awaits_reads_the_request_with_no_hop(
+        self, hops, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        begun: list[object] = []
+        begin = bridge._begin
+
+        def counted_begin(*args) -> None:
+            begun.append(args)
+            begin(*args)
+
+        def fetch(keys: Sequence[int]) -> dict[int, object]:
+            seen = (getattr(request_local, "value", None), translation.get_language())
+            return dict.fromkeys(keys, seen)
+
+        monkeypatch.setattr(bridge, "_begin", counted_begin)
+        loader = Loader(fetch)
+
+        async def work() -> list[object]:
+            scoped()
+            return list(await asyncio.gather(loader.load(1), loader.load(2)))
+
+        with translation.override("de"):
+            found = copy_context().run(_with_request_local, asyncio.run, work())
+        assert found == [("set", "de"), ("set", "de")]
+        assert begun == []
 
     def test_a_sync_batch_a_loop_task_awaits_runs_on_the_view_thread(self) -> None:
         ran_on: list[int] = []
@@ -1175,7 +1335,7 @@ class TestRequestThread:
         async def scenario():
             async with ThreadSensitiveContext():
                 scope = scoped()
-                open_loaders(scope, copy_context())
+                open_loaders(scope, ContextSnapshot(copy_context()))
                 waiter = asyncio.create_task(loader.load(1))
                 await next_turn()
                 threaded = sync_to_async(job, thread_sensitive=True)()
@@ -1237,6 +1397,31 @@ class TestRequestThread:
 
 class TestScopeLifetime:
     """Closing the scope fails every key no batch answered and wakes each waiter."""
+
+    def test_a_call_failing_after_the_scope_closed_reports_nothing(self) -> None:
+        reported: list[dict[str, object]] = []
+        loader = Loader(recording([]), max_batch=1)
+
+        async def scenario():
+            loop = asyncio.get_running_loop()
+            loop.set_exception_handler(lambda _, context: reported.append(context))
+            scope = request_memo.get().scope
+            reached = asyncio.Event()
+            release = asyncio.Event()
+            segment_runner.set(unstoppable_runner(reached, release))
+            waiter = asyncio.create_task(loader.load(1))
+            await reached.wait()
+            await scope.close()
+            running = drain_loaders(scope)
+            release.set()
+            outcomes = await asyncio.gather(*running, waiter, return_exceptions=True)
+            await next_turn()
+            return outcomes
+
+        *calls, waited = run_request(scenario)
+        assert any(isinstance(outcome, BackendDownError) for outcome in calls)
+        assert isinstance(waited, RuntimeError)
+        assert reported == []
 
     def test_closing_the_scope_fails_the_keys_of_a_batch_no_one_started(self) -> None:
         async def scenario():
@@ -1610,7 +1795,7 @@ class TestRequestContext:
             await asyncio.wait_for(asyncio.create_task(job(1)), WAIT)
             request = copy_context()
             request.run(marker.set, "request")
-            open_loaders(scope, request)
+            open_loaders(scope, ContextSnapshot(request))
             await asyncio.wait_for(asyncio.create_task(job(2)), WAIT)
 
         run_request(scenario, runner=inline)
@@ -1618,7 +1803,7 @@ class TestRequestContext:
 
     def test_a_scope_with_no_loop_has_no_batches_to_open(self) -> None:
         scope = RequestScope()
-        open_loaders(scope, copy_context())
+        open_loaders(scope, ContextSnapshot(copy_context()))
         assert scope._tree.slots == {}
 
 

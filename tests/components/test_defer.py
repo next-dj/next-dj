@@ -98,20 +98,29 @@ class TestComponentDefer:
         assert options is not None
         assert options.mode is DeferMode.MANUAL
 
-    def test_props_named_twice_declare_nothing(self, tmp_path) -> None:
-        module_path = _module(
-            tmp_path / "card", "component.defer(props=('a',))\ncomponent.props('b')"
-        )
-        assert defer_declarations.options(module_path) is None
-        assert defer_declarations.problems() == (
-            (
-                module_path,
-                (
-                    "it names props through both component.defer(props=) and "
-                    "component.props()"
-                ),
+    @pytest.mark.parametrize(
+        ("source", "problem"),
+        [
+            pytest.param(
+                "component.defer(props=('a',))\ncomponent.props('b')",
+                "it names props through both component.defer(props=) and "
+                "component.props()",
+                id="props-named-twice",
             ),
-        )
+            pytest.param(
+                "component.defer()\n\n\ndef late():\n    component.props('x')"
+                "\n\n\nlate()",
+                "it runs inside a function rather than at the top of the module",
+                id="call-inside-a-function",
+            ),
+        ],
+    )
+    def test_a_misplaced_declaration_declares_nothing(
+        self, tmp_path, source: str, problem: str
+    ) -> None:
+        module_path = _module(tmp_path / "card", source)
+        assert defer_declarations.options(module_path) is None
+        assert defer_declarations.problems() == ((module_path, problem),)
 
     def test_an_unusable_option_declares_nothing(self, tmp_path) -> None:
         module_path = _module(tmp_path / "card", "component.defer('lazy')")
@@ -119,19 +128,6 @@ class TestComponentDefer:
         [(file_path, problem)] = defer_declarations.problems()
         assert file_path == module_path
         assert problem.startswith("mode must be one of")
-
-    def test_a_call_inside_a_function_declares_nothing(self, tmp_path) -> None:
-        module_path = _module(
-            tmp_path / "card",
-            "component.defer()\n\n\ndef late():\n    component.props('x')\n\n\nlate()",
-        )
-        assert defer_declarations.options(module_path) is None
-        assert defer_declarations.problems() == (
-            (
-                module_path,
-                "it runs inside a function rather than at the top of the module",
-            ),
-        )
 
     def test_a_removed_call_stops_applying_after_a_reload(self, tmp_path) -> None:
         module_path = _module(tmp_path / "card", "component.defer()")

@@ -10,8 +10,8 @@ from django.conf import settings
 from django.utils.html import escape
 
 from next.defer import DEFAULT_TAG, BoundaryFailure, DebugBoundaryFailure, ErrorKind
+from next.utils import open_elements, root_ends, root_miss
 
-from .elements import missed, open_elements, roots
 from .failures import Trace
 from .options import error_settings
 from .reporting import failure_log
@@ -127,8 +127,8 @@ def _adopted(attributes: str, body: str, shown: Shown) -> str:
     The detail is an attribute, since no element is valid beside a table row.
     """
     detail = "" if shown.trace is None else shown.trace.text
-    ends, loose = roots(body)
-    found = missed(ends, loose=loose)
+    ends, loose = root_ends(body)
+    found = root_miss(ends, loose=loose)
     if found is None:
         end = ends[0]
         extra = _detail_attribute(detail) if detail else ""

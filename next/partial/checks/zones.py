@@ -22,7 +22,8 @@ from next.pages.loaders import PAGE_MODULE, layout_chain
 from next.pages.paths import page_template_path
 from next.pages.skeletons import PAGE_BODY, SKELETON_GLOB, declared_zones, skeleton_zone
 from next.partial.guards import Components, guarded_zones, opaque_zones
-from next.partial.zone import zones_under
+from next.partial.registry import zones_of
+from next.partial.zone import LOADING, zones_under
 from next.permissions.nodes import HasPermNode
 from next.utils import LAYOUT_TEMPLATE
 
@@ -35,6 +36,7 @@ from .codes import (
     E_ZONE_IN_FOR,
     E_ZONE_IN_HAS_PERM,
     E_ZONE_IN_IF,
+    W_SKELETON_UNSHOWN,
     W_WITH_OVER_ZONE,
 )
 from .nodes import zone_nodes, zones_directly_in_with
@@ -398,6 +400,44 @@ def _orphan_skeletons(
     ]
 
 
+@register(Tags.templates, NEXT)
+def check_zone_skeletons_shown(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Warn when no layer and no reload can show a `loading.<zone>.djx` (`next.W187`).
+
+    A layer opens only a zone a partial request renders alone.
+    """
+    shown: dict[Path, bool] = {}
+    found: dict[Path, tuple[Path, ...]] = {}
+    for page_path, template in iter_composed_pages():
+        zones = zones_of(template, page_path)
+        body = page_template_path(page_path)
+        for directory in (
+            body.parent,
+            *(layout.parent for layout in layout_chain(body)),
+        ):
+            if directory not in found:
+                found[directory] = tuple(sorted(directory.glob(SKELETON_GLOB)))
+            for skeleton in found[directory]:
+                info = zones.get(skeleton_zone(skeleton) or "")
+                if info is not None:
+                    showing = info.standalone or info.options.reload == LOADING
+                    shown[skeleton] = shown.get(skeleton, False) or showing
+    return [
+        DjangoWarning(
+            f"{skeleton} is the loading UI of a zone that neither opens in a layer "
+            'nor reloads with reload="loading", so the file never renders.',
+            hint=(
+                "Move the zone out of the tag that keeps a partial request from "
+                'rendering it alone, add reload="loading" to it, or delete the file.'
+            ),
+            obj=str(skeleton),
+            id=W_SKELETON_UNSHOWN,
+        )
+        for skeleton, showing in sorted(shown.items())
+        if not showing
+    ]
+
+
 __all__ = [
     "check_context_zone_names_exist",
     "check_duplicate_zone_names",
@@ -408,4 +448,5 @@ __all__ = [
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
     "check_zone_skeletons_have_zones",
+    "check_zone_skeletons_shown",
 ]

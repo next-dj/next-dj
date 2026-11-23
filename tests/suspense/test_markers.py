@@ -52,36 +52,18 @@ class TestPlacement:
         assert placement.lane is Lane.REQUEST
         assert placement.forced
 
-    @pytest.mark.parametrize(
-        ("verdict", "lane"),
-        [
-            (Verdict.EXPLORE, Lane.POOL),
-            (Verdict.PINNED, Lane.POOL),
-            (Verdict.POOL_MODE, Lane.POOL),
-            (Verdict.COST, Lane.POOL),
-            (Verdict.FOREGROUND_FULL, Lane.POOL),
-            (Verdict.HANDOFF, Lane.REQUEST),
-            (Verdict.CPU, Lane.REQUEST),
-            (Verdict.ALONE, Lane.REQUEST),
-        ],
-    )
-    def test_a_verdict_names_its_lane(self, verdict: Verdict, lane: Lane) -> None:
+    @pytest.mark.parametrize("verdict", list(Verdict))
+    def test_every_verdict_takes_the_pool(self, verdict: Verdict) -> None:
         placement = Placement(verdict)
-        assert placement.lane is lane
+        assert placement.lane is Lane.POOL
         assert not placement.forced
 
 
 class TestSite:
     """Tests for ``Site``."""
 
-    def test_call_sites_of_one_component_share_the_cost_key(self) -> None:
-        assert SITE != OTHER
-        assert SITE.cost_key == OTHER.cost_key
-        assert SITE.cost_key == (Addressing.COMPONENT, "card", DeferMode.STREAM)
-
     def test_a_page_and_a_component_of_one_name_differ(self) -> None:
-        page = dataclasses.replace(PAGE, name="card")
-        assert page.cost_key != SITE.cost_key
+        assert dataclasses.replace(PAGE, name="card") != SITE
 
     def test_a_page_site_defaults_to_index_zero(self) -> None:
         assert PAGE.index == 0
@@ -218,7 +200,7 @@ class TestOutcome:
         assert outcome.timing == Timing()
 
     def test_an_error_outcome_with_its_timing(self) -> None:
-        timing = Timing(Lane.POOL, Placement(Verdict.COST), 0.01, 0.2)
+        timing = Timing(Lane.POOL, Placement(Verdict.POOL), 0.01, 0.2)
         outcome = Outcome("b-00000000-0", _fallback(ErrorKind.TIMEOUT), timing)
         assert outcome.state is State.ERROR
         assert outcome.kind is ErrorKind.TIMEOUT
@@ -235,28 +217,27 @@ class RuleCase:
 
     id: str
     facts: ForegroundFacts
-    parallel: bool | None
+    parallel: bool
     rule: Rule | None
 
 
 _PLAIN = ForegroundFacts(Server.WSGI_THREADED)
 
 RULE_CASES: tuple[RuleCase, ...] = (
-    RuleCase("none", _PLAIN, None, None),
-    RuleCase("pinned-pool", _PLAIN, True, None),
+    RuleCase("none", _PLAIN, True, None),
     RuleCase(
-        "atomic", dataclasses.replace(_PLAIN, atomic=("default",)), None, Rule.ATOMIC
+        "atomic", dataclasses.replace(_PLAIN, atomic=("default",)), True, Rule.ATOMIC
     ),
     RuleCase(
         "sqlite-file",
         dataclasses.replace(_PLAIN, sqlite=("default",)),
-        None,
+        True,
         Rule.SQLITE,
     ),
     RuleCase(
         "sqlite-file-parallel",
         dataclasses.replace(_PLAIN, sqlite=("default",), sqlite_parallel=True),
-        None,
+        True,
         None,
     ),
     RuleCase(
@@ -264,29 +245,23 @@ RULE_CASES: tuple[RuleCase, ...] = (
         dataclasses.replace(
             _PLAIN, sqlite=("default",), memory=("default",), sqlite_parallel=True
         ),
-        None,
+        True,
         Rule.SQLITE,
     ),
     RuleCase(
         "connection-state",
         dataclasses.replace(_PLAIN, connection_sources=("routers",)),
-        None,
+        True,
         Rule.CONNECTION_STATE,
     ),
     RuleCase(
         "thread-local",
         dataclasses.replace(_PLAIN, thread_sources=("crum",)),
-        None,
+        True,
         Rule.THREAD_LOCAL,
     ),
     RuleCase(
         "global-opt-out",
-        dataclasses.replace(_PLAIN, parallel=False),
-        None,
-        Rule.OPT_OUT,
-    ),
-    RuleCase(
-        "global-opt-out-beats-a-pin",
         dataclasses.replace(_PLAIN, parallel=False),
         True,
         Rule.OPT_OUT,
@@ -295,7 +270,7 @@ RULE_CASES: tuple[RuleCase, ...] = (
     RuleCase(
         "atomic-before-sqlite",
         dataclasses.replace(_PLAIN, atomic=("default",), sqlite=("default",)),
-        None,
+        True,
         Rule.ATOMIC,
     ),
     RuleCase(
@@ -303,7 +278,7 @@ RULE_CASES: tuple[RuleCase, ...] = (
         dataclasses.replace(
             _PLAIN, sqlite=("default",), connection_sources=("routers",)
         ),
-        None,
+        True,
         Rule.SQLITE,
     ),
     RuleCase(
@@ -311,7 +286,7 @@ RULE_CASES: tuple[RuleCase, ...] = (
         dataclasses.replace(
             _PLAIN, connection_sources=("routers",), thread_sources=("crum",)
         ),
-        None,
+        True,
         Rule.CONNECTION_STATE,
     ),
     RuleCase(
@@ -319,12 +294,6 @@ RULE_CASES: tuple[RuleCase, ...] = (
         dataclasses.replace(_PLAIN, thread_sources=("crum",), parallel=False),
         False,
         Rule.THREAD_LOCAL,
-    ),
-    RuleCase(
-        "a-pin-never-beats-a-rule",
-        dataclasses.replace(_PLAIN, atomic=("default",)),
-        True,
-        Rule.ATOMIC,
     ),
 )
 

@@ -104,6 +104,33 @@ Deny by raising ``PermissionDenied`` or ``Http404``, or by returning an ``HttpRe
 The intercept declares its own access, and a check reports one that leaves a public target's modal behind the default login, see :doc:`/content/ref/system-checks`.
 :doc:`/content/howto/open-a-page-as-a-modal-over-another` walks the whole setup.
 
+Before the answer arrives
+-------------------------
+
+The dialog opens before its request leaves, with an empty zone container that carries ``data-next-busy`` and ``aria-busy="true"``.
+No framework CSS is applied, so ``dialog[data-next-dialog] > [data-next-busy]:empty`` styles that wait, and the container stays empty when no loading UI is declared.
+
+A ``loading.<zone>.djx`` beside the template that declares the zone a layer opens is its loading UI, the same file a ``reload="loading"`` zone of that name shows.
+A page that holds a ``data-next-layer`` link carries it in a ``<template data-next-layer="<zone>">`` before the first link of each zone, whichever template wrote the link and whether its attributes are literals or variables.
+The first link of a zone names the page whose file the template holds, and an intercept that serves the zone over that page wins over it.
+The file renders over the request alone, since the context of the page it belongs to is not built yet.
+A page, a zone answer, and an appended page of rows all carry it, and the reload bundle loads with it.
+
+The layer shows the template in its container once ``data-next-delay`` on the link passes, 150 milliseconds when it is absent, so an answer that comes sooner never flashes it.
+The answer replaces it, the container stays busy until then, and an answer that fails leaves the container empty again.
+``next.W187`` reports a ``loading.<zone>.djx`` whose zone neither opens in a layer nor reloads to its loading UI.
+
+.. code-block:: jinja
+   :caption: gallery/pages/feed/(..)photo/[int:photo]/loading.photo-modal.djx
+
+   <article class="modal" aria-hidden="true">
+     <div class="skeleton skeleton-title"></div>
+     <div class="skeleton skeleton-image"></div>
+   </article>
+
+Under the client router the answer often arrives before the click.
+A layer link is prefetched like a link the router owns, by intent, in view, or at the press of the pointer, and the layer that opens takes that answer and sends nothing, see :doc:`/content/topics/router/prefetch`.
+
 Titles under a layer
 --------------------
 

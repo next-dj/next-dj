@@ -1,7 +1,5 @@
-import re
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 
 import pytest
 from django.contrib.auth.models import Group
@@ -12,10 +10,8 @@ from django.db import (
     connections,
     transaction,
 )
-from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
 from django.db.transaction import TransactionManagementError
-from django.test.utils import CaptureQueriesContext
 from django.utils.connection import ConnectionDoesNotExist
 
 from next.transactions import (
@@ -26,29 +22,16 @@ from next.transactions import (
     probe_atomic_aliases,
     request_atomic,
 )
-
-
-_SAVEPOINT_NAME = re.compile(r'"s\d+_x\d+"')
-_TABLE = re.compile(r'^(INSERT INTO|DELETE FROM|UPDATE) "(\w+)".*')
+from tests.support.statements import (
+    close_driver,
+    fresh_default,
+    query_missing_table,
+    statement_log,
+)
 
 
 class _Abort(BaseException):
     pass
-
-
-def _statement(sql: str) -> str:
-    sql = _SAVEPOINT_NAME.sub("sp", sql)
-    if sql.startswith("SELECT"):
-        return "SELECT"
-    return _TABLE.sub(r"\1 \2", sql)
-
-
-@contextmanager
-def _log() -> Iterator[list[str]]:
-    statements: list[str] = []
-    with CaptureQueriesContext(connection) as queries:
-        yield statements
-    statements.extend(_statement(query["sql"]) for query in queries.captured_queries)
 
 
 def _names() -> list[str]:
@@ -58,24 +41,6 @@ def _names() -> list[str]:
 def _refuse(*args: object) -> None:
     msg = "refused"
     raise DatabaseError(msg)
-
-
-def _close(wrapper: BaseDatabaseWrapper) -> None:
-    if wrapper.connection is not None:
-        wrapper.connection.close()
-
-
-@contextmanager
-def _fresh_default() -> Iterator[None]:
-    """Swap in a new `default` connection object and close it on the way out."""
-    original = connections["default"]
-    del connections["default"]
-    try:
-        yield
-    finally:
-        fresh = connections["default"]
-        connections["default"] = original
-        _close(fresh)
 
 
 @pytest.fixture()
@@ -147,20 +112,28 @@ class TestLazySavepointInsideATransaction:
     """Inside a transaction the savepoint waits for the subtree's first statement."""
 
     def test_a_query_free_subtree_issues_nothing(self) -> None:
-        with transaction.atomic(), _log() as log, LazySavepoint(probe_atomic_aliases()):
+        with (
+            transaction.atomic(),
+            statement_log() as log,
+            LazySavepoint(probe_atomic_aliases()),
+        ):
             pass
         assert log == []
         assert connection.execute_wrappers == []
 
     def test_one_query_is_wrapped_in_one_savepoint(self) -> None:
-        with transaction.atomic(), _log() as log, LazySavepoint(probe_atomic_aliases()):
+        with (
+            transaction.atomic(),
+            statement_log() as log,
+            LazySavepoint(probe_atomic_aliases()),
+        ):
             list(Group.objects.all())
         assert log == ["SAVEPOINT sp", "SELECT", "RELEASE SAVEPOINT sp"]
 
     def test_a_failure_rolls_back_only_the_subtree(self) -> None:
         with transaction.atomic():
             Group.objects.create(name="before")
-            with _log() as log, LazySavepoint(probe_atomic_aliases()) as point:
+            with statement_log() as log, LazySavepoint(probe_atomic_aliases()) as point:
                 Group.objects.create(name="failed")
                 point.rollback()
             Group.objects.create(name="after")
@@ -214,7 +187,7 @@ class TestLazySavepointInsideATransaction:
     def test_a_broken_transaction_takes_no_savepoint(self) -> None:
         with transaction.atomic():
             transaction.set_rollback(True)
-            with _log() as log, LazySavepoint(("default",)) as point:
+            with statement_log() as log, LazySavepoint(("default",)) as point:
                 with pytest.raises(TransactionManagementError):
                     list(Group.objects.all())
                 point.rollback()
@@ -226,7 +199,7 @@ class TestLazySavepointInsideATransaction:
         with transaction.atomic():
             point.__enter__()
             Group.objects.create(name="kept")
-        with _log() as log:
+        with statement_log() as log:
             point.rollback()
         assert log == []
         assert _names() == ["kept"]
@@ -283,7 +256,7 @@ class TestLazySavepointInsideATransaction:
     def test_an_inner_first_query_takes_the_outer_savepoint_first(self) -> None:
         with transaction.atomic():
             aliases = probe_atomic_aliases()
-            with _log() as log, LazySavepoint(aliases):
+            with statement_log() as log, LazySavepoint(aliases):
                 with LazySavepoint(aliases) as inner:
                     Group.objects.create(name="inner")
                     inner.rollback()
@@ -302,7 +275,7 @@ class TestLazySavepointInsideATransaction:
     def test_a_user_block_takes_its_savepoint_after_the_subtree(self) -> None:
         with (
             transaction.atomic(),
-            _log() as log,
+            statement_log() as log,
             LazySavepoint(probe_atomic_aliases()) as point,
         ):
             with transaction.atomic():
@@ -400,11 +373,6 @@ class TestNestedSubtreeRollback:
         assert _names() == []
 
 
-def _missing_table() -> None:
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM next_missing_table")
-
-
 @pytest.mark.django_db(transaction=True)
 class TestNestedReadsShareTheOuterSavepoint:
     """Inside a transaction an inner subtree takes a savepoint before its first write."""
@@ -412,7 +380,7 @@ class TestNestedReadsShareTheOuterSavepoint:
     def test_inner_reads_issue_one_savepoint_pair(self) -> None:
         with transaction.atomic():
             aliases = probe_atomic_aliases()
-            with _log() as log, LazySavepoint(aliases):
+            with statement_log() as log, LazySavepoint(aliases):
                 list(Group.objects.all())
                 for _ in range(3):
                     with LazySavepoint(aliases):
@@ -422,7 +390,11 @@ class TestNestedReadsShareTheOuterSavepoint:
     def test_an_inner_first_read_takes_only_the_outer_savepoint(self) -> None:
         with transaction.atomic():
             aliases = probe_atomic_aliases()
-            with _log() as log, LazySavepoint(aliases), LazySavepoint(aliases) as inner:
+            with (
+                statement_log() as log,
+                LazySavepoint(aliases),
+                LazySavepoint(aliases) as inner,
+            ):
                 list(Group.objects.all())
                 Group.objects.create(name="inner")
                 assert inner.rollback()
@@ -444,7 +416,7 @@ class TestNestedReadsShareTheOuterSavepoint:
                 Group.objects.create(name="outer")
                 with LazySavepoint(aliases) as inner:
                     with pytest.raises(DatabaseError):
-                        _missing_table()
+                        query_missing_table()
                     assert not inner.rollback()
                 assert outer.rollback()
             Group.objects.create(name="after")
@@ -469,7 +441,7 @@ class TestNestedReadsShareTheOuterSavepoint:
                 Group.objects.create(name="outer")
                 with LazySavepoint(aliases) as inner:
                     with pytest.raises(DatabaseError), transaction.atomic():
-                        _missing_table()
+                        query_missing_table()
                     assert inner.rollback()
                 assert not transaction.get_rollback()
                 assert _names() == ["outer"]
@@ -484,7 +456,7 @@ class TestNestedReadsShareTheOuterSavepoint:
                 with LazySavepoint(aliases) as inner:
                     Group.objects.create(name="inner")
                     with pytest.raises(DatabaseError):
-                        _missing_table()
+                        query_missing_table()
                     assert inner.rollback()
                 assert _names() == ["outer"]
                 assert outer.rollback() is True
@@ -493,7 +465,7 @@ class TestNestedReadsShareTheOuterSavepoint:
     def test_a_failure_outside_a_transaction_breaks_nothing(self) -> None:
         with LazySavepoint() as point:
             with pytest.raises(DatabaseError):
-                _missing_table()
+                query_missing_table()
             assert point.rollback()
 
     def test_an_inner_failed_read_after_an_autocommit_write_goes_outward(self) -> None:
@@ -501,7 +473,7 @@ class TestNestedReadsShareTheOuterSavepoint:
             Group.objects.create(name="outer")
             with LazySavepoint() as inner:
                 with pytest.raises(DatabaseError):
-                    _missing_table()
+                    query_missing_table()
                 assert not inner.rollback()
             assert outer.rollback()
         assert _names() == []
@@ -511,7 +483,7 @@ class TestNestedReadsShareTheOuterSavepoint:
         with transaction.atomic():
             with LazySavepoint(probe_atomic_aliases()) as point:
                 with pytest.raises(DatabaseError):
-                    _missing_table()
+                    query_missing_table()
                 assert point.rollback()
             Group.objects.create(name="after")
         assert _names() == ["after"]
@@ -524,7 +496,7 @@ class TestUserBlocksInsideNestedSubtrees:
     def test_a_first_get_or_create_keeps_both_savepoints_valid(self) -> None:
         with transaction.atomic():
             aliases = probe_atomic_aliases()
-            with _log() as log, LazySavepoint(aliases):
+            with statement_log() as log, LazySavepoint(aliases):
                 list(Group.objects.all())
                 with LazySavepoint(aliases):
                     Group.objects.get_or_create(name="inner")
@@ -584,17 +556,17 @@ class TestLazySavepointInAutocommit:
     """In autocommit `atomic` decides when a transaction opens around the subtree."""
 
     def test_a_query_free_subtree_issues_nothing(self) -> None:
-        with _log() as log, LazySavepoint():
+        with statement_log() as log, LazySavepoint():
             pass
         assert log == []
 
     def test_reads_open_nothing_by_default(self) -> None:
-        with _log() as log, LazySavepoint():
+        with statement_log() as log, LazySavepoint():
             list(Group.objects.all())
         assert log == ["SELECT"]
 
     def test_a_failure_between_two_writes_leaves_nothing(self) -> None:
-        with _log() as log, LazySavepoint(atomic=WRITES) as point:
+        with statement_log() as log, LazySavepoint(atomic=WRITES) as point:
             list(Group.objects.all())
             Group.objects.create(name="one")
             Group.objects.create(name="two")
@@ -623,7 +595,7 @@ class TestLazySavepointInAutocommit:
         assert connection.get_autocommit()
 
     def test_true_opens_before_the_first_read(self) -> None:
-        with _log() as log, LazySavepoint(atomic=True) as point:
+        with statement_log() as log, LazySavepoint(atomic=True) as point:
             list(Group.objects.all())
             Group.objects.create(name="failed")
             point.rollback()
@@ -631,7 +603,7 @@ class TestLazySavepointInAutocommit:
         assert _names() == []
 
     def test_false_leaves_autocommit_alone(self) -> None:
-        with _log() as log, LazySavepoint(atomic=False) as point:
+        with statement_log() as log, LazySavepoint(atomic=False) as point:
             Group.objects.create(name="one")
             Group.objects.create(name="two")
             point.rollback()
@@ -640,13 +612,17 @@ class TestLazySavepointInAutocommit:
         assert connection.execute_wrappers == []
 
     def test_a_statement_that_refuses_a_transaction_opens_none(self) -> None:
-        with _log() as log, LazySavepoint(atomic=True), connection.cursor() as cursor:
+        with (
+            statement_log() as log,
+            LazySavepoint(atomic=True),
+            connection.cursor() as cursor,
+        ):
             cursor.execute("VACUUM")
         assert log == ["VACUUM"]
 
     def test_a_caught_error_on_the_first_write_leaves_autocommit_usable(self) -> None:
         Group.objects.create(name="taken")
-        with _log() as log, LazySavepoint() as point:
+        with statement_log() as log, LazySavepoint() as point:
             with pytest.raises(IntegrityError):
                 Group.objects.create(name="taken")
             assert connection.get_autocommit()
@@ -672,7 +648,7 @@ class TestLazySavepointInAutocommit:
         assert connection.get_autocommit()
 
     def test_a_user_block_opened_first_commits_on_its_own(self) -> None:
-        with _log() as log, LazySavepoint() as point:
+        with statement_log() as log, LazySavepoint() as point:
             with transaction.atomic():
                 Group.objects.create(name="user")
             Group.objects.create(name="subtree")
@@ -702,7 +678,7 @@ class TestLazySavepointInAutocommit:
         assert _names() == ["created"]
 
     def test_true_takes_get_or_create_into_the_transaction(self) -> None:
-        with _log() as log, LazySavepoint(atomic=True) as point:
+        with statement_log() as log, LazySavepoint(atomic=True) as point:
             Group.objects.get_or_create(name="created")
             point.rollback()
         assert log == [
@@ -751,7 +727,7 @@ class TestLazySavepointInAutocommit:
         assert _names() == ["manual"]
 
     def test_nested_subtrees_share_the_transaction(self) -> None:
-        with _log() as log, LazySavepoint():
+        with statement_log() as log, LazySavepoint():
             Group.objects.create(name="outer")
             with LazySavepoint() as inner:
                 Group.objects.create(name="inner")
@@ -770,7 +746,7 @@ class TestLazySavepointInAutocommit:
         assert _names() == ["after", "outer"]
 
     def test_an_inner_true_subtree_opens_the_outer_transaction(self) -> None:
-        with _log() as log, pytest.raises(ValueError, match="outer failed"):
+        with statement_log() as log, pytest.raises(ValueError, match="outer failed"):
             _read_write_then_fail()
         assert log == [
             "BEGIN",
@@ -783,7 +759,7 @@ class TestLazySavepointInAutocommit:
         assert _names() == []
 
     def test_an_inner_subtree_rolls_back_inside_an_outer_true_one(self) -> None:
-        with _log() as log, LazySavepoint(atomic=True):
+        with statement_log() as log, LazySavepoint(atomic=True):
             with LazySavepoint() as inner:
                 list(Group.objects.all())
                 Group.objects.create(name="inner")
@@ -829,7 +805,7 @@ class TestLazySavepointConnections:
     """The handles of one thread share one wrapper per connection and one receiver."""
 
     def test_a_connection_opened_inside_the_subtree_is_covered(self) -> None:
-        with LazySavepoint() as point, _fresh_default():
+        with LazySavepoint() as point, fresh_default():
             fresh = connections["default"]
             Group.objects.create(name="one")
             Group.objects.create(name="two")
@@ -840,14 +816,14 @@ class TestLazySavepointConnections:
         assert connection.execute_wrappers == []
 
     def test_a_copy_of_a_connection_is_not_covered(self) -> None:
-        with _fresh_default(), LazySavepoint():
+        with fresh_default(), LazySavepoint():
             fresh = connections["default"]
             copy = fresh.copy()
             try:
                 copy.ensure_connection()
                 assert copy.execute_wrappers == []
             finally:
-                _close(copy)
+                close_driver(copy)
             fresh.ensure_connection()
             assert len(fresh.execute_wrappers) == 1
 
@@ -858,7 +834,7 @@ class TestLazySavepointConnections:
             other = connections["default"]
             other.ensure_connection()
             seen.append(list(other.execute_wrappers))
-            _close(other)
+            close_driver(other)
 
         with LazySavepoint():
             worker = threading.Thread(target=work)
@@ -869,20 +845,20 @@ class TestLazySavepointConnections:
     def test_a_connection_opened_after_the_subtree_is_left_bare(self) -> None:
         with LazySavepoint():
             pass
-        with _fresh_default():
+        with fresh_default():
             fresh = connections["default"]
             fresh.ensure_connection()
             assert fresh.execute_wrappers == []
 
     def test_a_connection_known_before_it_connects_keeps_one_wrapper(self) -> None:
-        with _fresh_default():
+        with fresh_default():
             fresh = connections["default"]
             with LazySavepoint():
                 fresh.ensure_connection()
                 assert len(fresh.execute_wrappers) == 1
 
     def test_a_handle_that_watches_no_connection_ignores_new_ones(self) -> None:
-        with LazySavepoint(atomic=False), _fresh_default():
+        with LazySavepoint(atomic=False), fresh_default():
             fresh = connections["default"]
             fresh.ensure_connection()
             assert fresh.execute_wrappers == []
@@ -956,7 +932,7 @@ class TestKeptSavepoints:
         with keep_savepoints():
             with LazySavepoint():
                 pass
-            with _fresh_default():
+            with fresh_default():
                 fresh = connections["default"]
                 fresh.ensure_connection()
                 assert len(fresh.execute_wrappers) == 1

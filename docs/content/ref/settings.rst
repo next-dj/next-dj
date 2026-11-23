@@ -498,7 +498,7 @@ Keys are the injection ``policy`` (``auto``, ``disabled``, or ``manual``) and th
 A ``policy`` no member names reads as ``auto``, and a template ``.format`` cannot fill is replaced by the default one.
 The ``{payload}`` of ``chunk_template`` is escaped for the text of a ``<script>`` element alone, so a template that places it anywhere else, an attribute included, is replaced by the default one too.
 ``manage.py check`` reports both, and a render meets them under :ref:`topics-failure-containment`.
-``script_tag_template`` also renders the tag of each bundle a page declares, such as ``defer``, ``reload``, ``more``, or ``reader``, with its load attributes added after ``<script``, and the default tag serves a template that holds no ``<script``.
+``script_tag_template`` also renders the tag of each bundle a page declares, such as ``defer``, ``reload``, ``more``, or ``reader``, with its load attributes added after ``<script``, and the default tag serves a template that holds no ``<script>`` start tag, a custom element such as ``<script-x>`` included.
 A bundle loads with ``async fetchpriority="low"``, with ``async`` on a streamed page for the ``reader`` bundle and for every bundle of a page that holds a ``load`` boundary, and with ``defer`` on a page that holds a ``load`` boundary and does not stream.
 Under ``manual`` those bundle tags open the ``{% collect_scripts %}`` slot, so the tag that loads the runtime goes above it, and under ``disabled`` none renders, which ``next.W181`` reports.
 
@@ -596,13 +596,6 @@ Default value.
                "PARALLEL": True,
                "SQLITE": "foreground",
                "THREAD_LOCAL_MIDDLEWARE": (),
-               "PLACEMENT": {
-                   "MODE": "adaptive",
-                   "HANDOFF": 0.0003,
-                   "CPU_RATIO": 0.8,
-                   "CPU_MAX": 0.002,
-                   "EXPLORE": 3,
-               },
            },
        },
        "POLICY": {
@@ -669,8 +662,6 @@ A pool job waits at most ``QUEUE_TIMEOUT`` in a queue of at most ``MAX_QUEUE`` j
 ``PARALLEL`` set to ``False`` keeps every job on its request thread.
 ``SQLITE`` of ``"foreground"`` keeps the jobs of a project with a SQLite alias on the request thread, and ``"parallel"`` lets a file database use the pool.
 ``THREAD_LOCAL_MIDDLEWARE`` lists the dotted paths of middleware that keep request state on the thread, which pins jobs to the request thread until a ``THREAD_STATE`` backend covers them.
-``PLACEMENT["MODE"]`` of ``"pool"`` sends every job no rule pins to the pool, and ``"adaptive"`` chooses per call site from the costs it measures.
-A site runs ``EXPLORE`` jobs on the pool before its cost decides, a site whose jobs take less than ``HANDOFF`` seconds stays on the request thread, and so does one whose CPU time passes ``CPU_RATIO`` of its wall time within ``CPU_MAX`` seconds while the GIL is on.
 
 ``POLICY`` names the ``StreamPolicy`` that decides how a response delivers its boundaries.
 The ``OPTIONS`` of the default one are ``STREAM``, ``False`` assembling every response inline, ``BOTS``, the case-insensitive pattern of the user agents assembled inline, ``None`` naming the common crawlers, and ``SYNC_WORKERS``, ``"inline"`` or ``"stream"`` for a transport that serves one request at a time.
@@ -698,7 +689,8 @@ A transport that is not incremental assembles every page inline, and one that is
 
 ``LOADER_MAX_BATCH`` is the most keys one call of a batch function receives, an integer from ``1``, default ``500``.
 A batch that reaches it closes at once and the next key opens another one.
-``BATCH_WINDOW`` is how long a batch stays open after its first key so that concurrent callers join it, a duration from ``0`` written as a number of seconds or as a literal such as ``"1ms"`` or ``"2s"``, default ``0.001``.
+``BATCH_WINDOW`` is the longest a batch stays open after its first key so that concurrent callers join it, a duration from ``0`` written as a number of seconds or as a literal such as ``"1ms"`` or ``"2s"``, default ``0.001``.
+The batch closes earlier once every deferred job of the response that runs or is about to run waits on a loader or has ended, see :doc:`/content/topics/boundaries/async`.
 A ``Loader`` built with ``max_batch=`` or ``window=`` keeps its own limit, and one built without them reads the setting each time it opens or fills a batch, so a settings reload reaches loaders built before it.
 
 ``MORE["MAX_RESTORE"]`` is the most batches a pager renders for a restored ``{% more %}`` list, an integer from ``1``, default ``10``.

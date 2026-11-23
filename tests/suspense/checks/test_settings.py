@@ -18,17 +18,41 @@ class TestCheckDeferSettings:
         with override_settings(NEXT_FRAMEWORK={"DEFER": []}):
             assert check_defer_settings() == []
 
-    def test_a_misfit_value_yields_e076(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"ERRORS": {"KINDS": "brief"}}}
-        ):
+    @pytest.mark.parametrize(
+        ("defer", "check_id", "text"),
+        [
+            pytest.param(
+                {"ERRORS": {"KINDS": "brief"}},
+                "next.E076",
+                "NEXT_FRAMEWORK['DEFER']['ERRORS']['KINDS'] must be 'detailed' or "
+                "'opaque', got 'brief'. The framework ignores this value and keeps "
+                "its default.",
+                id="misfit-value",
+            ),
+            pytest.param(
+                {"MORE": {"PAGES": 3}},
+                "next.E035",
+                "NEXT_FRAMEWORK['DEFER']['MORE'] has unknown keys 'PAGES'. Allowed "
+                "keys are MAX_RESTORE.",
+                id="unknown-key",
+            ),
+            pytest.param(
+                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"MODE": "pool"}}}},
+                "next.E035",
+                "NEXT_FRAMEWORK['DEFER']['EXECUTOR']['OPTIONS'] has unknown keys "
+                "'PLACEMENT'. Allowed keys are CONN_IDLE, MAX_FOREGROUND, MAX_QUEUE, "
+                "MAX_WORKERS, PARALLEL, PER_REQUEST, QUEUE_TIMEOUT, SQLITE, "
+                "THREAD_LOCAL_MIDDLEWARE.",
+                id="unknown-section",
+            ),
+        ],
+    )
+    def test_a_bad_entry_yields_its_check(
+        self, defer: dict[str, object], check_id: str, text: str
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK={"DEFER": defer}):
             [message] = check_defer_settings()
-        assert message.id == "next.E076"
-        assert message.msg == (
-            "NEXT_FRAMEWORK['DEFER']['ERRORS']['KINDS'] must be 'detailed' or "
-            "'opaque', got 'brief'. The framework ignores this value and keeps "
-            "its default."
-        )
+        assert (message.id, message.msg) == (check_id, text)
 
     def test_a_foreign_backend_option_the_framework_reads_yields_e076(self) -> None:
         options = {"MAX_WORKERS": "x", "OWN": "kept"}
@@ -37,15 +61,6 @@ class TestCheckDeferSettings:
             [message] = check_defer_settings()
         assert message.id == "next.E076"
         assert "['EXECUTOR']['OPTIONS']['MAX_WORKERS']" in message.msg
-
-    def test_an_unknown_key_yields_e035(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"PAGES": 3}}}):
-            [message] = check_defer_settings()
-        assert message.id == "next.E035"
-        assert message.msg == (
-            "NEXT_FRAMEWORK['DEFER']['MORE'] has unknown keys 'PAGES'. Allowed keys "
-            "are MAX_RESTORE."
-        )
 
     def test_a_short_token_key_yields_e233(self) -> None:
         with override_settings(

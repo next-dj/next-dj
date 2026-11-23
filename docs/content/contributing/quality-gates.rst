@@ -181,7 +181,7 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - Declared by a page with a client-trip boundary or an error UI that offers a retry.
    * - ``next.reload.min.js``
      - ``next/client/entries/reload.ts``
-     - Declared by a page with a ``reload="loading"`` zone.
+     - Declared by a page with a ``reload="loading"`` zone or with a layer link whose zone has a ``loading.<zone>.djx``.
    * - ``next.more.min.js``
      - ``next/client/entries/more.ts``
      - Declared by a ``{% more %}`` sentinel that sets ``prune=`` or ``url=``.
@@ -193,10 +193,10 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - Declared by every routed document while the client router is on.
    * - ``next.history.min.js``
      - ``next/client/entries/history.ts``
-     - Named by the router, which loads it once the page is idle, for the snapshots and the scroll restore.
+     - Named by the router, which loads it once the page is idle, for the snapshots, the scroll restore, and the navigation of a ``GET`` form.
    * - ``next.intent.min.js``
      - ``next/client/entries/intent.ts``
-     - Named by the router, which loads it once the page is idle, for the prefetch and the active-link pass.
+     - Named by the router, which loads it once the page is idle, for the prefetch of links and layers and the active-link pass.
 
 The job then enforces a gzip budget on every bundle, 18432 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks.
 The defer, reload, more, and reader chunks get 2048 bytes each, the history chunk gets 4096 bytes, and the router and intent chunks get 4608 bytes each.

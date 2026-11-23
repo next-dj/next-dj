@@ -45,10 +45,10 @@ A named dependency, ``Depends("name")``, is bound at request time, so the scan d
 
    from next import page
 
-   page.defer(timeout="3s", parallel=True)
+   page.defer(timeout="3s", parallel=False)
 
 ``timeout`` is a number of seconds or a ``"3s"`` or ``"500ms"`` literal, at most one day, after which the boundary settles as ``timeout``.
-``parallel=True`` pins the job to the pool, ``False`` keeps it on the request thread, and ``None`` leaves it to placement, see :doc:`async`.
+``parallel=False`` keeps the job on the request thread, and the default ``True`` lets it take the pool when no request-lane rule holds, see :doc:`async`.
 A call inside a function, outside a ``page.py``, or with a value outside its shape declares nothing and is reported as ``next.E222``.
 
 Component boundaries
@@ -81,7 +81,7 @@ A ``@component.context`` callable that takes a parameter of one of those names i
 
 ``component.defer(mode, *, timeout, props, tag, parallel, tokens)`` declares the boundary.
 ``props`` names the props a reload or a retry renders the component from, and ``component.props(*names)`` declares the same list on its own.
-``tag`` names the wrapper element, ``parallel`` pins the job the way ``page.defer`` does, and ``tokens`` overrides ``max_age``, ``bucket``, ``binding``, or ``max_bytes`` of the token settings for this component.
+``tag`` names the wrapper element, ``parallel=False`` keeps the job on the request thread the way ``page.defer`` does, and ``tokens`` overrides ``max_age``, ``bucket``, ``binding``, or ``max_bytes`` of the token settings for this component.
 A deferred component without a ``loading.djx`` renders the template ``DEFER["LOADING"]`` names, or nothing, which ``next.W157`` reports.
 
 A ``loading.djx`` renders over the context of the call site, with ``props`` holding the props of the call.
@@ -172,11 +172,12 @@ A prop whose name a ``@component.context`` parameter takes travels as the annota
      - Refused
 
 ``list[T]`` takes any scalar type of the table as ``T``, ``Decimal``, ``date``, ``datetime``, and ``UUID`` included, and never a model or an optional element.
-``T | None`` accepts ``None`` as well, an ``int`` must fit in 64 bits, a ``float`` must be finite, and text is capped by ``MAX_BYTES``.
+``T | None`` accepts ``None`` as well, while an ``int`` outside 64 bits, a ``float`` that is not finite, and text over ``MAX_BYTES`` are not refused but delivered another way, as described below.
+An optional prop is written ``T | None`` and a list ``list[T]``, while ``typing.List[T]`` is refused, and so are ``Optional[T]`` and ``Union[T, None]`` on Python 3.12 and 3.13, where they are not the ``T | None`` object they are from Python 3.14.
 A string marked safe travels as plain text, so the deferred render autoescapes it.
 An unannotated value that needs its annotation to come back typed, such as a ``date``, is refused rather than sent as its text.
 Every refusal raises ``BoundaryPropsError`` when the token is minted, naming the prop and the type of its value.
-Props of one request that outgrow ``MAX_BYTES``, such as a long search query, raise ``BoundarySizeError`` instead, and the page renders that boundary as a ``stream`` boundary in the same response and logs a warning to ``next.suspense``.
+Props of one request that outgrow ``MAX_BYTES``, such as a long search query, or an ``int`` outside 64 bits, such as ``int(request.GET["page"])`` for a forty-digit number, raise ``BoundarySizeError`` instead, and the page renders that boundary as a ``stream`` boundary in the same response and logs a warning to ``next.suspense``.
 A ``float`` or ``Decimal`` that is NaN or infinite, such as ``float(request.GET["ratio"])`` for ``?ratio=inf``, raises ``BoundaryValueError`` and is delivered the same way, with a warning that names the value.
 Under ``DEBUG`` the ``X-Next-Boundaries`` header lists such a boundary as ``stream``.
 ``manage.py check`` reports an annotation no token carries, and a constant a call site passes that its annotation refuses, as ``next.E243``.

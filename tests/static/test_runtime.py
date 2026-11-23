@@ -339,6 +339,9 @@ class TestPayloadInScript:
             "<script{nonce_attr}>(self.$nx||=[]).push({payload})</script>",
             "<script>a({payload})</script><script>b({payload})</script>",
             "<script>{oops}</script>",
+            "<SCRIPT>{payload}</Script >",
+            "<script\n>{payload}</script/>",
+            "<script>{payload}</script\t\n bar>",
         ],
     )
     def test_script_text_holds_the_payload(self, template: str) -> None:
@@ -350,6 +353,10 @@ class TestPayloadInScript:
             "<script data-x='{payload}'></script>",
             "<p>{payload}</p>",
             "<script>{payload}",
+            "<script>a</script foo>{payload}<script>b</script>",
+            "<script>a</SCRIPT\t\n bar>{payload}</script>",
+            "<script>a</script/>{payload}</script>",
+            "<script-x>{payload}</script>",
         ],
     )
     def test_an_attribute_or_markup_does_not(self, template: str) -> None:
@@ -551,6 +558,14 @@ class TestDeclaredBundles:
         )
         assert builder.bundle_tag("/s/a.js", load=BundleLoad.DEFERRED, nonce="n") == (
             '<SCRIPT defer crossorigin="anonymous" src="/s/a.js" nonce="n"></SCRIPT>'
+        )
+
+    def test_a_custom_element_named_like_script_takes_the_default(self) -> None:
+        builder = NextScriptBuilder(
+            URL, script_tag_template='<script-loader src="{url}"></script-loader>'
+        )
+        assert builder.bundle_tag("/s/a.js", load=BundleLoad.EAGER) == (
+            '<script async src="/s/a.js"></script>'
         )
 
     def test_a_template_without_a_script_element_takes_the_default(self) -> None:

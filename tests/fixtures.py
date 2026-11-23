@@ -29,7 +29,9 @@ from next.pages.registry import PageContextRegistry
 from next.pages.transactions import atomic_store
 from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
+from next.ports import context_propagator_slot
 from next.server import NextStatReloader
+from next.suspense.bridge import BridgePropagator
 from next.templatetags import components as component_tags
 from next.testing import override_next_settings, reset_check_caches
 from next.urls import URLPatternParser
@@ -59,6 +61,14 @@ class _CappedRedirect(HttpResponseRedirect):
             msg = f"Unsafe redirect exceeding {_REDIRECT_CAP} characters"
             raise DisallowedRedirect(msg)
         super().__init__(redirect_to, **kwargs)
+
+
+@pytest.fixture()
+def root(tmp_path: Path) -> Path:
+    """Return an empty `pages` directory, the root of a page tree under test."""
+    directory = tmp_path / "pages"
+    directory.mkdir()
+    return directory
 
 
 @pytest.fixture()
@@ -379,3 +389,23 @@ def fresh_atomic_declarations() -> Generator[None, None, None]:
 def layout_pages(tmp_path: Path) -> dict[str, Path]:
     """Write a page tree under two layouts and return its `page.py` files by name."""
     return layout_tree(tmp_path / "pages")
+
+
+@pytest.fixture(params=["plain", "hops"])
+def carry(request: pytest.FixtureRequest) -> Iterator[BridgePropagator]:
+    """Bind a propagator that moves nothing, then one that hops, whatever asgiref needs."""
+    propagator = BridgePropagator(plain=request.param == "plain")
+    previous = context_propagator_slot.get()
+    context_propagator_slot.set(propagator)
+    yield propagator
+    context_propagator_slot.set(previous)
+
+
+@pytest.fixture()
+def hops() -> Iterator[BridgePropagator]:
+    """Bind the propagator that hops, which every asgiref moves a `Local` with."""
+    propagator = BridgePropagator(plain=False)
+    previous = context_propagator_slot.get()
+    context_propagator_slot.set(propagator)
+    yield propagator
+    context_propagator_slot.set(previous)

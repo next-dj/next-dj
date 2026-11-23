@@ -21,7 +21,6 @@ from next.suspense import (
 from next.suspense.coordinator import (
     Abandon,
     Command,
-    CostTable,
     Emit,
     End,
     Finish,
@@ -31,11 +30,9 @@ from next.suspense.coordinator import (
     RunRequest,
     Settlement,
     StartLoop,
-    Thresholds,
     Totals,
     Unit,
     Wake,
-    place,
 )
 from next.suspense.markers import (
     Addressing,
@@ -52,8 +49,6 @@ from tests.support.jobs import plain_job
 
 
 SITE = Site(Addressing.COMPONENT, "row", DeferMode.STREAM, "list.djx")
-POOL = Thresholds("pool", 300_000, 0.8, 2_000_000, 3)
-ADAPTIVE = Thresholds("adaptive", 300_000, 0.8, 2_000_000, 3)
 WSGI = ForegroundFacts(Server.WSGI_THREADED)
 ASGI = ForegroundFacts(Server.ASGI)
 ATOMIC_WSGI = ForegroundFacts(Server.WSGI_THREADED, atomic=("default",))
@@ -82,15 +77,6 @@ class _Admission:
         return self.verdicts[0]
 
 
-def _placer(options: Thresholds) -> Callable[..., Placement]:
-    table = CostTable()
-
-    def placer(job: Job[str], facts: ForegroundFacts, *, alone: bool) -> Placement:
-        return place(job, facts, options, table, alone=alone)
-
-    return placer
-
-
 def _caps(*, per_request: int = 2, depth: int = 2, grace: float = 2.0) -> Caps:
     return Caps(10.0, grace, 64, 4, depth, 1000, per_request)
 
@@ -100,7 +86,6 @@ def _machine(
     *,
     caps: Caps | None = None,
     facts: ForegroundFacts = WSGI,
-    options: Thresholds = POOL,
     admission: _Admission | None = None,
     deadline: float = 10.0,
     coalesce: float = 0.002,
@@ -109,7 +94,6 @@ def _machine(
         units if isinstance(units, Plan) else Plan(tuple(units)),
         caps or _caps(),
         facts,
-        _placer(options),
         admission or _Admission(),
         deadline=deadline,
         coalesce=coalesce,
@@ -160,7 +144,7 @@ class TestPoolFairness:
     def test_a_unit_carries_its_placement_and_the_earlier_deadline(self) -> None:
         machine = _machine([_job("j0", deadline=20.0)], deadline=8.0)
         (command,) = [c for c in machine.start(CAPACITY, 0.0) if isinstance(c, RunPool)]
-        assert command.unit.placement == Placement(Verdict.POOL_MODE)
+        assert command.unit.placement == Placement(Verdict.POOL)
         assert [task.deadline for task in command.unit.tasks] == [8.0]
 
     def test_a_job_past_its_deadline_in_the_queue_never_runs(self) -> None:
@@ -173,7 +157,7 @@ class TestPoolFairness:
             Settlement(
                 _job("j1", deadline=0.5),
                 ErrorKind.TIMEOUT,
-                Timing(placement=Placement(Verdict.POOL_MODE)),
+                Timing(placement=Placement(Verdict.POOL)),
             ),
         )
         assert machine.totals == Totals(timeouts=1)
@@ -231,12 +215,10 @@ class TestRequestLane:
         machine = _machine([_job("j0"), _job("j1"), _job("j2")], facts=ATOMIC_ASGI)
         assert _request(machine.start(CAPACITY, 0.0)) == [["j0", "j1", "j2"]]
 
-    def test_a_lone_job_runs_on_the_request_lane(self) -> None:
-        machine = _machine([_job("j0")], options=ADAPTIVE)
-        (command,) = [
-            c for c in machine.start(CAPACITY, 0.0) if isinstance(c, RunRequest)
-        ]
-        assert command.units[0].placement == Placement(Verdict.ALONE)
+    def test_a_lone_job_takes_the_pool(self) -> None:
+        machine = _machine([_job("j0")])
+        (command,) = [c for c in machine.start(CAPACITY, 0.0) if isinstance(c, RunPool)]
+        assert command.unit.placement == Placement(Verdict.POOL)
 
     def test_a_request_job_past_its_deadline_before_it_starts_never_runs(self) -> None:
         machine = _machine([_job("j0"), _job("j1", deadline=0.5)], facts=ATOMIC_WSGI)
@@ -271,7 +253,7 @@ class TestAdmission:
         assert _pool(commands) == []
         (command,) = [c for c in commands if isinstance(c, RunRequest)]
         assert [unit.id for unit in command.units] == ["j0"]
-        assert command.units[0].placement == Placement(Verdict.POOL_MODE)
+        assert command.units[0].placement == Placement(Verdict.POOL)
         assert admission.calls == [(CAPACITY, False), (CAPACITY, False)]
 
     def test_a_reading_admits_queued_units_again(self) -> None:
@@ -315,31 +297,21 @@ class TestRefused:
     """Tests for ``Machine.refused``."""
 
     def test_a_refused_unit_behind_the_credit_stays_off_the_request_lane(self) -> None:
-        def placer(job: Job[str], facts: ForegroundFacts, *, alone: bool) -> Placement:
-            return Placement(Verdict.HANDOFF if job.id == "j1" else Verdict.POOL_MODE)
-
-        machine = Machine(
-            Plan((_job("j0"), _job("j1"))),
-            _caps(per_request=1),
-            ASGI,
-            placer,
-            _Admission(Admit.POOL, Admit.REQUEST),
-            deadline=10.0,
-            coalesce=0.002,
+        machine = _machine(
+            [_job("j0"), _job("j1")],
+            caps=_caps(per_request=1),
+            facts=ASGI,
+            admission=_Admission(Admit.POOL, Admit.REQUEST),
         )
-        commands = machine.start(CAPACITY, 0.0)
-        assert _pool(commands) == ["j0"]
-        assert _request(commands) == [["j1"]]
+        assert _pool(machine.start(CAPACITY, 0.0)) == ["j0"]
+        assert _request(machine.capacity(CAPACITY, 0.005)) == [["j1"]]
         assert _pool(machine.refused("j1", 0.01)) == []
         assert _request(machine.capacity(CAPACITY, 0.02)) == []
         assert _pool(machine.finished("j0", _ok(), Timing(), 0.03)) == ["j1"]
 
     def test_a_unit_without_a_permit_goes_to_the_pool(self) -> None:
         machine = _machine(
-            [_job("j0")],
-            facts=ASGI,
-            options=ADAPTIVE,
-            admission=_Admission(Admit.REQUEST),
+            [_job("j0")], facts=ASGI, admission=_Admission(Admit.REQUEST)
         )
         assert _request(machine.start(CAPACITY, 0.0)) == [["j0"]]
         (command,) = [c for c in machine.refused("j0", 0.01) if isinstance(c, RunPool)]
@@ -383,10 +355,7 @@ class TestFull:
 
     def test_a_unit_the_request_lane_refused_too_is_shed_once(self) -> None:
         machine = _machine(
-            [_job("j0")],
-            facts=ASGI,
-            options=ADAPTIVE,
-            admission=_Admission(Admit.REQUEST),
+            [_job("j0")], facts=ASGI, admission=_Admission(Admit.REQUEST)
         )
         assert _request(machine.start(CAPACITY, 0.0)) == [["j0"]]
         assert _pool(machine.refused("j0", 0.01)) == ["j0"]
@@ -430,7 +399,7 @@ class TestDeadlines:
         assert item == Settlement(
             _job("j0", deadline=1.0),
             ErrorKind.TIMEOUT,
-            Timing(Lane.POOL, Placement(Verdict.POOL_MODE)),
+            Timing(Lane.POOL, Placement(Verdict.POOL)),
         )
         assert _pool(commands) == []
         assert machine.totals == Totals(late=1, timeouts=1)
@@ -606,7 +575,7 @@ class TestResults:
         (item,) = emit.items
         assert isinstance(item, Settlement)
         assert (item.kind, item.error, machine.end("j0")) == (kind, error, end)
-        assert item.timing == Timing(Lane.POOL, Placement(Verdict.POOL_MODE))
+        assert item.timing == Timing(Lane.POOL, Placement(Verdict.POOL))
 
     def test_a_rendered_error_ends_by_its_kind(self) -> None:
         machine = _machine([_job("j0")])
@@ -618,7 +587,7 @@ class TestResults:
     def test_the_driver_timing_is_kept(self) -> None:
         machine = _machine([_job("j0")])
         machine.start(CAPACITY, 0.0)
-        timing = Timing(Lane.REQUEST, Placement(Verdict.COST), 0.1, 0.2)
+        timing = Timing(Lane.REQUEST, Placement(Verdict.FOREGROUND_FULL), 0.1, 0.2)
         (emit,) = _emits(machine.finished("j0", _ok(), timing, 0.3))
         assert emit.items == (Outcome("j0", _ok(), timing),)
 
@@ -827,7 +796,6 @@ class _RandomDriver:
             Plan(tuple(units), expired),
             caps=self.caps,
             facts=rng.choice([WSGI, ASGI, ATOMIC_WSGI, ATOMIC_ASGI]),
-            options=rng.choice([POOL, ADAPTIVE]),
             admission=_Admission(*(rng.verdict() for _ in range(50))),
         )
         self.slow = rng.choice((1.0, 0.05))

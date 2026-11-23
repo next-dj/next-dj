@@ -15,6 +15,7 @@ from next.pages.context import Context
 from next.urls import DUrl
 from tests.benchmarks.factories import STAND_IN_PK
 from tests.support import build_mock_http_request
+from tests.support.deps import themed_resolver
 
 
 def _handler_simple(request: object, name: str = "default") -> str:
@@ -84,17 +85,6 @@ def _template_context(size: int) -> dict[str, object]:
 def _default_resolver() -> DependencyResolver:
     """Fresh resolver that loads the auto-registry on its first resolve."""
     return DependencyResolver()
-
-
-def _themed_resolver() -> DependencyResolver:
-    """Fresh resolver with its providers loaded and the `theme` dependency bound.
-
-    The registry sync is paid here, so a plan benchmark prices one compile only.
-    """
-    planned = DependencyResolver()
-    planned.dependency("theme")(lambda: "dark")
-    planned._sync_providers()
-    return planned
 
 
 def _linear_resolver() -> LinearDependencyResolver:
@@ -242,7 +232,7 @@ class TestBenchInjectionPlan:
         """First resolve of the handler on a resolver that has no plan for it."""
 
         def setup() -> tuple[tuple[DependencyResolver], dict[str, object]]:
-            return (_themed_resolver(),), {}
+            return (themed_resolver(),), {}
 
         benchmark.pedantic(
             _resolve_four_markers,
@@ -256,7 +246,7 @@ class TestBenchInjectionPlan:
         """Second resolve of the handler, the plan already sits in the cache."""
 
         def setup() -> tuple[tuple[DependencyResolver], dict[str, object]]:
-            planned = _themed_resolver()
+            planned = themed_resolver()
             _resolve_four_markers(planned)
             return (planned,), {}
 

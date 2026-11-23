@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from next.deps import Depends
 from next.deps.cache import DependencyCache
-from next.deps.resolver import DependencyResolver
+from tests.support.deps import themed_resolver
+
+
+if TYPE_CHECKING:
+    from next.deps.resolver import DependencyResolver
 
 
 _PLAN_ROUNDS = 300
@@ -42,14 +48,6 @@ def _fourth(pricing: object = Depends(_pricing)) -> object:
 _UNIT = (_first, _second, _third, _fourth, _first, _fourth)
 
 
-def _themed_resolver() -> DependencyResolver:
-    """Fresh resolver with its providers loaded and the `theme` dependency bound."""
-    planned = DependencyResolver()
-    planned.dependency("theme")(lambda: "dark")
-    planned._sync_providers()
-    return planned
-
-
 def _render_unit(planned: DependencyResolver) -> list[dict[str, object]]:
     """Resolve the callables of one render unit against the cache they share."""
     cache = DependencyCache()
@@ -62,7 +60,7 @@ class TestBenchFactoryDepends:
     @pytest.mark.benchmark(group="deps.markers")
     def test_unit_shares_its_factories(self, benchmark) -> None:
         """Six callables naming two factories, so four of their reads hit the cache."""
-        planned = _themed_resolver()
+        planned = themed_resolver()
         results = benchmark(_render_unit, planned)
         assert results[0]["settings"] is results[1]["settings"]
         assert results[2]["pricing"] is results[3]["pricing"]
@@ -72,7 +70,7 @@ class TestBenchFactoryDepends:
         """The same unit on a fresh resolver, which compiles a plan per callable."""
 
         def setup() -> tuple[tuple[DependencyResolver], dict[str, object]]:
-            return (_themed_resolver(),), {}
+            return (themed_resolver(),), {}
 
         benchmark.pedantic(
             _render_unit,
@@ -84,7 +82,7 @@ class TestBenchFactoryDepends:
     @pytest.mark.benchmark(group="deps.markers")
     def test_leaf_factory_memo_hit(self, benchmark) -> None:
         """One consumer of a factory an earlier callable of the unit already ran."""
-        planned = _themed_resolver()
+        planned = themed_resolver()
         cache = DependencyCache()
         first = planned.resolve_dependencies(_first, _cache=cache)
 
@@ -96,7 +94,7 @@ class TestBenchFactoryDepends:
     @pytest.mark.benchmark(group="deps.markers")
     def test_injected_factory_memo_miss(self, benchmark) -> None:
         """The first consumer of an injected factory, a fresh cache every call."""
-        planned = _themed_resolver()
+        planned = themed_resolver()
 
         def read() -> dict[str, object]:
             return planned.resolve_dependencies(_fourth, _cache=DependencyCache())

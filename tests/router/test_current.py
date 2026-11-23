@@ -1,5 +1,5 @@
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Collection, Iterator
 from unittest import mock
 
 import pytest
@@ -11,14 +11,15 @@ from next.router import current
 from next.router.current import (
     CONTAINERS,
     CurrentLinks,
+    _Current,
+    _opened,
     _Scan,
     current_links,
-    mark_current,
     origin_of,
 )
 from next.testing import override_next_settings
 from tests.support import I18N_ROUTED
-from tests.support.markup import HOSTILE, flood
+from tests.support.markup import HOSTILE, PARSER_VOID, flood
 
 
 ORIGIN = "https://example.com"
@@ -30,6 +31,23 @@ ANCESTOR = ANCESTOR_MARK
 
 class UpperLinks(CurrentLinks):
     """A project backend the settings name instead of the shipped one."""
+
+
+def mark_current(
+    html: str,
+    path: str,
+    query: str,
+    *,
+    containers: tuple[str, ...],
+    origin: str = "",
+    homes: Callable[[], Collection[str]] | None = None,
+) -> str:
+    """Mark `html` for an explicit path and query, as `CurrentLinks.mark` does."""
+    opened = _opened(html, containers)
+    if opened is None:
+        return html
+    plan, low = opened
+    return _Scan(html, low, plan, _Current(path, query, origin, homes)).run()
 
 
 def marked(
@@ -333,6 +351,11 @@ class TestExistingMarks:
 
 class TestContainers:
     """Only anchors inside the configured containers are marked."""
+
+    @pytest.mark.parametrize("name", PARSER_VOID)
+    def test_a_void_element_opens_no_container(self, name: str) -> None:
+        html = f'<p><{name} data-next-nav><a href="/docs/intro/">x</a></p>'
+        assert marked(html) is html
 
     @pytest.mark.parametrize(
         "html",

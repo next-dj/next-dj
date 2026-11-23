@@ -45,13 +45,6 @@ def _rows(
     )
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 class TestMoreZoneExists:
     """next.E220 flags a `{% more %}` whose zone the page does not declare."""
 

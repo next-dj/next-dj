@@ -226,7 +226,7 @@ The tests run under pytest-django, set up as :doc:`test-a-page-with-actions` sho
        streamed = NextClient().get_stream(f"/product/{product.pk}/")
        assert "data-recommendations-skeleton" in streamed.shell
        assert "<ul data-recommendations>" not in streamed.shell
-       [chunk] = streamed.chunks
+       chunk = streamed.boundary("recommendations")
        assert chunk.state == "ready"
        assert "<ul data-recommendations>" in chunk.html
 

@@ -27,13 +27,6 @@ from tests.support.cases.intercepts import PICK_CASES, PickCase, zone_body
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 @contextmanager
 def _mounted(root: Path, url: str = "/photo/3/") -> Generator[None, None, None]:
     """Route `root` and build its patterns, which publishes the intercepts."""

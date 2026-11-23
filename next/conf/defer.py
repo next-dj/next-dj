@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -33,7 +32,6 @@ from .shapes import (
 SCOPE: Final = "DEFER"
 
 type DeadlineMode = Literal["state", "always", False]
-type PlacementMode = Literal["adaptive", "pool"]
 
 
 def _seconds(*, positive: bool = False) -> Usable:
@@ -104,26 +102,13 @@ def _streams(value: object) -> bool:
     return value == "auto" or _ONE_UP(value)
 
 
-def fraction(value: object) -> TypeGuard[float]:
-    """Whether `value` is a number above 0 up to 1, never a bool."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return False
-    return math.isfinite(value) and 0 < value <= 1
-
-
 _DEADLINE_MODES: Final = choice(("state", "always", False))
-_PLACEMENT_MODES: Final = choice(("adaptive", "pool"))
 _ERRORS_ATOMIC: Final = choice(("writes", True, False))
 
 
 def deadline_choice(value: object) -> TypeGuard[DeadlineMode]:
     """Whether `value` is a `DEADLINE_TO_DB` mode."""
     return _DEADLINE_MODES.usable(value)
-
-
-def placement_choice(value: object) -> TypeGuard[PlacementMode]:
-    """Whether `value` is a placement `MODE`."""
-    return _PLACEMENT_MODES.usable(value)
 
 
 def atomic_choice(value: object) -> TypeGuard[bool | Literal["writes"]]:
@@ -174,15 +159,6 @@ SHAPE: Final = Section(
                 "PARALLEL": _FLAG,
                 "SQLITE": choice(("foreground", "parallel")),
                 "THREAD_LOCAL_MIDDLEWARE": _PATHS,
-                "PLACEMENT": Section(
-                    {
-                        "MODE": _PLACEMENT_MODES,
-                        "HANDOFF": _WAIT,
-                        "CPU_RATIO": Shape(fraction, "a number above 0 up to 1"),
-                        "CPU_MAX": _WAIT,
-                        "EXPLORE": Shape(count(0), "an integer from 0"),
-                    }
-                ),
             },
         ),
         "POLICY": _backend(
@@ -438,7 +414,6 @@ __all__ = [
     "SCOPE",
     "SHAPE",
     "DeadlineMode",
-    "PlacementMode",
     "atomic_choice",
     "backend_count",
     "backend_option",
@@ -451,10 +426,8 @@ __all__ = [
     "defer_seconds",
     "defer_template",
     "entry_options",
-    "fraction",
     "long_token_age",
     "parallel",
-    "placement_choice",
     "sqlite_parallel",
     "thread_local_middleware",
     "timeout_floor",

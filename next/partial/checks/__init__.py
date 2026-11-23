@@ -36,6 +36,7 @@ from .codes import (
     W_FORM_BACKEND_NOT_AWARE,
     W_FORM_IN_FOR_NO_KEY,
     W_MANIFEST_VERSION_NO_STORAGE,
+    W_SKELETON_UNSHOWN,
     W_TOO_MANY_BACKENDS,
     W_WITH_OVER_ZONE,
 )
@@ -58,6 +59,7 @@ from .zones import (
     check_zone_not_in_if,
     check_zone_not_in_loop,
     check_zone_skeletons_have_zones,
+    check_zone_skeletons_shown,
 )
 
 
@@ -85,6 +87,7 @@ __all__ = [
     "W_FORM_BACKEND_NOT_AWARE",
     "W_FORM_IN_FOR_NO_KEY",
     "W_MANIFEST_VERSION_NO_STORAGE",
+    "W_SKELETON_UNSHOWN",
     "W_TOO_MANY_BACKENDS",
     "W_WITH_OVER_ZONE",
     "check_asset_version_moves_between_deploys",
@@ -112,4 +115,5 @@ __all__ = [
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
     "check_zone_skeletons_have_zones",
+    "check_zone_skeletons_shown",
 ]

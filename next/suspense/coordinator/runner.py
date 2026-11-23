@@ -4,7 +4,6 @@ import asyncio
 import logging
 import time
 from contextlib import AbstractContextManager, nullcontext
-from contextvars import Context
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -15,12 +14,13 @@ from next.deps.cache import RequestMemo, request_memo
 from next.deps.loader import CountedJob
 from next.deps.runner import run_on_request_thread, segment_runner
 from next.deps.scope import RequestScope
+from next.ports import context_propagator_slot
 from next.suspense.connections import Replayable, job_guard
 from next.suspense.coordinator.machine import Task
-from next.suspense.coordinator.placement import CostTable
 from next.suspense.errors import BoundaryDeadlineError
-from next.suspense.executors import BoundaryExecutor, RequestThreadExecutor, served_cpu
+from next.suspense.executors import BoundaryExecutor, RequestThreadExecutor
 from next.suspense.markers import ForegroundFacts, Lane, Placement, Rendered, Timing
+from next.tasks import ContextSnapshot
 
 
 if TYPE_CHECKING:
@@ -41,11 +41,10 @@ class Runtime:
     thread through, `None` where the server's own request context routes them.
     """
 
-    snapshot: Context
+    snapshot: ContextSnapshot
     states: Replayable
     facts: ForegroundFacts
     executor: BoundaryExecutor
-    costs: CostTable
     scope: RequestScope | None = None
     hops: RequestThreadExecutor | None = None
 
@@ -79,13 +78,21 @@ def run[D](
 ) -> Report[D]:
     """Run the sync body of `task` on this thread, or skip it past its deadline.
 
-    Only a pool thread replays the request thread's thread and connection states.
+    The deadline bounds a carry of the snapshot, only a pool thread replays states.
     """
     started = time.monotonic()
     if started >= task.deadline:
         return skipped(unit, task, placement)
     timing = Timing(lane, placement, started - queued)
-    return runtime.snapshot.copy().run(_run, runtime, unit, task, timing, count)
+    snapshot = runtime.snapshot
+    context = snapshot.get()
+    if context is None:
+        try:
+            with deadline(task.deadline):
+                context = context_propagator_slot.get().restore(snapshot)
+        except TimeoutError:
+            return skipped(unit, task, placement)
+    return context.copy().run(_run, runtime, unit, task, timing, count)
 
 
 def _counting(count: CountedJob | None) -> AbstractContextManager[None]:
@@ -96,10 +103,7 @@ def _counting(count: CountedJob | None) -> AbstractContextManager[None]:
 def _run[D](
     runtime: Runtime, unit: str, task: Task[D], timing: Timing, count: CountedJob | None
 ) -> Report[D]:
-    """Run the body, charging its site its own CPU and not that of hops it served.
-
-    An exception settles the job as a logged fallback, an interrupt leaves the thread.
-    """
+    """Run the body, an exception settling the job, an interrupt leaving the thread."""
     job = task.job
     body = cast("Callable[[], Rendered[D]]", job.run)
     guard: AbstractContextManager[None] = nullcontext()
@@ -107,17 +111,13 @@ def _run[D](
         guard = job_guard(runtime.states, deadline=task.deadline)
     result: Rendered[D] | Exception
     wall = time.perf_counter_ns()
-    served = served_cpu()
-    cpu = time.thread_time_ns()
     try:
         with deadline(task.deadline), guard, _counting(count):
             result = body()
     except Exception as error:  # noqa: BLE001
         result = error
-    wall = time.perf_counter_ns() - wall
-    cpu = max(0, time.thread_time_ns() - cpu - (served_cpu() - served))
-    runtime.costs.observe(job.site.cost_key, wall, cpu)
-    return Report(unit, job.id, result, replace(timing, ran=wall / _NS))
+    ran = (time.perf_counter_ns() - wall) / _NS
+    return Report(unit, job.id, result, replace(timing, ran=ran))
 
 
 async def arun[D](
@@ -137,9 +137,13 @@ async def arun[D](
     if started >= task.deadline:
         return skipped(unit, task, placement)
     timing = Timing(Lane.LOOP, placement, started - queued)
+    snapshot = runtime.snapshot
+    context = snapshot.get()
+    if context is None:
+        context = await context_propagator_slot.get().arestore(snapshot)
     loop = asyncio.get_running_loop()
     return await loop.create_task(
-        _arun(runtime, unit, task, timing, count), context=runtime.snapshot.copy()
+        _arun(runtime, unit, task, timing, count), context=context.copy()
     )
 
 

@@ -35,6 +35,7 @@ from next.pages.responses import (
 from next.pages.router import page_router
 from next.pages.transactions import page_atomic
 from next.partial.headers import PartialIntent, partial_intent, set_partial_vary
+from next.partial.intercept import pick_intercept
 from next.partial.stream import owned, streamable
 from next.partial.view import plain_zone_response, zone_response
 from next.router.current import current_links
@@ -354,6 +355,32 @@ def _gate(request: HttpRequest, file_path: Path) -> HttpResponseBase | None:
     return None
 
 
+def _zone_gate(
+    request: HttpRequest, file_path: Path, intent: PartialIntent
+) -> HttpResponseBase | None:
+    """Answer a zone prefetch its page refuses or a busy pool sheds, else `None`.
+
+    A layer prefetch renders what the layer would, so a serving intercept may refuse.
+    """
+    if intent.prefetch is None:
+        return None
+    rule = pick_intercept(file_path, intent.zones)
+    served = file_path if rule is None else rule.file
+    if not (page_router(file_path).prefetch and page_router(served).prefetch):
+        return refused_prefetch()
+    return shed(request, file_path)
+
+
+def _planned_refusal(file_path: Path, call: _Call) -> HttpResponseBase | None:
+    """Return the refusal of a planned page request, gating a zone prefetch first."""
+    request = call.request
+    if call.route is RouteKind.ZONE:
+        early = _zone_gate(request, file_path, call.intent)
+        if early is not None:
+            return early
+    return refusal(file_path, request, call.kwargs, call.dep_cache)
+
+
 def _refused(
     denial: HttpResponseBase, route: RouteKind, request: HttpRequest
 ) -> HttpResponseBase:
@@ -432,10 +459,13 @@ def _admission(
     """
     if route is RouteKind.BOUNDARY:
         return _boundary_refusal(file_path, request, kwargs, dep_cache)
+    early = None
     if route is RouteKind.NAVIGATE:
         early = _gate(request, file_path)
-        if early is not None:
-            return early
+    elif route is RouteKind.ZONE:
+        early = _zone_gate(request, file_path, partial_intent(request))
+    if early is not None:
+        return early
     denial = refusal(file_path, request, kwargs, dep_cache)
     return None if denial is None else _refused(denial, route, request)
 
@@ -456,7 +486,7 @@ def _static_view(page: Page, file_path: Path) -> Callable[..., HttpResponseBase]
         call = _Call(request, kwargs, intent, route, dep_cache)
         if route not in _PLANNED or request.method not in SAFE_METHODS:
             return _admitted(file_path, call, serve, admitted=False)
-        denied = refusal(file_path, request, kwargs, dep_cache)
+        denied = _planned_refusal(file_path, call)
         if denied is not None:
             return denied
         if route is RouteKind.ZONE:

@@ -60,7 +60,7 @@ Any component with a ``component.py`` counts as one that decides what it shows, 
 Boundary declarations
 ~~~~~~~~~~~~~~~~~~~~~
 
-``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=None, tokens=None)`` and ``component.props(*names)`` declare the boundary of the ``component.py`` that calls them, see :doc:`defer`.
+``component.defer(mode="stream", *, timeout=None, props=(), tag=WrapperTag.SITE, parallel=True, tokens=None)`` and ``component.props(*names)`` declare the boundary of the ``component.py`` that calls them, see :doc:`defer`.
 ``WrapperTag.SITE``, the default ``tag``, leaves the wrapper to the call site, which adopts the root element of the loading UI and of the content inside a table, a list, a ``select``, or an ``svg`` and wraps them in a ``div`` anywhere else, while ``tag=None`` adopts the root everywhere and a ``tag`` of a name fixes the element, see :doc:`defer` and :doc:`/content/topics/boundaries/loading`.
 A ``loading.djx`` beside the component makes it a ``stream`` boundary without a declaration, and an ``error.djx`` beside it makes it an error boundary in every render.
 ``next.components.calls`` renders one guarded or deferred call behind its boundary, ``CallSite`` naming the call, ``ComponentFallback`` rendering the error UI of the component, and ``DeferredRender`` rendering the call a deferred job runs.

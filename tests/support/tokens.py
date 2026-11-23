@@ -4,9 +4,11 @@ from django.http import HttpRequest
 from django.test import RequestFactory
 
 from next.conf.merge import FROZEN_DEFAULTS
+from next.suspense import BoundaryTokenError, TokenRejection
 from next.suspense.tokens import (
     BoundaryClaims,
     BoundaryTarget,
+    BoundaryTokenBackend,
     StackedTokenBackend,
     encode_props,
     url_pairs,
@@ -97,3 +99,13 @@ def flip_bit(sealed: str, index: int) -> str:
     raw = bytearray(b64decode(sealed))
     raw[index] ^= 1
     return b64encode(bytes(raw))
+
+
+class MinimalTokenBackend(BoundaryTokenBackend):
+    """A backend that issues one fixed token and refuses every token it reads."""
+
+    def issue(self, request, claims, *, tokens=()) -> str:
+        return "token"
+
+    def redeem(self, request, token, target) -> BoundaryClaims:
+        raise BoundaryTokenError(TokenRejection.MALFORMED)

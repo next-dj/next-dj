@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 
 from next.deps.resolver import current_resolver
-from next.deps.runner import run_segment
 from next.deps.scope import bridged_scope
 from next.pages.boundaries import Caught, ErrorShell
 from next.pages.gating import GATE_KEY, Plan, ShellGate, note_slow, plan_gating
@@ -23,7 +22,6 @@ from next.pages.graph import (
     run_phase,
 )
 from next.pages.metadata.chain import FoldedMetadata, contained_chain
-from next.pages.processors import _get_context_processors
 from next.seeding import METADATA_KEY
 
 from .render import ContextRender
@@ -160,26 +158,14 @@ class PageGating(ContextRender):
                 if chain.errors
                 else await work
             )
-        caught = isinstance(outcome, Caught)
-        registry = (
-            self._metadata_registry
-            if not caught and self._metadata_awaits(file_path)
-            else None
+        render = (file_path, request, url_kwargs, dep_cache)
+        shell, thunk, entry = await self._ashell(
+            chain, render, blamed, caught=isinstance(outcome, Caught)
         )
-        finish = partial(
-            self._tail, file_path, request, url_kwargs, dep_cache, registry
-        )
-        if registry is None and (request is None or not _get_context_processors()):
-            tail, thunk, entry = finish()
-        else:
-            tail, thunk, entry = await run_segment(finish)
-        shell = self._shell(chain, file_path, url_kwargs, tail, blamed)
         if isinstance(outcome, Caught):
             return replace(outcome, shell=shell)
         note_slow(plan, file_path, phase.timings, time.perf_counter() - started)
-        context = self._gate(
-            plan, shell, outcome, (file_path, request, url_kwargs, dep_cache)
-        )
+        context = self._gate(plan, shell, outcome, render)
         if entry is not None and entry.folded is None:
             folded = await thunk.afold(entry, dict(context))
             context[METADATA_KEY] = FoldedMetadata(thunk, folded)

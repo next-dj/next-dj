@@ -1,6 +1,6 @@
 import inspect
 from operator import attrgetter
-from typing import ClassVar
+from typing import Annotated, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,7 +37,6 @@ from tests.support import (
     _ctx,
     build_mock_http_request,
     inspect_parameter,
-    typing_optional,
 )
 
 
@@ -75,11 +74,11 @@ class TestHttpRequestProvider:
         [
             (_mock_request_factory, HttpRequest, True),
             (_mock_request_factory, HttpRequest | None, True),
-            (_mock_request_factory, typing_optional(HttpRequest), True),
+            (_mock_request_factory, Annotated[HttpRequest, "doc"] | None, True),
             (_stand_in_request_factory, HttpRequest, True),
             (_stand_in_request_factory, HttpRequest | None, True),
             (_mock_wsgi_request_factory, WSGIRequest, True),
-            (_mock_wsgi_request_factory, typing_optional(WSGIRequest), True),
+            (_mock_wsgi_request_factory, Annotated[WSGIRequest, "doc"] | None, True),
             (_mock_request_factory, WSGIRequest, False),
             (_mock_wsgi_request_factory, ASGIRequest | None, False),
             (_mock_request_factory, HttpRequest | int, False),
@@ -93,11 +92,11 @@ class TestHttpRequestProvider:
         ids=[
             "request_present",
             "pep604_optional",
-            "typing_optional",
+            "annotated_optional",
             "stand_in_under_the_base_annotation",
             "stand_in_under_the_optional_base_annotation",
             "wsgi_subclass",
-            "wsgi_subclass_typing_optional",
+            "wsgi_subclass_annotated_optional",
             "base_request_under_a_subclass_annotation",
             "wsgi_request_under_an_asgi_annotation",
             "union_with_other_type",

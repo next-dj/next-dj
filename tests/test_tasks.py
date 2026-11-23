@@ -1,3 +1,5 @@
+import asyncio
+import contextvars
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
@@ -5,7 +7,7 @@ from functools import partial
 import pytest
 from asgiref.current_thread_executor import CurrentThreadExecutor
 
-from next.tasks import QuitParentExecutor, StealableTask
+from next.tasks import ContextSnapshot, QuitParentExecutor, StealableTask
 from tests.support.errors import HaltError
 
 
@@ -122,3 +124,56 @@ class TestQuitParentExecutor:
             submitted = pool.submit(child.submit, print)
             with pytest.raises(RuntimeError, match="already quit"):
                 submitted.result()
+
+
+class TestContextSnapshot:
+    """A snapshot reads as itself on its thread and as a kept copy elsewhere."""
+
+    def test_the_capturing_thread_gets_the_context_itself(self) -> None:
+        context = contextvars.copy_context()
+        assert ContextSnapshot(context).get() is context
+
+    def test_another_thread_gets_none_until_it_keeps_a_copy(self) -> None:
+        captured = ContextSnapshot(contextvars.Context(), thread=-1)
+        assert captured.get() is None
+        kept = contextvars.Context()
+        assert captured.keep(kept) is kept
+        assert captured.get() is kept
+
+
+async def _thread_context() -> contextvars.Context:
+    return contextvars.copy_context()
+
+
+class TestLanding:
+    """One task per loop restores a snapshot, whoever asks for it."""
+
+    def test_every_caller_on_a_loop_shares_the_first_task(self) -> None:
+        captured = ContextSnapshot(contextvars.Context(), thread=-1)
+        started: list[int] = []
+
+        async def carry() -> contextvars.Context:
+            started.append(threading.get_ident())
+            return await _thread_context()
+
+        async def scenario() -> bool:
+            first = captured.landing(carry)
+            second = captured.landing(carry)
+            await first
+            return first is second
+
+        assert asyncio.run(scenario()) is True
+        assert len(started) == 1
+
+    def test_the_task_runs_in_a_copy_of_the_captured_context(self) -> None:
+        marker = contextvars.ContextVar[str]("marker")
+        context = contextvars.Context()
+        context.run(marker.set, "captured")
+        captured = ContextSnapshot(context, thread=-1)
+
+        async def scenario() -> contextvars.Context:
+            return await captured.landing(_thread_context)
+
+        carried = asyncio.run(scenario())
+        assert carried is not context
+        assert carried[marker] == "captured"

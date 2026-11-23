@@ -12,10 +12,9 @@ from django.test import override_settings
 from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.pages import Page, page
 from next.pages.boundaries import SHELL_KEY, Caught
-from next.pages.loaders import load_page_module
 from next.pages.manager import render as manager_render
 from next.pages.metadata import ResolvedMetadata
-from next.pages.metadata.chain import FoldedMetadata, MetadataThunk
+from next.pages.metadata.chain import MetadataThunk
 from next.seeding import METADATA_KEY, REQUEST_KEY
 from next.testing import override_next_settings
 from tests.support import (
@@ -28,9 +27,10 @@ from tests.support import (
     resolve_page_metadata,
     touch_later,
     unified_view,
-    write_page,
     write_page_chain,
 )
+from tests.support.pages import folded_metadata, loaded_page, page_calls
+from tests.support.views import write_dynamic_page
 
 
 def _silent_processor(request) -> None:
@@ -100,20 +100,6 @@ _FAILING_METADATA = (
 
 async def _late() -> int:
     return 1
-
-
-def _loaded(root: Path, source: str, trail: str = "") -> Path:
-    """Write and import one `page.py`, so its registrations reach the global page."""
-    page_file = write_page(root, trail, source)
-    _module, error = load_page_module(page_file)
-    assert error is None
-    return page_file
-
-
-def _metadata(context: dict[str, object]) -> FoldedMetadata:
-    thunk = context[METADATA_KEY]
-    assert isinstance(thunk, FoldedMetadata)
-    return thunk
 
 
 _FAILING_ASYNC = (
@@ -211,12 +197,6 @@ def _leaf_callable(parameters: str = "", title: str = '"Own"') -> str:
     return LEAF_CALLABLE.format(parameters=parameters, title=title)
 
 
-def _calls(page_file: Path) -> list[int]:
-    module, _error = load_page_module(page_file)
-    assert module is not None
-    return module.calls
-
-
 def _thunk(context_data: dict[str, object]) -> MetadataThunk:
     thunk = context_data[METADATA_KEY]
     assert isinstance(thunk, MetadataThunk)
@@ -231,14 +211,6 @@ def _counter() -> tuple[list[int], Any]:
         return len(calls)
 
     return calls, counter
-
-
-def _build_dynamic_page(directory: Path, *, returns: str = "'<p>dynamic</p>'") -> Path:
-    """Write a ``page.py`` whose ``render()`` returns `returns` on every request."""
-    directory.mkdir(parents=True, exist_ok=True)
-    page_file = directory / "page.py"
-    page_file.write_text(f"def render(request):\n    return {returns}\n")
-    return page_file
 
 
 class TestContextProcessorOutcomes:
@@ -282,17 +254,17 @@ class TestPageColour:
     def test_a_sync_page_does_not_await_and_the_answer_is_memoised(
         self, tmp_path
     ) -> None:
-        page_file = _loaded(tmp_path, "template = 'ok'\n")
+        page_file = loaded_page(tmp_path, "template = 'ok'\n")
 
         assert page.awaits(page_file) is False
         with mock.patch.object(page.contexts, "awaits", side_effect=AssertionError):
             assert page.awaits(page_file) is False
 
     def test_an_async_context_makes_the_page_await(self, tmp_path) -> None:
-        assert page.awaits(_loaded(tmp_path, _ASYNC_CONTEXT)) is True
+        assert page.awaits(loaded_page(tmp_path, _ASYNC_CONTEXT)) is True
 
     def test_an_async_metadata_callable_makes_the_page_await(self, tmp_path) -> None:
-        assert page.awaits(_loaded(tmp_path, _ASYNC_METADATA)) is True
+        assert page.awaits(loaded_page(tmp_path, _ASYNC_METADATA)) is True
 
     def test_a_write_to_either_registry_reads_the_colour_again(self, tmp_path) -> None:
         instance = Page()
@@ -328,7 +300,7 @@ class TestBuildRenderContext:
     """A render context of an async page is built through the bound driver."""
 
     def test_the_async_context_merges_with_the_processors(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, _ASYNC_CONTEXT)
+        page_file = loaded_page(tmp_path, _ASYNC_CONTEXT)
         request = build_page_request()
 
         context = page.build_render_context(page_file, request)
@@ -340,7 +312,7 @@ class TestBuildRenderContext:
         assert isinstance(context[METADATA_KEY], MetadataThunk)
 
     def test_a_render_without_a_request_runs_no_blocking_tail(self, tmp_path) -> None:
-        page_file = _loaded(
+        page_file = loaded_page(
             tmp_path,
             "from next.pages import context\n\n"
             "@context('rows')\n"
@@ -357,28 +329,28 @@ class TestBuildRenderContext:
         assert REQUEST_KEY not in context
 
     def test_async_metadata_folds_ahead_of_the_render(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, _ASYNC_METADATA)
+        page_file = loaded_page(tmp_path, _ASYNC_METADATA)
 
         context = page.build_render_context(page_file, build_page_request())
 
-        assert str(_metadata(context).folded().title) == "Async"
+        assert str(folded_metadata(context).folded().title) == "Async"
 
     def test_async_metadata_folds_without_a_request(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, _ASYNC_METADATA)
+        page_file = loaded_page(tmp_path, _ASYNC_METADATA)
 
         context = page.build_render_context(page_file)
 
-        assert str(_metadata(context).folded().title) == "Async"
+        assert str(folded_metadata(context).folded().title) == "Async"
 
     def test_a_failing_async_metadata_callable_is_left_out(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, _FAILING_METADATA)
+        page_file = loaded_page(tmp_path, _FAILING_METADATA)
 
         context = page.build_render_context(page_file, build_page_request())
 
-        assert _metadata(context).folded().title is None
+        assert folded_metadata(context).folded().title is None
 
     def test_a_dict_below_an_async_ancestor_folds_in_order(self, tmp_path) -> None:
-        _loaded(
+        loaded_page(
             tmp_path,
             "from next.pages import page\n\n"
             "@page.metadata(inherit=True)\n"
@@ -386,16 +358,16 @@ class TestBuildRenderContext:
             "    return {'title': 'Root', 'description': 'Root text'}\n\n"
             "template = 'ok'\n",
         )
-        leaf = _loaded(
+        leaf = loaded_page(
             tmp_path, "metadata = {'description': 'Leaf text'}\ntemplate = 'ok'\n", "a"
         )
 
         context = page.build_render_context(leaf, build_page_request())
 
-        assert _metadata(context).folded().description == "Leaf text"
+        assert folded_metadata(context).folded().description == "Leaf text"
 
     def test_a_refused_chain_keeps_the_lazy_thunk(self, tmp_path) -> None:
-        page_file = _loaded(
+        page_file = loaded_page(
             tmp_path,
             "from next.pages import page\n\n"
             "metadata = {'title': 'Dict'}\n\n"
@@ -415,17 +387,17 @@ class TestGuardedContext:
 
     def test_async_metadata_folds_once_the_guard_settled(self, tmp_path) -> None:
         (tmp_path / "error.djx").write_text("e")
-        page_file = _loaded(tmp_path, _ASYNC_METADATA)
+        page_file = loaded_page(tmp_path, _ASYNC_METADATA)
 
         context = page.guarded_context(page_file, build_page_request())
 
         assert isinstance(context, dict)
-        assert str(_metadata(context).folded().title) == "Async"
+        assert str(folded_metadata(context).folded().title) == "Async"
         assert SHELL_KEY in context
 
     def test_a_render_without_a_request_builds_on_the_loop(self, tmp_path) -> None:
         (tmp_path / "error.djx").write_text("e")
-        page_file = _loaded(tmp_path, _ASYNC_CONTEXT)
+        page_file = loaded_page(tmp_path, _ASYNC_CONTEXT)
 
         context = page.guarded_context(page_file)
 
@@ -434,7 +406,7 @@ class TestGuardedContext:
 
     def test_a_contained_failure_comes_back_with_its_shell(self, tmp_path) -> None:
         (tmp_path / "error.djx").write_text("e")
-        page_file = _loaded(tmp_path, _FAILING_ASYNC)
+        page_file = loaded_page(tmp_path, _FAILING_ASYNC)
 
         caught = page.guarded_context(page_file, build_page_request())
 
@@ -559,7 +531,7 @@ class TestNothingRunsWithoutAReader:
         view = unified_view(page, leaf)
         response = view(build_zone_request("z"))
         assert response.status_code == 200
-        assert _calls(leaf) == []
+        assert page_calls(leaf) == []
 
     def test_an_http_response_from_render_never_runs_the_callable(
         self, tmp_path: Path
@@ -568,7 +540,7 @@ class TestNothingRunsWithoutAReader:
         view = unified_view(page, leaf)
         response = view(build_page_request())
         assert response.content == b"short-circuit"
-        assert _calls(leaf) == []
+        assert page_calls(leaf) == []
 
 
 class TestRenderContextPathPrecompute:
@@ -657,7 +629,7 @@ class TestRenderContextPathPrecompute:
     ) -> None:
         """A ``render()`` page sees it too, through the skeleton refresh."""
         leaf = tmp_path / "leaf"
-        page_file = _build_dynamic_page(
+        page_file = write_dynamic_page(
             leaf, returns="'<p>{{ current_template_path }}</p>'"
         )
         view = unified_view(page_instance, page_file)

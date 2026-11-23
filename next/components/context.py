@@ -279,7 +279,7 @@ class ComponentContextManager:
         timeout: float | str | None = None,
         props: tuple[str, ...] = (),
         tag: str | WrapperTag | None = WrapperTag.SITE,
-        parallel: bool | None = None,
+        parallel: bool = True,
         tokens: Mapping[str, object] | None = None,
     ) -> None:
         """Deliver this component as a boundary in `mode`, with the options given.

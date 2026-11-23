@@ -86,31 +86,6 @@ class TestMisfits:
             ({"MORE": []}, ("MORE",), "a list"),
             ({"MORE": {"MAX_RESTORE": 0}}, ("MORE", "MAX_RESTORE"), "0"),
             (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"MODE": "fixed"}}}},
-                ("EXECUTOR", "OPTIONS", "PLACEMENT", "MODE"),
-                "'fixed'",
-            ),
-            (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"CPU_RATIO": 0}}}},
-                ("EXECUTOR", "OPTIONS", "PLACEMENT", "CPU_RATIO"),
-                "0",
-            ),
-            (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"CPU_RATIO": 1.5}}}},
-                ("EXECUTOR", "OPTIONS", "PLACEMENT", "CPU_RATIO"),
-                "1.5",
-            ),
-            (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"CPU_RATIO": False}}}},
-                ("EXECUTOR", "OPTIONS", "PLACEMENT", "CPU_RATIO"),
-                "False",
-            ),
-            (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"EXPLORE": -1}}}},
-                ("EXECUTOR", "OPTIONS", "PLACEMENT", "EXPLORE"),
-                "-1",
-            ),
-            (
                 {"EXECUTOR": {"OPTIONS": {"SQLITE": "always"}}},
                 ("EXECUTOR", "OPTIONS", "SQLITE"),
                 "'always'",
@@ -231,7 +206,7 @@ class TestMisfits:
             {"TOKENS": {"OPTIONS": {"BUCKET": 30, "KEYS": ["k" * 32]}}},
             {"TOKENS": {"OPTIONS": {"BUCKET": 599, "MAX_AGE": 86_400 * 2}}},
             {"TOKENS": {"OPTIONS": {"BUCKET": None, "MAX_AGE": 1}}},
-            {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"CPU_RATIO": 1, "MODE": "pool"}}}},
+            {"EXECUTOR": {"OPTIONS": {"PER_REQUEST": 1, "SQLITE": "parallel"}}},
             {"THREAD_STATE": ("a.b",), "LOADING": "skeleton.djx"},
         ],
     )
@@ -312,12 +287,7 @@ class TestReads:
             ({"MORE": []}, ("MORE", "MAX_RESTORE"), 10),
             ({"MORE": {}}, ("MORE", "MAX_RESTORE"), 10),
             (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"MODE": "pool"}}}},
-                ("EXECUTOR", "OPTIONS", "PLACEMENT", "EXPLORE"),
-                3,
-            ),
-            (
-                {"EXECUTOR": {"OPTIONS": {"PLACEMENT": {"MODE": "pool"}}}},
+                {"EXECUTOR": {"OPTIONS": {"PER_REQUEST": 2}}},
                 ("EXECUTOR", "OPTIONS", "MAX_WORKERS"),
                 16,
             ),
@@ -377,12 +347,12 @@ class TestReads:
             NEXT_FRAMEWORK={
                 "DEFER": {
                     "MORE": {"MAX_RESTORE": 4},
-                    "EXECUTOR": {"OPTIONS": {"PLACEMENT": {"HANDOFF": "2ms"}}},
+                    "EXECUTOR": {"OPTIONS": {"QUEUE_TIMEOUT": "2ms"}},
                 }
             }
         ):
             assert defer_count("MORE", "MAX_RESTORE") == 4
-            assert defer_seconds("EXECUTOR", "OPTIONS", "PLACEMENT", "HANDOFF") == 0.002
+            assert defer_seconds("EXECUTOR", "OPTIONS", "QUEUE_TIMEOUT") == 0.002
             assert defer_template("LOADING") is None
 
 

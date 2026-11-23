@@ -29,8 +29,8 @@ from next.introspect import (
     is_async_callable,
     is_coroutine_callable,
 )
-from next.ports import wait_served
-from next.tasks import QuitParentExecutor, StealableTask
+from next.ports import context_propagator_slot, wait_served
+from next.tasks import ContextSnapshot, QuitParentExecutor, StealableTask
 
 from .cache import request_memo
 from .errors import DependencyCycleError, MissingKeyError
@@ -40,7 +40,6 @@ from .scope import _Failure, join_waits, running_loop
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
-    from contextvars import Context
 
     from django.db.models import Model
 
@@ -91,14 +90,14 @@ def _take_route(route: _Route) -> None:
         SyncToAsync.thread_sensitive_context.set(sensitive)
 
 
-def _detached(context: Context) -> Context:
-    """Return a copy of `context` with no route, no running batch and no counted job."""
-    detached = context.copy()
+def _detached(captured: ContextSnapshot) -> ContextSnapshot:
+    """Return a copy of `captured` with no route, running batch or counted job."""
+    detached = captured.context.copy()
     detached.run(_route_to, None)
     detached.run(_running.set, ())
     detached.run(_counted.set, None)
     detached.run(join_waits.set, None)
-    return detached
+    return ContextSnapshot(detached, captured.thread)
 
 
 class _Refusal(QuitParentExecutor):
@@ -188,6 +187,7 @@ class _Batch:
     """The keys one loader gathers in one request until its window closes."""
 
     __slots__ = (
+        "carrier",
         "closed",
         "done",
         "entries",
@@ -212,6 +212,7 @@ class _Batch:
         self.started = False
         self.routes: dict[object, _Route] = {}
         self.via: object = None
+        self.carrier: int | None = None
         self.task: StealableTask[None] = StealableTask(partial(hub.run_here, self))
         self.timer = hub.loop.call_later(loader.window, hub.close, self)
 
@@ -352,7 +353,7 @@ class _Hub:
 
     __slots__ = (
         "_admitting",
-        "_context",
+        "_captured",
         "_drivers",
         "_lock",
         "_memo",
@@ -366,13 +367,16 @@ class _Hub:
     )
 
     def __init__(
-        self, scope: RequestScope, loop: asyncio.AbstractEventLoop, context: Context
+        self,
+        scope: RequestScope,
+        loop: asyncio.AbstractEventLoop,
+        captured: ContextSnapshot,
     ) -> None:
         """Bind the hub to the root scope, the loop and the context batches run in."""
         self.scope = scope
         self.loop = loop
         self.shut = False
-        self._context = _detached(context)
+        self._captured = _detached(captured)
         self._open: dict[Loader[Any, Any], _Batch] = {}
         self._memo: dict[Loader[Any, Any], dict[object, _Entry]] = {}
         self._drivers: set[asyncio.Task[None]] = set()
@@ -382,9 +386,9 @@ class _Hub:
         self._serial = count()
         self.jobs = _JobCount(loop, self.flush)
 
-    def adopt(self, context: Context) -> None:
-        """Run the batches started from now on in `context`, from any thread."""
-        self._context = _detached(context)
+    def adopt(self, captured: ContextSnapshot) -> None:
+        """Run the batches started from now on in the context of `captured`."""
+        self._captured = _detached(captured)
 
     def cached(self, loader: Loader[Any, Any], key: object) -> _Entry | None:
         """Return the entry of `key`, read from any thread, or None before it joins."""
@@ -483,7 +487,9 @@ class _Hub:
         if batch.started:
             return
         batch.started = True
-        context = self._context.copy()
+        captured = self._captured
+        restored = captured.get()
+        context = (captured.context if restored is None else restored).copy()
         refusal = batch.loader.refusal
         if refusal is None:
             batch.via, route = next(iter(batch.routes.items()))
@@ -491,7 +497,8 @@ class _Hub:
         else:
             context.run(_route_to, refusal)
             context.run(_running.set, (batch,))
-        driver = self.loop.create_task(self._drive(batch), context=context)
+        carrying = captured if restored is None and refusal is not None else None
+        driver = self.loop.create_task(self._drive(batch, carrying), context=context)
         self._drivers.add(driver)
         driver.add_done_callback(self._drivers.discard)
         if refusal is None:
@@ -525,10 +532,12 @@ class _Hub:
     def run_here(self, batch: _Batch) -> None:
         """Call the sync batch function in the scope context on the claiming thread.
 
-        The context and the thread list the batch, so a wait on one of its keys raises.
-        A claiming pool job lends the call its connection, transaction and deadline.
+        A segment runner carried that context here, any other claimant restores it.
         """
-        context = self._context.copy()
+        if batch.carrier == threading.get_ident():
+            context = copy_context()
+        else:
+            context = context_propagator_slot.get().restore(self._captured).copy()
         context.run(_running.set, (*_running.get(), batch))
         held = _held.batches
         held.append(batch)
@@ -543,13 +552,16 @@ class _Hub:
         batch.timer.cancel()
         batch.closed.set_result(None)
 
-    async def _drive(self, batch: _Batch) -> None:
+    async def _drive(self, batch: _Batch, carrying: ContextSnapshot | None) -> None:
         """Run `batch` through the scope, failing its keys when the run fails.
 
-        An interrupt is logged here, as no one awaits this task to see it raise.
+        `carrying` reaches the loop first. An interrupt is logged, as none awaits it.
         """
         try:
-            await self.scope.resolve(batch.name, partial(self._execute, batch))
+            if carrying is None:
+                await self._resolve(batch)
+            else:
+                await self._carried(batch, carrying)
         except BaseException as error:
             if isinstance(error, Exception) and self._unserved(batch):
                 self._reroute(batch)
@@ -560,6 +572,23 @@ class _Hub:
             if not isinstance(error, Exception):
                 name = describe_callable(batch.loader.batch)
                 logger.exception(_HALTED, name, type(error).__name__)
+
+    async def _resolve(self, batch: _Batch) -> None:
+        await self.scope.resolve(batch.name, partial(self._execute, batch))
+
+    async def _carried(self, batch: _Batch, captured: ContextSnapshot) -> None:
+        """Resolve an async `batch` in `captured` restored on this loop.
+
+        This task runs in the captured context already, so a moved one needs its own.
+        """
+        context = await context_propagator_slot.get().arestore(captured)
+        if context is captured.context:
+            await self._resolve(batch)
+            return
+        refused = context.copy()
+        refused.run(_route_to, batch.loader.refusal)
+        refused.run(_running.set, (batch,))
+        await self.loop.create_task(self._resolve(batch), context=refused)
 
     def _unserved(self, batch: _Batch) -> bool:
         """Whether the call of `batch` failed on the route of a waiter that has gone.
@@ -581,14 +610,23 @@ class _Hub:
     async def _execute(self, batch: _Batch) -> None:
         """Await an async batch here, or queue a sync one on the segment runner.
 
-        The sync call is shielded and tracked until it returns, as no cancel stops it.
+        The sync call is tracked until it returns, as no cancel of this wait stops it.
         """
         if batch.loader.awaits:
             await self._run_async(batch)
             return
-        call = asyncio.ensure_future(run_segment(batch.task.run))
+        call = asyncio.ensure_future(run_segment(partial(self._on_segment, batch)))
         self._track(call)
-        await asyncio.shield(call)
+        await asyncio.wait((call,))
+        call.result()
+
+    def _on_segment(self, batch: _Batch) -> bool:
+        """Run `batch` on the thread its segment runner carried the batch context to."""
+        batch.carrier = threading.get_ident()
+        try:
+            return batch.task.run()
+        finally:
+            batch.carrier = None
 
     def _call(self, batch: _Batch) -> None:
         """Call the sync batch function and settle every key with what it returned."""
@@ -705,8 +743,8 @@ class Loader[K: Hashable, V]:
         if scope is None:
             return await self._alone(key)
         loop = asyncio.get_running_loop()
-        home = scope.loop
-        hub = _hub(scope, loop if home is None else home)
+        own = scope.loop
+        hub = _hub(scope, loop if own is None else own)
         if hub.loop is not loop:
             return await sync_to_async(self.load_sync, thread_sensitive=True)(key)
         entry = hub.enter(self, key)
@@ -837,24 +875,24 @@ class _Loaders:
     Until then jobs are counted here off the loop, and the hub takes over the rest.
     """
 
-    __slots__ = ("_context", "_jobs", "_lock", "hub", "root")
+    __slots__ = ("_captured", "_jobs", "_lock", "hub", "root")
 
     def __init__(self, root: RequestScope) -> None:
         """Hold no hub, no context and no job yet."""
         self.root = root
         self.hub: _Hub | None = None
-        self._context: Context | None = None
+        self._captured: ContextSnapshot | None = None
         self._jobs: set[CountedJob] = set()
         self._lock = threading.Lock()
 
-    def adopt(self, context: Context) -> None:
-        """Run the batches started from now on in `context`, from any thread."""
+    def adopt(self, captured: ContextSnapshot) -> None:
+        """Run the batches started from now on in the context of `captured`."""
         with self._lock:
             hub = self.hub
             if hub is None:
-                self._context = context
+                self._captured = captured
                 return
-        hub.adopt(context)
+        hub.adopt(captured)
 
     def made(self, loop: asyncio.AbstractEventLoop) -> _Hub:
         """Return the hub, making it on `loop` with the jobs counted so far."""
@@ -864,8 +902,10 @@ class _Loaders:
         with self._lock:
             hub = self.hub
             if hub is None:
-                context = copy_context() if self._context is None else self._context
-                hub = _Hub(self.root, loop, context)
+                captured = self._captured
+                if captured is None:
+                    captured = ContextSnapshot(copy_context())
+                hub = _Hub(self.root, loop, captured)
                 for job in self._jobs:
                     job.hub = hub
                     hub.jobs.post(hub.jobs.join, job)
@@ -910,13 +950,13 @@ def _thread_hub(scope: RequestScope) -> _Hub | None:
     return None if loop is None else _hub(scope, loop)
 
 
-def open_loaders(scope: RequestScope, context: Context) -> None:
-    """Run the batches of the request on `scope` in `context`, from any thread.
+def open_loaders(scope: RequestScope, captured: ContextSnapshot) -> None:
+    """Run the batches of the request on `scope` in the context of `captured`.
 
     Without it they run in the context of the first load, its deadline included.
     """
     if scope.loop is not None:
-        _loaders(scope).adopt(context)
+        _loaders(scope).adopt(captured)
 
 
 def count_job(scope: RequestScope | None, deadline: float) -> CountedJob | None:

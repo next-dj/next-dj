@@ -18,6 +18,7 @@ from next.conf import next_framework_settings
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.router import CONTAINER_SELECTOR, CURRENT, SCOPE, router_settings
 from next.paths import ANCESTOR_MARK, PAGE_MARK, home_paths, normal_path, path_mark
+from next.utils import RAW_TEXT_ELEMENTS, VOID_ELEMENTS
 
 from .digest import fold
 
@@ -44,39 +45,9 @@ _TAG: Final = re.compile(rf"([a-z][^{_SPACE}/>]*+){_attrs_run('')}>")
 _SCHEME: Final = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*+:")
 
 _RAW: Final[Mapping[str, str]] = {
-    name: f"</{name}"
-    for name in (
-        "iframe",
-        "noembed",
-        "noframes",
-        "noscript",
-        "script",
-        "style",
-        "template",
-        "textarea",
-        "title",
-        "xmp",
-    )
+    name: f"</{name}" for name in (*RAW_TEXT_ELEMENTS, "template")
 }
-_VOID: Final = frozenset(
-    {
-        "area",
-        "base",
-        "br",
-        "col",
-        "embed",
-        "hr",
-        "img",
-        "input",
-        "keygen",
-        "link",
-        "meta",
-        "param",
-        "source",
-        "track",
-        "wbr",
-    }
-)
+"""The end tag the walk skips to past each raw-text element and an inert template."""
 _TAG_ENDS: Final = "\t\n\f\r />"
 _SPACE_CHARS: Final = "\t\n\f\r "
 _URL_TRIM: Final = "".join(chr(code) for code in range(33))
@@ -508,7 +479,7 @@ class _Scan:
             return -1
         if tag.name == "a" and self.stack:
             self.anchor(match.start() - 1, match.end())
-        if tag.name not in _VOID:
+        if tag.name not in VOID_ELEMENTS:
             return self.open(tag, match.start() - 1, match.end())
         return match.end()
 
@@ -662,26 +633,6 @@ def _opened(html: str, containers: tuple[str, ...]) -> tuple[_Plan, str] | None:
     return (plan, low) if plan.opened(low) else None
 
 
-def mark_current(
-    html: str,
-    path: str,
-    query: str,
-    *,
-    containers: tuple[str, ...],
-    origin: str = "",
-    homes: Callable[[], Collection[str]] | None = None,
-) -> str:
-    """Return `html` with the links of its navigation containers marked for `path`.
-
-    A document without a container opener comes back as the very object passed in.
-    """
-    opened = _opened(html, containers)
-    if opened is None:
-        return html
-    plan, low = opened
-    return _Scan(html, low, plan, _Current(path, query, origin, homes)).run()
-
-
 class CurrentLinks:
     """The settings-named backend that marks current links in rendered HTML."""
 
@@ -747,4 +698,4 @@ def origin_of(request: HttpRequest) -> str:
     return f"{request.scheme}://{host}"
 
 
-__all__ = ["CONTAINERS", "CurrentLinks", "current_links", "mark_current", "origin_of"]
+__all__ = ["CONTAINERS", "CurrentLinks", "current_links", "origin_of"]

@@ -96,11 +96,11 @@ class TestAssembled:
         html = inline_sink.assembled(lambda: queued()[0], collector=None, request=None)
         assert 'data-next-state="ready">R</div>' in html
 
-    def test_a_forced_pool_places_every_job_by_the_pool_mode(self, queued) -> None:
+    def test_a_forced_pool_places_every_job_on_the_pool(self, queued) -> None:
         with forcing_pool(), capture_signals(boundary_rendered) as recorder:
             assembled(lambda: queued()[0] + queued()[0], collector=None, request=None)
         reasons = {str(event.kwargs["reason"]) for event in recorder}
-        assert reasons == {"pool-mode"}
+        assert reasons == {"pool"}
 
 
 class TestPageDeferrals:

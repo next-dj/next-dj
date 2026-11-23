@@ -37,7 +37,6 @@ from next.suspense.coordinator.machine import (
     Unit,
     Wake,
 )
-from next.suspense.coordinator.placement import COSTS, Thresholds, place
 from next.suspense.coordinator.runner import Report, Runtime
 from next.suspense.errors import BoundaryRefusedError, BoundaryShedError
 from next.suspense.executors import (
@@ -48,17 +47,9 @@ from next.suspense.executors import (
     request_executor,
 )
 from next.suspense.manager import suspense_manager
-from next.suspense.markers import (
-    Capacity,
-    ForegroundFacts,
-    Job,
-    Lane,
-    Placement,
-    Server,
-    Timing,
-)
+from next.suspense.markers import Capacity, ForegroundFacts, Lane, Server, Timing
 from next.suspense.session import BoundarySession
-from next.tasks import StealableTask
+from next.tasks import ContextSnapshot, StealableTask
 from next.utils import after_fork
 
 
@@ -160,20 +151,6 @@ def foreground() -> Foreground:
     return held
 
 
-class _Placer:
-    """The placement decision with the thresholds bound, as the machine calls it."""
-
-    __slots__ = ("_options",)
-
-    def __init__(self, options: Thresholds) -> None:
-        self._options = options
-
-    def __call__(
-        self, job: Job[Any], facts: ForegroundFacts, *, alone: bool
-    ) -> Placement:
-        return place(job, facts, self._options, COSTS, alone=alone)
-
-
 class _Run[D]:
     """One dispatched unit, the jobs it reported and whether the driver left it."""
 
@@ -271,14 +248,12 @@ class Coordinator[D]:
         *,
         executor: BoundaryExecutor | None = None,
         admission: Admitter | None = None,
-        thresholds: Thresholds | None = None,
         permits: Foreground | None = None,
         coalesce: float = COALESCE,
     ) -> None:
         """Use the process backends and settings for whatever is not given."""
         self.executor = executor
         self.admission = admission
-        self.thresholds = thresholds
         self.permits = permits
         self.coalesce = coalesce
         self.finish: Finish | None = None
@@ -350,16 +325,15 @@ class _Driver[D](ABC):
             facts = ForegroundFacts(self._server)
         snapshot = session.snapshot
         if snapshot is None:
-            snapshot = contextvars.copy_context()
+            snapshot = ContextSnapshot(contextvars.copy_context())
         self._executor = coordinator.executor or suspense_manager.executor()
         self._runtime = Runtime(
-            snapshot, session, facts, self._executor, COSTS, session.scope, hops
+            snapshot, session, facts, self._executor, session.scope, hops
         )
         self._machine = Machine(
             session.plan(),
             session.caps,
             facts,
-            _Placer(coordinator.thresholds or Thresholds.from_settings()),
             coordinator.admission or suspense_manager.admission(),
             deadline=session.deadline,
             coalesce=coordinator.coalesce,
@@ -922,7 +896,7 @@ class AsyncDriver[D](_Driver[D]):
         """
         jobs = {run.task for run in self._runs.values() if run.task is not None}
         cancelled = await _outlast({*self._hopping, *jobs})
-        snapshot = self._runtime.snapshot if jobs else None
+        snapshot = self._runtime.snapshot.context if jobs else None
         sensitive = SyncToAsync.thread_sensitive_context
         if snapshot is not None and snapshot.get(sensitive) is not None:
             cleared = self._loop.create_task(_cleared(), context=snapshot.copy())
@@ -988,14 +962,27 @@ class AsyncDriver[D](_Driver[D]):
 
     async def _steal_hop(self, work: StealableTask[None]) -> None:
         """Run a queued pool unit on the request thread under a taken permit."""
-        steal = sync_to_async(self._steal_here, thread_sensitive=True)
+        steal = sync_to_async(
+            self._steal_here, thread_sensitive=True, context=self._restored()
+        )
         await self._hopped(steal(work))
+
+    def _restored(self) -> contextvars.Context:
+        """Return a copy of the snapshot, which a hop restores on the request thread."""
+        return self._runtime.snapshot.context.copy()
+
+    def _keep(self) -> None:
+        """Keep the snapshot the hop restored here, so its jobs need no hop."""
+        snapshot = self._runtime.snapshot
+        if snapshot.get() is None:
+            snapshot.keep(contextvars.copy_context())
 
     def _unpermit(self, _task: asyncio.Task[None]) -> None:
         self._permits.release()
 
     def _steal_here(self, work: StealableTask[None]) -> None:
         self._request_thread = threading.get_ident()
+        self._keep()
         self._executor.steal(work)
 
     def _hop_task(self, hop: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
@@ -1039,20 +1026,21 @@ class AsyncDriver[D](_Driver[D]):
         """Run request-lane units in one hop under a permit, refusing chosen ones."""
         permits = self._permits
         if not permits.take():
-            runs = self._refuse_chosen(runs)
+            runs = self._refuse_unforced(runs)
             if not runs:
                 return
             until = max(task.deadline for run in runs for task in run.unit.tasks)
             if not await permits.wait(until):
                 self._expire(runs)
                 return
+        hop = sync_to_async(self._hop, thread_sensitive=True, context=self._restored())
         try:
-            await self._hopped(sync_to_async(self._hop, thread_sensitive=True)(runs))
+            await self._hopped(hop(runs))
         finally:
             permits.release()
 
-    def _refuse_chosen(self, runs: list[_Run[D]]) -> list[_Run[D]]:
-        """Send the units placement chose back to the pool, keeping the forced ones."""
+    def _refuse_unforced(self, runs: list[_Run[D]]) -> list[_Run[D]]:
+        """Send the units no rule forced back to the pool, keeping the forced ones."""
         forced: list[_Run[D]] = []
         for run in runs:
             if run.unit.placement.forced:
@@ -1075,6 +1063,7 @@ class AsyncDriver[D](_Driver[D]):
         A unit counts only once it starts, as the units behind it wait for its end.
         """
         self._request_thread = threading.get_ident()
+        self._keep()
         for run in runs:
             unit = run.unit
             run.count = self._count(unit)

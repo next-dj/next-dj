@@ -6,30 +6,10 @@ import pytest
 from next.pages import Page, page
 from next.pages.boundaries import SHELL_KEY, Caught
 from next.pages.gating import GATE_KEY, ShellGate
-from next.pages.loaders import (
-    BoundaryChain,
-    PageBoundary,
-    load_page_module,
-    page_boundaries,
-)
+from next.pages.loaders import BoundaryChain, PageBoundary, page_boundaries
 from next.pages.manager import gating as manager_gating
-from next.pages.metadata.chain import FoldedMetadata
-from next.seeding import METADATA_KEY
-from tests.support import build_page_request, write_page
-
-
-def _loaded(root: Path, source: str, trail: str = "") -> Path:
-    """Write and import one `page.py`, so its registrations reach the global page."""
-    page_file = write_page(root, trail, source)
-    _module, error = load_page_module(page_file)
-    assert error is None
-    return page_file
-
-
-def _metadata(context: dict[str, object]) -> FoldedMetadata:
-    thunk = context[METADATA_KEY]
-    assert isinstance(thunk, FoldedMetadata)
-    return thunk
+from tests.support import build_page_request
+from tests.support.pages import folded_metadata, loaded_page
 
 
 _GATED_ASYNC = (
@@ -87,7 +67,7 @@ class TestGatedContext:
         self, tmp_path
     ) -> None:
         (tmp_path / "loading.djx").write_text("l")
-        page_file = _loaded(tmp_path, _GATED_SYNC)
+        page_file = loaded_page(tmp_path, _GATED_SYNC)
 
         context = _gated(page_file, build_page_request())
 
@@ -98,20 +78,20 @@ class TestGatedContext:
 
     def test_an_async_guard_runs_the_shell_through_the_bridge(self, tmp_path) -> None:
         (tmp_path / "loading.djx").write_text("l")
-        page_file = _loaded(tmp_path, _GATED_ASYNC)
+        page_file = loaded_page(tmp_path, _GATED_ASYNC)
 
         context = _gated(page_file, build_page_request())
 
         assert isinstance(context, dict)
         assert context["rows"] == [1, 2]
         assert "total" not in context
-        assert str(_metadata(context).folded().title) == "Async"
+        assert str(folded_metadata(context).folded().title) == "Async"
 
     def test_an_async_shell_without_a_request_builds_on_the_loop(
         self, tmp_path
     ) -> None:
         (tmp_path / "loading.djx").write_text("l")
-        page_file = _loaded(tmp_path, _GATED_GUARD)
+        page_file = loaded_page(tmp_path, _GATED_GUARD)
 
         context = _gated(page_file)
 
@@ -125,7 +105,7 @@ class TestGatedContext:
         (tmp_path / "error.djx").write_text("e")
         (tmp_path / "leaf").mkdir()
         (tmp_path / "leaf" / "loading.djx").write_text("l")
-        page_file = _loaded(tmp_path, _GATED_FAILING.format(kind=kind), "leaf")
+        page_file = loaded_page(tmp_path, _GATED_FAILING.format(kind=kind), "leaf")
 
         caught = _gated(page_file, build_page_request())
 

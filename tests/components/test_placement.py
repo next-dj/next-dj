@@ -226,24 +226,27 @@ class TestPlacement:
         assert (first, last) == ("a-", "-z")
         assert middle.var.var == "p"
 
-    def test_a_constant_row_key_is_one_literal_piece(self) -> None:
-        template = _compiled(
-            "{% for p in xs %}<li data-next-key='const'>{% component 'c' %}"
-            "</li>{% endfor %}"
-        )
-        assert Placement.of(((template.nodelist, _is_call),)).recipe == ("const",)
-
     @pytest.mark.parametrize(
-        "before",
-        ["<title-bar></title-bar>", "<script-loader></script-loader>", "<!-->"],
+        "row",
+        [
+            pytest.param("<li data-next-key='const'>{call}</li>", id="plain"),
+            pytest.param(
+                "<title-bar></title-bar><tr data-next-key='const'>{call}</tr>",
+                id="after-a-custom-element",
+            ),
+            pytest.param(
+                "<script-loader></script-loader><tr data-next-key='const'>{call}</tr>",
+                id="after-a-script-named-element",
+            ),
+            pytest.param(
+                "<!--><tr data-next-key='const'>{call}</tr>",
+                id="after-an-empty-comment",
+            ),
+        ],
     )
-    def test_the_row_key_reads_past_markup_that_hides_nothing(
-        self, before: str
-    ) -> None:
-        template = _compiled(
-            f"{{% for p in xs %}}{before}<tr data-next-key='const'>"
-            "{% component 'c' %}</tr>{% endfor %}"
-        )
+    def test_a_constant_row_key_is_one_literal_piece(self, row: str) -> None:
+        body = row.format(call="{% component 'c' %}")
+        template = _compiled(f"{{% for p in xs %}}{body}{{% endfor %}}")
         assert Placement.of(((template.nodelist, _is_call),)).recipe == ("const",)
 
     def test_a_loop_without_a_keyed_row_has_no_key(self) -> None:

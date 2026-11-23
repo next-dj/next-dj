@@ -1,5 +1,4 @@
 import inspect
-from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -11,11 +10,7 @@ from next.pages import Context
 from next.pages.graph import compile_graph
 from next.testing import override_provider
 from tests.support import bound_dependency
-
-
-ROOT = Path("/graph/page.py")
-MID = Path("/graph/mid/page.py")
-LEAF = Path("/graph/mid/leaf/page.py")
+from tests.support.graphs import LEAF, MID, ROOT
 
 
 _READS_A = Context("a")

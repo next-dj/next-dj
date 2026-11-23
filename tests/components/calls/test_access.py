@@ -10,7 +10,7 @@ from django.test import Client
 from next.components.trip import TripInput
 from next.defer import DEFERRALS_KEY, DeferMode, DeferredCall
 from next.seeding import COLLECTOR_KEY
-from next.suspense.assembly import finish, run_sequentially
+from next.suspense.assembly import finish
 from next.suspense.components import deferring
 from next.templatetags import components as component_tags
 from next.templatetags.components import ComponentNode
@@ -27,6 +27,7 @@ from tests.components.sites import (
 )
 from tests.support import routed
 from tests.support.access import COMPONENTS
+from tests.support.boundaries import run_sequentially
 from tests.support.pages import write_page
 
 

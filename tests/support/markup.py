@@ -21,3 +21,26 @@ HOSTILE = MappingProxyType(
 def flood(unit: str, size: int) -> str:
     """Repeat `unit` into a document of about `size` characters."""
     return unit * (size // len(unit))
+
+
+PARSER_VOID = (
+    "area",
+    "base",
+    "basefont",
+    "bgsound",
+    "br",
+    "col",
+    "embed",
+    "frame",
+    "hr",
+    "img",
+    "input",
+    "keygen",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+)
+"""The start tags the HTML parsing algorithm never leaves open, spelled out by hand."""

@@ -6,7 +6,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 from django.http import HttpRequest
@@ -55,14 +55,6 @@ class SignalSender:
 
     A cached signal weak-references its sender, which a bare ``object()`` cannot be.
     """
-
-
-def typing_optional(cls: type) -> object:
-    """Return the `typing.Optional` spelling of `cls | None`, as user code may write it.
-
-    Subscripted, since the literal spelling is rewritten to PEP 604 on 3.12 and 3.13.
-    """
-    return Optional.__getitem__(cls)
 
 
 def next_framework_settings_stand_in(**overrides: object) -> SimpleNamespace:

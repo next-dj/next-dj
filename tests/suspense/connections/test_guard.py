@@ -23,6 +23,7 @@ from next.suspense.connections import (
 )
 from next.suspense.markers import Captured
 from next.tasks import StealableTask
+from tests.support.statements import close_driver
 from tests.suspense.connections.shared import (
     Broken,
     Recorder,
@@ -83,11 +84,6 @@ def _create_then_fail(name: str) -> None:
     _fail_job()
 
 
-def _close(wrapper: BaseDatabaseWrapper) -> None:
-    if wrapper.connection is not None:
-        wrapper.connection.close()
-
-
 @contextmanager
 def _fresh_default() -> Iterator[BaseDatabaseWrapper]:
     original = connections["default"]
@@ -97,7 +93,7 @@ def _fresh_default() -> Iterator[BaseDatabaseWrapper]:
         yield fresh
     finally:
         connections["default"] = original
-        _close(fresh)
+        close_driver(fresh)
 
 
 def _set_config(calls: list[tuple[object, ...]]) -> None:

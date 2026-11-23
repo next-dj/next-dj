@@ -43,7 +43,7 @@ def plain_job(
     *,
     site: Site = PLAIN_SITE,
     key: str = "k",
-    parallel: bool | None = None,
+    parallel: bool = True,
     deadline: float = 10.0,
     html: str = "<p>ready</p>",
     delta: str = "",

@@ -108,10 +108,19 @@ class TestMoreMarkup:
             'data-next-param="p">Older</a></div>'
         )
 
-    def test_url_is_written_on_a_raw_link(self) -> None:
-        source = '{% more zone="feed" next=n url="push" %}More{% endmore %}'
-        assert _render(source, n="Wzx") == (
-            FEED_HEAD.format(query="page=Wzx") + ' data-next-url="push">More</a></div>'
+    @pytest.mark.parametrize(
+        ("option", "n", "written"),
+        [
+            pytest.param('url="push"', "Wzx", 'data-next-url="push"', id="url"),
+            pytest.param('margin="400px"', 2, 'data-next-margin="400px"', id="margin"),
+        ],
+    )
+    def test_an_option_is_written_on_the_raw_link(
+        self, option: str, n: object, written: str
+    ) -> None:
+        source = f'{{% more zone="feed" next=n {option} %}}More{{% endmore %}}'
+        assert _render(source, n=n) == (
+            FEED_HEAD.format(query=f"page={n}") + f" {written}>More</a></div>"
         )
 
     @pytest.mark.parametrize(
@@ -132,13 +141,6 @@ class TestMoreMarkup:
     def test_the_default_param_is_not_written(self) -> None:
         source = '{% more zone="feed" next=n param="page" %}More{% endmore %}'
         assert "data-next-param" not in _render(source, n=2)
-
-    def test_margin(self) -> None:
-        source = '{% more zone="feed" next=n margin="400px" %}More{% endmore %}'
-        assert _render(source, n=2) == (
-            FEED_HEAD.format(query="page=2")
-            + ' data-next-margin="400px">More</a></div>'
-        )
 
     @pytest.mark.parametrize(
         ("option", "attribute"),

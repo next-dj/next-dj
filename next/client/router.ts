@@ -101,7 +101,7 @@ export interface Turn {
 }
 
 export interface HistoryHost {
-  partial: Pick<PartialSurface, "apply" | "layers" | "_headers" | "_parse">;
+  partial: Pick<PartialSurface, "apply" | "layers" | "_headers" | "_parse" | "_take">;
   settings: () => Settings;
   context: () => Readonly<Record<string, unknown>>;
   region: (target: Target) => Bounds | undefined;
@@ -166,6 +166,7 @@ export interface RouterNext {
     | "_headers"
     | "_parse"
     | "_sweep"
+    | "_take"
   >;
   readonly context: Readonly<Record<string, unknown>>;
   on(event: "ready", listener: () => void): () => void;

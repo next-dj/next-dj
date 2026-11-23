@@ -277,24 +277,15 @@ def _run_keeping_markers(hop: StealableTask[Any], saved: dict[str, Any]) -> None
 
     A stale marker would send a later `async_to_sync` here to the background loop.
     """
-    started = time.thread_time_ns()
     try:
         hop.run()
     finally:
         markers = vars(SyncToAsync.threadlocal)
         markers.clear()
         markers.update(saved)
-        _served.cpu = served_cpu() + time.thread_time_ns() - started
 
 
 _serving = threading.local()
-_served = threading.local()
-
-
-def served_cpu() -> int:
-    """Return the CPU nanoseconds this thread spent on hops it served for others."""
-    cpu: int = getattr(_served, "cpu", 0)
-    return cpu
 
 
 @contextmanager
@@ -647,5 +638,4 @@ __all__ = [
     "request_executor",
     "retire_thread",
     "serve_until",
-    "served_cpu",
 ]

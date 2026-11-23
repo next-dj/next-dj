@@ -5,7 +5,6 @@ import inspect
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from django.http import Http404
@@ -21,7 +20,6 @@ from next.pages.context import ContextResult
 from next.pages.graph import (
     ContextGraph,
     Phase,
-    acollect,
     arun_phase,
     blaming,
     callable_keys,
@@ -31,11 +29,16 @@ from next.pages.graph import (
 )
 from next.pages.registry import PageContextRegistry
 from tests.support import bound_dependency
+from tests.support.graphs import (
+    LEAF,
+    MID,
+    ROOT,
+    collect,
+    failing,
+    register_two,
+    run_graph,
+)
 
-
-ROOT = Path("/graph/page.py")
-MID = Path("/graph/mid/page.py")
-LEAF = Path("/graph/mid/leaf/page.py")
 
 _READING_FACTORY = Depends(lambda a: a)
 _JS = object()
@@ -71,23 +74,6 @@ class _Picks:
         return options[self.below(len(options))]
 
 
-def _collect(registry: PageContextRegistry, file_path: Path = LEAF, **kwargs):
-    """Run `acollect_context` of `file_path` on a fresh loop."""
-    return asyncio.run(registry.acollect_context(file_path, **kwargs))
-
-
-def _run_graph(graph: ContextGraph, file_path: Path = LEAF, **kwargs):
-    """Run `graph` through `acollect` on a fresh loop with empty inputs."""
-    options = {
-        "request": None,
-        "url_kwargs": {},
-        "dep_cache": {},
-        "requested_zones": None,
-        **kwargs,
-    }
-    return asyncio.run(acollect(graph, file_path, **options))
-
-
 class TestSerial:
     """A graph with no layer of two async callables runs in order with plain awaits."""
 
@@ -107,7 +93,7 @@ class TestSerial:
         registry.register_context(LEAF, "second", second)
         monkeypatch.setattr(asyncio, "create_task", boom)
 
-        assert _collect(registry).context_data == {"first": "A", "second": "AB"}
+        assert collect(registry).context_data == {"first": "A", "second": "AB"}
 
     def test_consecutive_sync_callables_share_one_segment(
         self, registry, inline
@@ -120,7 +106,7 @@ class TestSerial:
         registry.register_context(LEAF, "c_async", c_async)
         registry.register_context(LEAF, "d_sync", lambda c_async: c_async + "d")
 
-        result = _collect(registry)
+        result = collect(registry)
 
         assert result.context_data["d_sync"] == "abcd"
         assert inline.calls == 2
@@ -138,7 +124,7 @@ class TestSerial:
         registry.register_context(LEAF, "rows", rows, serialize=True)
         registry.register_context(LEAF, "total", total, serialize=True, serializer=_JS)
 
-        result = _collect(registry)
+        result = collect(registry)
 
         assert result.context_data == {"rows": [1, 2], "spread": 1, "total": 2}
         assert result.js_context == {"rows": 0, "spread": 1, "total": 2}
@@ -157,7 +143,7 @@ class TestSerial:
         registry.register_context(LEAF, "boxed", boxed, zone="box")
         registry.register_context(LEAF, "other", lambda: "other", zone="other")
 
-        result = _collect(registry, requested_zones=frozenset({"box"}))
+        result = collect(registry, requested_zones=frozenset({"box"}))
 
         assert result.context_data == {"boxed": "box"}
 
@@ -168,14 +154,9 @@ class TestSerial:
         registry.register_context(LEAF, "first", first)
         registry.register_context(LEAF, "second", lambda slug: slug + "!")
 
-        result = _collect(registry, url_kwargs={"slug": "post"})
+        result = collect(registry, url_kwargs={"slug": "post"})
 
         assert result.context_data == {"first": "post", "second": "post!"}
-
-
-def _two_async(registry: PageContextRegistry, one, two) -> None:
-    registry.register_context(LEAF, "one", one)
-    registry.register_context(LEAF, "two", two)
 
 
 class TestParallel:
@@ -194,7 +175,7 @@ class TestParallel:
             await asyncio.wait_for(events["one"].wait(), 1)
             return 2
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
 
         async def main():
             events["one"] = asyncio.Event()
@@ -216,10 +197,10 @@ class TestParallel:
         def three() -> bool:
             return reached.wait(1)
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
         registry.register_context(LEAF, "three", three)
 
-        assert _collect(registry).context_data == {"one": 1, "three": True, "two": 2}
+        assert collect(registry).context_data == {"one": 1, "three": True, "two": 2}
 
     def test_each_callable_gets_a_stack_of_its_own(
         self, registry, inline, monkeypatch
@@ -239,9 +220,9 @@ class TestParallel:
         async def two() -> int:
             return 2
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
         monkeypatch.setattr(graph_module, "ResolutionContext", Recording)
-        _collect(registry)
+        collect(registry)
 
         assert len({id(stack) for stack in stacks}) == len(stacks) == 3
 
@@ -272,8 +253,8 @@ class TestParallel:
         zones = picks.choice([None, frozenset({"z1"})])
         graph = registry.graph(LEAF)
 
-        parallel = _run_graph(replace(graph, parallel=True), requested_zones=zones)
-        serial = _run_graph(replace(graph, parallel=False), requested_zones=zones)
+        parallel = run_graph(replace(graph, parallel=True), requested_zones=zones)
+        serial = run_graph(replace(graph, parallel=False), requested_zones=zones)
 
         assert parallel == serial
         assert list(parallel.context_data) == list(serial.context_data)
@@ -290,7 +271,7 @@ class TestParallel:
         registry.register_context(LEAF, "w", lambda k, y: k + y, serialize=True)
 
         expected = registry.collect_context(LEAF)
-        parallel = _run_graph(replace(registry.graph(LEAF), parallel=True))
+        parallel = run_graph(replace(registry.graph(LEAF), parallel=True))
 
         assert parallel == expected
         assert list(parallel.context_data) == list(expected.context_data)
@@ -322,7 +303,7 @@ class TestParallel:
         registry.register_context(LEAF, "c_fast", c_fast)
 
         with pytest.raises(LookupError, match="a"):
-            _collect(registry)
+            collect(registry)
         assert cancelled == ["b"]
 
     def test_http404_keeps_its_type(self, registry, inline) -> None:
@@ -334,10 +315,10 @@ class TestParallel:
         async def two() -> int:
             return 2
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
 
         with pytest.raises(Http404) as caught:
-            _collect(registry)
+            collect(registry)
         assert caught.value is from_view
 
     def test_callables_after_a_failure_never_start(self, registry, inline) -> None:
@@ -359,7 +340,7 @@ class TestParallel:
         registry.register_context(LEAF, "c_later", c_later)
 
         with pytest.raises(ValueError, match="a"):
-            _collect(registry)
+            collect(registry)
         assert started == []
 
     def test_a_failing_sync_callable_is_raised_at_its_place(
@@ -381,13 +362,13 @@ class TestParallel:
         registry.register_context(LEAF, "b_fails", b_fails)
 
         with pytest.raises(KeyError, match="sync"):
-            _collect(registry)
+            collect(registry)
 
     def test_a_lane_stops_before_a_callable_past_the_failure(self, registry) -> None:
         registry.register_context(LEAF, "late", lambda: 1)
         base = ResolutionContext.for_page(None, {}, {})
         run = graph_module._Run(registry.graph(LEAF), LEAF, base)
-        lane = graph_module._Lane(((0, {}),), -1)
+        lane = graph_module._Lane(((0, {}),), -1, ())
 
         run._lane(lane, run.base)
 
@@ -414,7 +395,7 @@ class TestParallel:
         registry.register_context(LEAF, "two", two)
         registry.register_context(LEAF, "zoned", lambda: 3, zone="other")
 
-        result = _collect(registry, requested_zones=frozenset({"box"}))
+        result = collect(registry, requested_zones=frozenset({"box"}))
 
         assert result.context_data == {"k": "root", "one": 1, "two": 2}
         assert called == []
@@ -435,7 +416,7 @@ class TestParallel:
         async def two(value=Depends("graph_user")) -> object:
             return value
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
 
         async def main() -> tuple[object, object]:
             async with render_scope({}):
@@ -459,7 +440,7 @@ class TestParallel:
         async def two(value=Depends("graph_user")) -> object:
             return value
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
         memo = RequestMemo(RequestScope(), shared=frozenset({"graph_user"}))
 
         async def main(held: RequestMemo | None) -> object:
@@ -490,7 +471,7 @@ class TestParallel:
             bucket.append("two")
             return bucket
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
 
         async def main() -> dict[str, object]:
             async with render_scope({}):
@@ -528,13 +509,13 @@ class TestParallel:
 
         spread = spread_async if colour == "async" else spread_sync
         registry.register_context(LEAF, None, spread)
-        _two_async(registry, a_slow, b_slow)
+        register_two(registry, a_slow, b_slow)
 
         with pytest.raises(
             PageContextShapeError,
             match=r"keyless `@context` spread_\w+ returned a non-mapping",
         ):
-            _collect(registry)
+            collect(registry)
         assert cancelled == ["a"]
 
     def test_a_failure_the_run_abandons_is_retrieved(self, registry) -> None:
@@ -552,7 +533,7 @@ class TestParallel:
             await asyncio.sleep(1)
             return 2
 
-        _two_async(registry, one, two)
+        register_two(registry, one, two)
 
         async def main() -> None:
             loop = asyncio.get_running_loop()
@@ -594,13 +575,6 @@ def _random_callable(
         ]
     )
     return body
-
-
-def _fails(message: str) -> Callable[[], str]:
-    def fail() -> str:
-        raise ValueError(message)
-
-    return fail
 
 
 def _phase(
@@ -689,7 +663,7 @@ class TestPhases:
         assert blamed.settled == [(0, "nav", "mid")]
 
     def test_a_failure_blames_its_group(self, registry) -> None:
-        registry.register_context(MID, "nav", _fails("nav"), inherit_context=True)
+        registry.register_context(MID, "nav", failing("nav"), inherit_context=True)
         graph, phase = _phase(registry, {0})
 
         with blaming() as blamed, pytest.raises(ValueError, match="nav"):

@@ -61,11 +61,11 @@ class PageDeferDeclaring:
     """The `page.defer` declaration of the `Page` manager."""
 
     def defer(
-        self, *, timeout: float | str | None = None, parallel: bool | None = None
+        self, *, timeout: float | str | None = None, parallel: bool = True
     ) -> None:
         """Bound the streamed body of this page by `timeout` and place its job.
 
-        `None` lets placement decide, `True` pins the pool, `False` the request lane.
+        `False` keeps the job on the request lane, `True` lets it take the pool.
         """
         page_defer_store.record(
             registering_site(),

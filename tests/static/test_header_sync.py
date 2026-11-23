@@ -40,9 +40,11 @@ def _protocol() -> dict[str, str]:
 
 
 def _sent_prefetch_depths() -> set[str]:
-    """Return every value `prefetch.ts` sends under the prefetch header."""
+    """Return every value `prefetch.ts` sends under the prefetch header or as a depth."""
     source = (CLIENT / "prefetch.ts").read_text(encoding="utf-8")
-    return set(re.findall(r'\[HEADER_PREFETCH\]:\s*"([^"]+)"', source))
+    literal = re.findall(r'\[HEADER_PREFETCH\]:\s*"([^"]+)"', source)
+    depth = re.findall(r'\bask\([^()]*,\s*"([^"]+)"\)', source)
+    return {*literal, *depth}
 
 
 class TestHeaderNames:

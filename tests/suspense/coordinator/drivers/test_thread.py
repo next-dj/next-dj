@@ -8,12 +8,15 @@ from unittest import mock
 from unittest.mock import Mock
 
 import pytest
+from asgiref.local import Local
 from django.core.exceptions import ImproperlyConfigured
+from django.utils import translation
 
 from next.defer import BoundaryOptions, ErrorKind, remaining
 from next.deps import Loader
 from next.deps.cache import _CACHE_MISS, RequestMemo, request_memo
 from next.deps.scope import RequestScope
+from next.ports import context_propagator_slot
 from next.suspense import (
     Admit,
     BoundaryExecutor,
@@ -25,7 +28,6 @@ from next.suspense import (
     Verdict,
 )
 from next.suspense.coordinator import (
-    COSTS,
     IDLE,
     Abandon,
     Coordinator,
@@ -36,15 +38,13 @@ from next.suspense.coordinator import (
     ThreadDriver,
     Unit,
     drivers,
-    runner,
 )
 from next.suspense.executors import RequestThreadExecutor
 from next.suspense.markers import Group, Outcome, Rendered
 from next.suspense.session import BoundarySession
-from next.tasks import StealableTask
+from next.tasks import ContextSnapshot, StealableTask
 from tests.support.waits import QUIET
 from tests.suspense.coordinator.drivers.doubles import (
-    ADAPTIVE,
     ATOMIC_WSGI,
     RUNNING_TIMEOUT,
     WAIT,
@@ -85,6 +85,17 @@ from tests.suspense.coordinator.drivers.doubles import (
 
 
 marker = contextvars.ContextVar[str]("marker", default="unset")
+request_local = Local()
+
+
+class StalledPropagator:
+    """A propagator that never restores onto a sync thread before the deadline."""
+
+    def restore(self, captured: ContextSnapshot, /) -> contextvars.Context:
+        raise TimeoutError
+
+    async def arestore(self, captured: ContextSnapshot, /) -> contextvars.Context:
+        return captured.context
 
 
 class TestThreadDriver:
@@ -101,18 +112,54 @@ class TestThreadDriver:
         assert all(isinstance(item, Outcome) for item in items_of(batches).values())
         assert len({html_of(item) for item in items_of(batches).values()}) == 3
 
-    def test_a_lone_job_runs_on_the_request_thread_without_a_submission(
+    def test_pool_and_loop_jobs_read_the_language_of_the_request(
+        self, pools, hops
+    ) -> None:
+        def body() -> Rendered[str]:
+            return Rendered(translation.get_language(), "")
+
+        async def abody() -> Rendered[str]:
+            return Rendered(translation.get_language(), "")
+
+        executor = pools()
+        with translation.override("de"):
+            session = new_session()
+            queue_job(session, body)
+            queue_job(session, abody=abody)
+            batches = list(coordinator_over(executor).run(session))
+        assert executor.submitted == 1
+        assert [html_of(item) for item in items_of(batches).values()] == ["de", "de"]
+
+    def test_pool_and_loop_jobs_read_a_local_of_the_request(self, pools, hops) -> None:
+        def body() -> Rendered[str]:
+            return Rendered(str(getattr(request_local, "value", None)), "")
+
+        async def abody() -> Rendered[str]:
+            return Rendered(str(getattr(request_local, "value", None)), "")
+
+        def scenario() -> list[str]:
+            request_local.value = "set"
+            session = new_session()
+            queue_job(session, body)
+            queue_job(session, abody=abody)
+            batches = list(coordinator_over(pools()).run(session))
+            return [html_of(item) for item in items_of(batches).values()]
+
+        assert contextvars.copy_context().run(scenario) == ["set", "set"]
+
+    def test_a_job_on_the_thread_of_its_snapshot_asks_no_propagator(
         self, pools
     ) -> None:
         session = new_session()
-        job = queue_job(session, ident_body)
-        executor = pools()
-        coordinator = coordinator_over(executor, thresholds=ADAPTIVE)
-        (batch,) = list(coordinator.run(session))
+        job = queue_job(session, ident_body, parallel=False)
+        previous = context_propagator_slot.get()
+        context_propagator_slot.set(StalledPropagator())
+        try:
+            (batch,) = list(coordinator_over(pools()).run(session))
+        finally:
+            context_propagator_slot.set(previous)
+        assert batch.items[0].id == job.id
         assert html_of(batch.items[0]) == str(threading.get_ident())
-        assert executor.submitted == 0
-        assert coordinator.timings[job.id].lane is Lane.REQUEST
-        assert coordinator.timings[job.id].placement == Placement(Verdict.ALONE)
 
     def test_a_rule_runs_every_job_on_the_request_thread_in_document_order(
         self, pools
@@ -298,6 +345,24 @@ class TestThreadDriver:
         skipped = queue_job(session, late, site=site, timeout=0.05)
         items = items_of(list(coordinator_over(pools()).run(session)))
         assert items[skipped.id].kind is ErrorKind.TIMEOUT
+        assert ran == []
+
+    def test_a_job_whose_snapshot_misses_its_deadline_never_starts(self, pools) -> None:
+        ran: list[str] = []
+
+        def late() -> Rendered[str]:
+            ran.append("late")
+            return Rendered("late", "")
+
+        session = new_session()
+        job = queue_job(session, late)
+        previous = context_propagator_slot.get()
+        context_propagator_slot.set(StalledPropagator())
+        try:
+            items = items_of(list(coordinator_over(pools()).run(session)))
+        finally:
+            context_propagator_slot.set(previous)
+        assert items[job.id].kind is ErrorKind.TIMEOUT
         assert ran == []
 
     def test_parents_are_written_before_the_jobs_they_nest(self, pools) -> None:
@@ -567,16 +632,6 @@ class TestThreadDriver:
         value, before, after = read
         assert job.deadline - after <= value <= job.deadline - before
 
-    def test_a_run_feeds_the_cost_table(self, pools) -> None:
-        session = new_session()
-        site = named_site(f"costed-{session.seal}")
-        queue_job(session, sleeping_body(0.01), site=site)
-        list(coordinator_over(pools()).run(session))
-        cost = COSTS.cost(site.cost_key)
-        assert cost is not None
-        assert cost.runs == 1
-        assert cost.wall >= 10_000_000
-
     def test_a_full_queue_hands_its_units_to_the_request_thread(self) -> None:
         session = new_session()
         jobs = [queue_job(session, ident_body) for _ in range(2)]
@@ -590,26 +645,6 @@ class TestThreadDriver:
         assert executor.refused == 2
         assert coordinator.totals is not None
         assert coordinator.totals.shed == 0
-
-    def test_hops_served_during_a_job_are_not_charged_to_its_site(
-        self, pools, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        served = iter([0, 10**15])
-        monkeypatch.setattr(runner, "served_cpu", lambda: next(served))
-
-        def burn() -> Rendered[str]:
-            started = time.thread_time_ns()
-            while time.thread_time_ns() == started:
-                pass
-            return Rendered("burnt", "")
-
-        session = new_session()
-        site = named_site(f"served-{session.seal}")
-        queue_job(session, burn, site=site)
-        list(coordinator_over(pools(), thresholds=ADAPTIVE).run(session))
-        cost = COSTS.cost(site.cost_key)
-        assert cost is not None
-        assert cost.cpu == 0.0
 
     @pytest.mark.parametrize(
         "pool",
@@ -657,17 +692,18 @@ class TestThreadDriver:
             session = new_session(facts=None)
             session.snapshot = None
             queue_job(session, read)
-            return list(coordinator_over(pools(), thresholds=ADAPTIVE).run(session))
+            return list(coordinator_over(pools()).run(session))
 
         (batch,) = contextvars.copy_context().run(scenario)
         assert html_of(batch.items[0]) == "caller"
 
     def test_the_process_backends_serve_a_bare_coordinator(self) -> None:
         session = new_session()
-        queue_job(session, ident_body)
+        job = queue_job(session, ident_body)
         coordinator: Coordinator[str] = Coordinator()
         (batch,) = list(coordinator.run(session))
-        assert html_of(batch.items[0]) == str(threading.get_ident())
+        assert html_of(batch.items[0]) != str(threading.get_ident())
+        assert coordinator.timings[job.id].lane is Lane.POOL
 
     def test_each_async_job_resolves_in_a_layer_of_the_request_scope(
         self, pools
@@ -1006,7 +1042,7 @@ class TestThreadDriver:
     def test_an_abandon_of_an_ended_unit_leaves_its_work_alone(self) -> None:
         executor = Mock(spec=BoundaryExecutor)
         driver = ThreadDriver[str](coordinator_over(executor), new_session())
-        unit = Unit("u", (), Placement(Verdict.POOL_MODE))
+        unit = Unit("u", (), Placement(Verdict.POOL))
         run = driver._register(unit, Lane.POOL)
         run.work = StealableTask(noop)
         driver._shut(run)

@@ -1,28 +1,27 @@
 import asyncio
 import contextlib
+import contextvars
 import logging
 import threading
 from collections.abc import Callable, Coroutine, Iterator, Sequence
 from typing import Any
 
 import pytest
+from asgiref.local import Local
 from asgiref.sync import ThreadSensitiveContext, sync_to_async
 
 from next.defer import ErrorKind
 from next.deps import Loader
 from next.deps.runner import batch_scope
 from next.deps.scope import RequestScope
-from next.suspense import Admit, Lane, Placement, Verdict
-from next.suspense.coordinator import COSTS, Coordinator, Emit, Foreground, drivers
-from next.suspense.markers import Rendered
+from next.suspense import Admit, Lane, Placement, Verdict, bridge
+from next.suspense.coordinator import Coordinator, Emit, Foreground, drivers
+from next.suspense.markers import ForegroundFacts, Rendered
 from next.suspense.session import BoundarySession
 from tests.support.waits import until_loop
 from tests.suspense.coordinator.drivers.doubles import (
-    ADAPTIVE,
     ASGI,
     ATOMIC_ASGI,
-    HANDOFF,
-    POOL,
     RUNNING_TIMEOUT,
     WAIT,
     AwaitedPermits,
@@ -55,6 +54,17 @@ from tests.suspense.coordinator.drivers.doubles import (
 )
 
 
+view_local = Local()
+
+
+def local_body() -> Rendered[str]:
+    return Rendered(str(getattr(view_local, "value", None)), "")
+
+
+async def alocal_body() -> Rendered[str]:
+    return Rendered(str(getattr(view_local, "value", None)), "")
+
+
 class TestAsyncDriver:
     """Tests for ``Coordinator.arun`` on a server loop."""
 
@@ -70,10 +80,15 @@ class TestAsyncDriver:
         hops: list[object] = []
 
         def counted(
-            func: Callable[..., object], *, thread_sensitive: bool
+            func: Callable[..., object],
+            *,
+            thread_sensitive: bool,
+            context: contextvars.Context | None = None,
         ) -> Callable[..., Coroutine[Any, Any, object]]:
             hops.append(func)
-            return sync_to_async(func, thread_sensitive=thread_sensitive)
+            return sync_to_async(
+                func, thread_sensitive=thread_sensitive, context=context
+            )
 
         monkeypatch.setattr(drivers, "sync_to_async", counted)
         executor = pools()
@@ -86,6 +101,49 @@ class TestAsyncDriver:
         assert len(hops) == 1
         assert executor.submitted == 0
 
+    @pytest.mark.parametrize(
+        "facts",
+        [pytest.param(ATOMIC_ASGI, id="request"), pytest.param(ASGI, id="pool")],
+    )
+    def test_sync_and_loop_jobs_read_a_local_of_the_view(
+        self, pools, hops, facts: ForegroundFacts
+    ) -> None:
+        async def server() -> list[str]:
+            async with ThreadSensitiveContext():
+                view_local.value = "set"
+                session = new_session(facts=facts)
+                queue_job(session, local_body)
+                queue_job(session, abody=alocal_body)
+                coordinator = coordinator_over(pools())
+                batches = [batch async for batch in coordinator.arun(session)]
+            return [html_of(item) for item in items_of(batches).values()]
+
+        assert asyncio.run(server()) == ["set", "set"]
+
+    def test_a_request_lane_job_is_carried_by_the_hop_that_runs_it(
+        self, pools, hops, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        carries: list[object] = []
+
+        def refuse(*args: object) -> None:
+            carries.append(args)
+            msg = "carried by a hop of its own"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(bridge, "_begin", refuse)
+
+        async def server() -> list[str]:
+            async with ThreadSensitiveContext():
+                view_local.value = "set"
+                session = new_session(facts=ATOMIC_ASGI)
+                queue_job(session, local_body)
+                coordinator = coordinator_over(pools())
+                batches = [batch async for batch in coordinator.arun(session)]
+            return [html_of(item) for item in items_of(batches).values()]
+
+        assert asyncio.run(server()) == ["set"]
+        assert carries == []
+
     def test_pool_units_run_in_parallel_off_the_loop(self, pools) -> None:
         executor = pools()
         coordinator = coordinator_over(executor)
@@ -97,12 +155,14 @@ class TestAsyncDriver:
         assert len(threads) == 3
         assert str(view) not in threads
 
-    def test_a_chosen_request_unit_without_a_permit_goes_to_the_pool(
+    def test_an_admitted_request_unit_without_a_permit_goes_to_the_pool(
         self, pools
     ) -> None:
         permits = Foreground(1)
         assert permits.take()
-        coordinator = coordinator_over(pools(), thresholds=ADAPTIVE, permits=permits)
+        coordinator = coordinator_over(
+            pools(), admission=ScriptedAdmission(Admit.REQUEST), permits=permits
+        )
         batches, _ = asyncio.run(consume_stream(coordinator, ASGI, ident_body))
         (item,) = items_of(batches).values()
         assert item.timing.lane is Lane.POOL
@@ -147,20 +207,21 @@ class TestAsyncDriver:
         assert html_of(item) == str(view)
         assert permits.take()
 
-    def test_a_batch_without_a_permit_sends_chosen_units_to_the_pool(
+    def test_a_batch_without_a_permit_sends_admitted_units_to_the_pool(
         self, pools
     ) -> None:
         permits = AwaitedPermits(1)
         assert permits.take()
-        coordinator = coordinator_over(pools(), thresholds=HANDOFF, permits=permits)
+        coordinator = coordinator_over(
+            pools(), admission=ScriptedAdmission(Admit.REQUEST), permits=permits
+        )
 
         async def server() -> tuple[BoundarySession[str], int, list[Emit[str]]]:
             async with ThreadSensitiveContext():
                 session, view = await sync_to_async(
                     view_session, thread_sensitive=True
                 )(ASGI)
-                chosen = queue_job(session, ident_body)
-                COSTS.observe(chosen.site.cost_key, 1_000, 1_000)
+                queue_job(session, ident_body)
                 queue_job(session, ident_body, parallel=False)
                 stream = coordinator.arun(session)
                 first = asyncio.ensure_future(anext(stream))
@@ -376,7 +437,7 @@ class TestAsyncDriver:
             session = new_session(facts=ATOMIC_ASGI)
             session.scope = scope
             assert session.snapshot is not None
-            session.snapshot.run(batch_scope.set, scope)
+            session.snapshot.context.run(batch_scope.set, scope)
             queue_job(session, loading_body(loader, 1))
             queue_job(session, loading_body(loader, 2))
             try:
@@ -520,7 +581,7 @@ class TestAsyncDriver:
 
     def test_the_process_permits_serve_a_coordinator_without_them(self, pools) -> None:
         coordinator: Coordinator[str] = Coordinator(
-            executor=pools(), admission=ScriptedAdmission(), thresholds=POOL
+            executor=pools(), admission=ScriptedAdmission()
         )
         batches, view = asyncio.run(
             consume_stream(coordinator, ATOMIC_ASGI, ident_body)

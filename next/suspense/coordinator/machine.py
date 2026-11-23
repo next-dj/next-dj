@@ -7,7 +7,7 @@ import enum
 import heapq
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from next.defer import ErrorKind
 from next.suspense.errors import BoundaryRefusedError
@@ -37,15 +37,6 @@ _AFTER_FINISH: Final = "a command followed Finish"
 
 class ProtocolError(RuntimeError):
     """Raised when a driver breaks the event protocol."""
-
-
-class Placer(Protocol):
-    """The placement decision with the options and the cost table already bound."""
-
-    def __call__(
-        self, job: Job[Any], facts: ForegroundFacts, *, alone: bool
-    ) -> Placement:
-        """Return where the sync work of `job` runs and why."""
 
 
 class Admitter(Protocol):
@@ -223,7 +214,6 @@ class Machine[D]:
 
     __slots__ = (
         "_admission",
-        "_alone",
         "_capacity",
         "_caps",
         "_closed",
@@ -240,7 +230,6 @@ class Machine[D]:
         "_loop",
         "_now",
         "_open",
-        "_placer",
         "_plan",
         "_pool",
         "_ready",
@@ -258,7 +247,6 @@ class Machine[D]:
         plan: Plan[D],
         caps: Caps,
         facts: ForegroundFacts,
-        placer: Placer,
         admission: Admitter,
         *,
         deadline: float,
@@ -268,7 +256,6 @@ class Machine[D]:
         self._plan = plan
         self._caps = caps
         self._facts = facts
-        self._placer = placer
         self._admission = admission
         self._deadline = deadline
         self._coalesce = coalesce
@@ -293,7 +280,6 @@ class Machine[D]:
         self._started = False
         self._closed = False
         self._units: dict[str, _Unit[D]] = {}
-        self._alone = len(plan.units) == 1 and isinstance(plan.units[0], Job)
         for index, unit in enumerate(plan.units):
             if isinstance(unit, Group):
                 for member, job in enumerate(unit.members):
@@ -331,7 +317,7 @@ class Machine[D]:
             grouped = isinstance(unit, Group)
             members = unit.members if isinstance(unit, Group) else (unit,)
             entries = tuple(self._entries[job.id] for job in members)
-            self._queue(entries, grouped=grouped, alone=self._alone)
+            self._queue(entries, grouped=grouped)
         for job in self._plan.expired:
             self._end(
                 self._entries[job.id],
@@ -410,7 +396,7 @@ class Machine[D]:
             if isinstance(item, Outcome):
                 for index, job in enumerate(item.rendered.nested):
                     child = self._add(job, (*entry.ordinal, index))
-                    self._queue((child,), grouped=False, alone=False)
+                    self._queue((child,), grouped=False)
         return self._after(now)
 
     def refused(self, unit_id: str, now: float) -> list[Command[D]]:
@@ -509,11 +495,10 @@ class Machine[D]:
                 msg = f"the job {job.id} is no nested job of {entry.job.id}"
                 raise ProtocolError(msg)
 
-    def _queue(
-        self, entries: tuple[_Entry[D], ...], *, grouped: bool, alone: bool
-    ) -> None:
+    def _queue(self, entries: tuple[_Entry[D], ...], *, grouped: bool) -> None:
         job = entries[0].job
-        placement = self._placer(job, self._facts, alone=alone)
+        rule = self._facts.rule(job.options)
+        placement = Placement(Verdict.POOL if rule is None else rule)
         lane = Lane.LOOP if job.asynchronous else placement.lane
         unit = _Unit(job.id, entries, placement, lane, grouped=grouped)
         for entry in entries:
@@ -784,7 +769,6 @@ __all__ = [
     "End",
     "Finish",
     "Machine",
-    "Placer",
     "ProtocolError",
     "RunPool",
     "RunRequest",

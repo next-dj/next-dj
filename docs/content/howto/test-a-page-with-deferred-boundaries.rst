@@ -38,7 +38,7 @@ Its ``shell`` is the first write with every deferred body replaced by its loadin
 
    def test_a_chunk_settles_the_boundary(next_client, product) -> None:
        streamed = next_client.get_stream(f"/product/{product.pk}/")
-       [chunk] = streamed.chunks
+       chunk = streamed.boundary("recommendations")
        assert chunk.state == "ready"
        assert "<ul data-recommendations>" in chunk.html
 
@@ -48,7 +48,7 @@ Its ``shell`` is the first write with every deferred body replaced by its loadin
        assert streamed.ended
 
 ``final_html()`` applies each chunk to the shell in order, as the browser would, so a test reads the settled page without parsing scripts.
-``streamed.boundary(key)`` returns the chunk of one boundary by its wire id, its stable key, or its name, the component name or the path a page boundary is named by.
+``streamed.boundary(key)``, which the tests read the chunk through, returns the chunk of one boundary by its wire id, its stable key, or its name, the component name or the path a page boundary is named by.
 A test of an async stack awaits ``aread_stream(AsyncClient(), url)`` of ``next.testing`` for the same result.
 ``get_stream`` raises ``AssertionError`` when the page did not stream, and names the reason when ``DEBUG`` is on.
 
@@ -67,7 +67,7 @@ The test lasts as long as that timeout, two seconds for this component, and for 
    def test_a_slow_component_gives_way_to_its_error_ui(next_client, product) -> None:
        with boundary_errors("render"), boundary_gate(component="recommendations"):
            streamed = next_client.get_stream(f"/product/{product.pk}/")
-       [chunk] = streamed.chunks
+       chunk = streamed.boundary("recommendations")
        assert (chunk.state, chunk.kind) == ("error", "timeout")
        assert "data-next-retry" in chunk.html
 
@@ -83,7 +83,7 @@ A directory without a ``loading.djx`` and a component name no component source h
            streamed = next_client.get_stream(f"/product/{product.pk}/")
        assert held.entered.is_set()
        assert "data-recommendations-skeleton" in streamed.shell
-       assert streamed.chunks[0].state == "ready"
+       assert streamed.boundary("recommendations").state == "ready"
 
 Without ``boundary_errors("render")`` a failure a boundary contains is re-raised when the response ends, so a broken component fails its test instead of hiding behind its error UI.
 Every failure is also on ``response.boundary_failures`` for a test that renders them.
@@ -106,7 +106,7 @@ A pool thread reads only committed rows, so the test is marked ``@pytest.mark.dj
    def test_the_job_settles_on_the_pool(next_client, product) -> None:
        with parallel_boundaries():
            streamed = next_client.get_stream(f"/product/{product.pk}/")
-       [chunk] = streamed.chunks
+       chunk = streamed.boundary("recommendations")
        assert chunk.state == "ready"
        assert "<ul data-recommendations>" in chunk.html
 

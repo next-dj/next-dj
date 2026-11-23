@@ -487,6 +487,9 @@ class TestAsyncPartialStream:
             await anext(body)
             during = open_streams.open
             await sync_to_async(stream.close)()
+            # The close queues the body for the next loop turn, which a hop that
+            # ended before its future was chained returns without taking.
+            await asyncio.sleep(0)
             async with asyncio.timeout(5):
                 others = asyncio.all_tasks() - {asyncio.current_task()}
                 await asyncio.gather(*others, return_exceptions=True)

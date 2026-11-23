@@ -98,7 +98,7 @@ The loop lane is the event loop that runs ``async def`` work, and the request la
 The sync work of a job goes to the request lane when a request-lane rule holds, checked in this order.
 
 ``atomic``
-   The view runs inside a transaction, as a ``POST`` does by default, so every job shares its connection and sees its writes.
+   The view runs inside a transaction, as a ``POST`` does by default, or runs in ``"writes"`` mode and waits to open one at its first write, so every job shares its connection and sees its writes.
 ``sqlite``
    A database alias is SQLite, unless ``EXECUTOR["OPTIONS"]["SQLITE"]`` is ``"parallel"``, and an in-memory SQLite alias always.
 ``connection-state``
@@ -108,14 +108,19 @@ The sync work of a job goes to the request lane when a request-lane rule holds, 
 ``opt-out``
    ``EXECUTOR["OPTIONS"]["PARALLEL"]`` is ``False``, or the boundary declares ``parallel=False``.
 
-Without such a rule, ``parallel=True`` pins the job to the pool, and otherwise placement chooses per job from the costs it measured for each call site, keeping a short job on the request thread where a hand-off to the pool would cost more than the job.
+Without such a rule the job goes to the pool.
 A pool job that waits longer than ``QUEUE_TIMEOUT`` in the queue, or meets a full queue, runs on its request thread instead, and one neither can take settles as ``overloaded``.
 ``boundary_rendered`` reports the lane and the reason for each job, and ``page_stream_opened`` names the request-lane rule that pinned a stream.
 
 Thread and transaction rules
 ----------------------------
 
-A job on the pool runs on another thread with a copy of the context variables the view held, so a ``contextvars.ContextVar`` set in a middleware reaches it and a ``threading.local`` does not.
+A job on the pool runs on another thread with a copy of the context variables the view held, so a ``contextvars.ContextVar`` or an asgiref ``Local`` set in a middleware, the active language among them, reaches it and a ``threading.local`` does not.
+A ``Local`` of the project reaches a deferred job too, as the context snapshot is restored on the thread or the loop of the job by the hops asgiref moves a ``Local`` with, and a sync context callable of an overlapped layer gets it from the segment runner the same way.
+The same restore runs for a coroutine that ``drive`` runs and for a loader batch, see :doc:`/content/ref/ports`.
+A pool job whose snapshot cannot be restored on its thread before its deadline never starts, and its boundary settles as ``timeout``.
+When callables of one layer overlap, a ``Local`` value one of them sets returns to the caller with the whole ``Local`` of the last callable that wrote it, so a callable that only switched a value and switched it back writes back the value it saw.
+The language, the URLconf, and the script prefix keep what the last callable that changed them set, and ``next.pages.graph.register_local_accessor(accessor)`` gives a ``Local`` value of the project the same treatment, called once at startup with a ``LocalAccessor`` whose ``read()`` returns the value and ``write(value)`` sets it.
 A ``ThreadState`` backend captures such state on the request thread and applies it on the pool thread, and a ``ConnectionState`` backend replays per-connection state on the connection a pool thread opens, each naming the detected sources it ``covers``.
 
 A pool job uses a connection of its own in autocommit, so it reads committed rows only and never the uncommitted writes of its request, which is why the ``atomic`` rule keeps such a request on one thread.

@@ -1,9 +1,11 @@
-"""Work that runs at most once on its first claimant, and executors asgiref skips."""
+"""Work run once by its first claimant, executors asgiref skips, context snapshots."""
 
+import asyncio
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Executor, Future
 from contextlib import nullcontext
+from contextvars import Context
 from typing import Any, ClassVar
 
 
@@ -87,4 +89,47 @@ class StealableTask[R]:
             hook()
 
 
-__all__ = ["QuitParentExecutor", "StealableTask"]
+class ContextSnapshot:
+    """A snapshot of the request's context, with a copy kept for each thread.
+
+    asgiref 3.12 shows a `Local` value only on a thread that its own hop carried it to.
+    """
+
+    __slots__ = ("_copies", "_landings", "context", "thread")
+
+    def __init__(self, context: Context, thread: int | None = None) -> None:
+        """Hold `context`, captured on `thread`, the calling one by default."""
+        self.context = context
+        self.thread = threading.get_ident() if thread is None else thread
+        self._copies: dict[int, Context] = {}
+        self._landings: dict[int, asyncio.Task[Context]] = {}
+
+    def get(self) -> Context | None:
+        """Return the context restored on this thread, `None` until one was kept."""
+        here = threading.get_ident()
+        if here == self.thread:
+            return self.context
+        return self._copies.get(here)
+
+    def keep(self, context: Context) -> Context:
+        """Hold `context`, which a hop restored on this thread, and return it."""
+        self._copies[threading.get_ident()] = context
+        return context
+
+    def landing(
+        self, carry: Callable[[], Coroutine[Any, Any, Context]]
+    ) -> asyncio.Task[Context]:
+        """Return the task restoring a copy on the running loop, started by the first.
+
+        Every caller on one loop waits on the one task, so one hop serves all of them.
+        """
+        here = threading.get_ident()
+        task = self._landings.get(here)
+        if task is None:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(carry(), context=self.context.copy())
+            self._landings[here] = task
+        return task
+
+
+__all__ = ["ContextSnapshot", "QuitParentExecutor", "StealableTask"]

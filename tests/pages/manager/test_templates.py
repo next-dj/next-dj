@@ -21,6 +21,7 @@ from tests.support import (
     touch_later,
     unified_view,
 )
+from tests.support.views import write_dynamic_page
 
 
 _ZONED_BODY = 'a {% zone "z" %}<p>zoned</p>{% endzone %} b'
@@ -32,14 +33,6 @@ _ZONE_HTML = '<div data-next-zone="z"><p>zoned</p></div>'
 def _is_djx(path: Path) -> bool:
     """Match a template source, the kind of file a staleness check stats."""
     return path.suffix == ".djx"
-
-
-def _build_dynamic_page(directory: Path, *, returns: str = "'<p>dynamic</p>'") -> Path:
-    """Write a ``page.py`` whose ``render()`` returns `returns` on every request."""
-    directory.mkdir(parents=True, exist_ok=True)
-    page_file = directory / "page.py"
-    page_file.write_text(f"def render(request):\n    return {returns}\n")
-    return page_file
 
 
 class TestTemplateSourceSnapshot:
@@ -249,7 +242,7 @@ class TestLayoutSkeletonCache:
     ) -> None:
         """The cached skeleton holds a slot where the per-request body goes."""
         (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
-        page_file = _build_dynamic_page(tmp_path / "leaf")
+        page_file = write_dynamic_page(tmp_path / "leaf")
 
         response = unified_view(page_instance, page_file)(build_page_request())
 
@@ -262,7 +255,7 @@ class TestLayoutSkeletonCache:
     ) -> None:
         """The skeleton is composed once and filled per request."""
         (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
-        page_file = _build_dynamic_page(tmp_path / "leaf")
+        page_file = write_dynamic_page(tmp_path / "leaf")
         view = unified_view(page_instance, page_file)
 
         view(build_page_request())
@@ -275,7 +268,7 @@ class TestLayoutSkeletonCache:
         self, page_instance, tmp_path, watched_template_edits
     ) -> None:
         """A ``layout.djx`` created next to the page wraps the next dynamic GET."""
-        page_file = _build_dynamic_page(tmp_path / "leaf")
+        page_file = write_dynamic_page(tmp_path / "leaf")
         view = unified_view(page_instance, page_file)
         assert view(build_page_request()).content == b"<p>dynamic</p>"
 
@@ -289,7 +282,7 @@ class TestLayoutSkeletonCache:
     ) -> None:
         """A deleted ``layout.djx`` drops out of the next dynamic GET."""
         (tmp_path / "layout.djx").write_text("<html>{% template %}</html>")
-        page_file = _build_dynamic_page(tmp_path / "leaf")
+        page_file = write_dynamic_page(tmp_path / "leaf")
         view = unified_view(page_instance, page_file)
         assert view(build_page_request()).content == b"<html><p>dynamic</p></html>"
 
@@ -471,7 +464,7 @@ class TestTemplateRegistryBound:
         assert_bounded_by_insert_age(
             install,
             page_instance.layout_skeleton,
-            [_build_dynamic_page(tmp_path / name) for name in ("a", "b", "c")],
+            [write_dynamic_page(tmp_path / name) for name in ("a", "b", "c")],
         )
 
     def test_a_source_evicted_alone_leaves_no_stale_compiled_form(

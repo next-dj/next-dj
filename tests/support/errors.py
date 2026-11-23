@@ -4,3 +4,9 @@ class BackendDownError(Exception):
 
 class HaltError(BaseException):
     """An interrupt-like failure that is not an `Exception`."""
+
+
+def fail_hop() -> None:
+    """Raise the `ValueError` a failing hop raises."""
+    msg = "hop failed"
+    raise ValueError(msg)

@@ -39,7 +39,6 @@ from tests.support import (
     inspect_parameter,
     plan_by_name,
     plan_entries,
-    typing_optional,
 )
 
 
@@ -819,7 +818,7 @@ class TestStaticCanHandle:
         [
             (HttpRequest, None),
             (HttpRequest | None, None),
-            (typing_optional(HttpRequest), None),
+            (Annotated[HttpRequest, "doc"] | None, None),
             (WSGIRequest, None),
             (WSGIRequest | None, None),
             (HttpRequest | int, False),
@@ -831,7 +830,7 @@ class TestStaticCanHandle:
         ids=[
             "bare",
             "pep604_optional",
-            "typing_optional",
+            "annotated_optional",
             "subclass",
             "subclass_optional",
             "union_with_other_type",

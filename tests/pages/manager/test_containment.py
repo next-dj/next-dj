@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from asgiref.sync import async_to_sync
 from django.contrib.auth.models import Group
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, transaction
 
 from next.deps.runner import run_on_request_thread
 from next.pages import page
@@ -11,6 +11,7 @@ from next.pages.boundaries import Caught
 from next.pages.graph import Blame
 from next.pages.loaders import NO_BOUNDARIES, BoundaryChain, PageBoundary
 from next.transactions import LazySavepoint, probe_atomic_aliases
+from tests.support.statements import query_missing_table
 
 
 class Stop(BaseException):
@@ -24,13 +25,8 @@ def _stop() -> str:
 _GUARDED = BoundaryChain.of((PageBoundary(0, 0, Path("/site/error.djx"), None),))
 
 
-def _missing_table() -> None:
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM next_missing_table")
-
-
 async def _amissing_table() -> None:
-    await run_on_request_thread(_missing_table)
+    await run_on_request_thread(query_missing_table)
 
 
 def _boom_value() -> None:
@@ -44,7 +40,7 @@ async def _aboom_value() -> None:
 
 def _contain(mode: str, page_file: Path, work: str) -> object:
     if mode == "sync":
-        failing = _missing_table if work == "read" else _boom_value
+        failing = query_missing_table if work == "read" else _boom_value
         return page._contained(_GUARDED, page_file, Blame(), failing)
     afailing = _amissing_table() if work == "read" else _aboom_value()
     return async_to_sync(page._acontained)(_GUARDED, page_file, Blame(), afailing)

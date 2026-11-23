@@ -273,17 +273,12 @@ class TestGate:
             == 409
         )
 
-    def test_a_page_refusing_prefetch(self, layout_pages: dict[str, Path]) -> None:
-        response = navigate(
-            layout_pages["opted"], "/sec/opted/", **{"X-Next-Prefetch": "1"}
-        )
-        assert response.status_code == 204
-
-    def test_a_page_refusing_a_full_prefetch(
-        self, layout_pages: dict[str, Path]
+    @pytest.mark.parametrize("depth", ["1", "full"])
+    def test_a_page_refusing_prefetch(
+        self, layout_pages: dict[str, Path], depth: str
     ) -> None:
         response = navigate(
-            layout_pages["opted"], "/sec/opted/", **{"X-Next-Prefetch": "full"}
+            layout_pages["opted"], "/sec/opted/", **{"X-Next-Prefetch": depth}
         )
         assert response.status_code == 204
 

@@ -31,13 +31,6 @@ from tests.support.components import write_component
 from tests.support.guards import GUARDED_CHILDREN, wrap
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 class TestInterceptZonesUnique:
     """next.E173 flags an intercept zone its target or a sibling intercept declares."""
 

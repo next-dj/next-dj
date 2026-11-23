@@ -49,14 +49,6 @@ def capture_metadata_registered() -> Generator[SignalRecorder, None, None]:
 
 
 @pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    """Return an empty `pages` directory, the root of a page tree under test."""
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
-@pytest.fixture()
 def framework_providers() -> Generator[None, None, None]:
     """Keep only the providers the framework ships, dropping the ones tests declared.
 

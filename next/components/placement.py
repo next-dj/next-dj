@@ -20,9 +20,9 @@ from django.template.defaulttags import ForNode
 from django.template.loader_tags import BlockNode, IncludeNode
 from django.templatetags.cache import CacheNode
 
-from next.boundaries import open_elements, wrapper_tag
+from next.boundaries import wrapper_tag
 from next.defer import DEFAULT_TAG
-from next.utils import child_nodelists
+from next.utils import child_nodelists, open_elements
 
 from .nodes import ComponentTagNode
 

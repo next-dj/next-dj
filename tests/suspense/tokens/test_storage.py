@@ -76,15 +76,16 @@ class TestCacheStorage:
         reason = _reason(CacheStorage(), reference, _context())
         assert reason is TokenRejection.SIGNATURE
 
-    def test_a_poisoned_entry_never_reaches_the_codec(self) -> None:
+    @pytest.mark.parametrize(
+        "forged",
+        [
+            pytest.param(b'{"forged":1}', id="poisoned-bytes"),
+            pytest.param("claims", id="another-type"),
+        ],
+    )
+    def test_a_forged_entry_fails_its_mac(self, forged: object) -> None:
         reference = CacheStorage().put(b"claims", _context())
-        caches["default"].set(cache_key(reference[1:]), b'{"forged":1}')
-        reason = _reason(CacheStorage(), reference, _context())
-        assert reason is TokenRejection.SIGNATURE
-
-    def test_an_entry_of_another_type_fails_its_mac(self) -> None:
-        reference = CacheStorage().put(b"claims", _context())
-        caches["default"].set(cache_key(reference[1:]), "claims")
+        caches["default"].set(cache_key(reference[1:]), forged)
         reason = _reason(CacheStorage(), reference, _context())
         assert reason is TokenRejection.SIGNATURE
 

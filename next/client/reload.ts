@@ -22,6 +22,13 @@ type Swap = [el: HTMLElement, kept: Node[], shown: string, height: string];
 
 type Reload = [zone: Element, timer: ReturnType<typeof setTimeout>, swaps: Swap[]];
 
+type Opened = [root: Element, timer: ReturnType<typeof setTimeout>, shown?: string];
+
+interface LayerOpened {
+  opener: Element | null;
+  root: Element;
+}
+
 function changed(field: Element): boolean {
   if (field instanceof HTMLSelectElement) {
     const initial = Array.from(field.options).findIndex((o) => o.defaultSelected);
@@ -45,6 +52,7 @@ export function createReload(
   const captured = new Map<string, string>();
   const reloads = new Map<string, Reload>();
   const named = new Set<string | null>();
+  const opened = new Map<string, Opened>();
 
   const keyOf = (el: Element): string =>
     el.getAttribute("data-next-boundary-key") ?? el.id;
@@ -107,6 +115,39 @@ export function createReload(
     }
   }
 
+  // An answer that lands first leaves the root filled or released, so nothing shows.
+  function onOpened(event: Event): void {
+    const { opener, root } = (event as CustomEvent<LayerOpened>).detail;
+    const name = root.getAttribute(ATTR_ZONE);
+    const html =
+      name &&
+      doc.querySelector<HTMLTemplateElement>(
+        `template[data-next-layer="${cssEscape(name)}"]`,
+      )?.innerHTML;
+    if (!name || !html) return;
+    const entry: Opened = [
+      root,
+      setTimeout(
+        () => {
+          if (!root.hasAttribute(ATTR_BUSY) || root.firstChild) return;
+          root.innerHTML = html;
+          entry[2] = root.innerHTML;
+        },
+        duration(opener?.getAttribute("data-next-delay")) ?? 150,
+      ),
+    ];
+    opened.set(name, entry);
+  }
+
+  // A layer whose answer failed drops the loading UI, its root left empty as before.
+  function closed(name: string): void {
+    const entry = opened.get(name);
+    if (entry === undefined) return;
+    opened.delete(name);
+    clearTimeout(entry[1]);
+    if (entry[0].innerHTML === entry[2]) entry[0].replaceChildren();
+  }
+
   function onRequest(event: Event): void {
     const { intent } = (event as CustomEvent<{ intent: { zone?: string } }>).detail;
     for (const part of (intent.zone ?? "").split(",")) {
@@ -124,8 +165,10 @@ export function createReload(
     named.add(zone.getAttribute(ATTR_ZONE)),
   );
   listening.signal?.addEventListener("abort", () => {
-    for (const entry of reloads.values()) clearTimeout(entry[1]);
+    for (const entry of [...reloads.values(), ...opened.values()])
+      clearTimeout(entry[1]);
   });
+  doc.addEventListener("partial:layer-opened", onOpened, listening);
   doc.addEventListener("partial:before-request", onRequest, listening);
   doc.addEventListener(
     "partial:before-apply",
@@ -138,7 +181,10 @@ export function createReload(
   doc.addEventListener(
     "partial:settled",
     (event) => {
-      for (const name of (event as CustomEvent<Settled>).detail.zones) finish(name);
+      for (const name of (event as CustomEvent<Settled>).detail.zones) {
+        finish(name);
+        closed(name);
+      }
     },
     listening,
   );

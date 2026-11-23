@@ -138,7 +138,6 @@ from tests.support.helpers import (
     next_framework_settings_stand_in,
     rewrite_in_tick,
     touch_later,
-    typing_optional,
 )
 from tests.support.pages import (
     build_nested_page,
@@ -415,7 +414,6 @@ __all__ = [
     "throwaway_apps",
     "tick_scenario",
     "touch_later",
-    "typing_optional",
     "unified_view",
     "unwrapped_decorator",
     "watching_components_entry",

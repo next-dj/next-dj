@@ -39,7 +39,9 @@ from next.utils import (
     load_tree_source,
     middleware_installed,
     middleware_listed,
+    misrooted,
     non_negative_number,
+    open_elements,
     page_roots_shape_error,
     parse_intercept,
     positive_number,
@@ -60,6 +62,7 @@ from tests.support.cases.grammar import (
     InterceptNameCase,
     InterceptResolveCase,
 )
+from tests.support.markup import PARSER_VOID
 
 
 _OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
@@ -1267,3 +1270,66 @@ class TestAppHolding:
             assert app_holding(app) == ("app", ".")
             forget_app_holdings(setting="INSTALLED_APPS")
             assert app_holding(app) is None
+
+
+class TestOpenElements:
+    """The elements left open at the end of a markup, with their attributes."""
+
+    def test_the_open_elements_keep_their_attributes(self) -> None:
+        markup = "<UL class='a'><li id=x><!-- <b> --><br><i></i><title><p></title>"
+        assert open_elements(markup) == [("ul", " class='a'"), ("li", " id=x")]
+
+    @pytest.mark.parametrize("name", PARSER_VOID)
+    def test_a_void_element_stays_closed(self, name: str) -> None:
+        assert open_elements(f"<div><{name} x=1><p>") == [("div", ""), ("p", "")]
+
+    @pytest.mark.parametrize(
+        ("markup", "names"),
+        [
+            ("<title-bar><p>", ["title-bar", "p"]),
+            ("<script-loader x='1'><p>", ["script-loader", "p"]),
+            ("<textarea-x/><p>", ["textarea-x", "p"]),
+            ("<!--><p>", ["p"]),
+            ("<!---><p>", ["p"]),
+            ("<!-- <i> --!><p>", ["p"]),
+            ("<!-- <i>", []),
+            ("<div/><span>", ["div", "span"]),
+            ("<svg/><p>", ["p"]),
+            ("<svg><path/><g>", ["svg", "g"]),
+            ("<math><mi/>", ["math"]),
+            ("<svg><foreignObject><div/>", ["svg", "foreignobject", "div"]),
+            ("<svg><foreignObject><svg><path/>", ["svg", "foreignobject", "svg"]),
+            ("<div><xmp></div></xmp><p>", ["div", "p"]),
+            ("<iframe><b>", []),
+            ("<noscript><b>", []),
+        ],
+    )
+    def test_the_scan_reads_markup_as_a_browser_does(
+        self, markup: str, names: list[str]
+    ) -> None:
+        assert [name for name, _attrs in open_elements(markup)] == names
+
+
+class TestMisrooted:
+    """How a body misses the one root element its boundary adopts."""
+
+    @pytest.mark.parametrize(
+        ("body", "found"),
+        [
+            ("<li>a</li>", None),
+            ("<li>a</li><li>b</li>", "2 root elements"),
+            ("", "0 root elements"),
+            ("text", "loose text"),
+            ("<div>a</div><style-x></style-x><p>b</p>", "3 root elements"),
+            ("<title-bar>a</title-bar>", None),
+            ("<!--><p>a</p>", None),
+            ("<div/><p>a</p></div>", None),
+            ("<svg/><p>a</p>", "2 root elements"),
+            ("<svg><path/></svg>", None),
+            ("<noframes></p><i></noframes>", None),
+        ],
+    )
+    def test_misrooted_names_how_a_body_misses_one_root(
+        self, body: str, found: str | None
+    ) -> None:
+        assert misrooted(body) == found

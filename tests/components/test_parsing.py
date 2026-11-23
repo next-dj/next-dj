@@ -32,35 +32,21 @@ class TestComponentArguments:
 class TestSlotArguments:
     """A slot tag takes exactly one quoted slot name."""
 
-    def test_block_slot_tag_requires_name(self) -> None:
-        """{% #slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="#slot"):
+    @pytest.mark.parametrize(
+        ("slot", "match"),
+        [
+            pytest.param("{% #slot %}{% /slot %}", "#slot", id="block-without-name"),
+            pytest.param(
+                '{% #slot "a" "b" %}{% /slot %}', "exactly one", id="block-two-names"
+            ),
+            pytest.param('{% slot "" %}', "quoted slot name", id="short-empty-name"),
+            pytest.param('{% slot "a" "b" %}', "exactly one", id="short-two-names"),
+        ],
+    )
+    def test_a_slot_without_one_quoted_name_raises(self, slot: str, match: str) -> None:
+        with pytest.raises(TemplateSyntaxError, match=match):
             Template(
-                "{% load components %}"
-                '{% #component "c" %}{% #slot %}{% /slot %}{% /component %}'
-            )
-
-    def test_block_slot_tag_requires_exactly_one_arg(self) -> None:
-        """{% #slot %} with wrong arity raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% #slot "a" "b" %}{% /slot %}{% /component %}'
-            )
-
-    def test_short_slot_requires_quoted_name(self) -> None:
-        """{% slot %} short form with empty name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template(
-                '{% load components %}{% #component "c" %}{% slot "" %}{% /component %}'
-            )
-
-    def test_short_slot_requires_exactly_one_name(self) -> None:
-        """{% slot %} short form with two names raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% slot "a" "b" %}{% /component %}'
+                '{% load components %}{% #component "c" %}' + slot + "{% /component %}"
             )
 
 

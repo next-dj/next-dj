@@ -786,6 +786,68 @@ class TestZoneSkeletonCheck:
         assert errors == [(checks.E_SKELETON_ZONE_UNKNOWN, "loading.card.djx")]
 
 
+def _unshown(root: Path) -> list[str]:
+    """Return the file names `next.W187` reports under `root`."""
+    return [
+        Path(str(m.obj)).name
+        for m in checks.check_zone_skeletons_shown()
+        if str(m.obj).startswith(str(root))
+    ]
+
+
+class TestZoneSkeletonShownCheck:
+    """`next.W187` fires on a `loading.<zone>.djx` no layer and no reload shows."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param('{% zone "rows" %}x{% endzone %}', id="layer"),
+            pytest.param(
+                '{% if flag %}{% zone "rows" reload="loading" %}x{% endzone %}'
+                "{% endif %}",
+                id="reload",
+            ),
+        ],
+    )
+    def test_a_skeleton_a_layer_or_a_reload_shows_is_silent(
+        self, tmp_path: Path, body: str
+    ) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        (page_file.parent / "loading.rows.djx").write_text("S")
+        with _composed_pages((page_file, body)):
+            assert _unshown(tmp_path) == []
+
+    def test_a_skeleton_of_a_zone_no_request_renders_alone_warns(
+        self, tmp_path: Path
+    ) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        skeleton = page_file.parent / "loading.rows.djx"
+        skeleton.write_text("S")
+        (page_file.parent / "loading.ghost.djx").write_text("S")
+        body = '{% if flag %}{% zone "rows" %}x{% endzone %}{% endif %}'
+        with _composed_pages((page_file, body)):
+            messages = [
+                m
+                for m in checks.check_zone_skeletons_shown()
+                if str(m.obj).startswith(str(tmp_path))
+            ]
+        assert [m.id for m in messages] == [checks.W_SKELETON_UNSHOWN]
+        assert messages[0].obj == str(skeleton)
+        assert 'reload="loading"' in messages[0].msg
+
+    def test_a_layout_skeleton_shown_by_one_page_is_silent(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "layout.djx").write_text(
+            '{% zone "nav" %}n{% endzone %}{% template %}'
+        )
+        (tmp_path / "loading.nav.djx").write_text("S")
+        first = _page_dir(tmp_path, "one")
+        second = _page_dir(tmp_path, "two")
+        with _composed_pages((first, "<p>1</p>"), (second, "<p>2</p>")):
+            assert _unshown(tmp_path) == []
+
+
 @pytest.mark.usefixtures("restored_op_registry")
 class TestCustomPatchOpCheck:
     """A custom verb that is not a valid verb token is reported."""
@@ -1297,6 +1359,7 @@ class TestChecksSilentOnValidComposite:
             assert checks.check_zone_not_in_has_perm() == []
             assert checks.check_with_directly_over_zone() == []
             assert checks.check_zone_skeletons_have_zones() == []
+            assert checks.check_zone_skeletons_shown() == []
 
 
 _ZONE_CHECKS = (
@@ -1307,6 +1370,7 @@ _ZONE_CHECKS = (
     checks.check_repeated_form_has_key,
     checks.check_with_directly_over_zone,
     checks.check_zone_skeletons_have_zones,
+    checks.check_zone_skeletons_shown,
 )
 
 

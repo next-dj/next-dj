@@ -1,7 +1,6 @@
 """The inline error boundary, which contains a failed subtree behind its error UI."""
 
 from .containment import contain, contain_bare
-from .elements import misrooted, open_elements
 from .failures import (
     Boundary,
     Fallback,
@@ -48,10 +47,8 @@ __all__ = [
     "identity",
     "kind_of",
     "minting",
-    "misrooted",
     "new_digest",
     "note_retry",
-    "open_elements",
     "protect",
     "render_boundaries",
     "shown_kind",

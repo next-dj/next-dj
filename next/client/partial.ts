@@ -151,6 +151,8 @@ export interface PartialSurface {
   _fallbacks?: WeakMap<Element, string> | undefined;
   _slot?: ((target: Target) => Bounds | undefined) | undefined;
   _pop?: (() => string | undefined) | undefined;
+  /** The answer the intent chunk holds for a layer body, set once it loads. */
+  _take?: ((href: string, zone: string) => FetchAdapter | undefined) | undefined;
   _headers(headers: Record<string, string>): Headers;
   _parse(contentType: string, body: string): unknown;
   _sweep(): void;
@@ -336,6 +338,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       navigation,
       fetch: (request: WireRequest) => wire.fetch(request),
       abort: (key: string) => wire.abort(key),
+      take: () => surface._take,
     };
   }
 

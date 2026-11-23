@@ -60,6 +60,23 @@ An inline component with an ``async def`` part and a sync caller of an ``async d
 ``next.suspense`` sits above ``next.deps``, so a ``Loader`` waiting for a batch on the request thread reaches the driver through ``thread_wait_slot``, an ORM batch is a sync function the waiting thread may run itself, and an ``async def`` batch function refuses every thread-sensitive call.
 Callers go through ``wait_served``, which falls back to a plain blocking wait when no implementation is bound, the same wait a pool thread gets from the bound one.
 
+``ContextPropagator`` restores a ``ContextSnapshot`` of the request's context on the thread or the event loop that runs work deferred from it, ``restore`` on the calling sync thread and ``arestore`` on the running loop, and each answers the snapshot context itself when nothing had to move.
+asgiref 3.12 and later show a ``Local`` value only on a thread one of its own hops carried it to, so the language, the URLconf, and a ``Local`` of the project reach a pool job, a loop job, a ``drive`` coroutine, and a loader batch through this port.
+``next.suspense`` sits above ``next.deps``, so the loader reaches the propagator through ``context_propagator_slot``, and every other site reads the same slot.
+The default, ``next.suspense.bridge.BridgePropagator``, keeps one restored copy per thread of each snapshot, restores on a loop through a hop on a thread of its own, so a busy default executor of the loop never holds it up, and onto a sync thread through a hop from the server loop of that thread or from the background loop, waiting no longer than the deadline of the current job.
+``NextFrameworkConfig.ready()`` builds it with ``plain`` set when a ``Local`` written in a context already reads through that context on another thread, as before asgiref 3.12, and then it moves nothing and makes no hop.
+A project binds its own propagator, built on another mechanism, by setting the slot.
+
+``ContextSnapshot`` of ``next.tasks`` is what a propagator receives.
+``context`` is the request's context as captured, and ``thread`` the identity of the thread it was captured on.
+``get()`` answers the context restored on the calling thread, ``context`` itself on the capturing thread, and ``None`` until a copy was kept there.
+``keep(context)`` holds a copy a hop restored on the calling thread and answers it, so later jobs on that thread reuse it.
+``landing(carry)`` answers the task that restores a copy on the running loop, started by the first caller from the coroutine ``carry`` makes, so one hop serves every caller on that loop.
+A deferred job asks ``get()`` first, so a job on the thread its snapshot was taken on does not call the propagator.
+
+.. autoclass:: next.tasks.ContextSnapshot
+   :members: get, keep, landing
+
 ``DeferralSink`` takes a deferred component call whose template context holds no sink of its own, and answers the text the render holds in its place.
 ``next.suspense`` sits above the template tags and the render paths, so a component call and a render reach the assembled-inline sink through ``deferrals_slot`` rather than importing it.
 ``queue`` queues a job into the session of the response a ``deferring`` block opened and answers the loading wrapper, and outside such a block it renders the call in place.
@@ -84,7 +101,7 @@ Implementations
 ---------------
 
 Each area binds its own implementation, one class per port, holding nothing but the delegation to the area's real entry points.
-Every implementation lives in the ``ports`` module of its area, save ``FormRoutes``, which the form action manager answers itself, ``AsyncBridge`` and ``ThreadWait``, which ``next.suspense.drive`` and ``next.suspense.serve_until`` answer themselves, ``DeferralSink``, which ``next.suspense.assembly.inline_sink`` answers, ``RouterStamp``, which ``next.router.navigation.stamp`` answers, and ``ZoneMarking``, which ``next.router.navigation.action_marking`` answers.
+Every implementation lives in the ``ports`` module of its area, save ``FormRoutes``, which the form action manager answers itself, ``ContextPropagator``, which ``next.suspense.bridge.BridgePropagator`` answers, ``AsyncBridge`` and ``ThreadWait``, which ``next.suspense.drive`` and ``next.suspense.serve_until`` answer themselves, ``DeferralSink``, which ``next.suspense.assembly.inline_sink`` answers, ``RouterStamp``, which ``next.router.navigation.stamp`` answers, and ``ZoneMarking``, which ``next.router.navigation.action_marking`` answers.
 
 .. list-table::
    :header-rows: 1
@@ -99,6 +116,9 @@ Every implementation lives in the ``ports`` module of its area, save ``FormRoute
    * - ``AsyncBridge``
      - ``next.suspense.drive``
      - ``async_bridge_slot``
+   * - ``ContextPropagator``
+     - ``next.suspense.bridge.BridgePropagator``
+     - ``context_propagator_slot``
    * - ``DeferralSink``
      - ``next.suspense.assembly.inline_sink``
      - ``deferrals_slot``

@@ -73,7 +73,8 @@ class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
     Without the `X-Next-Request` switch every derived field stays empty. `layouts` is
-    the raw declaration of a navigation, `prefetch` the depth a router prefetch wants.
+    the raw declaration of a navigation, `prefetch` the depth a router prefetch wants,
+    always full for a zone, since a layer shows the answer as it arrives.
     """
 
     partial: bool = False
@@ -125,10 +126,12 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
     if _value(request, REQUEST_FLAG) != "1":
         return _NOT_PARTIAL
     navigate = _value(request, NAVIGATE) == "1"
-    wire = _value(request, PREFETCH) if navigate else None
+    zones = _split_names(_value(request, ZONE))
+    wire = _value(request, PREFETCH) if navigate or zones else None
+    depth = _WIRE_DEPTHS.get(wire) if wire is not None else None
     return PartialIntent(
         partial=True,
-        zones=_split_names(_value(request, ZONE)),
+        zones=zones,
         validate_fields=_split_names(_value(request, VALIDATE)),
         merge=_parse_merge(_value(request, MERGE)),
         version=_value(request, VERSION),
@@ -136,7 +139,7 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
         origin=_value(request, ORIGIN),
         navigate=navigate,
         layouts=_value(request, LAYOUTS) if navigate else None,
-        prefetch=_WIRE_DEPTHS.get(wire) if wire is not None else None,
+        prefetch=Depth.FULL if zones and depth is not None else depth,
     )
 
 

@@ -190,7 +190,10 @@ describe("inline scripts of a swap", () => {
     const html = op.html!;
     expect(html.match(/data-next-run/g)).toHaveLength(2);
     expect(html).toContain('nonce="evil"');
-    swapIn(html.replace(/<script[^>]*>.*?<\/script>/g, ""));
+    const parsed = document.createElement("template");
+    parsed.innerHTML = html;
+    parsed.content.querySelectorAll("script").forEach((el) => el.remove());
+    swapIn(parsed.innerHTML);
     swapped.before();
     swapped.after(envelope(), [], true);
     expect(document.body.dataset.ran).toBe("a");

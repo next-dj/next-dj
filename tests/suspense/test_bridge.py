@@ -1,13 +1,17 @@
 import asyncio
 import contextlib
 import contextvars
+import os
 import threading
+import time
 import traceback
-from collections.abc import Callable, Sequence
-from concurrent.futures import Future
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
 
+import asgiref
 import pytest
+from asgiref.local import Local
 from asgiref.sync import (
     AsyncToSync,
     SyncToAsync,
@@ -20,14 +24,21 @@ from django.core.exceptions import ImproperlyConfigured, SynchronousOnlyOperatio
 from django.http import HttpRequest, HttpResponse
 from django.test import AsyncClient, Client, override_settings
 from django.urls import path
+from django.utils import translation
 from django.utils.asyncio import async_unsafe
 
+from next.defer import deadline
 from next.deps import Loader
 from next.deps.cache import RequestMemo, request_memo
 from next.deps.loader import open_loaders
 from next.deps.scope import RequestScope
-from next.suspense import drive, executors, serve_until
+from next.ports import context_propagator_slot
+from next.suspense import bridge, drive, executors, serve_until
+from next.suspense.bridge import BridgePropagator, contexts_carry_locals
 from next.suspense.executors import background_loop
+from next.tasks import ContextSnapshot
+from tests.support.errors import fail_hop
+from tests.support.waits import QUIET, WAIT
 
 
 @async_unsafe
@@ -37,11 +48,6 @@ def _unsafe() -> int:
 
 def _interrupt() -> None:
     raise KeyboardInterrupt
-
-
-def _fail() -> None:
-    msg = "hop failed"
-    raise ValueError(msg)
 
 
 async def _answer() -> int:
@@ -66,10 +72,17 @@ async def _leave() -> None:
     raise SystemExit(1)
 
 
+_view_local = Local()
+
+UNSERVED = "The request thread no longer serves this coroutine."
+
+
 class _Ambiguous:
-    """A value whose inequality with any other raises."""
+    """A value whose inequality with any other value raises."""
 
     def __ne__(self, other: object) -> bool:
+        if other is self:
+            return False
         msg = "ambiguous"
         raise ValueError(msg)
 
@@ -92,7 +105,7 @@ def _load_here(pk: int) -> tuple[str, int]:
 async def _load_on_a_hop(pk: int) -> tuple[str, int]:
     scope = RequestScope()
     token = request_memo.set(RequestMemo(scope))
-    open_loaders(scope, contextvars.copy_context())
+    open_loaders(scope, ContextSnapshot(contextvars.copy_context()))
     try:
         return await sync_to_async(partial(_load_here, pk))()
     finally:
@@ -102,7 +115,10 @@ async def _load_on_a_hop(pk: int) -> tuple[str, int]:
 
 def _group_view(request: HttpRequest, pk: int) -> HttpResponse:
     name, hop = drive(_load_on_a_hop(pk))
-    return HttpResponse(f"{request.method} {name} {hop == threading.get_ident()}")
+    return HttpResponse(
+        f"{request.method} {name} {hop == threading.get_ident()}",
+        content_type="text/plain",
+    )
 
 
 urlpatterns = [path("groups/<int:pk>/", _group_view)]
@@ -274,7 +290,7 @@ class TestDriveHops:
     def test_a_failing_hop_raises_inside_the_coroutine(self) -> None:
         async def recover() -> str:
             try:
-                await sync_to_async(_fail)()
+                await sync_to_async(fail_hop)()
             except ValueError as error:
                 return str(error)
             return "unreached"
@@ -426,10 +442,283 @@ class TestDriveCancellation:
         assert cleanup == [threading.get_ident()]
 
 
+class _FailingPropagator:
+    """A propagator whose loop side raises `error`, as a broken custom one would."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def restore(self, captured: ContextSnapshot, /) -> contextvars.Context:
+        return captured.context
+
+    async def arestore(self, captured: ContextSnapshot, /) -> contextvars.Context:
+        raise self.error
+
+
+@contextlib.contextmanager
+def _bound(propagator: object) -> Iterator[None]:
+    previous = context_propagator_slot.get()
+    context_propagator_slot.set(propagator)
+    try:
+        yield
+    finally:
+        context_propagator_slot.set(previous)
+
+
+class TestDriveCarry:
+    """Tests for ``drive`` restoring the context through the bound propagator."""
+
+    def test_a_failed_handback_brings_the_writes_back_by_a_hop_of_its_own(
+        self, hops: BridgePropagator, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refused(*_args: object) -> None:
+            raise RuntimeError(UNSERVED)
+
+        async def write() -> int:
+            _view_local.value = "by the coroutine"
+            return await _answer()
+
+        def scenario() -> tuple[int, object]:
+            _view_local.value = "by the view"
+            return drive(write), _view_local.value
+
+        monkeypatch.setattr(bridge, "_handed", refused)
+        assert contextvars.copy_context().run(scenario) == (42, "by the coroutine")
+
+    def test_a_cancelled_handback_brings_the_writes_back_by_a_hop_of_its_own(
+        self, hops: BridgePropagator
+    ) -> None:
+        gate = threading.Event()
+        helpers: list[asyncio.Future[None]] = []
+
+        async def busy() -> None:
+            await sync_to_async(gate.wait)(WAIT)
+
+        async def write() -> int:
+            loop = asyncio.get_running_loop()
+            body = asyncio.current_task()
+            assert body is not None
+            helpers.append(asyncio.ensure_future(busy()))
+            await asyncio.sleep(0)
+            loop.call_later(QUIET, body.cancel)
+            loop.call_later(2 * QUIET, gate.set)
+            _view_local.value = "by the coroutine"
+            return 42
+
+        def scenario() -> tuple[int, object]:
+            _view_local.value = "by the view"
+            return drive(write), _view_local.value
+
+        assert contextvars.copy_context().run(scenario) == (42, "by the coroutine")
+
+    @pytest.mark.parametrize(
+        "error", [ValueError("no carry"), asyncio.CancelledError("no carry")]
+    )
+    def test_a_carry_that_fails_on_the_loop_fails_the_drive(
+        self, error: BaseException
+    ) -> None:
+        with (
+            _bound(_FailingPropagator(error)),
+            pytest.raises(type(error), match="no carry"),
+        ):
+            drive(_answer)
+
+
+def _captured_elsewhere() -> ContextSnapshot:
+    def capture() -> ContextSnapshot:
+        _view_local.value = "set"
+        return ContextSnapshot(contextvars.copy_context())
+
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(capture).result()
+
+
+def _read(context: contextvars.Context) -> object:
+    return context.run(getattr, _view_local, "value", None)
+
+
+def _marked(loop: asyncio.AbstractEventLoop) -> Callable[[], object]:
+    """Return a call that reads `_view_local` on a thread a server `loop` marks."""
+
+    def read() -> object:
+        SyncToAsync.threadlocal.main_event_loop = loop
+        SyncToAsync.threadlocal.main_event_loop_pid = os.getpid()
+        return _read(BridgePropagator(plain=False).restore(_captured_elsewhere()))
+
+    return read
+
+
+class TestBridgePropagator:
+    """Tests for ``BridgePropagator.restore`` restoring a snapshot on a sync thread."""
+
+    def test_the_capturing_thread_gets_the_context_itself(self) -> None:
+        captured = ContextSnapshot(contextvars.copy_context())
+        assert BridgePropagator(plain=False).restore(captured) is captured.context
+
+    def test_a_plain_carry_hands_the_captured_context_back_without_a_hop(self) -> None:
+        captured = _captured_elsewhere()
+        assert BridgePropagator(plain=True).restore(captured) is captured.context
+        assert background_loop.current() is None
+
+    def test_the_background_loop_carries_a_context_captured_elsewhere(self) -> None:
+        propagator = BridgePropagator(plain=False)
+        captured = _captured_elsewhere()
+        context = propagator.restore(captured)
+        assert _read(context) == "set"
+        assert propagator.restore(captured) is context
+
+    def test_the_server_loop_of_the_thread_carries_it_instead(self) -> None:
+        def read() -> object:
+            return _read(BridgePropagator(plain=False).restore(_captured_elsewhere()))
+
+        async def server() -> object:
+            return await sync_to_async(read)()
+
+        assert asyncio.run(server()) == "set"
+        assert background_loop.current() is None
+
+    @pytest.mark.parametrize("state", ["stopped", "closed"])
+    def test_a_server_loop_that_stopped_leaves_the_carry_to_the_background(
+        self, state: str
+    ) -> None:
+        loop = asyncio.new_event_loop()
+        if state == "closed":
+            loop.close()
+        try:
+            assert _in_thread(_marked(loop)) == ["set"]
+        finally:
+            loop.close()
+
+    def test_a_thread_running_a_loop_is_refused(self) -> None:
+        async def on_the_loop() -> None:
+            BridgePropagator(plain=False).restore(_captured_elsewhere())
+
+        with pytest.raises(RuntimeError, match="running an event loop"):
+            asyncio.run(on_the_loop())
+
+    def test_the_wait_ends_at_the_deadline(self) -> None:
+        captured = _captured_elsewhere()
+        release = threading.Event()
+        background_loop.call_soon(release.wait, WAIT)
+        try:
+            with deadline(time.monotonic() + 0.05), pytest.raises(TimeoutError):
+                BridgePropagator(plain=False).restore(captured)
+        finally:
+            release.set()
+        assert captured.get() is None
+
+    @pytest.mark.parametrize(
+        "error", [RuntimeError(UNSERVED), asyncio.CancelledError(UNSERVED)]
+    )
+    def test_a_failing_hop_raises_on_the_waiting_thread(
+        self, error: BaseException, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def refused(_settle: object) -> None:
+            raise error
+
+        monkeypatch.setattr(bridge, "_ARRIVE", refused)
+        with pytest.raises(type(error), match=UNSERVED):
+            BridgePropagator(plain=False).restore(_captured_elsewhere())
+
+
+class TestBridgePropagatorOnALoop:
+    """Tests for ``BridgePropagator.arestore`` restoring a snapshot on the running loop."""
+
+    def test_the_capturing_loop_gets_the_context_itself(self) -> None:
+        async def scenario() -> bool:
+            captured = ContextSnapshot(contextvars.copy_context())
+            return (
+                await BridgePropagator(plain=False).arestore(captured)
+                is captured.context
+            )
+
+        assert asyncio.run(scenario()) is True
+
+    def test_a_plain_carry_hands_the_captured_context_back(self) -> None:
+        captured = _captured_elsewhere()
+
+        async def scenario() -> bool:
+            return (
+                await BridgePropagator(plain=True).arestore(captured)
+                is captured.context
+            )
+
+        assert asyncio.run(scenario()) is True
+
+    def test_one_hop_carries_it_for_every_caller_on_the_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        propagator = BridgePropagator(plain=False)
+        captured = _captured_elsewhere()
+        landings: list[int] = []
+        landed = bridge._landed
+
+        async def counted() -> contextvars.Context:
+            landings.append(threading.get_ident())
+            return await landed()
+
+        monkeypatch.setattr(bridge, "_landed", counted)
+
+        async def scenario() -> tuple[object, bool]:
+            first, second = await asyncio.gather(
+                propagator.arestore(captured), propagator.arestore(captured)
+            )
+            again = await propagator.arestore(captured)
+            return _read(first), first is second is again
+
+        assert asyncio.run(scenario()) == ("set", True)
+        assert len(landings) == 1
+
+    def test_a_cancelled_caller_leaves_the_carry_to_the_others(self) -> None:
+        propagator = BridgePropagator(plain=False)
+        captured = _captured_elsewhere()
+
+        async def scenario() -> object:
+            cancelled = asyncio.ensure_future(propagator.arestore(captured))
+            waiting = asyncio.ensure_future(propagator.arestore(captured))
+            await asyncio.sleep(0)
+            cancelled.cancel()
+            return _read(await waiting)
+
+        assert asyncio.run(scenario()) == "set"
+
+    def test_a_saturated_default_executor_holds_no_carry_up(self) -> None:
+        captured = _captured_elsewhere()
+
+        async def scenario() -> object:
+            loop = asyncio.get_running_loop()
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+            released = threading.Event()
+            blocker = loop.run_in_executor(None, released.wait, WAIT)
+
+            async def carried() -> object:
+                context = await BridgePropagator(plain=False).arestore(captured)
+                released.set()
+                return _read(context)
+
+            try:
+                return await asyncio.wait_for(carried(), WAIT)
+            finally:
+                released.set()
+                await blocker
+
+        assert asyncio.run(scenario()) == "set"
+
+
+class TestContextsCarryLocals:
+    """Tests for the probe of whether a context shows its `Local` values anywhere."""
+
+    def test_it_tells_whether_asgiref_tags_a_local_with_its_thread(self) -> None:
+        major, minor = (int(part) for part in asgiref.__version__.split(".")[:2])
+        assert contexts_carry_locals() is ((major, minor) < (3, 12))
+
+
 class TestDriveContext:
     """Tests for ``drive`` sharing context variables with the caller."""
 
-    def test_variables_are_visible_and_writes_come_back(self) -> None:
+    def test_variables_are_visible_and_writes_come_back(
+        self, carry: BridgePropagator
+    ) -> None:
         kept = contextvars.ContextVar[str]("kept")
         written = contextvars.ContextVar[str]("written")
         created = contextvars.ContextVar[str]("created")
@@ -451,7 +740,39 @@ class TestDriveContext:
 
         contextvars.copy_context().run(scenario)
 
-    def test_a_value_whose_comparison_raises_comes_back(self) -> None:
+    def test_the_coroutine_reads_and_writes_the_language_of_the_view(
+        self, hops: BridgePropagator
+    ) -> None:
+        async def switch() -> str:
+            seen = translation.get_language()
+            translation.activate("fr")
+            return seen
+
+        def scenario() -> None:
+            translation.activate("de")
+            assert drive(switch) == "de"
+            assert translation.get_language() == "fr"
+
+        contextvars.copy_context().run(scenario)
+
+    def test_the_coroutine_reads_and_writes_a_local_of_the_view(
+        self, hops: BridgePropagator
+    ) -> None:
+        async def switch() -> object:
+            seen = getattr(_view_local, "value", None)
+            _view_local.value = "by the coroutine"
+            return seen
+
+        def scenario() -> None:
+            _view_local.value = "by the view"
+            assert drive(switch) == "by the view"
+            assert _view_local.value == "by the coroutine"
+
+        contextvars.copy_context().run(scenario)
+
+    def test_a_value_whose_comparison_raises_comes_back(
+        self, carry: BridgePropagator
+    ) -> None:
         ambiguous = contextvars.ContextVar[object]("ambiguous")
         written = _Ambiguous()
 

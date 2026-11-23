@@ -598,7 +598,7 @@ Errors
      - A ``NEXT_FRAMEWORK`` value has a type the settings merge silently drops in favour of the framework default.
        The check covers ``PAGE_BACKENDS``, ``COMPONENT_BACKENDS``, ``STATIC_BACKENDS``, and ``TEMPLATE_LOADERS`` as lists.
        It also covers ``COMPONENT_TEMPLATE_LOADER``, ``CSRF_DELIVERY``, ``DEPENDENCY_RESOLVER``, ``DEV_SERVER``, ``URL_NAME_TEMPLATE``, and ``URL_RESOLVER`` as strings, ``STATIC_VERSION`` as a string or ``None``, and ``NEXT_JS_OPTIONS``, ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, ``CONSENT``, ``TRANSACTIONS``, and ``DEFER`` as dicts.
-       Inside ``TRANSACTIONS`` it also covers ``SAFE`` and ``UNSAFE`` as bools, ``ALIASES`` as ``"all"`` or a list of aliases, and ``RULE`` as a string or ``None``, values the transaction rule reads as their default.
+       Inside ``TRANSACTIONS`` it also covers ``SAFE`` and ``UNSAFE`` as ``True``, ``False``, or ``"writes"``, ``ALIASES`` as ``"all"`` or a list of aliases, and ``RULE`` as a string or ``None``, values the transaction rule reads as their default.
        Inside ``DEFER`` it covers every value at every level, a negative duration or one above a day, a cap below one, and a value outside its set, and a read of such a value answers its default.
        The token ``KEYS``, ``MAX_AGE`` and ``BUCKET`` carry their own code, ``next.E233``.
        Inside ``ROUTER`` it covers a ``SCOPE``, ``PREFETCH``, ``INTERCEPT`` or ``FOREIGN`` value outside its set, a delay or a TTL that is no finite number above zero, a ``PREFETCH_ENTRIES``, ``SNAPSHOTS`` or ``MAX_LAYOUTS`` that is no integer from one, an ``EXCLUDE`` that is no list or tuple of paths starting with ``/``, an ``ENABLED``, ``TRANSITIONS`` or ``CURRENT['ENABLED']`` that is no bool, a ``CUT``, ``DIGEST`` or ``CURRENT['BACKEND']`` that is no non-empty string, a ``SPECULATION`` that is neither ``None``, a string, nor a dict, a ``CURRENT`` that is neither a bool nor a dict, and a ``CURRENT['CONTAINERS']`` entry that is not one simple selector, a tag name, ``[attr]`` or ``[attr=value]``, each read as its default.
@@ -1176,7 +1176,7 @@ Errors
      - ``next.suspense.checks.tokens``
    * - ``next.E222``
      - A ``component.defer()``, ``component.props()``, ``page.defer()``, or ``page.compress()`` call declares nothing.
-       It covers a mode outside ``stream``, ``load``, ``visible``, ``manual``, and ``inline``, a ``timeout`` that is neither ``None`` nor a duration above zero and up to one day, written as seconds or as ``"3s"`` or ``"500ms"``, a ``props`` value that is not a tuple of distinct identifiers or that names ``defer``, ``timeout``, ``reload``, or ``delay``, a ``tag`` that names no HTML element or names one that cannot wrap the loading HTML, a void element or one whose content is raw text, script or inert markup such as ``script``, ``style``, ``textarea``, ``title``, ``template``, ``noscript``, ``iframe``, ``object``, or ``img``, a ``parallel`` other than ``None``, ``True``, or ``False``, a ``tokens`` mapping with a key outside ``max_age``, ``bucket``, ``binding``, and ``max_bytes``, with an unusable value, or with a ``bucket`` at or above its ``max_age``, props named through both ``component.defer(props=...)`` and ``component.props()``, a ``page.compress()`` value that is no bool, and a call inside a function.
+       It covers a mode outside ``stream``, ``load``, ``visible``, ``manual``, and ``inline``, a ``timeout`` that is neither ``None`` nor a duration above zero and up to one day, written as seconds or as ``"3s"`` or ``"500ms"``, a ``props`` value that is not a tuple of distinct identifiers or that names ``defer``, ``timeout``, ``reload``, or ``delay``, a ``tag`` that names no HTML element or names one that cannot wrap the loading HTML, a void element or one whose content is raw text, script or inert markup such as ``script``, ``style``, ``textarea``, ``title``, ``template``, ``noscript``, ``iframe``, ``object``, or ``img``, a ``parallel`` other than ``True`` or ``False``, a ``tokens`` mapping with a key outside ``max_age``, ``bucket``, ``binding``, and ``max_bytes``, with an unusable value, or with a ``bucket`` at or above its ``max_age``, props named through both ``component.defer(props=...)`` and ``component.props()``, a ``page.compress()`` value that is no bool, and a call inside a function.
        It also covers a call outside the module kind it is for, a ``component.defer()`` or ``component.props()`` outside a ``component.py`` and a ``page.defer()`` or ``page.compress()`` outside a ``page.py``.
        The component or the page keeps the boundary its files give it until the declaration is fixed.
      - ``next.pages.checks.declarations``
@@ -1901,6 +1901,11 @@ Warnings
        ``DEFER["TOKENS"]["OPTIONS"]["BINDING"]`` is ``NoBinding`` while ``django.contrib.auth`` is installed and a component mints boundary tokens, so a token minted for one signed-in user opens the boundary for any client that obtains it until it expires.
        Setting the binding to ``"user"`` or ``"session"`` clears it, and a project whose client-trip boundaries show only public content silences it through ``SILENCED_SYSTEM_CHECKS``.
      - ``next.suspense.checks.tokens``
+   * - ``next.W187``
+     - A ``loading.<zone>.djx`` sits beside a template whose zone of that name no layer can open and that does not reload with ``reload="loading"``, so the file never renders.
+       A layer opens a zone a partial request renders alone, so a zone under a ``{% if %}`` or inside a component that decides what it shows is out of its reach.
+       Moving the zone out of that tag, adding ``reload="loading"`` to it, or deleting the file clears it.
+     - ``next.partial.checks.zones``
 
 Codes are assigned per check and are not contiguous.
 

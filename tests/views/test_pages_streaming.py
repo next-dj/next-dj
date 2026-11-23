@@ -464,7 +464,9 @@ class TestStreamedPage:
         with override_settings(MIDDLEWARE=[*settings.MIDDLEWARE, _NONCE]):
             page = _stream(pages, "/one/")
         written = b"".join(page.writes).decode()
-        tags = re.findall(r"<(?:script|style)\b[^>]*>", written)
+        tags = re.findall(
+            r"<(?:script|style)(?=[\t\n\f\r />])[^>]*>", written, re.IGNORECASE
+        )
         inline = [tag for tag in tags if "src=" not in tag]
         assert len(inline) >= 4
         assert all(f'nonce="{NONCE_VALUE}"' in tag for tag in inline)

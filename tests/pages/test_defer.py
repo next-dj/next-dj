@@ -27,7 +27,7 @@ class TestPageDefer:
         assert page_defer(page_file) is None
         [(file_path, held)] = list(page_defer_store.loaded())
         assert file_path == page_file
-        assert held.problem() == "parallel must be None, True or False, got 'str'"
+        assert held.problem() == "parallel must be True or False, got 'str'"
 
 
 class TestPageDeferDeclaration:

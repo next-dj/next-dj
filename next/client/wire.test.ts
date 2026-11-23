@@ -2670,3 +2670,20 @@ describe("Wire state marking", () => {
     });
   });
 });
+
+describe("Wire send override", () => {
+  it("sends through the request's own seam with the headers it would fetch with", async () => {
+    const h = makeWire(() => Promise.resolve(envelopeResponse('{"ops":[]}')));
+    const sent: { url: string; init: RequestInit }[] = [];
+    const send = (url: string, init: RequestInit): Promise<Response> => {
+      sent.push({ url, init });
+      return Promise.resolve(envelopeResponse('{"ops":[]}'));
+    };
+    const outcome = await h.wire.fetch({ url: "/m/", zone: "sheet", send });
+    expect(outcome.status).toBe("ok");
+    expect(h.calls).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(new Headers(sent[0]!.init.headers).get("X-Next-Zone")).toBe("sheet");
+    expect(sent[0]!.init.signal).toBeInstanceOf(AbortSignal);
+  });
+});

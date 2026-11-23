@@ -342,6 +342,16 @@ class TestNavigationIntent:
         )
         assert partial_intent(request).prefetch is None
 
+    @pytest.mark.parametrize(
+        ("value", "depth"),
+        [("1", Depth.FULL), ("full", Depth.FULL), ("deep", None), (None, None)],
+    )
+    def test_a_zone_prefetch_is_always_full(self, value, depth) -> None:
+        headers = {"X-Next-Request": "1", "X-Next-Zone": "sheet"}
+        if value is not None:
+            headers["X-Next-Prefetch"] = value
+        assert partial_intent(_request_with_headers(**headers)).prefetch is depth
+
     def test_the_navigation_headers_are_varied(self) -> None:
         assert {"X-Next-Navigate", "X-Next-Layouts", "X-Next-Prefetch"} <= set(
             VARY_HEADERS

@@ -705,8 +705,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - ``loading``, written by ``reload="loading"`` and left out for the default ``keep``.
        While a request reloads the zone, the runtime shows loading content after the delay instead of keeping the current content busy.
    * - ``data-next-delay``
-     - Zone wrapper
+     - Zone wrapper, or a ``data-next-layer`` link
      - The milliseconds a ``reload="loading"`` zone waits before it shows loading content, written from ``delay=`` when it differs from the default of 150.
+       Written by hand on a layer link, it is the wait before the layer shows the loading UI of its zone.
    * - ``data-next-loading``
      - ``<template>``
      - The zone name or the boundary key whose loading content the template holds, written once per name and response on a page whose zone uses ``reload="loading"``.
@@ -768,6 +769,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
    * - ``data-next-layer``
      - ``<a>``
      - Open the href in a layer, the zone container is created before the request.
+   * - ``data-next-layer``
+     - ``<template>``
+     - The zone whose ``loading.<zone>.djx`` the template holds, written before the first link of the page that opens a layer of that zone, see :doc:`layers`.
    * - ``data-next-accepted``
      - The opening ``<a>``
      - A comma-separated list of zones the runtime re-fetches from the host page in one zone GET once the layer is accepted.

@@ -37,13 +37,6 @@ _PROBE = (
 _PEEK_AND_SIDE = zone_body("peek") + '{% zone "side" %}{{ side_probe }}{% endzone %}'
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 def _site(root: Path, *, intercept_source: str = "", peek: str | None = None) -> None:
     write_page(root, "photo/[int:pk]", PAGE_HEAD, body="<p>photo</p>")
     write_page(

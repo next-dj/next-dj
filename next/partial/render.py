@@ -22,6 +22,7 @@ from next.templatetags.boundaries import (
 )
 
 from .errors import UnknownZoneError
+from .layers import stash_layers
 from .registry import zones_of
 from .signals import zone_rendered
 from .zone import render_zone_body
@@ -178,6 +179,7 @@ def _rendered_zones(
     html: dict[str, str] = {}
     bodies: dict[str, str] = {}
     durations: dict[str, float] = {}
+    shown: set[str] = set()
     for info in infos:
         name = info.name
         start = perf_counter() if listening else 0.0
@@ -199,8 +201,9 @@ def _rendered_zones(
         if listening:
             durations[name] = (perf_counter() - start) * 1000
         # SafeString is a str, kept as-is to avoid copies on the hot path.
-        html[name] = wrapped
-        bodies[name] = body
+        held = set(shown)
+        html[name] = stash_layers(wrapped, collector, request, shown)
+        bodies[name] = stash_layers(body, collector, request, held)
 
     _emit_rendered(page_path, durations, request)
     return ZoneRenderResult(

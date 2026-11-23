@@ -58,7 +58,7 @@ DEFER_CHUNK_STATIC_PATH: Final = "next/next.defer.min.js"
 """The client-trip loader, declared by a page holding a token or a retry control."""
 
 RELOAD_CHUNK_STATIC_PATH: Final = "next/next.reload.min.js"
-"""The zone skeletons, declared by a page holding a zone that reloads to its loading."""
+"""The zone and layer skeletons, declared by a page holding a zone or a layer link."""
 
 MORE_CHUNK_STATIC_PATH: Final = "next/next.more.min.js"
 """The `{% more %}` URL sync and pruning, declared by a page holding such a link."""
@@ -70,10 +70,10 @@ ROUTER_CHUNK_STATIC_PATH: Final = "next/next.router.min.js"
 """The client router, declared by every document while `ROUTER["ENABLED"]` holds."""
 
 HISTORY_CHUNK_STATIC_PATH: Final = "next/next.history.min.js"
-"""The snapshots, scroll restore and active links the router loads once idle."""
+"""The snapshots, scroll restore and form navigation the router loads once idle."""
 
 INTENT_CHUNK_STATIC_PATH: Final = "next/next.intent.min.js"
-"""The intent prefetch and the client cache the router loads once idle."""
+"""The link and layer prefetch, its cache and active links, loaded once idle."""
 
 DEV_CHUNK_KEY: Final = "dev"
 """The `$chunks` key of the diagnostics chunk, listed only under `DEBUG`."""
@@ -391,13 +391,15 @@ def dry_run_template(template: str, fields: Iterable[str]) -> None:
     template.format(**dict.fromkeys(fields, ""))
 
 
+_NAME_END: Final = r"(?=[\t\n\f\r />])"
 SCRIPT_TEXT: Final = re.compile(
-    r"<script\b[^>]*>(?P<text>.*?)</script\s*>", re.IGNORECASE | re.DOTALL
+    rf"<script{_NAME_END}[^>]*>(?P<text>.*?)</script{_NAME_END}[^>]*>",
+    re.IGNORECASE | re.DOTALL,
 )
-"""A `<script>` element with its text under `text`, as a chunk template writes it."""
+"""A `<script>` element with its text under `text`, its tag names ended as HTML does."""
 _PROBE: Final = "\ue000"
 _SCRIPT_START: Final = "<script"
-_SCRIPT_OPEN: Final = re.compile(rf"{_SCRIPT_START}\b", re.IGNORECASE)
+_SCRIPT_OPEN: Final = re.compile(rf"{_SCRIPT_START}{_NAME_END}", re.IGNORECASE)
 
 
 def payload_in_script(template: str) -> bool:

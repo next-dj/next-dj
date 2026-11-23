@@ -41,13 +41,7 @@ from next.pages.boundaries import (
 from next.pages.context import ContextResult
 from next.pages.gating import GATE_KEY
 from next.pages.graph import Blame
-from next.pages.loaders import (
-    NO_BOUNDARIES,
-    BoundaryChain,
-    ErrorBoundary,
-    PageBoundary,
-    forget_layout_texts,
-)
+from next.pages.loaders import NO_BOUNDARIES, ErrorBoundary, forget_layout_texts
 from next.ports import PortSlot, render_deferred
 from next.seeding import JS_CONTEXT_KEY, JS_SERIALIZERS_KEY, TEMPLATE_PATH_KEY
 from next.static import ScriptInjectionPolicy
@@ -56,6 +50,7 @@ from next.templatetags.boundaries import PageBoundaryNode, contained_by, enclosi
 from next.testing import capture_signals
 from tests.pages.shells import boom, boundary_tag, deferred_tag, error_shell, shell_gate
 from tests.support import touch_later
+from tests.support.pages import boundary_chain
 
 
 pytestmark = pytest.mark.usefixtures("framework_providers")
@@ -63,15 +58,6 @@ pytestmark = pytest.mark.usefixtures("framework_providers")
 
 _BASE = Template("<b>{% block c %}{% endblock %}</b>")
 _BROKEN_ERROR = '{% include "next-missing.djx" %}'
-
-
-def _chain(*levels: int, root: Path = Path("/site")) -> BoundaryChain:
-    return BoundaryChain.of(
-        tuple(
-            PageBoundary(level, level, root / str(level) / "error.djx", None)
-            for level in levels
-        )
-    )
 
 
 def _shown(html: str) -> str:
@@ -82,24 +68,24 @@ class TestCatching:
     """The nearest boundary above the failed callable contains a failure."""
 
     def test_the_nearest_boundary_contains_a_failure_of_the_page(self) -> None:
-        guard = catching(_chain(0, 2), ValueError("x"))
+        guard = catching(boundary_chain(0, 2), ValueError("x"))
 
         assert guard == ErrorBoundary(0, 0, Path("/site/0/error.djx"))
 
     def test_a_callable_of_a_directory_skips_the_boundary_of_that_directory(
         self,
     ) -> None:
-        guard = catching(_chain(1, 2), ValueError("x"), 1)
+        guard = catching(boundary_chain(1, 2), ValueError("x"), 1)
 
         assert guard is not None
         assert guard.level == 2
 
     def test_a_callable_above_every_boundary_is_not_contained(self) -> None:
-        assert catching(_chain(1), ValueError("x"), 3) is None
+        assert catching(boundary_chain(1), ValueError("x"), 3) is None
 
     @pytest.mark.parametrize("error", [Http404("x"), PermissionDenied("x")])
     def test_an_intended_exception_passes_through(self, error: Exception) -> None:
-        assert catching(_chain(0), error) is None
+        assert catching(boundary_chain(0), error) is None
 
     def test_a_chain_without_an_error_file_contains_nothing(self) -> None:
         assert catching(NO_BOUNDARIES, ValueError("x")) is None
@@ -123,7 +109,7 @@ class TestShell:
         return blame
 
     def test_a_cut_keeps_the_groups_at_or_above_the_boundary(self) -> None:
-        chain = _chain(1, 2)
+        chain = boundary_chain(1, 2)
         shell = ErrorShell({"head": 1}, {"tail": 2}, (2, 1), self._blame(), chain)
 
         assert shell.at(2) == {
@@ -138,14 +124,14 @@ class TestShell:
         assert shell.at(1)["side"] == "SIDE"
 
     def test_a_source_reads_the_cut_of_its_boundary(self) -> None:
-        chain = _chain(1, 2)
+        chain = boundary_chain(1, 2)
         shell = ErrorShell({}, {}, (2, 1), self._blame(), chain)
 
         assert "side" not in shell.of(Path("/site/2/error.djx"))
         assert shell.of(Path("/site/1/error.djx"))["side"] == "SIDE"
 
     def test_an_unknown_source_gets_no_inherited_group(self) -> None:
-        shell = ErrorShell({"head": 1}, {}, (2,), self._blame(), _chain(2))
+        shell = ErrorShell({"head": 1}, {}, (2,), self._blame(), boundary_chain(2))
 
         context = shell.of(Path("/elsewhere/error.djx"))
 
@@ -232,7 +218,7 @@ class TestBoundaryScope:
         with mock.patch(
             "next.pages.boundaries.render_boundaries", return_value=_NO_SCOPE
         ) as opened:
-            boundary_scope(_chain(0))
+            boundary_scope(boundary_chain(0))
 
         opened.assert_called_once_with()
 

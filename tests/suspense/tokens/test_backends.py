@@ -25,7 +25,6 @@ from next.suspense.tokens import (
     VERSIONS,
     BoundaryClaims,
     BoundaryTarget,
-    BoundaryTokenBackend,
     FrozenClock,
     HeaderTransport,
     JsonCodec,
@@ -46,6 +45,7 @@ from tests.support.tokens import (
     OLD_KEY,
     SEAL_PATHS,
     STORAGE_PATHS,
+    MinimalTokenBackend,
     b64decode,
     b64encode,
     claims,
@@ -695,29 +695,21 @@ class TestRejection:
         reset_failure_logs()
 
 
-class _Minimal(BoundaryTokenBackend):
-    def issue(self, request, claims, *, tokens=()) -> str:
-        return "token"
-
-    def redeem(self, request, token, target) -> BoundaryClaims:
-        raise BoundaryTokenError(TokenRejection.MALFORMED)
-
-
 class TestBackendContract:
     """A backend implements issue and redeem, and inherits the rest."""
 
     def test_a_minimal_backend_inherits_the_defaults(self) -> None:
-        backend = _Minimal({"OPTIONS": {"ANY": 1}})
+        backend = MinimalTokenBackend({"OPTIONS": {"ANY": 1}})
         assert backend.options == {"ANY": 1}
         assert backend.validate((("max_age", 1),)) is None
         assert isinstance(backend.transport, HeaderTransport)
 
     def test_options_that_are_no_mapping_read_as_empty(self) -> None:
-        assert _Minimal({"OPTIONS": "x"}).options == {}
-        assert _Minimal().options == {}
+        assert MinimalTokenBackend({"OPTIONS": "x"}).options == {}
+        assert MinimalTokenBackend().options == {}
 
     def test_a_minimal_backend_caps_a_prop_at_the_default_limit(self) -> None:
-        assert _Minimal().prop_limit((("max_bytes", 9),)) == DEFAULT_LIMIT
+        assert MinimalTokenBackend().prop_limit((("max_bytes", 9),)) == DEFAULT_LIMIT
 
     @pytest.mark.parametrize(
         ("storage", "limit"),

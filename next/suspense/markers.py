@@ -35,19 +35,10 @@ class Rule(enum.StrEnum):
 
 
 class Verdict(enum.StrEnum):
-    """Why placement chose a lane for a job no request-lane rule forces."""
+    """Why a job no request-lane rule forces went to the pool."""
 
-    EXPLORE = "explore"
-    PINNED = "pinned"
-    POOL_MODE = "pool-mode"
-    COST = "cost"
+    POOL = "pool"
     FOREGROUND_FULL = "foreground-full"
-    HANDOFF = "handoff"
-    CPU = "cpu"
-    ALONE = "alone"
-
-
-_REQUEST_VERDICTS: Final = frozenset({Verdict.HANDOFF, Verdict.CPU, Verdict.ALONE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,14 +49,12 @@ class Placement:
 
     @property
     def lane(self) -> Lane:
-        """Return the request lane for a rule or a cheap job, the pool otherwise."""
-        if self.forced or self.reason in _REQUEST_VERDICTS:
-            return Lane.REQUEST
-        return Lane.POOL
+        """Return the request lane for a rule, the pool otherwise."""
+        return Lane.REQUEST if self.forced else Lane.POOL
 
     @property
     def forced(self) -> bool:
-        """Whether a request-lane rule placed the job rather than the cost model."""
+        """Whether a request-lane rule placed the job."""
         return isinstance(self.reason, Rule)
 
 
@@ -261,7 +250,7 @@ class ForegroundFacts:
             return Rule.CONNECTION_STATE
         if self.thread_sources:
             return Rule.THREAD_LOCAL
-        if not self.parallel or options.parallel is False:
+        if not (self.parallel and options.parallel):
             return Rule.OPT_OUT
         return None
 

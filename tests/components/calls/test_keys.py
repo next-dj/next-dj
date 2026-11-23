@@ -4,9 +4,10 @@ from django.template import Context, Template
 from django.template.base import UNKNOWN_SOURCE
 
 from next.defer import stable_key
-from next.suspense.assembly import finish, run_sequentially
+from next.suspense.assembly import finish
 from next.suspense.components import deferring
 from tests.components.sites import FIRST_KEY, ComponentSite, Member, template_engine
+from tests.support.boundaries import run_sequentially
 
 
 class TestKey:
@@ -194,24 +195,30 @@ class TestCapture:
         bodies = [part.split("]")[0] for part in html.split("[")[1:]]
         assert bodies == ["1.1a", "2.1b", "3.1c", "1.2a", "2.2b", "3.2c"]
 
-    def test_a_slot_under_autoescape_off_stays_unescaped(
-        self, site: ComponentSite
+    @pytest.mark.parametrize(
+        ("template", "value", "expected"),
+        [
+            pytest.param(
+                "{% autoescape off %}{% #component 'card' %}{% #slot 'x' %}{{ h }}"
+                "{% /slot %}{% /component %}{% endautoescape %}",
+                "<b>raw</b>",
+                "<c><b>raw</b></c>",
+                id="autoescape-off",
+            ),
+            pytest.param(
+                "{% #component 'card' %}{% #slot 'x' %}{{ h }}{% /slot %}"
+                "{% /component %}",
+                "<b>",
+                "<c>&lt;b&gt;</c>",
+                id="escaped",
+            ),
+        ],
+    )
+    def test_a_slot_keeps_the_escaping_it_was_written_under(
+        self, site: ComponentSite, template: str, value: str, expected: str
     ) -> None:
         site.add("card", "<c>{% set_slot 'x' %}</c>", loading="L")
-        html = site.finished(
-            "{% autoescape off %}{% #component 'card' %}{% #slot 'x' %}{{ h }}"
-            "{% /slot %}{% /component %}{% endautoescape %}",
-            h="<b>raw</b>",
-        )
-        assert "<c><b>raw</b></c>" in html
-
-    def test_an_escaped_slot_stays_escaped(self, site: ComponentSite) -> None:
-        site.add("card", "<c>{% set_slot 'x' %}</c>", loading="L")
-        html = site.finished(
-            "{% #component 'card' %}{% #slot 'x' %}{{ h }}{% /slot %}{% /component %}",
-            h="<b>",
-        )
-        assert "<c>&lt;b&gt;</c>" in html
+        assert expected in site.finished(template, h=value)
 
     def test_an_include_in_a_slot_finds_its_engine(self, site: ComponentSite) -> None:
         site.add("card", "<c>{% set_slot 'x' %}</c>", loading="L")

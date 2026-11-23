@@ -45,7 +45,7 @@ The server renders a script tag for each one a page needs, right after the runti
      - The fetch of client-trip boundaries, the ``data-next-fetch`` and ``data-next-retry`` controls, the token expiry reload, and the second fetch of an ``incomplete`` boundary, declared by a page with a client-trip boundary or an error UI that offers a retry.
        Once it loads, ``Next.partial.fetch`` also takes a boundary wrapper element and fetches that boundary.
    * - ``reload``
-     - The loading UI of a ``reload="loading"`` zone and the skeletons of the boundaries inside it, declared by a page with such a zone.
+     - The loading UI of a ``reload="loading"`` zone and the skeletons of the boundaries inside it, and the loading UI of a layer before its answer, declared by a page with such a zone or with a layer link whose zone has one.
    * - ``more``
      - The pruning, the address writes, and the retries of ``{% more %}``, declared by a sentinel that sets ``prune=`` or ``url=``.
    * - ``reader``
@@ -54,10 +54,10 @@ The server renders a script tag for each one a page needs, right after the runti
      - The client router, declared by every routed document while ``ROUTER["ENABLED"]`` holds and loaded as a plain ``async`` script, since the first click needs it.
        Once it evaluates, ``Next.router`` exists, see `The router`_.
    * - ``history``
-     - The snapshots, the scroll restore, the scroll after a push, the memo of URLs that answered no envelope, the memo of shared pages a navigation fetches as plain documents, the default focus move and announcement, persisted elements, view transitions, the retirement of page stylesheets, the inline scripts a navigation runs, and the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``.
+     - The snapshots, the scroll restore, the scroll after a push, the memo of URLs that answered no envelope, the memo of shared pages a navigation fetches as plain documents, the default focus move and announcement, persisted elements, view transitions, the retirement of page stylesheets, the inline scripts a navigation runs, the navigation of a ``GET`` form, and the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``.
        Named by URL in the ``$router`` payload entry rather than by a tag, and loaded by the router once the page is idle or two seconds have passed, at once when the document opens on a history entry the router wrote before, and before any navigation or ``Next.router.prefetch()`` applies, which waits fifteen seconds at most.
    * - ``intent``
-     - The intent and viewport prefetch, the cache of prefetched answers, the client pass of active links, and the navigation of a ``GET`` form, named and loaded as the ``history`` bundle is.
+     - The intent and viewport prefetch of links and layers, the cache of prefetched answers, and the client pass of active links, named and loaded as the ``history`` bundle is.
 
 The load attributes of each tag are listed under ``NEXT_JS_OPTIONS`` in :doc:`settings`, and the ``disabled`` script policy renders none, which ``next.W181`` reports.
 
@@ -187,7 +187,7 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
    * - ``partial:settled``
      - ``Settled``, ``{zones, boundaries, status}``, once a request finished and once a batch of stream chunks applied, naming the zones and the boundary ids it settled and the ``status`` of its ``Outcome``.
    * - ``partial:layer-opened``
-     - ``{opener}``, the opening element, or ``null`` for a server-initiated open.
+     - ``{opener, root}``, the opening element, or ``null`` for a server-initiated open, and the zone container the body fills.
    * - ``partial:layer-accepted``
      - ``{result}``, the accept result the closing side passed, or ``undefined`` for a close without one.
    * - ``partial:layer-dismissed``
@@ -744,8 +744,8 @@ The remaining six carry both authors, written by a ``{% form %}`` parameter, by 
      - The reload bundle, which shows the loading content of the zone once a request that reloads it outlasts the delay.
        A ``data-next-reload`` outside a zone and a boundary wrapper also keeps the links inside it out of the client router.
    * - ``data-next-delay``
-     - ``{% zone delay= %}``
-     - The reload bundle, which waits that many milliseconds, 150 when it is absent, before it shows the loading content.
+     - ``{% zone delay= %}``, or hand-written on a ``data-next-layer`` link
+     - The reload bundle, which waits that many milliseconds, 150 when it is absent, before it shows the loading content of the zone or of the layer the link opens.
    * - ``data-next-action``
      - ``{% form %}``
      - The triggers intercept a submit and lock on the uid, and the applier resolves a ``form`` target by it.
@@ -811,6 +811,7 @@ The remaining six carry both authors, written by a ``{% form %}`` parameter, by 
    * - ``data-next-layer``
      - Hand-written on an ``<a>``
      - The layer stack, which opens the href in a modal and names the zone the dialog hosts.
+       The client router prefetches the zone under the intent, viewport, and press rules, and the layer takes that answer instead of sending its own request.
        A link missing either the zone or the href stays a plain navigation.
        So does a click the pagination rule of ``data-next-merge`` leaves to the browser, such as a Ctrl-click that opens the URL in a new tab.
    * - ``data-next-accepted``
@@ -892,6 +893,9 @@ A page reads ``data-next-state`` and ``data-next-error`` from a stylesheet, and 
    * - ``data-next-loading``
      - The server, on a ``<template>``
      - Holds the loading UI a ``reload="loading"`` zone shows, named after the zone.
+   * - ``data-next-layer``
+     - The server, on a ``<template>``
+     - Holds the loading UI a layer of that zone shows until its answer arrives, written before the first link that opens it.
 
 See :doc:`/content/topics/boundaries/streaming` for the states and :doc:`/content/topics/boundaries/errors` for the error UI.
 :doc:`template-tags` records the ``{% zone %}``, ``{% form %}``, and ``{% #consented %}`` parameters that compile to the eleven names a template tag can write, and :doc:`/content/topics/scripts/declaring` covers the script tags that carry ``data-next-script``.
@@ -929,7 +933,7 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
      };
      "partial:error": PartialError;
      "partial:settled": Settled;
-     "partial:layer-opened": { opener: HTMLElement | null };
+     "partial:layer-opened": { opener: HTMLElement | null; root: HTMLElement };
      "partial:layer-accepted": { result: unknown };
      "partial:layer-dismissed": { reason: string };
      "next:stream-gap": { topic: string; from: number; to: number };
@@ -1041,11 +1045,11 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``swap.ts``
      - The focus move, the announcement, persisted elements, view transitions, page stylesheet retirement, the inline scripts a navigation runs, and the reading of a foreign ``text/html`` answer, shipped in the history bundle.
    * - ``prefetch.ts``
-     - The prefetch queue of the viewport and intent prefetch, the cache of prefetched answers, and the stylesheets a landed answer fetches ahead, shipped in the intent bundle.
+     - The prefetch queue of the viewport and intent prefetch, the cache of prefetched answers, the answer a layer takes, and the stylesheets a landed answer fetches ahead, shipped in the intent bundle.
    * - ``current.ts``
      - The client pass of active links, shipped in the intent bundle.
    * - ``submit.ts``
-     - The URL a ``GET`` form navigates to, built from its fields and its submit button, shipped in the intent bundle.
+     - The URL a ``GET`` form navigates to, built from its fields and its submit button, shipped in the history bundle.
    * - ``entries/scripts.ts``, ``entries/stream.ts``, ``entries/ws.ts``, ``entries/csrf.ts``, ``entries/poll.ts``, ``entries/dev.ts``
      - The entry of each lazy chunk, one module per chunk named after it.
    * - ``entries/defer.ts``, ``entries/reload.ts``, ``entries/more.ts``, ``entries/reader.ts``, ``entries/router.ts``, ``entries/history.ts``, ``entries/intent.ts``

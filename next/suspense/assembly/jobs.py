@@ -5,7 +5,6 @@ import contextvars
 from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from concurrent.futures import Future
 from contextlib import aclosing, asynccontextmanager, closing, contextmanager
-from dataclasses import replace
 from pathlib import Path
 
 from django.http import HttpRequest
@@ -20,10 +19,9 @@ from next.suspense.connections import (
     Outlived,
     capture_states,
     foreground_facts,
-    pool_forced,
     settle_request,
 )
-from next.suspense.coordinator import Coordinator, Thresholds, Totals
+from next.suspense.coordinator import Coordinator, Totals
 from next.suspense.executors import background_loop
 from next.suspense.markers import ForegroundFacts, Outcome
 from next.suspense.policy import (
@@ -36,6 +34,7 @@ from next.suspense.policy import (
 from next.suspense.render import Delta
 from next.suspense.response import Piece, StreamGrant
 from next.suspense.session import BoundarySession
+from next.tasks import ContextSnapshot
 
 from .outcomes import MS, Outcomes
 
@@ -63,7 +62,7 @@ def prepare(
     session.facts = facts
     session.threads = states.threads
     session.connections = states.connections
-    session.snapshot = contextvars.copy_context()
+    session.snapshot = ContextSnapshot(contextvars.copy_context())
     memo = request_memo.get()
     session.scope = batch_scope.get() if memo is None else memo.scope
     if session.scope is not None:
@@ -83,8 +82,8 @@ def _own_scope(
     scope = RequestScope(render_dep_cache(request), loop=loop)
     snapshot = session.snapshot
     if snapshot is None:
-        snapshot = session.snapshot = contextvars.copy_context()
-    snapshot.run(batch_scope.set, scope)
+        snapshot = session.snapshot = ContextSnapshot(contextvars.copy_context())
+    snapshot.context.run(batch_scope.set, scope)
     session.scope = scope
     open_loaders(scope, snapshot)
     return scope
@@ -131,15 +130,8 @@ async def _ajob_scope(
 
 
 def _coordinator() -> Coordinator[Delta]:
-    """Return the coordinator of one response, every job pooled under `forcing_pool`.
-
-    Outcomes ready within `COALESCE_MS` of each other share one write.
-    """
-    coalesce = compression_settings().coalesce_ms / MS
-    if pool_forced():
-        thresholds = replace(Thresholds.from_settings(), mode="pool")
-        return Coordinator[Delta](thresholds=thresholds, coalesce=coalesce)
-    return Coordinator[Delta](coalesce=coalesce)
+    """Return a coordinator whose outcomes ready within `COALESCE_MS` share a write."""
+    return Coordinator[Delta](coalesce=compression_settings().coalesce_ms / MS)
 
 
 def batches(

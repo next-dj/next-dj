@@ -74,7 +74,7 @@ A call inside a function, a mode other than ``True``, ``False``, or ``"writes"``
 Boundary declaration
 ~~~~~~~~~~~~~~~~~~~~
 
-``page.defer(*, timeout=None, parallel=None)`` at the top of a ``page.py`` bounds the job of the page boundary a ``loading.djx`` above the page declares, and places it on the pool for ``True``, on the request thread for ``False``, or by placement for ``None``.
+``page.defer(*, timeout=None, parallel=True)`` at the top of a ``page.py`` bounds the job of the page boundary a ``loading.djx`` above the page declares, and ``parallel=False`` keeps that job on the request thread.
 The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value outside its shape declares nothing and is reported by ``next.E222``.
 See :doc:`defer` and :doc:`/content/topics/boundaries/loading`.
 
@@ -167,10 +167,14 @@ Context graph
 ``compile_graph`` layers each step one below the last it reads.
 ``collect`` runs the steps of a ``RunOrder`` one after another and ``acollect`` overlaps the independent ones on the event loop, while ``run_phase`` and ``arun_phase`` run one phase of a render that a boundary splits.
 ``merged`` folds the results in run order, a keyless callable spreading only the names still free.
+A context variable or an asgiref ``Local`` a callable writes reaches the later callables and the caller in declaration order.
+The sync callables of an overlapped layer hand their writes back through the segment runner, so the caller sees them even when the runner runs the callables in a copy of the context.
+The language, the URLconf and the script prefix keep what the last callable that changed them set, even when a later one switched one and restored it, and ``register_local_accessor`` registers a ``LocalAccessor``, an object with ``read()`` and ``write(value)``, that gives a value of the project the same treatment.
+A layer whose callables wrote nothing reads none of these values.
 ``Blame`` names the inherited group a failed run is blamed on.
 
 .. automodule:: next.pages.graph
-   :members: ContextGraph, RunOrder, Step, Phase, Blame, compile_graph, collect, acollect, run_phase, arun_phase, merged, blame, blaming, callable_keys, closure, keyless_result, keyless_shape_error
+   :members: ContextGraph, RunOrder, Step, Phase, Blame, compile_graph, collect, acollect, run_phase, arun_phase, merged, blame, blaming, callable_keys, closure, keyless_result, keyless_shape_error, register_local_accessor, LocalAccessor
 
 Registry
 ~~~~~~~~

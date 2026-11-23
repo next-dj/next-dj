@@ -857,20 +857,20 @@ class TestRefusal:
             response = _reload(_logged(_user("thief")), "/home/", card)
         self._refused(response)
 
-    def test_a_cross_site_reload_is_refused(self, pages: Path) -> None:
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            pytest.param({"Sec-Fetch-Site": "cross-site"}, id="cross-site"),
+            pytest.param({"X-Next-Zone": "list"}, id="wrapper-of-another-shape"),
+        ],
+    )
+    def test_a_reload_out_of_its_page_is_refused(
+        self, pages: Path, headers: dict[str, str]
+    ) -> None:
         client = Client()
         with _routed(pages):
             _html, (card, _boom) = _shell(client, "/home/")
-            response = _reload(
-                client, "/home/", card, **{"Sec-Fetch-Site": "cross-site"}
-            )
-        self._refused(response)
-
-    def test_a_wrapper_id_of_another_shape_is_refused(self, pages: Path) -> None:
-        client = Client()
-        with _routed(pages):
-            _html, (card, _boom) = _shell(client, "/home/")
-            response = _reload(client, "/home/", card, **{"X-Next-Zone": "list"})
+            response = _reload(client, "/home/", card, **headers)
         self._refused(response)
 
     def test_a_token_without_the_partial_switch_never_reaches_the_reload(

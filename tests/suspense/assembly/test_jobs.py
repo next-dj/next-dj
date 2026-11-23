@@ -242,14 +242,9 @@ class TestSettledRequest:
     """Request state settles only for pool jobs, a shared page keeping its cache."""
 
     @staticmethod
-    def _queued_session(*, parallel: bool | None = None) -> BoundarySession[Delta]:
+    def _queued_session(*, parallel: bool = True) -> BoundarySession[Delta]:
         session = open_session()
-        options = (
-            BoundaryOptions()
-            if parallel is None
-            else BoundaryOptions(parallel=parallel)
-        )
-        session.queue(make_job(session, options=options))
+        session.queue(make_job(session, options=BoundaryOptions(parallel=parallel)))
         return session
 
     @override_settings(MIDDLEWARE=[_SESSIONS])

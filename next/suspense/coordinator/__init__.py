@@ -18,7 +18,6 @@ from next.suspense.coordinator.machine import (
     End,
     Finish,
     Machine,
-    Placer,
     ProtocolError,
     RunPool,
     RunRequest,
@@ -29,33 +28,22 @@ from next.suspense.coordinator.machine import (
     Unit,
     Wake,
 )
-from next.suspense.coordinator.placement import (
-    COSTS,
-    Cost,
-    CostTable,
-    Thresholds,
-    place,
-)
 
 
 __all__ = [
     "COALESCE",
-    "COSTS",
     "IDLE",
     "Abandon",
     "Admitter",
     "AsyncDriver",
     "Command",
     "Coordinator",
-    "Cost",
-    "CostTable",
     "Emit",
     "End",
     "Finish",
     "Foreground",
     "Idle",
     "Machine",
-    "Placer",
     "ProtocolError",
     "RunPool",
     "RunRequest",
@@ -63,10 +51,8 @@ __all__ = [
     "StartLoop",
     "Task",
     "ThreadDriver",
-    "Thresholds",
     "Totals",
     "Unit",
     "Wake",
     "foreground",
-    "place",
 ]

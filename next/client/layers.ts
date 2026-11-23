@@ -19,6 +19,7 @@ import {
   pageKey,
   currentUrl as pageUrl,
 } from "./protocol";
+import type { FetchAdapter } from "./wire";
 
 const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
@@ -84,7 +85,10 @@ export interface LayerDeps {
     zone: string;
     queue?: string;
     headers?: Record<string, string>;
+    send?: FetchAdapter | undefined;
   }) => Promise<unknown>;
+  // The hand-over of a prefetched layer body, absent until the prefetch loads.
+  take?: () => ((href: string, zone: string) => FetchAdapter | undefined) | undefined;
   // Abort a queued fetch, so a closed layer drops its body in flight.
   abort?: (key: string) => void;
   document?: Document;
@@ -126,7 +130,6 @@ export function createLayers(deps: LayerDeps): LayerStack {
   const doc = deps.document ?? document;
   const dialogAdapter = deps.dialog ?? nativeDialog();
 
-  const abort = deps.abort ?? ((): void => undefined);
   const popstate = deps.popstate ?? defaultPopState();
   const stack: Layer[] = [];
   let serial = 0;
@@ -244,6 +247,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // move it. The query is kept, so a filtered host comes back with its filters.
     const host = currentUrl();
     const back = host + doc.location.hash;
+    // Taken while the address bar still shows the host the prefetch was asked over.
+    const send = seed && deps.take?.()?.(seed.href, seed.zone);
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
@@ -278,13 +283,14 @@ export function createLayers(deps: LayerDeps): LayerStack {
             () => (layer.committed = true),
           );
       }
-      emit("partial:layer-opened", { opener });
+      emit("partial:layer-opened", { opener, root });
       if (seed !== undefined) {
         await deps.fetch({
           url: seed.href,
           zone: seed.zone,
           queue: layer.key,
           headers: { [HEADER_ZONE]: seed.zone, [HEADER_ORIGIN]: host },
+          send,
         });
         if (sharesOwner) layer.committed = true;
       }
@@ -335,7 +341,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     try {
       stack.splice(index, 1);
       layer.drop?.();
-      abort(layer.key);
+      deps.abort?.(layer.key);
       layer.close();
       // Fire next:removed on the detaching root so an island inside the modal
       // unmounts before the subtree leaves the document, the apply verbs' contract.

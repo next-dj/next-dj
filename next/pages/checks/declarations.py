@@ -28,7 +28,7 @@ def _page_errors() -> list[CheckMessage]:
         page_defer_store,
         consequence="The page keeps the default options of its boundary.",
         hint="Call page.defer() at the top of the module, with timeout= None or a "
-        "duration such as 3 or '3s', and parallel= None, True or False.",
+        "duration such as 3 or '3s', and parallel= True or False.",
     )
     errors.extend(
         declaration_errors(

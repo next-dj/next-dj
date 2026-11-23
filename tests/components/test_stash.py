@@ -1,3 +1,4 @@
+import pytest
 from django.template import Context
 
 from next.components.stash import (
@@ -109,8 +110,16 @@ class TestStashContainment:
             '<template data-next-loading="k">&lt;/TEMPLATE >x</template>'
         )
 
-    def test_a_nested_template_stays_markup(self) -> None:
-        html = '<template id="n"><p>n</p></template><p>after</p>'
+    @pytest.mark.parametrize(
+        "html",
+        [
+            pytest.param(
+                '<template id="n"><p>n</p></template><p>after</p>', id="nested-template"
+            ),
+            pytest.param("<template-row></template-row>", id="custom-element"),
+        ],
+    )
+    def test_markup_that_ends_no_stash_is_left_alone(self, html: str) -> None:
         assert stash_markup("k", html) == (
             f'<template data-next-loading="k">{html}</template>'
         )
@@ -118,12 +127,6 @@ class TestStashContainment:
     def test_an_open_nested_template_is_closed(self) -> None:
         assert stash_markup("k", "<template><p>open") == (
             '<template data-next-loading="k"><template><p>open</template></template>'
-        )
-
-    def test_a_custom_element_named_after_it_is_left_alone(self) -> None:
-        html = "<template-row></template-row>"
-        assert stash_markup("k", html) == (
-            f'<template data-next-loading="k">{html}</template>'
         )
 
 

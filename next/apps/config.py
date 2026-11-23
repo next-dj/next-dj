@@ -47,13 +47,16 @@ from next.pages.ports import PageScanImpl
 from next.pages.processors import forget_context_processors, forget_template_processors
 from next.pages.responses import forget_response_policies
 from next.pages.watch import forget_watch_state
+from next.partial.layers import stash_layers
 from next.partial.manager import forget_asset_version, forget_partial_backend
 from next.permissions.access import forget_login_default
 from next.ports import (
     action_owners_slot,
     async_bridge_slot,
+    context_propagator_slot,
     deferrals_slot,
     form_routes_slot,
+    layer_loading_slot,
     page_scan_slot,
     page_scripts_slot,
     realtime_negotiation_slot,
@@ -91,6 +94,7 @@ from next.static.ports import StaticAssetsImpl
 from next.static.serializers import forget_serializer
 from next.suspense import drive, serve_until
 from next.suspense.assembly import inline_sink
+from next.suspense.bridge import BridgePropagator, contexts_carry_locals
 from next.suspense.connections import forget_detection
 from next.suspense.manager import forget_suspense_backends
 from next.transactions import cover_new_connection
@@ -214,10 +218,12 @@ class NextFrameworkConfig(AppConfig):
         _connect(connection_created, (cover_new_connection,))
         apply_resolver_setting()
         async_bridge_slot.set(drive)
+        context_propagator_slot.set(BridgePropagator(plain=contexts_carry_locals()))
         thread_wait_slot.set(serve_until)
         deferrals_slot.set(inline_sink)
         action_owners_slot.set(ActionOwnersImpl())
         form_routes_slot.set(form_action_manager)
+        layer_loading_slot.set(stash_layers)
         page_scan_slot.set(PageScanImpl())
         realtime_negotiation_slot.set(RealtimeNegotiationImpl())
         router_access_slot.set(RouterAccessImpl())

@@ -7,9 +7,10 @@ from django.test import override_settings
 from next.diagnostics import degraded, watch_degraded
 from next.static import StaticCollector
 from next.static.runtime import BUNDLE_NOTE
-from next.suspense.assembly import finish, run_sequentially
+from next.suspense.assembly import finish
 from next.suspense.components import deferring
 from tests.components.sites import FIRST_KEY, HEAD, TRIP, ComponentSite
+from tests.support.boundaries import run_sequentially
 
 
 def _bundle_url(name: str) -> str:

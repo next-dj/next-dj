@@ -70,9 +70,9 @@ def _contained(html: str) -> str:
     return balanced + _CLOSE * depth
 
 
-def stash_markup(name: str, html: str) -> str:
+def stash_markup(name: str, html: str, attr: str = STASH_ATTR) -> str:
     """Return the `<template>` element holding `html` as the loading UI of `name`."""
-    return f'<template {STASH_ATTR}="{escape(name)}">{_contained(html)}</template>'
+    return f'<template {attr}="{escape(name)}">{_contained(html)}</template>'
 
 
 @contextmanager

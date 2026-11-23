@@ -87,12 +87,12 @@ class StreamLifecycle:
                 )
             )
             try:
-                responses = await asyncio.shield(sending)
+                await asyncio.wait((sending,))
             except asyncio.CancelledError:
-                await asyncio.wait([sending])
+                await asyncio.wait((sending,))
                 self._log("stream_subscribed", sending.result())
                 raise
-            self._log("stream_subscribed", responses)
+            self._log("stream_subscribed", sending.result())
 
     def close(self, reason: UnsubscribeReason) -> None:
         """Send `stream_unsubscribed` once, a reason noted earlier winning."""

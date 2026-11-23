@@ -6,6 +6,7 @@ import pytest
 from django.http import HttpRequest
 
 from next.router.checks import check_root_layout_paths, paths as router_checks
+from tests.support.checks import write_file
 
 
 def path_processor(request: HttpRequest) -> dict[str, object]:
@@ -69,25 +70,19 @@ def _made() -> HttpRequest:
     return HttpRequest()
 
 
-def _write(path: Path, text: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
-
-
 @pytest.mark.usefixtures("router_on")
 class TestRootLayoutPaths:
     """`next.W176` names a root chrome that reads the path outside its zones."""
 
     def test_path_reads(self, tmp_path: Path) -> None:
-        root = _write(
+        root = write_file(
             tmp_path / "layout.djx",
             "{% comment %}{{ request.path }}{% endcomment %}"
             '{% zone "crumbs" %}{{ request.path }}{% endzone %}'
             "<footer>{{ site_path }} {{ request.get_full_path }}</footer>"
             "{% if brand %}{{ brand }}{% endif %}{% template %}",
         )
-        inner = _write(
+        inner = write_file(
             tmp_path / "a" / "layout.djx", "{{ request.path }}{% template %}"
         )
         processors = [path_processor, plain_processor, len]
@@ -102,7 +97,7 @@ class TestRootLayoutPaths:
         assert "reads site_path, request.get_full_path outside" in message.msg
 
     def test_a_clean_root(self, tmp_path: Path) -> None:
-        root = _write(tmp_path / "layout.djx", "<main>{% template %}</main>")
+        root = write_file(tmp_path / "layout.djx", "<main>{% template %}</main>")
         with (
             mock.patch.object(router_checks, "layouts", return_value=[root]),
             mock.patch.object(router_checks, "context_processors", return_value=[]),
@@ -151,7 +146,7 @@ class TestRootLayoutPaths:
     def test_a_constant_of_a_path_processor_is_quiet(
         self, tmp_path: Path, body: str, *, warned: bool
     ) -> None:
-        root = _write(tmp_path / "layout.djx", f"<nav>{body}</nav>{{% template %}}")
+        root = write_file(tmp_path / "layout.djx", f"<nav>{body}</nav>{{% template %}}")
         with (
             mock.patch.object(router_checks, "layouts", return_value=[root]),
             mock.patch.object(

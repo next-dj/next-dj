@@ -1,5 +1,3 @@
-import time
-
 import pytest
 from django.http import Http404
 
@@ -12,8 +10,8 @@ from next.diagnostics import (
 )
 from next.static import StaticCollector
 from next.static.assets import StaticAsset
-from next.suspense.assembly.inline import assemble, finish, prune, run_sequentially
-from next.suspense.markers import Caps, Captured, Job, Outcome, Rendered
+from next.suspense.assembly.inline import assemble, finish, prune
+from next.suspense.markers import Captured, Job, Outcome, Rendered
 from next.suspense.render import Added, Delta
 from next.suspense.response import shell
 from next.suspense.session import BoundarySession
@@ -210,60 +208,6 @@ class TestPrune:
         assert pruned.seal == session.seal
         assert pruned.deadline == session.deadline
         assert pruned.threads is session.threads
-
-
-class TestRunSequentially:
-    """Every job runs on the calling thread, nested ones after their parent."""
-
-    def test_nested_jobs_follow_their_parent(self) -> None:
-        session = open_session()
-        child = _job(session, _ready("I"))
-        parent = _job(session, _ready("O", nested=(child,)))
-        session.queue(parent)
-        batches = list(run_sequentially(session))
-        assert [[outcome.id for outcome in batch] for batch in batches] == [
-            [parent.id, child.id]
-        ]
-
-    def test_a_job_past_its_deadline_settles_as_timeout(self) -> None:
-        session = open_session()
-        job = _job(session, _ready("C"), deadline=time.monotonic() - 1)
-        session.queue(job)
-        [[outcome]] = run_sequentially(session)
-        assert outcome.kind is ErrorKind.TIMEOUT
-        assert outcome.rendered.html == "fallback:timeout"
-
-    def test_an_expired_job_settles_as_timeout(self) -> None:
-        caps = Caps.from_settings()
-        session = BoundarySession[Delta](
-            Caps(
-                caps.deadline,
-                caps.write_grace,
-                caps.boundaries,
-                caps.per_site,
-                caps.depth,
-                1,
-                caps.per_request,
-            ),
-            seal="s",
-            deadline=time.monotonic() + 60,
-        )
-        first, second = _job(session, _ready("A")), _job(session, _ready("B"))
-        session.queue(first)
-        session.queue(second)
-        outcomes = [outcome for batch in run_sequentially(session) for outcome in batch]
-        assert [outcome.kind for outcome in outcomes] == [None, ErrorKind.TIMEOUT]
-
-    def test_an_async_body_runs_through_the_bridge(self) -> None:
-        session = open_session()
-
-        async def arun() -> Rendered[Delta]:
-            return _ready("async")
-
-        job = make_job(session, arun=arun, fallback=lambda kind: _ready("", kind=kind))
-        session.queue(job)
-        [[outcome]] = run_sequentially(session)
-        assert outcome.rendered.html == "async"
 
 
 class TestFinish:

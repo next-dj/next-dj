@@ -128,6 +128,25 @@ An answer asked for by the viewport alone uses ``rel="prefetch"`` instead, since
 An answer for an asset version other than the one the page holds is dropped unused.
 The cache is emptied with the snapshots, after a non-``GET`` partial request, a clearing answer, a fresh CSRF token, a restore from the back-forward cache, and ``Next.router.flush()``, as :doc:`browser` lists, and all but the restore also abort a prefetch in flight.
 
+Layer links
+-----------
+
+A link with ``data-next-layer`` opens a layer rather than navigating, see :doc:`/content/topics/partial-rendering/layers`, and the same intent, viewport, and press rules prefetch the zone that layer shows.
+The request is the zone ``GET`` the layer would send, with ``X-Next-Zone`` naming the zone, ``X-Next-Origin`` naming the page on screen, and ``X-Next-Prefetch: full``.
+It asks for a JSON envelope and never a stream, since the layer shows the answer as it arrives.
+A hover, a link in view, and a press all send this one full request, and a ``data-next-press`` mode decides only whether it leaves at the press.
+
+The answer is kept under the URL, the zone, and the page on screen, apart from a navigation answer for the same URL, and the layer that opens takes it once.
+It stays usable for ``ROUTER["PREFETCH_TTL"]`` seconds, and only a ``2xx`` envelope that was not redirected is kept.
+A layer that opens while its prefetch or its press is in flight waits for it and sends nothing beside it, and one whose answer never came sends its own request.
+A layer that closes first stops the request of its press.
+The refusals, the pause, the asset version check, and the flushes of this page apply to the layer answers as well.
+
+A layer link is prefetched by its URL alone, so ``ROUTER["SCOPE"] = "opt-in"`` and ``data-next-router="off"`` around it do not turn it off.
+``data-next-prefetch="off"`` and ``data-next-press`` on the link or around it do.
+A link whose ``data-next-layer`` is empty opens no layer and is prefetched by neither path.
+The client router owns the prefetch, so a page without it opens each layer with its own request.
+
 What a prefetch renders
 -----------------------
 
@@ -135,6 +154,9 @@ A prefetch is a navigation request that also carries ``X-Next-Prefetch``.
 The server renders the page through the same view, with its access rules and context callables, and ``request.next.purpose`` is ``prefetch`` at both depths.
 ``request.next.depth`` tells them apart, ``Depth.SHELL`` for ``X-Next-Prefetch: 1`` and ``Depth.FULL`` for ``X-Next-Prefetch: full``.
 It is ``None`` for a request that is no router prefetch.
+
+A zone prefetch of a layer reads every ``X-Next-Prefetch`` value as ``Depth.FULL`` and renders the zone exactly as the layer open does.
+The zone request keeps the purpose of any zone request, so ``request.next.depth`` stays ``None`` there as well.
 
 At the shell depth a deferred boundary renders its loading content and no deferred job runs, so the answer is the shell of the page, and it never streams.
 The navigation that applies it shows that loading content until the fresh render fills the boundaries.
@@ -154,6 +176,7 @@ The context callables of a prefetched page do run, and a prefetch answer may be 
 A press the visitor abandons still sent its full request, so ``request.next.depth`` counts neither the visits that were shown nor those that never happened.
 The browser counts visits on ``router:commit``, which fires when a navigation lands whatever answer it used.
 Server code that must act once per visit, such as consuming a one-time link, declares ``page.router(prefetch=False)``, and the page is then never prefetched, so the click navigates with its own request.
+The declaration refuses a layer prefetch of the page too, and of an intercept that serves the zone when the intercept declares it, so such a layer opens with its own request.
 
 The server's answers
 --------------------

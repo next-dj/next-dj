@@ -2,9 +2,12 @@ import { defaultObserver } from "./adapters";
 import { assetLoad } from "./apply";
 import { inPlace, isPlainActivation } from "./events";
 import {
+  ACCEPT,
   CONTENT_TYPE,
+  HEADER_ORIGIN,
   HEADER_PREFETCH,
   HEADER_VERSION,
+  HEADER_ZONE,
   bare,
   isRecord,
   matching,
@@ -45,6 +48,7 @@ const SKIP =
   "[download],[rel~=external],[data-next-prefetch=off],[data-next-confirm]," +
   "[data-next-action]";
 const MODE = "data-next-prefetch";
+const LAYER = "data-next-layer";
 const PRESS = "data-next-press";
 const VIEWPORT = `[${MODE}=viewport] a[href],a[href][${MODE}=viewport]`;
 const RETRY = 30;
@@ -69,16 +73,44 @@ export function createPrefetch(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pressed: Press | undefined;
 
-  const keyOf = (href: string): string => {
+  const keyOf = (id: string): string => {
     const chain = host.chain().map((layout) => layout[0] + layout[1]);
-    return `${bare(href)} ${chain.join()}`;
+    return `${id} ${chain.join()}`;
   };
 
-  const read = async (response: Response): Promise<unknown> => {
+  // A layer link answers with its zone for the page it opens over, so both join its URL.
+  const spot = (href: string, zone?: string | null): string =>
+    zone ? `${bare(href)} ${zone} ${location.pathname + location.search}` : bare(href);
+
+  const addr = (link: HTMLAnchorElement): string =>
+    spot(link.href, link.getAttribute(LAYER));
+
+  const ask = (id: string, signal: AbortSignal, depth: string): Promise<Response> => {
+    const [url = "", zone, origin = ""] = id.split(" ");
+    return zone
+      ? fetch(url, {
+          headers: host.partial._headers({
+            Accept: ACCEPT,
+            [HEADER_ZONE]: zone,
+            [HEADER_ORIGIN]: origin,
+            [HEADER_PREFETCH]: "full",
+          }),
+          signal,
+          mode: "same-origin",
+        })
+      : host.ask(url, signal, { [HEADER_PREFETCH]: depth });
+  };
+
+  // A layer body stays unread for the layer to apply, so its record holds the facts
+  // the cache reads. A navigation body is the envelope, kept when it lists layouts.
+  const read = async (id: string, response: Response): Promise<unknown> => {
     const type = mime(response);
-    return type === (cfg().type ?? CONTENT_TYPE)
-      ? host.partial._parse(type, await response.text())
-      : undefined;
+    if (!response.ok || response.redirected || type !== (cfg().type ?? CONTENT_TYPE))
+      return undefined;
+    if (id.includes(" "))
+      return { complete: true, version: response.headers.get(HEADER_VERSION) };
+    const raw = host.partial._parse(type, await response.text());
+    return isRecord(raw) && Array.isArray(raw.layouts) ? raw : undefined;
   };
 
   const warm = (assets: unknown, urgent: boolean): void => {
@@ -107,7 +139,7 @@ export function createPrefetch(
   const room = (): boolean => {
     const now = Date.now();
     const stale = now - 1000 * (cfg().prefetch_ttl ?? 30);
-    const pointed = aimed ? keyOf(aimed.href) : "";
+    const pointed = aimed ? keyOf(addr(aimed)) : "";
     const limit = (cfg().prefetch_entries ?? 16) - flights();
     for (const [key, entry] of cache)
       if (
@@ -145,7 +177,7 @@ export function createPrefetch(
     response: Response,
     urgent: boolean,
   ): boolean => {
-    if (!isRecord(raw) || !Array.isArray(raw.layouts)) return false;
+    if (!isRecord(raw)) return false;
     const now = Date.now();
     const life =
       raw.complete === true
@@ -174,16 +206,16 @@ export function createPrefetch(
     pressed = undefined;
     clearTimeout(held.timer);
     const { response } = held;
-    if (!kept || !response?.ok || response.redirected) held.flight.stop();
+    if (!kept || !response) held.flight.stop();
     else
-      void read(response)
+      void read(held.url, response)
         .then((raw) => keep(held.key, raw, response, true))
         .catch(() => false)
         .then((stored) => stored || held.flight.stop());
   };
 
   const press = (link: HTMLAnchorElement): void => {
-    const url = bare(link.href);
+    const url = addr(link);
     if (pressed?.url === url) return;
     release();
     const key = keyOf(url);
@@ -205,7 +237,7 @@ export function createPrefetch(
       link,
       timer: setTimeout(release, HOLD),
       flight: {
-        answer: host.ask(url, controller.signal, { [HEADER_PREFETCH]: "full" }).then(
+        answer: ask(url, controller.signal, "full").then(
           (response) => {
             heed(url, response);
             const { status } = response;
@@ -225,12 +257,11 @@ export function createPrefetch(
     const controller = (wish.controller = new AbortController());
     const { signal } = controller;
     const key = keyOf(url);
-    void host
-      .ask(url, signal, { [HEADER_PREFETCH]: "1" })
+    void ask(url, signal, "1")
       .then(async (response) => {
         heed(url, response);
         if (says(response, "clear")) host.flush();
-        const raw = response.ok && !response.redirected && (await read(response));
+        const raw = await read(url, response);
         if (signal.aborted) return;
         tried.add(url);
         wish.stop?.();
@@ -264,12 +295,11 @@ export function createPrefetch(
   };
 
   const want = (
-    href: string,
+    url: string,
     urgent: boolean,
     el?: Element,
     stop?: () => void,
   ): Promise<void> => {
-    const url = bare(href);
     const held = wishes.get(url);
     if (held) {
       if (stop) {
@@ -287,7 +317,7 @@ export function createPrefetch(
     if (
       pressed?.url === url ||
       host.going() === url ||
-      !host.owned(new URL(url)) ||
+      !host.owned(new URL(url.split(" ")[0] ?? "")) ||
       fresh(cache.get(keyOf(url))) ||
       refused.has(url) ||
       pause > Date.now()
@@ -301,7 +331,7 @@ export function createPrefetch(
   };
 
   const forget = (el: Element | undefined, pointer = false): void => {
-    const url = el instanceof HTMLAnchorElement ? bare(el.href) : "";
+    const url = el instanceof HTMLAnchorElement ? addr(el) : "";
     const wish = wishes.get(url);
     if (!wish || wish.controller || wish.el !== el) return;
     if (pointer && wish.stop) wish.urgent = false;
@@ -340,7 +370,7 @@ export function createPrefetch(
     el instanceof HTMLAnchorElement &&
     inPlace(el.getAttribute("target")) &&
     !el.closest(SKIP) &&
-    host.owned(new URL(el.href), el)
+    host.owned(new URL(el.href), el.getAttribute(LAYER) ? undefined : el)
       ? el
       : undefined;
 
@@ -355,7 +385,7 @@ export function createPrefetch(
   };
 
   const intend = (link: HTMLAnchorElement): void => {
-    if (eager()) void want(link.href, true, link);
+    if (eager()) void want(addr(link), true, link);
   };
 
   const full = (event: Event, link: HTMLAnchorElement): boolean => {
@@ -405,9 +435,9 @@ export function createPrefetch(
       const stop = observer.observe(
         el,
         (visible) => {
-          if (tried.has(bare(link.href))) stop();
+          if (tried.has(addr(link))) stop();
           else if (!visible) forget(el);
-          else if (eager()) void want(link.href, false, el, stop);
+          else if (eager()) void want(addr(link), false, el, stop);
         },
         "",
       );
@@ -443,12 +473,30 @@ export function createPrefetch(
   );
   watch(doc);
 
+  // A layer takes the answer held for its link, or fetches as it would without one.
+  host.partial._take = (href, zone) => {
+    const url = spot(new URL(href, doc.baseURI).href, zone);
+    const found = adopt(url, claim(url));
+    return (
+      found &&
+      (async (target, init) => {
+        const hit = await found;
+        const flight = hit?.flight;
+        if (hit?.response) flight?.stop();
+        else init.signal?.addEventListener("abort", () => flight?.stop());
+        return (
+          hit?.response ?? (flight && (await flight.answer)) ?? fetch(target, init)
+        );
+      })
+    );
+  };
+
   return {
     take: (href) => {
       const url = bare(href);
       return adopt(url, claim(url));
     },
-    prefetch: (href) => want(href, true),
+    prefetch: (href) => want(bare(href), true),
     drop: () => {
       release(false);
       for (const wish of wishes.values()) wish.controller?.abort();

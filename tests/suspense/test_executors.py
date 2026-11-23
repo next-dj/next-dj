@@ -36,10 +36,10 @@ from next.suspense.executors import (
     request_executor,
     retire_thread,
     serve_until,
-    served_cpu,
 )
 from next.tasks import StealableTask
 from next.testing import override_next_settings
+from tests.support.errors import fail_hop
 from tests.support.waits import WAIT, until
 
 
@@ -60,11 +60,6 @@ def _expiring(future: Future[Any]) -> Iterator[None]:
 
 def _interrupt() -> None:
     raise KeyboardInterrupt
-
-
-def _fail() -> None:
-    msg = "hop failed"
-    raise ValueError(msg)
 
 
 async def _connect() -> None:
@@ -385,7 +380,7 @@ class TestRequestThreadExecutor:
 
     def test_an_error_in_a_hop_settles_it_and_serving_goes_on(self) -> None:
         executor = RequestThreadExecutor()
-        failed = _submit_elsewhere(executor, _fail)
+        failed = _submit_elsewhere(executor, fail_hop)
         done: Future[None] = Future()
         _submit_elsewhere(executor, done.set_result, None)
         executor.serve(done, WAIT)
@@ -422,19 +417,6 @@ class TestRequestThreadExecutor:
         _submit_elsewhere(executor, mark)
         executor.serve(done, WAIT)
         assert dict(vars(markers)) == before
-
-    def test_the_cpu_of_a_served_hop_is_counted_for_its_thread(self) -> None:
-        executor = RequestThreadExecutor()
-        before = served_cpu()
-
-        def burn() -> None:
-            started = time.thread_time_ns()
-            while time.thread_time_ns() == started:
-                pass
-
-        hop = _submit_elsewhere(executor, burn)
-        executor.serve(hop, WAIT)
-        assert served_cpu() > before
 
     def test_it_reads_as_a_quit_executor_to_asgiref(self) -> None:
         executor = RequestThreadExecutor()
@@ -694,7 +676,7 @@ class TestLaneExecutorOutcomes:
     """Results and failures reach the future, and no failure ends a worker."""
 
     def test_an_exception_reaches_the_future(self, pools) -> None:
-        future = pools().submit(StealableTask(_fail))
+        future = pools().submit(StealableTask(fail_hop))
         with pytest.raises(ValueError, match="hop failed"):
             future.result(5)
 

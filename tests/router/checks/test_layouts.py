@@ -14,6 +14,7 @@ from next.router.checks import (
 )
 from next.testing import override_next_settings
 from tests.support import patch_checks_router_manager, write_page
+from tests.support.checks import write_file
 
 
 _ROOT_LAYOUT = (
@@ -84,19 +85,13 @@ def active_tab() -> str:
 """
 
 
-def _write(path: Path, text: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
-
-
 @pytest.mark.usefixtures("router_on")
 class TestLayoutSlots:
     """`next.E239` names a placeholder the slot comments cannot wrap."""
 
     def test_a_title_placeholder(self, tmp_path: Path) -> None:
-        bad = _write(tmp_path / "layout.djx", "<title>{% template %}</title>")
-        good = _write(tmp_path / "a" / "layout.djx", "<main>{% template %}</main>")
+        bad = write_file(tmp_path / "layout.djx", "<title>{% template %}</title>")
+        good = write_file(tmp_path / "a" / "layout.djx", "<main>{% template %}</main>")
         gone = tmp_path / "gone" / "layout.djx"
         with mock.patch.object(
             router_checks, "layouts", return_value=[bad, good, gone]
@@ -106,9 +101,11 @@ class TestLayoutSlots:
         assert "inside a <title>" in message.msg
 
     def test_the_layouts_of_the_trees(self, tmp_path: Path) -> None:
-        first = _write(tmp_path / "a" / "layout.djx", "<main>{% template %}</main>")
-        second = _write(tmp_path / "b" / "layout.djx", "<main>{% template %}</main>")
-        third = _write(tmp_path / "c" / "layout.djx", "<main>{% template %}</main>")
+        first = write_file(tmp_path / "a" / "layout.djx", "<main>{% template %}</main>")
+        second = write_file(
+            tmp_path / "b" / "layout.djx", "<main>{% template %}</main>"
+        )
+        third = write_file(tmp_path / "c" / "layout.djx", "<main>{% template %}</main>")
         with (
             mock.patch.object(
                 router_checks,

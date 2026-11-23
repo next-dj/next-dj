@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 from django.conf import settings
 
 from next.diagnostics import FailureLog
-from next.ports import page_scripts_slot
+from next.ports import page_scripts_slot, stash_layer_loading
 
 from .assets import default_kinds
 from .collector import HEAD_CLOSE, default_placeholders
@@ -170,6 +170,7 @@ class PlaceholderInjector:
         Every URL passes through `asset_url` first, so a per-request rewrite applies.
         """
         sender = self._provider
+        html = stash_layer_loading(html, collector, request)
         collector_finalized.send(sender=collector, page_path=page_path, request=request)
         html_before = html
         replaced: tuple[str, ...] | None = None

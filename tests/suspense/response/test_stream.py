@@ -287,12 +287,12 @@ class TestChunks:
     def test_debug_carries_the_lane_and_the_timing(self, make_chunks) -> None:
         session = open_session()
         job = _job(session)
-        timing = Timing(Lane.POOL, Placement(Verdict.COST), 0.002, 0.01)
+        timing = Timing(Lane.POOL, Placement(Verdict.FOREGROUND_FULL), 0.002, 0.01)
         outcome = Outcome(job.id, Rendered("", Delta()), timing)
         chunks = make_chunks(session, shell(job.id, make_call("div", "k"), ""))
         assert chunks.payload(Piece(job, outcome))[keys.CHUNK_DEBUG] == {
             "lane": "pool",
-            "placement": "cost",
+            "placement": "foreground-full",
             "queue_ms": 2.0,
             "run_ms": 10.0,
         }

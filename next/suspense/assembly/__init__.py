@@ -9,7 +9,7 @@ from .delivery import (
     page_deferring,
     page_sink,
 )
-from .inline import Run, assemble, finish, prune, run_sequentially
+from .inline import Run, assemble, finish, prune
 from .pages import page_response
 from .partials import PartialRender
 
@@ -28,5 +28,4 @@ __all__ = [
     "page_response",
     "page_sink",
     "prune",
-    "run_sequentially",
 ]

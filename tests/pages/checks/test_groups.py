@@ -16,13 +16,6 @@ from tests.support.cases.groupnames import (
 from tests.support.checks import located, run_check
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 class TestParenthesisedDirectoryNames:
     """next.E169 flags a parenthesised name that is neither a group nor an intercept."""
 

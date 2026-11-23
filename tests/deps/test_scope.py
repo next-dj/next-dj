@@ -79,6 +79,20 @@ def test_an_uncontended_key_makes_no_waiter_future() -> None:
     asyncio.run(scenario())
 
 
+def test_an_eagerly_finished_claim_reads_its_task_at_once() -> None:
+    """Under an eager task factory a claim that never suspends is done when awaited."""
+
+    async def scenario() -> None:
+        asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory)
+        scope = RequestScope()
+        compute = Counted("ann")
+        assert await scope.resolve("user", compute) == "ann"
+        assert await scope.resolve("user", never) == "ann"
+        assert compute.calls == 1
+
+    asyncio.run(scenario())
+
+
 def test_a_contended_key_computes_once() -> None:
     async def scenario() -> None:
         scope = RequestScope()

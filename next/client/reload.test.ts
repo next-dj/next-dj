@@ -370,3 +370,123 @@ describe("a zone reload showing loading content", () => {
     expect(byId("b-1").innerHTML).toBe("<p>content</p> tail");
   });
 });
+
+describe("a layer waiting for its answer", () => {
+  const SKELETON = '<p class="bone">loading</p>';
+
+  function page(markup = `<template data-next-layer="sheet">${SKELETON}</template>`): {
+    opener: HTMLElement;
+    root: HTMLElement;
+  } {
+    document.body.innerHTML =
+      `${markup}<a id="o" href="/m/" data-next-layer="sheet">M</a>` +
+      '<dialog data-next-dialog><div id="r" data-next-zone="sheet" ' +
+      'data-next-busy aria-busy="true"></div></dialog>';
+    harness();
+    return { opener: byId("o"), root: byId("r") };
+  }
+
+  function opened(opener: Element | null, root: Element): void {
+    emit("partial:layer-opened", { opener, root });
+  }
+
+  it("shows the loading UI of its zone once the delay passes", () => {
+    const { opener, root } = page();
+    opened(opener, root);
+    vi.advanceTimersByTime(149);
+    expect(root.innerHTML).toBe("");
+    vi.advanceTimersByTime(1);
+    expect(root.innerHTML).toBe(SKELETON);
+    expect(root.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("waits the delay the opener names", () => {
+    const { opener, root } = page();
+    opener.setAttribute("data-next-delay", "400ms");
+    opened(opener, root);
+    vi.advanceTimersByTime(399);
+    expect(root.innerHTML).toBe("");
+    vi.advanceTimersByTime(1);
+    expect(root.innerHTML).toBe(SKELETON);
+  });
+
+  it("shows it for a layer the server opens, after the default delay", () => {
+    const { root } = page();
+    opened(null, root);
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe(SKELETON);
+  });
+
+  it("never flashes it once a fast answer filled or released the root", () => {
+    const { opener, root } = page();
+    opened(opener, root);
+    root.innerHTML = "<form>body</form>";
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe("<form>body</form>");
+    root.innerHTML = "";
+    root.removeAttribute("data-next-busy");
+    opened(opener, root);
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe("");
+  });
+
+  it("leaves the answer that replaced it in place", () => {
+    const { opener, root } = page();
+    opened(opener, root);
+    vi.advanceTimersByTime(150);
+    root.innerHTML = "<form>body</form>";
+    settle(["sheet"]);
+    expect(root.innerHTML).toBe("<form>body</form>");
+  });
+
+  it("empties the root again when the answer fails", () => {
+    const { opener, root } = page();
+    opened(opener, root);
+    vi.advanceTimersByTime(150);
+    settle(["sheet"], "error");
+    expect(root.innerHTML).toBe("");
+  });
+
+  it("shows nothing once the answer settles before the delay", () => {
+    const { opener, root } = page();
+    opened(opener, root);
+    settle(["sheet"], "error");
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe("");
+  });
+
+  it("keeps the empty busy root of a zone without a loading UI", () => {
+    const { opener, root } = page("");
+    opened(opener, root);
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe("");
+    settle(["sheet"]);
+    expect(root.innerHTML).toBe("");
+  });
+
+  it("reads no reload stash of the same name", () => {
+    const { opener, root } = page(stashed("sheet", "<p>reload</p>"));
+    opened(opener, root);
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe("");
+  });
+
+  it("clears its timers when the runtime is torn down", () => {
+    const { opener, root } = page();
+    opened(opener, root);
+    controller.abort();
+    vi.advanceTimersByTime(150);
+    expect(root.innerHTML).toBe("");
+  });
+});
+
+describe("an empty layer", () => {
+  it("shows no loading UI for a root that names no zone", () => {
+    document.body.innerHTML =
+      '<template data-next-layer="">x</template><div id="r" data-next-busy></div>';
+    harness();
+    emit("partial:layer-opened", { opener: null, root: byId("r") });
+    vi.advanceTimersByTime(150);
+    expect(byId("r").innerHTML).toBe("");
+  });
+});

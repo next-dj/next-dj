@@ -30,13 +30,6 @@ _OBJECT = (
 )
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 def _intercept(root: Path, trail: str, source: str = PAGE_HEAD) -> Path:
     return write_page(root, trail, source, body=zone_body("peek"))
 

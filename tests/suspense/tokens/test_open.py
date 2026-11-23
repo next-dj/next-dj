@@ -5,17 +5,18 @@ from django.contrib.auth.models import AnonymousUser
 
 from next.signals import boundary_token_rejected
 from next.suspense import BoundaryTokenError, TokenRejection
-from next.suspense.tokens import (
-    VERSION,
-    BoundaryClaims,
-    BoundaryTokenBackend,
-    FrozenClock,
-    SignedSeal,
-    clocked,
-)
+from next.suspense.tokens import VERSION, FrozenClock, SignedSeal, clocked
 from next.suspense.tokens.context import TokenContext
 from next.testing import capture_signals
-from tests.support.tokens import KEY, NOW, claims, request_for, stacked, target
+from tests.support.tokens import (
+    KEY,
+    NOW,
+    MinimalTokenBackend,
+    claims,
+    request_for,
+    stacked,
+    target,
+)
 
 
 _AGES: list[int] = []
@@ -23,14 +24,6 @@ _AGES: list[int] = []
 
 def age_of(request, claims) -> int:
     return _AGES[-1]
-
-
-class _Minimal(BoundaryTokenBackend):
-    def issue(self, request, claims, *, tokens=()) -> str:
-        return "token"
-
-    def redeem(self, request, token, target) -> BoundaryClaims:
-        raise BoundaryTokenError(TokenRejection.MALFORMED)
 
 
 def _reason(call) -> TokenRejection:
@@ -43,16 +36,16 @@ class TestContract:
     """A backend without a two-phase redeem serves no reload."""
 
     def test_open_and_settle_are_not_implemented(self) -> None:
-        backend = _Minimal()
-        with pytest.raises(NotImplementedError, match="_Minimal"):
+        backend = MinimalTokenBackend()
+        with pytest.raises(NotImplementedError, match="MinimalTokenBackend"):
             backend.open(request_for(), "token")
-        with pytest.raises(NotImplementedError, match="_Minimal"):
+        with pytest.raises(NotImplementedError, match="MinimalTokenBackend"):
             backend.settle(request_for(), claims(), target())
 
     def test_announce_does_nothing(self) -> None:
         error = BoundaryTokenError(TokenRejection.MALFORMED)
         with capture_signals(boundary_token_rejected) as recorder:
-            _Minimal().announce(request_for(), error, "card")
+            MinimalTokenBackend().announce(request_for(), error, "card")
         assert len(recorder) == 0
 
 

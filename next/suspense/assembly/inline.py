@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import re
-import time
 from collections.abc import Callable, Iterable
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Final
 
-from next.defer import ErrorKind
 from next.diagnostics import mark_degraded
-from next.ports import run_bridged
 from next.suspense.markers import Outcome
 from next.suspense.render import Delta
 from next.suspense.response.markup import STATE, closed, openings
@@ -18,10 +15,8 @@ from next.suspense.session import ID_HEAD, IDENT, BoundarySession
 
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Iterator
-
     from next.static.collector import StaticCollector
-    from next.suspense.markers import Job, Rendered
+    from next.suspense.markers import Rendered
 
 
 _STALE: Final = re.compile(
@@ -146,31 +141,6 @@ def prune(session: BoundarySession[Delta], shell_html: str) -> BoundarySession[D
     return session.narrowed(kept)
 
 
-def _run_inline(job: Job[Delta], expired: frozenset[str]) -> Iterator[Outcome[Delta]]:
-    """Run `job` here, then its nested jobs, a job out of time settling as `timeout`."""
-    if job.id in expired or time.monotonic() >= job.deadline:
-        yield Outcome(job.id, job.fallback(ErrorKind.TIMEOUT))
-        return
-    body = job.run
-    if body is None:
-        arun = cast("Callable[[], Coroutine[Any, Any, Rendered[Delta]]]", job.arun)
-        rendered = run_bridged(arun)
-    else:
-        rendered = body()
-    yield Outcome(job.id, rendered)
-    for nested in rendered.nested:
-        yield from _run_inline(nested, expired)
-
-
-def run_sequentially(
-    session: BoundarySession[Delta],
-) -> Iterator[tuple[Outcome[Delta], ...]]:
-    """Run every job on the calling thread in document order, one batch per job."""
-    expired = frozenset(job.id for job in session.plan().expired)
-    for job in session.jobs:
-        yield tuple(_run_inline(job, expired))
-
-
 def finish(
     shell_html: str,
     session: BoundarySession[Delta],
@@ -183,4 +153,4 @@ def finish(
     return assemble(shell_html, outcomes, collector, seal=session.seal)
 
 
-__all__ = ["Run", "assemble", "finish", "prune", "run_sequentially"]
+__all__ = ["Run", "assemble", "finish", "prune"]

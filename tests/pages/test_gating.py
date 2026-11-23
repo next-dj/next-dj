@@ -278,18 +278,16 @@ class TestMetadata:
         assert _keys(plan, plan.split.shell) == {"site", "section", "body", "extra"}
         assert [key for _index, key in plan.split.pulled] == ["extra"]
 
-    def test_a_key_the_shell_provides_pulls_nothing(self, layered_registry) -> None:
+    @pytest.mark.parametrize(
+        "key",
+        [
+            pytest.param("site", id="the-shell-provides-it"),
+            pytest.param("slug", id="no-keyed-callable-provides-it"),
+        ],
+    )
+    def test_a_key_pulls_nothing(self, layered_registry, key: str) -> None:
         plan = _plan(
-            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"site"})
-        )
-
-        assert plan.split.pulled == ()
-
-    def test_a_key_no_keyed_callable_provides_pulls_nothing(
-        self, layered_registry
-    ) -> None:
-        plan = _plan(
-            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({"slug"})
+            layered_registry, _loading(0, LEAF_LOADING), metadata=frozenset({key})
         )
 
         assert plan.split.pulled == ()

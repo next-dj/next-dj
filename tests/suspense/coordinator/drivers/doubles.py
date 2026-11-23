@@ -31,7 +31,6 @@ from next.suspense.coordinator import (
     Emit,
     Foreground,
     Settlement,
-    Thresholds,
 )
 from next.suspense.executors import background_loop
 from next.suspense.markers import (
@@ -43,13 +42,10 @@ from next.suspense.markers import (
     Site,
 )
 from next.suspense.session import BoundarySession
-from next.tasks import StealableTask
+from next.tasks import ContextSnapshot, StealableTask
 from tests.support.waits import QUIET, WAIT
 
 
-POOL = Thresholds("pool", 300_000, 0.8, 2_000_000, 3)
-ADAPTIVE = Thresholds("adaptive", 300_000, 0.8, 2_000_000, 3)
-HANDOFF = Thresholds("adaptive", 300_000, 0.8, 2_000_000, 0)
 WSGI = ForegroundFacts(Server.WSGI_THREADED)
 ASGI = ForegroundFacts(Server.ASGI)
 ATOMIC_WSGI = ForegroundFacts(Server.WSGI_THREADED, atomic=("default",))
@@ -80,7 +76,7 @@ def new_session(
         Caps(deadline, grace, 16, per_site, 3, 64, per_request)
     )
     session.facts = facts
-    session.snapshot = contextvars.copy_context()
+    session.snapshot = ContextSnapshot(contextvars.copy_context())
     return session
 
 
@@ -95,7 +91,7 @@ def queue_job(
     abody: AsyncBody | None = None,
     site: Site | None = None,
     timeout: float | None = None,
-    parallel: bool | None = None,
+    parallel: bool = True,
 ) -> Job[str]:
     job_id = session.next_id()
     options = BoundaryOptions(timeout=timeout, parallel=parallel)
@@ -175,7 +171,7 @@ def scoped_session(session: BoundarySession[str]) -> RequestScope:
     scope = RequestScope(loop=background_loop.get())
     session.scope = scope
     assert session.snapshot is not None
-    session.snapshot.run(batch_scope.set, scope)
+    session.snapshot.context.run(batch_scope.set, scope)
     return scope
 
 
@@ -438,13 +434,11 @@ def coordinator_over(
     executor: BoundaryExecutor,
     *,
     admission: Admitter | None = None,
-    thresholds: Thresholds = POOL,
     permits: Foreground | None = None,
 ) -> Coordinator[str]:
     return Coordinator(
         executor=executor,
         admission=admission or ScriptedAdmission(),
-        thresholds=thresholds,
         permits=permits or Foreground(4),
     )
 

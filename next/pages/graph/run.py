@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from enum import Enum, auto
 from functools import partial
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from next.deps.cache import request_memo
 from next.deps.context import ResolutionContext
@@ -18,7 +18,16 @@ from next.deps.runner import run_isolated
 
 from .blame import blame, blame_watch
 from .merge import Merge, Ordered, RunOrder, keyless_shape_error
-from .variables import Writes, restore, scope_writes
+from .variables import (
+    LocalAccessor,
+    Values,
+    Writes,
+    accessors,
+    read_values,
+    restore,
+    scope_writes,
+    settle,
+)
 
 
 if TYPE_CHECKING:
@@ -333,7 +342,7 @@ class _Run:
     def _lane(self, lane: _Lane, context: ResolutionContext) -> None:
         """Run the sync steps of a layer in order, each in a context copy of its own.
 
-        It stops before a step past `lane.stop`, which a failing sibling lowers.
+        Writes go to the segment context, and it stops past `lane.stop` on a failure.
         """
         start = contextvars.copy_context()
         for index, view in lane.steps:
@@ -344,7 +353,11 @@ class _Run:
                 context.request, None, context.url_kwargs, view, context.cache
             )
             value = scope.run(self.call, index, resolution)
-            lane.done.append((self._shaped(index, value), scope_writes(scope, start)))
+            shaped = self._shaped(index, value)
+            written = scope_writes(scope, start)
+            restore(written)
+            end = scope.run(read_values, lane.tracked) if written else None
+            lane.done.append((shaped, frozenset(written), end))
 
     async def _overlap(
         self, calls: list[tuple[int, dict[str, object]]], results: list[object]
@@ -354,6 +367,7 @@ class _Run:
         A failure cancels the siblings after it and lets the ones before it finish.
         """
         start = contextvars.copy_context()
+        tracked = accessors()
         steps = self.steps
         owned: list[tuple[int, asyncio.Task[object], contextvars.Context]] = []
         for index, view in calls:
@@ -363,7 +377,9 @@ class _Run:
                 task.add_done_callback(_retrieved)
                 owned.append((index, task, scope))
         lane = _Lane(
-            tuple(call for call in calls if not steps[call[0]].is_async), self.limit
+            tuple(call for call in calls if not steps[call[0]].is_async),
+            self.limit,
+            tracked,
         )
         tasks = [task for _index, task, _scope in owned]
         if lane.steps:
@@ -376,20 +392,53 @@ class _Run:
             await self._watch(owned, lane, tasks)
         finally:
             await _stop(tasks)
-        writes: dict[int, Writes] = {}
+        self._apply(calls, self._writes(owned, lane, start, results), start, tracked)
+
+    def _writes(
+        self,
+        owned: list[tuple[int, asyncio.Task[object], contextvars.Context]],
+        lane: _Lane,
+        start: contextvars.Context,
+        results: list[object],
+    ) -> dict[int, tuple[Writes, Values | None]]:
+        """Take the result and the writes of every step that finished, by index."""
+        writes: dict[int, tuple[Writes, Values | None]] = {}
         for index, task, scope in owned:
             if _failure(task) is None and not task.cancelled():
                 results[index] = task.result()
-                writes[index] = scope_writes(scope, start)
+                written = scope_writes(scope, start)
+                end = scope.run(read_values, lane.tracked) if written else None
+                writes[index] = (written, end)
         done = lane.done
-        for (index, _view), (value, written) in zip(
-            lane.steps[: len(done)], done, strict=True
-        ):
-            results[index] = value
-            writes[index] = written
+        if lane.task is not None:
+            carried = lane.task.get_context()
+            for (index, _view), (value, names, end) in zip(
+                lane.steps[: len(done)], done, strict=True
+            ):
+                results[index] = value
+                writes[index] = (_carried(carried, names), end)
+        return writes
+
+    def _apply(
+        self,
+        calls: list[tuple[int, dict[str, object]]],
+        writes: dict[int, tuple[Writes, Values | None]],
+        start: contextvars.Context,
+        tracked: tuple[LocalAccessor[Any], ...],
+    ) -> None:
+        """Restore the writes in declaration order, then settle what steps changed.
+
+        A layer whose steps wrote nothing reads and settles nothing.
+        """
+        ends: list[Values] = []
         for index, _view in calls:
             if index < self.limit and index in writes:
-                restore(writes[index])
+                written, end = writes[index]
+                restore(written)
+                if end is not None:
+                    ends.append(end)
+        if ends:
+            settle(tracked, start.run(read_values, tracked), ends)
 
     async def _watch(
         self,
@@ -417,20 +466,33 @@ class _Run:
                     task.cancel()
 
 
+def _carried(
+    carried: contextvars.Context, written: frozenset[contextvars.ContextVar[Any]]
+) -> Writes:
+    """Return the values `carried` holds for the variables a sync step wrote."""
+    return {variable: carried[variable] for variable in written if variable in carried}
+
+
 class _Lane:
     """The sync steps of one layer, the task running them and what they finished.
 
     The loop lowers `stop` while the thread runs the steps, which reads it before each.
     """
 
-    __slots__ = ("done", "steps", "stop", "task")
+    __slots__ = ("done", "steps", "stop", "task", "tracked")
 
     def __init__(
-        self, steps: tuple[tuple[int, dict[str, object]], ...], stop: int
+        self,
+        steps: tuple[tuple[int, dict[str, object]], ...],
+        stop: int,
+        tracked: tuple[LocalAccessor[Any], ...],
     ) -> None:
         """Start with no step finished, stopping before any step past `stop`."""
         self.steps = steps
-        self.done: list[tuple[object, Writes]] = []
+        self.tracked = tracked
+        self.done: list[
+            tuple[object, frozenset[contextvars.ContextVar[Any]], Values | None]
+        ] = []
         self.stop = stop
         self.task: asyncio.Task[object] | None = None
 

@@ -48,7 +48,6 @@ from tests.support import (
     inspect_parameter,
     restored_resolver,
     routed,
-    typing_optional,
     write_page,
 )
 from tests.support.deps import counted
@@ -341,7 +340,7 @@ class TestStaticClaim:
             (Annotated[DObject, "doc"], True),
             (DObject[Group] | None, True),
             (DObject | None, True),
-            (typing_optional(DObject[Group]), True),
+            (Annotated[DObject[Group], "doc"] | None, True),
             (_RowAlias, True),
             (_RowAlias | None, True),
             (int, False),
@@ -364,7 +363,7 @@ class TestStaticClaim:
             "annotated_bare",
             "pep604_union",
             "bare_union",
-            "typing_optional",
+            "annotated_optional",
             "alias",
             "alias_union",
             "int",

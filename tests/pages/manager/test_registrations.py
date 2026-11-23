@@ -17,6 +17,7 @@ from tests.support import (
     unified_view,
     write_page_chain,
 )
+from tests.support.pages import page_calls
 
 
 ROOT = 'metadata = {"title": {"template": "{title} | Root"}, "description": "Root"}\n'
@@ -75,12 +76,6 @@ def leaf_meta({parameters}):
 
 def _leaf_callable(parameters: str = "", title: str = '"Own"') -> str:
     return LEAF_CALLABLE.format(parameters=parameters, title=title)
-
-
-def _calls(page_file: Path) -> list[int]:
-    module, _error = load_page_module(page_file)
-    assert module is not None
-    return module.calls
 
 
 class TestContextDecorator:
@@ -321,7 +316,7 @@ class TestStaticReads:
         (leaf,) = write_page_chain(tmp_path, [("leaf", _leaf_callable())])
         overlay = Segment("overlay", title=TitleSpec(absolute="Post"))
         assert page.fold_metadata(leaf, overlay=overlay).title == "Post"
-        assert _calls(leaf) == []
+        assert page_calls(leaf) == []
 
 
 class TestReset:

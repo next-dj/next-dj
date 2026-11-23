@@ -1732,3 +1732,78 @@ describe("layer head scoping from the audit", () => {
     expect(document.title).toBe("Feed");
   });
 });
+
+describe("a prefetched layer body", () => {
+  const prefetched = vi.fn<(input: string, init: RequestInit) => Promise<Response>>();
+
+  type Taker = ReturnType<NonNullable<LayerDeps["take"]>>;
+
+  function stack(taker?: Taker, loaded = true) {
+    const sent: Parameters<LayerDeps["fetch"]>[0][] = [];
+    const dispatched: Dispatched[] = [];
+    const layers = createTrackedLayers({
+      dispatch: (event, detail) => void dispatched.push({ event, detail }),
+      fetch: async (request) => void sent.push(request),
+      document,
+      dialog: mockDialog().adapter,
+      history: { push: () => undefined, replace: () => undefined },
+      ...(loaded ? { take: () => taker } : {}),
+    });
+    return { layers, sent, dispatched };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("sends the body through the answer the prefetch holds for the link and zone", async () => {
+    const take = vi.fn<NonNullable<Taker>>().mockReturnValue(prefetched);
+    const { layers, sent } = stack(take);
+    await layers.open(null, "/m/", "sheet");
+    expect(take).toHaveBeenCalledWith("/m/", "sheet");
+    expect(sent[0]!.send).toBe(prefetched);
+  });
+
+  it("asks for the answer while the address bar still shows the host page", async () => {
+    history.replaceState(null, "", "/host/");
+    const seen: string[] = [];
+    const layers = createTrackedLayers({
+      dispatch: () => undefined,
+      fetch: async () => undefined,
+      document,
+      dialog: mockDialog().adapter,
+      take: () => () => {
+        seen.push(location.pathname);
+        return undefined;
+      },
+    });
+    try {
+      await layers.open(null, "/m/", "sheet");
+      expect(location.pathname).toBe("/m/");
+      expect(seen).toEqual(["/host/"]);
+    } finally {
+      history.replaceState(null, "", "/");
+    }
+  });
+
+  it("fetches as before when no prefetch holds an answer or none is loaded", async () => {
+    const held = stack(() => undefined);
+    await held.layers.open(null, "/m/", "sheet");
+    expect(held.sent[0]!.send).toBeUndefined();
+    const idle = stack();
+    await idle.layers.open(null, "/m/", "sheet");
+    expect(idle.sent[0]!.send).toBeUndefined();
+    const bare = stack(undefined, false);
+    await bare.layers.open(null, "/m/", "sheet");
+    expect(bare.sent[0]!.send).toBeUndefined();
+  });
+
+  it("names the zone root a loading UI fills in the opened event", async () => {
+    const { layers, dispatched } = stack();
+    await layers.open(null, "/m/", "sheet");
+    const opened = dispatched.find((d) => d.event === "partial:layer-opened")!;
+    expect(opened.detail.root).toBe(
+      document.querySelector('dialog [data-next-zone="sheet"]'),
+    );
+  });
+});

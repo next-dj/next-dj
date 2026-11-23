@@ -4,12 +4,7 @@ from unittest import mock
 import pytest
 
 from next.router.checks import check_inline_scripts, scripts as router_checks
-
-
-def _write(path: Path, text: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
+from tests.support.checks import write_file
 
 
 @pytest.mark.usefixtures("router_on")
@@ -17,13 +12,13 @@ class TestInlineScripts:
     """`next.W177` names a template with an inline script without a nonce."""
 
     def test_scripts(self, tmp_path: Path) -> None:
-        bare = _write(tmp_path / "template.djx", "<script>go()</script>")
-        fine = _write(
+        bare = write_file(tmp_path / "template.djx", "<script>go()</script>")
+        fine = write_file(
             tmp_path / "a" / "template.djx",
             '<script nonce="{{ n }}">x</script><script src="/a.js"></script>'
             '<script type="application/json">{}</script>',
         )
-        module = _write(
+        module = write_file(
             tmp_path / "b" / "template.djx", '<script type="module">y</script>'
         )
         with mock.patch.object(
@@ -36,8 +31,8 @@ class TestInlineScripts:
         assert 'nonce="{{ csp_nonce }}"' in str(messages[0].hint)
 
     def test_the_templates_of_the_trees(self, tmp_path: Path) -> None:
-        page = _write(tmp_path / "a" / "template.djx", "<p>a</p>")
-        layout = _write(tmp_path / "layout.djx", "<main>{% template %}</main>")
+        page = write_file(tmp_path / "a" / "template.djx", "<p>a</p>")
+        layout = write_file(tmp_path / "layout.djx", "<main>{% template %}</main>")
         with (
             mock.patch.object(
                 router_checks,

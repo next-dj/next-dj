@@ -159,12 +159,13 @@ The zone itself shows its reload skeleton when it has one, a file named ``loadin
    {% for _ in "xxxxx" %}<tr><td colspan="4" class="skeleton"></td></tr>{% endfor %}
 
 The skeleton belongs to the template beside it, a ``template.djx``, a ``layout.djx`` or a ``component.djx``, and is never inherited by a directory below.
-It never renders on the first paint, because a zone always renders inline, and only ``reload="loading"`` uses it.
+It never renders on the first paint, because a zone always renders inline, and two things use it.
+A ``reload="loading"`` zone shows it while it reloads, and a layer that opens the zone shows it until its answer arrives, see :doc:`layers`.
 A page whose zone uses ``reload="loading"`` ships the skeleton once per response, rendered with the zone's context inside ``<template data-next-loading="<zone>">``, and ships the ``loading.djx`` of every ``defer="inline"`` component inside the zone the same way, named by its boundary key.
 Without the file, a zone with no component boundary inside stays busy only.
 The loading content never replaces a part of the zone that holds the focused element or a field the user changed.
 A replaced part keeps its measured height as ``min-height`` while the loading content shows, so the page below it does not jump, and ``data-next-reserve="off"`` on the zone or on an element around it lets the part shrink to the loading content instead.
-``next.E232`` reports a ``loading.<zone>.djx`` whose template declares no zone of that name.
+``next.E232`` reports a ``loading.<zone>.djx`` whose template declares no zone of that name, and ``next.W187`` one whose zone neither opens in a layer nor reloads to its loading UI.
 
 A zone is not an error boundary, so there is no ``error.<zone>.djx``.
 A failure inside the zone falls to the nearest page or component ``error.djx``.
@@ -294,6 +295,9 @@ A standalone request answers 400 ``unknown zone`` and ``Patches.morph_zone`` rai
    * - A ``loading.<zone>.djx`` sits beside the template that declares the zone.
      - ``next.E232``
      - A file whose zone the template beside it does not declare never renders.
+   * - Something shows a ``loading.<zone>.djx``.
+     - ``next.W187``
+     - A file whose zone no partial request renders alone and that does not reload to its loading UI never renders.
    * - A zone name is an ASCII slug of letters, digits, hyphens, or underscores.
      - ``next.E061``
      - The name travels in the ``X-Next-Zone`` header, which is latin-1.

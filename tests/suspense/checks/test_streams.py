@@ -27,13 +27,6 @@ WINDOWED_MORE = (
 
 
 @pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
-@pytest.fixture()
 def no_tokens():
     with patch.object(streams_module, "mints_tokens", return_value=False):
         yield

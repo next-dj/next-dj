@@ -32,6 +32,7 @@ from next.testing import (
     capture_signals,
     memory_broker,
 )
+from tests.support.errors import HaltError
 from tests.support.realtime import ServerClock, issue_session_ticket
 
 
@@ -277,6 +278,38 @@ class TestLifecycle:
 
         assert asyncio.run(scenario()) == [stream_subscribed, stream_unsubscribed]
         assert heard == ["subscribed"]
+
+    def test_a_cancelled_open_whose_send_fails_reports_nothing_to_the_loop(
+        self,
+    ) -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        reported: list[dict[str, object]] = []
+
+        async def failing(**_kwargs: object) -> None:
+            entered.set()
+            await release.wait()
+            raise HaltError
+
+        async def scenario() -> None:
+            loop = asyncio.get_running_loop()
+            loop.set_exception_handler(lambda _, context: reported.append(context))
+            lifecycle = StreamLifecycle(object(), "ws")
+            stream_subscribed.connect(failing, weak=False)
+            try:
+                opening = asyncio.create_task(lifecycle.aopen(("room:1",)))
+                await entered.wait()
+                opening.cancel()
+                await asyncio.sleep(0)
+                release.set()
+                with pytest.raises(HaltError):
+                    await opening
+                await asyncio.sleep(0)
+            finally:
+                stream_subscribed.disconnect(failing)
+
+        asyncio.run(scenario())
+        assert reported == []
 
     def test_a_failing_receiver_is_logged_and_the_others_still_hear(
         self, recorder: SignalRecorder, caplog: pytest.LogCaptureFixture

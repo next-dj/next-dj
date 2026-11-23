@@ -18,9 +18,9 @@ from tests.support import (
     bound_dependency,
     build_page_request,
     unified_view,
-    write_page,
     write_page_chain,
 )
+from tests.support.pages import loaded_page
 
 
 _BROKEN_SYNTAX = "def render( invalid syntax {\n"
@@ -36,14 +36,6 @@ _ASYNC_CONTEXT = (
     "    return len(rows)\n\n"
     "template = '{{ total }}'\n"
 )
-
-
-def _loaded(root: Path, source: str, trail: str = "") -> Path:
-    """Write and import one `page.py`, so its registrations reach the global page."""
-    page_file = write_page(root, trail, source)
-    _module, error = load_page_module(page_file)
-    assert error is None
-    return page_file
 
 
 GUARDED = """
@@ -179,7 +171,7 @@ class TestAsyncBody:
     """An `async def render` is awaited, any other body resolves in one segment."""
 
     def test_an_async_render_body_is_dynamic(self, tmp_path) -> None:
-        page_file = _loaded(
+        page_file = loaded_page(
             tmp_path, "async def render(request):\n    return '<b>async</b>'\n"
         )
         module, _error = load_page_module(page_file)
@@ -194,14 +186,14 @@ class TestAsyncBody:
         assert resolution.dynamic is True
 
     def test_an_async_render_returning_no_body_is_refused(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, "async def render():\n    return 1\n")
+        page_file = loaded_page(tmp_path, "async def render():\n    return 1\n")
         module, _error = load_page_module(page_file)
 
         with pytest.raises(TypeError, match="must return str or HttpResponseBase"):
             asyncio.run(page.aresolve_page_body(page_file, module, dep_cache={}))
 
     def test_a_static_body_resolves_in_one_segment(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, "template = '<p>static</p>'\n")
+        page_file = loaded_page(tmp_path, "template = '<p>static</p>'\n")
         module, _error = load_page_module(page_file)
 
         resolution = asyncio.run(
@@ -212,7 +204,7 @@ class TestAsyncBody:
         assert resolution.dynamic is False
 
     def test_an_authorization_awaits_an_async_render(self, tmp_path) -> None:
-        page_file = _loaded(
+        page_file = loaded_page(
             tmp_path,
             "from django.http import HttpResponse\n\n"
             "async def render(request):\n"
@@ -228,7 +220,7 @@ class TestAsyncBody:
         assert dynamic is False
 
     def test_a_prepared_context_skips_the_collection(self, tmp_path) -> None:
-        page_file = _loaded(tmp_path, "template = '{{ value }}'\n")
+        page_file = loaded_page(tmp_path, "template = '{{ value }}'\n")
 
         with mock.patch.object(page.contexts, "collect_context") as collect:
             html = page.render_composed(
@@ -244,7 +236,7 @@ class TestAsyncBody:
     def test_a_render_builds_an_async_context_through_the_bridge(
         self, tmp_path
     ) -> None:
-        page_file = _loaded(tmp_path, _ASYNC_CONTEXT)
+        page_file = loaded_page(tmp_path, _ASYNC_CONTEXT)
 
         with mock.patch.object(
             manager_render, "bridged_scope", wraps=manager_render.bridged_scope

@@ -24,13 +24,6 @@ _SHELL = '<aside>{% zone "sidebar" %}side{% endzone %}</aside>{% template %}'
 _BROKEN = '{% zone "peek" %}{% bogus %}{% endzone %}'
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 def _rule(target: Path, file: Path) -> Intercept:
     return Intercept(target, file, "(.)")
 

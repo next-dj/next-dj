@@ -291,7 +291,9 @@ URL                  Name  File                                           Access
 
 The intercept [`page.py`](kanban/pages/%28.%29board/%5Bint%3Aboard%5D/page.py) resolves the board through `DObject[Board]` from the `board` kwarg of the target URL, loads its columns with their cards, and titles the tab `Peek · Engineering roadmap · next.dj Kanban` until the modal closes. The [`template.djx`](kanban/pages/%28.%29board/%5Bint%3Aboard%5D/template.djx) wraps one row per column in `{% zone "board-peek" %}` with the card count and the WIP limit, and ends in a plain link to the board. The board page, its React island and its payload stay untouched, since the zone response never renders them.
 
-`TestBoardPeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, the link to the board and the plain title link.
+The modal opens at the click, before the summary arrives, and [`loading.board-peek.djx`](kanban/pages/%28.%29board/%5Bint%3Aboard%5D/loading.board-peek.djx) beside the intercept template is what it shows until then. The index carries the file in a `<template data-next-layer="board-peek">` before its first `Peek at columns` link, and the modal swaps it in once 150 milliseconds pass without an answer, so a fast answer never flashes it. The client router also prefetches the summary of a link the pointer rests on, and starts the request at the press of the mouse, so a peek opened after a hover lands filled with no request of its own.
+
+`TestBoardPeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, the link to the board, the plain title link, the loading state while the answer is held back, and the peek a hover prefetched.
 
 ### 12. A live board
 

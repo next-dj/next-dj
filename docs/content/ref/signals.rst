@@ -74,7 +74,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``id``, ``name``, ``addressing``, ``mode``, ``state``, ``kind``, ``lane``, ``placement``, ``reason``, ``queue_ms``, ``run_ms``, ``request``
      - Once per deferred job of a response, on the request thread, as its outcome is spliced into the page, a nested job after its parent.
        ``state`` is ``"ready"`` or ``"error"``, ``kind`` the ``ErrorKind`` of an error and ``None`` otherwise, ``lane`` the ``Lane`` the job ran on and ``None`` for one that never started.
-       ``placement`` is the ``Placement`` that chose the lane and ``reason`` its rule or verdict, such as ``atomic`` or ``explore``.
+       ``placement`` is the ``Placement`` that chose the lane and ``reason`` its rule or verdict, such as ``atomic``, ``pool``, or ``foreground-full``.
        ``queue_ms`` is the time the job waited for its lane and ``run_ms`` the time its body ran.
        ``request`` may be ``None`` for a render outside a request.
    * - ``boundary_side_effect``

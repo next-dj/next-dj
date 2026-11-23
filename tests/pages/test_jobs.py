@@ -44,15 +44,6 @@ _BASE = Template("<b>{% block c %}{% endblock %}</b>")
 _BROKEN_ERROR = '{% include "next-missing.djx" %}'
 
 
-def _chain(*levels: int, root: Path = Path("/site")) -> BoundaryChain:
-    return BoundaryChain.of(
-        tuple(
-            PageBoundary(level, level, root / str(level) / "error.djx", None)
-            for level in levels
-        )
-    )
-
-
 def _failing_body(
     loading: Path, context: Context, *, error: Path | None = None
 ) -> tuple[str, object]:

@@ -4,11 +4,13 @@ from .blame import Blame, blame, blaming
 from .compile import ContextGraph, callable_keys, closure, compile_graph
 from .merge import RunOrder, Step, keyless_result, keyless_shape_error
 from .run import Phase, acollect, arun_phase, collect, merged, run_phase
+from .variables import LocalAccessor, register_local_accessor
 
 
 __all__ = [
     "Blame",
     "ContextGraph",
+    "LocalAccessor",
     "Phase",
     "RunOrder",
     "Step",
@@ -23,5 +25,6 @@ __all__ = [
     "keyless_result",
     "keyless_shape_error",
     "merged",
+    "register_local_accessor",
     "run_phase",
 ]

@@ -57,16 +57,14 @@ class _Spec:
 def _refused(name: str, annotation: object) -> BoundaryPropsError:
     return BoundaryPropsError(
         f"the prop {name!r} is annotated {annotation!r}, which no token carries. "
-        "Use str, int, float, bool, None, Decimal, date, datetime, UUID, a list "
-        "of those, or a concrete model class."
+        "Use str, int, float, bool, None, Decimal, date, datetime, UUID, list[X] of "
+        "those, or a concrete model class, and write an optional one as X | None."
     )
 
 
 def _arms(annotation: object) -> tuple[object, ...] | None:
     """Return the arms of a union annotation, `None` for any other annotation."""
     if isinstance(annotation, types.UnionType):
-        return typing.get_args(annotation)
-    if typing.get_origin(annotation) is typing.Union:
         return typing.get_args(annotation)
     return None
 
@@ -95,7 +93,7 @@ def _spec(name: str, annotation: object) -> _Spec:
         if len(rest) != 1 or len(rest) == len(arms):
             raise _refused(name, annotation)
         return replace(_spec(name, rest[0]), optional=True)
-    if typing.get_origin(annotation) is list:
+    if isinstance(annotation, types.GenericAlias) and annotation.__origin__ is list:
         elements = typing.get_args(annotation)
         if len(elements) != 1:
             raise _refused(name, annotation)

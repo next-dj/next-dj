@@ -11,6 +11,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
+    import contextvars
     from collections.abc import (
         Awaitable,
         Callable,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from next.components.trip import TripInput
     from next.defer import DeferredCall
     from next.static import StaticCollector
+    from next.tasks import ContextSnapshot
     from next.urls import RouterBackend, RouterManager, URLPatternParser
     from next.utils import PageRoot
 
@@ -236,6 +238,19 @@ class ThreadWait(Protocol):
         """Return once `future` is done, running the hops queued for this thread."""
 
 
+class ContextPropagator(Protocol):
+    """Restores a context snapshot on the sync thread or the loop that runs its work.
+
+    `next.deps` sits below the default in `next.suspense`, and a project binds its own.
+    """
+
+    def restore(self, captured: ContextSnapshot, /) -> contextvars.Context:
+        """Return `captured` restored on this sync thread, itself if nothing moved."""
+
+    async def arestore(self, captured: ContextSnapshot, /) -> contextvars.Context:
+        """Return `captured` restored on the running loop, itself if nothing moved."""
+
+
 class RouterStamp(Protocol):
     """Sets the client router directives, a login or logout among them, on a response.
 
@@ -258,10 +273,24 @@ class ZoneMarking(Protocol):
         """Return the block whose zone HTML is marked for the page of the form."""
 
 
+class LayerLoading(Protocol):
+    """Stashes the loading UI of each layer zone the links of a rendered page open.
+
+    `next.partial` sits above `next.static`, so the injector reaches it here.
+    """
+
+    def __call__(
+        self, html: str, collector: StaticCollector, request: HttpRequest | None, /
+    ) -> str:
+        """Return `html` with the loading UI of each layer zone its links open."""
+
+
 action_owners_slot = PortSlot["ActionOwners"]("action owners port")
 async_bridge_slot = PortSlot["AsyncBridge"]("async bridge port")
+context_propagator_slot = PortSlot["ContextPropagator"]("context propagator port")
 deferrals_slot = PortSlot["DeferralSink"]("deferrals port")
 form_routes_slot = PortSlot["FormRoutes"]("form routes port")
+layer_loading_slot = PortSlot["LayerLoading"]("layer loading port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
 router_access_slot = PortSlot["RouterAccess"]("router access port")
 router_stamp_slot = PortSlot["RouterStamp"]("router stamp port")
@@ -306,6 +335,14 @@ def render_deferred(
     return sink.assembled(render, collector=collector, request=request, context=context)
 
 
+def stash_layer_loading(
+    html: str, collector: StaticCollector, request: HttpRequest | None
+) -> str:
+    """Return `html` through the bound layer loading pass, unchanged when unbound."""
+    loading = layer_loading_slot.peek()
+    return html if loading is None else loading(html, collector, request)
+
+
 def stamp_router(response: HttpResponseBase, request: HttpRequest) -> HttpResponseBase:
     """Set the client router directives through the bound stamp, none when unbound."""
     stamp = router_stamp_slot.peek()
@@ -333,8 +370,10 @@ def wait_served(future: Future[Any]) -> None:
 __all__ = [
     "ActionOwners",
     "AsyncBridge",
+    "ContextPropagator",
     "DeferralSink",
     "FormRoutes",
+    "LayerLoading",
     "PageScan",
     "PageScripts",
     "PortSlot",
@@ -347,8 +386,10 @@ __all__ = [
     "ZoneMarking",
     "action_owners_slot",
     "async_bridge_slot",
+    "context_propagator_slot",
     "deferrals_slot",
     "form_routes_slot",
+    "layer_loading_slot",
     "marked_zones",
     "page_scan_slot",
     "page_scripts_slot",
@@ -359,6 +400,7 @@ __all__ = [
     "run_bridged",
     "seo_routes_slot",
     "stamp_router",
+    "stash_layer_loading",
     "static_assets_slot",
     "thread_wait_slot",
     "wait_served",

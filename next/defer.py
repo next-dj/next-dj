@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Final, Protocol
 from django.conf import settings
 from django.utils.crypto import salted_hmac
 
+from next.utils import RAW_TEXT_ELEMENTS, VOID_ELEMENTS
+
 
 if TYPE_CHECKING:
     from django.template import Context
@@ -111,48 +113,23 @@ _DURATION = re.compile(r"(?P<amount>[0-9]+(?:\.[0-9]+)?)(?P<unit>ms|s)")
 _TAG = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 _MS_PER_SECOND: Final = 1000
 _SHOWN_DIGITS: Final = 18
-_UNWRAPPING_TAGS: Final = frozenset(
-    {
+_UNWRAPPING_TAGS: Final = (
+    VOID_ELEMENTS
+    | RAW_TEXT_ELEMENTS
+    | {
         "applet",
-        "area",
-        "base",
-        "basefont",
-        "bgsound",
         "body",
-        "br",
-        "col",
-        "embed",
-        "frame",
         "frameset",
         "head",
-        "hr",
         "html",
-        "iframe",
         "image",
-        "img",
-        "input",
-        "keygen",
-        "link",
         "listing",
-        "meta",
-        "noembed",
-        "noframes",
-        "noscript",
         "object",
-        "param",
         "plaintext",
-        "script",
-        "source",
-        "style",
         "template",
-        "textarea",
-        "title",
-        "track",
-        "wbr",
-        "xmp",
     }
 )
-"""Void elements and those whose content is raw text, script or inert markup."""
+"""Void and raw-text elements, plus those a parser frames, rewrites or keeps inert."""
 
 
 class BoundaryOptionError(ValueError):
@@ -253,10 +230,10 @@ def _tag(value: object) -> str | None:
     return value
 
 
-def _parallel(value: object) -> bool | None:
-    if value is None or isinstance(value, bool):
+def _parallel(value: object) -> bool:
+    if isinstance(value, bool):
         return value
-    msg = f"parallel must be None, True or False, got {type(value).__name__!r}"
+    msg = f"parallel must be True or False, got {type(value).__name__!r}"
     raise BoundaryOptionError(msg)
 
 
@@ -308,7 +285,7 @@ class BoundaryOptions:
     props: tuple[str, ...] = ()
     tag: str | None = DEFAULT_TAG
     tag_declared: bool = False
-    parallel: bool | None = None
+    parallel: bool = True
     tokens: tuple[tuple[str, object], ...] = ()
 
     @classmethod
@@ -319,7 +296,7 @@ class BoundaryOptions:
         timeout: object = None,
         props: object = (),
         tag: object = WrapperTag.SITE,
-        parallel: object = None,
+        parallel: object = True,
         tokens: object = None,
     ) -> BoundaryOptions:
         """Return the options as written, raising `BoundaryOptionError` on a misfit."""
@@ -385,11 +362,6 @@ class Site:
     mode: DeferMode
     origin: str
     index: int = 0
-
-    @property
-    def cost_key(self) -> tuple[Addressing, str, DeferMode]:
-        """Return what the placement table keys on, shared by every call of one name."""
-        return (self.addressing, self.name, self.mode)
 
 
 class CallRenderer(Protocol):

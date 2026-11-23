@@ -334,7 +334,33 @@ class ContextRender(PageContainment):
                     requested_zones=requested_zones,
                 ),
             )
-        caught = isinstance(outcome, Caught)
+        shell, thunk, entry = await self._ashell(
+            chain,
+            (file_path, request, url_kwargs, dep_cache),
+            blamed,
+            caught=isinstance(outcome, Caught),
+        )
+        if isinstance(outcome, Caught):
+            return replace(outcome, shell=shell)
+        context = shell.around(outcome)
+        if entry is not None and entry.folded is None:
+            folded = await thunk.afold(entry, dict(context))
+            context[METADATA_KEY] = FoldedMetadata(thunk, folded)
+        return context
+
+    async def _ashell(
+        self,
+        chain: BoundaryChain,
+        render: tuple[Path, HttpRequest | None, Mapping[str, object], dict[str, Any]],
+        blamed: Blame,
+        *,
+        caught: bool,
+    ) -> tuple[ErrorShell, MetadataThunk, ChainEntry | None]:
+        """Return the shell of a settled async body, its processors run off the loop.
+
+        The metadata chain comes back too when a body that was not caught folds one.
+        """
+        file_path, request, url_kwargs, dep_cache = render
         registry = (
             self._metadata_registry
             if not caught and self._metadata_awaits(file_path)
@@ -347,14 +373,7 @@ class ContextRender(PageContainment):
             tail, thunk, entry = finish()
         else:
             tail, thunk, entry = await run_segment(finish)
-        shell = self._shell(chain, file_path, url_kwargs, tail, blamed)
-        if isinstance(outcome, Caught):
-            return replace(outcome, shell=shell)
-        context = shell.around(outcome)
-        if entry is not None and entry.folded is None:
-            folded = await thunk.afold(entry, dict(context))
-            context[METADATA_KEY] = FoldedMetadata(thunk, folded)
-        return context
+        return self._shell(chain, file_path, url_kwargs, tail, blamed), thunk, entry
 
     def _tail(
         self,

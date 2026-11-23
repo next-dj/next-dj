@@ -17,19 +17,23 @@ class TestPageAtomic:
         load_python_module_memo(page_file)
         assert page_atomic(page_file) == AtomicOverride(atomic=True, aliases="all")
 
-    def test_off_is_an_override_too(
-        self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]
+    @pytest.mark.parametrize(
+        ("declaration", "atomic"),
+        [
+            pytest.param("page.atomic(False)", False, id="off"),
+            pytest.param("page.atomic('writes')", "writes", id="writes"),
+        ],
+    )
+    def test_a_value_besides_on_is_an_override(
+        self,
+        tmp_path: Path,
+        page_declaring: Callable[[Path, str], Path],
+        declaration: str,
+        atomic: object,
     ) -> None:
-        page_file = page_declaring(tmp_path, "page.atomic(False)")
+        page_file = page_declaring(tmp_path, declaration)
         load_python_module_memo(page_file)
-        assert page_atomic(page_file) == AtomicOverride(atomic=False)
-
-    def test_writes_waits_for_the_first_write(
-        self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]
-    ) -> None:
-        page_file = page_declaring(tmp_path, "page.atomic('writes')")
-        load_python_module_memo(page_file)
-        assert page_atomic(page_file) == AtomicOverride(atomic="writes")
+        assert page_atomic(page_file) == AtomicOverride(atomic=atomic)
 
     def test_an_unusable_value_declares_nothing(
         self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]

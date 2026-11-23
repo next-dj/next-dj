@@ -57,7 +57,6 @@ EMPTY_PLAN: InjectionPlan = ()
 class Colour(Enum):
     """How the async replay fills a parameter or calls its target."""
 
-    PURE = "pure"
     BLOCKING = "blocking"
     ASYNC = "async"
 

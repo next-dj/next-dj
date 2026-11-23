@@ -13,11 +13,11 @@ from next.suspense.markers import Group, Plan
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from contextvars import Context
 
     from next.defer import BoundaryOptions
     from next.deps.scope import RequestScope
     from next.suspense.markers import Caps, Captured, ForegroundFacts, Job, Site
+    from next.tasks import ContextSnapshot
 
 
 _SEAL_BYTES: Final = 4
@@ -80,7 +80,7 @@ class BoundarySession[D]:
         self.facts: ForegroundFacts | None = None
         self.threads: tuple[Captured, ...] = ()
         self.connections: tuple[Captured, ...] = ()
-        self.snapshot: Context | None = None
+        self.snapshot: ContextSnapshot | None = None
         self.scope: RequestScope | None = None
         self._lock = threading.Lock()
         self._count = 0

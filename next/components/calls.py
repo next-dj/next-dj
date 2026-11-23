@@ -18,7 +18,6 @@ from next.boundaries import (
     claim_wrapper,
     contain,
     contain_bare,
-    misrooted,
     new_digest,
 )
 from next.defer import BoundaryFailure, DeferMode, ErrorKind
@@ -26,6 +25,7 @@ from next.diagnostics import mark_degraded
 from next.pages.boundaries import shown_source
 from next.permissions.nodes import Guards, rendered_under, rendering_guards
 from next.seeding import REQUEST_KEY
+from next.utils import misrooted
 
 from .boundaries import UNDISCLOSED, Attempt, current_attempt, deferral_sink, ruled
 from .facade import render_component_error, render_component_loading

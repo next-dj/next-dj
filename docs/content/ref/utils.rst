@@ -6,7 +6,7 @@ Utils reference
 Module summary
 --------------
 
-``next.utils`` exposes ``resolve_base_dir``, ``classify_dirs_entries``, ``redirect_or_fallback``, the ``PageRoot`` value object, and the readers of the two directory-name grammars that route groups and intercepting routes use.
+``next.utils`` exposes ``resolve_base_dir``, ``classify_dirs_entries``, ``redirect_or_fallback``, the ``PageRoot`` value object, the readers of the two directory-name grammars that route groups and intercepting routes use, and a lexical HTML scan.
 ``resolve_base_dir`` returns ``settings.BASE_DIR`` coerced to ``pathlib.Path``, or ``None`` when it is unset, for backends that resolve project-relative paths.
 ``classify_dirs_entries`` splits a backend ``DIRS`` list into existing directory roots and plain skip-name segments, the same split the file router applies.
 A ``DIRS`` that is no sequence of trees raises :class:`~next.errors.InvalidDirsError`, a bare string included, because iterating a string would split it into characters.
@@ -25,6 +25,12 @@ A directory named with a marker and a segment, such as ``(.)photo``, is an inter
 ``InterceptPage`` is the frozen value the walk reports for a page under an intercept directory, with the ``target_trail`` it sits over, its ``file``, the marked ``source`` directory, and the ``marker``.
 
 ``redirect_or_fallback(target, fallback, *, status=302)`` redirects to ``target``, or to ``fallback`` when Django refuses it as a ``Location``.
+
+The HTML scan reads markup the way a browser parser splits it into tags, without building a tree.
+``open_elements(text)`` returns the lowercased name and the attributes of each element ``text`` leaves open, and comments, raw-text content, void elements, and a self-closing tag in ``svg`` or ``math`` markup leave none open.
+``misrooted(body)`` returns how ``body`` misses a single root element, ``"loose text"`` or a count such as ``"2 root elements"``, and ``None`` when it has one.
+``root_ends(body)`` returns where the name of each top-level element ends, the place a wrapper attribute goes, and whether text lies outside every element, and ``root_miss(ends, *, loose)`` turns that pair into the answer ``misrooted`` gives.
+``VOID_ELEMENTS`` holds the start tags a parser never leaves open, obsolete ones included, and ``RAW_TEXT_ELEMENTS`` the elements whose content a parser reads as text up to their own end tag.
 
 The rest of the module is shared framework machinery and is excluded from the listing below.
 It holds the page-tree walk described next, the listing and shape probes the router and the system checks share, the trail helpers behind ``PageRoot.route_trail``, and ``TreeSource`` with ``load_tree_source``, the one loader of a Python file at the top of a page tree.
