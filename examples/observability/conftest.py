@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -11,7 +11,7 @@ def frozen_now() -> Callable[[datetime | str], "Iterator[time_machine.Coordinate
     """Return a context manager that pins `obs.metrics._now` to a moment."""
 
     @contextmanager
-    def travel(moment: datetime | str) -> "Iterator[time_machine.Coordinates]":
+    def travel(moment: datetime | str) -> "Generator[time_machine.Coordinates]":
         with time_machine.travel(moment, tick=False) as traveller:
             yield traveller
 

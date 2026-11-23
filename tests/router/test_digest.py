@@ -1,4 +1,5 @@
 import re
+from unittest import mock
 
 import pytest
 
@@ -12,6 +13,7 @@ from next.router.digest import (
     chrome_zones,
     find_slot,
     fold,
+    moved_body,
     normalise,
     regions,
     split_head,
@@ -248,6 +250,68 @@ class TestHeadAndBody:
         assert body_bounds("<main></main>") is None
         assert body_bounds("<body") is None
 
+    @pytest.mark.parametrize(
+        ("html", "inner"),
+        [
+            pytest.param("<body><p>in</p></BoDy >", "<p>in</p>", id="mixed-case"),
+            pytest.param(
+                "<body><p>in</p></body></html>" + "</p>" * 12,
+                "<p>in</p>",
+                id="long-tail",
+            ),
+            pytest.param(
+                "<body><p>in</p></body></body>", "<p>in</p></body>", id="last-close"
+            ),
+            pytest.param("<body><p>in" + "</p>" * 12, "<p>in" + "</p>" * 12, id="open"),
+            pytest.param("<body><p>in", "<p>in", id="no-end-tag"),
+        ],
+    )
+    def test_the_last_body_close_ends_the_body(self, html: str, inner: str) -> None:
+        start, end = body_bounds(html) or (0, 0)
+        assert html[start:end] == inner
+
+
+class TestMovedBody:
+    """An edit that keeps the head and the closed tail shifts the body bounds."""
+
+    BEFORE = '<html><body class="x"><p>in</p></body></html>'
+
+    def _moved(self, after: str) -> tuple[int, int] | None:
+        return moved_body(self.BEFORE, after, body_bounds(self.BEFORE))
+
+    @pytest.mark.parametrize(
+        "after",
+        [
+            '<html><body class="x"><p data-a>in</p></body></html>',
+            '<html><body class="x"></body></html>',
+            '<html><head></head><body class="x"><p>in</p></body></html>',
+            '<html><body class="x"><p>in</p></body><p>out</p></html>',
+            '<html><body class="x"><p>in</p></body >',
+        ],
+    )
+    def test_the_bounds_match_a_fresh_read(self, after: str) -> None:
+        assert self._moved(after) == body_bounds(after)
+
+    def test_a_kept_head_and_tail_read_nothing(self) -> None:
+        after = '<html><body class="x"><p data-a>in</p></body></html>'
+        bounds = body_bounds(self.BEFORE)
+        with mock.patch("next.router.digest.body_bounds") as read:
+            assert moved_body(self.BEFORE, after, bounds) == (22, 38)
+        read.assert_not_called()
+
+    def test_a_shell_without_a_body_reads_the_edit(self) -> None:
+        assert moved_body("<p>", "<body><p>", None) == (6, 9)
+
+    def test_an_unclosed_body_reads_the_edit(self) -> None:
+        before = "<body><p>"
+        assert moved_body(before, "<body><p></body>", body_bounds(before)) == (6, 9)
+
+    def test_a_head_and_tail_that_overlap_read_the_edit(self) -> None:
+        before = "<body </body>x</body>"
+        bounds = body_bounds(before)
+        assert bounds == (13, 14)
+        assert moved_body(before, "<body </body>", bounds) == (13, 13)
+
 
 class TestZones:
     """A sealed zone region is named by its wrapper and morphed without its comments."""
@@ -345,3 +409,14 @@ class TestFold:
 
     def test_no_code_point_folds_into_an_ascii_letter(self) -> None:
         assert fold("\u0130\u212a") == "\u0131\u0138"
+
+    @pytest.mark.parametrize(
+        ("text", "folded"),
+        [
+            ("<P>Строка</P>", "<p>строка</p>"),
+            ("<P>\u212a</P>", "<p>\u0138</p>"),
+            ("<P>\u0130</P>", "<p>\u0131</p>"),
+        ],
+    )
+    def test_text_beyond_ascii(self, text: str, folded: str) -> None:
+        assert fold(text) == folded

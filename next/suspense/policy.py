@@ -7,7 +7,7 @@ import re
 import threading
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -184,7 +184,7 @@ _streamed: ContextVar[bool] = ContextVar("next_streamed", default=False)
 
 
 @contextmanager
-def streaming() -> Iterator[None]:
+def streaming() -> Generator[None]:
     """Report a transport serving one request at a time as concurrent inside the block.
 
     The test client runs a request on a single-threaded worker, which never streams.

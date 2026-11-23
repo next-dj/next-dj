@@ -10,7 +10,6 @@ from next.suspense.connections import (
     facts,
     forcing_pool,
     foreground_facts,
-    pool_forced,
 )
 from next.suspense.markers import ForegroundFacts, Server
 from tests.suspense.connections.shared import (
@@ -112,10 +111,9 @@ class TestForegroundFacts:
     @pytest.mark.django_db()
     def test_a_forced_pool_reports_no_atomic_block_and_no_sqlite(self, rf) -> None:
         with forcing_pool():
-            assert pool_forced() is True
             found = foreground_facts(rf.get("/"))
         assert (found.atomic, found.sqlite, found.memory) == ((), (), ())
-        assert pool_forced() is False
+        assert foreground_facts(rf.get("/")).sqlite != ()
 
 
 class TestOutlived:

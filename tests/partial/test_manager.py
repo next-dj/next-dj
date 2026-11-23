@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -20,7 +20,7 @@ _DEFAULT_BACKEND = "next.partial.JsonPartialProtocolBackend"
 @contextmanager
 def _backend_options(
     options: dict[str, object], *, static_version: str | None = None
-) -> Iterator[None]:
+) -> Generator[None]:
     """Run the body against a protocol backend configured with `options`.
 
     Both edges of `override_settings` reset the shared manager through a reload.

@@ -7,7 +7,7 @@ from functools import partial
 import pytest
 from asgiref.current_thread_executor import CurrentThreadExecutor
 
-from next.tasks import ContextSnapshot, QuitParentExecutor, StealableTask
+from next.tasks import ContextSnapshot, QuitParentExecutor, StealableTask, contextless
 from tests.support.errors import HaltError
 
 
@@ -23,6 +23,20 @@ def _halt() -> None:
 def _claim_after(barrier: threading.Barrier, task: StealableTask[object]) -> bool:
     barrier.wait()
     return task.run()
+
+
+_mark: contextvars.ContextVar[str] = contextvars.ContextVar("mark")
+
+
+class TestContextless:
+    """The call runs in an empty context and hands back what it returns."""
+
+    def test_the_call_sees_nothing_of_the_caller_and_returns_its_result(self) -> None:
+        def scenario() -> tuple[str, str]:
+            _mark.set("caller")
+            return contextless(_mark.get, "unset"), _mark.get()
+
+        assert contextvars.Context().run(scenario) == ("unset", "caller")
 
 
 class TestStealableTask:

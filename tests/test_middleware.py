@@ -1,9 +1,9 @@
 import asyncio
 import logging
 import zlib
+from inspect import iscoroutinefunction
 
 import pytest
-from asgiref.sync import iscoroutinefunction
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import RequestFactory
 from django.urls import ResolverMatch

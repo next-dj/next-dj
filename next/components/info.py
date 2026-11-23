@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Final, override
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from next.defer import DeferMode
+
 
 LOADING_FILE: Final = "loading.djx"
 ERROR_FILE: Final = "error.djx"
@@ -36,6 +38,18 @@ def boundary_files(directory: Path) -> BoundaryFiles | None:
 
 
 @dataclass(frozen=True, slots=True)
+class CallRoute:
+    """How a call that names no delivery mode renders, decided at the `stamp` it holds.
+
+    The stamp names the declaration stores and their versions the decision read.
+    """
+
+    stamp: tuple[object, ...]
+    mode: DeferMode | None
+    ruled: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ComponentInfo:
     """What we know about one component after scanning the filesystem."""
 
@@ -47,6 +61,7 @@ class ComponentInfo:
     is_simple: bool
     files: BoundaryFiles | None = None
     resolved_scope_root: Path = field(init=False, repr=False, compare=False)
+    route: CallRoute | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Freeze the resolved form of `scope_root` once at construction."""
@@ -60,6 +75,10 @@ class ComponentInfo:
     def __str__(self) -> str:
         """Name the component as a log reads it, its module beside its name."""
         return f"component {self.name!r} ({self.module_path})"
+
+    def hold_route(self, route: CallRoute) -> None:
+        """Keep how a call naming no delivery mode renders, until `route` goes stale."""
+        object.__setattr__(self, "route", route)
 
     def current_files(self) -> BoundaryFiles | None:
         """Return the boundary files on disk now, `None` for a single-file component."""
@@ -90,6 +109,7 @@ __all__ = [
     "ERROR_FILE",
     "LOADING_FILE",
     "BoundaryFiles",
+    "CallRoute",
     "ComponentInfo",
     "boundary_files",
 ]

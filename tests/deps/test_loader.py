@@ -1203,9 +1203,7 @@ class TestRequestThread:
         assert scope._tree.slots[_HUB].hub.loop is loop
         assert calls == [[3]]
 
-    def test_a_batch_on_the_loop_of_the_request_reads_its_variables(
-        self, carry
-    ) -> None:
+    def test_a_batch_on_the_loop_of_the_request_reads_its_variables(self) -> None:
         async def batch(keys: Sequence[int]) -> dict[int, str]:
             return dict.fromkeys(keys, marker.get())
 
@@ -1220,7 +1218,7 @@ class TestRequestThread:
         assert asyncio.run(work()) == "request"
 
     def test_async_batches_of_one_hub_share_one_carry_onto_its_loop(
-        self, hops, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         landings: list[int] = []
         landed = bridge._landed
@@ -1246,7 +1244,7 @@ class TestRequestThread:
         ]
         assert len(landings) == 1
 
-    def test_a_batch_on_the_loop_of_the_request_reads_its_language(self, hops) -> None:
+    def test_a_batch_on_the_loop_of_the_request_reads_its_language(self) -> None:
         async def batch(keys: Sequence[int]) -> dict[int, str]:
             return dict.fromkeys(keys, translation.get_language())
 
@@ -1261,7 +1259,7 @@ class TestRequestThread:
             assert asyncio.run(work()) == "de"
 
     def test_a_batch_on_the_loop_of_the_request_reads_a_local_of_the_request(
-        self, hops
+        self,
     ) -> None:
         async def batch(keys: Sequence[int]) -> dict[int, object]:
             return dict.fromkeys(keys, getattr(request_local, "value", None))
@@ -1275,7 +1273,7 @@ class TestRequestThread:
 
         assert copy_context().run(_with_request_local, asyncio.run, work()) == "set"
 
-    def test_a_sync_batch_a_waiting_thread_runs_reads_the_language(self, hops) -> None:
+    def test_a_sync_batch_a_waiting_thread_runs_reads_the_language(self) -> None:
         def fetch(keys: Sequence[int]) -> dict[int, str]:
             return dict.fromkeys(keys, translation.get_language())
 
@@ -1283,7 +1281,7 @@ class TestRequestThread:
             assert run_request(_load_on_a_pool(Loader(fetch)), opened=True) == "de"
 
     def test_a_sync_batch_a_waiting_thread_runs_reads_a_local_of_the_request(
-        self, hops
+        self,
     ) -> None:
         def fetch(keys: Sequence[int]) -> dict[int, object]:
             return dict.fromkeys(keys, getattr(request_local, "value", None))
@@ -1295,7 +1293,7 @@ class TestRequestThread:
         )
 
     def test_a_sync_batch_a_loop_task_awaits_reads_the_request_with_no_hop(
-        self, hops, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         begun: list[object] = []
         begin = bridge._begin
@@ -1800,6 +1798,31 @@ class TestRequestContext:
 
         run_request(scenario, runner=inline)
         assert seen == ["job", "request"]
+
+    def test_a_batch_on_a_thread_reuses_the_copy_the_snapshot_kept_there(self) -> None:
+        seen: list[str] = []
+
+        def fetch(keys):
+            seen.append(marker.get())
+            return dict.fromkeys(keys, 1)
+
+        loader = Loader(fetch)
+
+        async def scenario():
+            scope = request_memo.get().scope
+            snapshot = ContextSnapshot(copy_context())
+            open_loaders(scope, snapshot)
+
+            def job() -> object:
+                kept = copy_context()
+                kept.run(marker.set, "kept")
+                snapshot.keep(kept)
+                return loader.load_sync(1)
+
+            return await asyncio.wait_for(asyncio.to_thread(job), WAIT)
+
+        assert run_request(scenario) == 1
+        assert seen == ["kept"]
 
     def test_a_scope_with_no_loop_has_no_batches_to_open(self) -> None:
         scope = RequestScope()

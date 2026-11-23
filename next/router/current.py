@@ -58,6 +58,7 @@ _REGION_MEMO: Final = 64
 _REGION_VARIANTS: Final = 4
 _REGION_LIMIT: Final = 16384
 _MARK_NAMES: Final = frozenset({"aria-current", "data-next-current"})
+_NOTHING: Final = (0, 0)
 _HELD: Final[Mapping[str, list[tuple[str, str]]]] = {
     PAGE_MARK: [("aria-current", "page"), ("data-next-current", "page")],
     ANCESTOR_MARK: [("data-next-current", "ancestor")],
@@ -147,9 +148,20 @@ class _Plan:
     skip: re.Pattern[str]
     needles: tuple[str, ...]
 
-    def opened(self, low: str) -> bool:
-        """Whether the folded document `low` holds the opener of any container."""
-        return any(map(low.__contains__, self.needles))
+    def last(self, low: str, hidden: tuple[int, int]) -> int:
+        """Return where the last opener of `low` outside `hidden` starts, -1 for none.
+
+        Each needle is searched only past the last opener an earlier needle found.
+        """
+        start, stop = hidden
+        last = -1
+        for needle in self.needles:
+            at = low.rfind(needle, max(stop, last + 1))
+            if at < 0 and last < start:
+                at = low.rfind(needle, last + 1, start)
+            if at >= 0:
+                last = at
+        return last
 
 
 def _skip(
@@ -416,15 +428,17 @@ class _Scan:
         "tracked",
     )
 
-    def __init__(self, html: str, low: str, plan: _Plan, current: _Current) -> None:
-        """Start before the first tag, the last container opener located."""
+    def __init__(
+        self, html: str, low: str, plan: _Plan, current: _Current, last: int
+    ) -> None:
+        """Start before the first tag, `last` the start of the last container opener."""
         self.html = html
         self.low = low
         self.selectors = plan.selectors
         self.skip = plan.skip
         self.inside = plan.skip
         self.current = current
-        self.last = max(low.rfind(selector.needle) for selector in plan.selectors)
+        self.last = last
         self.stack: list[_Frame] = []
         self.tracked: dict[str, int] = {}
         self.cuts: list[tuple[int, int, str]] = []
@@ -626,13 +640,6 @@ class _Scan:
         return "".join(parts)
 
 
-def _opened(html: str, containers: tuple[str, ...]) -> tuple[_Plan, str] | None:
-    """Return the plan of `containers` and the folded `html` when it opens one."""
-    plan = _plan(containers)
-    low = fold(html)
-    return (plan, low) if plan.opened(low) else None
-
-
 class CurrentLinks:
     """The settings-named backend that marks current links in rendered HTML."""
 
@@ -642,26 +649,29 @@ class CurrentLinks:
 
     def holds(self, html: str) -> bool:
         """Whether `html` opens a container, which a template plan asks once."""
-        return _plan(self.containers).opened(fold(html))
+        return _plan(self.containers).last(fold(html), _NOTHING) >= 0
 
     def mark(
         self,
         html: str,
         path: Callable[[], str],
         origin: Callable[[], str] | None = None,
+        *,
+        hidden: tuple[int, int] = _NOTHING,
     ) -> str:
         """Return `html` marked against the request path with its query `path` reads.
 
-        The path and the origin are read only once `html` opens a container.
+        `hidden` spans framework payload, so its selector text opens no container.
         """
-        opened = _opened(html, self.containers)
-        if opened is None:
+        plan = _plan(self.containers)
+        low = fold(html)
+        last = plan.last(low, hidden)
+        if last < 0:
             return html
-        plan, low = opened
         location, _, query = path().partition("#")[0].partition("?")
         host = "" if origin is None else origin()
         current = _Current(location, query, host, home_paths)
-        return _Scan(html, low, plan, current).run()
+        return _Scan(html, low, plan, current, last).run()
 
 
 def _links() -> CurrentLinks | None:

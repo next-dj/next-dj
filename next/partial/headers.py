@@ -10,6 +10,7 @@ from django.utils.cache import patch_vary_headers
 
 from next.conf.sentinels import UNSET
 from next.defer import Depth
+from next.utils import request_header
 
 
 if TYPE_CHECKING:
@@ -110,35 +111,24 @@ def _parse_merge(raw: str | None) -> "MergeMode | None":
         return None
 
 
-@functools.cache
-def _meta_key(name: str) -> str:
-    """Return the WSGI `META` key of a header name."""
-    return "HTTP_" + name.upper().replace("-", "_")
-
-
-def _value(request: "HttpRequest", name: str) -> str | None:
-    """Return a request header value from `META`, skipping the parsed headers map."""
-    return request.META.get(_meta_key(name))
-
-
 def _parse_intent(request: "HttpRequest") -> PartialIntent:
     """Parse the partial-request headers of a request into an intent."""
-    if _value(request, REQUEST_FLAG) != "1":
+    if request_header(request, REQUEST_FLAG) != "1":
         return _NOT_PARTIAL
-    navigate = _value(request, NAVIGATE) == "1"
-    zones = _split_names(_value(request, ZONE))
-    wire = _value(request, PREFETCH) if navigate or zones else None
+    navigate = request_header(request, NAVIGATE) == "1"
+    zones = _split_names(request_header(request, ZONE))
+    wire = request_header(request, PREFETCH) if navigate or zones else None
     depth = _WIRE_DEPTHS.get(wire) if wire is not None else None
     return PartialIntent(
         partial=True,
         zones=zones,
-        validate_fields=_split_names(_value(request, VALIDATE)),
-        merge=_parse_merge(_value(request, MERGE)),
-        version=_value(request, VERSION),
-        request_id=_value(request, REQUEST_ID),
-        origin=_value(request, ORIGIN),
+        validate_fields=_split_names(request_header(request, VALIDATE)),
+        merge=_parse_merge(request_header(request, MERGE)),
+        version=request_header(request, VERSION),
+        request_id=request_header(request, REQUEST_ID),
+        origin=request_header(request, ORIGIN),
         navigate=navigate,
-        layouts=_value(request, LAYOUTS) if navigate else None,
+        layouts=request_header(request, LAYOUTS) if navigate else None,
         prefetch=Depth.FULL if zones and depth is not None else depth,
     )
 

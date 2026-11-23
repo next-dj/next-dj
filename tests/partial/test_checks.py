@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import partialmethod
 from pathlib import Path
@@ -46,7 +46,7 @@ from tests.support.trees import framework, layout_root, templated_page
 
 
 @contextmanager
-def _scanned_root(root: Path) -> Iterator[None]:
+def _scanned_root(root: Path) -> Generator[None]:
     """Point the page-scanning checks at one on-disk page tree."""
     manager = MagicMock()
     manager.backends = (MagicMock(),)
@@ -58,7 +58,7 @@ def _scanned_root(root: Path) -> Iterator[None]:
 
 
 @contextmanager
-def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
+def _context_pages(*pages: tuple[Path, str, str]) -> Generator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
     Real imports and compiles record zone tags and `@context` as a live process does.
@@ -73,7 +73,7 @@ def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
 
 
 @contextmanager
-def _composed_pages(*pages: tuple[Path, str]) -> Iterator[None]:
+def _composed_pages(*pages: tuple[Path, str]) -> Generator[None]:
     """Point the checks at pages whose `page.py` registers nothing."""
     with _context_pages(*((page_file, "x = 1", body) for page_file, body in pages)):
         yield
@@ -998,7 +998,7 @@ class _ClassHookBackend(RegistryFormActionBackend):
 
 
 @contextmanager
-def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
+def _form_backends(*backends, partial_active: bool) -> Generator[None]:
     """Point the W068 check at given form backends and partial-config state."""
     manager = MagicMock()
     manager.backends = tuple(backends)
@@ -1098,7 +1098,7 @@ _PLAIN_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 @contextmanager
 def _partial_options(
     options: object, *, storage: str = _PLAIN_STORAGE
-) -> Iterator[None]:
+) -> Generator[None]:
     """Run the W069 check against one backend entry and a staticfiles storage."""
     config = {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": options}
     with override_settings(
@@ -1239,7 +1239,7 @@ class TestAssetVersionCheckIsDeployOnly:
 
 
 @contextmanager
-def _partial_backends(configs: object) -> Iterator[None]:
+def _partial_backends(configs: object) -> Generator[None]:
     """Point the W071 check at the given PARTIAL_BACKENDS config value."""
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = configs
@@ -1375,7 +1375,7 @@ _ZONE_CHECKS = (
 
 
 @contextmanager
-def _counting_collect() -> Iterator[MagicMock]:
+def _counting_collect() -> Generator[MagicMock]:
     """Count the composed templates the walk builds, one per page and walk."""
     with patch.object(
         page, "composed_template_for", wraps=page.composed_template_for

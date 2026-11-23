@@ -19,7 +19,6 @@ from next.suspense.connections.facts import (
     capture_states,
     forcing_pool,
     foreground_facts,
-    pool_forced,
     server_of,
 )
 from next.suspense.connections.guard import (
@@ -58,7 +57,6 @@ __all__ = [
     "forget_detection",
     "fresh_querysets",
     "job_guard",
-    "pool_forced",
     "request_state",
     "seams",
     "server_of",

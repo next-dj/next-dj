@@ -167,8 +167,9 @@ A replacement backend
 ---------------------
 
 ``ROUTER["CURRENT"]["BACKEND"]`` names the ``CurrentLinks`` subclass that runs the pass, ``next.router.CurrentLinks`` by default.
-It is built with the configured containers, and its ``mark(html, path, origin=None)`` returns ``html`` with the links marked for the request.
+It is built with the configured containers, and its ``mark(html, path, origin=None, *, hidden=(0, 0))`` returns ``html`` with the links marked for the request.
 ``path`` is a callable that answers the request path with its query, and ``origin`` one that answers the scheme and host absolute links are compared with, and each runs only once ``html`` opens a container.
+``hidden`` is the span of the runtime payload of the framework in the document, which the pass never treats as a container.
 A subclass that marks links by a rule of its own overrides ``mark``, and ``current_links()`` returns the backend the settings name, or ``None`` while the pass is off.
 The ``intent`` bundle marks the links again with the default rule after each update in the browser, so the marks of a different rule hold until the first navigation or partial update of the page.
 A path that does not import or names no concrete subclass is reported as ``next.E219``.

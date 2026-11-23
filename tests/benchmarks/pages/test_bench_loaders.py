@@ -78,6 +78,7 @@ class TestBenchDjxLoader:
 
 
 class TestBenchLayoutLoader:
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="pages.loaders")
     def test_ancestor_walk_no_layouts(self, tmp_path: Path, benchmark) -> None:
         leaf = tmp_path
@@ -89,6 +90,7 @@ class TestBenchLayoutLoader:
         loader = LayoutTemplateLoader()
         benchmark(loader._find_layout_files, page_path)
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="pages.loaders")
     def test_ancestor_walk_with_layouts(self, tmp_path: Path, benchmark) -> None:
         leaf = tmp_path
@@ -164,6 +166,7 @@ class TestBenchComposeLayoutHierarchy:
         page_path.write_text(_PY_SRC)
         return page_path, layouts
 
+    @pytest.mark.walltime()
     @pytest.mark.parametrize("depth", [3, 10])
     @pytest.mark.benchmark(group="pages.loaders")
     def test_compose(self, tmp_path: Path, depth: int, benchmark) -> None:

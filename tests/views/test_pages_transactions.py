@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from unittest import mock
@@ -71,7 +71,7 @@ def _events(page_file: Path) -> list[str]:
 
 def _recorder(events: list[str]) -> Callable[..., object]:
     @contextmanager
-    def atomic(using: str | None = None) -> Iterator[None]:
+    def atomic(using: str | None = None) -> Generator[None]:
         events.append(f"enter {using}")
         try:
             yield

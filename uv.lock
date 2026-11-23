@@ -1286,7 +1286,7 @@ e2e = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asgiref", specifier = ">=3.9" },
+    { name = "asgiref", specifier = ">=3.12" },
     { name = "brotli", marker = "extra == 'brotli'", specifier = ">=1.1" },
     { name = "cryptography", marker = "extra == 'crypto'", specifier = ">=44" },
     { name = "defusedxml", marker = "extra == 'testing'", specifier = ">=0.7" },

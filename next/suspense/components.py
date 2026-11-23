@@ -6,7 +6,7 @@ import functools
 import logging
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -152,7 +152,7 @@ def current_deferring() -> Deferring | None:
 @contextmanager
 def deferring(
     sink: DeferralSink | None = None, request: HttpRequest | None = None
-) -> Iterator[Deferring]:
+) -> Generator[Deferring]:
     """Gather the deferred calls of the render inside the block into one session.
 
     Outside such a block a deferred call renders in place, as no one assembles it.
@@ -167,7 +167,7 @@ def deferring(
 
 
 @contextmanager
-def _undeferred() -> Iterator[None]:
+def _undeferred() -> Generator[None]:
     """Render the block outside every `deferring` block, as a loading UI renders."""
     token = _deferring.set(None)
     try:

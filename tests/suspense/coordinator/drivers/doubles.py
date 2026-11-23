@@ -4,7 +4,7 @@ import contextvars
 import inspect
 import threading
 import time
-from collections.abc import Callable, Coroutine, Iterator, Sequence
+from collections.abc import Callable, Coroutine, Generator, Sequence
 from concurrent.futures import Future, wait
 from typing import Any
 
@@ -368,7 +368,7 @@ class StoppingIdlePool(IdlePool):
 
 
 @contextlib.contextmanager
-def queue_timeout(seconds: float) -> Iterator[None]:
+def queue_timeout(seconds: float) -> Generator[None]:
     options = {"EXECUTOR": {"OPTIONS": {"QUEUE_TIMEOUT": seconds}}}
     with override_settings(NEXT_FRAMEWORK={"DEFER": options}):
         yield

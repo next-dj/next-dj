@@ -25,7 +25,7 @@ from tests.support.access import PAGE_HEAD
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from django.http import HttpRequest, HttpResponseBase
@@ -59,7 +59,7 @@ def _cheap_provider() -> str:
 @contextmanager
 def _zone_view(
     directory: Path, *, providers: int = 0
-) -> Iterator[Callable[..., HttpResponseBase]]:
+) -> Generator[Callable[..., HttpResponseBase]]:
     """Build the unified view of a ten-zone page with `providers` zone-gated callables.
 
     Each provider is bound to its own zone, so a tick runs one and filters the rest.
@@ -78,7 +78,7 @@ def _zone_view(
 
 
 @contextmanager
-def _manifest_storage(root: Path) -> Iterator[None]:
+def _manifest_storage(root: Path) -> Generator[None]:
     """Point staticfiles at a manifest storage carrying an unhashed manifest.
 
     An empty recorded hash sends `asset_version` down the hashing branch.

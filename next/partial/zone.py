@@ -15,9 +15,9 @@ from django.utils.text import unescape_string_literal
 
 from next.components.stash import stash_markup, stashing
 from next.defer import BoundaryOptionError, parse_duration
-from next.pages.layouts import ZONE, seal_region
+from next.pages.layouts import ZONE, request_seal, sealed
 from next.pages.skeletons import render_skeleton, zone_skeleton
-from next.seeding import TEMPLATE_PATH_KEY
+from next.seeding import REQUEST_KEY, TEMPLATE_PATH_KEY
 from next.static.collector import require_bundle
 from next.static.runtime import RELOAD_CHUNK_KEY
 from next.utils import child_nodelists
@@ -296,7 +296,10 @@ class ZoneNode(Node):
         wrapped = render_zone_standalone(self.partial, self.name, self.options, context)
         if self.options.reload == LOADING:
             wrapped = SafeString(wrapped + _skeleton_stash(self.name, context))
-        return SafeString(seal_region(context, ZONE, wrapped))
+        seal = request_seal(context.get(REQUEST_KEY))
+        if seal is None:
+            return wrapped
+        return SafeString(sealed(ZONE, seal, wrapped))
 
 
 type Ancestor = type[Node] | tuple[type[Node], ...]

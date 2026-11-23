@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -107,7 +107,7 @@ def install_visibility_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @contextmanager
-def counted(scope: RequestScope | None, deadline: float) -> Iterator[None]:
+def counted(scope: RequestScope | None, deadline: float) -> Generator[None]:
     """Count the code of the block as one job of the request, admitted as it starts."""
     job = count_job(scope, deadline)
     if job is None:

@@ -7,7 +7,7 @@ import keyword
 import re
 import reprlib
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -414,7 +414,7 @@ def remaining() -> float | None:
 
 
 @contextmanager
-def deadline(at: float | None) -> Iterator[None]:
+def deadline(at: float | None) -> Generator[None]:
     """Run the block under a deadline at the `time.monotonic()` instant `at`."""
     token = _deadline.set(at)
     try:

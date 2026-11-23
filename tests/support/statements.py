@@ -1,5 +1,5 @@
 import re
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from django.db import connection, connections
@@ -20,7 +20,7 @@ def statement(sql: str) -> str:
 
 
 @contextmanager
-def statement_log() -> Iterator[list[str]]:
+def statement_log() -> Generator[list[str]]:
     """Collect the reduced statements the block runs on the default connection."""
     statements: list[str] = []
     with CaptureQueriesContext(connection) as queries:
@@ -35,7 +35,7 @@ def close_driver(wrapper: BaseDatabaseWrapper) -> None:
 
 
 @contextmanager
-def fresh_default() -> Iterator[None]:
+def fresh_default() -> Generator[None]:
     """Swap in a new `default` connection object and close it on the way out."""
     original = connections["default"]
     del connections["default"]

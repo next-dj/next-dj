@@ -3,7 +3,7 @@
 import math
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from types import TracebackType
 from typing import Final, Protocol, cast
@@ -278,7 +278,7 @@ def _wrap(
 
 
 @contextmanager
-def job_guard(states: Replayable, *, deadline: float) -> Iterator[None]:
+def job_guard(states: Replayable, *, deadline: float) -> Generator[None]:
     """Run a pool job with the view's thread state and lazy connection state replayed.
 
     `deadline` is the job's monotonic settle instant, and every replay unwinds on exit.

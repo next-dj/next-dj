@@ -34,6 +34,7 @@ from next.conf import next_framework_settings
 from next.diagnostics import FailureLog
 from next.permissions.access import open_view
 from next.site.headers import ROBOTS_HEADER
+from next.utils import request_header
 
 
 logger = logging.getLogger(__name__)
@@ -194,9 +195,9 @@ def _refusal(request: HttpRequest) -> HttpResponse | None:
     """Return the error response for a request that gets no token, else `None`."""
     if request.method not in _SAFE_METHODS:
         return HttpResponseNotAllowed(_SAFE_METHODS)
-    if request.headers.get(_REQUEST_FLAG) != "1":
+    if request_header(request, _REQUEST_FLAG) != "1":
         return HttpResponseBadRequest(f"{_REQUEST_FLAG}: 1 is required")
-    fetch_site = request.headers.get("Sec-Fetch-Site")
+    fetch_site = request_header(request, "Sec-Fetch-Site")
     if fetch_site is not None and fetch_site != _SAME_ORIGIN:
         return HttpResponseForbidden("Only a same-origin request gets a token")
     return None

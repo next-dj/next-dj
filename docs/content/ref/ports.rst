@@ -63,8 +63,8 @@ Callers go through ``wait_served``, which falls back to a plain blocking wait wh
 ``ContextPropagator`` restores a ``ContextSnapshot`` of the request's context on the thread or the event loop that runs work deferred from it, ``restore`` on the calling sync thread and ``arestore`` on the running loop, and each answers the snapshot context itself when nothing had to move.
 asgiref 3.12 and later show a ``Local`` value only on a thread one of its own hops carried it to, so the language, the URLconf, and a ``Local`` of the project reach a pool job, a loop job, a ``drive`` coroutine, and a loader batch through this port.
 ``next.suspense`` sits above ``next.deps``, so the loader reaches the propagator through ``context_propagator_slot``, and every other site reads the same slot.
-The default, ``next.suspense.bridge.BridgePropagator``, keeps one restored copy per thread of each snapshot, restores on a loop through a hop on a thread of its own, so a busy default executor of the loop never holds it up, and onto a sync thread through a hop from the server loop of that thread or from the background loop, waiting no longer than the deadline of the current job.
-``NextFrameworkConfig.ready()`` builds it with ``plain`` set when a ``Local`` written in a context already reads through that context on another thread, as before asgiref 3.12, and then it moves nothing and makes no hop.
+The default, ``next.suspense.bridge.BridgePropagator``, keeps one restored copy per thread of each snapshot, restores on a loop through a hop that runs on the thread of that loop, so a busy default executor of the loop never holds it up, and onto a sync thread through a hop from the server loop of that thread or from the background loop, waiting no longer than the deadline of the current job.
+``NextFrameworkConfig.ready()`` binds it.
 A project binds its own propagator, built on another mechanism, by setting the slot.
 
 ``ContextSnapshot`` of ``next.tasks`` is what a propagator receives.

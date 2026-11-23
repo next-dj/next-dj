@@ -1,10 +1,12 @@
 import asyncio
+import contextvars
 import gc
 
 import pytest
 
 from next.realtime.pool import HandlerPool, Lease, PooledSignal
 from next.testing import capture_signals
+from tests.support.starts import Request, held, spied_starts
 
 
 class _Slotted:
@@ -58,6 +60,23 @@ def test_removing_a_sender_without_weak_references_is_a_miss() -> None:
 
 def test_an_uncached_signal_keeps_the_plain_cache() -> None:
     assert PooledSignal().sender_receivers_cache == {}
+
+
+def test_a_worker_starts_outside_the_context_of_the_submitter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = spied_starts(monkeypatch)
+    pool = HandlerPool()
+
+    def submit() -> int:
+        held.set(Request())
+        return pool.executor.submit(lambda: 42).result(5)
+
+    try:
+        assert contextvars.Context().run(submit) == 42
+    finally:
+        pool.executor.shutdown()
+    assert seen == [None]
 
 
 def test_a_reset_pool_runs_on_fresh_threads_and_permits() -> None:

@@ -25,7 +25,7 @@ from tests.support import plain_get, routed, write_page
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from django.http import HttpRequest, HttpResponseBase
@@ -50,7 +50,7 @@ _COLD_WARMUP_ROUNDS = 5
 
 
 @contextmanager
-def _site(root: Path) -> Iterator[Callable[[HttpRequest], HttpResponseBase]]:
+def _site(root: Path) -> Generator[Callable[[HttpRequest], HttpResponseBase]]:
     """Route two pages of one section under the client router, yielding the target."""
     (root / "layout.djx").write_text(_ROOT_LAYOUT)
     (root / "docs").mkdir()

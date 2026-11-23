@@ -133,7 +133,9 @@ class TestResponses:
         self, rf, site: str | None, *, crossed: bool
     ) -> None:
         headers = {} if site is None else {"HTTP_SEC_FETCH_SITE": site}
-        assert reload.cross_site(rf.get("/", **headers)) is crossed
+        request = rf.get("/", **headers)
+        assert reload.cross_site(request) is crossed
+        assert "headers" not in vars(request)
 
 
 class TestRedeem:

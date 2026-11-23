@@ -17,6 +17,7 @@ Viewport and intent prefetch
 
 ``"intent"``, the default
    A link the pointer rests on, or one that gains keyboard focus, is prefetched once ``ROUTER["PREFETCH_DELAY"]`` seconds pass, ``0.065`` by default.
+   Movement of the pointer arms the wait, so content that scrolls under a resting pointer prefetches nothing.
    Leaving the link earlier cancels it, and a press of the pointer or a touch skips the wait, see `The press of a link`_.
 
 ``"viewport"``
@@ -111,7 +112,7 @@ A shell prefetch of the URL that waits in the queue is dropped by the press, and
 
 A press that does not become a click ends in one of these ways.
 
-- The browser fires ``pointercancel``, ``dragstart``, or ``contextmenu``.
+- The browser fires ``pointercancel``, as it does for a touch that turns into a scroll, ``dragstart``, or ``contextmenu``.
 - The pointer is released outside the link.
 - Another navigation starts.
 - One second passes without a click.
@@ -142,6 +143,7 @@ A layer that opens while its prefetch or its press is in flight waits for it and
 A layer that closes first stops the request of its press.
 The refusals, the pause, the asset version check, and the flushes of this page apply to the layer answers as well.
 
+Under ``ROUTER["PREFETCH"] = "viewport"`` a layer link is observed only when it or an element around it carries an explicit ``data-next-prefetch="viewport"``.
 A layer link is prefetched by its URL alone, so ``ROUTER["SCOPE"] = "opt-in"`` and ``data-next-router="off"`` around it do not turn it off.
 ``data-next-prefetch="off"`` and ``data-next-press`` on the link or around it do.
 A link whose ``data-next-layer`` is empty opens no layer and is prefetched by neither path.

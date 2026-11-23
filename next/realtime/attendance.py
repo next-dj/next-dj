@@ -7,7 +7,15 @@ import math
 import secrets
 import time
 import weakref
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Generator,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from typing import cast
@@ -182,7 +190,7 @@ class Attendance:
 @contextmanager
 def attending[T](
     attendance: Attendance | None, items: Iterator[T]
-) -> Iterator[Iterator[T]]:
+) -> Generator[Iterator[T]]:
     """Join for the block and yield the items kept fresh, leaving on every way out."""
     if attendance is None:
         yield items
@@ -197,7 +205,7 @@ def attending[T](
 @asynccontextmanager
 async def aattending[T](
     attendance: Attendance | None, items: AsyncIterator[T]
-) -> AsyncIterator[AsyncIterator[T]]:
+) -> AsyncGenerator[AsyncIterator[T]]:
     """Join for the block through the asynchronous API, leaving on every way out."""
     if attendance is None:
         yield items

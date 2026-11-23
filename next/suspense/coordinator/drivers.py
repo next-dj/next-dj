@@ -41,6 +41,7 @@ from next.suspense.coordinator.runner import Report, Runtime
 from next.suspense.errors import BoundaryRefusedError, BoundaryShedError
 from next.suspense.executors import (
     BoundaryExecutor,
+    LaneDispatch,
     RequestThreadExecutor,
     background_loop,
     check_asgiref,
@@ -413,13 +414,11 @@ class _Driver[D](ABC):
         A unit a free worker takes counts from now, another once a thread starts it.
         """
         run = self._register(unit, Lane.POOL)
-        work = StealableTask(partial(self._pool_body, run))
-        run.work = work
         capacity = self._executor.capacity()
         if capacity.queued < capacity.idle:
             run.count = self._count(unit)
         try:
-            self._executor.submit(work)
+            work = self._dispatch(run)
         except BoundaryShedError:
             _uncount(run)
             self._shut(run)
@@ -429,6 +428,7 @@ class _Driver[D](ABC):
             _uncount(run)
             self._refuse(run, error)
             return
+        run.work = work
         work.future.add_done_callback(partial(_uncounted, run))
         self._watch(run, work)
 
@@ -437,11 +437,11 @@ class _Driver[D](ABC):
         here = threading.get_ident() == self._request_thread
         lane = Lane.REQUEST if here else Lane.POOL
         unit = run.unit
-        if run.count is None:
-            run.count = self._count(unit)
         for task in unit.tasks:
             if run.abandoned:
                 return
+            if run.count is None:
+                run.count = self._count(unit)
             self._post(
                 runner.run(
                     self._runtime,
@@ -555,6 +555,10 @@ class _Driver[D](ABC):
                 self._logged = True
                 logger.exception(_FAILED)
             return []
+
+    @abstractmethod
+    def _dispatch(self, run: _Run[D]) -> StealableTask[None]:
+        """Queue the body of a pool unit on the executor, raising what refuses it."""
 
     @abstractmethod
     def _post(self, message: _Message) -> None:
@@ -759,6 +763,12 @@ class ThreadDriver[D](_Driver[D]):
             self._hops.serve(Future(), 0.0)
 
     @override
+    def _dispatch(self, run: _Run[D]) -> StealableTask[None]:
+        work = StealableTask(partial(self._pool_body, run))
+        self._executor.submit(work)
+        return work
+
+    @override
     def _post(self, message: _Message) -> None:
         self._inbox.put(message)
         signal = self._signal
@@ -859,6 +869,8 @@ class AsyncDriver[D](_Driver[D]):
         self._timer: asyncio.TimerHandle | None = None
         self._batches: set[asyncio.Task[None]] = set()
         self._hopping: set[asyncio.Task[None]] = set()
+        self._dispatched: set[asyncio.Task[None]] = set()
+        self._lane: LaneDispatch | None = None
         self._queued: deque[_Run[D]] = deque()
         self._queue_timeout = defer_seconds("EXECUTOR", "OPTIONS", "QUEUE_TIMEOUT")
 
@@ -1001,6 +1013,36 @@ class AsyncDriver[D](_Driver[D]):
             self._hopping.discard(current)
 
     @override
+    def _dispatch(self, run: _Run[D]) -> StealableTask[None]:
+        """Queue the unit through asgiref, which restores the snapshot on its thread.
+
+        The task starts at once, so the executor takes or refuses the unit right here.
+        """
+        lane = self._lane
+        if lane is None:
+            lane = self._lane = LaneDispatch(self._executor)
+        hop = SyncToAsync(
+            partial(self._landed_body, run),
+            thread_sensitive=False,
+            executor=lane,
+            context=self._restored(),
+        )
+        task = asyncio.Task(hop(), loop=self._loop, eager_start=True)
+        if task.done():
+            task.result()
+        work = cast("StealableTask[None]", lane.queued)
+        lane.queued = None
+        self._dispatched.add(task)
+        task.add_done_callback(self._dispatched.discard)
+        task.add_done_callback(partial(self._pool_done, run))
+        return work
+
+    def _landed_body(self, run: _Run[D]) -> None:
+        """Keep the snapshot asgiref restored on this thread, then run the unit."""
+        self._keep()
+        self._pool_body(run)
+
+    @override
     def _post(self, message: _Message) -> None:
         if threading.get_ident() == self._loop_thread:
             self._queue.put_nowait(message)
@@ -1011,8 +1053,6 @@ class AsyncDriver[D](_Driver[D]):
     @override
     def _watch(self, run: _Run[D], work: StealableTask[None]) -> None:
         self._queued.append(run)
-        future = asyncio.wrap_future(work.future, loop=self._loop)
-        future.add_done_callback(partial(self._pool_done, run))
 
     def _pool_done(self, run: _Run[D], future: asyncio.Future[None]) -> None:
         self._post(_Closed(run, _error_of(future)))

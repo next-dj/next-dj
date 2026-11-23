@@ -19,7 +19,8 @@ def _declaring(**modes: str):
     """Patch the declaration store so each named component declares its mode."""
     declared = {name: BoundaryOptions.parse(mode) for name, mode in modes.items()}
     store = SimpleNamespace(
-        options=lambda path: None if path is None else declared.get(path.parent.name)
+        options=lambda path: None if path is None else declared.get(path.parent.name),
+        version=0,
     )
     return patch("next.templatetags.components.defer_declarations", store)
 
@@ -74,7 +75,7 @@ class TestModeDecision:
     ) -> None:
         site.add("card", "C", module=HEAD)
         store = SimpleNamespace(
-            options=lambda _path: BoundaryOptions.parse(timeout="5s")
+            options=lambda _path: BoundaryOptions.parse(timeout="5s"), version=0
         )
         with patch("next.templatetags.components.defer_declarations", store):
             _, session = site.deferred("{% component 'card' defer='stream' %}")
@@ -113,6 +114,49 @@ class TestZeroCost:
             html = site.render("{% component 'card' %}")
         assert html.startswith('<div id="b-')
         assert slot.mock_calls == []
+
+
+class TestHeldRoute:
+    """A call naming no mode reads its route off the component until a store moves."""
+
+    def test_a_second_call_reuses_the_route(self, site: ComponentSite) -> None:
+        info = site.add("card", "<c>C</c>")
+        site.render("{% component 'card' %}")
+        held = info.route
+        assert held is not None
+        assert site.render("{% component 'card' %}") == "<c>C</c>"
+        assert info.route is held
+
+    def test_a_new_declaration_decides_again(self, site: ComponentSite) -> None:
+        site.add("card", "<c>C</c>", module=HEAD)
+        declared: dict[str, BoundaryOptions] = {}
+        store = SimpleNamespace(
+            options=lambda path: declared.get(path.parent.name), version=0
+        )
+        with patch("next.templatetags.components.defer_declarations", store):
+            assert site.render("{% component 'card' %}") == "<c>C</c>"
+            declared["card"] = BoundaryOptions.parse("stream")
+            store.version = 1
+            with deferring() as held:
+                html = site.render("{% component 'card' %}")
+        assert 'data-next-state="loading"' in html
+        assert held.session is not None
+
+    def test_a_new_access_rule_decides_again(self, site: ComponentSite) -> None:
+        info = site.add("card", "<c>C</c>", module=HEAD)
+        access = SimpleNamespace(version=0)
+        rules = [False]
+        with (
+            patch("next.templatetags.components.declarations", access),
+            patch("next.templatetags.components.ruled", lambda _info: rules[-1]),
+        ):
+            site.render("{% component 'card' %}")
+            assert info.route is not None
+            assert not info.route.ruled
+            rules.append(True)
+            access.version = 1
+            site.render("{% component 'card' %}")
+        assert info.route.ruled
 
 
 class TestSink:
@@ -168,7 +212,7 @@ class TestDeclaredWrapperTag:
     ) -> None:
         site.add("card", "C", loading="<p>L</p>", module=HEAD)
         store = SimpleNamespace(
-            options=lambda _path: BoundaryOptions.parse("stream", tag=tag)
+            options=lambda _path: BoundaryOptions.parse("stream", tag=tag), version=0
         )
         with patch("next.templatetags.components.defer_declarations", store):
             shell, _ = site.deferred("{% component 'card' %}")

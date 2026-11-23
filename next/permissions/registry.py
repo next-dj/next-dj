@@ -1,7 +1,7 @@
 """Registries of the object permissions by name and of the access declared per file."""
 
 import threading
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -213,7 +213,7 @@ class DeclarationRegistry:
         self._change(file_path, _paired(held, own, inherited))
 
     @contextmanager
-    def collecting(self, file_path: Path) -> Iterator[None]:
+    def collecting(self, file_path: Path) -> Generator[None]:
         """Gather what one execution of `file_path` declares and swap it in at the end.
 
         A reader during the execution sees the earlier declarations rather than none.

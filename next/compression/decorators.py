@@ -2,9 +2,9 @@
 
 from collections.abc import Awaitable, Callable
 from functools import wraps
+from inspect import iscoroutinefunction
 from typing import cast
 
-from asgiref.sync import iscoroutinefunction
 from django.http.response import HttpResponseBase
 
 from .manager import OPT_OUT

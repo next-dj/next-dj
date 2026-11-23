@@ -248,7 +248,7 @@ class TestMountedTrees:
     """A `pages()` tree starts its chain at its own root, never at the host."""
 
     @pytest.fixture()
-    def mounted(self, tmp_path) -> Path:
+    def mounted(self, tmp_path) -> Generator[Path]:
         app = write_app(tmp_path, "wallets", {"pages": ()})
         write_guard(app, _LOGIN_INHERIT)
         write_guard(app / "pages")

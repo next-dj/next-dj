@@ -9,7 +9,7 @@ import time
 from collections.abc import Hashable, Mapping, Sequence
 from concurrent.futures import Executor, Future, wait
 from contextlib import contextmanager
-from contextvars import ContextVar, copy_context
+from contextvars import Context, ContextVar, copy_context
 from functools import partial
 from itertools import count
 from typing import TYPE_CHECKING, Any, Final, cast, override
@@ -39,7 +39,7 @@ from .scope import _Failure, join_waits, running_loop
 
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator
+    from collections.abc import Awaitable, Callable, Generator
 
     from django.db.models import Model
 
@@ -90,14 +90,14 @@ def _take_route(route: _Route) -> None:
         SyncToAsync.thread_sensitive_context.set(sensitive)
 
 
-def _detached(captured: ContextSnapshot) -> ContextSnapshot:
-    """Return a copy of `captured` with no route, running batch or counted job."""
-    detached = captured.context.copy()
+def _detached(context: Context) -> Context:
+    """Return a copy of `context` with no route, running batch or counted job."""
+    detached = context.copy()
     detached.run(_route_to, None)
     detached.run(_running.set, ())
     detached.run(_counted.set, None)
     detached.run(join_waits.set, None)
-    return ContextSnapshot(detached, captured.thread)
+    return detached
 
 
 class _Refusal(QuitParentExecutor):
@@ -241,7 +241,7 @@ class CountedJob:
         loaders.start(self)
 
     @contextmanager
-    def running(self) -> Iterator[None]:
+    def running(self) -> Generator[None]:
         """Mark the code of this context as the job, so its waits on a key count."""
         token = _counted.set(self)
         hooked = join_waits.set(partial(_joining, self))
@@ -376,7 +376,7 @@ class _Hub:
         self.scope = scope
         self.loop = loop
         self.shut = False
-        self._captured = _detached(captured)
+        self._captured = captured
         self._open: dict[Loader[Any, Any], _Batch] = {}
         self._memo: dict[Loader[Any, Any], dict[object, _Entry]] = {}
         self._drivers: set[asyncio.Task[None]] = set()
@@ -388,7 +388,7 @@ class _Hub:
 
     def adopt(self, captured: ContextSnapshot) -> None:
         """Run the batches started from now on in the context of `captured`."""
-        self._captured = _detached(captured)
+        self._captured = captured
 
     def cached(self, loader: Loader[Any, Any], key: object) -> _Entry | None:
         """Return the entry of `key`, read from any thread, or None before it joins."""
@@ -489,7 +489,7 @@ class _Hub:
         batch.started = True
         captured = self._captured
         restored = captured.get()
-        context = (captured.context if restored is None else restored).copy()
+        context = _detached(captured.context if restored is None else restored)
         refusal = batch.loader.refusal
         if refusal is None:
             batch.via, route = next(iter(batch.routes.items()))
@@ -537,7 +537,7 @@ class _Hub:
         if batch.carrier == threading.get_ident():
             context = copy_context()
         else:
-            context = context_propagator_slot.get().restore(self._captured).copy()
+            context = _detached(context_propagator_slot.get().restore(self._captured))
         context.run(_running.set, (*_running.get(), batch))
         held = _held.batches
         held.append(batch)
@@ -577,15 +577,9 @@ class _Hub:
         await self.scope.resolve(batch.name, partial(self._execute, batch))
 
     async def _carried(self, batch: _Batch, captured: ContextSnapshot) -> None:
-        """Resolve an async `batch` in `captured` restored on this loop.
-
-        This task runs in the captured context already, so a moved one needs its own.
-        """
+        """Resolve an async `batch` in `captured` restored on this loop."""
         context = await context_propagator_slot.get().arestore(captured)
-        if context is captured.context:
-            await self._resolve(batch)
-            return
-        refused = context.copy()
+        refused = _detached(context)
         refused.run(_route_to, batch.loader.refusal)
         refused.run(_running.set, (batch,))
         await self.loop.create_task(self._resolve(batch), context=refused)
@@ -970,7 +964,7 @@ def count_job(scope: RequestScope | None, deadline: float) -> CountedJob | None:
 
 
 @contextmanager
-def _joining(job: CountedJob, root: RequestScope) -> Iterator[None]:
+def _joining(job: CountedJob, root: RequestScope) -> Generator[None]:
     """Count `job` waiting while it joins a key its own request computes elsewhere.
 
     It runs on the loop, and a wait before the hub exists stays on the job for the hub.

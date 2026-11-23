@@ -1,6 +1,6 @@
 """What the view reads on the request thread for placement and replay on the pool."""
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
@@ -32,18 +32,13 @@ _forced: ContextVar[bool] = ContextVar("next_pool_forced", default=False)
 
 
 @contextmanager
-def forcing_pool() -> Iterator[None]:
+def forcing_pool() -> Generator[None]:
     """Let the jobs inside the block take the pool despite an atomic block or SQLite."""
     token = _forced.set(True)
     try:
         yield
     finally:
         _forced.reset(token)
-
-
-def pool_forced() -> bool:
-    """Whether `forcing_pool` holds in this context."""
-    return _forced.get()
 
 
 def server_of(
@@ -140,6 +135,5 @@ __all__ = [
     "capture_states",
     "forcing_pool",
     "foreground_facts",
-    "pool_forced",
     "server_of",
 ]

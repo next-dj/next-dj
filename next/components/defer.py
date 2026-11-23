@@ -11,7 +11,7 @@ from next.defer import BoundaryOptionError, BoundaryOptions
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Set as AbstractSet
+    from collections.abc import Callable, Generator, Set as AbstractSet
     from pathlib import Path
 
 
@@ -183,7 +183,7 @@ class DeferDeclarations:
             self._announce()
 
     @contextmanager
-    def collecting(self, file_path: Path) -> Iterator[None]:
+    def collecting(self, file_path: Path) -> Generator[None]:
         """Gather what one execution of `file_path` declares and swap it in at the end.
 
         A reader during the execution sees the earlier declaration rather than none.

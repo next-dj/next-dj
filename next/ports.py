@@ -245,10 +245,10 @@ class ContextPropagator(Protocol):
     """
 
     def restore(self, captured: ContextSnapshot, /) -> contextvars.Context:
-        """Return `captured` restored on this sync thread, itself if nothing moved."""
+        """Return `captured` restored on this sync thread."""
 
     async def arestore(self, captured: ContextSnapshot, /) -> contextvars.Context:
-        """Return `captured` restored on the running loop, itself if nothing moved."""
+        """Return `captured` restored on the running loop."""
 
 
 class RouterStamp(Protocol):

@@ -4,27 +4,25 @@ import asyncio
 import contextvars
 import inspect
 import os
-import threading
 from collections.abc import Awaitable, Callable
-from concurrent.futures import Future, InvalidStateError, ThreadPoolExecutor
+from concurrent.futures import Future, InvalidStateError
 from contextlib import suppress
 from functools import partial
 from typing import Any
 
-from asgiref.local import Local
 from asgiref.sync import AsyncToSync, SyncToAsync
 
 from next.defer import remaining
 from next.deps.scope import running_loop
 from next.ports import ContextPropagator, context_propagator_slot
 from next.suspense.executors import (
+    InlineExecutor,
     RequestThreadExecutor,
     background_loop,
     check_asgiref,
     request_executor,
 )
 from next.tasks import ContextSnapshot
-from next.utils import after_fork
 
 
 type Work[T] = Awaitable[T] | Callable[[], Awaitable[T]]
@@ -113,7 +111,7 @@ def _carry(source: contextvars.Context) -> None:
 class _Run[T]:
     """One coroutine on an event loop and the future the request thread awaits.
 
-    The bound propagator restores its context, and a moved one goes back by a hop.
+    The bound propagator restores its context, and the outcome comes back by a hop.
     """
 
     _task: asyncio.Task[None]
@@ -130,15 +128,15 @@ class _Run[T]:
         self._propagator = propagator
         self.captured = ContextSnapshot(contextvars.copy_context())
         self.outcome: Future[T] = Future()
-        self.final: ContextSnapshot | None = None
+        self.returned: contextvars.Context | None = None
 
     def start(self, parents: list[asyncio.Task[Any]] | None) -> None:
-        """Create the task in the captured context and list it in `parents` meanwhile.
+        """Create the task in an empty context and list it in `parents` meanwhile.
 
         Cancelling the call that awaits this thread makes asgiref cancel the first one.
         """
         loop = asyncio.get_running_loop()
-        task = loop.create_task(self._main(), context=self.captured.context)
+        task = loop.create_task(self._main(), context=contextvars.Context())
         self._task = task
         _listed(task, parents)
 
@@ -147,24 +145,19 @@ class _Run[T]:
         self._task.cancel()
 
     async def _main(self) -> None:
-        """Run the work in the restored context, in this task if nothing moved."""
-        captured = self.captured
+        """Run the work as a task of its own in the context restored on this loop."""
         try:
-            context = await self._propagator.arestore(captured)
+            context = await self._propagator.arestore(self.captured)
         except BaseException as error:
             self.outcome.set_exception(error)
             if isinstance(error, asyncio.CancelledError):
                 raise
             return
-        self.final = final = ContextSnapshot(context)
-        if context is captured.context:
-            await self._body(None)
-            return
         loop = asyncio.get_running_loop()
-        await loop.create_task(self._body(final), context=context)
+        await loop.create_task(self._body(), context=context)
 
-    async def _body(self, final: ContextSnapshot | None) -> None:
-        """Await the work and settle its outcome, by a hop keeping `final` if it moved.
+    async def _body(self) -> None:
+        """Await the work and settle its outcome by the hop that hands the context back.
 
         A cancel is raised again once settled, an interrupt never leaves the task.
         """
@@ -173,24 +166,19 @@ class _Run[T]:
             awaitable = self._work() if callable(self._work) else self._work
             result = await awaitable
         except BaseException as error:
-            await self._settle(partial(self.outcome.set_exception, error), final)
+            await self._settle(partial(self.outcome.set_exception, error))
             if isinstance(error, asyncio.CancelledError):
                 raise
             return
-        await self._settle(partial(self.outcome.set_result, result), final)
+        await self._settle(partial(self.outcome.set_result, result))
 
-    async def _settle(
-        self, settle: Callable[[], object], final: ContextSnapshot | None
-    ) -> None:
-        """Settle the outcome in the hop that keeps `final`, else here if it failed.
+    async def _settle(self, settle: Callable[[], object]) -> None:
+        """Settle the outcome in the hop that hands the context back, else here.
 
-        Without a kept copy the request thread carries the context back by itself.
+        A failed hop hands back nothing, so the request thread keeps its own values.
         """
-        if final is None:
-            settle()
-            return
         try:
-            await _arrive_on(self._executor, partial(_handed, final, settle))
+            await _arrive_on(self._executor, partial(_handed, self, settle))
         except BaseException as error:
             with suppress(InvalidStateError):
                 settle()
@@ -199,10 +187,10 @@ class _Run[T]:
 
 
 def _handed(
-    final: ContextSnapshot, settle: Callable[[], object], context: contextvars.Context
+    run: _Run[Any], settle: Callable[[], object], context: contextvars.Context
 ) -> None:
     """Keep the context a hop carried onto the request thread, then settle."""
-    final.keep(context)
+    run.returned = context
     settle()
 
 
@@ -221,11 +209,9 @@ def _drive[T](work: Work[T], propagator: ContextPropagator) -> T:
             executor.serve(run.outcome)
             raise
         finally:
-            try:
-                if run.final is not None:
-                    _carry(propagator.restore(run.final))
-            finally:
-                _bind(previous)
+            if run.returned is not None:
+                _carry(run.returned)
+            _bind(previous)
     return run.outcome.result()
 
 
@@ -246,45 +232,19 @@ def _idle() -> None:
     """Do nothing, as the hop that carries a task needs no work on its thread."""
 
 
-class _Carrier:
-    """The one thread the hops that carry a task onto its loop pass through.
-
-    It runs no work, so a busy default executor of the loop never holds a carry up.
-    """
-
-    __slots__ = ("hop",)
-
-    def __init__(self) -> None:
-        """Start without a thread until the first hop needs one."""
-        self.forget()
-
-    def forget(self) -> None:
-        """Drop the executor, as a forked child inherits no thread."""
-        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="next-carry")
-        self.hop = SyncToAsync(_idle, thread_sensitive=False, executor=executor)
-
-
-_carrier = _Carrier()
-after_fork(_carrier.forget)
+_LAND = SyncToAsync(_idle, thread_sensitive=False, executor=InlineExecutor())
 
 
 async def _landed() -> contextvars.Context:
-    """Return the context of this task once a hop carried it onto the loop."""
-    await _carrier.hop()
+    """Return the context of this task once a hop on the loop thread moved it here."""
+    await _LAND()
     return contextvars.copy_context()
 
 
 class BridgePropagator:
-    """Restore a context snapshot through the asgiref hops that move `Local` values.
+    """Restore a context snapshot through the asgiref hops that move `Local` values."""
 
-    `plain` means a context shows its `Local` values on any thread, so nothing moves.
-    """
-
-    __slots__ = ("plain",)
-
-    def __init__(self, *, plain: bool) -> None:
-        """Hold whether a context already carries its `Local` values by itself."""
-        self.plain = plain
+    __slots__ = ()
 
     def restore(self, captured: ContextSnapshot, /) -> contextvars.Context:
         """Return `captured` restored on this thread by a hop from a loop, kept after.
@@ -294,8 +254,6 @@ class BridgePropagator:
         found = captured.get()
         if found is not None:
             return found
-        if self.plain:
-            return captured.context
         if running_loop() is not None:
             raise RuntimeError(_RESTORE_ON_LOOP)
         arrived: Future[contextvars.Context] = Future()
@@ -316,8 +274,6 @@ class BridgePropagator:
         found = captured.get()
         if found is not None:
             return found
-        if self.plain:
-            return captured.context
         landing = captured.landing(_landed)
         await asyncio.wait((landing,))
         return captured.keep(landing.result())
@@ -349,22 +305,4 @@ def _begin(
     _listed(task, parents)
 
 
-def contexts_carry_locals() -> bool:
-    """Whether a `Local` value set in a context reads through it on another thread.
-
-    asgiref before 3.12 keeps the value in the context itself, so no hop moves it.
-    """
-    local = Local()
-    context = contextvars.Context()
-    marker = object()
-    context.run(setattr, local, "value", marker)
-    seen: list[object] = []
-    reader = threading.Thread(
-        target=lambda: seen.append(context.run(getattr, local, "value", None))
-    )
-    reader.start()
-    reader.join()
-    return seen == [marker]
-
-
-__all__ = ["BridgePropagator", "contexts_carry_locals", "drive", "server_loop"]
+__all__ = ["BridgePropagator", "drive", "server_loop"]

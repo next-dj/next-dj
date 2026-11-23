@@ -1,6 +1,6 @@
 import functools
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 import pytest
@@ -396,7 +396,7 @@ class TestOverride:
 
 def _recorder(events: list[str], refused: str | None = None) -> Callable[..., object]:
     @contextmanager
-    def atomic(using: str | None = None) -> Iterator[None]:
+    def atomic(using: str | None = None) -> Generator[None]:
         if using == refused:
             msg = f"cannot open {using}"
             raise RuntimeError(msg)
@@ -424,6 +424,16 @@ class TestRequestAtomicOrder:
             "exit default",
             "exit replica",
         ]
+
+    def test_one_alias_opens_one_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        events: list[str] = []
+        monkeypatch.setattr(transaction, "atomic", _recorder(events))
+        with request_atomic(EAGER):
+            events.append("view")
+        assert events == ["enter default", "view", "exit default"]
+
+    def test_one_alias_is_the_django_block_itself(self) -> None:
+        assert isinstance(request_atomic(EAGER), transaction.Atomic)
 
     def test_the_order_matches_atomic_requests(
         self, monkeypatch: pytest.MonkeyPatch

@@ -4,7 +4,7 @@ import asyncio
 import itertools
 import json
 from collections import deque
-from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
+from collections.abc import AsyncIterator, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from types import MappingProxyType, TracebackType
@@ -412,7 +412,7 @@ async def aissue_socket_ticket(
 
 
 @contextmanager
-def override_websocket_mount(*, mounted: bool = False) -> Iterator[None]:
+def override_websocket_mount(*, mounted: bool = False) -> Generator[None]:
     """Set whether this process serves the WebSocket, restoring the flag on exit.
 
     A `WebSocketApp` marks the whole process, so a later WSGI test would offer `ws`.
@@ -674,7 +674,7 @@ def capture_published(*topics: str) -> PublishedMessages:
 
 
 @contextmanager
-def memory_broker(**options: object) -> Iterator[MemoryBroker]:
+def memory_broker(**options: object) -> Generator[MemoryBroker]:
     """Serve realtime from a fresh `MemoryBroker` in the block, `options` its `OPTIONS`.
 
     The configured broker is built anew on its first use after the block.

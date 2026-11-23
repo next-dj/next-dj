@@ -112,9 +112,7 @@ class TestThreadDriver:
         assert all(isinstance(item, Outcome) for item in items_of(batches).values())
         assert len({html_of(item) for item in items_of(batches).values()}) == 3
 
-    def test_pool_and_loop_jobs_read_the_language_of_the_request(
-        self, pools, hops
-    ) -> None:
+    def test_pool_and_loop_jobs_read_the_language_of_the_request(self, pools) -> None:
         def body() -> Rendered[str]:
             return Rendered(translation.get_language(), "")
 
@@ -130,7 +128,7 @@ class TestThreadDriver:
         assert executor.submitted == 1
         assert [html_of(item) for item in items_of(batches).values()] == ["de", "de"]
 
-    def test_pool_and_loop_jobs_read_a_local_of_the_request(self, pools, hops) -> None:
+    def test_pool_and_loop_jobs_read_a_local_of_the_request(self, pools) -> None:
         def body() -> Rendered[str]:
             return Rendered(str(getattr(request_local, "value", None)), "")
 

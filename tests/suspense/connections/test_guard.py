@@ -1,7 +1,7 @@
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -44,7 +44,7 @@ def _statement(sql: str) -> str:
 
 
 @contextmanager
-def _log(alias: str = "default") -> Iterator[list[str]]:
+def _log(alias: str = "default") -> Generator[list[str]]:
     statements: list[str] = []
     with CaptureQueriesContext(connections[alias]) as queries:
         try:
@@ -85,7 +85,7 @@ def _create_then_fail(name: str) -> None:
 
 
 @contextmanager
-def _fresh_default() -> Iterator[BaseDatabaseWrapper]:
+def _fresh_default() -> Generator[BaseDatabaseWrapper]:
     original = connections["default"]
     del connections["default"]
     fresh = connections["default"]

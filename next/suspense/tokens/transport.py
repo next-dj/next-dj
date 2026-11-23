@@ -6,6 +6,8 @@ from typing import ClassVar, Final, override
 
 from django.http import HttpRequest, QueryDict
 
+from next.utils import request_header
+
 
 HEADER: Final = "X-Next-Boundary"
 """The request header `HeaderTransport` carries a token in."""
@@ -61,8 +63,7 @@ class HeaderTransport(TokenTransport):
 
     @override
     def extract(self, request: HttpRequest) -> str | None:
-        value = request.headers.get(self.name)
-        return value if isinstance(value, str) and value else None
+        return request_header(request, self.name) or None
 
 
 class _FieldTransport(TokenTransport):

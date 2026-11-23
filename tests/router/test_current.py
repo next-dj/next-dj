@@ -12,11 +12,12 @@ from next.router.current import (
     CONTAINERS,
     CurrentLinks,
     _Current,
-    _opened,
+    _plan,
     _Scan,
     current_links,
     origin_of,
 )
+from next.router.digest import fold
 from next.testing import override_next_settings
 from tests.support import I18N_ROUTED
 from tests.support.markup import HOSTILE, PARSER_VOID, flood
@@ -43,11 +44,12 @@ def mark_current(
     homes: Callable[[], Collection[str]] | None = None,
 ) -> str:
     """Mark `html` for an explicit path and query, as `CurrentLinks.mark` does."""
-    opened = _opened(html, containers)
-    if opened is None:
+    plan = _plan(containers)
+    low = fold(html)
+    last = plan.last(low, (0, 0))
+    if last < 0:
         return html
-    plan, low = opened
-    return _Scan(html, low, plan, _Current(path, query, origin, homes)).run()
+    return _Scan(html, low, plan, _Current(path, query, origin, homes), last).run()
 
 
 def marked(
@@ -700,6 +702,43 @@ class TestCurrentLinks:
         self, html: str, *, held: bool
     ) -> None:
         assert CurrentLinks().holds(html) is held
+
+    def test_a_hidden_span_opens_no_container(self) -> None:
+        html = '<p><a href="/a">x</a></p><script>["nav","[data-next-nav]"]</script>'
+        hidden = (html.index("<script>"), len(html))
+        path = mock.Mock(return_value="/a")
+        assert CurrentLinks().mark(html, path, hidden=hidden) is html
+        path.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "html",
+        [
+            '<nav><a href="/a">x</a></nav><script>"role"</script>',
+            '<script>"role"</script><nav><a href="/a">x</a></nav>',
+            '<nav><a href="/a">x</a></nav><script>"role"</script><div role=x></div>',
+        ],
+    )
+    def test_containers_around_a_hidden_span_are_marked(self, html: str) -> None:
+        start = html.index("<script>")
+        hidden = (start, html.index("</script>"))
+        out = CurrentLinks().mark(html, lambda: "/a", hidden=hidden)
+        assert out == CurrentLinks().mark(html, lambda: "/a")
+        assert out.count(PAGE_MARK) == 1
+
+    @pytest.mark.parametrize(
+        ("low", "hidden", "last"),
+        [
+            ("<nav> role <nav>", (0, 0), 11),
+            ("role <nav> data-next-nav", (0, 0), 11),
+            ("<nav> [role] <x>", (6, 12), 0),
+            ("<nav> [role] data-next-nav", (6, 12), 13),
+            ("[role] [data-next-nav]", (0, 22), -1),
+        ],
+    )
+    def test_the_last_opener_outside_the_hidden_span(
+        self, low: str, hidden: tuple[int, int], last: int
+    ) -> None:
+        assert _plan(CONTAINERS).last(low, hidden) == last
 
     def test_holds_reads_the_containers_of_the_backend(self) -> None:
         links = CurrentLinks(("header",))

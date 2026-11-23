@@ -38,6 +38,7 @@ _CSRF_VALUE: Final = re.compile(r"""(\svalue=)(?:"[^"]*"|'[^']*')""", re.IGNOREC
 _BODY_OPEN: Final = re.compile(r"<body(?![\w:-])", re.IGNORECASE)
 _BODY_CLOSE: Final = re.compile(r"</body\s*>", re.IGNORECASE)
 _ZONE_NAME: Final = re.compile(r"""\sdata-next-zone=(?:"([^"]*)"|'([^']*)')""")
+_TAIL_TAGS: Final = 8
 
 
 def fold(text: str) -> str:
@@ -45,8 +46,9 @@ def fold(text: str) -> str:
 
     Two code points lower to a longer string or to ASCII, so they are swapped first.
     """
-    if text.isascii():
-        return text.lower()
+    low = text.lower()
+    if text.isascii() or (len(low) == len(text) and "\u212a" not in text):
+        return low
     return text.replace("\u0130", "\u0131").replace("\u212a", "\u0138").lower()
 
 
@@ -228,14 +230,50 @@ def split_head(text: str) -> tuple[str, str] | None:
     return text[:start], text[start:]
 
 
+def _body_end(html: str, start: int) -> int:
+    """Return where the last `</body>` past `start` opens, the end of `html` for none.
+
+    The last few end tags are tried first, as a document closes its body near its end.
+    """
+    at = html.rfind("</", start)
+    for _ in range(_TAIL_TAGS):
+        if at < 0:
+            return len(html)
+        if _BODY_CLOSE.match(html, at) is not None:
+            return at
+        at = html.rfind("</", start, at)
+    ends = list(_BODY_CLOSE.finditer(html, start))
+    return ends[-1].start() if ends else len(html)
+
+
 def body_bounds(html: str) -> tuple[int, int] | None:
     """Return the bounds of the children of the `<body>` of `html`, `None` for none."""
     start = _body_start(html)
     if start is None:
         return None
-    ends = list(_BODY_CLOSE.finditer(html, start))
-    end = ends[-1].start() if ends else len(html)
-    return start, end
+    return start, _body_end(html, start)
+
+
+def moved_body(
+    before: str, after: str, bounds: tuple[int, int] | None
+) -> tuple[int, int] | None:
+    """Return the body bounds of `after` from the `bounds` of `before`, which it edits.
+
+    A head and a closed tail both left as they were keep the bounds without a scan.
+    """
+    if bounds is None:
+        return body_bounds(after)
+    start, end = bounds
+    tail = len(before) - end
+    end = len(after) - tail
+    if (
+        tail
+        and end >= start
+        and after.startswith(before[:start])
+        and after.endswith(before[-tail:])
+    ):
+        return start, end
+    return body_bounds(after)
 
 
 def find_slot(
@@ -304,6 +342,7 @@ __all__ = [
     "chrome_zones",
     "find_slot",
     "fold",
+    "moved_body",
     "normalise",
     "regions",
     "split_head",

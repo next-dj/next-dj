@@ -42,7 +42,7 @@ from next.seo.ports import SeoRoutesImpl
 from next.static.ports import StaticAssetsImpl
 from next.suspense import drive, serve_until
 from next.suspense.assembly import inline_sink
-from next.suspense.bridge import BridgePropagator, contexts_carry_locals
+from next.suspense.bridge import BridgePropagator
 from next.urls.manager import _LazyUrlPatterns
 from next.urls.ports import RouterAccessImpl
 
@@ -131,12 +131,8 @@ class TestAppComposition:
     def test_the_wait_slot_holds_the_hop_server(self) -> None:
         assert thread_wait_slot.get() is serve_until
 
-    def test_the_propagator_slot_holds_a_bridge_that_hops_only_when_asgiref_needs_it(
-        self,
-    ) -> None:
-        propagator = context_propagator_slot.get()
-        assert isinstance(propagator, BridgePropagator)
-        assert propagator.plain is contexts_carry_locals()
+    def test_the_propagator_slot_holds_the_bridge(self) -> None:
+        assert isinstance(context_propagator_slot.get(), BridgePropagator)
 
     def test_the_deferrals_slot_holds_the_assembled_inline_sink(self) -> None:
         assert deferrals_slot.get() is inline_sink

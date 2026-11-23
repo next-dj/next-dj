@@ -10,7 +10,7 @@ from next.urls.manager import router_manager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
 
 class RootPagesRouter(RouterBackend):
@@ -142,7 +142,7 @@ ENTRY_ROUTER: dict[str, object] = {"BACKEND": "tests.support.routers.EntryRouter
 
 
 @contextmanager
-def routers_from(*entries: Mapping[str, object]) -> Iterator[None]:
+def routers_from(*entries: Mapping[str, object]) -> Generator[None]:
     """Build the global routers from `entries` for the block, then from the settings."""
     try:
         with patch.object(

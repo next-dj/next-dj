@@ -46,6 +46,7 @@ from next.static.nonce import resolve_nonce
 from next.static.runtime import (
     CONSENT_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
+    ROUTER_PAYLOAD_KEY,
     SCRIPTS_PAYLOAD_KEY,
     RouterRender,
     html_finish,
@@ -54,7 +55,15 @@ from next.static.runtime import (
 from next.suspense.manager import suspense_manager
 
 from .current import current_links, origin_of
-from .digest import body_bounds, chrome, chrome_zones, find_slot, split_head, zone_html
+from .digest import (
+    body_bounds,
+    chrome,
+    chrome_zones,
+    find_slot,
+    moved_body,
+    split_head,
+    zone_html,
+)
 from .manager import client_router
 from .markers import (
     Cut,
@@ -69,7 +78,7 @@ from .signals import navigation_rendered, prefetch_shed, router_cleared
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Generator, Sequence
     from contextlib import AbstractContextManager
     from pathlib import Path
     from types import TracebackType
@@ -100,6 +109,8 @@ _SHED: Final = 429
 _CONFLICT: Final = 409
 _REDIRECTS: Final = range(300, 400)
 _ORIGIN_VARY: Final = (ORIGIN,)
+_ROUTER_ENTRY: Final = f"{json.dumps(ROUTER_PAYLOAD_KEY)}:"
+_NOTHING: Final = (0, 0)
 
 logger = logging.getLogger("next.router")
 
@@ -139,13 +150,10 @@ def _digests(
     return head + backend.digest(parts[1]), head
 
 
-def read_shell(
-    html: str, seal: str, ids: Sequence[str], backend: ChromeDigest | None = None
-) -> ScannedShell:
-    """Return the layouts of `ids` that `html` holds, nested outer first, digested.
-
-    Without `backend` only the bounds are read. A missing slot ends the chain there.
-    """
+def _layouts(
+    html: str, seal: str, ids: Sequence[str], backend: ChromeDigest | None
+) -> tuple[ScannedLayout, ...]:
+    """Return the layouts of `ids` that `html` holds, digested by `backend` if any."""
     layouts: list[ScannedLayout] = []
     region = (0, len(html))
     for ident in ids:
@@ -159,17 +167,29 @@ def read_shell(
             digest, head = _digests(text, seal, backend, root=not layouts)
         layouts.append(ScannedLayout(ident, digest, inner, outer, head))
         region = inner
-    return ScannedShell(html, seal, tuple(layouts), body=body_bounds(html))
+    return tuple(layouts)
+
+
+def read_shell(
+    html: str, seal: str, ids: Sequence[str], backend: ChromeDigest | None = None
+) -> ScannedShell:
+    """Return the layouts of `ids` that `html` holds, nested outer first, digested.
+
+    Without `backend` only the bounds are read. A missing slot ends the chain there.
+    """
+    layouts = _layouts(html, seal, ids, backend)
+    return ScannedShell(html, seal, layouts, body=body_bounds(html))
 
 
 def _relocated(shell: ScannedShell, html: str) -> ScannedShell:
-    """Return `shell` with the bounds of its layouts read again from `html`."""
-    moved = read_shell(html, shell.seal, [layout.ident for layout in shell.layouts])
+    """Return `shell` with the bounds of its layouts and its body moved into `html`."""
+    moved = _layouts(html, shell.seal, [layout.ident for layout in shell.layouts], None)
     layouts = tuple(
         ScannedLayout(old.ident, old.digest, new.slot, new.outer, old.head)
-        for old, new in zip(shell.layouts, moved.layouts, strict=False)
+        for old, new in zip(shell.layouts, moved, strict=False)
     )
-    return ScannedShell(html, shell.seal, layouts, body=moved.body)
+    body = moved_body(shell.html, html, shell.body)
+    return ScannedShell(html, shell.seal, layouts, body=body)
 
 
 def layouts_payload(shell: ScannedShell, kept: int = 0) -> list[list[str | None]]:
@@ -180,12 +200,18 @@ def layouts_payload(shell: ScannedShell, kept: int = 0) -> list[list[str | None]
     ]
 
 
-def marked_links(html: str, request: HttpRequest) -> str:
-    """Return `html` with its current links marked, once its digests are taken."""
+def marked_links(
+    html: str, request: HttpRequest, hidden: tuple[int, int] = _NOTHING
+) -> str:
+    """Return `html` with its current links marked, once its digests are taken.
+
+    `hidden` spans the `$router` entry, whose selectors open no container.
+    """
     links = current_links()
     if links is None:
         return html
-    return links.mark(html, request.get_full_path, partial(origin_of, request))
+    path, origin = request.get_full_path, partial(origin_of, request)
+    return links.mark(html, path, origin, hidden=hidden)
 
 
 class Routing:
@@ -230,9 +256,14 @@ class Routing:
         shell = read_shell(
             html, self.seal, layout_ids(self.file_path), client_router.digest()
         )
-        payload = json.dumps(layouts_payload(shell), separators=(",", ":"))
-        html = html.replace(self.render.mark, payload, 1)
-        html = marked_links(html, self.request)
+        mark = self.render.mark
+        at = html.find(mark)
+        hidden = _NOTHING
+        if at >= 0:
+            payload = json.dumps(layouts_payload(shell), separators=(",", ":"))
+            html = f"{html[:at]}{payload}{html[at + len(mark) :]}"
+            hidden = (html.rfind(_ROUTER_ENTRY, 0, at), at)
+        html = marked_links(html, self.request, hidden)
         self.shell = shell = _relocated(shell, html)
         self.html = html
         return html, shell
@@ -269,7 +300,7 @@ def page_marking(request: HttpRequest) -> AbstractContextManager[None]:
 @contextmanager
 def _routed(
     request: HttpRequest, file_path: Path, purpose: Purpose
-) -> Iterator[Routing]:
+) -> Generator[Routing]:
     """Bind the router state of one page view to the render inside the block."""
     held = Routing(request, file_path, purpose)
     token = router_render.set(held.render)

@@ -1,10 +1,12 @@
 import asyncio
+import contextvars
+import gc
 import logging
 import re
 import threading
 import time
 import weakref
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, InvalidStateError, wait
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -40,11 +42,12 @@ from next.suspense.executors import (
 from next.tasks import StealableTask
 from next.testing import override_next_settings
 from tests.support.errors import fail_hop
+from tests.support.starts import Request, held, spied_starts
 from tests.support.waits import WAIT, until
 
 
 @contextmanager
-def _expiring(future: Future[Any]) -> Iterator[None]:
+def _expiring(future: Future[Any]) -> Generator[None]:
     def expire() -> None:
         with suppress(InvalidStateError):
             future.set_exception(TimeoutError("the wait never ended"))
@@ -107,6 +110,23 @@ class TestBackgroundLoop:
         owner.stop()
         assert not any(thread.is_alive() for thread in started)
         assert loop.is_closed()
+
+    def test_the_first_caller_leaves_no_context_on_the_loop_or_its_thread(
+        self, owner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = spied_starts(monkeypatch)
+
+        def first() -> weakref.ref[Request]:
+            request = Request()
+            held.set(request)
+            owner.get()
+            return weakref.ref(request)
+
+        pinned = contextvars.Context().run(first)
+        gc.collect()
+        assert pinned() is None
+        assert seen == [None]
+        assert owner.current() is not None
 
     def test_the_loop_runs_submitted_coroutines(self, owner) -> None:
         future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0, "done"), owner.get())
@@ -252,7 +272,7 @@ class TestCheckAsgiref:
     ) -> None:
         monkeypatch.delattr(AsyncToSync, "executors")
         with pytest.raises(
-            ImproperlyConfigured, match=r"Install asgiref 3\.9 or later\.$"
+            ImproperlyConfigured, match=r"Install asgiref 3\.12 or later\.$"
         ):
             check_asgiref()
 
@@ -625,6 +645,19 @@ class TestLaneExecutorThreads:
         assert len(started) == 1
         assert all(thread.name.startswith("next-pool-") for thread in started)
         assert all(thread.daemon for thread in started)
+
+    def test_a_worker_starts_outside_the_context_of_the_submitter(
+        self, pools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = spied_starts(monkeypatch)
+        executor = pools()
+
+        def submit() -> int:
+            held.set(Request())
+            return executor.submit(StealableTask(lambda: 42)).result(5)
+
+        assert contextvars.Context().run(submit) == 42
+        assert seen == [None]
 
     def test_an_idle_worker_takes_the_next_task_without_a_new_thread(
         self, pools
@@ -1025,7 +1058,9 @@ class TestLaneExecutorConnections:
             return len(held.execute_wrappers)
 
         executor.submit(StealableTask(open_with_one)).result(5)
+        until(lambda: executor.capacity().busy == 0)
         assert held.execute_wrappers == []
         held.execute_wrappers.append(kept)
         assert executor.submit(StealableTask(leave_another)).result(5) == 2
+        until(lambda: executor.capacity().busy == 0)
         assert held.execute_wrappers == [kept]

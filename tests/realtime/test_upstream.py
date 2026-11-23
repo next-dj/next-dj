@@ -2,7 +2,7 @@ import asyncio
 import json
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import fields
@@ -556,7 +556,7 @@ def test_events_past_the_concurrency_are_refused_without_a_strike() -> None:
 
 
 @contextmanager
-def _blocking() -> Iterator[tuple[threading.Event, threading.Event]]:
+def _blocking() -> Generator[tuple[threading.Event, threading.Event]]:
     """Register a sync `block` handler that holds its thread until released."""
     entered = threading.Event()
     release = threading.Event()
@@ -965,7 +965,7 @@ def _broken_receiver(**kwargs: object) -> None:
 
 
 @contextmanager
-def _failing(*signals: Signal) -> Iterator[None]:
+def _failing(*signals: Signal) -> Generator[None]:
     for signal in signals:
         signal.connect(_broken_receiver, weak=False)
     try:

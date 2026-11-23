@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import logging
 import threading
 
@@ -37,6 +38,7 @@ from tests.support.realtime import (
     manual_schedule,
     silent_schedule,
 )
+from tests.support.starts import Request, held, spied_starts
 
 
 def _identify(user: object, topic: str) -> dict[str, object]:
@@ -173,6 +175,23 @@ def test_threaded_schedule_publishes_once_the_window_closes() -> None:
 
     assert published.wait(5)
     schedule.close()
+
+
+def test_the_schedule_thread_starts_outside_the_context_of_the_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = spied_starts(monkeypatch)
+    published = threading.Event()
+    schedule = PresenceSchedule(lambda _topic: published.set())
+
+    def first() -> None:
+        held.set(Request())
+        schedule.schedule("room:1", 0.01)
+
+    contextvars.Context().run(first)
+    assert published.wait(5)
+    schedule.close()
+    assert seen == [None]
 
 
 def test_schedule_logs_a_failed_publication_and_keeps_going(caplog) -> None:

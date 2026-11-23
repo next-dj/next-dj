@@ -22,7 +22,7 @@ from next.utils import resolve_base_dir
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Generator, Sequence
 
     from next.defer import ErrorKind
 
@@ -61,7 +61,7 @@ def _hand_on(sinks: Sequence[_Sink], failures: Sequence[RecordedFailure]) -> Non
 
 
 @contextmanager
-def boundary_errors(mode: Mode) -> Iterator[None]:
+def boundary_errors(mode: Mode) -> Generator[None]:
     """Run the block with contained failures re-raised, or rendered for `"render"`.
 
     Tests re-raise by default, so only a test about an error UI asks for `"render"`.
@@ -106,7 +106,7 @@ def _listen() -> None:
 
 
 @contextmanager
-def _recording_into(recordings: tuple[_Sink, ...]) -> Iterator[None]:
+def _recording_into(recordings: tuple[_Sink, ...]) -> Generator[None]:
     """Record every failure contained in the block on this context into `recordings`."""
     _listen()
     token = _recording.set(recordings)
@@ -117,7 +117,7 @@ def _recording_into(recordings: tuple[_Sink, ...]) -> Iterator[None]:
 
 
 @contextmanager
-def recorded_failures() -> Iterator[list[RecordedFailure]]:
+def recorded_failures() -> Generator[list[RecordedFailure]]:
     """Record every failure a boundary contains inside the block, in render order.
 
     Every enclosing recording receives each failure too, as it is recorded.
@@ -143,7 +143,7 @@ class HeldFailures:
         self._lock = threading.Lock()
 
     @contextmanager
-    def recording(self) -> Iterator[None]:
+    def recording(self) -> Generator[None]:
         """Record the failures of the block here alone, handing them on if it raises."""
         with _recording_into((self,)):
             try:
@@ -189,7 +189,7 @@ def in_document_order(
 
 
 @contextmanager
-def parallel_boundaries() -> Iterator[None]:
+def parallel_boundaries() -> Generator[None]:
     """Run the deferred jobs of the block on the pool, the test transaction aside.
 
     A pool thread reads only committed rows, so it suits a transactional test.
@@ -224,7 +224,7 @@ class ComponentGate:
 
 
 @contextmanager
-def gated(name: str) -> Iterator[ComponentGate]:
+def gated(name: str) -> Generator[ComponentGate]:
     """Hold every job of the component `name` inside the block until it is released."""
     held = ComponentGate(name)
     job_gates[name] = held
@@ -282,7 +282,7 @@ def boundary_gate(
     component: str | None = None,
     page: Path | str | None = None,
     after_shell: bool = False,
-) -> Iterator[ComponentGate]:
+) -> Generator[ComponentGate]:
     """Hold every deferred job of `component`, or of the page boundary at `page`.
 
     `page` is the directory of its `loading.djx`, and `after_shell` opens after a shell.

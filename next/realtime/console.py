@@ -4,7 +4,7 @@
 """
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 
 from django.core.exceptions import ImproperlyConfigured
@@ -39,7 +39,7 @@ _PROCESS_LOCAL = (
 
 
 @contextmanager
-def refused() -> Iterator[None]:
+def refused() -> Generator[None]:
     """Turn a refused topic, payload or broker into a `ConsoleError` with its reason."""
     try:
         yield

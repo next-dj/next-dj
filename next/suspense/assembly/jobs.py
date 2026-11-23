@@ -2,7 +2,7 @@
 
 import asyncio
 import contextvars
-from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
+from collections.abc import AsyncGenerator, Generator, Iterator
 from concurrent.futures import Future
 from contextlib import aclosing, asynccontextmanager, closing, contextmanager
 from pathlib import Path
@@ -92,7 +92,7 @@ def _own_scope(
 @contextmanager
 def _job_scope(
     session: BoundarySession[Delta], request: HttpRequest | None
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold a scope for the jobs a thread drives, closed after them.
 
     An untouched scope closes here, any other on its loop, unawaited on the loop thread.
@@ -117,7 +117,7 @@ def _job_scope(
 @asynccontextmanager
 async def _ajob_scope(
     session: BoundarySession[Delta], request: HttpRequest
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     """Hold a scope for jobs the running loop drives, closed after them."""
     if session.scope is not None:
         yield

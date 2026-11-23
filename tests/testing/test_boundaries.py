@@ -13,7 +13,7 @@ from next.boundaries import Boundary, boundary_failed, contain
 from next.components import ComponentInfo
 from next.compression import GzipBackend
 from next.defer import Addressing, BoundaryFailure, ErrorKind
-from next.suspense.connections import pool_forced
+from next.suspense.connections import foreground_facts
 from next.testing import (
     NextClient,
     boundary_errors,
@@ -545,10 +545,10 @@ class TestDeferredHelpers:
     """The helpers that force the pool and hold a component's jobs."""
 
     def test_parallel_boundaries_lifts_the_request_lane_rules(self) -> None:
-        assert pool_forced() is False
+        assert foreground_facts(None).sqlite != ()
         with parallel_boundaries():
-            assert pool_forced() is True
-        assert pool_forced() is False
+            assert foreground_facts(None).sqlite == ()
+        assert foreground_facts(None).sqlite != ()
 
     @pytest.mark.usefixtures("widget_pages")
     def test_boundary_gate_holds_the_named_component(self) -> None:

@@ -73,7 +73,7 @@ from next.suspense.tokens import (
 )
 from next.suspense.trip import mint
 from next.templatetags.components import isolated_renderer
-from next.utils import template_edits_watched
+from next.utils import request_header, template_edits_watched
 
 
 type _Found = dict[tuple[str, str], ComponentInfo]
@@ -153,7 +153,7 @@ def failed(request: HttpRequest, exc: Exception) -> HttpResponseBase:
 
 def cross_site(request: HttpRequest) -> bool:
     """Whether the browser reports the request as made from another site."""
-    site = request.headers.get(SEC_FETCH_SITE)
+    site = request_header(request, SEC_FETCH_SITE)
     return site is not None and site != _SAME_ORIGIN
 
 

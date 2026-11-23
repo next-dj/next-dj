@@ -1,7 +1,7 @@
 """The clock boundary tokens read their mint and expiry time from."""
 
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import override
 
@@ -50,7 +50,7 @@ def token_clock() -> TokenClock:
 
 
 @contextmanager
-def clocked[C: TokenClock](clock: C) -> Iterator[C]:
+def clocked[C: TokenClock](clock: C) -> Generator[C]:
     """Make tokens read `clock` inside the block, the previous clock after it."""
     previous, _held.clock = _held.clock, clock
     try:

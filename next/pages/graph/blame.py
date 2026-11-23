@@ -10,7 +10,7 @@ from .merge import spread
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 
 class Blame:
@@ -61,7 +61,7 @@ def blame(group: int) -> None:
 
 
 @contextmanager
-def blaming() -> Iterator[Blame]:
+def blaming() -> Generator[Blame]:
     """Watch the context runs of the block for the group a failure belongs to."""
     held = Blame()
     token = blame_watch.set(held)

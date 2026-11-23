@@ -11,7 +11,7 @@ from next.partial import render_zone
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from next.pages import Page
@@ -51,7 +51,7 @@ def _priced_provider() -> str:
 
 
 @contextmanager
-def _priced_page(directory: Path, *, scoped: bool) -> Iterator[Path]:
+def _priced_page(directory: Path, *, scoped: bool) -> Generator[Path]:
     """Build a ten-zone page whose providers are bound to a zone or not.
 
     The registrations go into the module-level page singleton, so teardown undoes them.

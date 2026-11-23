@@ -37,6 +37,7 @@ from next.components.calls import (
     wrapper_source,
 )
 from next.components.defer import defer_declarations
+from next.components.info import CallRoute
 from next.components.nodes import ComponentTagNode, SetSlotTagNode, SlotTagNode
 from next.components.parsing import (
     BLOCK_SLOT_SPEC,
@@ -83,7 +84,7 @@ from next.defer import (
 from next.diagnostics import Capture
 from next.interpolation import Interpolation
 from next.pages.boundaries import shown_source
-from next.permissions.access import check, declared
+from next.permissions.access import check, declarations, declared
 from next.permissions.nodes import claimed, rendering_guards
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
 from next.static import StaticCollector, collect_component_assets
@@ -110,6 +111,25 @@ _INTERNAL_CONTEXT_KEYS = frozenset({_SLOT_COLLECTOR_KEY})
 _ORDINAL: Final = "next.component.ordinal"
 _capturing: ContextVar[bool] = ContextVar("next_component_capturing", default=False)
 _known: WeakKeyDictionary[ComponentNode, Known] = WeakKeyDictionary()
+
+
+def _route(info: ComponentInfo) -> CallRoute:
+    """Return how a call of `info` that names no mode renders, decided once per stamp.
+
+    A `loading.djx` streams the call when its `component.py` declares no mode.
+    """
+    stamp = (defer_declarations, defer_declarations.version, declarations.version)
+    held = info.route
+    if held is not None and held.stamp == stamp:
+        return held
+    declared_options = defer_declarations.options(info.module_path)
+    mode = None if declared_options is None else declared_options.mode
+    files = info.files
+    if mode is None and files is not None and files.loading is not None:
+        mode = DeferMode.STREAM
+    route = CallRoute(stamp, mode, ruled(info))
+    info.hold_route(route)
+    return route
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,18 +324,14 @@ class ComponentNode(ComponentTagNode):
         A call compiled inside a tag that stores its output knows it, an included one
         reads the render once the project can defer at all.
         """
-        if not _capturing.get() and (
+        if (
             self.captured or (deferred_components.held and self._captured(context))
-        ):
+        ) and not _capturing.get():
             token = _capturing.set(True)
             try:
-                return self._render(context)
+                return self.render(context)
             finally:
                 _capturing.reset(token)
-        return self._render(context)
-
-    def _render(self, context: template.Context) -> str:
-        """Merge props, slots, and children, then render the component."""
         path = self._template_path_from_context(context)
         if path is None:
             return self._on_missing_path()
@@ -324,29 +340,38 @@ class ComponentNode(ComponentTagNode):
         if info is None:
             return self._on_not_found(path)
 
-        files = info.files
         call = self.options
-        mode = None if call is None else call.mode
-        if mode is None:
-            declared_options = defer_declarations.options(info.module_path)
-            mode = None if declared_options is None else declared_options.mode
-        if mode is None and files is not None and files.loading is not None:
-            mode = DeferMode.STREAM
-        if mode is not None:
-            return self._render_deferred(context, info, path, mode)
-
-        if files is not None and files.error is not None:
-            return self._render_guarded(context, info, path, files.error)
-
-        if ruled(info):
-            attempt = Attempt(info)
-            token = current_attempt.set(attempt)
-            try:
-                return self.attempt(context, info, path, attempt)
-            finally:
-                current_attempt.reset(token)
+        route = _route(info)
+        mode = route.mode if call is None or call.mode is None else call.mode
+        files = info.files
+        if (
+            mode is not None
+            or route.ruled
+            or (files is not None and files.error is not None)
+        ):
+            return self._bounded(context, info, path, mode)
         collect_component_assets(info, context.get(COLLECTOR_KEY))
         return self._composed(context, info, path)
+
+    def _bounded(
+        self,
+        context: template.Context,
+        info: ComponentInfo,
+        path: Path,
+        mode: DeferMode | None,
+    ) -> str:
+        """Render a call that defers, sits behind an error boundary, or has a rule."""
+        if mode is not None:
+            return self._render_deferred(context, info, path, mode)
+        files = info.files
+        if files is not None and files.error is not None:
+            return self._render_guarded(context, info, path, files.error)
+        attempt = Attempt(info)
+        token = current_attempt.set(attempt)
+        try:
+            return self.attempt(context, info, path, attempt)
+        finally:
+            current_attempt.reset(token)
 
     def _composed(
         self,

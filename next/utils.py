@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 
+    from django.http import HttpRequest
     from django.template.base import Node
 
 
@@ -208,6 +209,17 @@ def decode_url_path(path: str) -> str:
     Decoded only once split from its query, so an encoded `?` stays in its segment.
     """
     return repercent_broken_unicode(unquote_to_bytes(path)).decode()
+
+
+@functools.cache
+def _meta_key(name: str) -> str:
+    """Return the WSGI `META` key of a header name."""
+    return "HTTP_" + name.upper().replace("-", "_")
+
+
+def request_header(request: HttpRequest, name: str) -> str | None:
+    """Return a request header value from `META`, skipping the parsed headers map."""
+    return request.META.get(_meta_key(name))
 
 
 @functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)

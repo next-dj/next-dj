@@ -14,7 +14,7 @@ from django.utils.html import escape
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from django.template import Context
 
@@ -38,7 +38,7 @@ def in_loading() -> bool:
 
 
 @contextmanager
-def loading_content() -> Iterator[None]:
+def loading_content() -> Generator[None]:
     """Render the block as loading content, where a deferred call renders in place."""
     token = _loading.set(True)
     try:
@@ -76,7 +76,7 @@ def stash_markup(name: str, html: str, attr: str = STASH_ATTR) -> str:
 
 
 @contextmanager
-def stashing() -> Iterator[None]:
+def stashing() -> Generator[None]:
     """Stash the loading UI of every inline boundary the block renders.
 
     A nested block joins the outer one, so each key is stashed once.

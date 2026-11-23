@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -67,7 +68,7 @@ def rule(isolated_permissions, log) -> _Rule:
 
 
 @pytest.fixture()
-def denials() -> SignalRecorder:
+def denials() -> Generator[SignalRecorder]:
     with capture_signals(form_access_denied) as recorder:
         yield recorder
 

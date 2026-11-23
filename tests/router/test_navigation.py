@@ -333,6 +333,36 @@ class TestRouting:
             assert held.settled(held.html or "") is shell
             assert held.html == "<p>[]</p>"
 
+    def test_the_router_entry_opens_no_container(self, tmp_path: Path, rf) -> None:
+        with override_next_settings(ROUTER={"ENABLED": True}):
+            request = rf.get("/docs/")
+            held = Routing(request, tmp_path / "page.py", Purpose.DOCUMENT)
+            entry = held.render.encoded()
+            script = f'<script>({{"$router":{entry},"$layouts":{held.render.mark}}})'
+            html = f'<body><p><a href="/docs/">D</a></p>{script}</script></body>'
+            with mock.patch.object(request, "get_full_path") as path:
+                done = held.finish(html)
+        path.assert_not_called()
+        assert done == html.replace(held.render.mark, "[]")
+        assert '"[data-next-nav]"' in entry
+
+    @pytest.mark.parametrize("before", [True, False])
+    def test_a_container_beside_the_router_entry_is_marked(
+        self, tmp_path: Path, rf, *, before: bool
+    ) -> None:
+        with override_next_settings(ROUTER={"ENABLED": True}):
+            held = Routing(rf.get("/docs/"), tmp_path / "page.py", Purpose.DOCUMENT)
+            script = (
+                f'<script>({{"$router":{held.render.encoded()},'
+                f'"$layouts":{held.render.mark}}})</script>'
+            )
+            body = f"{NAV}{script}" if before else f"{script}{NAV}"
+            done = held.finish(f"<html><body>{body}</body></html>")
+            shell = held.settled(done)
+        assert DOCS_MARKED in done
+        start, end = shell.body or (0, 0)
+        assert done[start:end] == done[len("<html><body>") : -len("</body></html>")]
+
     @pytest.mark.parametrize("snapshot", [True, False])
     def test_the_render_carries_the_snapshot_option(
         self, tmp_path: Path, rf, *, snapshot: bool

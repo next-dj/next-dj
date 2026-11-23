@@ -19,6 +19,7 @@ from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
 from next.partial.envelope import Envelope, Patch
 from next.partial.manager import asset_version
+from next.tasks import contextless
 from next.utils import after_fork, int_between, positive_number
 
 from .errors import InvalidMemberError
@@ -337,7 +338,7 @@ class PresenceSchedule:
                 self._thread = threading.Thread(
                     target=self._run, name="next-realtime-presence", daemon=True
                 )
-                self._thread.start()
+                contextless(self._thread.start)
             self._condition.notify()
 
     def pending(self) -> tuple[str, ...]:

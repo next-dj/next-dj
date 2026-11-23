@@ -17,7 +17,7 @@ from .errors import DependencyCycleError
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping
     from contextlib import AbstractContextManager
     from types import TracebackType
 
@@ -392,7 +392,7 @@ class RequestScope:
 
 
 @asynccontextmanager
-async def render_scope(seed: Mapping[str, object]) -> AsyncIterator[RequestScope]:
+async def render_scope(seed: Mapping[str, object]) -> AsyncGenerator[RequestScope]:
     """Open the request scope of one async render and close it once the render ends.
 
     It is seeded from the shell cache and shared through the request memo.

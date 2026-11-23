@@ -9,6 +9,16 @@ from contextvars import Context
 from typing import Any, ClassVar
 
 
+def contextless[**P, R](
+    call: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+) -> R:
+    """Return what `call` returns in an empty context, so nothing it starts pins one.
+
+    A thread on free-threaded Python and the handles of a new loop copy the current one.
+    """
+    return Context().run(call, *args, **kwargs)
+
+
 class QuitParentExecutor(Executor):
     """An executor asgiref reads as a quit parent when bound as its current executor.
 
@@ -132,4 +142,4 @@ class ContextSnapshot:
         return task
 
 
-__all__ = ["ContextSnapshot", "QuitParentExecutor", "StealableTask"]
+__all__ = ["ContextSnapshot", "QuitParentExecutor", "StealableTask", "contextless"]

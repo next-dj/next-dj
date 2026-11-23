@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urljoin, urlsplit
 
 from django.template import Context
+from django.urls import get_script_prefix
 
 from next.caches import BoundedCache
 from next.components.stash import stash_markup
@@ -45,7 +46,9 @@ _SCAN: Final = re.compile(
 _ATTR: Final = re.compile(
     r"""\s([^\s"'>/=]++)\s*+=\s*+(?:"([^"]*+)"|'([^']*+)'|([^\s"'>]++))"""
 )
-_SERVED: BoundedCache[tuple[str, str], tuple[int, "Path | None"]] = BoundedCache()
+_SERVED: BoundedCache[tuple[str, str, object, str], tuple[int, "Path | None"]] = (
+    BoundedCache()
+)
 
 
 def _attrs(tag: str) -> dict[str, str]:
@@ -59,16 +62,20 @@ def _attrs(tag: str) -> dict[str, str]:
 
 
 def _served(path: str, zone: str, request: "HttpRequest") -> "Path | None":
-    """Return the page serving `zone` at `path`, an intercept over it included."""
+    """Return the page serving `zone` at `path`, an intercept over it included.
+
+    The URLconf and the script prefix of the request decide what `path` resolves to.
+    """
     version = module_version()
-    held = _SERVED.get((path, zone))
+    key = (path, zone, getattr(request, "urlconf", None), get_script_prefix())
+    held = _SERVED.get(key)
     if held is not None and held[0] == version:
         return held[1]
     page = resolve_url_to_page(path, request)
     if page is not None:
         rule = pick_intercept(page, (zone,))
         page = page if rule is None else rule.file
-    _SERVED[path, zone] = (version, page)
+    _SERVED[key] = (version, page)
     return page
 
 

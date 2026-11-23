@@ -1,6 +1,6 @@
 """The sinks deferred calls reach and the delivery a render settles its jobs by."""
 
-from collections.abc import Callable, Iterator, MutableMapping
+from collections.abc import Callable, Generator, MutableMapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
@@ -60,7 +60,7 @@ _rendering: ContextVar[PageRender | None] = ContextVar("next_page_render", defau
 
 
 @contextmanager
-def page_deferring(request: HttpRequest) -> Iterator[PageRender]:
+def page_deferring(request: HttpRequest) -> Generator[PageRender]:
     """Gather the deferred calls of a page render with the sink that asks the policy.
 
     A failed render gives back the stream slot its policy took.

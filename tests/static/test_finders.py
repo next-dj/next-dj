@@ -50,7 +50,7 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Generator, Iterable, Iterator
 
     from next.static import StaticBackend
 
@@ -309,7 +309,7 @@ class TestFinderFreshness:
     """The held answer is rebuilt when what it was read from moves, and not before."""
 
     @contextmanager
-    def _counted_scan(self) -> Iterator[mock.MagicMock]:
+    def _counted_scan(self) -> Generator[mock.MagicMock]:
         with mock.patch(
             "next.static.finders.discover_colocated_static_assets",
             wraps=discover_colocated_static_assets,
@@ -508,7 +508,7 @@ class TestMalformedRouterSurvival:
     """
 
     @contextmanager
-    def _malformed_router(self, tree: Path) -> Iterator[None]:
+    def _malformed_router(self, tree: Path) -> Generator[None]:
         with (
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}

@@ -22,7 +22,7 @@ from tests.support.access import COMPONENTS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from django.http import HttpRequest, HttpResponseBase
@@ -47,7 +47,7 @@ _BOUNDARIES = 10
 
 
 @contextmanager
-def _site(root: Path, boundaries: int) -> Iterator[Callable[..., HttpResponseBase]]:
+def _site(root: Path, boundaries: int) -> Generator[Callable[..., HttpResponseBase]]:
     """Route a page of `boundaries` client-trip cards and yield its view."""
     (root / "layout.djx").write_text(_LAYOUT)
     build_component(

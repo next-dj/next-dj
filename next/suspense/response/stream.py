@@ -400,7 +400,7 @@ class Lifetime:
             await sync_to_async(release_connections, thread_sensitive=True)()
 
     @contextmanager
-    def guard(self, message: str = _FAILED) -> Iterator[None]:
+    def guard(self, message: str = _FAILED) -> Generator[None]:
         """Contain a failure of the machinery, logging only the first of a stream."""
         try:
             yield

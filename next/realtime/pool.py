@@ -6,7 +6,7 @@ import logging
 import os
 import threading
 from collections.abc import Awaitable, Callable, Iterator, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from contextvars import ContextVar, Token
 from types import TracebackType
@@ -17,6 +17,7 @@ from asgiref.sync import sync_to_async
 from django.db import close_old_connections
 from django.dispatch import Signal
 
+from next.tasks import contextless
 from next.utils import after_fork
 
 from .errors import PoolFullError
@@ -166,6 +167,17 @@ class PoolThread:
                     loop.call_soon_threadsafe(self._lease.give)
 
 
+class _HandlerExecutor(ThreadPoolExecutor):
+    """A thread pool whose workers start in an empty context, pinning no caller's."""
+
+    @override
+    def submit[**P, R](
+        self, fn: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Future[R]:
+        """Queue the call, a worker it starts copying no context of the submitter."""
+        return contextless(super().submit, fn, *args, **kwargs)
+
+
 class HandlerPool:
     """The bulkhead sync upstream handlers run in, apart from the pool Django shares.
 
@@ -184,7 +196,7 @@ class HandlerPool:
     def reset(self) -> None:
         """Start a fresh executor and fresh permits, as a forked child has to."""
         self.workers = min(32, (os.cpu_count() or 1) + 4)
-        self.executor = ThreadPoolExecutor(
+        self.executor = _HandlerExecutor(
             self.workers, thread_name_prefix="next-handler"
         )
         self.permits = threading.BoundedSemaphore(self.workers)

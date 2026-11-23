@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from html import unescape
 from pathlib import Path
@@ -428,7 +428,7 @@ def pages(tmp_path: Path, fresh_deferred_components: DeferredComponents) -> Path
 
 
 @contextmanager
-def _routed(pages: Path, **tokens: object) -> Iterator[None]:
+def _routed(pages: Path, **tokens: object) -> Generator[None]:
     defer = {"TOKENS": {"OPTIONS": tokens}} if tokens else {}
     with routed(pages, COMPONENT_BACKENDS=COMPONENTS, DEFER=defer):
         yield

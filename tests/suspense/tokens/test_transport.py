@@ -37,6 +37,7 @@ class TestExtract:
         request = rf.get("/?_nb=query", HTTP_X_NEXT_BOUNDARY="tok")
         assert HeaderTransport().extract(request) == "tok"
         assert HeaderTransport().extract(rf.get("/?_nb=q")) is None
+        assert "headers" not in vars(request)
 
     def test_an_empty_header_carries_no_token(self, rf) -> None:
         request = rf.get("/", HTTP_X_NEXT_BOUNDARY="")

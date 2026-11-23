@@ -682,7 +682,7 @@ class _AnsweringShaper:
 
 
 @contextmanager
-def _dispatch_receiver(signal: Signal) -> Iterator[list[dict[str, Any]]]:
+def _dispatch_receiver(signal: Signal) -> Generator[list[dict[str, Any]]]:
     """Connect a receiver filtered on the `FormActionDispatch` sender."""
     events: list[dict[str, Any]] = []
 

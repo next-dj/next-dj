@@ -3,7 +3,7 @@
 A token re-checks on reload what those branches name, at compile time and at render.
 """
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import override
@@ -49,7 +49,7 @@ def _joined(guards: Iterable[str | None]) -> tuple[str, ...] | None:
 @contextmanager
 def granting(
     parser: Parser, perm: FilterExpression, obj: FilterExpression | None
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold one granting branch open on `parser` while the branch compiles."""
     stack = _granting.setdefault(parser, [])
     stack.append(_claim(perm, obj))
@@ -73,7 +73,7 @@ def rendering_guards() -> Guards:
 
 
 @contextmanager
-def rendered_under(guards: Guards) -> Iterator[None]:
+def rendered_under(guards: Guards) -> Generator[None]:
     """Render the block under `guards`, as a deferred render runs after they closed."""
     token = _rendering.set(guards)
     try:

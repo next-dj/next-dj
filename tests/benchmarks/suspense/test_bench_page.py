@@ -23,7 +23,7 @@ from tests.support.access import COMPONENTS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from django.http import HttpRequest, HttpResponseBase
@@ -62,7 +62,7 @@ def _site(
     loading: str | None = "<p>loading</p>",
     error: bool = False,
     router: bool = False,
-) -> Iterator[Callable[[HttpRequest], HttpResponseBase]]:
+) -> Generator[Callable[[HttpRequest], HttpResponseBase]]:
     """Route a one-page site around the `card` component and yield the page view."""
     (root / "layout.djx").write_text(_LAYOUT)
     build_component(root, "card", body=_CARD_BODY, module=_CARD, loading=loading)
@@ -148,6 +148,7 @@ class TestBenchDeferredPageInline:
 class TestBenchDeferredPageStreamed:
     """A GET of the same page under a threaded server, its streamed body read whole."""
 
+    @pytest.mark.walltime()
     @_BOUNDARIES
     @pytest.mark.benchmark(group="suspense.page")
     def test_streamed(self, tmp_path: Path, boundaries: int, benchmark) -> None:
@@ -162,6 +163,7 @@ class TestBenchDeferredPageStreamed:
                 warmup_rounds=REQUEST_WARMUP_ROUNDS,
             )
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="suspense.page")
     def test_streamed_shell(self, tmp_path: Path, benchmark) -> None:
         """Ten boundaries up to the returned response, before any chunk is read."""
@@ -199,6 +201,7 @@ class TestBenchFullPrefetch:
                 warmup_rounds=REQUEST_WARMUP_ROUNDS,
             )
 
+    @pytest.mark.walltime()
     @_BOUNDARIES
     @pytest.mark.parametrize("depth", [None, "full"], ids=["navigation", "full"])
     @pytest.mark.benchmark(group="suspense.page")

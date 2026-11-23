@@ -1,6 +1,6 @@
 import importlib.util
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
@@ -701,7 +701,7 @@ def _typing(upstream: Upstream) -> None:
 @contextmanager
 def _unused_realtime(
     urlconf: object = "", pages: tuple[Path, ...] = ()
-) -> Iterator[None]:
+) -> Generator[None]:
     """Run the deploy check on a project that touches realtime only as asked."""
     with (
         override_settings(NEXT_FRAMEWORK={}, ROOT_URLCONF=urlconf),

@@ -24,7 +24,7 @@ from tests.support import bound_dependency
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine, Iterator
+    from collections.abc import Callable, Coroutine, Generator
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -217,7 +217,7 @@ STAND_IN_PK = 7
 
 
 @contextmanager
-def stand_in_rows(pk: int = STAND_IN_PK) -> Iterator[None]:
+def stand_in_rows(pk: int = STAND_IN_PK) -> Generator[None]:
     """Give the `Group` manager a `visible_to` that answers one unsaved row of `pk`."""
     rows = StandInRows(Group(pk=pk, name="bench"))
     with patch.object(
@@ -227,7 +227,7 @@ def stand_in_rows(pk: int = STAND_IN_PK) -> Iterator[None]:
 
 
 @contextmanager
-def stand_in_scope(pk: int = STAND_IN_PK) -> Iterator[None]:
+def stand_in_scope(pk: int = STAND_IN_PK) -> Generator[None]:
     """Answer every `Group` lookup with one unsaved row of `pk` and bind the `scope`."""
     with stand_in_rows(pk), bound_dependency(SCOPE_DEPENDENCY, lambda: "tenant"):
         yield

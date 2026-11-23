@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+from inspect import iscoroutinefunction, markcoroutinefunction
 from typing import TYPE_CHECKING, ClassVar, Final, cast
 
-from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.utils.cache import patch_vary_headers
 from django.utils.deprecation import MiddlewareMixin
 

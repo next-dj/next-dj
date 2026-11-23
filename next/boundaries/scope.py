@@ -14,7 +14,7 @@ from .options import Errors, error_settings
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Hashable, Iterator
+    from collections.abc import Callable, Generator, Hashable
     from types import TracebackType
 
 
@@ -77,7 +77,7 @@ _wrapper: ContextVar[str | None] = ContextVar("next_boundary_wrapper", default=N
 
 
 @contextmanager
-def wrapping(ident: str) -> Iterator[None]:
+def wrapping(ident: str) -> Generator[None]:
     """Hand the id of the wrapper drawn around the block to the boundary claiming it."""
     token = _wrapper.set(ident)
     try:
@@ -95,7 +95,7 @@ def claim_wrapper() -> str | None:
 
 
 @contextmanager
-def minting(minter: Callable[[], str | None]) -> Iterator[None]:
+def minting(minter: Callable[[], str | None]) -> Generator[None]:
     """Take the id of every error wrapper inside the block from `minter`, if it has one.
 
     A deferred render binds its session, so every wrapper shares one id scheme.

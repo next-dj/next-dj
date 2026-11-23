@@ -2,7 +2,7 @@ import asyncio
 import gc
 import threading
 import traceback
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import TracebackType
 from typing import NoReturn
@@ -884,7 +884,7 @@ def test_a_joiner_waits_inside_the_join_hook_until_it_ends_or_is_cancelled() -> 
     entered: list[tuple[str, RequestScope]] = []
 
     @contextmanager
-    def hook(root: RequestScope) -> Iterator[None]:
+    def hook(root: RequestScope) -> Generator[None]:
         entered.append(("in", root))
         try:
             yield

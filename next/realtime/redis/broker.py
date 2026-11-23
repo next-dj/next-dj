@@ -11,10 +11,12 @@ import threading
 import time
 import weakref
 from collections.abc import (
+    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
     Coroutine,
+    Generator,
     Iterator,
     Mapping,
     Sequence,
@@ -482,7 +484,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         channels = self._channels(topics)
 
         @contextmanager
-        def subscription() -> Iterator[Iterator[Message | None]]:
+        def subscription() -> Generator[Iterator[Message | None]]:
             pubsub = self._subscriber.pubsub()
             try:
                 with self._subscribe_failures:
@@ -502,7 +504,7 @@ class RedisBroker(BrokerBackend, PresenceWindow):
         channels = self._channels(topics)
 
         @asynccontextmanager
-        async def subscription() -> AsyncIterator[AsyncIterator[Message | None]]:
+        async def subscription() -> AsyncGenerator[AsyncIterator[Message | None]]:
             pubsub = self._loop_client().subscriber.pubsub()
             try:
                 with self._subscribe_failures:

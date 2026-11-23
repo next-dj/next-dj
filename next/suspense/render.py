@@ -27,7 +27,7 @@ from next.suspense.trip import retry_token
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from django.template import Template
 
@@ -240,7 +240,7 @@ def _context(capture: Capture, collector: StaticCollector) -> Context:
 
 
 @contextmanager
-def _bound(context: Context, template: Template | None) -> Iterator[None]:
+def _bound(context: Context, template: Template | None) -> Generator[None]:
     """Bind `context` to the template the call site rendered in, when there was one."""
     if template is None:
         yield
@@ -331,7 +331,7 @@ def _run(
 
 
 @contextmanager
-def unframed() -> Iterator[None]:
+def unframed() -> Generator[None]:
     """Render the block outside every job, so a deferred call in it renders in place."""
     token = _frame.set(None)
     try:

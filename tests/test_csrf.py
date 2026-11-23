@@ -372,6 +372,13 @@ class TestEndpoint:
         assert response.status_code == 400
         assert not response.cookies
 
+    @pytest.mark.parametrize(("site", "status"), [("cross-site", 403), (None, 200)])
+    def test_the_gate_reads_meta_alone(self, site: str | None, status: int) -> None:
+        headers = FLAG if site is None else {**FLAG, "HTTP_SEC_FETCH_SITE": site}
+        request = RequestFactory().get("/_next/csrf/", **headers)
+        assert csrf_view(request).status_code == status
+        assert "headers" not in vars(request)
+
 
 class TestLazyRoundTrip:
     """A shared page sets no cookie, the runtime fetches a token and posts with it."""

@@ -142,12 +142,44 @@ describe("intent", () => {
     const link = document.getElementById("l")!;
     fire(document.body, "pointerout");
     fire(document.getElementById("x")!, "pointerover");
-    fire(link, "pointerover");
+    fire(link, "pointerover", { clientX: 1 });
     fire(link, "pointerout", { relatedTarget: document.getElementById("p") });
     link.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     link.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     await wait(40);
     expect(asked).toEqual([]);
+  });
+
+  it("arms no hover for a link content carries under a resting pointer", async () => {
+    document.body.innerHTML =
+      '<p id="p">p</p><a id="l" href="/b/"><span id="s">B</span></a>';
+    make();
+    const link = document.getElementById("l")!;
+    fire(document.getElementById("p")!, "pointerover", { clientX: 5, clientY: 5 });
+    fire(link, "pointerover", { clientX: 5, clientY: 5 });
+    await wait(40);
+    expect(asked).toEqual([]);
+    fire(document.getElementById("s")!, "pointerover", { clientX: 6, clientY: 5 });
+    await wait(40);
+    expect(hrefs()).toEqual(["/b/"]);
+  });
+
+  it("arms the hover on the spot of a press, and a focus on a resting pointer", async () => {
+    document.body.innerHTML =
+      '<p id="p">p</p><a id="a" href="/a/">A</a><a id="b" href="/b/">B</a>';
+    make();
+    const spot = { clientX: 5, clientY: 5 };
+    fire(document.getElementById("p")!, "pointerdown", spot);
+    fire(document.getElementById("a")!, "pointerover", spot);
+    await wait(40);
+    fire(document.getElementById("b")!, "pointerover", spot);
+    await wait(40);
+    expect(hrefs()).toEqual(["/a/"]);
+    document
+      .getElementById("b")!
+      .dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await wait(40);
+    expect(hrefs()).toEqual(["/a/", "/b/"]);
   });
 
   it("prefetches at once on a press or a touch, one request per URL", async () => {
@@ -159,6 +191,54 @@ describe("intent", () => {
     fire(document, "pointerdown");
     await wait(0);
     expect(hrefs()).toEqual(["/b/"]);
+  });
+
+  it("aborts the prefetch of a touched link once the browser takes the touch for a scroll", () => {
+    document.body.innerHTML = '<p id="p">p</p><a id="l" href="/b/">B</a>';
+    held();
+    make();
+    const link = document.getElementById("l")!;
+    document
+      .getElementById("p")!
+      .dispatchEvent(new Event("touchstart", { bubbles: true }));
+    link.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }),
+    );
+    link.dispatchEvent(new Event("touchstart", { bubbles: true }));
+    expect(hrefs()).toEqual(["/b/"]);
+    fire(document, "pointercancel");
+    expect(asked[0]!.signal.aborted).toBe(true);
+  });
+
+  it("drops a waiting prefetch of a touched link once the touch scrolls", async () => {
+    document.body.innerHTML = '<a id="l" href="/b/">B</a>';
+    const answers = [held(), held(), held()];
+    const prefetch = make();
+    const done = ["/a/", "/c/", "/d/"].map((path) => prefetch.prefetch(at(path)));
+    document
+      .getElementById("l")!
+      .dispatchEvent(new Event("touchstart", { bubbles: true }));
+    fire(document, "pointercancel");
+    fire(document, "pointercancel");
+    for (const answer of answers) answer();
+    await Promise.all(done);
+    await wait(0);
+    expect(hrefs()).toEqual(["/a/", "/c/", "/d/"]);
+  });
+
+  it("keeps the prefetch of a touched link a visit already took", async () => {
+    document.body.innerHTML = '<a id="l" href="/b/">B</a>';
+    const answer = held();
+    const prefetch = make();
+    document
+      .getElementById("l")!
+      .dispatchEvent(new Event("touchstart", { bubbles: true }));
+    const joined = prefetch.take(at("/b/"));
+    fire(document, "pointercancel");
+    expect(asked[0]!.signal.aborted).toBe(false);
+    const response = shell();
+    answer(response);
+    expect(await joined).toEqual({ raw: SHELL, response });
   });
 
   it.each([
@@ -556,6 +636,31 @@ describe("viewport", () => {
     const seen = observer();
     make(seen);
     expect(seen.watched).toEqual([byId("a")]);
+  });
+
+  it("watches a layer link under the viewport mode only where it opts in", () => {
+    settings = { prefetch: "viewport" };
+    document.body.innerHTML =
+      '<a id="a" href="/a/">a</a><a id="m" href="/m/" data-next-layer="sheet">m</a>' +
+      '<a id="v" href="/v/" data-next-layer="sheet" data-next-prefetch="viewport">v</a>' +
+      '<div data-next-prefetch="viewport">' +
+      '<a id="w" href="/w/" data-next-layer="sheet">w</a></div>';
+    const seen = observer();
+    make(seen);
+    expect(seen.watched).toEqual([byId("a"), byId("v"), byId("w")]);
+  });
+
+  it("keeps a link in view prefetching after a touch on it scrolls", () => {
+    settings = { prefetch: "viewport" };
+    document.body.innerHTML = '<a id="v" href="/v/">v</a>';
+    held();
+    const seen = observer();
+    make(seen);
+    seen.show(byId("v"));
+    byId("v").dispatchEvent(new Event("touchstart", { bubbles: true }));
+    fire(document, "pointercancel");
+    expect(hrefs()).toEqual(["/v/"]);
+    expect(asked[0]!.signal.aborted).toBe(false);
   });
 
   it("asks the router about no link a region keeps out of the viewport mode", () => {
@@ -1348,6 +1453,12 @@ describe("layer links", () => {
 
   let sent: Sent[];
   let answers: Reply[];
+  let moves = 0;
+
+  const stalled: Reply = (signal) =>
+    new Promise<Response>((_done, fail) =>
+      signal.addEventListener("abort", () => fail(signal.reason as Error)),
+    );
 
   beforeEach(() => {
     sent = [];
@@ -1383,7 +1494,8 @@ describe("layer links", () => {
   }
 
   function hover(el: Element): Promise<void> {
-    fire(el, "pointerover");
+    moves += 1;
+    fire(el, "pointerover", { clientX: moves });
     return wait(40);
   }
 
@@ -1561,23 +1673,117 @@ describe("layer links", () => {
   });
 
   it("stops a pressed flight a kept answer makes needless", async () => {
-    let answer: (response: Response) => void = () => undefined;
     const reply = zone();
-    answers = [
-      () => new Promise<Response>((done) => (answer = done)),
-      (signal) =>
-        new Promise<Response>((_done, fail) =>
-          signal.addEventListener("abort", () => fail(signal.reason as Error)),
-        ),
-    ];
+    answers = [reply, stalled];
+    make();
+    const el = opener();
+    await hover(el);
+    const headers = vi.spyOn(surface, "_headers");
+    headers.mockReturnValue(new Headers({ "X-Next-Version": "v2" }));
+    press(el);
+    expect(sent).toHaveLength(2);
+    headers.mockReturnValue(new Headers({ "X-Next-Version": "v1" }));
+    expect(await send()!(...request())).toBe(reply);
+    expect(sent[1]!.signal.aborted).toBe(true);
+  });
+
+  it("lets a press take over the hover prefetch of a layer in flight", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    answers = [() => new Promise<Response>((done) => (answer = done))];
     make();
     const el = opener();
     await hover(el);
     press(el);
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
     const landing = send()!(...request());
+    const reply = zone();
     answer(reply);
     expect(await landing).toBe(reply);
-    expect(sent[1]!.signal.aborted).toBe(true);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("sends nothing for a layer link content carries under a resting pointer", async () => {
+    document.body.innerHTML = `<p id="p">p</p>${LAYER}`;
+    make();
+    fire(document.getElementById("p")!, "pointerover", { clientX: 5, clientY: 5 });
+    fire(document.getElementById("s")!, "pointerover", { clientX: 5, clientY: 5 });
+    await wait(40);
+    expect(sent).toEqual([]);
+  });
+
+  it.each([
+    ["a drop", (prefetch: Prefetch): unknown => prefetch.drop()],
+    [
+      "a page restored from the cache",
+      (): unknown =>
+        window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true })),
+    ],
+    [
+      "a newer answer of another URL past the cache size",
+      (prefetch: Prefetch): unknown => {
+        settings = { ...settings, prefetch_entries: 1 };
+        return prefetch.prefetch(at("/a/"));
+      },
+    ],
+  ])("cancels the unread body of a kept layer answer on %s", async (_name, act) => {
+    const reply = zone();
+    const cancel = vi.spyOn(reply.body!, "cancel");
+    answers = [reply];
+    const prefetch = make();
+    await hover(opener());
+    await act(prefetch);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(send()).toBeUndefined();
+  });
+
+  it("cancels the unread body of a layer answer kept for another asset version", async () => {
+    const reply = zone();
+    const cancel = vi.spyOn(reply.body!, "cancel").mockRejectedValue(new Error("gone"));
+    answers = [reply];
+    make();
+    await hover(opener());
+    vi.spyOn(surface, "_headers").mockReturnValue(
+      new Headers({ "X-Next-Version": "v2" }),
+    );
+    expect(send()).toBeUndefined();
+    await wait(0);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the unread body of a layer answer it keeps not", async () => {
+    const reply = zone({ status: 500 });
+    const cancel = vi.spyOn(reply.body!, "cancel");
+    answers = [reply];
+    make();
+    await hover(opener());
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws away the prefetch a layer dropped its request while waiting for", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    answers = [() => new Promise<Response>((done) => (answer = done))];
+    make();
+    await hover(opener());
+    const controller = new AbortController();
+    const landing = send()!(at("/m/"), { signal: controller.signal });
+    controller.abort();
+    const reply = zone();
+    const cancel = vi.spyOn(reply.body!, "cancel");
+    answer(reply);
+    await expect(landing).rejects.toBe(controller.signal.reason);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("stops a pressed layer flight the layer dropped before it took it", async () => {
+    answers = [stalled];
+    make();
+    press(opener());
+    const controller = new AbortController();
+    const landing = send()!(at("/m/"), { signal: controller.signal });
+    controller.abort();
+    await expect(landing).rejects.toBe(controller.signal.reason);
+    expect(sent[0]!.signal.aborted).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 });

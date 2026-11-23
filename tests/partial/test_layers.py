@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.test import RequestFactory
+from django.test.utils import override_script_prefix
 
 from next.forms.origin import resolve_url_to_page
 from next.partial.layers import LAYER_ATTR, stash_layers
@@ -158,6 +159,29 @@ class TestStash:
             again = stash_layers(_LINK, StaticCollector(), request)
         assert first == again == _STASH + _LINK
         assert resolving.call_count == 1
+
+    def test_another_urlconf_resolves_the_path_again(self, root: Path) -> None:
+        _site(root)
+        request = RequestFactory().get("/home/")
+        other = RequestFactory().get("/home/")
+        other.urlconf = "tests.partial.urls_origin"
+        with routed(root):
+            assert stash_layers(_LINK, StaticCollector(), request) == _STASH + _LINK
+            assert stash_layers(_LINK, StaticCollector(), other) == _LINK
+
+    def test_another_script_prefix_resolves_the_path_again(self, root: Path) -> None:
+        _site(root)
+        request = RequestFactory().get("/home/")
+        with (
+            routed(root),
+            mock.patch(
+                "next.partial.layers.resolve_url_to_page", wraps=resolve_url_to_page
+            ) as resolving,
+        ):
+            stash_layers(_LINK, StaticCollector(), request)
+            with override_script_prefix("/app/"):
+                stash_layers(_LINK, StaticCollector(), request)
+        assert resolving.call_count == 2
 
 
 class TestResponses:

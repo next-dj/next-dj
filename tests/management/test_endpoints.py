@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -51,14 +52,14 @@ def card_ping():
 
 
 @pytest.fixture()
-def project(tmp_path) -> Path:
+def project(tmp_path) -> Generator[Path]:
     root = write_access_project(tmp_path / "pages")
     with routed(root, COMPONENT_BACKENDS=COMPONENTS):
         yield root
 
 
 @pytest.fixture()
-def views_project(tmp_path) -> Path:
+def views_project(tmp_path) -> Generator[Path]:
     root = write_access_project(tmp_path / "pages")
     with routed(root, urlconf=_VIEWS_URLCONF, COMPONENT_BACKENDS=COMPONENTS):
         yield root

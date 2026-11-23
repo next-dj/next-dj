@@ -8,8 +8,8 @@ import threading
 import time
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator, Mapping
-from concurrent.futures import Future, wait
+from collections.abc import Callable, Generator, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager, suppress
 from queue import Empty, SimpleQueue
 from typing import Any, override
@@ -26,7 +26,7 @@ from next.conf.defer import backend_count, backend_option, entry_options
 from next.defer import parse_duration
 from next.suspense.errors import BoundaryShedError, ExecutorStoppedError
 from next.suspense.markers import Capacity
-from next.tasks import QuitParentExecutor, StealableTask
+from next.tasks import QuitParentExecutor, StealableTask, contextless
 from next.utils import after_fork
 
 
@@ -70,8 +70,11 @@ class _LoopThread:
     """One event loop and the daemon thread that runs it until halted."""
 
     def __init__(self) -> None:
-        """Create the loop, with slow-callback detection in `DEBUG`, and start it."""
-        self.loop = asyncio.new_event_loop()
+        """Create the loop and start its thread in an empty context, which pins nothing.
+
+        The loop handles and a thread that inherits a context keep it for the process.
+        """
+        self.loop = contextless(asyncio.new_event_loop)
         if settings.DEBUG:
             self.loop.set_debug(enabled=True)
             self.loop.slow_callback_duration = 0.1
@@ -80,7 +83,7 @@ class _LoopThread:
         self.thread = threading.Thread(
             target=self._serve, name=_THREAD_NAME, daemon=True
         )
-        self.thread.start()
+        contextless(self.thread.start)
 
     @property
     def serving(self) -> bool:
@@ -193,7 +196,7 @@ def check_asgiref() -> None:
     msg = (
         f"The installed asgiref lacks {', '.join(missing)}, which routes the "
         "thread-sensitive calls of async page code to the request thread. Install "
-        "asgiref 3.9 or later."
+        "asgiref 3.12 or later."
     )
     raise ImproperlyConfigured(msg)
 
@@ -240,7 +243,6 @@ class RequestThreadExecutor(QuitParentExecutor):
 
         A zero `timeout` runs the hops already queued and returns without waiting.
         """
-        saved = dict(vars(SyncToAsync.threadlocal))
         until = None if timeout is None else time.monotonic() + timeout
         while not future.done():
             try:
@@ -252,7 +254,7 @@ class RequestThreadExecutor(QuitParentExecutor):
             if future.done():
                 self._queue.put(hop)
                 return
-            _run_keeping_markers(hop, saved)
+            _unmarked(hop.run)
 
     def _next(self, until: float | None) -> StealableTask[Any] | None:
         """Take the next hop, raising `Empty` once the instant `until` has passed."""
@@ -272,24 +274,45 @@ class RequestThreadExecutor(QuitParentExecutor):
                 hop.reject(RuntimeError(_UNSERVED))
 
 
-def _run_keeping_markers(hop: StealableTask[Any], saved: dict[str, Any]) -> None:
-    """Run `hop` and put back the loop markers asgiref leaves on this thread.
+def _unmarked[R](call: Callable[[], R]) -> R:
+    """Return what `call` returns, putting back the loop markers asgiref leaves here.
 
-    A stale marker would send a later `async_to_sync` here to the background loop.
+    A stale marker would send a later `async_to_sync` on this thread to that loop.
     """
+    markers = vars(SyncToAsync.threadlocal)
+    saved = dict(markers)
     try:
-        hop.run()
+        return call()
     finally:
-        markers = vars(SyncToAsync.threadlocal)
         markers.clear()
         markers.update(saved)
+
+
+class InlineExecutor(ThreadPoolExecutor):
+    """Run each call on the submitting thread at once, a hop that moves nowhere.
+
+    asgiref moves the `Local` values of a hop to the thread it runs on, here the loop.
+    """
+
+    def __init__(self) -> None:
+        """Start no thread, as every call runs on the caller's."""
+        super().__init__(max_workers=1)
+
+    @override
+    def submit[**P, R](
+        self, fn: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Future[R]:
+        """Run the call here, its outcome on the returned future."""
+        task = StealableTask(functools.partial(fn, *args, **kwargs))
+        _unmarked(task.run)
+        return task.future
 
 
 _serving = threading.local()
 
 
 @contextmanager
-def request_executor() -> Iterator[RequestThreadExecutor]:
+def request_executor() -> Generator[RequestThreadExecutor]:
     """Yield the executor this thread serves, opened and closed by the outermost caller.
 
     A hop that drives again shares it, and a close on another thread spares this local.
@@ -519,7 +542,7 @@ class LaneExecutor(BoundaryExecutor):
                 return
             worker = _Worker(self._serve, f"{_POOL_THREAD}-{next(_numbers)}")
             self._workers = (*workers, worker)
-            worker.thread.start()
+            contextless(worker.thread.start)
 
     def _serve(self, worker: _Worker) -> None:
         """Run queued tasks until a stop or a retirement, closing connections after."""
@@ -616,6 +639,31 @@ class LaneExecutor(BoundaryExecutor):
         self._staff()
 
 
+class LaneDispatch(ThreadPoolExecutor):
+    """Queue each asgiref call on a boundary executor as one stealable pool unit.
+
+    The unit queued last stays on `queued`, so the caller can steal or watch it.
+    """
+
+    def __init__(self, executor: BoundaryExecutor) -> None:
+        """Queue onto `executor`, starting no thread of its own."""
+        super().__init__(max_workers=1)
+        self.executor = executor
+        self.queued: StealableTask[Any] | None = None
+
+    @override
+    def submit[**P, R](
+        self, fn: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Future[R]:
+        """Queue the call, raising what the boundary executor refuses it with."""
+        task = StealableTask(
+            functools.partial(_unmarked, functools.partial(fn, *args, **kwargs))
+        )
+        self.executor.submit(task)
+        self.queued = task
+        return task.future
+
+
 _live: weakref.WeakSet[LaneExecutor] = weakref.WeakSet()
 
 
@@ -631,6 +679,8 @@ after_fork(_forget_pools)
 __all__ = [
     "BackgroundLoop",
     "BoundaryExecutor",
+    "InlineExecutor",
+    "LaneDispatch",
     "LaneExecutor",
     "RequestThreadExecutor",
     "background_loop",

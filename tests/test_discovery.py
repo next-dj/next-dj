@@ -51,7 +51,7 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 
 def _labelled_root(index: int, tree: Path) -> PageRoot:
@@ -119,7 +119,7 @@ class _TwoLabelRouter(RouterBackend):
 
 
 @contextmanager
-def _walk_spy() -> Iterator[MagicMock]:
+def _walk_spy() -> Generator[MagicMock]:
     """Count the tree walks a check seam runs, keeping the real walk."""
     with patch("next.discovery.walk_page_tree", wraps=walk_page_tree) as spy:
         yield spy
@@ -147,7 +147,7 @@ class _CountingRouterAccess(RouterAccessImpl):
 @contextmanager
 def _counting_router_access(
     failure: Exception | None = None,
-) -> Iterator[_CountingRouterAccess]:
+) -> Generator[_CountingRouterAccess]:
     """Bind a counting router port into the slot the discovery pass reads."""
     access = _CountingRouterAccess(failure)
     slot: PortSlot = PortSlot("router access port")
@@ -229,7 +229,7 @@ class TestRouterManagerCache:
 
 
 @contextmanager
-def _manager_over(routers: list[object]) -> Iterator[None]:
+def _manager_over(routers: list[object]) -> Generator[None]:
     """Point the discovery pass at exactly these routers."""
     manager = MagicMock()
     manager.backends = tuple(routers)
@@ -249,7 +249,7 @@ class _CountingPageScan(PageScanImpl):
 
 
 @contextmanager
-def _counting_page_scan() -> Iterator[_CountingPageScan]:
+def _counting_page_scan() -> Generator[_CountingPageScan]:
     """Bind a counting page-scan port into the slot the discovery pass reads."""
     scan = _CountingPageScan()
     slot: PortSlot = PortSlot("page scan port")

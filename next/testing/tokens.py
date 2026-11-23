@@ -10,7 +10,7 @@ from next.suspense.tokens import FrozenClock, StackedTokenBackend, clocked, toke
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from django.http import HttpRequest
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def freeze_token_clock(at: int) -> Iterator[FrozenClock]:
+def freeze_token_clock(at: int) -> Generator[FrozenClock]:
     """Hold the clock tokens read at the Unix second `at` inside the block."""
     with clocked(FrozenClock(at)) as clock:
         yield clock

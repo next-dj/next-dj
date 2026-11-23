@@ -612,7 +612,7 @@ class TestDeclaredTag:
         options: dict[Path, BoundaryOptions] = {}
         monkeypatch.setattr(
             "next.templatetags.components.defer_declarations",
-            SimpleNamespace(options=options.get),
+            SimpleNamespace(options=options.get, version=0),
         )
         return options
 

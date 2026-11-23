@@ -19,7 +19,7 @@ from tests.support import partial_meta, plain_get
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from django.http import HttpRequest, HttpResponseBase
@@ -63,7 +63,7 @@ def _zone_get() -> HttpRequest:
 
 
 @contextmanager
-def _view_for(page_file: Path) -> Iterator[Callable[..., HttpResponseBase]]:
+def _view_for(page_file: Path) -> Generator[Callable[..., HttpResponseBase]]:
     """Build the unified view of a page on the module-level singleton.
 
     Created the way the URL builder creates it, so only the per-request path is timed.

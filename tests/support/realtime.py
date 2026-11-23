@@ -1,6 +1,13 @@
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
@@ -207,7 +214,7 @@ class ScriptedBroker(MemoryBroker):
         subscriber = object()
 
         @asynccontextmanager
-        async def subscription() -> AsyncIterator[AsyncIterator[Message | None]]:
+        async def subscription() -> AsyncGenerator[AsyncIterator[Message | None]]:
             self._register(selected, subscriber)
             try:
                 yield self._fed()
@@ -423,7 +430,7 @@ class WireOpener:
 
 
 @asynccontextmanager
-async def _over_sse(events: SseReader, *, asynchronous: bool) -> AsyncIterator[Wire]:
+async def _over_sse(events: SseReader, *, asynchronous: bool) -> AsyncGenerator[Wire]:
     """Read an SSE response, a sync one inline since its frames are already queued."""
     if asynchronous:
 
@@ -452,7 +459,7 @@ async def _over_sse(events: SseReader, *, asynchronous: bool) -> AsyncIterator[W
 @asynccontextmanager
 async def _over_websocket(
     ticket: SocketTicket, last_seq: Mapping[str, object] | None
-) -> AsyncIterator[Wire]:
+) -> AsyncGenerator[Wire]:
     """Subscribe through the WebSocket app with the ticket and an optional cursor."""
     communicator = WebSocketCommunicator(
         WebSocketApp(),

@@ -106,7 +106,7 @@ class TestAsyncDriver:
         [pytest.param(ATOMIC_ASGI, id="request"), pytest.param(ASGI, id="pool")],
     )
     def test_sync_and_loop_jobs_read_a_local_of_the_view(
-        self, pools, hops, facts: ForegroundFacts
+        self, pools, facts: ForegroundFacts
     ) -> None:
         async def server() -> list[str]:
             async with ThreadSensitiveContext():
@@ -121,7 +121,7 @@ class TestAsyncDriver:
         assert asyncio.run(server()) == ["set", "set"]
 
     def test_a_request_lane_job_is_carried_by_the_hop_that_runs_it(
-        self, pools, hops, monkeypatch: pytest.MonkeyPatch
+        self, pools, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         carries: list[object] = []
 
@@ -142,6 +142,33 @@ class TestAsyncDriver:
             return [html_of(item) for item in items_of(batches).values()]
 
         assert asyncio.run(server()) == ["set"]
+        assert carries == []
+
+    def test_a_pool_job_is_carried_by_the_dispatch_that_queues_it(
+        self, pools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        carries: list[object] = []
+
+        def refuse(*args: object) -> None:
+            carries.append(args)
+            msg = "carried by a hop of its own"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(bridge, "_begin", refuse)
+        executor = pools()
+
+        async def server() -> list[str]:
+            async with ThreadSensitiveContext():
+                view_local.value = "set"
+                session, _ = await sync_to_async(view_session, thread_sensitive=True)(
+                    ASGI, local_body, local_body
+                )
+                coordinator = coordinator_over(executor)
+                batches = [batch async for batch in coordinator.arun(session)]
+            return [html_of(item) for item in items_of(batches).values()]
+
+        assert asyncio.run(server()) == ["set", "set"]
+        assert executor.submitted == 2
         assert carries == []
 
     def test_pool_units_run_in_parallel_off_the_loop(self, pools) -> None:

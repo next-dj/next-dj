@@ -20,7 +20,7 @@ Importing ``next.apps`` registers the framework system checks, because the packa
 #. ``connection_created`` receiver ``cover_new_connection`` connected
 #. ``apply_resolver_setting()``
 #. ``async_bridge_slot.set(drive)``
-#. ``context_propagator_slot.set(BridgePropagator(plain=contexts_carry_locals()))``
+#. ``context_propagator_slot.set(BridgePropagator())``
 #. ``thread_wait_slot.set(serve_until)``
 #. ``deferrals_slot.set(inline_sink)``
 #. ``action_owners_slot.set(ActionOwnersImpl())``
@@ -61,7 +61,7 @@ The ``realtime`` sweep imports the modules that ``REALTIME["HANDLERS"]`` selects
 The ``set`` steps bind every :doc:`next.ports <ports>` slot, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
-The ``context_propagator_slot`` binding probes once whether the installed asgiref carries a ``Local`` value through a context on another thread, and ``plain`` records the answer, see :doc:`ports`.
+The ``context_propagator_slot`` binding takes the default propagator that moves a ``Local`` value through the hops of asgiref, see :doc:`ports`.
 The ``seo_routes_version.move()`` step right after the ``seo_routes_slot`` binding moves the counter of ``next.urls.manager`` the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port just bound.
 
 Public API

@@ -1,7 +1,7 @@
 """The `TRANSACTIONS` rule that names the database aliases a next.dj view wraps."""
 
 import enum
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Final, Literal, TypeGuard, cast, override
@@ -262,7 +262,7 @@ def safe_aliases(override: AtomicOverride | None = None) -> tuple[str, ...] | No
 
 
 @contextmanager
-def _atomic_chain(aliases: tuple[str, ...]) -> Iterator[None]:
+def _atomic_chain(aliases: tuple[str, ...]) -> Generator[None]:
     with ExitStack() as stack:
         for alias in reversed(aliases):
             stack.enter_context(transaction.atomic(using=alias))
@@ -280,7 +280,10 @@ def request_atomic(scope: AtomicScope) -> AbstractContextManager[object]:
     if not scope.aliases or scope.atomic is False:
         return _NO_ATOMIC
     if scope.atomic is True:
-        return _atomic_chain(scope.aliases)
+        aliases = scope.aliases
+        if len(aliases) == 1:
+            return transaction.atomic(using=aliases[0])
+        return _atomic_chain(aliases)
     return LazyAtomic(scope.aliases)
 
 

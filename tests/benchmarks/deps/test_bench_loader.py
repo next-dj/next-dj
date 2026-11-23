@@ -17,13 +17,27 @@ if TYPE_CHECKING:
 
 
 _JOBS = pytest.mark.parametrize("jobs", [10, 100], ids=["ten", "hundred"])
-_CALLS: list[int] = []
 
 
-def _prices(keys: Sequence[int]) -> dict[int, int]:
-    """Batch function answering from memory, so the loader itself is what is timed."""
-    _CALLS.append(len(keys))
-    return {key: key * 10 for key in keys}
+class _Prices:
+    """Batch function answering from memory, so the loader itself is what is timed.
+
+    It records batch sizes until `settled`, so the timed rounds append nothing.
+    """
+
+    def __init__(self) -> None:
+        self._sizes: list[int] = []
+        self._recording = True
+
+    def batch(self, keys: Sequence[int]) -> dict[int, int]:
+        if self._recording:
+            self._sizes.append(len(keys))
+        return {key: key * 10 for key in keys}
+
+    def settled(self) -> list[int]:
+        """Stop recording and return the batch sizes seen so far."""
+        self._recording = False
+        return self._sizes
 
 
 async def _job(loader: Loader[int, int], scope: RequestScope, key: int) -> int:
@@ -61,14 +75,14 @@ class TestBenchLoaderBatching:
     def test_jobs_resolved_by_one_batch(
         self, loop: asyncio.AbstractEventLoop, jobs: int, benchmark
     ) -> None:
-        loader = Loader(_prices, window=3600)
+        prices = _Prices()
+        loader = Loader(prices.batch, window=3600)
 
         def serve() -> list[int]:
             return loop.run_until_complete(_response(loader, range(jobs)))
 
-        _CALLS.clear()
         assert serve() == [key * 10 for key in range(jobs)]
-        assert [jobs] == _CALLS
+        assert [jobs] == prices.settled()
         benchmark(serve)
 
     @_JOBS
@@ -77,14 +91,14 @@ class TestBenchLoaderBatching:
         self, loop: asyncio.AbstractEventLoop, jobs: int, benchmark
     ) -> None:
         """Five keys a batch, so the cap closes each one before its jobs all wait."""
-        loader = Loader(_prices, max_batch=5, window=3600)
+        prices = _Prices()
+        loader = Loader(prices.batch, max_batch=5, window=3600)
 
         def serve() -> list[int]:
             return loop.run_until_complete(_response(loader, range(jobs)))
 
-        _CALLS.clear()
         assert serve() == [key * 10 for key in range(jobs)]
-        assert [5] * (jobs // 5) == _CALLS
+        assert [5] * (jobs // 5) == prices.settled()
         benchmark(serve)
 
     @pytest.mark.benchmark(group="deps.loader")
@@ -92,14 +106,14 @@ class TestBenchLoaderBatching:
         self, loop: asyncio.AbstractEventLoop, benchmark
     ) -> None:
         """Ten jobs asking for the same row, answered by a batch of one key."""
-        loader = Loader(_prices, window=3600)
+        prices = _Prices()
+        loader = Loader(prices.batch, window=3600)
 
         def serve() -> list[int]:
             return loop.run_until_complete(_response(loader, [7] * 10))
 
-        _CALLS.clear()
         assert serve() == [70] * 10
-        assert _CALLS == [1]
+        assert prices.settled() == [1]
         benchmark(serve)
 
     @pytest.mark.benchmark(group="deps.loader")

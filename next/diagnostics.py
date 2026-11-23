@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Hashable, Iterator, Mapping
+from collections.abc import Callable, Generator, Hashable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
@@ -76,7 +76,7 @@ def mark_degraded(status: int | None = None) -> None:
 
 
 @contextmanager
-def status_kept() -> Iterator[None]:
+def status_kept() -> Generator[None]:
     """Keep a status a failure contained in the block sets off the response.
 
     The render still reads as degraded, so no shared cache stores it.

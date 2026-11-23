@@ -94,7 +94,7 @@ from next.static.ports import StaticAssetsImpl
 from next.static.serializers import forget_serializer
 from next.suspense import drive, serve_until
 from next.suspense.assembly import inline_sink
-from next.suspense.bridge import BridgePropagator, contexts_carry_locals
+from next.suspense.bridge import BridgePropagator
 from next.suspense.connections import forget_detection
 from next.suspense.manager import forget_suspense_backends
 from next.transactions import cover_new_connection
@@ -218,7 +218,7 @@ class NextFrameworkConfig(AppConfig):
         _connect(connection_created, (cover_new_connection,))
         apply_resolver_setting()
         async_bridge_slot.set(drive)
-        context_propagator_slot.set(BridgePropagator(plain=contexts_carry_locals()))
+        context_propagator_slot.set(BridgePropagator())
         thread_wait_slot.set(serve_until)
         deferrals_slot.set(inline_sink)
         action_owners_slot.set(ActionOwnersImpl())
