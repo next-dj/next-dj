@@ -244,7 +244,7 @@ from next import page
 from next.pages import context
 from tests.support import hosts as host
 
-page.defer(timeout="200ms")
+page.defer(timeout="30s")
 
 
 @context("a_item")
@@ -290,6 +290,8 @@ def state(request: HttpRequest) -> str:
         host.stall()
     return "fine"
 """
+
+_HASTY_ITEM = _ITEM.replace('timeout="30s"', 'timeout="200ms"')
 
 _ITEM_BODY = (
     "<article>{{ a_item }} {{ b_checked }} {{ c_detail }} {{ relaxed }} {{ state }} "
@@ -380,7 +382,7 @@ def zero(one: str) -> str:
 }
 
 
-def _shop(pages: Path) -> Path:
+def _shop(pages: Path, item: str = _ITEM) -> Path:
     shop = pages / "shop"
     shop.mkdir()
     (shop / "page.py").write_text(_SECTION)
@@ -388,7 +390,7 @@ def _shop(pages: Path) -> Path:
         "<section>{% component 'slow' n=1 %}{% template %}</section>"
     )
     (shop / "loading.djx").write_text("<p>loading {{ section }}</p>")
-    write_page(pages, "shop/item", _ITEM, body=_ITEM_BODY)
+    write_page(pages, "shop/item", item, body=_ITEM_BODY)
     return shop
 
 
@@ -458,11 +460,12 @@ class TestGatedPage:
         assert "<p>failed error S clean</p>" in html
         assert "<p>1 yes</p>" in html
 
-    def test_the_page_timeout_settles_through_the_error_file(self, shop: Path) -> None:
+    def test_the_page_timeout_settles_through_the_error_file(self, pages: Path) -> None:
+        shop = _shop(pages, _HASTY_ITEM)
         (shop / "error.djx").write_text("<p>failed {{ error.kind }}</p>")
 
         with parallel_boundaries():
-            response = _get(shop.parent, "/shop/item/?slow=1")
+            response = _get(pages, "/shop/item/?slow=1")
 
         assert 'data-next-error="timeout"><p>failed timeout</p>' in (
             response.content.decode()
@@ -591,7 +594,7 @@ class TestGatedVariants:
     def test_a_timeout_without_an_error_file_answers_500_privately(
         self, pages: Path
     ) -> None:
-        _shop(pages)
+        _shop(pages, _HASTY_ITEM)
 
         with parallel_boundaries():
             response = _get(pages, "/shop/item/?slow=1")

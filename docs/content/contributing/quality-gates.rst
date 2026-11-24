@@ -102,7 +102,7 @@ Benchmarks
 ----------
 
 Benchmarks live in ``tests/benchmarks/`` and stay out of the default test run through ``--ignore=tests/benchmarks``.
-``make bench`` runs them locally under pytest-benchmark with the ``perf`` marker, a warmup of 1000 iterations, a minimum of 10 rounds, garbage collection disabled, and result storage under ``.benchmarks/``.
+``make bench`` runs them locally under pytest-benchmark with the ``perf`` marker, garbage collection disabled, result storage under ``.benchmarks/``, and the warmup and round counts that ``BENCH_FLAGS`` in the ``Makefile`` sets.
 Local numbers compare only against other numbers from the same machine, so a pull request cites the CodSpeed report rather than a local delta.
 
 The CodSpeed workflow runs on every pull request and every push to ``main`` on a single Python version, and CodSpeed posts its report on the pull request.
@@ -198,8 +198,7 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
      - ``next/client/entries/intent.ts``
      - Named by the router, which loads it once the page is idle, for the prefetch of links and layers and the active-link pass.
 
-The job then enforces a gzip budget on every bundle, 18432 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks.
-The defer, reload, more, and reader chunks get 2048 bytes each, the history chunk gets 4096 bytes, and the router and intent chunks get 4608 bytes each.
+The job then enforces a gzip budget on every bundle, each set in the budget step of ``.github/workflows/ci.yml``.
 That budget check runs in continuous integration only.
 Growth of the core file past its budget calls for a lazily loaded chunk rather than a larger core file, and a chunk that is lazy already has no further code to move out, so its own budget is the one a change raises, with the reason in the change.
 The job finishes with the vitest run and its coverage thresholds.
