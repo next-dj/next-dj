@@ -2,6 +2,7 @@ import asyncio
 import contextvars
 import gc
 import logging
+import re
 import threading
 import time
 import weakref
@@ -206,8 +207,9 @@ class TestBackgroundLoop:
         assert future.result(WAIT) == "done"
         reports = [r for r in caplog.records if r.name == "next.bridge"]
         assert len(reports) == 1
-        assert reports[0].getMessage().startswith("Exception in callback fail()")
-        assert "handle: <Handle fail()" in reports[0].getMessage()
+        message = reports[0].getMessage()
+        assert message.startswith("Exception in callback fail()")
+        assert re.search(r"handle: <\w*Handle fail\(\)", message)
         assert reports[0].exc_info is not None
         assert reports[0].exc_info[0] is ValueError
         assert not [r for r in caplog.records if r.name == "asyncio"]

@@ -70,7 +70,7 @@ def test_the_overview_boots_and_babel_draws_the_react_sparkline(
     page.goto(base_url)
     wait_for_runtime(page)
 
-    expect(page.locator(SPARK_BARS)).to_have_count(4)
+    expect(page.locator(SPARK_BARS)).to_have_count(5)
     expect(page.locator(SPARKLINE)).to_contain_text("pages_rendered")
     cdn = [
         response
@@ -115,7 +115,7 @@ def test_a_culled_render_count_takes_down_the_latency_widget_alone(
         "data-next-error", "error"
     )
     expect(latency.locator("table")).to_have_count(0)
-    expect(page.locator(SPARK_BARS)).to_have_count(4)
+    expect(page.locator(SPARK_BARS)).to_have_count(5)
     expect(busiest_widget(page)).to_contain_text("obs/pages/page.py")
     expect(stat(page, "Pages rendered")).to_have_text(re.compile(r"^\d+$"))
 
