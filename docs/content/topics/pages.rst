@@ -543,7 +543,8 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
    The request such a call carries describes the page, not the endpoint that asked on its behalf.
    The framework restates the live request as a GET of the URL under authorization, so ``request.method`` is ``GET``, ``request.path`` is the page URL, and ``request.GET`` holds that URL's query string, while the user, the session, and everything else a middleware attached come through untouched.
    A ``render`` that short-circuits on a missing query parameter, on a non-GET method, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
-   The live request is never modified, so the dispatcher reads its own POST as usual once ``render`` has answered.
+   The method, the path, and the POST of the live request stay as they were, so the dispatcher reads its own POST as usual once ``render`` has answered.
+   What ``render`` marks for the response comes back to the live request, so a cookie it read or a CSRF token it used reaches the response the dispatcher sends.
    One caller cannot name a URL, ``Patches.morph(zone=..., page=...)`` addressing the foreign page by file path rather than by URL, and its authorization call asks as a GET with no query and the live path in place.
 
 JSON endpoint

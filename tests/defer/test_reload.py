@@ -1,5 +1,6 @@
 import gc
 import json
+import logging
 import weakref
 from pathlib import Path
 from types import SimpleNamespace
@@ -123,14 +124,15 @@ class TestResponses:
     )
     @override_settings(DEBUG=True)
     def test_a_token_refusal_names_its_reason_under_debug(
-        self, answer, reason, status
+        self, answer, reason, status, caplog: pytest.LogCaptureFixture
     ) -> None:
         error = BoundaryTokenError(reason)
-        response = answer(error)
+        with caplog.at_level(logging.WARNING, logger="next.defer"):
+            response = answer(error)
         assert response.status_code == status
         assert response[reload.REJECTED_HEADER] == str(reason)
-        assert response["Content-Type"].startswith("text/plain")
-        assert error.detail in response.content.decode()
+        assert response.content == b""
+        assert error.detail in caplog.text
         assert response["Cache-Control"] == "private, no-store"
 
     @override_settings(DEBUG=True)

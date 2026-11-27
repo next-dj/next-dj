@@ -20,7 +20,7 @@ from next.pages.loaders import (
     load_page_module,
     page_boundaries,
 )
-from next.pages.visits import visit_request
+from next.pages.visits import visiting
 
 from .containment import PageContainment
 
@@ -192,15 +192,15 @@ class PageBodies(PageContainment):
         render_func = getattr(module, "render", None) if module is not None else None
         if not callable(render_func):
             return None, False
-        visit = visit_request(request, visit_url)
-        if is_coroutine_callable(render_func):
-            context = ResolutionContext.for_page(visit, url_kwargs or {}, {})
-            acall = partial(current_resolver().acall, render_func, context)
-            resolution = _classified(bridged_scope({}, acall), file_path)
-        else:
-            resolution = self._call_render_function(
-                render_func, file_path, visit, url_kwargs or {}, {}
-            )
+        with visiting(request, visit_url) as visit:
+            if is_coroutine_callable(render_func):
+                context = ResolutionContext.for_page(visit, url_kwargs or {}, {})
+                acall = partial(current_resolver().acall, render_func, context)
+                resolution = _classified(bridged_scope({}, acall), file_path)
+            else:
+                resolution = self._call_render_function(
+                    render_func, file_path, visit, url_kwargs or {}, {}
+                )
         return resolution.http_response, resolution.dynamic
 
 

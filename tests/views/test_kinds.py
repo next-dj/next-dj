@@ -1,10 +1,14 @@
+import re
 from pathlib import Path
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
+from django.test import Client
 
 from next.defer.lifecycle import boundary_token
 from next.lifecycle import PageCall, lifecycle
 from next.pages.responses import PrefetchDepth, Purpose, depth_of, purpose_of
+from next.partial.headers import partial_intent
 from next.requests import RequestKind
 from next.testing import override_next_settings
 from next.views.kinds import note_purpose, route_request
@@ -133,6 +137,22 @@ class TestDecideRoute:
         request.META["HTTP_X_NEXT_BOUNDARY"] = "other"
         assert token_of(request) == "t"
 
+    def test_a_partial_request_without_a_token_keeps_nothing(self, rf) -> None:
+        request = rf.get("/", **_PARTIAL)
+        partial_intent(request)
+        held = set(vars(request))
+        assert token_of(request) is None
+        assert token_of(request) is None
+        assert set(vars(request)) == held
+
+    def test_an_empty_token_field_is_still_carried(self, rf) -> None:
+        with override_next_settings(
+            DEFER={"TOKENS": {"OPTIONS": {"CARRIER": "query"}}}
+        ):
+            request = rf.get("/?_nb=", **_PARTIAL)
+            assert decide_route(request) is RequestKind.BOUNDARY
+            assert token_of(request) == ""
+
 
 class TestNotePurpose:
     """A navigation is a prefetch at a depth or a plain navigation, the rest no depth."""
@@ -162,3 +182,23 @@ class TestNotePurpose:
         request = rf.get("/", headers=headers)
         note_purpose(request, RequestKind.PAGE)
         assert (purpose_of(request), depth_of(request)) == (purpose, None)
+
+
+def remember_redirect(get_response):
+    """Store a redirect target under `request.next`, as a login flow might."""
+
+    def middleware(request):
+        request.next = "/home"
+        return get_response(request)
+
+    return middleware
+
+
+class TestForeignRequestNext:
+    """A project middleware that claims `request.next` fails the page view by name."""
+
+    def test_the_page_view_names_the_attribute(self, settings) -> None:
+        settings.MIDDLEWARE = [*settings.MIDDLEWARE, f"{__name__}.remember_redirect"]
+        owned = re.escape("next.dj owns the request.next attribute")
+        with pytest.raises(ImproperlyConfigured, match=owned):
+            Client().get("/")

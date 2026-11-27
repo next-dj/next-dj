@@ -2,6 +2,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
+from django.contrib import messages
+from django.contrib.messages.storage.cookie import CookieStorage
 from django.test import RequestFactory
 
 from next.forms.uid import MAX_ORIGIN_LENGTH
@@ -528,6 +530,59 @@ class TestResponse:
         response = Patches(plain_request()).response(fallback=_OVERSIZE_GROUP_ORIGIN)
         assert response.status_code == 303
         assert response["Location"] == "/"
+
+
+class TestToastFlash:
+    """A toast on a request without the runtime survives the 303 as a message."""
+
+    def test_toasts_become_messages_in_order(self) -> None:
+        request = plain_request()
+        storage = CookieStorage(request)
+        request._messages = storage
+        Patches(request).toast("Saved", "success").toast("Heads up").response()
+        assert [(m.level, m.message) for m in storage] == [
+            (messages.SUCCESS, "Saved"),
+            (messages.INFO, "Heads up"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("variant", "level"),
+        [
+            ("info", messages.INFO),
+            ("success", messages.SUCCESS),
+            ("warning", messages.WARNING),
+            ("error", messages.ERROR),
+            ("sparkle", messages.INFO),
+        ],
+    )
+    def test_the_variant_maps_to_a_level(self, variant: str, level: int) -> None:
+        request = plain_request()
+        storage = CookieStorage(request)
+        request._messages = storage
+        Patches(request).toast("Done", variant).response()
+        assert [m.level for m in storage] == [level]
+
+    def test_without_the_messages_middleware_the_redirect_stands(self) -> None:
+        request = plain_request()
+        response = Patches(request).toast("Saved", "success").response()
+        assert response.status_code == 303
+        assert not hasattr(request, "_messages")
+
+    def test_a_partial_request_keeps_the_toast_in_the_envelope(self) -> None:
+        request = partial_request()
+        storage = CookieStorage(request)
+        request._messages = storage
+        response = Patches(request).toast("Saved", "success").response()
+        assert isinstance(response, PatchResponse)
+        assert b'"toast"' in response.content
+        assert list(storage) == []
+
+    def test_other_ops_add_no_message(self) -> None:
+        request = plain_request()
+        storage = CookieStorage(request)
+        request._messages = storage
+        Patches(request).layer_close().response()
+        assert list(storage) == []
 
 
 class TestVersionBuilder:

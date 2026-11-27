@@ -1,17 +1,25 @@
 """The request a page's own view would have seen for a GET visit of one of its URLs."""
 
 import copy
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Final
 
 from django.http import QueryDict
 from django.urls import get_script_prefix
 
+from next.csrf import NONCE_ATTR, TOKEN_META
 from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.pages.responses import RENDER_FLAGS
 from next.utils import decode_url_path
 
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
+
+
+HANDED_BACK: Final = (*RENDER_FLAGS, NONCE_ATTR)
+"""The attributes a visit's render sets that keep the live response private."""
 
 
 def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
@@ -37,6 +45,31 @@ def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
     return visit
 
 
+def hand_back(visit: "HttpRequest", request: "HttpRequest") -> None:
+    """Copy onto `request` what a render of `visit` marked for the response it sends.
+
+    A token the render read sets the CSRF cookie of that response through `META`.
+    """
+    held = vars(visit)
+    for name in HANDED_BACK:
+        if name in held:
+            setattr(request, name, held[name])
+    meta = visit.META
+    for key in TOKEN_META:
+        if key in meta:
+            request.META[key] = meta[key]
+
+
+@contextmanager
+def visiting(request: "HttpRequest", url: str | None) -> Iterator["HttpRequest"]:
+    """Yield the visit of `url` as `visit_request` builds it, handed back on exit."""
+    visit = visit_request(request, url)
+    try:
+        yield visit
+    finally:
+        hand_back(visit, request)
+
+
 def _path_info(path: str) -> str:
     """Return `path` without the script prefix a sub-path deployment mounts under."""
     prefix = get_script_prefix()
@@ -45,4 +78,4 @@ def _path_info(path: str) -> str:
     return path
 
 
-__all__ = ["visit_request"]
+__all__ = ["HANDED_BACK", "hand_back", "visit_request", "visiting"]

@@ -208,7 +208,8 @@ A backend whose ``dispatch`` drives the pipeline by hand rather than delegating 
 The ``render()`` under this call does not see the POST to ``/_next/form/<uid>/``.
 ``next.pages.visits.visit_request`` copies the live request and restates it as a GET of the URL being authorized, rewriting ``method``, ``path``, ``path_info``, ``GET``, ``POST``, ``META`` and ``resolver_match`` while carrying over everything a middleware attached, the user and the session included.
 It drops the dispatch dependency cache from the copy, and the guard resolves ``render()`` with a fresh cache, so no value the dispatch resolved reaches the answer.
-The copy leaves the live request untouched, so the dispatcher reads its own POST afterwards as it always did.
+The copy leaves the method, the path, and the POST of the live request alone, so the dispatcher reads its own POST afterwards.
+Once ``render()`` answers, ``next.pages.visits.hand_back`` copies back the render flags, the CSP nonce, and the CSRF cookie keys of ``META``, so the response the dispatcher sends stays private where the render read the visitor and sets the CSRF cookie where it read a token.
 A page that short-circuits on the request method, on a query parameter, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
 
 Each of the four authorization sites names the URL it asks about, the posted origin for a submission and for ``Patches.morph_zone``, the next step's URL for a wizard advance.

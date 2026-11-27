@@ -366,3 +366,37 @@ class TestNavigationIntent:
         assert {"X-Next-Navigate", "X-Next-Layouts", "X-Next-Prefetch"} <= set(
             VARY_HEADERS
         )
+
+
+def _sent(method: str, **headers: str) -> HttpRequest:
+    meta = {"HTTP_" + name.upper().replace("-", "_"): v for name, v in headers.items()}
+    return RequestFactory().generic(method, "/_next/form/x/", **meta)
+
+
+class TestLayerIntent:
+    """`layer` names the host page of a submission fired inside a layer."""
+
+    @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+    def test_an_unsafe_request_from_a_layer(self, method: str) -> None:
+        request = _sent(method, **{"X-Next-Request": "1", "X-Next-Origin": "/b/?p=2"})
+        assert partial_intent(request).layer == "/b/?p=2"
+
+    @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS", "TRACE"])
+    def test_a_safe_request_carrying_the_origin(self, method: str) -> None:
+        request = _sent(method, **{"X-Next-Request": "1", "X-Next-Origin": "/b/"})
+        intent = partial_intent(request)
+        assert (intent.origin, intent.layer) == ("/b/", None)
+
+    def test_a_submission_outside_a_layer(self) -> None:
+        assert partial_intent(_sent("POST", **{"X-Next-Request": "1"})).layer is None
+
+    def test_a_submission_without_the_runtime(self) -> None:
+        request = _sent("POST", **{"X-Next-Origin": "/b/"})
+        assert partial_intent(request).layer is None
+
+    @pytest.mark.parametrize(
+        "origin", ["//evil.example.com/", "https://evil.example.com/", "b/"]
+    )
+    def test_an_origin_off_the_site(self, origin: str) -> None:
+        request = _sent("POST", **{"X-Next-Request": "1", "X-Next-Origin": origin})
+        assert partial_intent(request).layer is None

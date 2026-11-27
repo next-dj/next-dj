@@ -78,7 +78,7 @@ The loader batches the keys that its callers ask for concurrently.
    @component.context("picks")
    async def picks(product: Product, by: str) -> list[Product]:
        keys = [key async for key in Product.objects.picks_for(product, by=by)]
-       return list(await asyncio.gather(*(product_cards.load(key) for key in keys)))
+       return await asyncio.gather(*(product_cards.load(key) for key in keys))
 
 ``picks_for`` is the project's own method of ``ProductQuerySet`` that answers the primary keys of the picks.
 The rails live on the product page at ``/product/<pk>/``, whose ``page.py`` loads the product and whose template calls the component once per rail.

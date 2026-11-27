@@ -49,6 +49,8 @@ A partial request carries ``X-Next-Request: 1``, a header no cross-site form can
 ``note_purpose`` sets ``request.next``, whose ``purpose`` names why the view renders, ``document``, ``navigate``, ``prefetch``, or ``speculation`` for a browser prefetch.
 Its ``depth`` is the ``PrefetchDepth`` of ``next.requests``, ``PrefetchDepth.SHELL`` for a router prefetch that asks for the shell, ``PrefetchDepth.FULL`` for one sent at the press of a link, and ``None`` for any other request.
 ``purpose_of(request)`` and ``depth_of(request)`` from ``next.pages.responses`` read them, and :ref:`topics-router-prefetch-visits` says why ``depth`` is no visit counter.
+The ``next`` attribute of a request is reserved for the framework.
+A middleware or view that stores anything else there, a redirect target for one, makes the page view raise ``ImproperlyConfigured`` naming the attribute and the type found, so keep such a value under another name.
 
 ``route_request`` answers a ``RequestKind`` of ``next.requests``, the one vocabulary of request kinds every layer shares, ``page``, ``zone``, ``boundary``, or ``navigate``, and form action dispatch adds ``action``.
 A request with ``X-Next-Request: 1`` takes the most specific kind a participant claims, ``boundary`` before ``zone`` before ``navigate``, and any other request is a ``page``.

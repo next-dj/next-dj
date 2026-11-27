@@ -163,7 +163,8 @@ Test a token
 ~~~~~~~~~~~~
 
 A token lives ``MAX_AGE`` seconds, and a reload with an expired one answers ``409`` with ``X-Next-Reload: token_expired``.
-Under ``DEBUG`` a refused reload names its ``TokenRejection`` in the ``X-Next-Token-Rejected`` header and explains it in the body, while with ``DEBUG`` off the answer names no reason.
+A refused reload answers with an empty body.
+Under ``DEBUG`` it names its ``TokenRejection`` in the ``X-Next-Token-Rejected`` header and logs the full explanation to ``next.defer``, while with ``DEBUG`` off the answer names no reason.
 ``freeze_token_clock(at)`` holds the clock the tokens read, ``issue_boundary_token`` mints a token through the configured backend, and ``expire_boundary_token`` mints one whose life ended a second ago.
 
 .. code-block:: python

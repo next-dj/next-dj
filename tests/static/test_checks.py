@@ -813,7 +813,7 @@ class TestRuntimeBundlesDeployedCheck:
             warnings = check_runtime_bundles_deployed()
         assert check_ids(warnings) == ["next.W090"] * 13
         assert warnings[0].msg.startswith("next/next.min.js: no static files finder")
-        assert "collectstatic" in warnings[0].hint
+        assert "npm run build:next" in warnings[0].hint
         asked = [call.args[0] for call in find.call_args_list]
         assert "next/next.dev.min.js" not in asked
 
@@ -832,6 +832,8 @@ class TestRuntimeBundlesDeployedCheck:
         assert warning.msg.startswith(
             "next/next.stream.min.js: the static files storage"
         )
+        assert "production STORAGES" in warning.hint
+        assert "npm" not in warning.hint
 
 
 class TestColocatedNameCollisionsCheck:

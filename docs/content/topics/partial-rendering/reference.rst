@@ -203,6 +203,7 @@ A handler that returns ``None`` under the runtime also drains the pending :doc:`
 The drained variants are ``info``, ``success``, ``warning``, and ``error``, with ``debug`` mapped to ``info``.
 An action that already sets ``Meta.success_message`` therefore shows a toast without a builder call.
 Draining marks the messages read, so a later full navigation does not replay them.
+The opposite direction runs on a request without the runtime, where ``response`` adds every queued ``toast`` to the messages framework before its 303, see :ref:`partial-toasts-without-runtime`.
 
 A verb beyond this set is registered on both sides.
 ``register_patch_op("confetti")`` on the server registers the name and earns the generic ``op()`` channel on the builder.

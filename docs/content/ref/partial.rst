@@ -116,6 +116,8 @@ Detecting a partial request
 
 ``is_partial_request`` returns ``True`` when the request carries the ``X-Next-Request`` switch, the test a ``render`` escape hatch reads before shaping a patch response.
 ``partial_intent`` parses and memoises the ``X-Next-*`` headers into a ``PartialIntent``.
+Its ``layer`` attribute holds the host page path of the layer a mutation was submitted from, read from ``X-Next-Origin`` on a method other than ``GET``, ``HEAD``, ``OPTIONS``, and ``TRACE``.
+It is ``None`` for every safe request, a navigation, a prefetch, and a layer body load included, for a submission outside a layer, and for a request without the runtime, see :ref:`partial-layer-submissions`.
 ``zone_requested`` answers whether the intent names a given zone, the in-body guard a context provider reads to do work only for a request that re-renders that zone.
 ``@context(..., zone="name")`` skips the provider call outright on a GET for another zone, while a full render still runs it.
 
@@ -142,6 +144,8 @@ Building patches
 
 ``Patches`` is the request-bound builder.
 Each method records one operation and returns ``self`` for chaining, and ``response`` finalises a ``PatchResponse`` or falls back to a redirect when the runtime is absent.
+The fallback 303 adds every queued ``toast`` to :doc:`django.contrib.messages <django:ref/contrib/messages>` first, with ``info``, ``success``, ``warning``, and ``error`` mapped to the message level of the same name and any other variant to ``INFO``.
+A request without the ``MessageMiddleware`` gets the 303 alone, see :ref:`partial-toasts-without-runtime`.
 ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects the builder assembles, surfaced for a custom backend that serializes the wire format itself.
 ``morph``, ``replace``, ``inner``, ``append``, and ``prepend`` take the markup as an ``html`` string.
 

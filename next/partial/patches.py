@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, overload
 from urllib.parse import urljoin, urlsplit
 
+from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.utils.functional import Promise
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -23,7 +24,7 @@ from next.pages.metadata import resolve_metadata
 from next.pages.metadata.fold import fold_metadata
 from next.pages.metadata.normalize import normalize_metadata
 from next.pages.metadata.scope import contain_site_refusal, site_segment
-from next.pages.visits import visit_request
+from next.pages.visits import visiting
 from next.seeding import JS_CONTEXT_KEY
 from next.static.assets import default_kinds
 from next.static.collector import default_placeholders
@@ -86,6 +87,12 @@ _SEE_OTHER = 303
 _NO_STORE = "private, no-store"
 _META_SOURCE = "Patches.meta"
 _STYLESHEET = "link"
+_TOAST_LEVELS: dict[str, int] = {
+    "info": messages.INFO,
+    "success": messages.SUCCESS,
+    "warning": messages.WARNING,
+    "error": messages.ERROR,
+}
 
 # Framework-owned bus events, refused to event() so an app cannot forge one.
 _RESERVED_EVENT_NAMES: frozenset[str] = frozenset({"ready", "context-updated"})
@@ -630,17 +637,17 @@ class Patches:
             }
             self._ops.append(Patch(op="meta", extras=extras))
             return self
-        visit = visit_request(self._require_request(), self._head_address(match))
-        origin_fold = self._fold_head(
-            page_path,
-            dict(match.url_kwargs),
-            segment,
-            visit,
-            self._metadata_context,
-            "in Patches.meta()",
-        )
-        if origin_fold is not None:
-            self._append_head(origin_fold, visit)
+        with visiting(self._require_request(), self._head_address(match)) as visit:
+            origin_fold = self._fold_head(
+                page_path,
+                dict(match.url_kwargs),
+                segment,
+                visit,
+                self._metadata_context,
+                "in Patches.meta()",
+            )
+            if origin_fold is not None:
+                self._append_head(origin_fold, visit)
         return self
 
     def _fold_head(
@@ -790,7 +797,8 @@ class Patches:
     def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":
         """Assemble the response for the current request.
 
-        Without the partial switch, 303s to the origin or `fallback`, to `/` if refused.
+        Without the partial switch, 303s to the origin or `fallback`, to `/` if refused,
+        and queues every toast as a `django.contrib.messages` flash for the next page.
         """
         request = self._request
         if request is not None and is_partial_request(request):
@@ -799,8 +807,19 @@ class Patches:
             return PatchResponse(
                 body, content_type=backend.content_type, version=self._version
             )
+        if request is not None:
+            self._flash_toasts(request)
         target = self._fallback_target(fallback)
         return redirect_or_fallback(target, "/", status=_SEE_OTHER)
+
+    def _flash_toasts(self, request: HttpRequest) -> None:
+        """Add each queued toast as a flash message when a middleware stores them."""
+        for patch in self._ops:
+            if patch.op == "toast":
+                level = _TOAST_LEVELS.get(patch.extras["variant"], messages.INFO)
+                messages.add_message(
+                    request, level, patch.extras["text"], fail_silently=True
+                )
 
     def _fallback_target(self, fallback: str | None) -> str:
         """Return the validated no-runtime redirect target.

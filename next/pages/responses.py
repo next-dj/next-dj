@@ -21,6 +21,7 @@ from django.utils.cache import patch_cache_control, patch_vary_headers
 
 from next.caches import FRAMEWORK, PageCache
 from next.conf.compression import OPT_OUT
+from next.conf.sentinels import UNSET
 from next.conf.settings import fail_loudly
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token, nonce_minted
 from next.deps.cache import render_dep_cache
@@ -529,12 +530,23 @@ class RequestNext:
         return self.info.depth
 
 
+def _foreign(held: object) -> ImproperlyConfigured:
+    """Return the error for a value under `request.next` that next.dj did not set."""
+    return ImproperlyConfigured(
+        f"request.{NEXT_ATTR} holds a {type(held).__name__}, but next.dj owns the "
+        f"request.{NEXT_ATTR} attribute. Store the value under another name."
+    )
+
+
 def next_of(request: object) -> RequestNext:
     """Return `request.next`, made on the first call as a document's."""
-    held = vars(request).get(NEXT_ATTR)
+    space = vars(request)
+    held = space.get(NEXT_ATTR)
     if isinstance(held, RequestNext):
         return held
-    made: RequestNext = vars(request).setdefault(NEXT_ATTR, RequestNext())
+    if NEXT_ATTR in space:
+        raise _foreign(held)
+    made: RequestNext = space.setdefault(NEXT_ATTR, RequestNext())
     return made
 
 
@@ -557,22 +569,33 @@ def mark_purpose(
     next_of(request).info = _INFOS[purpose, depth]
 
 
+def _info(request: object) -> RequestInfo:
+    """Return the info `request.next` holds, a document's when no view set one."""
+    held = getattr(request, NEXT_ATTR, UNSET)
+    if isinstance(held, RequestNext):
+        return held.info
+    if held is UNSET:
+        return _DOCUMENT
+    raise _foreign(held)
+
+
 def purpose_of(request: object) -> Purpose:
     """Return the purpose `request.next` names, a document when no view set one."""
-    held = getattr(request, NEXT_ATTR, None)
-    return held.info.purpose if isinstance(held, RequestNext) else Purpose.DOCUMENT
+    return _info(request).purpose
 
 
 def depth_of(request: object) -> PrefetchDepth | None:
     """Return the prefetch depth `request.next` names, `None` for any other request."""
-    held = getattr(request, NEXT_ATTR, None)
-    return held.info.depth if isinstance(held, RequestNext) else None
+    return _info(request).depth
 
 
 _SHARED_RENDER_ATTR: Final = "_next_shared_render"
 _PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
 _BOUND_RENDER_ATTR: Final = "_next_bound_render"
 _COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
+
+RENDER_FLAGS: Final = (_PERSONAL_RENDER_ATTR, _BOUND_RENDER_ATTR, _COOKIE_VARY_ATTR)
+"""The flags a render sets on its request that keep the response private or varied."""
 
 
 def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
@@ -912,6 +935,7 @@ __all__ = [
     "FORBIDDEN_HEADERS",
     "NEXT_ATTR",
     "NO_STORE",
+    "RENDER_FLAGS",
     "CacheControl",
     "CacheDict",
     "HeadersDict",

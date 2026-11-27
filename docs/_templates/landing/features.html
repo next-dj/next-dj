@@ -138,6 +138,71 @@
 
       <article class="ndj-feature">
         <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Boundaries and streaming</span>
+          <h3 class="ndj-feature-title">Paint the shell, stream the slow parts</h3>
+          <p>
+            A <code>loading.djx</code> beside a component or a page makes it a
+            boundary. The response goes out at once with the loading UI in its
+            place and streams the part in when it renders, and an
+            <code>error.djx</code> keeps a failure inside its own UI.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} <code>component.defer</code> picks <code>stream</code>, <code>load</code>, <code>visible</code>, or <code>manual</code></li>
+            <li>{{ check() }} A failed part rolls back its own writes and shows its error UI</li>
+            <li>{{ check() }} A <code>stream</code> part lands in the same response, under WSGI and ASGI alike</li>
+            <li>{{ check() }} <code>read_stream</code> and <code>boundary_errors</code> test the shell, chunks, and failures</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("catalog/pages/catalog/[category]/[slug]/_components/rail/") }}
+          <pre class="ndj-mock-body ndj-code">component.py
+loading.djx         <span class="c-com"># painted in the shell at once</span>
+error.djx           <span class="c-com"># replaces this rail alone on failure</span>
+
+<span class="c-kw">from</span> next <span class="c-kw">import</span> component
+
+component.<span class="c-fn">defer</span>(timeout=<span class="c-str">"1s"</span>)
+
+<span class="c-deco">@component.context</span>(<span class="c-str">"picks"</span>)
+<span class="c-kw">async def</span> <span class="c-fn">picks</span>(product: Product, by: <span class="c-kw">str</span>) -> <span class="c-kw">list</span>[Product]:
+    keys = [key <span class="c-kw">async for</span> key <span class="c-kw">in</span> Product.objects.<span class="c-fn">picks_for</span>(product, by=by)]
+    <span class="c-kw">return</span> <span class="c-kw">list</span>(<span class="c-kw">await</span> asyncio.<span class="c-fn">gather</span>(*(product_cards.<span class="c-fn">load</span>(key) <span class="c-kw">for</span> key <span class="c-kw">in</span> keys)))</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Client router</span>
+          <h3 class="ndj-feature-title">Navigate without reloads</h3>
+          <p>
+            A click on a link to a page fetches the next page and swaps in only
+            what changed. The layouts both pages share stay on screen with their
+            scroll, open menus, and typed values. The router is on by default,
+            and with JavaScript off every link is a plain link.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} <code>ROUTER["PREFETCH"]</code> and <code>data-next-prefetch</code> fetch on intent or in view</li>
+            <li>{{ check() }} <code>data-next-press</code> starts the request at the press of the link</li>
+            <li>{{ check() }} <code>data-next-current</code> marks active links, snapshots serve Back and Forward</li>
+            <li>{{ check() }} <code>data-next-layer</code> opens a page as a modal layer over the current one</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("blog/pages/posts/layout.djx") }}
+          <pre class="ndj-mock-body ndj-code">{% raw %}&lt;nav <span class="c-deco">data-next-press</span>=<span class="c-str">"all"</span>&gt;
+  &lt;a href=<span class="c-str">"/"</span>&gt;Posts&lt;/a&gt;
+  &lt;a href=<span class="c-str">"/about/"</span>&gt;About&lt;/a&gt;
+&lt;/nav&gt;
+&lt;a href=<span class="c-str">"/posts/<span class="c-tag">{{ article.slug }}</span>/print/"</span> <span class="c-deco">data-next-prefetch</span>=<span class="c-str">"off"</span>&gt;Print view&lt;/a&gt;
+
+&lt;div class=<span class="c-str">"prose"</span>&gt;
+  <span class="c-tag">{% template %}</span>  <span class="c-com">{# swaps on navigation, the nav stays #}</span>
+&lt;/div&gt;{% endraw %}</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
           <span class="ndj-feature-kicker">Realtime</span>
           <h3 class="ndj-feature-title">Every open tab stays current</h3>
           <p>

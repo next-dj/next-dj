@@ -196,13 +196,20 @@ class TestRefusals:
         assert response.status_code == 403
         assert response[RELOAD_HEADER] == REFUSED_SIGNAL
 
-    def test_debug_names_the_reason_of_a_refusal(self, pages: Path) -> None:
-        with _routed(pages), override_settings(DEBUG=True):
+    def test_debug_names_the_reason_of_a_refusal(
+        self, pages: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            _routed(pages),
+            override_settings(DEBUG=True),
+            caplog.at_level(logging.WARNING, logger="next.defer"),
+        ):
             client = Client()
             response = _reload(client, _wrapper(client), "1.1.forged")
         assert response.status_code == 403
         assert response[REJECTED_HEADER] == "malformed"
-        assert b"its text is not one the token backend mints" in response.content
+        assert response.content == b""
+        assert "its text is not one the token backend mints" in caplog.text
 
     def test_production_names_no_reason(self, pages: Path) -> None:
         with _routed(pages):

@@ -22,9 +22,9 @@ Content that has to reach a reader without JavaScript renders inline instead.
 Some operations exist only in an envelope
 -----------------------------------------
 
-``toast``, ``layer.open``, ``layer.close``, and ``event`` live only inside a partial envelope that the client runtime applies.
+``layer.open``, ``layer.close``, and ``event`` live only inside a partial envelope that the client runtime applies.
 A request without the runtime gets the full page or the redirect of the action, and none of these operations reaches it.
-A notice that has to reach every reader renders in the page itself, for example through Django's messages framework.
+A ``toast`` is the exception, since ``Patches.response`` adds every queued toast to :doc:`django.contrib.messages <django:ref/contrib/messages>` before the 303 of a request without the runtime, see :ref:`partial-toasts-without-runtime`.
 
 Realtime transports
 -------------------

@@ -225,10 +225,67 @@ Foreign-zone authorization
 --------------------------
 
 The layer runtime sends ``X-Next-Origin`` with the host page on the modal body fetch, the accepted re-GET, and a mutation fired inside the layer, and a handler reads it back through ``resolve_partial_origin`` to address a zone of that page with ``morph(page=, url_kwargs=)``.
+Of these requests only the mutation sets ``partial_intent(request).layer``, see `Answering a submission from a layer`_.
 ``morph(zone=)`` always renders against the posted form origin and ignores the header.
 The server authorizes the page behind every zone render whose own view did not run, the one the handler names and the one the posted form origin names alike, raising ``ForeignPageNotAuthorizedError`` when that page may not be rendered for the requester.
 This keeps a page-addressed render in a response from reaching a zone the requester has no claim on.
 A foreign page whose module fails to import, or that sits under a ``page.py`` that fails to import, raises ``PageModuleImportError`` from the same authorization step in production too, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
+
+.. _partial-layer-submissions:
+
+Answering a submission from a layer
+-----------------------------------
+
+A form that renders both inside a layer and on its own page needs two answers.
+Inside the layer the handler closes it and shows a toast, while on the standalone page there is no layer to close and ``layer_close`` does nothing.
+``partial_intent(request).layer`` tells the two apart.
+It holds the host page path of the layer the mutation was submitted from, query string included, and ``None`` otherwise.
+
+The runtime stamps ``X-Next-Origin`` on an unsafe request only for a form submitted inside a layer, so ``layer`` is set only for a method other than ``GET``, ``HEAD``, ``OPTIONS``, and ``TRACE`` that carries the header with a same-site path.
+A navigation, a prefetch, the layer body load, and the accepted re-GET send the header on a ``GET`` and leave ``layer`` at ``None``.
+A submission outside every layer and a request without the runtime leave it at ``None`` as well.
+An inline validation request inside a layer carries no origin, so its ``layer`` is ``None`` too.
+
+.. code-block:: python
+   :caption: records/page.py
+
+   from django.contrib import messages
+   from django.http import HttpRequest, HttpResponse
+   from django.shortcuts import redirect
+   from records.models import Record
+
+   from next import action
+   from next.partial import Patches, partial_intent
+
+   @action("archive_record")
+   def archive_record(request: HttpRequest) -> HttpResponse:
+       """Archive the record, closing the layer it was opened in."""
+       pk = int(request.POST["record_id"])
+       Record.objects.filter(pk=pk).update(archived=True)
+       if partial_intent(request).layer:
+           return (
+               Patches(request)
+               .layer_close(result={"id": pk})
+               .toast("Record archived", variant="success")
+               .response()
+           )
+       messages.success(request, "Record archived")
+       return redirect("/records/")
+
+The redirect serves both remaining cases.
+Under the runtime the action answers it with a ``visit``, and without the runtime the browser follows it.
+In both cases the next page shows the flash message once.
+
+.. _partial-toasts-without-runtime:
+
+Toasts without the runtime
+--------------------------
+
+A request without the runtime has no tray to show a toast in, so ``Patches.response`` adds every queued toast to :doc:`django.contrib.messages <django:ref/contrib/messages>` before its 303.
+The variants ``info``, ``success``, ``warning``, and ``error`` map to the message level of the same name, and any other variant maps to ``INFO``.
+The page the redirect lands on renders the messages like any other flash, once, because the answer is always a redirect.
+Without the ``MessageMiddleware`` on the request the toasts are dropped and the 303 stands.
+A partial request keeps its toasts in the envelope and adds no message, the mirror of the drain that turns pending messages into toasts under the runtime, see :doc:`reference`.
 
 Styling layers and toasts
 -------------------------

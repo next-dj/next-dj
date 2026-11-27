@@ -51,6 +51,8 @@ CSRF_DEFERRED_ATTR: Final = "_next_csrf_deferred"
 _PAYLOAD_ATTR: Final = "_next_csrf_payload"
 _COOKIE_KEY: Final = "CSRF_COOKIE"
 _RENEWED_KEY: Final = "CSRF_COOKIE_NEEDS_UPDATE"
+TOKEN_META: Final = (_COOKIE_KEY, _RENEWED_KEY)
+"""The `META` keys a token read sets, which tell the middleware to send the cookie."""
 _SAFE_METHODS: Final = ("GET", "HEAD")
 _SAME_ORIGIN: Final = "same-origin"
 
@@ -257,6 +259,7 @@ __all__ = [
     "CSRF_DEFERRED_ATTR",
     "CSRF_URL_NAME",
     "NONCE_ATTR",
+    "TOKEN_META",
     "CsrfDelivery",
     "csrf_delivery",
     "csrf_header_name",

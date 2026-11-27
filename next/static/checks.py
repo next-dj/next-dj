@@ -614,14 +614,27 @@ _DEPLOYED_BUNDLES: Final = (
 """The runtime bundles a production page may load, the dev chunk left out."""
 
 
-def _bundle_problem(path: str) -> str | None:
-    """Return why the storage cannot serve a runtime bundle, `None` when it can."""
+_UNBUILT_HINT: Final = (
+    "Build the client runtime (npm run build:next in a source checkout) and run "
+    "manage.py collectstatic."
+)
+_UNCOLLECTED_HINT: Final = (
+    "Run manage.py collectstatic under the production STORAGES, so the storage "
+    "holds the bundles the installed runtime ships."
+)
+
+
+def _bundle_problem(path: str) -> tuple[str, str] | None:
+    """Return why the storage cannot serve a runtime bundle and the fix, or `None`."""
     if not finders.find(path):
-        return "no static files finder answers it, so the client runtime is unbuilt"
+        return (
+            "no static files finder answers it, so the client runtime is unbuilt",
+            _UNBUILT_HINT,
+        )
     try:
         staticfiles_storage.url(path)
     except ValueError:
-        return "the static files storage holds no entry for it"
+        return "the static files storage holds no entry for it", _UNCOLLECTED_HINT
     return None
 
 
@@ -632,12 +645,9 @@ def check_runtime_bundles_deployed(
     """Warn about a runtime bundle the deployed storage cannot serve (`next.W090`)."""
     return [
         DjangoWarning(
-            f"{path}: {problem}. Pages render without the runtime, or without the "
+            f"{path}: {problem[0]}. Pages render without the runtime, or without the "
             "feature the chunk carries.",
-            hint=(
-                "Build the client runtime (npm run build:next in a source checkout) "
-                "and run manage.py collectstatic."
-            ),
+            hint=problem[1],
             obj=settings,
             id="next.W090",
         )

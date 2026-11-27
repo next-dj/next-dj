@@ -84,15 +84,16 @@ def _without_field(request: HttpRequest) -> None:
 def boundary_token(request: HttpRequest) -> str | None:
     """Return the token a partial request carries in the configured carrier.
 
-    It is read once, before the query loses its token field.
+    A carried token is kept before the query loses its field, an absent one is not.
     """
     held = getattr(request, _CARRIED_ATTR, None)
     if isinstance(held, str):
-        return held or None
+        return held
     token = None
     if partial_intent(request).partial:
         token = defer_manager.tokens().carrier.extract(request)
-    setattr(request, _CARRIED_ATTR, token or "")
+    if token is not None:
+        setattr(request, _CARRIED_ATTR, token)
     _without_field(request)
     return token
 

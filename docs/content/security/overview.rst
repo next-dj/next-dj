@@ -220,7 +220,7 @@ Mark each access check of such a page ``guard=True``, and ``next.W169`` reports 
 See :doc:`/content/topics/boundaries/loading` for the rule and :doc:`/content/topics/boundaries/errors` for what the visitor sees.
 
 A token that is expired, minted under another version of the claims, or whose claims the storage lost or could not answer for answers ``409`` with ``X-Next-Reload: token_expired``, which reloads the page once.
-Any other refusal of a token answers one ``403`` with no reason outside ``DEBUG``, and every refusal sends ``boundary_token_rejected``.
+Any other refusal of a token answers one empty ``403`` that names a reason only under ``DEBUG``, and every refusal sends ``boundary_token_rejected``.
 No setting limits the rate of reloads, so a project that must cap them does so at the proxy by the ``X-Next-Boundary`` header, see :doc:`/content/deployment/boundaries`.
 
 What a custom backend must preserve

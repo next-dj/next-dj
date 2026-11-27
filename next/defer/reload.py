@@ -3,6 +3,7 @@
 Every 403 it answers carries `X-Next-Reload: refused`, so the browser reloads the page.
 """
 
+import logging
 import weakref
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -83,6 +84,8 @@ from .tokens.settings import override_profile
 from .trip import mint
 
 
+logger = logging.getLogger("next.defer")
+
 type _Found = dict[tuple[str, str], ComponentInfo]
 
 _SAME_ORIGIN: Final = "same-origin"
@@ -129,18 +132,16 @@ def private[R: HttpResponseBase](response: R) -> R:
 
 
 def _answer(status: int, error: BoundaryTokenError | None) -> HttpResponse:
-    """Return an empty answer, the token refusal explained under `DEBUG` alone."""
-    if error is None or not settings.DEBUG:
-        return HttpResponse(b"", status=status)
-    response = HttpResponse(
-        f"{error}\n{error.detail}\n", status=status, content_type="text/plain"
-    )
-    response[REJECTED_HEADER] = str(error.reason)
+    """Return an empty answer, a refusal naming its reason under `DEBUG` alone."""
+    response = HttpResponse(b"", status=status)
+    if error is not None and settings.DEBUG:
+        response[REJECTED_HEADER] = str(error.reason)
+        logger.warning("%s %s", error, error.detail)
     return response
 
 
 def refused(error: BoundaryTokenError | None = None) -> HttpResponse:
-    """Return the one 403 every refused reload answers, explained under `DEBUG`."""
+    """Return the one 403 every refused reload answers, empty and `DEBUG` naming why."""
     return private(_answer(_FORBIDDEN, error))
 
 

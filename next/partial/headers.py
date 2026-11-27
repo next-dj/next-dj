@@ -9,7 +9,9 @@ from django.utils.cache import patch_vary_headers
 
 from next.caches import pure_cache
 from next.conf.sentinels import UNSET
+from next.forms.uid import validated_origin_path
 from next.requests import PrefetchDepth
+from next.transactions.policy import SAFE_METHODS
 from next.utils import request_header
 from next.wire import REQUEST_FLAG
 
@@ -87,7 +89,8 @@ class MergeMode(enum.StrEnum):
 class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
-    Without the `X-Next-Request` switch every derived field stays empty.
+    Without the `X-Next-Request` switch every derived field stays empty. `layer` holds
+    the host page path of the layer an unsafe request was submitted from.
     """
 
     partial: bool = False
@@ -101,6 +104,7 @@ class PartialIntent:
     navigate: bool = False
     layouts: str | None = None
     prefetch: PrefetchDepth | None = None
+    layer: str | None = None
 
 
 # Every field is immutable and empty, so non-partial requests share one instance.
@@ -132,6 +136,9 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
     zones = _split_names(request_header(request, ZONE))
     wire = request_header(request, PREFETCH) if navigate or zones else None
     depth = _WIRE_DEPTHS.get(wire) if wire is not None else None
+    origin = request_header(request, ORIGIN)
+    # Only a submission from a layer sends the origin on an unsafe method.
+    layer = None if request.method in SAFE_METHODS else validated_origin_path(origin)
     return PartialIntent(
         partial=True,
         zones=zones,
@@ -140,10 +147,11 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
         version=request_header(request, VERSION),
         protocol=request_header(request, PROTOCOL),
         request_id=request_header(request, REQUEST_ID),
-        origin=request_header(request, ORIGIN),
+        origin=origin,
         navigate=navigate,
         layouts=request_header(request, LAYOUTS) if navigate else None,
         prefetch=PrefetchDepth.FULL if zones and depth is not None else depth,
+        layer=layer,
     )
 
 

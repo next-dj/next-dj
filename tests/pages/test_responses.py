@@ -1757,3 +1757,42 @@ class TestRequestDepth:
 
     def test_an_object_that_is_no_request_has_no_depth(self) -> None:
         assert depth_of(object()) is None
+
+
+class TestForeignRequestNext:
+    """A value next.dj did not set under `request.next` is refused by name and type."""
+
+    _MESSAGE = re.escape(
+        "request.next holds a str, but next.dj owns the request.next attribute."
+    )
+
+    def test_making_the_namespace_refuses_it(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        request.next = "/home"
+        with pytest.raises(ImproperlyConfigured, match=self._MESSAGE):
+            next_of(request)
+        assert request.next == "/home"
+
+    def test_marking_the_purpose_refuses_it(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        request.next = "/home"
+        with pytest.raises(ImproperlyConfigured, match=self._MESSAGE):
+            mark_purpose(request, Purpose.NAVIGATE)
+
+    @pytest.mark.parametrize("reader", [purpose_of, depth_of])
+    def test_reading_it_refuses_it(self, reader, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        request.next = "/home"
+        with pytest.raises(ImproperlyConfigured, match=self._MESSAGE):
+            reader(request)
+
+    def test_a_none_is_foreign_too(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        request.next = None
+        with pytest.raises(ImproperlyConfigured, match="holds a NoneType"):
+            next_of(request)
+
+    def test_the_namespace_is_made_once(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        assert next_of(request) is next_of(request) is request.next
+        assert purpose_of(request) is Purpose.DOCUMENT

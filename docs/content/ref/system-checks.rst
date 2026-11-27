@@ -1470,6 +1470,7 @@ Warnings
    * - ``next.W090``
      - The client runtime ``next/next.min.js`` or a lazy chunk other than the dev one is unbuilt, so no static files finder answers it, or the static files storage, a hashing one such as ``ManifestStaticFilesStorage``, holds no entry for it.
        A page renders without the runtime, or leaves the chunk out of ``$chunks`` and logs a warning while its render stays shareable.
+       The hint follows the cause, a build of the runtime for a bundle no finder answers, and ``manage.py collectstatic`` under the production ``STORAGES`` for a bundle the storage lacks.
        The check carries ``deploy=True``.
      - ``next.static.checks``
    * - ``next.W091``
