@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,13 +13,19 @@ from next.forms.uid import ORIGIN_FIELD_NAME
 from next.pages.loaders import load_python_module_memo
 from next.pages.manager import page as page_singleton
 from next.partial import Patches, resolve_partial_origin
-from tests.benchmarks.factories import build_layout_page
+from next.views.pages import unified_view
+from tests.benchmarks.factories import (
+    REQUEST_ROUNDS,
+    REQUEST_WARMUP_ROUNDS,
+    build_layout_page,
+    each_round,
+)
 from tests.support import partial_meta, plain_get, routed, write_page
 from tests.support.access import PAGE_HEAD
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
     from django.http import HttpRequest, HttpResponseBase
@@ -52,7 +59,7 @@ def _cheap_provider() -> str:
 @contextmanager
 def _zone_view(
     directory: Path, *, providers: int = 0
-) -> Iterator[Callable[..., HttpResponseBase]]:
+) -> Generator[Callable[..., HttpResponseBase]]:
     """Build the unified view of a ten-zone page with `providers` zone-gated callables.
 
     Each provider is bound to its own zone, so a tick runs one and filters the rest.
@@ -62,7 +69,7 @@ def _zone_view(
     for i in range(providers):
         registry.register_context(page_file, f"k_{i}", _cheap_provider, zone=f"z_{i}")
     module = load_python_module_memo(page_file)
-    view = page_singleton._create_unified_view(page_file, module)
+    view = unified_view(page_singleton, page_file, module)
     try:
         yield view
     finally:
@@ -71,7 +78,7 @@ def _zone_view(
 
 
 @contextmanager
-def _manifest_storage(root: Path) -> Iterator[None]:
+def _manifest_storage(root: Path) -> Generator[None]:
     """Point staticfiles at a manifest storage carrying an unhashed manifest.
 
     An empty recorded hash sends `asset_version` down the hashing branch.
@@ -100,7 +107,12 @@ class TestBenchZoneGetThroughView:
         request = _zone_get("z_0")
         with _zone_view(tmp_path) as view:
             view(request)
-            benchmark(view, request)
+            benchmark.pedantic(
+                view,
+                setup=each_round(partial(_zone_get, "z_0")),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_batch_of_five(self, tmp_path: Path, benchmark) -> None:
@@ -108,7 +120,12 @@ class TestBenchZoneGetThroughView:
         request = _zone_get(_BATCH)
         with _zone_view(tmp_path) as view:
             view(request)
-            benchmark(view, request)
+            benchmark.pedantic(
+                view,
+                setup=each_round(partial(_zone_get, _BATCH)),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.parametrize("providers", [1, 10], ids=["one", "ten"])
     @pytest.mark.benchmark(group="partial.zone_get")
@@ -119,7 +136,12 @@ class TestBenchZoneGetThroughView:
         request = _zone_get("z_0")
         with _zone_view(tmp_path, providers=providers) as view:
             view(request)
-            benchmark(view, request)
+            benchmark.pedantic(
+                view,
+                setup=each_round(partial(_zone_get, "z_0")),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_manifest_storage(self, tmp_path: Path, benchmark) -> None:
@@ -127,7 +149,12 @@ class TestBenchZoneGetThroughView:
         request = _zone_get("z_0")
         with _manifest_storage(tmp_path), _zone_view(tmp_path) as view:
             view(request)
-            benchmark(view, request)
+            benchmark.pedantic(
+                view,
+                setup=each_round(partial(_zone_get, "z_0")),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
 
 _PEEK = '{% zone "peek" %}<h2>peek {{ pk }}</h2>{% endzone %}'
@@ -179,7 +206,12 @@ class TestBenchInterceptZoneGet:
             response = match.func(request, **match.kwargs)
             assert response.status_code == 200
             assert b"peek 3" in response.content
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(partial(_zone_get, "peek"), **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_intercepted(self, tmp_path: Path, benchmark) -> None:
@@ -192,7 +224,12 @@ class TestBenchInterceptZoneGet:
             assert response.status_code == 200
             assert b"peek 3" in response.content
             assert b'"op":"meta"' in response.content
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(partial(_zone_get, "peek"), **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_intercepted_with_meta(self, tmp_path: Path, benchmark) -> None:
@@ -205,7 +242,12 @@ class TestBenchInterceptZoneGet:
             assert response.status_code == 200
             assert b"peek 3" in response.content
             assert json.loads(response.content)["ops"][-1]["title"] == "Peek"
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(partial(_zone_get, "peek"), **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_intercepted_with_callable_meta(
@@ -220,7 +262,12 @@ class TestBenchInterceptZoneGet:
             assert response.status_code == 200
             assert b"peek 3" in response.content
             assert json.loads(response.content)["ops"][-1]["title"] == "Peek"
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(partial(_zone_get, "peek"), **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_get")
     def test_zone_get_among_several_rules(self, tmp_path: Path, benchmark) -> None:
@@ -232,7 +279,12 @@ class TestBenchInterceptZoneGet:
             response = match.func(request, **match.kwargs)
             assert response.status_code == 200
             assert f"{_RULE_ZONES[-1]} 3".encode() in response.content
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(partial(_zone_get, _RULE_ZONES[-1]), **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
 
 class TestBenchLayerPost:

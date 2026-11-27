@@ -3,14 +3,27 @@
 Import from here when one module subscribes to several subsystems at once.
 """
 
+from next.boundaries.signals import boundary_failed
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
     components_registered,
 )
+from next.compression.signals import compression_backend_loaded
 from next.conf.signals import settings_reloaded
 from next.consent.signals import consent_backend_loaded
+from next.defer.signals import (
+    boundary_job_finished,
+    boundary_job_started,
+    boundary_settled,
+    boundary_state_written,
+    boundary_token_rejected,
+    defer_backend_loaded,
+    page_stream_closed,
+    page_stream_declined,
+    page_stream_opened,
+)
 from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
@@ -46,6 +59,12 @@ from next.realtime.signals import (
     upstream_received,
     upstream_rejected,
 )
+from next.router.signals import (
+    navigation_rendered,
+    prefetch_shed,
+    router_backend_loaded,
+    router_cleared,
+)
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
@@ -57,9 +76,9 @@ from next.static.signals import (
 )
 from next.urls.signals import (
     intercept_registered,
+    page_backend_loaded,
     route_registered,
-    router_backend_loaded,
-    router_reloaded,
+    routes_reloaded,
 )
 
 
@@ -67,14 +86,22 @@ __all__ = [
     "action_dispatched",
     "action_registered",
     "asset_registered",
+    "boundary_failed",
+    "boundary_job_finished",
+    "boundary_job_started",
+    "boundary_settled",
+    "boundary_state_written",
+    "boundary_token_rejected",
     "broker_backend_loaded",
     "collector_finalized",
     "component_backend_loaded",
     "component_registered",
     "component_rendered",
     "components_registered",
+    "compression_backend_loaded",
     "consent_backend_loaded",
     "context_registered",
+    "defer_backend_loaded",
     "field_validated",
     "form_access_denied",
     "form_backend_loaded",
@@ -84,13 +111,20 @@ __all__ = [
     "intercept_registered",
     "message_published",
     "metadata_registered",
+    "navigation_rendered",
+    "page_backend_loaded",
     "page_rendered",
+    "page_stream_closed",
+    "page_stream_declined",
+    "page_stream_opened",
     "partial_backend_loaded",
     "patch_op_registered",
+    "prefetch_shed",
     "provider_registered",
     "route_registered",
     "router_backend_loaded",
-    "router_reloaded",
+    "router_cleared",
+    "routes_reloaded",
     "scripts_registered",
     "settings_reloaded",
     "sitemap_backend_loaded",

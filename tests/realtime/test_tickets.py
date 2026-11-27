@@ -22,8 +22,8 @@ from django.db import connection
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, override_settings
 from django.test.utils import CaptureQueriesContext
-from django.utils.crypto import salted_hmac
 
+from next.identity import bound_salt
 from next.realtime.errors import InvalidTicketError
 from next.realtime.tickets import (
     _SALT,
@@ -88,7 +88,7 @@ def test_ticket_other_session_or_tampered_token_is_rejected() -> None:
     other = SessionStore()
     other.create()
 
-    with pytest.raises(InvalidTicketError, match="another session"):
+    with pytest.raises(InvalidTicketError, match="of another session"):
         verify_ticket(grant.token, other.session_key)
     with pytest.raises(InvalidTicketError, match="invalid or expired"):
         verify_ticket(grant.token + "x", request.session.session_key)
@@ -96,6 +96,18 @@ def test_ticket_other_session_or_tampered_token_is_rejected() -> None:
         verify_ticket(None, request.session.session_key)
     with pytest.raises(InvalidTicketError, match="no ticket credential"):
         verify_ticket(grant.token, "")
+
+
+@pytest.mark.django_db()
+def test_ticket_of_a_credential_that_proves_no_subject_is_rejected() -> None:
+    signed = "next.realtime.SignedCookieBinding"
+    with override_next_settings(REALTIME={"TICKET_BINDING": signed}):
+        request = RequestFactory().get("/updates/")
+        grant = issue_ticket(
+            request, ("room",), transform_ref=None, authorizer_ref=_AUTHORIZER
+        )
+        with pytest.raises(InvalidTicketError, match="proves no session"):
+            verify_ticket(grant.token, "nobody")
 
 
 @pytest.mark.django_db()
@@ -112,39 +124,15 @@ def test_ticket_expired_or_malformed_claims_resigned_validly_are_rejected() -> N
         verify_ticket(grant.token, request.session.session_key)
 
     assert request.session.session_key is not None
-    session_digest = salted_hmac(
-        _SALT,
-        request.session.session_key,
-        secret=settings.SECRET_KEY,
-        algorithm="sha256",
-    ).hexdigest()
-    signer = signing.TimestampSigner(salt=_SALT)
+    signer = signing.TimestampSigner(
+        salt=bound_salt(_SALT, request.session.session_key)
+    )
     invalid = [
-        {
-            "session": session_digest,
-            "topics": [],
-            "transform": None,
-            "authorizer": _AUTHORIZER,
-        },
-        {
-            "session": session_digest,
-            "topics": ["next:internal"],
-            "transform": None,
-            "authorizer": _AUTHORIZER,
-        },
-        {
-            "session": session_digest,
-            "topics": ["room", "room"],
-            "transform": None,
-            "authorizer": _AUTHORIZER,
-        },
-        {
-            "session": session_digest,
-            "topics": ["room"],
-            "transform": 42,
-            "authorizer": _AUTHORIZER,
-        },
-        {"session": session_digest, "topics": ["room"], "transform": None},
+        {"topics": [], "transform": None, "authorizer": _AUTHORIZER},
+        {"topics": ["next:internal"], "transform": None, "authorizer": _AUTHORIZER},
+        {"topics": ["room", "room"], "transform": None, "authorizer": _AUTHORIZER},
+        {"topics": ["room"], "transform": 42, "authorizer": _AUTHORIZER},
+        {"topics": ["room"], "transform": None},
         [],
     ]
     for payload in invalid:
@@ -428,17 +416,14 @@ def test_ticket_for_a_signed_in_session_never_loads_its_user() -> None:
 
 
 def _signed_presence(session_key: str, **presence: object) -> str:
-    digest = salted_hmac(
-        _SALT, session_key, secret=settings.SECRET_KEY, algorithm="sha256"
-    ).hexdigest()
     payload = {
-        "session": digest,
         "topics": ["room"],
         "transform": None,
         "authorizer": _AUTHORIZER,
         **presence,
     }
-    return signing.TimestampSigner(salt=_SALT).sign_object(payload, compress=True)
+    signer = signing.TimestampSigner(salt=bound_salt(_SALT, session_key))
+    return signer.sign_object(payload, compress=True)
 
 
 @pytest.mark.django_db()
@@ -455,7 +440,8 @@ def test_ticket_carries_the_presence_mode_of_its_grant(presence: object) -> None
     )
     claims = verify_ticket(grant.token, request.session.session_key)
     assert claims.presence == presence
-    payload = signing.TimestampSigner(salt=_SALT).unsign_object(grant.token)
+    salt = bound_salt(_SALT, request.session.session_key)
+    payload = signing.TimestampSigner(salt=salt).unsign_object(grant.token)
     assert ("presence" in payload) is (presence is not False)
 
 

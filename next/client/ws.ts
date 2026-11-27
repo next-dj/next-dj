@@ -2,10 +2,16 @@
 
 import { defaultWebSocket } from "./adapters";
 import type { StreamMeta, Transport, TransportControl } from "./stream";
-import { REFUSAL_DISABLED, REFUSAL_STALE, asString, isRecord } from "./protocol";
+import {
+  HEADER_TRANSPORT,
+  PROTOCOL,
+  REFUSAL_DISABLED,
+  REFUSAL_STALE,
+  asString,
+  isRecord,
+} from "./protocol";
 import type { FetchAdapter } from "./wire";
 
-const NEGOTIATION_HEADER = "X-Next-Transport";
 const MAX_FAILURES = 3;
 const NEGOTIATION_MS = 5000;
 // Used until a hello names the server's upstream handler timeout.
@@ -265,7 +271,7 @@ export function createWebSocketTransport(
           const response = await fetcher(url, {
             method: "GET",
             credentials: "same-origin",
-            headers: { [NEGOTIATION_HEADER]: "ws", Accept: "application/json" },
+            headers: { [HEADER_TRANSPORT]: "ws", Accept: "application/json" },
             signal: controller.signal,
           });
           if (stopped()) return;
@@ -540,7 +546,7 @@ function websocketUrl(
 ): { url: string; ticket: string } | undefined {
   if (
     !isRecord(value) ||
-    value.protocol !== 2 ||
+    value.protocol !== PROTOCOL ||
     value.transport !== "ws" ||
     typeof value.ticket !== "string" ||
     value.ticket.length === 0 ||

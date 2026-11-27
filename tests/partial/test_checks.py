@@ -1,5 +1,7 @@
-from collections.abc import Generator, Iterator
+import inspect
+from collections.abc import Generator
 from contextlib import contextmanager
+from functools import partialmethod
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -9,6 +11,7 @@ from django.core.checks.registry import registry as check_registry
 from django.template import TemplateDoesNotExist
 from django.test import override_settings
 
+from next import forms as next_forms
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.pages.manager import page
@@ -20,18 +23,14 @@ from next.partial import (
 )
 from next.partial.registry import register_patch_op
 from next.testing import reset_check_caches
-from tests.pages.checks.metadata.trees import (
-    component_template,
-    framework,
-    layout_root,
-    templated_page,
-)
 from tests.support import (
     PARTIAL_ROUTER_MANAGER_TARGETS,
     RootPagesRouter,
-    patch_checks_router_manager_with_routers,
-    patched_router_manager,
+    patch_checks_route_manager_with_routers,
+    patched_route_manager,
 )
+from tests.support.checks import written
+from tests.support.components import write_component
 from tests.support.guards import (
     CHILDREN_BODY,
     GUARDED_CHILDREN,
@@ -44,22 +43,23 @@ from tests.support.guards import (
     fill_slot,
     wrap,
 )
+from tests.support.trees import framework, layout_root, templated_page
 
 
 @contextmanager
-def _scanned_root(root: Path) -> Iterator[None]:
+def _scanned_root(root: Path) -> Generator[None]:
     """Point the page-scanning checks at one on-disk page tree."""
     manager = MagicMock()
     manager.backends = (MagicMock(),)
     with (
-        patched_router_manager(*PARTIAL_ROUTER_MANAGER_TARGETS, manager=manager),
+        patched_route_manager(*PARTIAL_ROUTER_MANAGER_TARGETS, manager=manager),
         patch("next.discovery.get_pages_directories", return_value=[root]),
     ):
         yield
 
 
 @contextmanager
-def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
+def _context_pages(*pages: tuple[Path, str, str]) -> Generator[None]:
     """Point the page-scanning checks at real on-disk page directories.
 
     Real imports and compiles record zone tags and `@context` as a live process does.
@@ -74,7 +74,7 @@ def _context_pages(*pages: tuple[Path, str, str]) -> Iterator[None]:
 
 
 @contextmanager
-def _composed_pages(*pages: tuple[Path, str]) -> Iterator[None]:
+def _composed_pages(*pages: tuple[Path, str]) -> Generator[None]:
     """Point the checks at pages whose `page.py` registers nothing."""
     with _context_pages(*((page_file, "x = 1", body) for page_file, body in pages)):
         yield
@@ -305,8 +305,8 @@ class TestZoneInGuardedComponentPart:
 
     def _messages(self, pages: Path, component: str | None, body: str) -> list:
         if component is not None:
-            component_template(pages, "guarded", component)
-        component_template(pages, "plain", PLAIN_COMPONENT)
+            write_component(pages, "guarded", body=component, loading=None)
+        write_component(pages, "plain", body=PLAIN_COMPONENT, loading=None)
         templated_page(pages / "hello", "x = 1\n", body)
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             return checks.check_zone_not_in_has_perm()
@@ -401,37 +401,25 @@ class TestZoneInGuardedComponentPart:
         assert 'the component "guarded"' in messages[1].msg
 
 
-class TestLazyPlaceholderCheck:
-    """`next.E064` fires when a lazy zone has no `{% placeholder %}`."""
-
-    def test_lazy_without_placeholder(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "lazy_bad")
-        body = '{% zone "z" lazy="load" %}<p>{{ a }}</p>{% endzone %}'
-        with _composed_pages((page_file, body)):
-            ids = [m.id for m in checks.check_lazy_zone_has_placeholder()]
-        assert ids == [checks.E_LAZY_WITHOUT_PLACEHOLDER]
-
-    def test_lazy_with_placeholder_is_silent(self, tmp_path: Path) -> None:
-        page_file = _page_dir(tmp_path, "lazy_ok")
-        body = (
-            '{% zone "z" lazy="load" %}<p>{{ a }}</p>'
-            "{% placeholder %}<div>loading</div>{% endzone %}"
-        )
-        with _composed_pages((page_file, body)):
-            assert checks.check_lazy_zone_has_placeholder() == []
-
-
 class TestComposedTemplateCompileCheck:
     """`next.E072` fires when a composed page template fails to compile."""
 
-    def test_placeholder_without_lazy_errors(self, tmp_path: Path) -> None:
+    def test_a_placeholder_branch_is_an_unknown_tag(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "broken")
         body = '{% zone "z" %}<p>{{ a }}</p>{% placeholder %}<p>p</p>{% endzone %}'
         with _composed_pages((page_file, body)):
             messages = checks.check_composed_templates_compile()
         assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
         assert str(page_file) in messages[0].msg
-        assert "placeholder requires lazy=" in messages[0].msg
+        assert "Invalid block tag on line 1: 'placeholder'" in messages[0].msg
+
+    def test_a_lazy_option_is_unknown(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "lazy")
+        body = '{% zone "z" lazy="load" %}<p>{{ a }}</p>{% endzone %}'
+        with _composed_pages((page_file, body)):
+            messages = checks.check_composed_templates_compile()
+        assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+        assert "got an unknown option 'lazy'" in messages[0].msg
 
     def test_healthy_page_is_silent(self, tmp_path: Path) -> None:
         page_file = _page_dir(tmp_path, "compiles")
@@ -678,9 +666,31 @@ class TestZoneInComponentCheck:
             ids = [m.id for m in checks.check_no_zone_in_component()]
         assert ids == [checks.E_ZONE_IN_COMPONENT]
 
-    def test_component_without_zone_is_silent(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("source", "tag"),
+        [
+            ('{%zone "inner" %}x{% endzone %}', "zone"),
+            ('{% more zone="rows" next=n %}x{% endmore %}', "more"),
+            ('{%more zone="rows" previous=n%}x{% endmore %}', "more"),
+        ],
+    )
+    def test_every_tag_declaring_a_zone_is_reported(
+        self, tmp_path: Path, source: str, tag: str
+    ) -> None:
         component = tmp_path / "card.djx"
-        component.write_text("<div>plain card</div>")
+        component.write_text(f"<div>{source}</div>")
+        with _component(component):
+            [message] = checks.check_no_zone_in_component()
+        assert message.id == checks.E_ZONE_IN_COMPONENT
+        assert f"declares a zone through a {{% {tag} %}} tag" in message.msg
+
+    @pytest.mark.parametrize(
+        "source",
+        ["<div>plain card</div>", "{% zones %}", "{% more_items %}", "{% moreover %}"],
+    )
+    def test_component_without_zone_is_silent(self, tmp_path: Path, source) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text(source)
         with _component(component):
             assert checks.check_no_zone_in_component() == []
 
@@ -704,6 +714,139 @@ class TestZoneInComponentCheck:
         settings_ns.COMPONENT_BACKENDS = []
         with patch("next.partial.checks.zones.next_framework_settings", settings_ns):
             assert checks.check_no_zone_in_component() == []
+
+    def test_the_message_points_at_component_boundaries(self, tmp_path: Path) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text('{% zone "inner" %}x{% endzone %}')
+        with _component(component):
+            [message] = checks.check_no_zone_in_component()
+        assert "around the component call" in message.msg
+        assert "a loading.djx beside it" in message.msg
+
+
+def _skeleton_errors(root: Path) -> list[tuple[str, str]]:
+    """Return the `next.E232` errors under `root` as (id, file name) pairs."""
+    return [
+        (m.id, Path(str(m.obj)).name)
+        for m in checks.check_zone_skeletons_have_zones()
+        if str(m.obj).startswith(str(root))
+    ]
+
+
+class TestZoneSkeletonCheck:
+    """`next.E232` fires on a `loading.<zone>.djx` whose template lacks the zone."""
+
+    def test_a_skeleton_of_a_declared_zone_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        (page_file.parent / "loading.rows.djx").write_text("S")
+        with _composed_pages((page_file, '{% zone "rows" %}x{% endzone %}')):
+            assert _skeleton_errors(tmp_path) == []
+
+    def test_a_skeleton_of_an_undeclared_zone_errors(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        (page_file.parent / "loading.rowz.djx").write_text("S")
+        (page_file.parent / "loading.djx").write_text("L")
+        with _composed_pages((page_file, '{% zone "rows" %}x{% endzone %}')):
+            messages = [
+                m
+                for m in checks.check_zone_skeletons_have_zones()
+                if str(m.obj).startswith(str(tmp_path))
+            ]
+        assert [m.id for m in messages] == [checks.E_SKELETON_ZONE_UNKNOWN]
+        assert 'zone "rowz"' in messages[0].msg
+        assert messages[0].obj == str(page_file.parent / "loading.rowz.djx")
+
+    def test_a_layout_holds_the_skeletons_of_its_own_zones(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "layout.djx").write_text(
+            '{% zone "nav" %}n{% endzone %}{% template %}'
+        )
+        (tmp_path / "loading.nav.djx").write_text("S")
+        (tmp_path / "loading.rows.djx").write_text("S")
+        page_file = _page_dir(tmp_path, "rows")
+        with _composed_pages((page_file, '{% zone "rows" %}x{% endzone %}')):
+            errors = _skeleton_errors(tmp_path)
+        assert errors == [(checks.E_SKELETON_ZONE_UNKNOWN, "loading.rows.djx")]
+
+    def test_an_inline_page_template_declares_its_zones(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "inline")
+        (page_file.parent / "loading.pz.djx").write_text("S")
+        source = "template = '{% zone \"pz\" %}x{% endzone %}'\n"
+        with _context_pages((page_file, source, "")):
+            assert _skeleton_errors(tmp_path) == []
+
+    def test_a_component_skeleton_needs_the_zone_in_its_template(
+        self, tmp_path: Path
+    ) -> None:
+        component = tmp_path / "card.djx"
+        component.write_text("<div>card</div>")
+        (tmp_path / "loading.card.djx").write_text("S")
+        with _component(component):
+            errors = _skeleton_errors(tmp_path)
+        assert errors == [(checks.E_SKELETON_ZONE_UNKNOWN, "loading.card.djx")]
+
+
+def _unshown(root: Path) -> list[str]:
+    """Return the file names `next.W187` reports under `root`."""
+    return [
+        Path(str(m.obj)).name
+        for m in checks.check_zone_skeletons_shown()
+        if str(m.obj).startswith(str(root))
+    ]
+
+
+class TestZoneSkeletonShownCheck:
+    """`next.W187` fires on a `loading.<zone>.djx` no layer and no reload shows."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param('{% zone "rows" %}x{% endzone %}', id="layer"),
+            pytest.param(
+                '{% if flag %}{% zone "rows" reload="loading" %}x{% endzone %}'
+                "{% endif %}",
+                id="reload",
+            ),
+        ],
+    )
+    def test_a_skeleton_a_layer_or_a_reload_shows_is_silent(
+        self, tmp_path: Path, body: str
+    ) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        (page_file.parent / "loading.rows.djx").write_text("S")
+        with _composed_pages((page_file, body)):
+            assert _unshown(tmp_path) == []
+
+    def test_a_skeleton_of_a_zone_no_request_renders_alone_warns(
+        self, tmp_path: Path
+    ) -> None:
+        page_file = _page_dir(tmp_path, "rows")
+        skeleton = page_file.parent / "loading.rows.djx"
+        skeleton.write_text("S")
+        (page_file.parent / "loading.ghost.djx").write_text("S")
+        body = '{% if flag %}{% zone "rows" %}x{% endzone %}{% endif %}'
+        with _composed_pages((page_file, body)):
+            messages = [
+                m
+                for m in checks.check_zone_skeletons_shown()
+                if str(m.obj).startswith(str(tmp_path))
+            ]
+        assert [m.id for m in messages] == [checks.W_SKELETON_UNSHOWN]
+        assert messages[0].obj == str(skeleton)
+        assert 'reload="loading"' in messages[0].msg
+
+    def test_a_layout_skeleton_shown_by_one_page_is_silent(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "layout.djx").write_text(
+            '{% zone "nav" %}n{% endzone %}{% template %}'
+        )
+        (tmp_path / "loading.nav.djx").write_text("S")
+        first = _page_dir(tmp_path, "one")
+        second = _page_dir(tmp_path, "two")
+        with _composed_pages((first, "<p>1</p>"), (second, "<p>2</p>")):
+            assert _unshown(tmp_path) == []
 
 
 @pytest.mark.usefixtures("restored_op_registry")
@@ -733,8 +876,130 @@ class _PartialUnawareBackend(RegistryFormActionBackend):
         return object()
 
 
+class _ShaperConsultingBackend(RegistryFormActionBackend):
+    """Backend whose override asks its shaper before its own envelope."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Return what the shaper builds, an empty page when it declines."""
+        shaped = self.shaper.shape(self, request, outcome)
+        return shaped if shaped is not None else object()
+
+
+class _DeferringBackend(RegistryFormActionBackend):
+    """Backend whose override restamps the response the base hook built."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Stamp an audit header on the base response."""
+        response = super().shape_response(request, outcome)
+        response["X-Audited"] = "1"
+        return response
+
+
+class _DeferringToUnawareBackend(_PartialUnawareBackend):
+    """Backend deferring to a parent whose override never consults the shaper."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the parent override."""
+        return super().shape_response(request, outcome)
+
+
+class _NamedBaseBackend(RegistryFormActionBackend):
+    """Backend whose override calls the base hook by its class name."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the base hook named outright."""
+        return FormActionBackend.shape_response(self, request, outcome)
+
+
+class _ModuleNamedBaseBackend(RegistryFormActionBackend):
+    """Backend whose override names the base hook through its module."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the base hook named through `next.forms`."""
+        return next_forms.FormActionBackend.shape_response(self, request, outcome)
+
+
+class _NamedUnawareBaseBackend(_PartialUnawareBackend):
+    """Backend naming a parent whose override never consults the shaper."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the parent override named outright."""
+        return _PartialUnawareBackend.shape_response(self, request, outcome)
+
+
+class _AuditMixin:
+    """Mixin restamping whatever the next class in the MRO answers."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Stamp an audit header on the response the next class builds."""
+        response = super().shape_response(request, outcome)
+        response["X-Audited"] = "1"
+        return response
+
+
+class _NamedMixinBackend(_AuditMixin, RegistryFormActionBackend):
+    """Backend naming a mixin that defers to the base hook."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Hand the outcome to the mixin named outright."""
+        return _AuditMixin.shape_response(self, request, outcome)
+
+
+def _shaping_hook(backend, request: object, outcome: object) -> object:
+    """Return what the shaper builds, an empty page when it declines."""
+    shaped = backend.shaper.shape(backend, request, outcome)
+    return shaped if shaped is not None else object()
+
+
+class _RenamedReceiverBackend(RegistryFormActionBackend):
+    """Backend whose hook calls its instance by another name than self."""
+
+    shape_response = _shaping_hook
+
+
+class _GetattrShaperBackend(RegistryFormActionBackend):
+    """Backend whose override reads the shaper through `getattr`."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Return what the shaper builds, an empty page when it has none."""
+        shaper = getattr(self, "shaper", None)
+        shaped = shaper.shape(self, request, outcome) if shaper is not None else None
+        return shaped if shaped is not None else object()
+
+
+def _full_page(backend: object, request: object, outcome: object) -> object:
+    """Serve a full page regardless of the partial switch."""
+    del backend, request, outcome
+    return object()
+
+
+class _SourcelessHookBackend(RegistryFormActionBackend):
+    """Backend whose hook is no function, so its source is not inspected."""
+
+    shape_response = partialmethod(_full_page)
+
+
+class _StaticHookBackend(RegistryFormActionBackend):
+    """Backend whose hook is a static method, which sees no instance shaper."""
+
+    @staticmethod
+    def shape_response(request: object, outcome: object) -> object:
+        """Serve a full page regardless of the partial switch."""
+        del request, outcome
+        return object()
+
+
+class _ClassHookBackend(RegistryFormActionBackend):
+    """Backend whose hook is a class method, which reads no instance shaper."""
+
+    @classmethod
+    def shape_response(cls, request: object, outcome: object) -> object:
+        """Ask the class attribute, which is no shaper instance."""
+        return cls.shaper.shape(cls, request, outcome)
+
+
 @contextmanager
-def _form_backends(*backends, partial_active: bool) -> Iterator[None]:
+def _form_backends(*backends, partial_active: bool) -> Generator[None]:
     """Point the W068 check at given form backends and partial-config state."""
     manager = MagicMock()
     manager.backends = tuple(backends)
@@ -773,8 +1038,52 @@ class TestFormBackendPartialAwareCheck:
         with _form_backends(_PartialUnawareBackend(), partial_active=False):
             assert checks.check_form_backend_partial_aware() == []
 
+    def test_the_warning_names_the_shaper(self) -> None:
+        with _form_backends(_PartialUnawareBackend(), partial_active=True):
+            (message,) = checks.check_form_backend_partial_aware()
+        assert "without consulting self.shaper" in message.msg
+
+    @pytest.mark.parametrize(
+        "backend_class",
+        [
+            pytest.param(_ShaperConsultingBackend, id="reads-the-shaper"),
+            pytest.param(_DeferringBackend, id="defers-to-the-base"),
+            pytest.param(_NamedBaseBackend, id="names-the-base"),
+            pytest.param(_ModuleNamedBaseBackend, id="names-the-base-by-module"),
+            pytest.param(_NamedMixinBackend, id="names-a-deferring-mixin"),
+            pytest.param(_RenamedReceiverBackend, id="renamed-receiver"),
+            pytest.param(_GetattrShaperBackend, id="getattr-shaper"),
+            pytest.param(_SourcelessHookBackend, id="no-function-source"),
+        ],
+    )
+    def test_an_override_reaching_the_shaper_is_silent(self, backend_class) -> None:
+        with _form_backends(backend_class(), partial_active=True):
+            assert checks.check_form_backend_partial_aware() == []
+
+    @pytest.mark.parametrize(
+        "backend_class",
+        [
+            pytest.param(_DeferringToUnawareBackend, id="defers-to-an-unaware-parent"),
+            pytest.param(_NamedUnawareBaseBackend, id="names-an-unaware-parent"),
+            pytest.param(_StaticHookBackend, id="static-method"),
+            pytest.param(_ClassHookBackend, id="class-method"),
+        ],
+    )
+    def test_an_override_missing_the_shaper_warns(self, backend_class) -> None:
+        with _form_backends(backend_class(), partial_active=True):
+            ids = [m.id for m in checks.check_form_backend_partial_aware()]
+        assert ids == [checks.W_FORM_BACKEND_NOT_AWARE]
+
+    def test_an_override_without_readable_source_is_silent(self) -> None:
+        """A check that cannot read the override does not guess at a warning."""
+        with (
+            _form_backends(_PartialUnawareBackend(), partial_active=True),
+            patch.object(inspect, "getsource", side_effect=OSError("no source")),
+        ):
+            assert checks.check_form_backend_partial_aware() == []
+
     def test_inherited_shape_response_is_silent(self) -> None:
-        # a subclass without its own shape_response inherits the partial-aware base
+        """A subclass without its own shape_response inherits the base hook."""
         assert _PartialUnawareBackend.shape_response is not (
             FormActionBackend.shape_response
         )
@@ -790,7 +1099,7 @@ _PLAIN_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 @contextmanager
 def _partial_options(
     options: object, *, storage: str = _PLAIN_STORAGE
-) -> Iterator[None]:
+) -> Generator[None]:
     """Run the W069 check against one backend entry and a staticfiles storage."""
     config = {"BACKEND": "next.partial.JsonPartialProtocolBackend", "OPTIONS": options}
     with override_settings(
@@ -931,7 +1240,7 @@ class TestAssetVersionCheckIsDeployOnly:
 
 
 @contextmanager
-def _partial_backends(configs: object) -> Iterator[None]:
+def _partial_backends(configs: object) -> Generator[None]:
     """Point the W071 check at the given PARTIAL_BACKENDS config value."""
     settings_ns = MagicMock()
     settings_ns.PARTIAL_BACKENDS = configs
@@ -992,6 +1301,37 @@ class TestBackendNamesPathCheck:
             assert checks.check_partial_backend_names_a_path() == []
 
 
+class TestBackendPathCheck:
+    """`next.E219` fires when a PARTIAL_BACKENDS entry names no usable backend."""
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("no.such.Backend", "does not import"),
+            ("pathlib.Path", "is no subclass of PartialProtocolBackend"),
+            ("next.partial.PartialProtocolBackend", "is an abstract class"),
+        ],
+        ids=["unimportable", "wrong_kind", "abstract"],
+    )
+    def test_an_unusable_path_errors(self, dotted: str, problem: str) -> None:
+        with _partial_backends([{"BACKEND": dotted}]):
+            (message,) = checks.check_partial_backend_paths()
+        assert message.id == "next.E219"
+        assert f"NEXT_FRAMEWORK['PARTIAL_BACKENDS'][0]['BACKEND'] {dotted!r}" in (
+            message.msg
+        )
+        assert problem in message.msg
+
+    @pytest.mark.parametrize(
+        "config",
+        [[_BACKEND_DICT], [{}], ["x"], [{"BACKEND": 5}], "not-a-list"],
+        ids=["usable", "no_path", "non_dict", "non_string", "non_sequence"],
+    )
+    def test_a_usable_or_unnamed_backend_is_silent(self, config: object) -> None:
+        with _partial_backends(config):
+            assert checks.check_partial_backend_paths() == []
+
+
 class TestBackendsShapeCheck:
     """`next.E067` fires when PARTIAL_BACKENDS holds anything but a list."""
 
@@ -1001,7 +1341,7 @@ class TestBackendsShapeCheck:
         ids=["tuple", "bare_dict", "dotted_path"],
     )
     def test_non_list_value_errors(self, configs: object) -> None:
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": configs}):
+        with written({"PARTIAL_BACKENDS": configs}):
             ids = [m.id for m in checks.check_partial_backends_is_a_list()]
         assert ids == [checks.E_BACKENDS_NOT_A_LIST]
 
@@ -1026,7 +1366,7 @@ class TestThirdPartyBackendPagesReachTheZoneChecks:
             '{% zone "side" %}<p>{{ b }}</p>{% endzone %}'
         )
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             ids = [m.id for m in checks.check_duplicate_zone_names()]
@@ -1041,8 +1381,7 @@ class TestChecksSilentOnValidComposite:
         page_file = _page_dir(tmp_path, "valid")
         body = (
             '{% zone "header" %}<h1>{{ title }}</h1>{% endzone %}'
-            '{% zone "feed" lazy="revealed" %}<ul>{{ items }}</ul>'
-            "{% placeholder %}<p>loading</p>{% endzone %}"
+            '{% zone "feed" reload="loading" %}<ul>{{ items }}</ul>{% endzone %}'
         )
         with _composed_pages((page_file, body)):
             assert checks.check_duplicate_zone_names() == []
@@ -1050,8 +1389,9 @@ class TestChecksSilentOnValidComposite:
             assert checks.check_zone_not_in_loop() == []
             assert checks.check_zone_not_in_if() == []
             assert checks.check_zone_not_in_has_perm() == []
-            assert checks.check_lazy_zone_has_placeholder() == []
             assert checks.check_with_directly_over_zone() == []
+            assert checks.check_zone_skeletons_have_zones() == []
+            assert checks.check_zone_skeletons_shown() == []
 
 
 _ZONE_CHECKS = (
@@ -1060,13 +1400,14 @@ _ZONE_CHECKS = (
     checks.check_zone_not_in_loop,
     checks.check_zone_not_in_if,
     checks.check_repeated_form_has_key,
-    checks.check_lazy_zone_has_placeholder,
     checks.check_with_directly_over_zone,
+    checks.check_zone_skeletons_have_zones,
+    checks.check_zone_skeletons_shown,
 )
 
 
 @contextmanager
-def _counting_collect() -> Iterator[MagicMock]:
+def _counting_collect() -> Generator[MagicMock]:
     """Count the composed templates the walk builds, one per page and walk."""
     with patch.object(
         page, "composed_template_for", wraps=page.composed_template_for

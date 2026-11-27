@@ -82,7 +82,7 @@ Markers and value objects
 ``Replace(value)`` takes a value whole instead of merging it, and ``RESET`` is ``Replace()``, which drops the inherited value.
 ``Metadata`` is the merged metadata of one page without a request, and ``ResolvedMetadata`` the resolve of one response, every URL absolute, the site rule applied to the robots, and ``og`` carrying its fallbacks.
 ``Alternates.languages`` holds the hreflang alternates as a tuple of ``(code, url)`` pairs, so the value hashes like the rest of the dataclass.
-``Crumb`` is one breadcrumb of the merge, with the route it names, and ``Breadcrumb`` one resolved crumb with its ``label``, ``url``, and ``current`` flag.
+``Crumb`` is one breadcrumb of the merge, with the route it names, and ``Breadcrumb`` one resolved crumb with its ``label``, ``url``, and its ``current`` and ``ancestor`` flags.
 ``ResolvedMetadata.crumbs`` holds the crumbs of the page unreversed, and its ``breadcrumbs`` property reverses their URLs on the first read, so a render that never shows a crumb never reverses one.
 
 .. automodule:: next.pages.metadata.markers

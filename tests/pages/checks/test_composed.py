@@ -71,9 +71,9 @@ class TestIterComposedPages:
             paths = [path for path, _template in iter_composed_pages()]
         assert len(paths) == len(set(paths)) == 2
 
-    def test_no_router_manager_yields_nothing(self) -> None:
+    def test_no_route_manager_yields_nothing(self) -> None:
         error = Error("boom", id="next.E007")
-        with patch.object(composed, "get_router_manager", return_value=(None, [error])):
+        with patch.object(composed, "get_route_manager", return_value=(None, [error])):
             assert list(iter_composed_pages()) == []
 
 

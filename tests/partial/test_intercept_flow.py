@@ -80,13 +80,6 @@ def _shared_missing(request, exception=None) -> HttpResponse:
     return response
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 def _site(
     root: Path,
     *,
@@ -862,16 +855,16 @@ class TestMorphZone:
 
         assert envelope.ops[0].html.startswith('<div data-next-zone="peek"><h2>peek 3')
 
-    def test_two_morphs_authorize_and_build_the_intercept_once(
+    def test_two_morphs_build_one_zone_context_each_on_the_intercept(
         self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _site(root)
         served = root / "(.)photo" / "[int:pk]" / "page.py"
-        built: list[Path] = []
+        built: list[tuple[Path, frozenset[str] | None]] = []
         original = patches_module.page_manager.build_render_context
 
         def spy(page_path, *args, **kwargs):
-            built.append(page_path)
+            built.append((page_path, kwargs.get("requested_zones")))
             return original(page_path, *args, **kwargs)
 
         monkeypatch.setattr(patches_module.page_manager, "build_render_context", spy)
@@ -885,7 +878,10 @@ class TestMorphZone:
             )
 
         assert [op.op for op in envelope.ops] == ["morph", "morph"]
-        assert built.count(served) == 1
+        assert [zones for path, zones in built if path == served] == [
+            frozenset({"peek", "peek-entries"}),
+            frozenset({"peek-entries"}),
+        ]
 
     def test_the_render_of_an_intercept_never_runs(self, root: Path) -> None:
         _site(

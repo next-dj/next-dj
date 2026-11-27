@@ -36,6 +36,7 @@ class TestWireKeyConstants:
         assert keys.URL == "url"
         assert keys.INLINE == "inline"
         assert keys.LOAD == "load"
+        assert (keys.SCOPE, keys.PAGE_SCOPE) == ("scope", "page")
 
     def test_form_meta_key_values(self) -> None:
         assert keys.UID == "uid"

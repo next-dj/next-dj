@@ -30,6 +30,7 @@ export interface Poller {
   start(el: Element): void;
   // Pause on a hidden tab, resume the due ticks on a visible one.
   wake(): void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -100,7 +101,7 @@ export function createPoller(deps: PollDeps): Poller {
     group.handle = clock.setTimeout(() => pollTick(interval), interval);
   }
 
-  return {
+  const exposed = {
     start(el) {
       if (membership.has(el)) return;
       if (el.getAttribute(ATTR_ZONE) === null) return;
@@ -131,12 +132,17 @@ export function createPoller(deps: PollDeps): Poller {
         }
       }
     },
-    _reset() {
+  } satisfies Omit<Poller, "_reset"> as Poller;
+
+  TEST: {
+    exposed._reset = () => {
       for (const group of groups.values()) {
         if (group.handle !== null) clock.clearTimeout(group.handle);
       }
       groups.clear();
       membership = new WeakSet();
-    },
-  };
+    };
+  }
+
+  return exposed;
 }

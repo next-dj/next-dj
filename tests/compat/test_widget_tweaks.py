@@ -64,11 +64,13 @@ class TestWidgetTweaks:
         assert 'data-test="tweaked"' in html
         assert "errorlist" in html
 
+    @pytest.mark.django_db()
     def test_invalid_post_sets_invalid_header(self, tweaks_env, next_client):
         resp = next_client.post_action("compat_tweaks_form", {"name": ""}, origin="/")
         assert resp.status_code == 200
         assert resp["X-Next-Form"] == "invalid"
 
+    @pytest.mark.django_db()
     def test_valid_post_redirects(self, tweaks_env, next_client):
         resp = next_client.post_action(
             "compat_tweaks_form", {"name": "Ada"}, origin="/"

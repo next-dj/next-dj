@@ -1,8 +1,10 @@
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from django.core.checks import run_checks
+from django.core.checks.registry import registry as check_registry
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
@@ -10,14 +12,23 @@ from next.checks import NEXT
 from next.components import ComponentInfo, FileComponentsBackend
 from next.components.checks import (
     check_component_context_registration_files,
+    check_component_context_reserved_parameters,
+    check_component_error_self_reference,
     check_component_module_imports,
     check_component_py_no_pages_context,
+    check_component_template_loader,
+    check_component_token_age,
     check_cross_root_component_name_conflicts,
+    check_deferred_component_loading,
     check_duplicate_component_names,
+    check_keyless_context_props,
     check_next_components_configuration,
 )
 from next.components.context import ComponentContextRegistry, component
+from next.components.defer import defer_declarations
+from next.components.info import BoundaryFiles
 from next.components.manager import components_manager
+from next.components.modules import ModuleLoader
 from next.components.sources import get_components_manager
 from tests.support import (
     file_router_config_entry,
@@ -52,7 +63,7 @@ class TestChecks:
         with (
             patch("next.components.checks.next_framework_settings", mock_ns),
             patch(
-                "next.checks.common.import_class_cached",
+                "next.conf.imports.import_class_cached",
                 side_effect=ImproperlyConfigured("MYAPP_KEY is unset"),
             ),
         ):
@@ -551,17 +562,38 @@ class TestPageTreeComponentsReachTheChecks:
         assert registered == ["card"]
         assert live_claimed == set()
 
-    def test_a_failing_router_manager_registers_nothing(self, tmp_path: Path) -> None:
+    def test_a_failing_route_manager_registers_nothing(self, tmp_path: Path) -> None:
         pages = self._write_project(tmp_path)
 
         with (
             override_settings(NEXT_FRAMEWORK=self._framework_settings(pages)),
-            patch(
-                "next.components.sources.get_router_manager", return_value=(None, [])
-            ),
+            patch("next.components.sources.get_route_manager", return_value=(None, [])),
         ):
             manager = get_components_manager()
             assert manager._walk_registered_folders == set()
+
+
+class TestTemplateLoaderPath:
+    """`next.E219` fires when `COMPONENT_TEMPLATE_LOADER` names no usable loader."""
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("no.such.Loader", "does not import"),
+            ("pathlib.Path", "is no subclass of ComponentTemplateLoader"),
+        ],
+        ids=["unimportable", "wrong_kind"],
+    )
+    def test_an_unusable_path_errors(self, dotted: str, problem: str) -> None:
+        mock_ns = _stand_in(COMPONENT_TEMPLATE_LOADER=dotted)
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            (message,) = check_component_template_loader()
+        assert message.id == "next.E219"
+        assert f"NEXT_FRAMEWORK['COMPONENT_TEMPLATE_LOADER'] {dotted!r}" in message.msg
+        assert problem in message.msg
+
+    def test_the_shipped_loader_is_silent(self) -> None:
+        assert check_component_template_loader() == []
 
 
 class TestComponentConfigurationCodes:
@@ -686,3 +718,355 @@ class TestComponentChecksEdgeCases:
         fake_backend._loaded = True
         with patch_checks_components_manager(fake_backend):
             assert check_component_py_no_pages_context() == []
+
+
+class _Opaque:
+    """A callable whose signature `inspect` cannot read."""
+
+    __signature__ = "unreadable"
+
+    def __call__(self) -> str:
+        return "x"
+
+
+def stats(timeout: int = 3, delay: int = 0) -> int:
+    return timeout + delay
+
+
+def plain(sku: str) -> str:
+    return sku
+
+
+class TestReservedContextParameters:
+    """`check_component_context_reserved_parameters` warns as next.W158."""
+
+    @pytest.fixture()
+    def module_path(self, tmp_path: Path) -> Iterator[Path]:
+        path = tmp_path.resolve() / "widget" / "component.py"
+        yield path
+        component.registry.unregister(path)
+
+    def test_a_reserved_parameter_yields_w158(self, module_path: Path) -> None:
+        component.registry.register(module_path, "stats", stats)
+        messages = [
+            m
+            for m in check_component_context_reserved_parameters()
+            if m.obj == str(module_path)
+        ]
+        assert [m.id for m in messages] == ["next.W158", "next.W158"]
+        assert messages[0].msg == (
+            f"@component.context stats in {module_path} takes the parameter "
+            "'timeout', which the component tag reserves for its boundary options, "
+            "so a call site cannot pass it as a prop."
+        )
+        assert messages[0].hint == (
+            "Rename the parameter, the tag reserves defer, delay, reload, timeout."
+        )
+        assert "'delay'" in messages[1].msg
+
+    @pytest.mark.parametrize("func", [plain, _Opaque()], ids=["plain", "opaque"])
+    def test_silent_on_other_parameters(self, module_path: Path, func) -> None:
+        component.registry.register(module_path, "value", func)
+        assert [
+            m
+            for m in check_component_context_reserved_parameters()
+            if m.obj == str(module_path)
+        ] == []
+
+    def test_silent_without_component_backends(self, module_path: Path) -> None:
+        component.registry.register(module_path, "stats", stats)
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            messages = check_component_context_reserved_parameters()
+        assert [m.id for m in messages if m.obj == str(module_path)] == [
+            "next.W158",
+            "next.W158",
+        ]
+
+
+class TestErrorSelfReference:
+    """`check_component_error_self_reference` refuses a self-rendering error.djx."""
+
+    def _check(self, tmp_path: Path, config: dict, error: bytes | None) -> list[object]:
+        folder = tmp_path / "card"
+        folder.mkdir()
+        error_path = folder / "error.djx"
+        if error is not None:
+            error_path.write_bytes(error)
+        backend = FileComponentsBackend(dict(config))
+        backend._registry.register(
+            ComponentInfo(
+                "card",
+                tmp_path,
+                "",
+                folder / "component.djx",
+                None,
+                False,
+                files=BoundaryFiles(None, error_path),
+            )
+        )
+        backend._registry.register(
+            ComponentInfo("plain", tmp_path, "", tmp_path / "plain.djx", None, True)
+        )
+        backend._loaded = True
+        with patch_checks_components_manager(backend):
+            return check_component_error_self_reference()
+
+    def test_a_tag_naming_the_component_is_next_e229(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        source = b"{% if x %}{% #component 'box' %}{% component 'card' %}{% /component %}{% endif %}"
+        (message,) = self._check(tmp_path, min_component_config, source)
+        assert message.id == "next.E229"
+        assert message.obj == str(tmp_path / "card" / "error.djx")
+        assert "'card'" in message.msg
+
+    @pytest.mark.parametrize(
+        "error",
+        [b"{% component 'other' %}", b"{% if %}", b"\xff\xfe\x00", None],
+        ids=["other_component", "syntax_error", "undecodable", "missing"],
+    )
+    def test_anything_else_is_quiet(
+        self, tmp_path: Path, min_component_config: dict, error: bytes | None
+    ) -> None:
+        assert self._check(tmp_path, min_component_config, error) == []
+
+    def test_no_configured_backends_reports_nothing(self) -> None:
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            assert check_component_error_self_reference() == []
+
+
+_DEFERS = "from next.components import component\n\ncomponent.defer('stream')\n"
+_PROPS_ONLY = "from next.components import component\n\ncomponent.props('title')\n"
+_INLINE = "from next.components import component\n\ncomponent.defer('inline')\n"
+
+
+class TestDeferredComponents:
+    """A deferred component without a loading UI of its own or by default warns W157."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_declarations(self) -> Iterator[None]:
+        defer_declarations.reset()
+        yield
+        defer_declarations.reset()
+
+    def _info(
+        self,
+        root: Path,
+        name: str,
+        *,
+        module: str | None = None,
+        loading: bool = False,
+        error: bool = False,
+    ) -> ComponentInfo:
+        folder = root / name
+        folder.mkdir()
+        template_path = folder / "component.djx"
+        template_path.write_text("<p>x</p>")
+        module_path = None
+        if module is not None:
+            module_path = folder / "component.py"
+            module_path.write_text(module)
+        loading_path = error_path = None
+        if loading:
+            loading_path = folder / "loading.djx"
+            loading_path.write_text("...")
+        if error:
+            error_path = folder / "error.djx"
+            error_path.write_text("!")
+        files = None
+        if loading or error:
+            files = BoundaryFiles(loading_path, error_path)
+        return ComponentInfo(
+            name, root, "", template_path, module_path, False, files=files
+        )
+
+    def _messages(self, config: dict, *infos: ComponentInfo) -> list[object]:
+        backend = FileComponentsBackend(dict(config))
+        backend._registry.register_many(infos)
+        backend._loaded = True
+        with patch_checks_components_manager(backend):
+            return check_deferred_component_loading()
+
+    def test_a_declared_component_without_a_loading_ui_warns(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        info = self._info(tmp_path.resolve(), "card", module=_DEFERS)
+        (loading,) = self._messages(min_component_config, info)
+        assert loading.id == "next.W157"
+        assert loading.obj == str(info.module_path)
+        assert loading.msg == (
+            "Component 'card' defers its render but has no loading.djx, and "
+            'BOUNDARIES["LOADING_TEMPLATE"] names no default, so its placeholder stays '
+            "empty until the content arrives."
+        )
+
+    @pytest.mark.parametrize(
+        ("module", "loading"),
+        [(_INLINE, False), (None, True), (_DEFERS, True)],
+        ids=["inline", "loading_file", "declared_with_loading_file"],
+    )
+    def test_a_component_with_a_loading_ui_or_inline_is_quiet(
+        self,
+        tmp_path: Path,
+        min_component_config: dict,
+        module: str | None,
+        *,
+        loading: bool,
+    ) -> None:
+        info = self._info(tmp_path.resolve(), "card", module=module, loading=loading)
+        assert self._messages(min_component_config, info) == []
+
+    @pytest.mark.parametrize(
+        ("module", "error"),
+        [(None, False), ("", False), (_PROPS_ONLY, False), (None, True)],
+        ids=["no_module", "empty_module", "props_only", "error_file_only"],
+    )
+    def test_a_component_that_does_not_defer_is_quiet(
+        self,
+        tmp_path: Path,
+        min_component_config: dict,
+        module: str | None,
+        *,
+        error: bool,
+    ) -> None:
+        info = self._info(tmp_path.resolve(), "card", module=module, error=error)
+        assert self._messages(min_component_config, info) == []
+
+    def test_a_project_default_silences_it(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        info = self._info(tmp_path.resolve(), "card", module=_DEFERS)
+        with override_settings(
+            NEXT_FRAMEWORK={"BOUNDARIES": {"LOADING_TEMPLATE": "l.djx"}}
+        ):
+            assert self._messages(min_component_config, info) == []
+
+    def test_no_configured_backends_reports_nothing(self) -> None:
+        mock_ns = _stand_in(COMPONENT_BACKENDS=[])
+        with patch("next.components.checks.next_framework_settings", mock_ns):
+            assert check_deferred_component_loading() == []
+
+    def test_the_check_is_registered(self) -> None:
+        assert check_deferred_component_loading in check_registry.get_checks()
+
+
+def _token_module(max_age: int) -> str:
+    return (
+        "from next.components import component\n\n"
+        f"component.defer('load', tokens={{'max_age': {max_age}}})\n"
+    )
+
+
+class TestComponentTokenAge:
+    """A deferred component whose token outlives one day warns as W182."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_declarations(self) -> Iterator[None]:
+        defer_declarations.reset()
+        yield
+        defer_declarations.reset()
+
+    def _messages(self, config: dict, root: Path, module: str) -> list[object]:
+        folder = root / "card"
+        folder.mkdir()
+        (folder / "component.djx").write_text("<p>x</p>")
+        module_path = folder / "component.py"
+        module_path.write_text(module)
+        info = ComponentInfo(
+            "card", root, "", folder / "component.djx", module_path, False
+        )
+        backend = FileComponentsBackend(dict(config))
+        backend._registry.register_many([info])
+        backend._loaded = True
+        with patch_checks_components_manager(backend):
+            return check_component_token_age()
+
+    def test_a_token_above_one_day_warns(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        root = tmp_path.resolve()
+        (message,) = self._messages(min_component_config, root, _token_module(86401))
+        assert message.id == "next.W182"
+        assert message.obj == str(root / "card" / "component.py")
+        assert message.msg == (
+            "Component 'card' declares a token max_age of 86401 seconds, above one "
+            "day. A leaked reload token stays usable that long."
+        )
+
+    @pytest.mark.parametrize(
+        "module", [_token_module(86400), _DEFERS], ids=["one_day", "no_tokens"]
+    )
+    def test_a_token_within_one_day_is_quiet(
+        self, tmp_path: Path, min_component_config: dict, module: str
+    ) -> None:
+        root = tmp_path.resolve()
+        assert self._messages(min_component_config, root, module) == []
+
+    def test_the_check_is_registered(self) -> None:
+        assert check_component_token_age in check_registry.get_checks()
+
+
+_KEYLESS = """from next.components import component
+
+component.props("x", "y")
+
+
+@component.context
+def defaults(flag: bool | None = False):
+    if flag is None:
+        return
+    if flag:
+        return dict(x=1, **{})
+    if flag == 2:
+        return list()
+
+    def inner():
+        return {"y": 2}
+
+    return {"x": "c", "z": 1, 3: "n", **{}}
+
+
+@component.context("y")
+def keyed():
+    return {"y": 1}
+"""
+
+
+class TestKeylessContextProps:
+    """`check_keyless_context_props` warns as next.W185."""
+
+    @pytest.fixture()
+    def module_path(self, tmp_path: Path) -> Iterator[Path]:
+        path = tmp_path.resolve() / "card" / "component.py"
+        path.parent.mkdir()
+        yield path
+        component.registry.unregister(path)
+        defer_declarations.reset()
+
+    def _messages(self, module_path: Path) -> list:
+        return [m for m in check_keyless_context_props() if m.obj == str(module_path)]
+
+    def test_a_returned_declared_prop_yields_w185(self, module_path: Path) -> None:
+        module_path.write_text(_KEYLESS)
+        ModuleLoader().load(module_path)
+        (message,) = self._messages(module_path)
+        assert message.id == "next.W185"
+        assert message.msg == (
+            f"The keyless @component.context defaults in {module_path} returns 'x', "
+            "which the component declares as a prop, so every call that passes it "
+            "raises ComponentContextConflictError."
+        )
+
+    def test_silent_without_props_or_readable_source(self, module_path: Path) -> None:
+        module_path.write_text(_KEYLESS.replace('component.props("x", "y")', ""))
+        ModuleLoader().load(module_path)
+        assert self._messages(module_path) == []
+        component.registry.unregister(module_path)
+        module_path.write_text(
+            'from next.components import component\n\ncomponent.props("x")\n'
+        )
+        ModuleLoader().load(module_path)
+        component.registry.register(module_path, None, _Opaque())
+        assert self._messages(module_path) == []

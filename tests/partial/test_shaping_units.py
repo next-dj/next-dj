@@ -13,7 +13,7 @@ from next.forms.formsets import error_message_count
 from next.forms.manager import form_action_manager
 from next.partial import Patches, shape_partial
 from next.partial.envelope import Envelope
-from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, VARY_HEADERS
+from next.partial.headers import VARY_HEADERS
 from next.partial.manager import partial_backend_manager
 from next.partial.shaping import ActionRef
 from next.partial.shaping.csrf import _CSRF_ROTATED_FLAG, _csrf_rotated, _stamp_csrf
@@ -30,6 +30,7 @@ from next.partial.shaping.targets import (
     _should_push_steps,
     _zone_overrides,
 )
+from next.wire import RESPONSE_ACTION, RESPONSE_FORM
 from tests.support import partial_request
 
 

@@ -20,12 +20,6 @@ from next.partial.render import render_zone
 from next.partial.shaping.targets import _declared_zones, _form_zone
 from next.partial.signals import zone_registered
 from next.testing import NextClient, capture_signals, envelope_of
-from tests.pages.checks.metadata.trees import (
-    COMPONENTS,
-    component_template,
-    layout_root,
-    templated_page,
-)
 from tests.support import (
     PermissionHolder,
     build_zone_request,
@@ -34,12 +28,14 @@ from tests.support import (
     touch_later,
 )
 from tests.support.access import (
+    COMPONENTS,
     PAGE_HEAD,
     client_as,
     login_required_middleware,
     login_required_setting,
     write_guard,
 )
+from tests.support.components import write_component
 from tests.support.guards import (
     CHILDREN_BODY,
     GUARDED_CHILDREN,
@@ -51,6 +47,7 @@ from tests.support.guards import (
     fill_slot,
     wrap,
 )
+from tests.support.trees import layout_root, templated_page
 
 
 _GUARD = f'{{% has_perm "{PERM}" %}}'
@@ -194,7 +191,7 @@ def _leak_tree(tmp_path: Path, leak: _Leak, findable_templates) -> Path:
     for name, text in leak.templates.items():
         findable_templates(name, text)
     for name, text in leak.components.items():
-        component_template(pages, name, _named(text, tmp_path.name))
+        write_component(pages, name, body=_named(text, tmp_path.name), loading=None)
     if leak.layout:
         (pages / "leak").mkdir()
         (pages / "leak" / "layout.djx").write_text(f"{_GUARD}{{% template %}}{_END}")
@@ -446,7 +443,7 @@ class TestFailClosed:
     def test_status(self, tmp_path: Path, case: _FailClosed) -> None:
         pages = layout_root(tmp_path)
         if case.component is not None:
-            component_template(pages, "card", case.component)
+            write_component(pages, "card", body=case.component, loading=None)
         templated_page(pages / "leak", "x = 1\n", wrap("card"))
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
             response = client_as("visitor").get_zones("/leak/", "cz")
@@ -476,7 +473,7 @@ class TestContextTagsInAComponent:
         self, tmp_path: Path, component: str, status: int
     ) -> None:
         pages = layout_root(tmp_path)
-        component_template(pages, "card", component)
+        write_component(pages, "card", body=component, loading=None)
         templated_page(pages / "leak", "x = 1\n", wrap("card"))
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
             response = client_as("visitor").get_zones("/leak/", "cz")
@@ -529,7 +526,12 @@ class TestEditsUnderDebug:
     @pytest.mark.parametrize(("debug", "after"), [(True, 400), (False, 200)])
     def test_an_edited_component(self, tmp_path: Path, debug, after: int) -> None:
         pages = layout_root(tmp_path)
-        card = component_template(pages, "card", "<div>{{ children }}</div>")
+        card = (
+            write_component(
+                pages, "card", body="<div>{{ children }}</div>", loading=None
+            )
+            / "component.djx"
+        )
         templated_page(pages / "leak", "x = 1\n", wrap("card"))
         client = client_as("visitor")
         with (
@@ -545,7 +547,12 @@ class TestEditsUnderDebug:
 
     def test_the_edit_registers_the_zones_once(self, tmp_path: Path, settings) -> None:
         pages = layout_root(tmp_path)
-        card = component_template(pages, "card", "<div>{{ children }}</div>")
+        card = (
+            write_component(
+                pages, "card", body="<div>{{ children }}</div>", loading=None
+            )
+            / "component.djx"
+        )
         leaf = templated_page(pages / "leak", "x = 1\n", wrap("card"))
         settings.DEBUG = True
         with routed(pages, COMPONENT_BACKENDS=COMPONENTS):
@@ -825,9 +832,8 @@ _PROBES = (
     ),
     _Probe(
         _Leak(
-            "lazy",
-            f'{_GUARD}{{% zone "lzz" lazy="load" %}}SECRET{{% placeholder %}}wait'
-            f"{{% endzone %}}{_END}",
+            "reload-loading",
+            f'{_GUARD}{{% zone "lzz" reload="loading" %}}SECRET{{% endzone %}}{_END}',
             "lzz",
         ),
         400,

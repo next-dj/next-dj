@@ -11,7 +11,7 @@ It exposes one global, ``window.Next``, and every name it owns reaches an applic
 The runtime applies the patch envelopes the server authors, drives the ``data-next-*`` triggers, and publishes a lifecycle event stream a page subscribes to.
 It never invents a target or a swap strategy, so this page records what the runtime accepts rather than what it decides.
 
-The core bundle loads on every page, and six lazy chunks load only for a page that needs them.
+The core bundle loads on every page, and eight lazy chunks load only for a page that needs them.
 
 .. list-table::
    :header-rows: 1
@@ -29,11 +29,54 @@ The core bundle loads on every page, and six lazy chunks load only for a page th
      - The fetch of a deferred CSRF token, fetched on the first need of a page that shipped only the endpoint.
    * - ``poll``
      - The zone poller, fetched once a scan finds a ``data-next-poll`` zone.
+   * - ``forms``
+     - Inline validation and filter forms, fetched once a scan finds a ``form[data-next-validate]`` or a ``data-next-trigger`` element.
+       A blur or an input before it lands is not sent, and the form still posts as it would without it.
+   * - ``layers``
+     - The modal layers, fetched once a scan finds a ``data-next-layer`` link or an envelope holds a ``layer.open`` op, which waits for it.
+       Until it lands ``Next.partial.layers`` answers every lookup for the base page, and a layer link whose bundle cannot load is a full visit.
+       Toasts stay in the runtime, since any page may receive one.
    * - ``dev``
      - The diagnostics of a ``DEBUG`` render, never fetched by a production page.
+       Under ``DEBUG`` a boundary whose token the server refused carries the reason in ``data-next-error-detail`` and in a console warning.
+
+Declared bundles are a second kind of lazy code.
+The server renders a script tag for each one a page needs, right after the runtime, so no chunk list names it and ``Next.ready`` does not fetch it.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - Bundle
+     - Carries and declared when
+   * - ``boundaries``
+     - The reader of a streamed page or partial response, and the fetch of client-trip boundaries, the ``data-next-fetch`` and ``data-next-retry`` controls, the token expiry reload, and the second fetch of an ``incomplete`` boundary.
+       Declared under the one need ``boundaries`` by a streamed page, by a page whose partial responses may stream, and by a page with a client-trip boundary or an error UI that offers a retry, so a boundary a stream fails or leaves incomplete is retried by the same bundle.
+       Once it loads, ``Next.partial.fetch`` also takes a boundary wrapper element and fetches that boundary.
+       The fills that wait apply as envelopes sized to an 8 ms budget, the cost of the last batch deciding how many fit, and the rest waits for ``scheduler.yield()`` where the browser has it and for the next animation frame otherwise, so a burst of fills from a cache hit never blocks input for one long task.
+       A stream whose hello frame names another wire protocol is refused and the page reloads once.
+   * - ``reload``
+     - The loading UI of a ``reload="loading"`` zone and the skeletons of the boundaries inside it, and the loading UI of a layer before its answer, declared by a page with such a zone or with a layer link whose zone has one.
+   * - ``more``
+     - The pruning, the address writes, and the retries of ``{% more %}``, declared by a sentinel that sets ``prune=`` or ``url=``.
+   * - ``router``
+     - The client router with its history, which holds the snapshots, the scroll restore, the scroll after a push, the memo of URLs that answered no envelope, the memo of shared pages a navigation fetches as plain documents, the default focus move and announcement, persisted elements, view transitions, the retirement of page stylesheets, the inline scripts a navigation runs, the navigation of a ``GET`` form, the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``, and the progress bar of ``ROUTER["PROGRESS"]``.
+       Declared by every routed document while ``ROUTER["ENABLED"]`` holds and loaded as a plain ``async`` script, since the first click needs it.
+       Once it evaluates, ``Next.router`` exists, see `The router`_.
+   * - ``intent``
+     - The intent and viewport prefetch of links and layers, the cache of prefetched answers, and the client pass of active links.
+       Named by URL in the ``$router`` payload entry rather than by a tag, and loaded by the router once the page is idle or two seconds have passed, at once when a container of active links holds no link a render marked, and on ``Next.router.prefetch()``.
+       A navigation never waits for it.
+
+Every chunk installs through one handshake as it evaluates, whether the runtime fetched it or the server declared its tag, and a second copy of a bundle installs nothing.
+The load attributes of each tag are listed under ``NEXT_JS_OPTIONS`` in :doc:`settings`, and the ``disabled`` script policy renders none, which ``next.W181`` reports.
 
 A chunk that fails to load, or has not loaded within 15 seconds, fires ``partial:error`` of kind ``asset`` once and is fetched again on its next need, three attempts in all, so a stalled request holds no ``Next.ready``, form submit, or stream for good.
+The ``intent`` and ``boundaries`` bundles the router fetches by URL fail the same way.
 A chunk that lands after its timeout is still delivered to every subscriber that waited for it.
+Every bundle of one build carries the same build id, and the runtime installs no chunk of another build.
+It reloads the page once, and a page that still mixes builds reports ``partial:error`` of kind ``asset`` and goes on without that chunk.
+The statements the unit suite needs alone, the harness seams, are compiled out of every bundle.
 The TypeScript sources are not part of the installed package, so a project imports no TypeScript and installs no Node toolchain.
 :doc:`/content/contributing/quality-gates` describes how the bundles are built and budgeted, and :doc:`static` describes the finder that serves them.
 
@@ -44,8 +87,8 @@ The surface splits into tiers that describe the intended audience for each name.
 A member whose name starts with an underscore is a bootstrap or test seam rather than application API.
 
 Stable.
-   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.submit``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
-   The ``next:*`` events and the ``partial:*`` document events belong to the same tier.
+   ``Next.context``, ``Next.on``, ``Next.use``, ``Next.ready``, ``Next.navigation``, ``Next.router``, ``Next.consent``, ``Next.scripts``, ``Next.partial.onMount``, ``Next.partial.mount``, ``Next.partial.apply``, ``Next.partial.fetch``, ``Next.partial.submit``, ``Next.partial.setCsrf``, ``Next.partial.layers``, and ``Next.partial.stream``.
+   The ``next:*`` events, the ``partial:*`` document events, and the ``router:*`` events belong to the same tier.
    Use these from a co-located asset, an island adapter, or a page script.
 
 Extension.
@@ -54,9 +97,14 @@ Extension.
    See :doc:`/content/topics/partial-rendering/extending` for the server half of both recipes.
 
 Internal.
-   ``Next._init`` is the bootstrap the injected inline payload calls, ``Next._land`` is the handshake every lazy chunk calls as it evaluates and ignores a key the runtime does not know, ``Next.partial._current`` backs ``Next.navigation.current``, and ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives.
+   ``Next._init`` is the bootstrap the injected inline payload calls, and ``Next._extend`` is the handshake every chunk calls as it evaluates, with its name, its install function and its build id.
+   The install function receives the kernel, the internal contract of the runtime.
+   The chunk serves the handlers the runtime calls, such as the stream reader or the slot bounds of the router.
+   It hooks the apply phases in a fixed order that runs before the public events, so no chunk writes a field of the runtime or of another chunk and the order never depends on which bundle evaluated first.
+   A name the runtime does not know installs nothing.
+   ``Next.partial._configure`` and ``Next.partial._reset`` are the harness seams the unit suite drives, and the shipped bundles leave them out.
    ``Next.partial.ready`` carries no underscore because the bootstrap calls it across a module boundary, and a page reaches for it only when it drives the runtime by hand.
-   None of the six is an application entry point.
+   None of them is an application entry point.
 
 Public API
 ----------
@@ -92,6 +140,9 @@ The class itself is not exported from the bundle, so ``window.Next`` is the only
    * - ``Next.navigation.current()``
      - ``NavigationState``
      - Where the page stands, ``{url, path, title}``.
+   * - ``Next.router``
+     - ``Router``
+     - The client router, ``undefined`` until the ``router`` bundle has evaluated and on a page the router does not serve, see `The router`_.
    * - ``Next.ready(chunk)``
      - ``Promise<NextChunks[K]>``
      - Resolve with the surfaces of a lazy chunk once it has loaded and taken the init payload, fetching it when needed, and reject when it cannot load.
@@ -135,7 +186,8 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
      - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``.
        The runtime fires it before the request leaves, and the event is not cancelable, so a listener observes rather than vetoes.
    * - ``partial:before-apply``
-     - ``{envelope}``, the parsed envelope with a mutable op list.
+     - ``BeforeApply``, ``{envelope, boundaries, hold}``, the parsed envelope with a mutable op list, the boundary wrappers its ops touch, and ``hold()``.
+       ``hold()`` returns a release function, and the ops of this envelope and of every later one wait until each hold taken is released, so an exit animation of a boundary finishes first.
        The veto lives on the document event of the same name, not here.
    * - ``partial:applied``
      - ``{envelope, ok, nodes, stale?}``.
@@ -143,23 +195,27 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` element events fire
        ``nodes`` are the elements the ops inserted or morphed, the roots the mount pass ran over.
        ``stale`` is ``true`` when a newer request superseded the envelope while its stylesheets loaded, so no op ran, ``ok`` is ``false``, and ``nodes`` is empty.
    * - ``partial:error``
-     - A ``PartialError``, discriminated on ``kind`` over ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered``.
+     - A ``PartialError``, discriminated on ``kind`` over ``network``, ``timeout``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, ``undelivered``, and ``incomplete``, with the ``zones`` of the request when it addressed any.
+       ``timeout`` carries ``url`` and means an HTTP request outlived its deadline and was aborted, so a mutation may have committed.
        ``csrf`` means a deferred token could not be fetched, so the mutation never left.
+       ``incomplete`` carries ``boundaries``, the ids of the boundaries a streamed partial response ended without filling.
        ``undelivered`` carries ``url`` and ``reason`` and means a mutation sent over the WebSocket may have run on the server but its reply never came back, so the page should re-read its state rather than resend.
        For the ``reason`` ``http_only`` the runtime reloads the page right after the event, and a listener runs before the reload but cannot cancel it.
        Each cause carries only its own fields, so a listener branches on ``kind`` before reading ``status`` or ``body``.
+   * - ``partial:settled``
+     - ``Settled``, ``{zones, boundaries, status}``, once a request finished and once a batch of stream chunks applied, naming the zones and the boundary ids it settled and the ``status`` of its ``Outcome``.
    * - ``partial:layer-opened``
-     - ``{opener}``, the opening element, or ``null`` for a server-initiated open.
+     - ``{opener, root}``, the opening element, or ``null`` for a server-initiated open, and the zone container the body fills.
    * - ``partial:layer-accepted``
      - ``{result}``, the accept result the closing side passed, or ``undefined`` for a close without one.
    * - ``partial:layer-dismissed``
-     - ``{reason}``, one of ``escape``, ``backdrop``, ``popstate``, ``dismissed``, the ``returnValue`` of a ``<form method="dialog">`` close or ``dialog`` when it is empty, or the text a server dismiss carried.
+     - ``{reason}``, one of ``escape``, ``backdrop``, ``popstate``, ``navigate`` for a layer a router navigation closes, ``dismissed``, the ``returnValue`` of a ``<form method="dialog">`` close or ``dialog`` when it is empty, or the text a server dismiss carried.
    * - ``next:stream-state``
      - ``{url, transport, state, code?}``, on every change of a stream connection, see `Connection state events`_.
    * - ``next:stream-gap``
      - ``{topic, from, to}``, for every gap or epoch change that triggers a zone resync.
    * - ``next:toast``
-     - ``{text, variant}``, fired alongside building the toast element.
+     - ``{text, variant, element}``, fired once the toast item is in its tray, with ``element`` the inserted item.
    * - ``next:navigated``
      - ``{url, path, title, action}``, once per commit that changes the address or the title, and never for the page load.
        A change of the title alone carries ``action: "none"``, see :doc:`client-extras`.
@@ -199,12 +255,12 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
    * - ``next:morph-element``
      - The old element, bubbles
      - Yes
-     - The morph engine before a matched pair morphs, with detail ``{newNode}``.
+     - The morph engine before a matched pair morphs, with detail ``{newNode}``, only under a target or an ancestor marked ``data-next-morph-events``.
        A veto skips that node and its whole subtree.
    * - ``next:morph-attribute``
      - The old element, bubbles
      - Yes
-     - The morph engine before one attribute changes, with detail ``{name, mutationType}`` over ``update`` and ``remove``.
+     - The morph engine before one attribute changes, with detail ``{name, mutationType}`` over ``update`` and ``remove``, under the same opt-in.
        A veto skips that one mutation.
    * - ``partial:before-request``
      - The document
@@ -222,7 +278,11 @@ A cancelable event is the only kind whose ``preventDefault()`` changes what the 
    * - ``partial:error``
      - The document
      - No
-     - Every source of a failure, the applier, the fetch layer, the asset loader, a stream, the chunk loader, and the lazy CSRF fetch.
+     - Every source of a failure, the applier, the fetch layer, the asset loader, a stream, the chunk loader, the lazy CSRF fetch, and the reader of a streamed partial response.
+   * - ``partial:settled``
+     - The document
+     - No
+     - The fetch layer once a request finished, and the boundary fills once a batch applied.
    * - ``partial:layer-opened``
      - The document
      - No
@@ -266,7 +326,7 @@ The partial surface
      - Send one partial request through the queues and the per-uid lock, and resolve with its `Outcome`_ once the reply is applied.
        Network, HTTP, and parse failures surface as ``partial:error`` and as an outcome rather than as a rejection.
        A mutation sent while its uid is locked is not sent and resolves as ``dropped``.
-       An HTTP request still unanswered after its deadline is aborted, fires ``partial:error`` of kind ``network`` with its ``url``, resolves as ``error``, and frees its lock.
+       An HTTP request still unanswered after its deadline is aborted, fires ``partial:error`` of kind ``timeout`` with its ``url``, resolves as ``error``, and frees its lock.
        The default deadline is 30 seconds.
        A ``$timeout`` key of the init payload sets it in milliseconds for every HTTP request of the page, and ``0`` turns it off, while the framework writes no such key itself.
        A WebSocket tunnel has its own timeout, and the HTTP deadline starts after the tunnel step.
@@ -311,7 +371,7 @@ The partial surface
        ``on(topic, name, callback)`` adds a topic listener, and ``meta()`` reads metadata during synchronous delivery.
        ``send(topic, name, data, options?)`` sends an upstream event over the WebSocket.
        ``now()`` and ``offset()`` estimate server time.
-       ``scan``, ``remember``, ``forget``, ``size``, and ``_reset`` are the seams the apply pipeline and the harness drive, not application API.
+       ``scan``, ``remember``, ``forget``, and ``size`` are the seams the apply pipeline drives, and ``_reset`` is a harness seam the shipped bundle leaves out, none of them application API.
        See `The stream API`_ and :doc:`/content/topics/realtime`.
    * - ``mount(nodes: readonly Element[])``
      - ``void``
@@ -322,12 +382,15 @@ The partial surface
    * - ``_current()``
      - ``NavigationState``
      - The current URL, path, and title, the value ``Next.navigation.current()`` returns, a bootstrap seam.
+   * - ``_release(current: boolean)``
+     - ``void``
+     - Record whether the server speaks the release of this runtime, reloading the page once when it does not, a bootstrap seam.
    * - ``_configure(adapters: PartialAdapters)``
      - ``void``
-     - Swap the platform seams and rebuild the sub-modules, a harness seam.
+     - Swap the platform seams and rebuild the sub-modules, a harness seam the shipped bundle leaves out.
    * - ``_reset()``
      - ``void``
-     - Tear down every registry, timer, observer, and open layer, a harness seam.
+     - Tear down every registry, timer, observer, and open layer, a harness seam the shipped bundle leaves out.
 
 WireRequest fields
 ~~~~~~~~~~~~~~~~~~
@@ -371,6 +434,8 @@ WireRequest fields
        ``true`` queues it behind the lock, and ``"latest"`` queues it and drops the older waiters.
    * - ``navigate``
      - ``false`` keeps the page on a redirect and resolves its URL in ``location``.
+   * - ``boundaries``
+     - The boundary wrappers the request reloads, which the runtime marks busy while it runs and names in ``partial:settled``.
 
 .. _ref-client-outcome:
 
@@ -398,7 +463,7 @@ The promise never rejects, and the usual ``partial:before-request``, ``partial:a
 ``applied`` is the ``ok`` of the matching ``partial:applied``, true once every op ran, and false when an op failed, the page refused the envelope in ``partial:before-apply``, a version mismatch reloaded the page, or no envelope came back.
 A mount callback or a script that throws after the ops still settles the outcome with ``applied`` false and frees the lock, and the error itself propagates to the page.
 A header name the browser refuses fires ``partial:error`` of kind ``network`` and sends nothing, and a ``SubmitAction`` whose ``data`` cannot be read resolves as ``error`` with that ``network`` error in ``error`` and fires nothing.
-``envelope`` is the parsed envelope whenever one came back.
+``envelope`` is the parsed envelope whenever one came back, and ``boundaries`` lists the ids of the boundaries a streamed reply filled.
 ``location`` is the absolute URL a reply would have navigated to, set only for a request sent with ``navigate: false``, the way a create returns the id of the new row without leaving the page.
 A declarative submit still drops a second submit of a busy form, so a double click sends one request, while ``submit`` queues because a script submits on purpose, such as a second drop of a drag while the first is in flight.
 
@@ -437,6 +502,7 @@ A name the server has not registered through ``register_patch_op`` never reaches
 ``parseHook`` widens the wire format.
 The hook owns the response body before classification and returns a value the applier parses as an envelope, so a backend answering a content type of its own is applied instead of navigated to.
 A hook that throws, and a value the applier rejects as no envelope, surface as a ``partial:error`` of kind ``parse``.
+A frame of a streamed response that is no JSON, met after the first fill landed, fires the same kind with the frame as its ``body``, and the stream goes on with the next frame.
 The registry is keyed by the bare content type, with the charset and any other parameter stripped before the lookup.
 A body no hook claims and no envelope content type covers becomes a full navigation on a safe request and a ``kind: "http"`` error on a mutation, because the action endpoint is no page to navigate to.
 
@@ -451,6 +517,116 @@ A body no hook claims and no envelope content type covers becomes a full navigat
    });
 
 .. _ref-client-stream:
+
+The router
+~~~~~~~~~~
+
+``Next.router`` is the surface of the ``router`` bundle, present on a document the client router serves, see :doc:`/content/topics/router/index`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 20 46
+
+   * - Member
+     - Returns
+     - Description
+   * - ``visit(url, {replace?, scroll?})``
+     - ``Promise<void>``
+     - Navigate to ``url`` as a click would, resolving once the navigation settled.
+       ``replace`` replaces the history entry, ``scroll: false`` keeps the scroll position, and a URL the router does not take over loads hard.
+   * - ``prefetch(url)``
+     - ``Promise<void>``
+     - Prefetch ``url`` into the cache a navigation applies, loading the ``intent`` bundle first when needed, whatever ``ROUTER["PREFETCH"]`` says, see :doc:`/content/topics/router/prefetch`.
+   * - ``flush()``
+     - ``void``
+     - Drop every history snapshot and every prefetched answer.
+   * - ``configure({focus?, announce?, host?})``
+     - ``void``
+     - Replace the focus move after a navigation, ``focus(nodes)`` returning whether it moved focus, the announcement of the new title, ``announce(text)``, or the browser adapter, ``host``, a test seam.
+
+Every router event fires on the document as a ``CustomEvent`` and on the ``Next.on`` bus with the same payload, and only the document event of ``router:before`` can cancel.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 30 46
+
+   * - Event
+     - Detail
+     - Fires
+   * - ``router:before``
+     - ``{url, trigger, cached}``
+     - Before a navigation, cancelable, and never for a Back or Forward step, ``cached`` telling whether a prefetched answer is kept or a press request is in flight.
+   * - ``router:start``
+     - ``{url}``
+     - As the navigation request is about to leave.
+   * - ``router:before-swap``
+     - ``{url, layouts, hold, nodes}``
+     - Before the envelope applies, ``hold()`` returning a release function the swap waits for.
+   * - ``router:commit``
+     - ``{url}``
+     - After the new content, the address, and the title are in place.
+   * - ``router:end``
+     - ``{url, status, initial?}``
+     - Once the navigation settled, ``status`` being ``complete``, ``hard``, or ``superseded``, and once at boot with ``initial: true``.
+   * - ``router:error``
+     - ``{url, error}``
+     - When the request throws, outlives the request deadline of ``Next.partial.fetch``, or the envelope fails to apply, before the hard load.
+
+Router attributes
+^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 22 48
+
+   * - Attribute
+     - Author
+     - Meaning
+   * - ``data-next-router``
+     - Hand-written
+     - ``off`` keeps the links and forms inside it out of the router, and under ``ROUTER["SCOPE"]`` of ``"pages"`` or ``"opt_in"`` the attribute with any other value takes the links inside it in, a page the route table cannot carry among them.
+   * - ``data-next-scroll="preserve"``
+     - Hand-written
+     - A link inside it keeps the scroll position.
+   * - ``data-next-scroll-region``
+     - Hand-written
+     - An element whose own scroll Back and Forward restore beside the scroll of the window.
+   * - ``data-next-focus``
+     - Hand-written
+     - The element that takes focus after a navigation, ahead of the first ``<h1>``.
+   * - ``data-next-persist``
+     - Hand-written
+     - An element a navigation moves into the place of the element with the same value in the new content, so its state survives the swap.
+   * - ``data-next-prefetch``
+     - Hand-written
+     - Overrides ``ROUTER["PREFETCH"]`` for the links inside it, ``viewport`` prefetching them as they scroll into view, ``intent`` only on intent, and ``off`` never, which also keeps them out of the Speculation Rules.
+   * - ``data-next-press``
+     - Hand-written
+     - Overrides ``ROUTER["PRESS"]`` for the links inside it, ``mouse`` sending the full page request at the press of a mouse, ``all`` at the press of every pointer, and ``off`` keeping every press at the shell depth.
+   * - ``data-next-transition``
+     - The runtime
+     - Set on ``<html>`` as each view transition under ``ROUTER["TRANSITIONS"]`` starts, ``forward``, ``back``, or ``replace``.
+   * - ``data-next-asset="page"``
+     - The server
+     - On each stylesheet a routed document injects, which the router disables once a page that does not list it is shown.
+   * - ``data-next-pending``
+     - The runtime
+     - On the link or form that started a navigation, until it commits or ends.
+   * - ``data-next-navigating``
+     - The runtime
+     - On ``<html>`` once a navigation outlasts ``ROUTER["PROGRESS_DELAY"]``, beside ``aria-busy="true"`` on the element around the slot that will change.
+       The default progress bar of ``ROUTER["PROGRESS"]`` is drawn from it.
+   * - ``aria-current``, ``data-next-current``
+     - The server, then the ``intent`` bundle
+     - The active-link marks, ``page`` or ``ancestor``, on the links of a navigation container, and ``data-next-current="off"`` hand-written to keep a link or a container as written.
+   * - ``data-next-match``
+     - Hand-written
+     - ``exact``, ``query``, or both, changing the active-link rule for a link or a container.
+   * - ``data-next-nav``
+     - Hand-written
+     - Marks a navigation container whose links are marked, one of the default containers.
+
+See :doc:`/content/topics/router/browser`, :doc:`/content/topics/router/prefetch`, and :doc:`/content/topics/router/active-links`.
 
 The stream API
 ~~~~~~~~~~~~~~
@@ -556,10 +732,12 @@ An inline validation mutates nothing, so in each of these cases it resends over 
 The attribute contract
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The runtime reads one attribute namespace, ``data-next-*``, and twenty-two names make up the whole contract.
+The runtime reads one attribute namespace, ``data-next-*``, and thirty-three names make up the contract of zones, forms, pagination, layers, and streams.
+The attributes of deferred boundaries follow in `Boundary attributes`_.
 They fall into authorship groups, and a reader needs the split to know which are theirs to write.
-The server writes eight of them alone, six from ``{% zone %}`` and ``{% form %}``, one from ``{% #consented %}``, and one on every script tag it renders from ``scripts.py``, the runtime writes four as styling and state hooks, and six are hand-authored on plain markup.
-The remaining four carry both authors, written by a ``{% form %}`` parameter on a form and by hand on the link or control that drives the same behaviour without one.
+The server writes fifteen of them alone, seven from ``{% zone %}`` and ``{% form %}``, six from ``{% more %}``, one from ``{% #consented %}``, and one on every script tag it renders from ``scripts.py``.
+The runtime writes six as styling, state, and bookkeeping hooks, and six are hand-authored on plain markup.
+The remaining six carry both authors, written by a ``{% form %}`` parameter, by ``{% more %}``, or on a boundary wrapper, and by hand on the element that drives the same behaviour without one.
 ``{% form %}`` reserves the ``data-next-`` prefix and raises a template syntax error on a hand-written one, so a hand-authored attribute goes on a wrapper, a link, or a submit control rather than on the tag.
 
 .. list-table::
@@ -571,14 +749,21 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
      - Read by
    * - ``data-next-zone``
      - ``{% zone %}``
-     - The applier resolves a ``zone`` target through it, the layer stack scopes that lookup per open layer, and the triggers require it on any lazy or polling element.
-   * - ``data-next-lazy``
-     - ``{% zone lazy= %}``
-     - The triggers, which fetch a ``load`` zone on ready and hand a ``revealed`` zone to the intersection observer.
-       On a pagination sentinel the value is not read and the attribute only marks the element observable.
+     - The applier resolves a ``zone`` target through it, the layer stack scopes that lookup per open layer, and the triggers require it on a polling element.
+   * - ``data-next-defer``
+     - ``{% more %}`` on its link, a client-trip boundary on its wrapper, hand-written on a pagination sentinel
+     - On a ``{% more %}`` link or another pagination sentinel the value is not read, and the attribute only marks the link the triggers hand to the intersection observer.
+       On a boundary wrapper the ``boundaries`` bundle reads it, fetching a ``load`` boundary on ready and a ``visible`` one once it scrolls into view, and leaving a ``manual`` one to its controls.
    * - ``data-next-poll``
      - ``{% zone poll= %}``
      - The triggers, which group every zone on one interval into a single timer chain and one batched GET.
+   * - ``data-next-reload``
+     - ``{% zone reload="loading" %}``
+     - The reload bundle, which shows the loading content of the zone once a request that reloads it outlasts the delay.
+       A ``data-next-reload`` outside a zone and a boundary wrapper also keeps the links inside it out of the client router.
+   * - ``data-next-delay``
+     - ``{% zone delay= %}``, or hand-written on a ``data-next-layer`` link
+     - The reload bundle, which waits that many milliseconds, 150 when it is absent, before it shows the loading content of the zone or of the layer the link opens.
    * - ``data-next-action``
      - ``{% form %}``
      - The triggers intercept a submit and lock on the uid, and the applier resolves a ``form`` target by it.
@@ -604,21 +789,47 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
      - ``{% form debounce= %}``, hand-written beside a trigger
      - The triggers, which collapse a burst of events into the last one.
    * - ``data-next-merge``
-     - Hand-written on a pagination link or sentinel
+     - ``{% more merge= %}``, hand-written on a pagination link or sentinel
      - The triggers, which GET the link with an ``append`` or ``prepend`` intent so the server authors the merge patch.
        A click with a modifier key or a button other than the primary one, a click a handler cancelled, and a link with ``download`` or a ``target`` other than ``_self`` stay with the browser.
+   * - ``data-next-margin``
+     - ``{% more margin= %}``
+     - The triggers, which pass it to the intersection observer of an infinite-scroll sentinel as its root margin.
+   * - ``data-next-param``
+     - ``{% more param= %}``
+     - The ``more`` bundle, which reads the token of a fetched batch from that query parameter, ``page`` when it is absent.
+   * - ``data-next-prune``
+     - ``{% more prune= %}``
+     - The ``more`` bundle, which drops whole batches from the top of the list once it holds more rows than that.
+   * - ``data-next-back``
+     - ``{% more %}`` on a link with ``prune=`` or ``url=``, from the ``back`` of a ``Window``
+     - The ``more`` bundle, which keeps it with the rows the link fetches as the token of the batch before them, and writes it into the ``<zone>-less`` link once a prune makes those rows the top of the list.
+   * - ``data-next-backs``
+     - ``{% more %}`` on the link of a restored window, from the ``backs`` of a ``Window``
+     - The ``more`` bundle, which splits the rows of the restored window evenly across its batches and keeps one space-separated token with each batch after the first.
+   * - ``data-next-url``
+     - ``{% more url= %}``
+     - The ``more`` bundle, which writes ``?<param>=<token>&_restore=<param>`` into the address bar after each fetched batch, with ``replace`` or ``push``.
+       The write is a ``url`` operation with ``quiet: true``, so it does not count as a page view.
+   * - ``data-next-batch``
+     - The runtime
+     - The ``more`` bundle stamps each row of a list whose link sets ``prune=`` or ``url=`` with the batch it arrived in and reads it back to drop whole batches.
    * - ``data-next-confirm``
      - Hand-written on a link or a submit control
      - The triggers, which run the confirm gate on the nearest ancestor carrying it and cancel the interaction on a refusal.
    * - ``data-next-keep``
      - Hand-written on any element
      - The morph engine, which leaves the node and its subtree untouched so a mounted island root survives.
+   * - ``data-next-reserve``
+     - Hand-written on an element around a zone or a boundary
+     - The reload bundle, which holds the height of a zone or a boundary while it shows loading content, unless an element around it carries ``data-next-reserve="off"``.
    * - ``data-next-stream``
      - Hand-written on a container
      - The stream bridge, which opens one stream per distinct URL, over WebSocket when negotiation succeeds and over ``EventSource`` otherwise, and rescans each inserted subtree.
    * - ``data-next-layer``
      - Hand-written on an ``<a>``
      - The layer stack, which opens the href in a modal and names the zone the dialog hosts.
+       The client router prefetches the zone under the intent, viewport, and press rules, and the layer takes that answer instead of sending its own request.
        A link missing either the zone or the href stays a plain navigation.
        So does a click the pagination rule of ``data-next-merge`` leaves to the browser, such as a Ctrl-click that opens the URL in a new tab.
    * - ``data-next-accepted``
@@ -632,27 +843,85 @@ The remaining four carry both authors, written by a ``{% form %}`` parameter on 
      - The scripts chunk, which finds a script tag the server already rendered by it so the tag is not inserted twice and ``load()`` resolves on it.
    * - ``data-next-busy``
      - The runtime
-     - The layer stack writes it on the opener and the target zone for the span of a request, alongside ``aria-busy="true"``, and reads it back as the double-click guard.
+     - The runtime writes it for the span of a request on every zone the request reloads, on every boundary wrapper it fetches, and on the opener of a layer, alongside ``aria-busy="true"`` except for a background poll.
+       The layer stack reads it back as the double-click guard, and the morph engine leaves both attributes alone while the element is busy.
    * - ``data-next-dialog``
      - The runtime
      - Nothing in the runtime reads it.
        It marks every layer ``<dialog>`` as the styling hook of the modal shell.
    * - ``data-next-toasts``
-     - The runtime
-     - Nothing in the runtime reads it.
-       It marks the toast tray, which also carries ``aria-live="polite"``.
+     - Hand-written on the page's own tray, or the runtime on the ``<div aria-live="polite">`` it appends to the body
+     - The layer stack, which puts every toast into the first tray it finds top layer down and builds its own only when the page renders none.
    * - ``data-next-toast``
      - The runtime
      - Nothing in the runtime reads it.
        It marks one toast item and its value is the variant.
+   * - ``data-next-run``
+     - The runtime
+     - The router marks the ``<template>`` that holds the place of each inline script carrying the page nonce in the HTML of a navigation, and replaces it with a fresh script once the swap commits, so the script runs.
 
 :doc:`/content/topics/partial-rendering/reference` records the accepted values, the closed value sets, and the dev warnings each attribute earns.
+
+Boundary attributes
+^^^^^^^^^^^^^^^^^^^
+
+The server writes every attribute of a boundary wrapper, and the runtime keeps them current as the boundary settles.
+A page reads ``data-next-state`` and ``data-next-error`` from a stylesheet, and writes ``data-next-fetch`` and ``data-next-retry`` into its loading and error UI.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 22 52
+
+   * - Attribute
+     - Author
+     - Meaning
+   * - ``data-next-boundary``
+     - The server
+     - The boundary id, equal to the ``id`` of the wrapper, which a chunk and a reload address.
+   * - ``data-next-state``
+     - The server, then the runtime
+     - ``loading`` while a stream job runs, ``idle`` while a client-trip boundary waits, ``ready``, or ``error``.
+   * - ``data-next-error``
+     - The server, then the runtime
+     - The ``ErrorKind`` of an ``error`` state, ``incomplete`` for a boundary a stream ended without filling, and ``timeout`` or ``network`` for a fetch the browser gave up on.
+   * - ``data-next-error-digest``, ``data-next-boundary-source``, ``data-next-error-detail``
+     - The server, under ``DEBUG``
+     - The digest of the failure, the ``error.djx`` that rendered, and the traceback where no ``<details>`` element may stand.
+   * - ``data-next-boundary-key``
+     - The server
+     - The key of the call site, the same across responses, which a zone reload matches a stashed loading UI by.
+   * - ``data-next-token``, ``data-next-carrier``
+     - The server, on a wrapper that can be fetched
+     - The boundary token, and the place the token travels in when the carrier is not the header.
+   * - ``data-next-defer``
+     - The server, on a client-trip wrapper
+     - ``load``, ``visible``, or ``manual``, read by the ``boundaries`` bundle.
+   * - ``data-next-adopted``
+     - The server
+     - Marks a wrapper whose attributes sit on the root element of its body, so a fetched body keeps them.
+   * - ``data-next-fetch``
+     - Hand-written in a loading UI
+     - A click fetches the client-trip boundary around the control.
+   * - ``data-next-retry``
+     - Hand-written in an error UI
+     - A click fetches the boundary again when it carries a token, reloads the nearest zone otherwise, and reloads the page outside every zone.
+   * - ``data-next-streamed``
+     - The server, on the root element
+     - Marks a streamed page, so ``load`` boundaries fetch without waiting for the whole document.
+   * - ``data-next-loading``
+     - The server, on a ``<template>``
+     - Holds the loading UI a ``reload="loading"`` zone shows, named after the zone.
+   * - ``data-next-layer``
+     - The server, on a ``<template>``
+     - Holds the loading UI a layer of that zone shows until its answer arrives, written before the first link that opens it.
+
+See :doc:`/content/topics/boundaries/streaming` for the states and :doc:`/content/topics/boundaries/errors` for the error UI.
 :doc:`template-tags` records the ``{% zone %}``, ``{% form %}``, and ``{% #consented %}`` parameters that compile to the eleven names a template tag can write, and :doc:`/content/topics/scripts/declaring` covers the script tags that carry ``data-next-script``.
 
 Exported types
 ~~~~~~~~~~~~~~
 
-The entry module exports nineteen type names.
+The entry module exports twenty-one type names.
 See :doc:`client-extras` and :doc:`/content/topics/realtime` for the navigation, consent, scripts, and stream types.
 A page written in TypeScript reaches them through the bundle's declaration output rather than by importing ``next/client/``.
 
@@ -673,7 +942,7 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
        method: string;
        intent: { zone?: string; uid?: string };
      };
-     "partial:before-apply": { envelope: Envelope };
+     "partial:before-apply": BeforeApply;
      "partial:applied": {
        envelope: Envelope;
        ok: boolean;
@@ -681,7 +950,8 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
        stale?: true;
      };
      "partial:error": PartialError;
-     "partial:layer-opened": { opener: HTMLElement | null };
+     "partial:settled": Settled;
+     "partial:layer-opened": { opener: HTMLElement | null; root: HTMLElement };
      "partial:layer-accepted": { result: unknown };
      "partial:layer-dismissed": { reason: string };
      "next:stream-gap": { topic: string; from: number; to: number };
@@ -691,7 +961,7 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
        state: "connecting" | "open" | "closed";
        code?: string;
      };
-     "next:toast": { text: string; variant: string };
+     "next:toast": { text: string; variant: string; element: Element };
      "next:navigated": NavigatedDetail;
      "next:consent": ConsentChange;
      "next:script-loaded": { name: string };
@@ -700,15 +970,16 @@ A page written in TypeScript reaches them through the bundle's declaration outpu
 
    export type { PartialError, PartialErrorKind } from "./protocol";
    export type { NavigatedDetail, NavigationAction, NavigationState } from "./navigation";
-   export type { Asset, AssetLoad, Envelope, FormMeta, Patch } from "./apply";
+   export type { Asset, AssetLoad, BeforeApply, Envelope, FormMeta, Patch } from "./apply";
    export type { ConsentChange } from "./consent";
    export type { ScriptsChunk } from "./chunks";
    export type { ScriptStatus } from "./scripts";
    export type { StreamMeta } from "./sse";
-   export type { Outcome } from "./wire";
+   export type { Outcome, Settled } from "./wire";
    export type { SubmitAction } from "./partial";
 
-``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, and ``undelivered`` kinds.
+``PartialError`` is the discriminated union every ``partial:error`` payload inhabits, over the ``network``, ``timeout``, ``http``, ``parse``, ``op``, ``asset``, ``csrf``, ``undelivered``, and ``incomplete`` kinds, each with an optional ``zones`` list.
+``BeforeApply`` is the payload of ``partial:before-apply`` and ``Settled`` the payload of ``partial:settled``.
 ``PartialErrorKind`` is its discriminant, aliased for a listener that switches on it.
 ``PartialSurface`` is declared in the partial module and not re-exported, so its name reaches a reader through this page rather than through an import.
 
@@ -731,7 +1002,7 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``next.ts``
      - The ``Next`` facade, the context store, the event bus, the plugin hook, and the bundle entry point.
    * - ``partial.ts``
-     - Assembly of the ``Next.partial`` surface over the other modules and their injectable platform seams.
+     - Assembly of the ``Next.partial`` surface and of the kernel the chunks install against, over the other modules and their injectable platform seams.
    * - ``apply.ts``
      - Envelope parsing, the built-in patch verbs, the custom-verb registry, and script neutralisation before insertion.
    * - ``wire.ts``
@@ -739,9 +1010,9 @@ None of these modules is reachable from application code, so the names serve rea
    * - ``morph.ts``
      - The morph engine that reuses live nodes so focus, caret, typed values, and scroll survive a patch.
    * - ``layers.ts``
-     - Modal layers over the native ``<dialog>``, top-down target resolution, and the toast tray.
+     - Modal layers over the native ``<dialog>`` and top-down target resolution, shipped in the layers chunk.
    * - ``triggers.ts``
-     - The delegated ``data-next-*`` handlers, lazy zone activation, the fetch of the poll chunk, and inline validation.
+     - The delegated ``data-next-*`` handlers, the ``data-next-defer`` triggers, and the fetch of the poll and forms chunks.
    * - ``sse.ts``
      - The ``EventSource`` transport and the factory that builds the SSE side of a stream.
    * - ``stream.ts``
@@ -756,29 +1027,68 @@ None of these modules is reachable from application code, so the names serve rea
      - The touched-element tracker whose snapshots keep a response from overwriting what the user typed.
    * - ``adapters.ts``
      - Default platform adapters over the browser globals a test harness replaces.
+   * - ``events.ts``
+     - The plain-activation test of a click and the in-place test of a browsing-context name, shared by the triggers, the layer openers, the router, and the intent bundle, and the temporary ``tabindex`` that lets an element take the focus a deferred boundary or a navigation moves to it.
+   * - ``protocol.gen.ts``
+     - The wire vocabulary of the server, its headers, media types, payload and chunk keys, events, query parameters and shared attributes, generated by ``next/static/protocol.py`` from the Python constants at every build and checked in, so no client module spells a server constant by hand.
    * - ``protocol.ts``
-     - The wire vocabulary shared with the server, the content type, the headers, the ``PartialError`` union, and ``pageKey``, the same-origin path and query a layer and a zone are keyed by.
+     - The generated vocabulary re-exported beside the constants only the runtime reads, the ``PartialError`` union, and ``pageKey``, the same-origin path and query a layer and a zone are keyed by.
    * - ``navigation.ts``
      - The history writes of a commit and the one ``next:navigated`` it fires, a layer's push written as it opens and announced once its body commits.
    * - ``head.ts``
      - The four URL-bound head tags a ``meta`` operation syncs and a layer snapshots and restores.
    * - ``csrf.ts``
-     - The token store, the single-flight fetch of a deferred token, and the prefetch on the first focus in a form.
+     - The token store, the CSRF cookie a mutation reads where scripts may, the single-flight fetch of a deferred token otherwise, and the prefetch on the first focus in a form.
        The fetch itself ships in the csrf chunk.
    * - ``chunks.ts``
      - The core side of the lazy chunks, which fetches each on demand, and of the scripts chunk, which answers ``Next.ready("scripts")`` once it loads.
+   * - ``kernel.ts``
+     - The contract a chunk installs against, which names what each chunk exports, the handlers it serves, and the order of the apply hooks.
+   * - ``stack.ts``
+     - The layer stack the runtime shares, its lookups for the base page until the layers chunk loads, the layer link clicks, and the toasts.
+   * - ``forms.ts``
+     - Inline validation and the auto-submit of filter forms, shipped in the forms chunk.
    * - ``consent.ts``, ``scripts.ts``
      - Consent and the script manifest loader, shipped in the scripts chunk.
    * - ``poll.ts``
      - The zone poller, its interval groups, and the pause and resume on tab visibility, shipped in the poll chunk.
-   * - ``entries/scripts.ts``, ``entries/stream.ts``, ``entries/ws.ts``, ``entries/csrf.ts``, ``entries/poll.ts``, ``entries/dev.ts``
+   * - ``drain.ts``
+     - The queue that applies the fills of a streamed page or partial response in batches sized to a time budget and marks a boundary left ``loading`` as ``incomplete``, shipped in the boundaries bundle.
+       A document chunk carries its markup in a ``<template>`` the parser already streamed in, so the queue hands its nodes to the boundary operation and removes the template as the chunk is taken, landed or dropped.
+   * - ``defer.ts``
+     - The client-trip fetch, the retry and fetch controls, and the page reload a refused expired token asks for, shipped in the boundaries bundle.
+   * - ``reload.ts``
+     - The loading UI of a reloading zone and its boundary skeletons, shipped in the reload bundle.
+   * - ``more.ts``
+     - The pruning and the address writes of an infinite list, shipped in the more bundle.
+   * - ``reader.ts``
+     - The reader of a streamed response, shipped in the boundaries bundle.
+   * - ``layout.ts``
+     - The slot markers of the layout chain and the bounds a navigation target resolves to, shipped in the router bundle.
+   * - ``router.ts``
+     - The client router, its link and form takeover, the navigation request, the commit, the progress marks and bar, and the loading of the intent bundle, shipped in the router bundle.
+   * - ``history.ts``
+     - The history snapshots, the scroll restore, the scroll after a push, the memo of URLs that answered no envelope, and the memo of shared pages fetched as plain documents, shipped in the router bundle.
+   * - ``swap.ts``
+     - The focus move, the announcement, persisted elements, view transitions, page stylesheet retirement, the inline scripts a navigation runs, and the reading of a foreign ``text/html`` answer, shipped in the router bundle.
+       A foreign document is read through its ``data-next-init`` script and its ``data-next-layouts`` block, and one whose swapped region holds an inline script the swap would not run loads as a page.
+   * - ``prefetch.ts``
+     - The prefetch queue of the viewport and intent prefetch, the cache of prefetched answers, the answer a layer takes, and the stylesheets a landed answer fetches ahead, shipped in the intent bundle.
+   * - ``links.ts``
+     - The client pass of active links, shipped in the intent bundle.
+   * - ``submit.ts``
+     - The URL a ``GET`` form navigates to, built from its fields and its submit button, shipped in the router bundle.
+   * - ``entries/scripts.ts``, ``entries/stream.ts``, ``entries/ws.ts``, ``entries/csrf.ts``, ``entries/poll.ts``, ``entries/dev.ts``, ``entries/forms.ts``, ``entries/layers.ts``
      - The entry of each lazy chunk, one module per chunk named after it.
+   * - ``entries/boundaries.ts``, ``entries/reload.ts``, ``entries/more.ts``, ``entries/router.ts``, ``entries/intent.ts``
+     - The entry of each declared bundle.
 
 Configuration
 -------------
 
 Nothing configures the runtime from the browser side.
-``NEXT_JS_OPTIONS`` inside ``NEXT_FRAMEWORK`` decides how the bundle and the inline ``_init`` payload reach the page, over the ``auto``, ``manual``, and ``disabled`` injection policies and the three tag templates.
+``NEXT_JS_OPTIONS`` inside ``NEXT_FRAMEWORK`` decides how the bundle and the inline ``_init`` payload reach the page, over the ``auto``, ``manual``, and ``disabled`` injection policies and the four tag templates.
+The ``boundaries``, ``reload``, ``more``, and ``router`` bundles a page needs are declared by script tags right after the runtime, rendered through ``script_tag_template``, at the top of ``{% collect_scripts %}`` under ``manual`` and nowhere under ``disabled``.
 ``JS_CONTEXT_SERIALIZER`` decides how a context value is encoded on its way into ``Next.context``.
 See :doc:`settings` for both keys and :doc:`/content/topics/static-assets/js-context` for the full option table.
 

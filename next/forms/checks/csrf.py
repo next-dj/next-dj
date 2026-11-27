@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, cast
 
-from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.csrf import CsrfDelivery, csrf_delivery
 from next.forms.manager import form_action_manager
 from next.forms.nodes import FormNode

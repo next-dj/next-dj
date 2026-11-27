@@ -28,8 +28,8 @@ Advanced.
    ``BrokerBackend``, ``MemoryBroker``, ``RedisBroker``, ``ReplayingBroker``, ``Replay``, ``Message``, ``Position``, ``TopicStream``, ``publish``, ``apublish``, ``Presence``, ``PresenceBroker``, ``presence``, ``apresence``, ``BrokerConnectionError``, ``InvalidTopicError``, ``InvalidMemberError``, and ``TopicPayloadError`` are imported from ``next.realtime``.
    The WebSocket side adds ``WebSocketApp``, ``application``, ``TopicSocket``, and ``InvalidTicketError``.
    Upstream events add ``on`` and ``Upstream``.
-   ``TicketBinding``, ``SessionBinding``, and ``SignedCookieBinding`` choose what a ticket is bound to, and ``LiveIdentity`` is the identity a binding returns.
-   ``stored_session``, ``session_user``, ``session_alive``, and ``ticket_binding`` live in ``next.realtime.binding`` for binding authors.
+   ``SessionBinding`` and ``SignedCookieBinding`` choose what a ticket is bound to.
+   Their base ``TicketBinding`` and the ``LiveIdentity`` a binding returns live in ``next.identity``, beside ``stored_session``, ``session_user``, and ``session_alive`` for binding authors, and ``ticket_binding`` lives in ``next.realtime.binding``.
    ``SocketPort`` and ``Handshake`` live in ``next.realtime.socket``, ``TicketClaims`` and ``verify_ticket`` in ``next.realtime.tickets``, ``Close`` in ``next.realtime.frames``, and ``TicketIntrospectionView`` in ``next.realtime.views``.
    ``DjangoTunnel``, ``Tunnel``, and ``TunnelHints`` live in ``next.realtime.tunnel`` for gateway and tunnel authors.
    The realtime signals are imported from ``next.signals``, and the checks live in ``next.realtime.checks``.
@@ -54,7 +54,8 @@ Without it, selecting the backend is reported by ``manage.py check`` as ``next.E
 
 The in-memory backend is process-local.
 A multi-process production deployment must use a shared backend such as Redis, because the framework does not infer process count from the server configuration.
-``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149``, and a single-process deployment silences the code.
+``manage.py check --deploy`` reports a ``MemoryBroker`` or a subclass of it as ``next.W149`` once realtime is in use, meaning ``NEXT_FRAMEWORK`` sets a non-empty ``REALTIME`` mapping, an ``@on`` handler is registered, the URLconf routes the ticket introspection view, or a routed ``page.py`` holds a ``TopicStream``.
+A project that never touches realtime gets no warning, and a single-process deployment silences the code.
 
 ``OPTIONS.CLIENT`` is a mapping of keyword arguments passed whole to the Redis ``from_url`` call, for the synchronous and the asynchronous client.
 It overrides the defaults ``health_check_interval`` and ``socket_keepalive``, while ``decode_responses`` is always ``True``.
@@ -1139,7 +1140,7 @@ For a WebSocket the framework calls ``issue`` and ``respond`` at the negotiation
      - Returns a ``LiveIdentity`` for the session key of an SSE request, or ``None`` once the session is gone.
        It calls ``stored_session`` by default and serves SSE only.
 
-The ticket carries a digest of the subject under ``SECRET_KEY``, and ``verify_ticket`` accepts a digest made under any of ``SECRET_KEY_FALLBACKS`` as well.
+The subject salts the signature of the ticket, so a ticket verifies only for a credential that proves the same subject, and ``verify_ticket`` accepts a signature made under any of ``SECRET_KEY_FALLBACKS`` as well.
 ``Handshake.credential`` holds the credential of the binding and stays out of ``repr``.
 It is the session key only under ``SessionBinding``.
 A handler never sees it.
@@ -1147,7 +1148,7 @@ A handler never sees it.
 The digest is stable across reconnects of one user or visitor and never yields the credential back.
 It is empty when the credential proves no subject.
 The digest changes when ``SECRET_KEY`` rotates, and under ``SessionBinding`` it follows the session rather than the user, so a new login yields a new one.
-``stored_session(session_key)`` returns the ``LiveIdentity`` of a stored session, ``session_user(store)`` loads the user of a session without writing to it, and ``session_alive(session_key)`` tells whether the stored session is live.
+``stored_session(session_key)`` of ``next.identity`` returns the ``LiveIdentity`` of a stored session, ``session_user(store)`` loads the user of a session without writing to it, and ``session_alive(session_key)`` tells whether the stored session is live.
 A binding class is built once per dotted path and shared by every connection, so it keeps no per-connection state.
 
 ``SignedCookieBinding`` binds a signed-in user as ``user:<auth hash>:<pk>`` and an anonymous visitor as ``visitor:<id>``.
@@ -1166,7 +1167,7 @@ A subclass changes ``cookie_name`` or ``salt``.
 The binding works under any ``SESSION_ENGINE``.
 ``next.W147`` warns when a server-side engine runs next to it, because ``SessionBinding`` would recheck the stored session there.
 
-.. autoclass:: next.realtime.TicketBinding
+.. autoclass:: next.identity.TicketBinding
    :members:
 
 .. autoclass:: next.realtime.SessionBinding
@@ -1175,13 +1176,13 @@ The binding works under any ``SESSION_ENGINE``.
 .. autoclass:: next.realtime.SignedCookieBinding
    :members:
 
-.. autoclass:: next.realtime.LiveIdentity
+.. autoclass:: next.identity.LiveIdentity
 
-.. autofunction:: next.realtime.binding.stored_session
+.. autofunction:: next.identity.stored_session
 
-.. autofunction:: next.realtime.binding.session_user
+.. autofunction:: next.identity.session_user
 
-.. autofunction:: next.realtime.binding.session_alive
+.. autofunction:: next.identity.session_alive
 
 .. autofunction:: next.realtime.binding.ticket_binding
 

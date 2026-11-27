@@ -5,10 +5,17 @@ import pytest
 from django.test import RequestFactory
 
 from next.components import ComponentInfo, FileComponentsBackend, components_manager
+from next.components.registry import DeferredComponents
+from next.defer import boundary_settled
+from next.defer.markers import JobState
 from next.pages.manager import page
 from next.seeding import TEMPLATE_PATH_KEY
 from next.static import StaticCollector
-from next.testing import override_component_backends
+from next.testing import (
+    capture_signals,
+    override_component_backends,
+    rendering as rendering_module,
+)
 from next.testing.rendering import render_component_by_name, render_page
 from tests.support.components import components_config
 
@@ -253,3 +260,51 @@ class TestRenderComponentByNameFrame:
             )
 
         assert f"<i>{page_module}</i>" in html
+
+
+_DEFERRING_TEMPLATE = '{% load components %}<div>{% component "slow" n=1 %}</div>'
+
+
+class TestRenderComponentByNameDeferral:
+    """A nested deferred call settles, and a project that cannot defer pays nothing."""
+
+    @pytest.mark.usefixtures("fresh_deferred_components")
+    def test_a_nested_deferred_call_runs_as_a_job_and_settles(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "_components"
+        slow = root / "slow"
+        slow.mkdir(parents=True)
+        (slow / "component.djx").write_text("<b>slow {{ n }}</b>")
+        (slow / "loading.djx").write_text("<i>loading</i>")
+        (root / "outer.djx").write_text(_DEFERRING_TEMPLATE)
+
+        with (
+            override_component_backends(components_config(root)),
+            capture_signals(boundary_settled) as recorder,
+        ):
+            html = render_component_by_name("outer", at=tmp_path / "page.djx")
+
+        assert "<b>slow 1</b>" in html
+        assert "loading" not in html
+        (event,) = recorder.events
+        assert event.kwargs["name"] == "slow"
+        assert event.kwargs["state"] is JobState.READY
+
+    def test_a_project_without_a_deferred_component_opens_no_block(
+        self, tmp_path: Path, fresh_deferred_components: DeferredComponents
+    ) -> None:
+        root = tmp_path / "_components"
+        root.mkdir()
+        (root / "plain.djx").write_text("<b>plain</b>")
+
+        with (
+            override_component_backends(components_config(root)),
+            patch.object(
+                rendering_module, "render_deferred", side_effect=AssertionError
+            ),
+        ):
+            html = render_component_by_name("plain", at=tmp_path / "page.djx")
+
+        assert fresh_deferred_components.held is False
+        assert html == "<b>plain</b>"

@@ -1,8 +1,7 @@
-"""Pluggable router backend contract, file router, and backend factory."""
+"""Pluggable page backend contract, file router, and backend factory."""
 
 from __future__ import annotations
 
-import functools
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -11,17 +10,17 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, override
 from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
 
-from next.caches import DEFAULT_CACHE_SIZE
+from next.caches import DEFAULT_CACHE_SIZE, ROUTES, SETTINGS, memo
 from next.conf import next_framework_settings
 from next.intercept import Intercept, intercepts
 from next.pages import page
 from next.pages.loaders import has_body, load_page_module, renders_itself
+from next.ports import page_views_slot
 from next.utils import (
     InterceptPage,
     PageRoot,
     classify_dirs_entries,
     is_within,
-    on_forget_resolved_trees,
     resolve_base_dir,
     resolved_tree,
 )
@@ -71,7 +70,7 @@ def _tree_key(label: str, subdir: str) -> str:
     return f"{label}/{subdir}"
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@memo(SETTINGS, ROUTES, maxsize=DEFAULT_CACHE_SIZE)
 def _key_under(path: Path, base_dir: Path) -> str | None:
     """Return the posix path of a tree under the base directory, both resolved."""
     base = base_dir.resolve()
@@ -81,9 +80,6 @@ def _key_under(path: Path, base_dir: Path) -> str | None:
     if tree.is_relative_to(base):
         return tree.relative_to(base).as_posix()
     return None
-
-
-on_forget_resolved_trees(_key_under.cache_clear)
 
 
 def _dirs_root_key(path: Path) -> str | None:
@@ -148,7 +144,7 @@ class _RoutedView(Protocol):
     next_route_trail: str
 
 
-class RouterBackend(ABC):
+class PageBackend(ABC):
     """Pluggable source of `URLPattern` and `URLResolver` entries.
 
     A backend takes its own `PAGE_BACKENDS` entry as its single constructor argument.
@@ -179,6 +175,13 @@ class RouterBackend(ABC):
         """
         return frozenset()
 
+    def serves_page(self, pattern: URLPattern) -> bool | None:
+        """Whether a pattern of this backend serves a page, `None` when it cannot tell.
+
+        The client router owns a page and sends a probing request where it cannot tell.
+        """
+        return True if getattr(pattern.callback, "next_page_path", None) else None
+
 
 def _narrow_file_router_options(options: object) -> dict[str, Any]:
     """Keep only keys consumed by `next.pages` (e.g. `context_processors`)."""
@@ -193,7 +196,7 @@ def _narrow_file_router_options(options: object) -> dict[str, Any]:
     return {"context_processors": cp}
 
 
-class FileRouterBackend(RouterBackend):
+class FilePageBackend(PageBackend):
     """Discover `page.py` (and virtual pages) under app and optional root trees."""
 
     def __init__(self, config: Mapping[str, Any]) -> None:
@@ -456,7 +459,7 @@ class FileRouterBackend(RouterBackend):
             if pattern := self._page_pattern(url_path, file_path):
                 cast("_RoutedView", pattern.callback).next_route_trail = url_path
                 route_registered.send(
-                    sender=FileRouterBackend, url_path=url_path, file_path=file_path
+                    sender=FilePageBackend, url_path=url_path, file_path=file_path
                 )
                 routed.setdefault(url_path, file_path)
                 yield pattern
@@ -494,7 +497,7 @@ class FileRouterBackend(RouterBackend):
             return
         for rule in rules:
             intercept_registered.send(
-                sender=FileRouterBackend,
+                sender=FilePageBackend,
                 target_file=rule.target_file,
                 file_path=rule.file,
                 marker=rule.marker,
@@ -514,7 +517,9 @@ class FileRouterBackend(RouterBackend):
         A refused page stays unrouted rather than abort the URLconf, so the checks run.
         """
         try:
-            return page.create_url_pattern(trail, file_path, self._url_parser)
+            return page.create_url_pattern(
+                trail, file_path, self._url_parser, page_views_slot.get()
+            )
         except self._url_parser.parameter_error as exc:
             logger.warning(
                 "%s The page is not routed, and manage.py check reports it.", exc
@@ -537,4 +542,4 @@ class FileRouterBackend(RouterBackend):
         yield from dispatcher.walk(pages_path, on_intercept=on_intercept)
 
 
-__all__ = ["FileRouterBackend", "RouterBackend"]
+__all__ = ["FilePageBackend", "PageBackend"]

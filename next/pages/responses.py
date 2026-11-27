@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import enum
 import functools
 import logging
 import re
@@ -12,21 +13,25 @@ import reprlib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from http.cookies import Morsel, SimpleCookie
-from typing import TYPE_CHECKING, Any, Final, TypedDict, override
+from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict, overload, override
 
 from django.core.exceptions import ImproperlyConfigured
 from django.template.response import SimpleTemplateResponse
 from django.utils.cache import patch_cache_control, patch_vary_headers
 
-from next.caches import PageCache
+from next.caches import FRAMEWORK, PageCache
+from next.conf.compression import OPT_OUT
+from next.conf.sentinels import UNSET
 from next.conf.settings import fail_loudly
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token, nonce_minted
 from next.deps.cache import render_dep_cache
 from next.deps.resolver import current_resolver
-from next.diagnostics import FailureLog, degraded
+from next.diagnostics import FailureLog, degraded, degraded_status
+from next.pages.compression import page_compress
 from next.pages.loaders import AncestorStamps
 from next.pages.metadata.markers import NOINDEX_DIRECTIVES, Metadata, robots_directives
 from next.pages.metadata.resolve import published_metadata, robots_contents
+from next.requests import PrefetchDepth
 from next.site.headers import ROBOTS_HEADER, stamp_site_robots
 from next.utils import is_int
 
@@ -108,6 +113,17 @@ FORBIDDEN_HEADERS: Final = (
 )
 """The lower-cased header names a page may not set, because the framework sets them."""
 
+_GRANTS: Final = frozenset(
+    {
+        "public",
+        "max-age",
+        "s-maxage",
+        "stale-while-revalidate",
+        "stale-if-error",
+        "immutable",
+    }
+)
+"""The `Cache-Control` directives that let a cache keep a copy or serve it stale."""
 _SHARED: Final = frozenset({"public", "s_maxage"})
 _PERSONAL: Final = _SHARED | {"private"}
 _TOKEN: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
@@ -290,12 +306,14 @@ def headers_problems(value: object) -> list[str]:
 class ResponsePolicy:
     """The cache, headers and robots header of one page response, set before render.
 
-    `robots` is the static `X-Robots-Tag`, used when no head was rendered.
+    `robots` is the static `X-Robots-Tag` used when no head was rendered, and a false
+    `compress` keeps every response of the page out of next.dj compression.
     """
 
     cache: CacheControl | None = None
     headers: tuple[tuple[str, str], ...] = ()
     robots: str | None = None
+    compress: bool = True
 
     @property
     def shared(self) -> bool:
@@ -318,7 +336,7 @@ class _Declared:
     refused: bool = False
 
 
-_DECLARED: PageCache[Path, _Declared] = PageCache()
+_DECLARED: PageCache[Path, _Declared] = PageCache(depends=(FRAMEWORK,))
 
 
 def _merge_headers(merged: dict[str, tuple[str, str | None]], value: object) -> None:
@@ -345,12 +363,15 @@ def _read_declared(page: Page, file_path: Path) -> _Declared:
         (name, header) for name, header in merged.values() if header is not None
     )
     static = page.static_metadata(file_path)
-    uncached = ResponsePolicy(None, headers, _static_robots(static.metadata))
+    compress = page_compress(file_path) is not False
+    uncached = ResponsePolicy(
+        None, headers, _static_robots(static.metadata), compress=compress
+    )
     return _Declared(
         ancestors=ancestors,
         policy=replace(uncached, cache=cache_control(own)),
         uncached=uncached,
-        zone=ResponsePolicy(headers=headers),
+        zone=ResponsePolicy(headers=headers, compress=compress),
         dynamic=own if callable(own) else None,
         refused=static.refused,
     )
@@ -452,9 +473,129 @@ def _dynamic_cache(
     return NO_STORE
 
 
+class Purpose(enum.StrEnum):
+    """Why a page view rendered, which `request.next.purpose` names."""
+
+    DOCUMENT = "document"
+    NAVIGATE = "navigate"
+    PREFETCH = "prefetch"
+    SPECULATION = "speculation"
+
+
+@dataclass(frozen=True, slots=True)
+class RequestInfo:
+    """What next.dj tells user code about the request a page view serves."""
+
+    purpose: Purpose = Purpose.DOCUMENT
+    depth: PrefetchDepth | None = None
+
+
+NEXT_ATTR: Final = "next"
+"""The request attribute a page view sets, read by user code as `request.next`."""
+
+_INFOS: Final[dict[tuple[Purpose, PrefetchDepth | None], RequestInfo]] = {
+    key: RequestInfo(*key)
+    for key in (
+        (Purpose.DOCUMENT, None),
+        (Purpose.NAVIGATE, None),
+        (Purpose.SPECULATION, None),
+        (Purpose.PREFETCH, PrefetchDepth.SHELL),
+        (Purpose.PREFETCH, PrefetchDepth.FULL),
+    )
+}
+_DOCUMENT: Final = _INFOS[Purpose.DOCUMENT, None]
+
+
+class RequestNext:
+    """What next.dj keeps on one request, which user code reads as `request.next`.
+
+    User code reads `purpose` and `depth`, and `boundaries` holds the boundary state.
+    """
+
+    __slots__ = ("boundaries", "info")
+
+    def __init__(self, info: RequestInfo = _DOCUMENT) -> None:
+        """Hold `info` and no boundary state yet."""
+        self.info = info
+        self.boundaries: object = None
+
+    @property
+    def purpose(self) -> Purpose:
+        """Return why the page view rendered."""
+        return self.info.purpose
+
+    @property
+    def depth(self) -> PrefetchDepth | None:
+        """Return how much of the page a router prefetch asks for."""
+        return self.info.depth
+
+
+def _foreign(held: object) -> ImproperlyConfigured:
+    """Return the error for a value under `request.next` that next.dj did not set."""
+    return ImproperlyConfigured(
+        f"request.{NEXT_ATTR} holds a {type(held).__name__}, but next.dj owns the "
+        f"request.{NEXT_ATTR} attribute. Store the value under another name."
+    )
+
+
+def next_of(request: object) -> RequestNext:
+    """Return `request.next`, made on the first call as a document's."""
+    space = vars(request)
+    held = space.get(NEXT_ATTR)
+    if isinstance(held, RequestNext):
+        return held
+    if NEXT_ATTR in space:
+        raise _foreign(held)
+    made: RequestNext = space.setdefault(NEXT_ATTR, RequestNext())
+    return made
+
+
+@overload
+def mark_purpose(
+    request: HttpRequest, purpose: Literal[Purpose.PREFETCH], depth: PrefetchDepth
+) -> None: ...
+@overload
+def mark_purpose(
+    request: HttpRequest,
+    purpose: Literal[Purpose.DOCUMENT, Purpose.NAVIGATE, Purpose.SPECULATION],
+) -> None: ...
+def mark_purpose(
+    request: HttpRequest, purpose: Purpose, depth: PrefetchDepth | None = None
+) -> None:
+    """Point `request.next` at the shared info of `purpose` at `depth`.
+
+    Only a prefetch carries a depth, and any other pair is a `KeyError`.
+    """
+    next_of(request).info = _INFOS[purpose, depth]
+
+
+def _info(request: object) -> RequestInfo:
+    """Return the info `request.next` holds, a document's when no view set one."""
+    held = getattr(request, NEXT_ATTR, UNSET)
+    if isinstance(held, RequestNext):
+        return held.info
+    if held is UNSET:
+        return _DOCUMENT
+    raise _foreign(held)
+
+
+def purpose_of(request: object) -> Purpose:
+    """Return the purpose `request.next` names, a document when no view set one."""
+    return _info(request).purpose
+
+
+def depth_of(request: object) -> PrefetchDepth | None:
+    """Return the prefetch depth `request.next` names, `None` for any other request."""
+    return _info(request).depth
+
+
 _SHARED_RENDER_ATTR: Final = "_next_shared_render"
 _PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
+_BOUND_RENDER_ATTR: Final = "_next_bound_render"
 _COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
+
+RENDER_FLAGS: Final = (_PERSONAL_RENDER_ATTR, _BOUND_RENDER_ATTR, _COOKIE_VARY_ATTR)
+"""The flags a render sets on its request that keep the response private or varied."""
 
 
 def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
@@ -490,6 +631,19 @@ def personal_render(request: HttpRequest | None) -> bool:
     return getattr(request, _PERSONAL_RENDER_ATTR, False) is True
 
 
+def mark_bound_render(request: HttpRequest | None) -> None:
+    """Mark a render that minted a token bound to its visitor, sent private always."""
+    mark_personal_render(request)
+    if request is not None:
+        setattr(request, _BOUND_RENDER_ATTR, True)
+
+
+def _bound_private(response: HttpResponseBase, request: HttpRequest) -> None:
+    """Send a response holding a visitor-bound token private when nothing else did."""
+    if getattr(request, _BOUND_RENDER_ATTR, False) is True and _carries_cache(response):
+        patch_cache_control(response, private=True)
+
+
 def vary_on_cookie(request: HttpRequest | None) -> None:
     """Mark the response of `request` as one whose HTML depends on a cookie."""
     if request is not None:
@@ -499,11 +653,6 @@ def vary_on_cookie(request: HttpRequest | None) -> None:
 def cookie_varies(request: HttpRequest | None) -> bool:
     """Whether the HTML of this response depends on a cookie."""
     return getattr(request, _COOKIE_VARY_ATTR, False) is True
-
-
-def forget_response_policies(**kwargs: object) -> None:
-    """Drop the memoised policies, so a settings reload takes effect."""
-    _DECLARED.clear()
 
 
 def _warn_private(file_path: Path) -> None:
@@ -616,10 +765,11 @@ def _after_render(
 
     A render that read the visitor makes a shared response private.
     """
-    _seal(response, policy, request)
+    _finish(response, policy, request)
     cookies = response.cookies
     if isinstance(cookies, SharedCookies) and _personal(request, response):
         cookies.take_private()
+    _bound_private(response, request)
 
 
 def _carries_cache(response: HttpResponseBase) -> bool:
@@ -645,20 +795,39 @@ def _apply_cache(
         response.cookies = SharedCookies(response, control, file_path)
 
 
+def unshare(response: HttpResponseBase) -> None:
+    """Keep a later cookie from rewriting `Cache-Control`, once nothing may share it."""
+    cookies = response.cookies
+    if isinstance(cookies, SharedCookies):
+        cookies.shared = None
+
+
 def _hold_degraded(response: HttpResponseBase) -> None:
     """Send a page whose failure was contained with `Cache-Control: private, no-store`.
 
     The page lacks what the failing source would have added, so no cache may store it.
     """
-    cookies = response.cookies
-    if isinstance(cookies, SharedCookies):
-        cookies.shared = None
+    unshare(response)
     never_store(response)
 
 
+def _directive(part: str) -> str:
+    """Return the lower-cased name of one `Cache-Control` directive."""
+    return part.split("=", 1)[0].strip().lower()
+
+
 def never_store(response: HttpResponseBase) -> None:
-    """Send `response` as `private, no-store` alone, with no CDN cache header."""
-    _drop_cache_headers(response)
+    """Send `response` as `private, no-store`, with no CDN cache header.
+
+    A directive that grants no copy stays, such as the `no-transform` of a stream.
+    """
+    held = response.get("Cache-Control")
+    if held:
+        kept = (part.strip() for part in held.split(","))
+        response["Cache-Control"] = ", ".join(
+            part for part in kept if part and _directive(part) not in _GRANTS
+        )
+    drop_cdn_headers(response)
     NO_STORE.apply(response)
 
 
@@ -685,12 +854,17 @@ def _static_robots(meta: Metadata) -> str | None:
 
 
 def _stamp_headers(response: HttpResponseBase, policy: ResponsePolicy) -> None:
-    """Add the `headers` of the page, keeping every header the response already set."""
+    """Add the `headers` of the page, keeping every header the response already set.
+
+    A page that opts out of compression marks the response for every compressor.
+    """
     for name, value in policy.headers:
         response.headers.setdefault(name, value)
+    if not policy.compress:
+        setattr(response, OPT_OUT, False)
 
 
-def _seal(
+def _finish(
     response: HttpResponseBase, policy: ResponsePolicy, request: HttpRequest
 ) -> None:
     """Set the robots headers and the cookie `Vary`, then make a degraded page private.
@@ -710,6 +884,9 @@ def _seal(
         patch_vary_headers(response, ("Cookie",))
     if degraded():
         _hold_degraded(response)
+        status = degraded_status()
+        if status is not None:
+            response.status_code = status
 
 
 def finish_response[R: HttpResponseBase](
@@ -722,12 +899,13 @@ def finish_response[R: HttpResponseBase](
     _stamp_headers(response, policy)
     if policy.cache is not None and not degraded():
         _apply_cache(response, policy.cache, request, file_path)
+    _bound_private(response, request)
     if isinstance(response, SimpleTemplateResponse) and not response.is_rendered:
         response.add_post_render_callback(
             functools.partial(_after_render, policy, request)
         )
     else:
-        _seal(response, policy, request)
+        _finish(response, policy, request)
     return response
 
 
@@ -755,30 +933,41 @@ __all__ = [
     "CDN_HEADERS",
     "CSP_HEADERS",
     "FORBIDDEN_HEADERS",
+    "NEXT_ATTR",
     "NO_STORE",
+    "RENDER_FLAGS",
     "CacheControl",
     "CacheDict",
     "HeadersDict",
+    "PrefetchDepth",
+    "Purpose",
+    "RequestInfo",
+    "RequestNext",
     "ResponsePolicy",
     "SharedCookies",
     "cache_control",
     "cache_problems",
     "cookie_varies",
+    "depth_of",
     "drop_cdn_headers",
     "finish_response",
     "finish_zone_response",
-    "forget_response_policies",
     "headers_problems",
     "is_header_name",
     "is_header_value",
+    "mark_bound_render",
     "mark_personal_render",
+    "mark_purpose",
     "mark_shared_render",
     "never_store",
+    "next_of",
     "personal_render",
     "prepare_page_render",
+    "purpose_of",
     "response_policy",
     "robots_tag",
     "shared_render",
+    "unshare",
     "vary_on_cookie",
     "zone_policy",
 ]

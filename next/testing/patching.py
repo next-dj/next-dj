@@ -21,7 +21,7 @@ from next.static.manager import get_static_manager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Generator
 
     from django import forms as django_forms
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 @contextlib.contextmanager
-def override_next_settings(**overrides: object) -> Iterator[None]:
+def override_next_settings(**overrides: object) -> Generator[None]:
     """Merge `overrides` into `NEXT_FRAMEWORK` for the duration of the block.
 
     The merge is shallow, and `override_settings` fires the chain that reloads managers.
@@ -42,7 +42,7 @@ def override_next_settings(**overrides: object) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def override_dependency(name: str, value: object) -> Iterator[None]:
+def override_dependency(name: str, value: object) -> Generator[None]:
     """Bind `Depends(name)` to `value` for the block.
 
     Any previous dependency registered under `name` is restored on exit.
@@ -59,7 +59,7 @@ def override_dependency(name: str, value: object) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def override_provider(provider: ParameterProvider) -> Iterator[None]:
+def override_provider(provider: ParameterProvider) -> Generator[None]:
     """Prepend `provider` to the resolver's provider list for the block.
 
     Placed first, it wins over any auto-registered provider for the same parameter.
@@ -77,7 +77,7 @@ def override_form_action(
     handler: Callable[..., Any],
     *,
     form_class: type[django_forms.Form] | Callable[..., Any] | None = None,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Register `handler` as the named form action for the block.
 
     Snapshots the registry and diagnostics so no false collision outlives the block.
@@ -102,7 +102,7 @@ def override_form_action(
 
 
 @contextlib.contextmanager
-def override_component_backends(*configs: dict[str, Any]) -> Iterator[None]:
+def override_component_backends(*configs: dict[str, Any]) -> Generator[None]:
     """Replace `COMPONENT_BACKENDS` for the block.
 
     Goes through `override_next_settings`, so `components_manager` rebuilds.
@@ -123,7 +123,7 @@ class StaticCollectorProxy:
 @contextlib.contextmanager
 def patch_static_collector(
     factory: Callable[[], StaticCollector] | None = None,
-) -> Iterator[StaticCollectorProxy]:
+) -> Generator[StaticCollectorProxy]:
     """Replace `default_manager.create_collector` for the block.
 
     The yielded proxy holds the latest collector, so tests skip parsing HTML.

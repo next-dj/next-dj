@@ -3,19 +3,23 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from django.test import override_settings
 
 import next.components as next_components_mod
 import next.components.backends as backends_mod
 from next.components import (
     ComponentInfo,
+    ComponentsBackend,
     ComponentsManager,
     FileComponentsBackend,
     ModuleCache,
     ModuleLoader,
     component_extra_roots_from_config,
+    components_manager,
+    refresh_component_files,
 )
-from next.components.loading import last_load_error
+from next.components.modules import last_load_error
 from tests.support import (
     DUMMY_COMPONENTS_BACKEND,
     DummyComponentsBackend,
@@ -98,6 +102,22 @@ class TestComponentInfoDunders:
         assert a != object()
 
 
+class TestBackendVersion:
+    """A plan reads how the components of each backend moved."""
+
+    def test_a_backend_of_fixed_components_answers_zero(self) -> None:
+        assert DummyComponentsBackend({}).version == 0
+
+    def test_a_file_backend_follows_its_registry(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        backend = FileComponentsBackend(dict(min_component_config))
+        before = backend.version
+        (tmp_path / "card.djx").write_text("<p>x</p>")
+        backend.register_walked_folder(tmp_path, tmp_path, "")
+        assert backend.version > before
+
+
 class TestFileComponentsBackend:
     """Tests for FileComponentsBackend discovery and resolution."""
 
@@ -150,6 +170,38 @@ class TestFileComponentsBackend:
         assert info.name == "profile"
         assert not info.is_simple
         assert info.template_path == tmp_path / "profile" / "component.djx"
+
+    def test_a_refresh_swaps_in_a_boundary_file_that_appears(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """The watcher's refresh swaps the new files in, a render reads none."""
+        (tmp_path / "profile").mkdir()
+        (tmp_path / "profile" / "component.djx").write_text("<div>profile</div>")
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": [str(tmp_path)]}
+        )
+        template = tmp_path / "page.djx"
+        info = backend.get_component("profile", template)
+        assert info is not None
+        assert info.files is None
+        (tmp_path / "profile" / "loading.djx").write_text("<p>loading</p>")
+        assert backend.get_component("profile", template) is info
+        assert backend.refresh_files() is True
+        info = backend.get_component("profile", template)
+        assert info is not None
+        assert info.files is not None
+        assert info.files.loading is not None
+        assert info.files.loading.samefile(tmp_path / "profile" / "loading.djx")
+        assert backend.refresh_files() is False
+
+    def test_a_backend_not_discovered_yet_refreshes_nothing(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        backend = FileComponentsBackend(
+            {**min_component_config, "DIRS": [str(tmp_path)]}
+        )
+        assert backend.refresh_files() is False
+        assert backend._loaded is False
 
     def test_string_base_dir_normalized_for_discovery(self, tmp_path: Path) -> None:
         """``BASE_DIR`` as str is converted to ``Path`` for ``DIRS`` resolution."""
@@ -274,6 +326,29 @@ class TestFileComponentsBackend:
 
         assert paths == (comp_dir / "component.py",)
         assert load_spy.call_count == 1
+
+    @pytest.mark.parametrize(("module", "raised"), [(True, 1), (False, 0)])
+    def test_a_lazy_module_lets_pages_gather_from_the_start(
+        self, tmp_path: Path, min_component_config: dict, *, module: bool, raised: int
+    ) -> None:
+        """A module that loads mid-render may declare a mode, so the flag rises now."""
+        comp_dir = tmp_path / "late_c"
+        comp_dir.mkdir()
+        (comp_dir / "component.djx").write_text("<div/>")
+        if module:
+            (comp_dir / "component.py").write_text("x = 1\n")
+        config = {**min_component_config, "DIRS": [str(tmp_path)]}
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "COMPONENT_BACKENDS": [config],
+                    "LAZY_COMPONENT_MODULES": True,
+                }
+            ),
+            patch.object(backends_mod, "may_defer") as may_defer,
+        ):
+            FileComponentsBackend(config).discover()
+        assert may_defer.call_count == raised
 
     def test_discover_stays_lazy_while_the_import_hook_executes(
         self, tmp_path: Path, min_component_config: dict
@@ -429,6 +504,24 @@ class TestWatchRoots:
     def test_a_backend_that_names_no_tree_watches_nothing(self) -> None:
         """The contract default keeps an on-demand backend out of autoreload."""
         assert tuple(DummyComponentsBackend({}).watch_roots()) == ()
+
+    def test_a_backend_without_files_has_nothing_to_refresh(self) -> None:
+        """The contract default answers that no boundary file moved."""
+        assert DummyComponentsBackend({}).refresh_files() is False
+
+    def test_the_watcher_refreshes_every_backend(self) -> None:
+        """One changed backend makes the whole refresh answer that files moved."""
+        moved, still = (
+            MagicMock(spec=ComponentsBackend),
+            MagicMock(spec=ComponentsBackend),
+        )
+        moved.refresh_files.return_value = True
+        still.refresh_files.return_value = False
+        with patch.object(type(components_manager), "backends", new=[moved, still]):
+            assert refresh_component_files() is True
+        still.refresh_files.assert_called_once_with()
+        with patch.object(type(components_manager), "backends", new=[still]):
+            assert refresh_component_files() is False
 
     def test_the_file_backend_watches_its_dirs_without_scanning(
         self, tmp_path: Path, min_component_config: dict

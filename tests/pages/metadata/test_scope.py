@@ -213,10 +213,11 @@ class TestNoindexed:
     @override_settings(
         ALLOWED_HOSTS=["*"], NEXT_FRAMEWORK={"SITE": {"INDEXABLE": _live_only}}
     )
-    def test_the_request_names_the_host_the_rule_reads(self) -> None:
-        factory = RequestFactory()
-        preview = factory.get("/", HTTP_HOST="preview.acme.example")
-        live = factory.get("/", HTTP_HOST="acme.example")
+    def test_the_request_names_the_host_the_rule_reads(
+        self, rf: RequestFactory
+    ) -> None:
+        preview = rf.get("/", HTTP_HOST="preview.acme.example")
+        live = rf.get("/", HTTP_HOST="acme.example")
         assert noindexed(Metadata(), request=preview) is True
         assert noindexed(Metadata(), request=live) is False
         assert noindexed(Metadata()) is False

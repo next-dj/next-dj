@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
-from next.checks.common import RunMemo, discover_page_registrations, get_router_manager
+from next.checks.common import RunMemo, discover_page_registrations, get_route_manager
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.manager import page
 from next.pages.metadata.normalize import normalize_metadata
@@ -45,14 +45,14 @@ def loaded_metadata_pages() -> list[MetadataPage]:
 
     A router that fails to build returns no pages, since `next.E007` reports it once.
     """
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
     return _metadata_pages.get(
-        router_manager,
+        route_manager,
         lambda: [
             _metadata_page(url_path, page_path)
-            for url_path, page_path in discover_page_registrations(router_manager)
+            for url_path, page_path in discover_page_registrations(route_manager)
         ],
     )
 

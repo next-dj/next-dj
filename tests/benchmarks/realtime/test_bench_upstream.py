@@ -90,6 +90,7 @@ class TestBenchDispatch:
         assert run() is True
         assert handler.calls == before + 1
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="realtime.upstream")
     def test_sync_handler(
         self,

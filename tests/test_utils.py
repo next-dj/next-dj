@@ -2,7 +2,7 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 from django.apps import apps
@@ -10,21 +10,23 @@ from django.core.exceptions import AppRegistryNotReady
 from django.middleware.locale import LocaleMiddleware
 from django.template import Template
 from django.test import override_settings
+from django.utils.module_loading import import_string
 
-from next.errors import InvalidDirsError
+from next.caches import FRAMEWORK, SETTINGS
+from next.conf import next_framework_settings
+from next.errors import DurationError, InvalidDirsError
 from next.urls.dispatcher import scan_pages_tree
 from next.utils import (
     INTERCEPT_PATTERN,
+    MAX_DURATION,
     ROUTE_GROUP_PATTERN,
     InterceptPage,
     PageRoot,
     TreeSource,
-    after_fork,
     app_holding,
     child_nodelists,
     classify_dirs_entries,
     exec_module_file,
-    forget_app_holdings,
     int_between,
     is_dynamic_trail,
     is_int,
@@ -34,9 +36,13 @@ from next.utils import (
     is_within,
     join_trail,
     load_tree_source,
+    middleware_installed,
     middleware_listed,
+    misrooted,
     non_negative_number,
+    open_elements,
     page_roots_shape_error,
+    parse_duration,
     parse_intercept,
     positive_number,
     prefix_trail,
@@ -56,6 +62,7 @@ from tests.support.cases.grammar import (
     InterceptNameCase,
     InterceptResolveCase,
 )
+from tests.support.markup import PARSER_VOID
 
 
 _OVERSIZE_TARGET = "/search/?q=" + "\u044f" * 3000
@@ -173,6 +180,14 @@ class TestTemplateEditsWatched:
         assert template_edits_watched() is True
         with override_settings(DEBUG=False):
             assert template_edits_watched() is False
+        assert template_edits_watched() is True
+
+    def test_a_first_read_inside_an_override_reads_the_override(self) -> None:
+        with override_settings(DEBUG=True):
+            assert template_edits_watched() is True
+            with override_settings(DEBUG=False):
+                assert template_edits_watched() is False
+            assert template_edits_watched() is True
 
 
 class TestResolveBaseDir:
@@ -281,22 +296,6 @@ class TestTypePredicates:
     ) -> None:
         assert check(2**1023, float("inf")) is True
         assert check(10**400, float("inf")) is False
-
-
-class TestAfterFork:
-    def test_registers_the_reset_for_a_forked_child(self) -> None:
-        reset = Mock()
-        with patch.object(os, "register_at_fork", create=True) as register:
-            after_fork(reset)
-        register.assert_called_once_with(after_in_child=reset)
-
-    def test_does_nothing_where_the_platform_cannot_fork(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delattr(os, "register_at_fork", raising=False)
-        reset = Mock()
-        after_fork(reset)
-        reset.assert_not_called()
 
 
 class TestIsDynamicTrail:
@@ -1102,7 +1101,7 @@ class TestMiddlewareDetection:
         assert is_middleware("csp.missing.CSPMiddleware", "csp.missing.CSPMiddleware")
         assert not is_middleware(self.LOCALE, "csp.missing.CSPMiddleware")
 
-    def test_an_entry_fixed_after_a_failed_import_matches(
+    def test_an_entry_fixed_after_a_failed_import_matches_after_a_reload(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.syspath_prepend(tmp_path)
@@ -1113,13 +1112,56 @@ class TestMiddlewareDetection:
             "class Late(LocaleMiddleware):\n    pass\n"
         )
         importlib.invalidate_caches()
+        assert not is_middleware(entry, self.LOCALE)
+        next_framework_settings.reload()
         assert is_middleware(entry, self.LOCALE)
         sys.modules.pop("late_locale_middleware")
+
+    def test_a_failed_import_runs_once_per_settings_load(self) -> None:
+        entry = "missing.once.Middleware"
+        with patch("next.utils.import_string", wraps=import_string) as imported:
+            assert not is_middleware(entry, self.LOCALE)
+            assert not is_middleware(entry, self.LOCALE)
+        tried = [call for call in imported.call_args_list if call.args == (entry,)]
+        assert len(tried) == 1
 
     def test_a_list_holding_a_match_lists_the_base(self) -> None:
         assert middleware_listed(["a.B", f"{__name__}._Locale"], self.LOCALE)
         assert not middleware_listed(["a.B"], self.LOCALE)
         assert not middleware_listed([], self.LOCALE)
+
+
+class TestInstalledMiddleware:
+    """What `settings.MIDDLEWARE` lists is asked once per list the setting holds."""
+
+    LOCALE = "django.middleware.locale.LocaleMiddleware"
+
+    def test_one_list_is_scanned_once_per_base(self) -> None:
+        with override_settings(MIDDLEWARE=[self.LOCALE]):
+            assert middleware_installed(self.LOCALE) is True
+            with patch("next.utils.middleware_listed") as listed:
+                assert middleware_installed(self.LOCALE) is True
+            listed.assert_not_called()
+
+    def test_another_list_is_scanned_again(self) -> None:
+        with override_settings(MIDDLEWARE=[self.LOCALE]):
+            assert middleware_installed(self.LOCALE) is True
+            with override_settings(MIDDLEWARE=[]):
+                assert middleware_installed(self.LOCALE) is False
+            assert middleware_installed(self.LOCALE) is True
+
+    def test_an_unset_list_holds_nothing(self) -> None:
+        with override_settings(MIDDLEWARE=None):
+            assert middleware_installed(self.LOCALE) is False
+
+    def test_a_framework_settings_reload_scans_again(self) -> None:
+        with override_settings(MIDDLEWARE=[self.LOCALE]):
+            assert middleware_installed(self.LOCALE) is True
+            FRAMEWORK.move()
+            with patch("next.utils.middleware_listed", return_value=False) as listed:
+                assert middleware_installed(self.LOCALE) is False
+            listed.assert_called_once()
+            FRAMEWORK.move()
 
 
 class TestRedirectOrFallback:
@@ -1207,7 +1249,7 @@ class TestAppHolding:
         ):
             assert app_holding(app) == ("app", ".")
 
-    def test_the_answer_is_memoised_until_the_app_list_changes(self, tmp_path) -> None:
+    def test_the_answer_is_memoised_until_settings_move(self, tmp_path) -> None:
         app = tmp_path / "app"
         app.mkdir()
         with patch.object(
@@ -1216,7 +1258,114 @@ class TestAppHolding:
             assert app_holding(app) == ("app", ".")
         with patch.object(apps, "get_app_configs", return_value=[]):
             assert app_holding(app) == ("app", ".")
-            forget_app_holdings(setting="ROOT_URLCONF")
-            assert app_holding(app) == ("app", ".")
-            forget_app_holdings(setting="INSTALLED_APPS")
+            SETTINGS.move()
             assert app_holding(app) is None
+
+
+class TestOpenElements:
+    """The elements left open at the end of a markup, with their attributes."""
+
+    def test_the_open_elements_keep_their_attributes(self) -> None:
+        markup = "<UL class='a'><li id=x><!-- <b> --><br><i></i><title><p></title>"
+        assert open_elements(markup) == [("ul", " class='a'"), ("li", " id=x")]
+
+    @pytest.mark.parametrize("name", PARSER_VOID)
+    def test_a_void_element_stays_closed(self, name: str) -> None:
+        assert open_elements(f"<div><{name} x=1><p>") == [("div", ""), ("p", "")]
+
+    @pytest.mark.parametrize(
+        ("markup", "names"),
+        [
+            ("<title-bar><p>", ["title-bar", "p"]),
+            ("<script-loader x='1'><p>", ["script-loader", "p"]),
+            ("<textarea-x/><p>", ["textarea-x", "p"]),
+            ("<!--><p>", ["p"]),
+            ("<!---><p>", ["p"]),
+            ("<!-- <i> --!><p>", ["p"]),
+            ("<!-- <i>", []),
+            ("<div/><span>", ["div", "span"]),
+            ("<svg/><p>", ["p"]),
+            ("<svg><path/><g>", ["svg", "g"]),
+            ("<math><mi/>", ["math"]),
+            ("<svg><foreignObject><div/>", ["svg", "foreignobject", "div"]),
+            ("<svg><foreignObject><svg><path/>", ["svg", "foreignobject", "svg"]),
+            ("<div><xmp></div></xmp><p>", ["div", "p"]),
+            ("<iframe><b>", []),
+            ("<noscript><b>", []),
+        ],
+    )
+    def test_the_scan_reads_markup_as_a_browser_does(
+        self, markup: str, names: list[str]
+    ) -> None:
+        assert [name for name, _attrs in open_elements(markup)] == names
+
+
+class TestMisrooted:
+    """How a body misses the one root element its boundary adopts."""
+
+    @pytest.mark.parametrize(
+        ("body", "found"),
+        [
+            ("<li>a</li>", None),
+            ("<li>a</li><li>b</li>", "2 root elements"),
+            ("", "0 root elements"),
+            ("text", "loose text"),
+            ("<div>a</div><style-x></style-x><p>b</p>", "3 root elements"),
+            ("<title-bar>a</title-bar>", None),
+            ("<!--><p>a</p>", None),
+            ("<div/><p>a</p></div>", None),
+            ("<svg/><p>a</p>", "2 root elements"),
+            ("<svg><path/></svg>", None),
+            ("<noframes></p><i></noframes>", None),
+        ],
+    )
+    def test_misrooted_names_how_a_body_misses_one_root(
+        self, body: str, found: str | None
+    ) -> None:
+        assert misrooted(body) == found
+
+
+class TestParseDuration:
+    @pytest.mark.parametrize(
+        ("value", "seconds"),
+        [
+            (0, 0.0),
+            (3, 3.0),
+            (0.25, 0.25),
+            ("2s", 2.0),
+            ("1.5s", 1.5),
+            ("500ms", 0.5),
+            ("0ms", 0.0),
+            (86_400, 86_400.0),
+            ("86400s", 86_400.0),
+        ],
+    )
+    def test_a_usable_duration_reads_as_seconds(self, value, seconds) -> None:
+        assert parse_duration(value) == seconds
+
+    @pytest.mark.parametrize(
+        "value",
+        [True, None, [1], -1, float("inf"), float("nan"), "5", "2 s", "-2s", "2m", ""],
+    )
+    def test_an_unusable_duration_is_refused(self, value) -> None:
+        with pytest.raises(DurationError, match="duration"):
+            parse_duration(value)
+
+    @pytest.mark.parametrize(
+        ("value", "shown"),
+        [
+            pytest.param(86_401, "86401", id="above-a-day"),
+            pytest.param(86_400.5, "86400.5", id="float-above-a-day"),
+            pytest.param("86401s", "'86401s'", id="literal-above-a-day"),
+            pytest.param("9" * 400 + "s", "'99999", id="infinite-literal"),
+            pytest.param(10**400, "a very large integer", id="overflowing-integer"),
+            pytest.param(-(10**400), "a very large integer", id="negative-overflow"),
+        ],
+    )
+    def test_a_duration_past_one_day_is_refused(self, value, shown: str) -> None:
+        with pytest.raises(DurationError, match="up to one day") as caught:
+            parse_duration(value)
+        assert shown in str(caught.value)
+
+    def test_the_cap_is_one_day(self) -> None:
+        assert MAX_DURATION == 86_400

@@ -505,9 +505,9 @@ class TestModelInstanceNormalisation:
         assert resp.url == "/things/7/"
 
     def test_instance_without_canonical_url_falls_back_to_url_sniff(self) -> None:
-        resp = FormActionDispatch.ensure_http_response(_group_with(url="/legacy/"))
+        resp = FormActionDispatch.ensure_http_response(_group_with(url="/done/"))
         assert resp.status_code == 302
-        assert resp.url == "/legacy/"
+        assert resp.url == "/done/"
 
     def test_instance_without_any_url_warns(self) -> None:
         bare = Group(name="bare")

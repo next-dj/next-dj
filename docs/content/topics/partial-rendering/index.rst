@@ -13,7 +13,7 @@ A page with no zone still updates in place through the extract-morph default, wh
 Every form and link in this section is layered on the same ``POST`` then ``303`` then ``GET`` flow the framework already serves.
 An interaction the runtime intercepts therefore degrades to a full page cycle when JavaScript is off.
 Four mechanisms have no such fallback, because the runtime is what drives them.
-A ``lazy=`` zone stops at its placeholder, and a ``poll=`` zone renders once and never ticks.
+A component deferred with ``load``, ``visible`` or ``manual`` stops at its loading content, and a ``poll=`` zone renders once and never ticks.
 The stream bridge never opens.
 The ``toast``, ``layer.open``, ``layer.close``, and ``event`` verbs ship only inside an envelope no unscripted page asks for.
 
@@ -30,7 +30,7 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
 .. rubric:: The tutorial
 
 :doc:`scenarios`
-   Seven scenarios from task to markup to handler, from neighbouring forms and inline validation to an auto-submitting filter, pagination and infinite scroll, a live stream, a modal wizard that refreshes a list, and lazy zones.
+   Seven scenarios from task to markup to handler, from neighbouring forms and inline validation to an auto-submitting filter, pagination and infinite scroll, a live stream, a modal wizard that refreshes a list, and a table that loads when it scrolls into view.
 
 .. rubric:: Concepts
 
@@ -68,6 +68,7 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
 
 .. seealso::
 
+   :doc:`/content/topics/boundaries/index` for ``loading.djx``, ``error.djx``, the delivery modes of a component that loads later, and streamed pages.
    :doc:`/content/topics/realtime` for topics, replay, presence, and the WebSocket transport.
    :doc:`/content/security/csp-and-nonce` for serving the runtime under a Content Security Policy.
 

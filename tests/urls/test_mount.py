@@ -6,7 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import Client
 from django.urls import URLResolver, reverse
 
-from next.urls import page_reverse, pages, router_manager
+from next.urls import page_reverse, pages, route_manager
 from next.urls.backends import _installed_app_directories
 from next.urls.manager import _RoutedPages, routed_pages
 from next.urls.mount import MountedTree
@@ -36,11 +36,11 @@ def _ids_page(outer: str, inner: str) -> str:
 
 
 def _routed() -> list[tuple[str, str]]:
-    return [(str(pattern.pattern), pattern.name) for pattern in router_manager]
+    return [(str(pattern.pattern), pattern.name) for pattern in route_manager]
 
 
 def _roots() -> list[PageRoot]:
-    return [root for router in router_manager.backends for root in router.page_roots()]
+    return [root for router in route_manager.backends for root in router.page_roots()]
 
 
 def _status(*urls: str) -> list[int]:
@@ -116,7 +116,7 @@ class TestUnprefixedProjects:
         names = self._project(tmp_path)
 
         with installed_apps(tmp_path, *names):
-            views = [pattern.callback for pattern in router_manager]
+            views = [pattern.callback for pattern in route_manager]
 
         assert all(isinstance(view.next_route_trail, str) for view in views)
 
@@ -399,7 +399,7 @@ class TestMountedTree:
             again = list(tree)
             sliced = tree[0:1]
             size = len(tree)
-            router_manager.reload()
+            route_manager.reload()
             rebuilt = tree[0]
 
         assert isinstance(first, URLResolver)
@@ -416,7 +416,7 @@ class TestMountedTree:
             patterns = list(inner)
             reads = (len(inner), list(reversed(inner)), inner[1], inner[:1])
             token = inner.version_token()
-            version = router_manager.version
+            version = route_manager.version
             built_once = next(iter(inner)) is patterns[0]
 
         assert reads == (2, patterns[::-1], patterns[1], patterns[:1])
@@ -447,7 +447,7 @@ class TestRoutedPages:
             pages_.fit("next", ["a", "b"])
             pages_.fit("audit", ["c"])
             pages_.fit("next", ["a"])
-            router_manager.reload()
+            route_manager.reload()
             pages_.fit("audit", ["c"])
 
         assert sized == [2, 3, 2, 1]

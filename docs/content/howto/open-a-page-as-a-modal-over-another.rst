@@ -104,11 +104,33 @@ The runtime sends a zone request for ``/photo/7/`` with the name ``photo-modal``
 The photo page declares no such zone, so the intercept that declares it serves the request.
 A link without ``data-next-layer``, a reload, and a shared link all render the photo page.
 
+Show a loading state
+~~~~~~~~~~~~~~~~~~~~
+
+The modal opens at the click, before its answer arrives.
+A ``loading.photo-modal.djx`` beside the intercept template is what the modal shows until then.
+
+.. code-block:: jinja
+   :caption: gallery/pages/feed/(..)photo/[int:photo]/loading.photo-modal.djx
+
+   <article class="modal" aria-hidden="true">
+     <div class="skeleton skeleton-title"></div>
+     <div class="skeleton skeleton-image"></div>
+   </article>
+
+The feed carries the file in a ``<template>`` before its first link to a photo, so the modal shows it with no request of its own.
+It appears once 150 milliseconds pass without an answer, and ``data-next-delay="300ms"`` on the link waits longer.
+The file renders over the request alone, since the photo is not loaded yet.
+
+Under the client router the feed also prefetches the modal of a photo the pointer rests on or presses, and the modal opens filled.
+A modal whose page acts on a visit declares ``page.router(prefetch=False)`` in the ``page.py`` of the intercept, and the modal then waits for its own request.
+
 Verification
 ------------
 
 Click a photo in the feed.
 The modal shows the intercept template, the address bar reads ``/photo/7/``, and Back closes the modal.
+On a throttled connection the modal shows the loading state first and the photo replaces it.
 Reload the address and the full photo page renders with its own layout and head.
 
 List the routes.
@@ -131,6 +153,7 @@ The checks name a mistake that would leave the intercept silent.
 ``next.E162`` reports an ``obj=DObject[Model]`` whose kwarg the target route does not capture.
 ``next.W138`` reports a breadcrumb, ``headers``, or ``cache`` that a zone response never carries, and ``next.W139`` a ``layout.djx`` inside the intercept directory.
 ``next.W140`` reports an intercept that falls under the default login while its target is public.
+``next.W187`` reports a ``loading.photo-modal.djx`` whose zone no layer can open.
 
 See also
 --------
@@ -138,7 +161,8 @@ See also
 .. seealso::
 
    :doc:`/content/topics/access` for the access chains of an intercept.
-   :doc:`/content/topics/partial-rendering/layers` for the layer runtime and its titles.
+   :doc:`/content/topics/partial-rendering/layers` for the layer runtime, its titles, and its loading state.
+   :doc:`/content/topics/router/prefetch` for the prefetch of layer links.
    :doc:`/content/topics/partial-rendering/zones` for the ``{% zone %}`` tag.
    :doc:`/content/security/sessions-and-auth` for the security notes.
    :doc:`/content/ref/system-checks` for the intercept checks.

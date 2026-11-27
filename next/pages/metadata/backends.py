@@ -16,6 +16,7 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 
 from next.backends import resolve_setting_class
+from next.caches import FRAMEWORK, memo
 from next.diagnostics import FailureLog, isolated_build, mark_degraded
 
 from .markers import (
@@ -401,7 +402,7 @@ def metadata_renderer() -> MetadataRenderer:
     return renderer
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def _built_renderer() -> tuple[MetadataRenderer, bool]:
     """Build the configured renderer once, with whether it was replaced."""
     return isolated_build(_build_renderer)
@@ -419,16 +420,10 @@ def _build_renderer() -> MetadataRenderer:
     return HtmlMetadataRenderer()
 
 
-def forget_metadata_renderer(**kwargs: object) -> None:
-    """Drop the memoised renderer, so a settings reload takes effect."""
-    _built_renderer.cache_clear()
-
-
 __all__ = [
     "HtmlMetadataRenderer",
     "MetadataRenderer",
     "configured_renderer_class",
     "dump_jsonld",
-    "forget_metadata_renderer",
     "metadata_renderer",
 ]

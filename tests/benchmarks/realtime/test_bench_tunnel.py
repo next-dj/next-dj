@@ -62,6 +62,7 @@ def action_urls() -> Iterator[None]:
 class TestBenchTunnel:
     """Run one ``http`` frame through the tunnel and shape the reply."""
 
+    @pytest.mark.walltime()
     @pytest.mark.benchmark(group="realtime.tunnel")
     def test_round_trip(self, bench_loop: asyncio.AbstractEventLoop, benchmark) -> None:
         """Checks the frame, routes it on the pool, runs the app and reads the reply."""

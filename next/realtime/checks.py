@@ -3,20 +3,16 @@
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from next.checks import NEXT
-from next.checks.common import errors_for_unknown_keys
+from next.checks import NEXT, register
+from next.checks.common import errors_for_unknown_keys, get_route_manager
 from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
+from next.pages.loaders import load_python_module_memo
+from next.pages.scan import iter_existing_scanned_pages
 
 from .backends import BrokerBackend, MemoryBroker
 from .binding import binding_class
@@ -67,6 +63,7 @@ from .roster import (
     valid_window,
 )
 from .tickets import MAX_TICKET_AGE, valid_ticket_age, valid_ws_path
+from .topics import TopicStream
 from .views import TicketIntrospectionView
 
 
@@ -513,14 +510,19 @@ def _broker_class(broker: Mapping[str, object]) -> type[BrokerBackend] | None:
         return None
 
 
-@register(NEXT, deploy=True)
+@register(Tags.urls, NEXT, deploy=True)
 def check_shared_broker(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Warn when the broker keeps topics inside one process (`next.W149`)."""
+    """Warn when realtime is in use and the broker keeps topics in one process.
+
+    The code is `next.W149`, and a project that never touches realtime gets none.
+    """
     broker = scope_value("REALTIME", "BROKER")
     if not isinstance(broker, Mapping):
         return []
     backend_class = _broker_class(broker)
     if backend_class is None or not issubclass(backend_class, MemoryBroker):
+        return []
+    if not _realtime_in_use():
         return []
     return [
         DjangoWarning(
@@ -536,6 +538,49 @@ def check_shared_broker(*args: object, **kwargs: object) -> list[CheckMessage]:
             id="next.W149",
         )
     ]
+
+
+def _realtime_in_use() -> bool:
+    """Whether the project configures, routes, handles or streams realtime topics."""
+    raw = getattr(settings, USER_SETTING, None)
+    if isinstance(raw, Mapping) and raw.get("REALTIME"):
+        return True
+    return len(handler_registry) > 0 or _routes_tickets() or _streams_topics()
+
+
+def _routes_tickets() -> bool:
+    """Whether the URLconf routes the ticket introspection view or a subclass of it."""
+    if not getattr(settings, "ROOT_URLCONF", None):
+        return False
+    try:
+        views = list(_routed_views(get_resolver().url_patterns))
+    except (ImportError, ImproperlyConfigured):
+        return False
+    return any(map(_introspection, views))
+
+
+def _streams_topics() -> bool:
+    """Whether a routed `page.py` holds `TopicStream` or a subclass of it."""
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
+        return False
+    for page_path in iter_existing_scanned_pages(route_manager, set()):
+        module = load_python_module_memo(page_path)
+        if module is not None and any(map(_topic_stream, vars(module).values())):
+            return True
+    return False
+
+
+def _topic_stream(value: object) -> bool:
+    return isinstance(value, type) and issubclass(value, TopicStream)
+
+
+def _introspection(view: Callable[..., object]) -> bool:
+    """Whether `view` serves the ticket introspection view or a subclass of it."""
+    view_class = getattr(view, "view_class", None)
+    return isinstance(view_class, type) and issubclass(
+        view_class, TicketIntrospectionView
+    )
 
 
 @register(NEXT, deploy=True)

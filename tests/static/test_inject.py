@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextvars import copy_context
 from functools import partial
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
+from django.middleware.csrf import get_token
 from django.test import RequestFactory, override_settings
+from django.urls import NoReverseMatch
 
+from next.csrf import defer_token
+from next.defer.payload import partial_streams
 from next.diagnostics import QUIET_PERIOD, degraded, watch_degraded
-from next.ports import PortSlot
+from next.ports import PortList, ScriptShare
+from next.router.render import RouterRender, RouterScripts, router_render
 from next.static import (
     StaticAsset,
     StaticCollector,
@@ -18,9 +24,20 @@ from next.static import (
     StaticManager,
     default_kinds,
 )
-from next.static.collector import HEAD_CLOSE
+from next.static.collector import HEAD_CLOSE, default_placeholders
+from next.static.inject import (
+    SPLIT_NOTE,
+    _dropped as dropped_bundles,
+    _split_mark,
+    split_of,
+)
 from next.static.manager import _failures as manager_failures
-from next.static.runtime import CSRF_PAYLOAD_KEY, DEV_PAYLOAD_KEY
+from next.static.runtime import (
+    BUNDLE_NOTE,
+    CSRF_PAYLOAD_KEY,
+    DEV_PAYLOAD_KEY,
+    html_finish,
+)
 from next.static.serializers import JsonJsContextSerializer
 from next.testing import override_next_settings
 from tests.support import (
@@ -32,7 +49,7 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
     from django.http import HttpRequest
 
@@ -46,10 +63,13 @@ LAZY_CHUNKS = (
     '"scripts":"/static/next/next.scripts.min.js",'
     '"stream":"/static/next/next.stream.min.js",'
     '"csrf":"/static/next/next.csrf.min.js",'
-    '"poll":"/static/next/next.poll.min.js"'
+    '"poll":"/static/next/next.poll.min.js",'
+    '"forms":"/static/next/next.forms.min.js",'
+    '"layers":"/static/next/next.layers.min.js"'
 )
 CHUNKS = f'"$chunks":{{{LAZY_CHUNKS}}}'
 DEV_CHUNKS = f'"$chunks":{{{LAZY_CHUNKS},"dev":"/static/next/next.dev.min.js"}}'
+WIRE = ',"$version":"0","$protocol":2'
 
 HASHED = {
     "next/next.min.js": "/static/next/next.min.1a2b.js",
@@ -59,12 +79,16 @@ HASHED = {
     "next/next.csrf.min.js": "/static/next/next.csrf.min.9c0d.js",
     "next/next.poll.min.js": "/static/next/next.poll.min.1e2f.js",
     "next/next.dev.min.js": "/static/next/next.dev.min.5e6f.js",
+    "next/next.forms.min.js": "/static/next/next.forms.min.2a3b.js",
+    "next/next.layers.min.js": "/static/next/next.layers.min.4c5d.js",
 }
 HASHED_CHUNKS = (
     '"$chunks":{"scripts":"/static/next/next.scripts.min.3c4d.js",'
     '"stream":"/static/next/next.stream.min.7a8b.js",'
     '"csrf":"/static/next/next.csrf.min.9c0d.js",'
-    '"poll":"/static/next/next.poll.min.1e2f.js"}'
+    '"poll":"/static/next/next.poll.min.1e2f.js",'
+    '"forms":"/static/next/next.forms.min.2a3b.js",'
+    '"layers":"/static/next/next.layers.min.4c5d.js"}'
 )
 REQUEST_ONLY_BACKENDS = {
     "STATIC_BACKENDS": [
@@ -171,11 +195,11 @@ class TestInjectScriptsAuto:
             out = fresh_manager.inject(html, collector)
 
         assert "/static/next/next.min.js" in out
-        assert f'Next._init({{"user":"alice",{CHUNKS}}})' in out
+        assert f'Next._init({{"user":"alice",{CHUNKS}{WIRE}}})' in out
         assert f'<script src="{JS_URL}"></script>' in out
         assert SCRIPTS_PLACEHOLDER not in out
 
-    def test_an_unbound_scripts_port_adds_no_head_or_payload(
+    def test_no_provider_adds_no_head_or_provider_entry(
         self, fresh_manager: StaticManager
     ) -> None:
         collector = StaticCollector()
@@ -184,9 +208,7 @@ class TestInjectScriptsAuto:
             mock.patch(
                 "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
             ),
-            mock.patch(
-                "next.static.inject.page_scripts_slot", PortSlot("page scripts port")
-            ),
+            mock.patch("next.static.inject.page_scripts", PortList()),
         ):
             out = fresh_manager.inject(html, collector)
 
@@ -208,19 +230,76 @@ class TestInjectScriptsAuto:
         user_idx = out.index(JS_URL)
         assert next_idx < user_idx
 
-    def test_real_request_injects_csrf_payload(
-        self, fresh_manager: StaticManager
-    ) -> None:
+    def _payload(
+        self, manager: StaticManager, request: HttpRequest, *, streams: bool = False
+    ) -> str:
         collector = StaticCollector()
+        if streams:
+            collector.note(SPLIT_NOTE, None)
         html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
-        request = RequestFactory().get("/")
         with mock.patch(
             "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
         ):
-            out = fresh_manager.inject(html, collector, request=request)
-        assert '"$csrf"' in out
-        assert '"header":"X-Csrftoken"' in out
-        assert '"token":' in out
+            return manager.inject(html, collector, request=request)
+
+    def test_a_request_that_read_no_token_names_the_endpoint(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        request = RequestFactory().get("/")
+        out = self._payload(fresh_manager, request)
+        assert (
+            '"$csrf":{"header":"X-Csrftoken","url":"/_next/csrf/","cookie":"csrftoken"}'
+            in out
+        )
+        assert not request.META.get("CSRF_COOKIE_NEEDS_UPDATE")
+
+    def test_a_request_that_read_a_token_embeds_one(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        request = RequestFactory().get("/")
+        get_token(request)
+        out = self._payload(fresh_manager, request)
+        assert '"$csrf":{"header":"X-Csrftoken","token":' in out
+
+    def test_each_page_carries_its_own_entry_after_another(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        endpoint = '"$csrf":{"header":"X-Csrftoken","url":"/_next/csrf/"'
+        first = self._payload(fresh_manager, RequestFactory().get("/"))
+        again = self._payload(fresh_manager, RequestFactory().get("/"))
+        minting = RequestFactory().get("/")
+        get_token(minting)
+        minted = self._payload(fresh_manager, minting)
+        assert endpoint in first
+        assert endpoint in again
+        assert '"$csrf":{"header":"X-Csrftoken","token":' in minted
+
+    def test_a_streamed_page_mints_before_its_headers(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        request = RequestFactory().get("/")
+        out = self._payload(fresh_manager, request, streams=True)
+        assert '"$csrf":{"header":"X-Csrftoken","token":' in out
+        assert request.META["CSRF_COOKIE_NEEDS_UPDATE"]
+
+    @pytest.mark.parametrize("delivery", ["eager", "lazy"])
+    def test_the_other_modes_keep_their_rule(
+        self, fresh_manager: StaticManager, delivery: str
+    ) -> None:
+        request = RequestFactory().get("/")
+        with override_settings(NEXT_FRAMEWORK={"CSRF_DELIVERY": delivery}):
+            if delivery == "lazy":
+                defer_token(request)
+            out = self._payload(fresh_manager, request)
+        assert ('"token":' in out) is (delivery == "eager")
+
+    def test_an_unrouted_endpoint_embeds_the_token(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        request = RequestFactory().get("/")
+        with mock.patch("next.csrf.csrf_url", side_effect=NoReverseMatch):
+            out = self._payload(fresh_manager, request)
+        assert '"$csrf":{"header":"X-Csrftoken","token":' in out
 
     def test_missing_request_omits_csrf_payload(
         self, fresh_manager: StaticManager
@@ -232,7 +311,7 @@ class TestInjectScriptsAuto:
         ):
             out = fresh_manager.inject(html, collector)
         assert "$csrf" not in out
-        assert f"Next._init({{{CHUNKS}}})" in out
+        assert f"Next._init({{{CHUNKS}{WIRE}}})" in out
 
 
 class TestScriptsChunkUrl:
@@ -249,8 +328,8 @@ class TestScriptsChunkUrl:
             first = fresh_manager.inject(html, StaticCollector())
             second = fresh_manager.inject(html, StaticCollector())
         assert first == second
-        assert f"Next._init({{{HASHED_CHUNKS}}})" in first
-        assert url.call_count == 5
+        assert f"Next._init({{{HASHED_CHUNKS}{WIRE}}})" in first
+        assert url.call_count == 7
 
     def test_debug_names_the_hashed_dev_chunk_too(
         self, fresh_manager: StaticManager
@@ -265,7 +344,7 @@ class TestScriptsChunkUrl:
         ):
             out = fresh_manager.inject(html, StaticCollector())
         assert (
-            f'{HASHED_CHUNKS[:-1]},"dev":"/static/next/next.dev.min.5e6f.js"}}}})'
+            f'{HASHED_CHUNKS[:-1]},"dev":"/static/next/next.dev.min.5e6f.js"}}{WIRE}}})'
         ) in out
 
 
@@ -336,9 +415,9 @@ class TestChunksEncoding:
     def test_debug_and_back_switches_the_entry_each_way(
         self, fresh_manager: StaticManager
     ) -> None:
-        assert f"Next._init({{{CHUNKS}}})" in self.inject(fresh_manager)
+        assert f"Next._init({{{CHUNKS}{WIRE}}})" in self.inject(fresh_manager)
         assert DEV_CHUNKS in self.inject(fresh_manager, debug=True)
-        assert f"Next._init({{{CHUNKS}}})" in self.inject(fresh_manager)
+        assert f"Next._init({{{CHUNKS}{WIRE}}})" in self.inject(fresh_manager)
 
     def test_a_rebuilt_storage_encodes_the_new_url(
         self, fresh_manager: StaticManager
@@ -350,7 +429,7 @@ class TestChunksEncoding:
             side_effect=HASHED.__getitem__,
         ):
             out = fresh_manager.inject(self.HTML, StaticCollector())
-        assert f"{HASHED_CHUNKS}}})" in out
+        assert f"{HASHED_CHUNKS}{WIRE}}})" in out
 
     def test_another_serializer_encodes_it_again(
         self, fresh_manager: StaticManager
@@ -393,7 +472,7 @@ class TestInjectDevPayload:
 
     def test_debug_adds_dev_key(self, fresh_manager: StaticManager) -> None:
         out = self.inject(fresh_manager, StaticCollector(), debug=True)
-        assert f'Next._init({{"$dev":true,{DEV_CHUNKS}}})' in out
+        assert f'Next._init({{"$dev":true,{DEV_CHUNKS}{WIRE}}})' in out
 
     def test_debug_appends_dev_key_after_user_context(
         self, fresh_manager: StaticManager
@@ -401,7 +480,7 @@ class TestInjectDevPayload:
         collector = StaticCollector()
         collector.add_js_context("user", "alice")
         out = self.inject(fresh_manager, collector, debug=True)
-        assert f'Next._init({{"user":"alice","$dev":true,{DEV_CHUNKS}}})' in out
+        assert f'Next._init({{"user":"alice","$dev":true,{DEV_CHUNKS}{WIRE}}})' in out
 
     def test_debug_adds_dev_key_next_to_csrf_payload(
         self, fresh_manager: StaticManager
@@ -424,7 +503,7 @@ class TestInjectDevPayload:
         out = self.inject(fresh_manager, StaticCollector(), debug=False)
         assert "$dev" not in out
         assert "next.dev.min.js" not in out
-        assert f"Next._init({{{CHUNKS}}})" in out
+        assert f"Next._init({{{CHUNKS}{WIRE}}})" in out
 
     def test_no_debug_omits_dev_key_with_csrf_payload(
         self, fresh_manager: StaticManager
@@ -499,7 +578,7 @@ class TestReservedInitPayloadKeys:
         collector.add_js_context(DEV_PAYLOAD_KEY, False)
         out = self.inject(fresh_manager, collector, debug=False)
         assert DEV_PAYLOAD_KEY not in out
-        assert f"Next._init({{{CHUNKS}}})" in out
+        assert f"Next._init({{{CHUNKS}{WIRE}}})" in out
 
     def test_user_csrf_key_is_dropped_without_a_token_minting_request(
         self, fresh_manager: StaticManager
@@ -516,7 +595,7 @@ class TestReservedInitPayloadKeys:
         collector = StaticCollector()
         collector.add_js_context("user", "alice")
         out = self.inject(fresh_manager, collector, debug=False)
-        assert f'Next._init({{"user":"alice",{CHUNKS}}})' in out
+        assert f'Next._init({{"user":"alice",{CHUNKS}{WIRE}}})' in out
 
     def test_key_serializer_override_does_not_encode_the_framework_value(
         self, fresh_manager: StaticManager
@@ -637,6 +716,136 @@ class TestInjectMissingPlaceholders:
         html = "<html><body>plain</body></html>"
         out = fresh_manager.inject(html, collector)
         assert out == html
+
+    def test_a_layout_without_the_scripts_slot_mints_no_csrf_token(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        """No token reaches a page without the slot, so no cookie or `Vary` follows."""
+        request = RequestFactory().get("/")
+        html = f"<html><head>{STYLES_PLACEHOLDER}</head><body>plain</body></html>"
+        with mock.patch("next.csrf.get_token") as minted:
+            out = fresh_manager.inject(html, StaticCollector(), request=request)
+        assert out == "<html><head></head><body>plain</body></html>"
+        minted.assert_not_called()
+
+    def test_every_repeat_of_a_slot_token_is_filled(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        html = f"{STYLES_PLACEHOLDER}<p>{SCRIPTS_PLACEHOLDER}</p>{STYLES_PLACEHOLDER}"
+        out = fresh_manager.inject(html, collector)
+        assert out.count(CSS_URL) == 2
+        assert "<!-- next:" not in out
+
+    def test_a_comment_sharing_the_token_prefix_stays(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        html = f"<head><!-- next:other -->{STYLES_PLACEHOLDER}</head>"
+        out = fresh_manager.inject(html, StaticCollector())
+        assert out == "<head><!-- next:other --></head>"
+
+    def test_a_token_without_the_shared_prefix_is_filled_too(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with restored_static_registries():
+            default_placeholders.register("late", token="[[late]]")
+            default_kinds.register(
+                "late", extension=".late", slot="late", renderer="render_link_tag"
+            )
+            collector = StaticCollector()
+            collector.add(StaticAsset(url="", kind="late", inline="<i>late</i>"))
+            collector.add(StaticAsset(url=CSS_URL, kind="css"))
+            html = f"<p>[[late]]</p>{STYLES_PLACEHOLDER}<p>[[late]]</p>"
+            out = fresh_manager.inject(html, collector)
+        assert out.count("<i>late</i>") == 2
+        assert CSS_URL in out
+        assert "[[late]]" not in out
+        assert STYLES_PLACEHOLDER not in out
+
+
+class TestStreamSplit:
+    """A streamed render asks where its chunks go, the end of the scripts slot."""
+
+    def _split(self, manager: StaticManager, html: str) -> tuple[str, int | None]:
+        collector = StaticCollector()
+        collector.note(SPLIT_NOTE, None)
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            out = manager.inject(html, collector)
+        return out, split_of(collector)
+
+    def test_the_split_follows_the_last_scripts_slot(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        html = f"<head></head><p>{SCRIPTS_PLACEHOLDER}</p><p>x</p>{SCRIPTS_PLACEHOLDER}"
+        out, split = self._split(fresh_manager, html)
+        assert split is not None
+        assert out[:split].endswith("</script>\n")
+        assert SCRIPTS_PLACEHOLDER not in out
+        assert out.count("Next._init(") == 2
+        assert out[split:] == ""
+
+    def test_a_body_close_after_the_scripts_slot_takes_the_split(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        html = f"<head>{SCRIPTS_PLACEHOLDER}</head><body><p>x</p></body></html>"
+        out, split = self._split(fresh_manager, html)
+        assert out[split:] == "</body></html>"
+
+    def test_a_page_without_a_body_close_splits_at_its_end(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        out, split = self._split(fresh_manager, "<p>x</p>")
+        assert (out, split) == ("<p>x</p>", 8)
+
+    def test_page_text_that_looks_like_a_mark_stays_and_no_mark_leaks(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        text = "user\x00next-split\x00text"
+        html = f"<p>{text}</p>{SCRIPTS_PLACEHOLDER}<footer>{text}</footer></body>"
+        out, split = self._split(fresh_manager, html)
+        assert out.count(text) == 2
+        assert "\x00next-split-" not in out
+        assert split is not None
+        assert out[split:] == "</body>"
+
+    def test_an_unrouted_html_finishes_before_its_split(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        seen: list[str] = []
+
+        def finish(html: str) -> str:
+            seen.append(html)
+            return html.replace("<nav>", '<nav data-x="1">')
+
+        token = html_finish.set(finish)
+        try:
+            out, split = self._split(
+                fresh_manager, f"<body><nav></nav>{SCRIPTS_PLACEHOLDER}</body>"
+            )
+        finally:
+            html_finish.reset(token)
+        assert "\x00next-split-" in seen[0]
+        assert out.startswith('<body><nav data-x="1"></nav>')
+        assert out[split:] == "</body>"
+
+    def test_each_render_gets_its_own_mark(self) -> None:
+        assert _split_mark() != _split_mark()
+
+    def test_a_render_that_asks_nothing_gets_no_split(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        out = fresh_manager.inject(f"<body>{SCRIPTS_PLACEHOLDER}</body>", collector)
+        assert split_of(collector) is None
+        assert SCRIPTS_PLACEHOLDER not in out
+
+    def test_a_split_asked_for_reads_none_until_the_injector_answers(self) -> None:
+        collector = StaticCollector()
+        collector.note(SPLIT_NOTE, None)
+        assert split_of(collector) is None
 
 
 class TestInjectForwardsRequest:
@@ -772,6 +981,8 @@ class TestBackendRewritesEveryAssetUrl:
             mock.call("/static/next/next.stream.min.js", request=mock.ANY),
             mock.call("/static/next/next.csrf.min.js", request=mock.ANY),
             mock.call("/static/next/next.poll.min.js", request=mock.ANY),
+            mock.call("/static/next/next.forms.min.js", request=mock.ANY),
+            mock.call("/static/next/next.layers.min.js", request=mock.ANY),
         ]
         assert f'<script src="/pfx{NEXT_JS_URL}"></script>' in out
         assert f'<link rel="preload" as="script" href="/pfx{NEXT_JS_URL}">' in out
@@ -1044,3 +1255,623 @@ class TestChunkUrlsWithoutARewrite:
         assert second == first
         assert '"poll":"/static/next/next.poll.min.js?v=v1"' in second
         assert asset_url.call_args_list == [mock.call(NEXT_JS_URL, request=None)]
+
+
+BOUNDARIES_URL = "/static/next/next.boundaries.min.js"
+RELOAD_URL = "/static/next/next.reload.min.js"
+MORE_URL = "/static/next/next.more.min.js"
+
+
+class TestDeclaredBundles:
+    """A needed bundle is declared by a tag between the runtime and the init script."""
+
+    PAGE = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    @pytest.fixture(autouse=True)
+    def _rearmed(self):
+        manager_failures.clear()
+        dropped_bundles.clear()
+        yield
+        manager_failures.clear()
+        dropped_bundles.clear()
+
+    def _inject(
+        self,
+        manager: StaticManager,
+        needs: tuple[str, ...],
+        *,
+        urgent: bool = False,
+        streams: bool = False,
+        page: str = PAGE,
+    ) -> tuple[StaticCollector, str]:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            collector = manager.create_collector()
+            collector.add(StaticAsset(url=JS_URL, kind="js"))
+            if streams:
+                collector.note(SPLIT_NOTE, None)
+            for name in needs:
+                collector.require(name)
+            if urgent:
+                collector.require(needs[0], urgent=True)
+            return collector, manager.inject(page, collector)
+
+    def _marked(
+        self,
+        manager: StaticManager,
+        needs: tuple[str, ...],
+        *,
+        urgent: bool = False,
+        page: str = PAGE,
+    ) -> tuple[StaticCollector, str]:
+        token = partial_streams.set(True)
+        try:
+            return self._inject(manager, needs, urgent=urgent, page=page)
+        finally:
+            partial_streams.reset(token)
+
+    def test_a_need_lands_after_the_runtime_and_before_the_init(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("boundaries",))
+        runtime = f'<script src="{NEXT_JS_URL}"></script>\n'
+        bundle = f'<script async fetchpriority="low" src="{BOUNDARIES_URL}"></script>\n'
+        assert f"{runtime}{bundle}<script data-next-init>Next._init(" in out
+        assert out.index("Next._init(") < out.index(JS_URL)
+        assert out.count(BOUNDARIES_URL) == 1
+
+    def test_urgency_defers_every_bundle_of_the_page(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(
+            fresh_manager, ("more", "boundaries", "reload"), urgent=True
+        )
+        assert (
+            f'<script defer src="{MORE_URL}"></script>\n'
+            f'<script defer src="{BOUNDARIES_URL}"></script>\n'
+            f'<script defer src="{RELOAD_URL}"></script>\n'
+            "<script data-next-init>Next._init("
+        ) in out
+        assert "async" not in out
+
+    def test_a_streamed_page_loads_the_reader_and_urgent_bundles_at_once(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(
+            fresh_manager, ("boundaries", "reload"), urgent=True, streams=True
+        )
+        assert (
+            f'<script async src="{BOUNDARIES_URL}"></script>\n'
+            f'<script async src="{RELOAD_URL}"></script>\n'
+            "<script data-next-init>Next._init("
+        ) in out
+        assert " defer" not in out
+
+    def test_a_streamed_page_keeps_a_bundle_no_boundary_hurries_lazy(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("boundaries", "more"), streams=True)
+        assert f'<script async src="{BOUNDARIES_URL}"></script>\n' in out
+        assert f'<script async fetchpriority="low" src="{MORE_URL}"></script>' in out
+
+    def test_a_page_marked_for_streamed_partials_requires_the_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector, out = self._marked(fresh_manager, ("boundaries",), urgent=True)
+        assert collector.notes(BUNDLE_NOTE) == [BOUNDARIES_URL]
+        assert (
+            f'<script defer src="{BOUNDARIES_URL}"></script>\n<script data-next-init>Next._init('
+        ) in out
+        assert '"$stream":true' in out
+
+    def test_a_page_without_the_runtime_slot_requires_no_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector, out = self._marked(fresh_manager, (), page="<body></body>")
+        assert collector.notes(BUNDLE_NOTE) == ()
+        assert "next.boundaries" not in out
+
+    def test_a_manual_page_marked_for_streamed_partials_requires_no_reader(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with override_settings(NEXT_FRAMEWORK=MANUAL):
+            collector, out = self._marked(fresh_manager, ())
+        assert collector.notes(BUNDLE_NOTE) == ()
+        assert "next.boundaries" not in out
+
+    def test_no_need_renders_the_scripts_slot_unchanged(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ())
+        baseline = StaticCollector()
+        baseline.add(StaticAsset(url=JS_URL, kind="js"))
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            expected = fresh_manager.inject(self.PAGE, baseline)
+        assert out == expected
+        assert "next.boundaries" not in out
+
+    def test_the_payload_never_lists_a_declared_bundle(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        _, out = self._inject(fresh_manager, ("boundaries", "reload", "more"))
+        assert f"Next._init({{{CHUNKS}{WIRE}}})" in out
+
+    def test_the_tags_carry_the_page_nonce(self, fresh_manager: StaticManager) -> None:
+        with mock.patch("next.static.inject.resolve_nonce", return_value="n0"):
+            _, out = self._inject(fresh_manager, ("reload",))
+        assert (
+            f'<script async fetchpriority="low" src="{RELOAD_URL}" nonce="n0"></script>'
+        ) in out
+
+    def test_without_the_runtime_no_bundle_renders(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="next.static.inject")
+        with override_settings(NEXT_FRAMEWORK=DISABLED):
+            _, out = self._inject(fresh_manager, ("boundaries",))
+        assert "next.boundaries" not in out
+        assert JS_URL in out
+        [record] = [r for r in caplog.records if r.name == "next.static.inject"]
+        assert record.levelno == logging.DEBUG
+        assert BOUNDARIES_URL in record.getMessage()
+
+    def test_a_manual_page_declares_them_before_its_scripts(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="next.static.inject")
+        with override_settings(NEXT_FRAMEWORK=MANUAL):
+            _, out = self._inject(fresh_manager, ("boundaries",), urgent=True)
+        assert out.startswith(f'<body><script defer src="{BOUNDARIES_URL}"></script>\n')
+        assert out.index(BOUNDARIES_URL) < out.index(JS_URL)
+        assert "Next._init(" not in out
+        assert not [r for r in caplog.records if r.name == "next.static.inject"]
+
+    def test_a_page_without_the_scripts_slot_logs_the_drop(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="next.static.inject")
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            collector = fresh_manager.create_collector()
+            collector.require("reload")
+            out = fresh_manager.inject("<body></body>", collector)
+        assert out == "<body></body>"
+        [record] = [r for r in caplog.records if r.name == "next.static.inject"]
+        assert RELOAD_URL in record.getMessage()
+
+    def test_an_unbuilt_bundle_is_left_out(self, caplog) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_hashed_without("next/next.boundaries.min.js"),
+        ):
+            manager = StaticManager()
+            collector = manager.create_collector()
+            collector.require("boundaries", urgent=True)
+            out = manager.inject(self.PAGE, collector)
+        assert "next.boundaries" not in out
+        assert "<script data-next-init>Next._init(" in out
+        [message] = _records(caplog)
+        assert "next/next.boundaries.min.js" in message
+
+
+ROUTER_URL = "/static/next/next.router.min.js"
+INTENT_URL = "/static/next/next.intent.min.js"
+
+
+class _HeadScripts:
+    name = "head"
+    priority = 500
+    keys = frozenset({"$head"})
+
+    def applies(self) -> bool:
+        return True
+
+    def share(self, render: object) -> ScriptShare:
+        return ScriptShare(head="<script data-h></script>")
+
+
+class TestRoutedRender:
+    """Under the client router the injector encloses its output and loads the router."""
+
+    PAGE = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
+
+    @pytest.fixture(autouse=True)
+    def router_on(self) -> Iterator[None]:
+        with override_next_settings(ROUTER={"ENABLED": True}):
+            yield
+
+    def _inject(
+        self, manager: StaticManager, routed: RouterRender, *, streams: bool = False
+    ) -> tuple[StaticCollector, str]:
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ):
+                collector = manager.create_collector()
+                collector.add(StaticAsset(url=CSS_URL, kind="css"))
+                if streams:
+                    collector.note(SPLIT_NOTE, None)
+                return collector, manager.inject(self.PAGE, collector)
+        finally:
+            router_render.reset(token)
+
+    def test_every_filled_slot_is_enclosed(self, fresh_manager: StaticManager) -> None:
+        finished: list[str] = []
+
+        def finish(html: str) -> str:
+            finished.append(html)
+            return html.replace(routed.mark, "[]")
+
+        routed = RouterRender("5ea1", '{"scope":"all"}', finish)
+        collector, out = self._inject(fresh_manager, routed)
+        assert "<!--nx:a 5ea1--><link" in out
+        assert out.count("<!--/nx:a 5ea1-->") == 2
+        assert f'<script async src="{ROUTER_URL}"></script>' in out
+        assert (
+            f'"$router":{{"scope":"all","boundaries":"{BOUNDARIES_URL}",'
+            f'"intent":"{INTENT_URL}"}}}});</script>'
+            '<script type="application/json" data-next-layouts>[]</script>'
+        ) in out
+        assert f'src="{BOUNDARIES_URL}"' not in out
+        assert f'src="{INTENT_URL}"' not in out
+        assert routed.boundaries == BOUNDARIES_URL
+        assert routed.intent == INTENT_URL
+        assert routed.collector is collector
+        assert finished
+        assert routed.mark in finished[0]
+
+    @pytest.mark.parametrize(
+        ("missing", "attr", "fields"),
+        [
+            pytest.param(
+                "next/next.boundaries.min.js",
+                "boundaries",
+                f'"intent":"{INTENT_URL}"',
+                id="boundaries",
+            ),
+            pytest.param(
+                "next/next.intent.min.js",
+                "intent",
+                f'"boundaries":"{BOUNDARIES_URL}"',
+                id="intent",
+            ),
+        ],
+    )
+    def test_a_storage_without_a_bundle_leaves_it_out(
+        self, missing: str, attr: str, fields: str
+    ) -> None:
+        routed = RouterRender("5ea1", '{"scope":"all"}')
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                side_effect=_hashed_without(missing),
+            ):
+                manager = StaticManager()
+                out = manager.inject(self.PAGE, manager.create_collector())
+        finally:
+            router_render.reset(token)
+        assert f'"$router":{{"scope":"all",{fields}}}' in out
+        assert [
+            name for name in ("boundaries", "intent") if getattr(routed, name) is None
+        ] == [attr]
+
+    def test_a_collector_without_bundles_names_no_boundaries(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", '{"scope":"all"}')
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ):
+                out = fresh_manager.inject(self.PAGE, StaticCollector())
+        finally:
+            router_render.reset(token)
+        assert routed.boundaries is None
+        assert routed.intent is None
+        assert '"$router":{"scope":"all"}' in out
+
+    def test_a_page_out_of_snapshots_says_so_in_the_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", '{"scope":"all"}', snapshot=False)
+        _collector, out = self._inject(fresh_manager, routed)
+        assert f'"intent":"{INTENT_URL}","snapshot":false}}' in out
+
+    def test_a_stream_keeps_its_split_inside_the_enclosed_scripts(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", "{}")
+        collector, out = self._inject(fresh_manager, routed, streams=True)
+        split = split_of(collector)
+        assert split is not None
+        assert out[split:] == "</body>"
+        assert out[:split].endswith("<!--/nx:a 5ea1-->")
+
+    def test_the_unrouted_pass_stays_off_a_routed_render(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        unrouted: list[str] = []
+
+        def finish(html: str) -> str:
+            unrouted.append(html)
+            return html
+
+        token = html_finish.set(finish)
+        try:
+            self._inject(fresh_manager, RouterRender("5ea1", "{}", str.strip))
+        finally:
+            html_finish.reset(token)
+        assert unrouted == []
+
+    def test_an_empty_slot_is_left_bare(self, fresh_manager: StaticManager) -> None:
+        routed = RouterRender("5ea1", "{}")
+        token = router_render.set(routed)
+        try:
+            out = fresh_manager.inject("<p>x</p>", fresh_manager.create_collector())
+        finally:
+            router_render.reset(token)
+        assert out == "<p>x</p>"
+
+    def _routed(
+        self, manager: StaticManager, routed: RouterRender, collector: StaticCollector
+    ) -> str:
+        token = router_render.set(routed)
+        try:
+            with mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ):
+                return manager.inject(self.PAGE, collector)
+        finally:
+            router_render.reset(token)
+
+    def test_page_stylesheets_carry_the_asset_attribute(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.add(StaticAsset(url="", kind="css", inline="p{color:red}"))
+        collector.add(StaticAsset(url=JS_URL, kind="js"))
+        out = self._routed(fresh_manager, RouterRender("5ea1", "{}"), collector)
+        assert f'<link data-next-asset="page" rel="stylesheet" href="{CSS_URL}">' in out
+        assert '<style data-next-asset="page">p{color:red}</style>' in out
+        assert f'<script src="{JS_URL}"></script>' in out
+
+    def test_a_tag_without_an_element_stays_as_rendered(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        with mock.patch.object(
+            fresh_manager.default_backend, "render_link_tag", return_value="plain"
+        ):
+            out = self._routed(fresh_manager, RouterRender("5ea1", "{}"), collector)
+        assert "<!--nx:a 5ea1-->plain<!--/nx:a 5ea1-->" in out
+
+    def test_the_head_carries_the_speculation_rules(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        routed = RouterRender("5ea1", "{}", speculation='{"prefetch":[]}')
+        out = self._routed(fresh_manager, routed, StaticCollector())
+        head = out.split("</head>")[0]
+        assert (
+            '<!--nx:a 5ea1--><script type="speculationrules">{"prefetch":[]}</script>'
+            "<!--/nx:a 5ea1-->"
+        ) in head
+
+    def test_the_rules_come_before_the_head_scripts(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        listed = PortList[Any]()
+        listed.register(_HeadScripts())
+        listed.register(RouterScripts())
+        routed = RouterRender("5ea1", "{}", speculation="{}")
+        with mock.patch("next.static.inject.page_scripts", listed):
+            out = self._routed(fresh_manager, routed, StaticCollector())
+        assert (
+            '<script type="speculationrules">{}</script>\n<script data-h></script>'
+        ) in out
+
+
+class _Provider:
+    """A page script provider handing back a fixed share, counted per call."""
+
+    def __init__(
+        self,
+        name: str,
+        priority: int,
+        share: ScriptShare | None,
+        *,
+        applies: bool = True,
+        keys: frozenset[str] = frozenset(),
+    ) -> None:
+        self.name = name
+        self.priority = priority
+        self.keys = keys
+        self._share = share
+        self._applies = applies
+        self.applied = 0
+        self.seen: list[object] = []
+
+    def applies(self) -> bool:
+        self.applied += 1
+        return self._applies
+
+    def share(self, render: object) -> ScriptShare | None:
+        self.seen.append(render)
+        return self._share
+
+
+class TestPageScriptProviders:
+    """The injector runs every provider in rank order and knows none of them."""
+
+    PAGE = (
+        f"<head>{STYLES_PLACEHOLDER}</head><body><p>x</p>{SCRIPTS_PLACEHOLDER}</body>"
+    )
+
+    def _inject(
+        self,
+        manager: StaticManager,
+        *providers: _Provider,
+        collector: StaticCollector | None = None,
+        page: str = PAGE,
+    ) -> str:
+        listed = PortList[Any]()
+        for provider in providers:
+            listed.register(provider)
+        with (
+            mock.patch("next.static.inject.page_scripts", listed),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+            ),
+        ):
+            return manager.inject(page, collector or manager.create_collector())
+
+    def test_the_parts_of_every_share_merge_in_rank_order(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        late = _Provider(
+            "late",
+            2,
+            ScriptShare(
+                head="<meta late>",
+                entries={"$late": 2},
+                shared='"$b":2',
+                after=lambda nonce: f"<i late {nonce}>",
+            ),
+        )
+        early = _Provider(
+            "early",
+            1,
+            ScriptShare(
+                head="<meta early>",
+                entries={"$early": 1},
+                shared='"$a":1',
+                after="<i early>".format,
+            ),
+        )
+        out = self._inject(fresh_manager, late, early)
+        assert "<meta early>\n<meta late>\n" in out.split("</head>")[0]
+        payload = out.split("Next._init(", 1)[1].split(");</script>", 1)[0]
+        assert list(json.loads(payload)) == ["$early", "$late", "$chunks", "$a", "$b"]
+        assert ");</script><i early><i late None>\n" in out
+
+    def test_a_provider_that_does_not_apply_is_never_asked(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        off = _Provider("off", 1, ScriptShare(head="<meta off>"), applies=False)
+        first = self._inject(fresh_manager, off)
+        listed = PortList[Any]()
+        listed.register(off)
+        with mock.patch("next.static.inject.page_scripts", listed):
+            fresh_manager.inject(self.PAGE, fresh_manager.create_collector())
+            fresh_manager.inject(self.PAGE, fresh_manager.create_collector())
+        assert "<meta off>" not in first
+        assert off.seen == []
+        assert off.applied == 2
+
+    def test_a_render_every_provider_skips_keeps_the_bare_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        idle = _Provider("idle", 1, None)
+        out = self._inject(fresh_manager, idle)
+        assert f"Next._init({{{CHUNKS}}})" in out
+        assert len(idle.seen) == 1
+
+    def test_the_render_names_the_page_and_its_runtime(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        reader = _Provider("reader", 1, None)
+        collector = fresh_manager.create_collector()
+        collector.note(SPLIT_NOTE, None)
+        self._inject(fresh_manager, reader, collector=collector)
+        [render] = reader.seen
+        assert render.collector is collector
+        assert render.runtime is True
+        assert render.streams is True
+        assert render.page_path is None
+        assert render.request is None
+        assert render.bundle_url("router") == ROUTER_URL
+
+    def test_a_render_without_bundles_resolves_none(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        reader = _Provider("reader", 1, ScriptShare(eager=("router",)))
+        collector = StaticCollector()
+        out = self._inject(fresh_manager, reader, collector=collector)
+        [render] = reader.seen
+        assert render.bundle_url("router") is None
+        assert "next.router" not in out
+
+    def test_a_provider_key_is_kept_from_the_page_context(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        owner = _Provider(
+            "owner", 1, ScriptShare(entries={"$own": "x"}), keys=frozenset({"$own"})
+        )
+        collector = fresh_manager.create_collector()
+        collector.add_js_context("$own", "page")
+        out = self._inject(fresh_manager, owner, collector=collector)
+        assert '"$own":"x"' in out
+        assert '"page"' not in out
+        assert owner.seen[0].entries == {"$own": "x"}
+
+    def test_the_eager_bundles_open_the_declared_ones(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        needs = _Provider("needs", 1, ScriptShare(bundles=("more",), eager=("router",)))
+        out = self._inject(fresh_manager, needs)
+        router = f'<script async src="{ROUTER_URL}"></script>\n'
+        more = '<script async fetchpriority="low" src="/static/next/next.more.min.js">'
+        assert f"{router}{more}" in out
+
+    def test_a_listed_chunk_joins_the_chunks(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        lister = _Provider("lister", 1, ScriptShare(listed=frozenset({"ws"})))
+        out = self._inject(fresh_manager, lister)
+        assert '"ws":"/static/next/next.ws.min.js"' in out
+
+    def test_enclosures_stylesheet_marks_and_passes_run_in_rank_order(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        def finish(tag: str) -> Callable[[str], str]:
+            return lambda html: f"{html}<{tag}>"
+
+        first = _Provider(
+            "first",
+            1,
+            ScriptShare(enclose="[{}]".format, finish=finish("a"), stylesheet=" a"),
+        )
+        second = _Provider(
+            "second",
+            2,
+            ScriptShare(enclose="({})".format, finish=finish("b"), stylesheet=" b"),
+        )
+        collector = fresh_manager.create_collector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        out = self._inject(fresh_manager, first, second, collector=collector)
+        assert f'([<link a b rel="stylesheet" href="{CSS_URL}">])' in out
+        assert out.endswith("</body><a><b>")
+
+    def test_a_replaced_list_is_read_afresh(self, fresh_manager: StaticManager) -> None:
+        one = _Provider("one", 1, ScriptShare(head="<meta one>"))
+        two = _Provider("two", 1, ScriptShare(head="<meta two>"))
+        assert "<meta one>" in self._inject(fresh_manager, one)
+        assert "<meta two>" in self._inject(fresh_manager, two)
+
+    def test_a_share_without_an_enclosure_leaves_the_slots_bare(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        marker = _Provider("marker", 1, ScriptShare(stylesheet=" m", finish=str.strip))
+        collector = fresh_manager.create_collector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        out = self._inject(fresh_manager, marker, collector=collector)
+        assert f'<link m rel="stylesheet" href="{CSS_URL}">' in out
+        assert out == out.strip()

@@ -138,7 +138,7 @@ See :doc:`/content/topics/forms/backends` for the two customisation layers and t
 
 .. warning::
 
-   ``FormActionBackend.shape_response`` routes partial requests through the patch-envelope shaping first, so this override restamps patch envelopes too.
+   ``FormActionBackend.shape_response`` asks the backend's response shaper first, which builds the patch envelope of a partial request, so this override restamps patch envelopes too.
    Gate the status change on ``not is_partial_request(request)`` from ``next.partial`` to keep the partial wire contract at 200.
 
 Surface actions to the system checks
@@ -159,6 +159,7 @@ A from-scratch backend overrides the hook so its actions participate in checks s
 
    class CustomBackend(FormActionBackend):
        def __init__(self, config: dict[str, Any] | None = None) -> None:
+           super().__init__(config)
            self._config = config or {}
            self._metas: dict[str, ActionMeta] = {}
 
@@ -168,6 +169,34 @@ A from-scratch backend overrides the hook so its actions participate in checks s
 The fragment shows only the storage and the hook.
 A from-scratch backend also implements the four abstract methods ``register_action``, ``get_action_url``, ``generate_urls``, and ``dispatch``, which fill and consume ``self._metas``.
 The yielded dicts carry the required ``name``, ``uid``, ``file_path``, and ``scope`` keys, the target, and the access ``guard``, the same shape ``get_meta`` returns.
+
+Mount a view of your own
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+A backend whose ``generate_urls`` mounts its own view applies ``next.transactions.skip_atomic_requests`` to the final callable, after every decorator, so ``ATOMIC_REQUESTS`` leaves it alone.
+The view then opens the transaction itself, the one ``atomic_scope`` names for the action under the ``TRANSACTIONS`` rule and its ``atomic`` choice.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from django.http import HttpRequest, HttpResponseBase
+   from django.urls import URLPattern, path
+   from django.views.decorators.http import require_POST
+
+   from next.forms import FormActionBackend
+   from next.requests import RequestKind
+   from next.transactions import atomic_scope, request_atomic, skip_atomic_requests
+
+   class CustomBackend(FormActionBackend):
+       def generate_urls(self) -> list[URLPattern]:
+           view = require_POST(self.dispatch)
+           return [path("_custom/form/<str:uid>/", skip_atomic_requests(view))]
+
+       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
+           meta = self._metas[uid]
+           scope = atomic_scope(request, RequestKind.ACTION, meta.get("atomic"))
+           with request_atomic(scope):
+               return self._run(request, meta)
 
 Verification
 ------------
@@ -186,6 +215,7 @@ A ``FORM_ACTION_BACKENDS`` value that is not a list fires ``next.E044``.
 An entry that is not a dict fires ``next.E058``, and an entry whose ``BACKEND`` is not a string fires ``next.E059``.
 A dotted path that cannot be imported fires ``next.E068``.
 A backend class outside the ``FormActionBackend`` family fires ``next.E045``.
+An ``OPTIONS["SHAPER"]`` that names no buildable ``ResponseShaper`` class fires ``next.E241``.
 
 See also
 --------

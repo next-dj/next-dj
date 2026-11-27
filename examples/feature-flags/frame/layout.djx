@@ -3,9 +3,9 @@
 {% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj flags" brand_href="/" brand_icon="🚩" %}
-    {% #slot "actions" %}
+    {% #slot "nav" %}
       {% component "nav_link" url_name="next:page_" label="Active" variant="bar" %}
-      {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="Admin" variant="bar" %}
+      {% component "nav_link" url_name="next:page_admin" label="Admin" variant="bar" %}
       {% component "nav_link" url_name="next:page_demo" label="Demo" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}

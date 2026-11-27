@@ -3,7 +3,7 @@
 Partial rendering reference
 ===========================
 
-The envelope fields, the patch verbs, the request and response headers, the ``data-next-*`` attributes, and the ``PARTIAL_BACKENDS`` settings, in tables.
+The envelope fields, the patch verbs, the request and response headers, the ``{% more %}`` options, the ``data-next-*`` attributes, and the ``PARTIAL_BACKENDS`` settings, in tables.
 For the narrative behind any of these, read the scenario that uses it in :doc:`scenarios`.
 
 .. contents::
@@ -142,8 +142,8 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
      - ``detail: {}``
    * - ``toast``
      - ``toast()``
-     - Show a toast, sugar over ``event`` with a built-in container.
-       The text is set as ``textContent`` and never parsed as HTML.
+     - Show a toast in the page's ``[data-next-toasts]`` tray, or in one the runtime builds when the page renders none.
+       The text is set as ``textContent`` and never parsed as HTML, and the item goes through the mount pass, so ``onMount`` and ``next:mounted`` reach it.
      - ``variant: "info"``
    * - ``layer.open``
      - ``layer_open()``
@@ -159,6 +159,7 @@ Pass ``request`` whenever one exists, so the asset URLs of the envelope stay sco
      - ``push_url()``, ``replace_url()``
      - Push or replace the browser history entry, with ``action: "push"`` or ``action: "replace"``.
        The href is validated by the server, and the write waits for the envelope to commit, so one ``next:navigated`` announces it.
+       An operation with ``quiet: true`` writes the address without announcing a page view, which is how a ``{% more %}`` batch records its position.
      - ``action: "push"``
    * - ``visit``
      - ``redirect()``
@@ -202,6 +203,7 @@ A handler that returns ``None`` under the runtime also drains the pending :doc:`
 The drained variants are ``info``, ``success``, ``warning``, and ``error``, with ``debug`` mapped to ``info``.
 An action that already sets ``Meta.success_message`` therefore shows a toast without a builder call.
 Draining marks the messages read, so a later full navigation does not replay them.
+The opposite direction runs on a request without the runtime, where ``response`` adds every queued ``toast`` to the messages framework before its 303, see :ref:`partial-toasts-without-runtime`.
 
 A verb beyond this set is registered on both sides.
 ``register_patch_op("confetti")`` on the server registers the name and earns the generic ``op()`` channel on the builder.
@@ -295,9 +297,13 @@ A target off that origin is refused before any request leaves, with a ``partial:
      - Pagination
      - ``append`` or ``prepend``, the merge intent.
    * - ``X-Next-Version``
-     - Every request once a version is learned
-     - The asset version the client holds.
-       The first request of a page asserts none.
+     - Every request of a page whose payload names a version
+     - The asset version the page was rendered with, read from ``$version`` of the init payload, so the first request after a deploy asserts it too.
+       A safe zone request naming another version answers an empty ``409``.
+   * - ``X-Next-Protocol``
+     - Every request
+     - The wire protocol the runtime speaks, ``PROTOCOL`` of ``next.partial.stream``.
+       A zone request naming another answers an empty ``409``, and a hello frame or a ``$protocol`` payload naming another makes the runtime reload the page once.
    * - ``X-Next-Request-Id``
      - Every non-abortable mutation
      - The ring id used to suppress an SSE echo.
@@ -309,6 +315,7 @@ A target off that origin is refused before any request leaves, with a ``partial:
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
        The server validates the value as sent as a same-site path, then splits off the query and decodes the path as Django decodes ``request.path``.
        A header that does not resolve to a page falls back to the posted form origin.
+       A client router navigation sends it too, naming the page it leaves, see :doc:`/content/ref/router`.
    * - CSRF header
      - Every unsafe method once the runtime holds a token
      - The name comes from ``CSRF_HEADER_NAME``, the token from the ``$csrf`` init payload, from ``/_next/csrf/`` when the payload defers it, and from any later rotation meta, and the cookie is never read.
@@ -334,10 +341,7 @@ Server to client.
      - ``application/vnd.next.patches+json``, the marker the runtime keys on.
    * - ``Vary``
      - Every response from a zone-capable URL
-     - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set on every envelope, on the 400 and 409 short-circuits, on a wizard advance, and on an SSE stream, so a shared cache never hands one intent's envelope to another.
-       A full page render from the same URL declares the same set, because the page and the envelope share an address and a cache that stored the unvaried HTML would answer a later partial request with it.
-       A page whose ``render()`` returns its own :class:`~django.http.HttpResponseBase` short-circuits before the shaper and stamps nothing, so such a view calls ``set_partial_vary(response)`` from ``next.partial.headers`` when the same URL also answers partial requests.
-       The three headers that never change the body, ``X-Next-Validate``, ``X-Next-Origin``, and ``X-Next-Request-Id``, stay out of the set.
+     - The request headers a shared cache keys the response on, listed per response kind in :ref:`topics-partial-rendering-reference-vary`.
    * - ``X-Next-Version``
      - Every envelope
      - The current asset version.
@@ -350,6 +354,50 @@ Server to client.
    * - ``X-Next-Transport``
      - A tunneled request, and a reply of an action declared ``transport="any"``
      - ``http`` on a ``421`` refusal of an action that answers over HTTP only, ``any`` on the reply of an opted-in action, and ``session`` on a ``421`` for an action that rotated or flushed the session, see :ref:`topics-forms-actions-transport`.
+
+.. _topics-partial-rendering-reference-vary:
+
+Vary by response kind
+---------------------
+
+A page, its zones, its navigation envelope, and its boundary reloads share one URL, so each response names in ``Vary`` the request headers that chose its body.
+The partial set is ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version, X-Next-Boundary, X-Next-Navigate, X-Next-Layouts, X-Next-Prefetch``, exported as ``VARY_HEADERS`` from ``next.partial.headers``.
+``X-Next-Validate`` and ``X-Next-Request-Id`` never enter ``Vary``, and ``X-Next-Origin`` enters it only where the table says.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Response
+     - Request headers in ``Vary``
+   * - Full document
+     - The partial set, because a cache that stored the unvaried HTML would answer a later partial request with it.
+       A response ``render()`` returns gets the set only when it is a successful :class:`~django.http.HttpResponse` that carries ``Cache-Control``, so a view that answers otherwise calls ``set_partial_vary(response)`` from ``next.partial.headers`` when the same URL also answers partial requests.
+   * - Streamed document
+     - The partial set, ``Accept``, and ``Accept-Encoding``.
+   * - Zone response
+     - The partial set, ``Accept`` on a ``GET`` or ``HEAD`` because a zone read may answer a stream by it, and ``X-Next-Origin`` while the active-link pass of ``ROUTER["ACTIVE_LINKS"]`` marks the links against the origin.
+       The 400 and 409 short-circuits and the refusal of an intercept carry the partial set, plus ``X-Next-Origin`` under the active-link pass.
+   * - Streamed zone response
+     - The partial set, ``Accept``, ``Accept-Encoding``, and ``X-Next-Origin`` under the active-link pass.
+   * - Form result
+     - The partial set on every answer to a submission that sends ``X-Next-Request``, the invalid re-render and a wizard advance included.
+       A submission without it gets the handler's response unvaried.
+   * - Navigation envelope
+     - The partial set, on the envelope, on a redirect passed to the router, and on the 409 of a stale version.
+       ``X-Next-Origin`` stays out, because the declared layouts in ``X-Next-Layouts`` decide the cut.
+   * - Streamed navigation
+     - The partial set, ``Accept``, and ``Accept-Encoding``.
+   * - Prefetch
+     - The partial set, on the envelope, on the refusal of a page that opts out, and on the 429 of a lagging pool.
+   * - Boundary reload
+     - The partial set on every answer, the refusals included, and ``Accept`` on a ``GET`` or ``HEAD`` answered whole.
+       A reload that streams adds ``Accept`` and ``Accept-Encoding``.
+   * - Realtime event stream
+     - The partial set.
+       The ticket answer of a stream URL varies on ``Cookie`` and ``X-Next-Transport``.
+
+Django adds ``Cookie`` to any of these when the session or the CSRF cookie is read, and the compression layer adds ``Accept-Encoding`` to a body it compresses.
 
 Status codes
 ------------
@@ -394,8 +442,393 @@ Status codes
        The runtime swaps nothing and fires ``partial:error``.
 
 A safe-method zone GET that answers with a non-envelope navigates once under a navigate-once flag, the same shape the version-mismatch reload uses.
-A ``lazy="load"`` zone re-asks on the freshly loaded page, so an expired session, a WAF stub, or a maintenance page that keeps answering non-envelope would otherwise loop the navigation.
+A component deferred with ``load`` asks again on the freshly loaded page, so an expired session, a WAF stub, or a maintenance page that keeps answering non-envelope would otherwise loop the navigation.
 The second non-envelope while the flag stands degrades to a ``partial:error`` of kind ``network`` and leaves the page in place, and the flag clears the moment a correct envelope classifies.
+
+.. _topics-partial-rendering-reference-more:
+
+Infinite lists
+--------------
+
+``{% more zone="<zone>" next=<expr> %}label{% empty %}end{% endmore %}`` renders the sentinel of an infinite list as a zone named ``<zone>-more``.
+The zone holds a real ``<a>`` whose ``href`` is the query string of the request with the paging parameter set to the token of the next batch and ``restore`` removed, so the link works without the runtime.
+When the list has no next batch, the zone holds the ``{% empty %}`` branch in a ``<div>`` instead.
+Both carry ``data-next-key="<zone>-more"``, so an ``append`` merge swaps one for the other.
+The ``<zone>-more`` zone is declared like any ``{% zone %}`` of the template, so a zone request names it beside the list zone.
+The runtime counts a zone request as a batch of the list only when its URL is the ``href`` of the link and its zones are exactly the ``data-next-target`` of the link.
+Any other request that names the same zones, a live filter among them, is an ordinary zone request that stamps no row, prunes nothing and writes no ``_restore``, whatever order it lists the zones in.
+
+``{% more zone="<zone>" previous=<expr> %}label{% empty %}start{% endmore %}``, placed above the list, renders the zone ``<zone>-less`` the same way, with a visible link to the batch before the list.
+It defaults to ``merge="prepend"`` and ``mode="manual"``, so the earlier batch lands above the rows on a click and a page opened at the top never fetches on its own.
+On the first window its ``<div>`` holds the ``{% empty %}`` branch and, after it, a link to the first window with the ``hidden`` attribute, which the runtime reveals in place of the ``<div>`` once ``prune=`` first drops rows, so a list that started at the top can load its pruned rows back.
+One tag takes either ``next=`` or ``previous=``, never both.
+
+``next=`` and ``previous=`` take the ``Window`` a pager returns, and the tag reads the ``next`` or the ``previous`` token of the window and the query parameter the window names.
+Either option also takes a raw token, which the tag writes under ``param=``.
+A raw token is an integer from 1, a string of up to 18 ASCII digits read as that integer, or any other slug of letters, digits, ``-`` and ``_`` up to 512 characters.
+``None`` and a missing variable end the list.
+Any other value is a template bug, so the tag raises ``TemplateSyntaxError`` at render under ``DEBUG`` or ``STRICT_LOADING`` and renders the end branch otherwise.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 22 60
+
+   * - Option
+     - Default
+     - Semantics
+   * - ``zone``
+     - Required
+     - The quoted name of the list zone the fetched rows merge into.
+       ``next.E220`` reports a name the page does not declare.
+   * - ``next``
+     - Required unless ``previous`` is set
+     - A template expression for the batch after the list, usually the ``Window`` the list loops over.
+   * - ``previous``
+     - Required unless ``next`` is set
+     - A template expression for the batch before the list, usually the same ``Window``.
+   * - ``mode``
+     - ``"visible"``, ``"manual"`` with ``previous``
+     - ``visible`` writes ``data-next-defer="visible"`` so the runtime fetches when the link scrolls into view.
+       ``manual`` leaves it out, so the link fetches on a click.
+   * - ``merge``
+     - ``"append"``, ``"prepend"`` with ``previous``
+     - ``append`` or ``prepend``, written as ``data-next-merge``.
+   * - ``margin``
+     - None
+     - One to four ``px`` or ``%`` lengths of up to six digits, written as ``data-next-margin``.
+       A bare integer of up to six digits reads as pixels.
+       Only ``mode="visible"`` takes it.
+   * - ``param``
+     - ``"page"``
+     - The query parameter that carries a raw token.
+       ``restore`` is refused.
+       A ``Window`` names its own parameter, so a ``param=`` that differs from it raises ``TemplateSyntaxError`` at render under ``DEBUG`` or ``STRICT_LOADING`` and yields to the window otherwise.
+       A parameter other than ``page`` is written as ``data-next-param``.
+   * - ``prune``
+     - None
+     - A row count from 1, written as ``data-next-prune``.
+       Once the list holds more rows, the runtime drops whole batches from its top and points the ``<zone>-less`` link above the list at the batch right before the rows that remain.
+       Only a ``next=`` tag takes it, and it needs a ``Window``.
+       With a raw token the tag raises ``TemplateSyntaxError`` at render under ``DEBUG`` or ``STRICT_LOADING`` and renders the link without pruning otherwise, since a raw token names no batch for the link above the list.
+   * - ``url``
+     - None
+     - ``replace`` or ``push``, written as ``data-next-url``.
+       After each fetched batch the runtime writes ``?<param>=<token>&_restore=<param>`` into the address bar with ``replaceState`` or ``pushState``, so a reload or a shared link restores the window.
+       The write does not count as a page view.
+       Only a ``next=`` tag takes it.
+
+Option values are quoted literals, and ``margin`` and ``prune`` also take a bare integer.
+An unknown option, a repeated one, or a value outside its set fails the template compile with a ``TemplateSyntaxError``.
+
+The ``next_page`` filter returns ``next_page_number()`` of a Django :class:`~django.core.paginator.Page` that ``has_next()`` and ``None`` for anything else.
+The ``previous_page`` filter returns ``previous_page_number()`` of a ``Page`` that ``has_previous()`` and ``None`` for anything else.
+Both adapt a list paged by a Django :class:`~django.core.paginator.Paginator` to the raw-token form of the tag, which pages by ``?page=N`` and serves neither ``prune=`` nor a restored window.
+
+Pagers
+~~~~~~
+
+A pager cuts the rows of a list into the window the query string of the request asks for.
+It keeps no request state, so one module-level instance serves every render.
+A context callable names the pager in an ``Annotated[Paging, <pager>]`` parameter and receives a ``Paging`` bound to the request.
+``page.paginate(rows)`` returns the ``Window``, and ``await page.apaginate(rows)`` does the same from an ``async def`` callable, reading a queryset through its async API.
+The template loops over the window and passes it to both tags.
+
+.. code-block:: python
+   :caption: feed/pages/feed/page.py
+
+   from typing import Annotated
+
+   from feed.models import Post
+
+   from next import context
+   from next.partial import KeysetPager, Paging, Window
+
+   latest = KeysetPager(("-created", "-pk"), per_page=20)
+
+   @context("rows")
+   def rows(page: Annotated[Paging, latest]) -> Window[Post]:
+       return page.paginate(Post.objects.filter(published=True))
+
+.. code-block:: jinja
+   :caption: feed/pages/feed/template.djx
+
+   {% more zone="feed" previous=rows %}Show earlier{% endmore %}
+
+   {% zone "feed" tag="ul" %}
+     {% for post in rows %}
+       <li data-next-key="{{ post.pk }}">{{ post.title }}</li>
+     {% endfor %}
+   {% endzone %}
+
+   {% more zone="feed" next=rows prune=40 url="replace" %}Show more{% empty %}End of the feed.{% endmore %}
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 22 56
+
+   * - Pager
+     - Query
+     - Rows
+   * - ``NumberPager(*, param="page", per_page=20, count=False, max_restore=10)``
+     - ``?page=N``
+     - A queryset or a sequence in its own order, read in one slice that runs one row past the window.
+   * - ``KeysetPager(ordering, *, param="cursor", per_page=20, count=False, max_token=512, max_restore=10)``
+     - ``?cursor=<token>``
+     - A queryset, which the pager filters past the position of the token and orders itself, or a sequence of model instances already in the ordering, which it bisects without a query.
+
+Both read one row past the window to learn whether a next batch follows, so neither counts the rows.
+``count=True`` reads the total into ``window.count`` with one more query, for a header that shows it.
+``param`` is a slug other than ``restore`` and ``per_page`` an integer from 1, and a pager built with anything else raises ``ValueError``.
+A ``Paging`` annotation that names no pager, or more than one, raises ``TypeError`` when the callable is first resolved.
+A render without a request reads the first window.
+
+A ``NumberPager`` reads its page as follows.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Query
+     - Window
+   * - No page, or a value that is not ASCII digits naming a page from 1 that a database offset can address
+     - Page 1.
+   * - ``?page=N``
+     - Page ``N`` alone, and when ``N`` lies past the last row an empty window with no next batch whose previous batch is the last page, which one more query counts.
+   * - ``?page=N&_restore=page``
+     - Pages ``max(1, N - max_restore + 1)`` to ``N``, ending on the last page that holds a row, or the empty window above when none does.
+
+A ``KeysetPager`` pages by the position of a row under a total ordering.
+The ordering is a sequence of field names, a leading ``-`` for descending, as in ``("-created", "-pk")``.
+Every name is a local non-null column of the model, a foreign key by its attname as in ``author_id``, and the last one is unique, usually ``pk``, so no two rows share a position.
+An ordering that is a bare string, empty, or names a column twice raises ``ValueError`` when the pager is built.
+An ordering the model cannot page by raises :exc:`~django.core.exceptions.ImproperlyConfigured` on the first window read from that model.
+The pager applies the ordering itself with ``order_by()``, so the ordering of the queryset it receives is not read.
+A sequence whose rows are not model instances raises ``TypeError``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Query
+     - Window
+   * - No cursor, or a token the pager refuses
+     - The first batch.
+   * - ``?cursor=<token>`` from ``next``
+     - The batch after the position of the token.
+   * - ``?cursor=<token>`` from ``previous``
+     - The batch before the position of the token.
+   * - ``?cursor=<token>&_restore=cursor``
+     - The batch the token names with the whole batches before it, ``max_restore`` batches at most.
+
+A token holds a direction and the values of the ordering columns of one row, written as unpadded base64url of compact JSON.
+It is neither signed nor encrypted, so a visitor can read those values and write a position of their own.
+Such a position moves the window within the rows the queryset already serves and reaches no other row.
+Each value is converted and validated by its model field before it reaches the query, and a datetime carries a time zone exactly when ``USE_TZ`` is on.
+A token that is malformed, longer than ``max_token`` characters, or holds a value its column refuses reads the first batch instead of raising.
+A row whose token would run past ``max_token`` raises ``ValueError`` when the window is built.
+``encode(values, *, reverse)`` and ``decode(token)`` are the two methods a subclass overrides to sign or shorten tokens, and a ``Pager`` subclass that implements ``plan`` and returns the ``WindowPlan`` of its window pages by a scheme of its own, ``window`` and ``awindow`` running that plan, see :doc:`/content/ref/partial` and :ref:`topics-partial-rendering-reference-tokens`.
+
+Windows
+~~~~~~~
+
+A ``Window`` is the frozen value a pager returns.
+It iterates over its rows and has their length, so a template loops over the window itself and an empty window is falsy.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - Field
+     - Meaning
+   * - ``rows``
+     - The rows this render shows.
+   * - ``param``
+     - The query parameter the tokens travel in.
+   * - ``next``
+     - The token of the batch after the rows, ``None`` at the end of the list.
+   * - ``previous``
+     - The token of the batch before the rows, ``None`` on the first window.
+   * - ``back``
+     - The token of the batch right before the one ``next`` fetches, which is the last batch of the window, ``None`` at the end of the list.
+       Written as ``data-next-back`` on a link with ``prune=`` or ``url=``.
+   * - ``backs``
+     - The same token for every batch of a restored window after its first, in order.
+       Written space-separated as ``data-next-backs`` on a link with ``prune=`` or ``url=``.
+   * - ``count``
+     - The total of the rows when the pager counts, ``None`` otherwise.
+
+The runtime stamps every row of a list whose link sets ``prune=`` or ``url=`` with ``data-next-batch`` and keeps, for each batch, the token of the batch before it.
+A fetched batch takes the ``data-next-back`` of the link that fetched it.
+The rows a restored window renders are split evenly across its batches and take the tokens of ``data-next-backs``, so the first prune after a restore drops the oldest batch alone.
+A prune drops whole batches from the top, never the last one, and writes the token kept for the first batch that remains into the ``<zone>-less`` link.
+
+Restored windows
+~~~~~~~~~~~~~~~~
+
+``url=`` writes ``?<param>=<token>&_restore=<param>`` after each fetched batch, with the token that fetched it.
+A request for that address renders the batch the token names together with the batches before it, ``max_restore`` batches of the pager at most, ten by default, so a long scroll costs a bounded read.
+Only a value naming the parameter of the pager flags a restore, so the flag of another list on the page reads one batch, and both tags drop ``_restore`` from the links they render.
+
+A ``NumberPager`` reads the restored pages in its one slice.
+A ``KeysetPager`` reads the batch after the position and the rows before it in two bounded queries.
+While a next batch follows, it keeps whole batches only, so every batch boundary matches a back token, and a remainder short of a batch stays out of the window for the ``previous`` token to link.
+At the end of the list it keeps every row it read.
+A restored window that starts below the top of the list is grown back by the ``previous=`` tag above it, while the ``next=`` tag below keeps linking the batch after it.
+
+``next.E235`` reports a ``{% more %}`` with ``prune=`` or ``url=`` on a page where no context callable a render runs, its own or one it inherits, takes an ``Annotated[Paging, <pager>]``, since the written restore address would render a single batch.
+``next.E236`` reports two distinct pagers of one page that read the same query parameter, since each list would page by the token of the other.
+
+.. _topics-partial-rendering-reference-tokens:
+
+Signed and shortened tokens
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A token is unpadded base64url of compact JSON that holds a direction and the values of the ordering columns of one row.
+It is neither signed nor encrypted.
+A visitor can therefore read those values and write a position of their own, which moves the window within the rows the queryset already serves and reaches no other row.
+Each value is converted and validated by its model field before it reaches the query, and a token the pager cannot read falls back to the first batch instead of raising.
+
+``encode()`` and ``decode()`` are the two methods to override when that default does not fit.
+``encode(values, *, reverse)`` receives the column values of a row and the direction, and returns the token.
+``decode(token)`` returns the direction and the raw values, or ``None`` for a token it refuses.
+A token contains no whitespace, since the tokens of a restored window travel space-separated in one attribute, and it stays within ``max_token`` characters, 512 unless the pager is built with another cap.
+
+Signing stops a visitor from writing positions, which matters when the ordering column is a value the page does not otherwise show.
+
+.. code-block:: python
+   :caption: feed/paging.py
+
+   from typing import override
+
+   from django.core import signing
+
+   from next.partial import KeysetPager
+
+   class SignedPager(KeysetPager):
+       signer = signing.Signer(salt="feed.cursor")
+
+       @override
+       def encode(self, values: tuple[object, ...], *, reverse: bool) -> str:
+           return self.signer.sign(super().encode(values, reverse=reverse))
+
+       @override
+       def decode(self, token: str) -> tuple[bool, tuple[object, ...]] | None:
+           try:
+               raw = self.signer.unsign(token)
+           except signing.BadSignature:
+               return None
+           return super().decode(raw)
+
+A signature hides nothing, so a column that must stay secret calls for encryption in the same two methods.
+A token signed under a key that has since left ``SECRET_KEY`` and ``SECRET_KEY_FALLBACKS`` reads the first batch, like any other token the pager refuses.
+
+A list ordered by one integer column fits a far shorter token.
+
+.. code-block:: python
+   :caption: feed/paging.py
+
+   class IdPager(KeysetPager):
+       def __init__(self, *, per_page: int = 20) -> None:
+           super().__init__(("pk",), per_page=per_page)
+
+       @override
+       def encode(self, values: tuple[object, ...], *, reverse: bool) -> str:
+           return f"{'b' if reverse else 'a'}{values[0]}"
+
+       @override
+       def decode(self, token: str) -> tuple[bool, tuple[object, ...]] | None:
+           head, digits = token[:1], token[1:]
+           if head not in {"a", "b"} or not (digits.isascii() and digits.isdecimal()):
+               return None
+           return head == "b", (int(digits),)
+
+The pager checks what ``decode()`` returns the same way it checks the default, one value per ordering column, each converted by its field, so a codec only has to parse.
+
+Pagers of another scheme
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+A list that pages by neither a number nor a position subclasses ``Pager``.
+The subclass implements ``plan(rows, request)``, which returns a ``WindowPlan``, and keeps no request state, since one instance serves every render.
+A plan holds the slices the window reads and a ``finish`` step that builds the ``Window`` from what they fetched, and it reads nothing itself.
+``window`` and ``awindow`` are the base class's own, one running the plan on the thread and the other awaiting it, so a pager written this way serves a sync and an async callable with the decision written once.
+A directory that loads one initial letter at a time is such a scheme.
+
+.. code-block:: python
+   :caption: people/paging.py
+
+   import string
+   from functools import partial
+   from typing import override
+
+   from django.db.models import QuerySet
+   from django.http import HttpRequest
+
+   from next.partial import PagedRows, Pager, Window, WindowPlan
+
+   LETTERS = string.ascii_lowercase
+
+   class LetterPager(Pager):
+       def __init__(self, field: str, *, param: str = "letter") -> None:
+           super().__init__(param=param, per_page=1, count=False)
+           self.field = field
+
+       def _letter(self, request: HttpRequest | None) -> str:
+           raw = "" if request is None else request.GET.get(self.param, "")
+           return raw if len(raw) == 1 and raw in LETTERS else LETTERS[0]
+
+       @override
+       def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> WindowPlan[T]:
+           if not isinstance(rows, QuerySet):
+               msg = "LetterPager pages a queryset."
+               raise TypeError(msg)
+           letter = self._letter(request)
+           lookup = {f"{self.field}__istartswith": letter}
+           section = rows.filter(**lookup).order_by(self.field, "pk")
+           return WindowPlan((section,), None, partial(self._finish, letter))
+
+       def _finish[T](
+           self, letter: str, fetched: list[list[T]], count: int | None
+       ) -> Window[T]:
+           [found] = fetched
+           at = LETTERS.index(letter)
+           following = LETTERS[at + 1] if at + 1 < len(LETTERS) else None
+           return Window(
+               rows=found,
+               param=self.param,
+               next=following,
+               previous=LETTERS[at - 1] if at else None,
+               back=letter if following else None,
+           )
+
+The base constructor checks ``param`` and ``per_page``, and a window of this pager is one section, so ``per_page`` is ``1``.
+The first field of the plan, ``slices``, holds one queryset here, the section of the letter, and the second, ``total``, holds the source to count or ``None`` for no count, which the pager here never asks.
+``finish`` receives the rows of each slice in order and the count, and returns the window.
+A query value the pager does not recognise reads the first window, as the shipped pagers do, and ``request`` is ``None`` for a render without a request.
+
+The fields of the ``Window`` are the contract with ``{% more %}``.
+``next`` and ``previous`` are the tokens of the batches around the rows, ``None`` where the list ends, and ``has_next()`` and ``has_previous()`` answer whether each is set.
+``back`` is the token of the batch right before the one ``next`` fetches, here the letter of the window itself, and ``prune=`` reads it to point the link above the list at the right batch once rows are dropped.
+A pager that also serves ``url=`` reads ``_restore=<param>`` from the query, renders the batches before the token up to its ``max_restore``, and fills ``backs`` with the same token for every batch after the first.
+``LetterPager`` leaves that out, so a reload of a restored address renders the one section its letter names and the link above it loads the earlier ones.
+
+The callable and the template use it like a shipped pager.
+
+.. code-block:: python
+   :caption: people/pages/people/page.py
+
+   from typing import Annotated
+
+   from people.models import Person
+   from people.paging import LetterPager
+
+   from next import context
+   from next.partial import Paging, Window
+
+   directory = LetterPager("name")
+
+   @context("people")
+   def people(page: Annotated[Paging, directory]) -> Window[Person]:
+       return page.paginate(Person.objects.all())
 
 Attributes
 ----------
@@ -412,12 +845,11 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Semantics
    * - ``data-next-zone``
      - Zone wrapper
-     - The zone address, written by the ``{% zone %}`` tag.
-   * - ``data-next-lazy``
-     - Lazy zone wrapper, infinite-scroll sentinel
-     - ``load`` or ``revealed``, the materialisation trigger.
-       On a zone wrapper ``load`` fetches on ``ready`` and ``revealed`` waits for the viewport.
-       On a zone wrapper a value outside the two is ignored.
+     - The zone address, written by the ``{% zone %}`` and ``{% more %}`` tags.
+   * - ``data-next-defer``
+     - Deferred component wrapper, infinite-scroll sentinel
+     - ``load``, ``visible`` or ``manual``, the delivery mode of a component that renders on its own later request.
+       ``load`` fetches on ``ready``, ``visible`` waits for the viewport, and ``manual`` waits for a ``data-next-fetch`` control inside its loading content.
        On a pagination sentinel the value is not read, and the attribute only marks the link the observer watches for the merge GET.
        A dev build warns about an unrecognised value in either place.
    * - ``data-next-poll``
@@ -425,6 +857,18 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - The poll interval in milliseconds, from the ``poll=`` literal, written on the full render and on the partial response wrapper.
        The runtime re-GETs the zone on the interval while the tab is visible.
        A hand-written value outside the whole-millisecond grammar, below the one-second floor, or above the browser timer ceiling is dropped, as is the attribute on an element without ``data-next-zone``, each with a console warning in dev.
+   * - ``data-next-reload``
+     - Zone wrapper
+     - ``loading``, written by ``reload="loading"`` and left out for the default ``keep``.
+       While a request reloads the zone, the runtime shows loading content after the delay instead of keeping the current content busy.
+   * - ``data-next-delay``
+     - Zone wrapper, or a ``data-next-layer`` link
+     - The milliseconds a ``reload="loading"`` zone waits before it shows loading content, written from ``delay=`` when it differs from the default of 150.
+       Written by hand on a layer link, it is the wait before the layer shows the loading UI of its zone.
+   * - ``data-next-loading``
+     - ``<template>``
+     - The zone name or the boundary key whose loading content the template holds, written once per name and response on a page whose zone uses ``reload="loading"``.
+       A zone's template holds its ``loading.<zone>.djx``, a boundary's template holds the ``loading.djx`` of a ``defer="inline"`` component inside such a zone.
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.
@@ -441,6 +885,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - ``<a>``, ``<form>``
      - Route the response into a zone.
        On a GET filter it names the zone to morph, and on a POST form it is written by the ``zone=`` tag parameter and travels as the morph target of the submission.
+       On a ``{% more %}`` link it names the list zone and the zone of the link.
+       A link with ``data-next-target`` and no ``data-next-merge`` stays a plain link, which the client router navigates like any other.
    * - ``data-next-trigger``
      - Filter ``<form>``, sort ``<select>``
      - The event that auto-submits a GET filter, ``input`` or ``change``.
@@ -452,13 +898,40 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
    * - ``data-next-merge``
      - Pagination link
      - ``append`` or ``prepend``, travels as ``X-Next-Merge``.
+       Written by ``{% more %}`` from its ``merge=`` option.
        Any other value is ignored, with a console warning in dev.
+   * - ``data-next-margin``
+     - Infinite-scroll sentinel
+     - The observer root margin, one to four ``px`` or ``%`` lengths, written by ``{% more %}`` from its ``margin=`` option.
+       A value outside that grammar falls back to no margin.
+   * - ``data-next-param``
+     - Pagination link
+     - The query parameter of the token, written by ``{% more %}`` when it is not ``page``.
+   * - ``data-next-prune``
+     - Pagination link
+     - The row count above which the runtime drops whole batches from the top of the list, written by ``{% more %}`` from its ``prune=`` option.
+   * - ``data-next-back``
+     - Pagination link
+     - The token of the batch right before the one the link fetches, written by ``{% more %}`` from the ``back`` of a ``Window`` on a link with ``prune=`` or ``url=``.
+       The runtime keeps it with the rows the link fetches, for the link above the list after a prune.
+   * - ``data-next-backs``
+     - Pagination link
+     - The same token for every batch of a restored window after its first, space-separated, written by ``{% more %}`` from the ``backs`` of a ``Window``.
+   * - ``data-next-url``
+     - Pagination link
+     - ``replace`` or ``push``, how the runtime writes ``?<param>=<token>&_restore=<param>`` after each fetched batch, written by ``{% more %}`` from its ``url=`` option.
+   * - ``data-next-batch``
+     - List rows
+     - Written by the runtime on every row of a list whose link sets ``prune=`` or ``url=``, the batch the row arrived in, read back to drop whole batches.
    * - ``data-next-layer``
      - ``<a>``
      - Open the href in a layer, the zone container is created before the request.
+   * - ``data-next-layer``
+     - ``<template>``
+     - The zone whose ``loading.<zone>.djx`` the template holds, written before the first link of the page that opens a layer of that zone, see :doc:`layers`.
    * - ``data-next-accepted``
      - The opening ``<a>``
-     - Re-fetch this zone on layer accept.
+     - A comma-separated list of zones the runtime re-fetches from the host page in one zone GET once the layer is accepted.
    * - ``data-next-confirm``
      - Form, link
      - A confirmation prompt before the request.
@@ -466,9 +939,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Any element
      - The morph leaves the node untouched, paired by id when present and by position otherwise.
    * - ``data-next-key``
-     - List rows, repeated ``<form>``
+     - List rows, repeated ``<form>``, ``{% more %}`` sentinel
      - The match key for the morph and for ``append`` dedup, falling back to ``id``.
        On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
+       On a ``{% more %}`` sentinel it is the name of the zone that holds it, so a merge replaces the spent link.
    * - ``data-next-consented``
      - ``<template>``
      - The consent category whose grant reveals the inert body, written by ``{% #consented %}`` when the runtime decides consent, see :doc:`/content/topics/scripts/consent`.
@@ -486,9 +960,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - Runtime ``<dialog>``
      - Set by the runtime on every layer dialog, the styling hook for the modal shell.
    * - ``data-next-toasts``
-     - Runtime toast container
-     - The toast tray, created by the runtime on the first ``toast`` and the styling hook for the stack.
-       The runtime also stamps ``aria-live="polite"`` on it, so a replacement tray carries its own live region.
+     - A container in the page, or the runtime's own
+     - The toast tray and the styling hook for the stack, found top layer down so a tray in the layout or in a modal receives every toast.
+       Only a tray the runtime builds itself, on the first ``toast`` of a page that renders none, gets ``aria-live="polite"``, so a hand-written tray carries its own live region.
    * - ``data-next-toast``
      - Runtime toast item
      - One toast, the value is the variant, the styling hook for a single notification.
@@ -496,7 +970,7 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
 
 .. warning::
 
-   ``data-next-validate`` carries no off switch, unlike the closed value sets of ``data-next-lazy`` and ``data-next-merge``.
+   ``data-next-validate`` carries no off switch, unlike the closed value sets of ``data-next-defer`` and ``data-next-merge``.
    Writing ``validate="off"`` on the tag turns inline validation on, because the rendered attribute is present either way.
    Omit the ``validate=`` parameter to leave inline validation off.
 

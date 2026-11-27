@@ -121,16 +121,16 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
 Cover the router
 ~~~~~~~~~~~~~~~~
 
-The URL subsystem emits ``route_registered`` for each route discovered during a file router scan and ``router_reloaded`` for each rebuild.
+The URL subsystem emits ``route_registered`` for each route discovered during a file router scan and ``routes_reloaded`` for each rebuild.
 ``route_registered`` carries ``url_path`` and ``file_path``.
-``router_reloaded`` carries no extra keyword arguments.
+``routes_reloaded`` carries no extra keyword arguments.
 
 .. code-block:: python
    :caption: obs/signals.py
 
    from django.dispatch import receiver
 
-   from next.urls.signals import route_registered, router_reloaded
+   from next.urls.signals import route_registered, routes_reloaded
 
    from .metrics import incr
 
@@ -138,9 +138,9 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    def on_route_registered(url_path: str | None = None, **kwargs) -> None:
        incr("urls.route", str(url_path))
 
-   @receiver(router_reloaded)
-   def on_router_reloaded(**kwargs) -> None:
-       incr("urls", "router_reloaded")
+   @receiver(routes_reloaded)
+   def on_routes_reloaded(**kwargs) -> None:
+       incr("urls", "routes_reloaded")
 
 Inventory the loaded backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,8 +158,8 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
        component_backend_loaded,
        consent_backend_loaded,
        form_backend_loaded,
+       page_backend_loaded,
        partial_backend_loaded,
-       router_backend_loaded,
        sitemap_backend_loaded,
        static_backend_loaded,
        wizard_backend_loaded,
@@ -172,7 +172,7 @@ Every one of them carries the same two keyword arguments, ``config``, a copy of 
        "consent": consent_backend_loaded,
        "forms": form_backend_loaded,
        "partial": partial_backend_loaded,
-       "urls": router_backend_loaded,
+       "urls": page_backend_loaded,
        "sitemap": sitemap_backend_loaded,
        "static": static_backend_loaded,
        "wizard": wizard_backend_loaded,
@@ -212,7 +212,7 @@ The sender is the resolved backend class rather than the manager, so ``sender=``
    def on_default_components_backend(**kwargs) -> None:
        incr("backends.components", "default")
 
-``router_backend_loaded`` and ``component_backend_loaded`` are skipped by a reload that passes ``notify=False``, so a count taken from them is a count of announced loads rather than of every rebuild.
+``page_backend_loaded`` and ``component_backend_loaded`` are skipped by a reload that passes ``notify=False``, so a count taken from them is a count of announced loads rather than of every rebuild.
 
 Audit the vendor origins of each tree
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -305,11 +305,11 @@ class TestInitPayload:
     """`init_payload` decodes the `Next._init({...})` bootstrap call."""
 
     def test_flat_payload(self) -> None:
-        html = '<script>Next._init({"csrf_header": "X-CSRFToken"});</script>'
+        html = '<script data-next-init>Next._init({"csrf_header": "X-CSRFToken"});</script>'
         assert init_payload(html) == {"csrf_header": "X-CSRFToken"}
 
     def test_nested_objects(self) -> None:
-        html = '<script>Next._init({"a": {"b": {"c": 1}}, "d": [2, 3]});</script>'
+        html = '<script data-next-init>Next._init({"a": {"b": {"c": 1}}, "d": [2, 3]});</script>'
         assert init_payload(html) == {"a": {"b": {"c": 1}}, "d": [2, 3]}
 
     def test_braces_inside_strings(self) -> None:
@@ -328,7 +328,7 @@ class TestInitPayload:
         assert init_payload('Next._init(\n  {"a": 1}\n)') == {"a": 1}
 
     def test_escaped_markup_from_the_script_builder(self) -> None:
-        html = '<script>Next._init({"tag": "\\u003Cscript\\u003E"});</script>'
+        html = '<script data-next-init>Next._init({"tag": "\\u003Cscript\\u003E"});</script>'
         assert init_payload(html) == {"tag": "<script>"}
 
     def test_reads_the_first_call(self) -> None:
@@ -341,11 +341,11 @@ class TestInitPayload:
 
     def test_raises_when_call_has_no_object(self) -> None:
         with pytest.raises(LookupError, match=r"Next\._init call not found"):
-            init_payload("<script>Next._init(null);</script>")
+            init_payload("<script data-next-init>Next._init(null);</script>")
 
     def test_raises_when_object_is_unterminated(self) -> None:
         with pytest.raises(LookupError, match="Malformed object"):
-            init_payload('<script>Next._init({"a": 1')
+            init_payload('<script data-next-init>Next._init({"a": 1')
 
 
 class TestFindFormParsing:

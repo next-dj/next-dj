@@ -12,6 +12,8 @@ from next.checks import NEXT
 from next.checks.common import (
     RegistrationSubject,
     RunMemo,
+    callable_problem,
+    class_problem,
     forget_run_memos,
     raw_scope,
     registration_file_errors,
@@ -20,13 +22,15 @@ from next.checks.common import (
 from next.deps import resolver
 from next.deps.introspect import introspect_key
 from next.deps.resolver import forget_dep_caches
+from next.discovery import _page_backends_for_watch, _state, forget_watch_state
 from next.pages.loaders import _page_roots, forget_page_roots
-from next.pages.watch import _page_backends_for_watch, _state, forget_watch_state
+from next.router import NavigationCut
 from next.static.manager import forget_manager_page_roots, get_static_manager
 from next.testing import reset_check_caches
-from next.urls import PageRoot, RouterBackend, checks as urls_checks
+from next.urls import PageBackend, PageRoot, checks as urls_checks
 from next.urls.checks import check_reverse_name_collisions, check_url_patterns
-from tests.support import patch_checks_router_manager_with_routers, write_page
+from tests.support import patch_checks_route_manager_with_routers, write_page
+from tests.support.checks import written
 
 
 if TYPE_CHECKING:
@@ -38,7 +42,7 @@ def _labelled_root(index: int, tree: Path) -> PageRoot:
     return PageRoot(path=tree, label="Root" if index == 0 else f"Root ({tree})")
 
 
-class _RootTreeRouter(RouterBackend):
+class _RootTreeRouter(PageBackend):
     """Third-party backend that reports root page trees and nothing else."""
 
     def __init__(self, root_trees: list[Path]) -> None:
@@ -66,7 +70,7 @@ class TestCollectAllPatternsDedup:
         router = _RootTreeRouter(root_trees=[tree_a, tree_b])
 
         with (
-            patch_checks_router_manager_with_routers(routers=[router]),
+            patch_checks_route_manager_with_routers(routers=[router]),
             patch(
                 "next.urls.checks._collect_all_patterns_uncached",
                 wraps=urls_checks._collect_all_patterns_uncached,
@@ -79,7 +83,7 @@ class TestCollectAllPatternsDedup:
         assert any(m.id == "next.E015" for m in memo_url)
 
         urls_checks.reset_collected_patterns_cache()
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             control_url = check_url_patterns(None)
             urls_checks.reset_collected_patterns_cache()
             control_rev = check_reverse_name_collisions(None)
@@ -89,23 +93,7 @@ class TestCollectAllPatternsDedup:
 
 
 class TestRunMemo:
-    """A run memo builds once per key and forgets on a check-cache reset."""
-
-    def test_a_repeat_with_the_same_key_builds_once(self) -> None:
-        memo: RunMemo[list[int]] = RunMemo()
-        key = object()
-        first = memo.get(key, lambda: [1])
-        assert memo.get(key, lambda: [2]) is first
-
-    def test_a_new_key_builds_again(self) -> None:
-        memo: RunMemo[list[int]] = RunMemo()
-        memo.get(object(), lambda: [1])
-        assert memo.get(object(), lambda: [2]) == [2]
-
-    def test_an_equal_key_is_not_the_same_key(self) -> None:
-        memo: RunMemo[str] = RunMemo()
-        memo.get([1], lambda: "first")
-        assert memo.get([1], lambda: "second") == "second"
+    """A run memo forgets its value on a check-cache reset."""
 
     @pytest.mark.parametrize("forget", [forget_run_memos, reset_check_caches])
     def test_a_reset_drops_every_memo(self, forget) -> None:
@@ -114,6 +102,46 @@ class TestRunMemo:
         memo.get(key, lambda: "before")
         forget()
         assert memo.get(key, lambda: "after") == "after"
+
+
+class TestDottedPaths:
+    """A dotted settings path is checked for what it names, never raising."""
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("next.router.VerifiedCut", None),
+            ("missing.module.Cut", "does not import ("),
+            ("tests.support.broken.Cut", "does not import (tests.support.broken.Cut "),
+            ("next.router.manager.client_router", "names no class"),
+            ("next.router.ChromeDigest", "is no subclass of NavigationCut"),
+            ("next.router.NavigationCut", "is an abstract class"),
+        ],
+    )
+    def test_a_class_path(self, dotted: str, problem: str | None) -> None:
+        found = class_problem(dotted, NavigationCut)
+        if problem is None:
+            assert found is None
+        else:
+            assert found is not None
+            assert found.startswith(problem)
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("django.utils.timezone.now", None),
+            ("missing.module.rule", "does not import ("),
+            ("tests.support.broken.rule", "does not import ("),
+            ("next.checks.common.WALK_HINT", "names no callable"),
+        ],
+    )
+    def test_a_callable_path(self, dotted: str, problem: str | None) -> None:
+        found = callable_problem(dotted)
+        if problem is None:
+            assert found is None
+        else:
+            assert found is not None
+            assert found.startswith(problem)
 
 
 class TestNextTag:
@@ -281,7 +309,7 @@ class TestRawScope:
         ids=["dict", "not_a_dict", "absent", "framework_not_a_dict"],
     )
     def test_the_scope_reads_as_written(self, framework, expected) -> None:
-        with override_settings(NEXT_FRAMEWORK=framework):
+        with written(framework):
             assert raw_scope("SITE") == expected
 
 

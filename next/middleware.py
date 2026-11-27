@@ -1,20 +1,28 @@
-"""Middleware that makes a response setting a cookie private for every shared cache."""
+"""The next.dj middleware, the shared cache guard and the response compression."""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Final
+from inspect import iscoroutinefunction, markcoroutinefunction
+from typing import TYPE_CHECKING, ClassVar, Final, cast
 
 from django.utils.cache import patch_vary_headers
 from django.utils.deprecation import MiddlewareMixin
 
+from next.compression.manager import acompress_response, compress_response
 from next.diagnostics import FailureLog
 from next.pages.responses import CDN_HEADERS, drop_cdn_headers
 
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Coroutine
+
     from django.http import HttpRequest
     from django.http.response import HttpResponseBase
+
+    type GetResponse = Callable[
+        [HttpRequest], HttpResponseBase | Awaitable[HttpResponseBase]
+    ]
 
 
 logger = logging.getLogger(__name__)
@@ -91,4 +99,35 @@ class SharedCacheGuardMiddleware(MiddlewareMixin):
         return guard_shared_cache(request, response)
 
 
-__all__ = ["SharedCacheGuardMiddleware", "guard_shared_cache"]
+class CompressionMiddleware:
+    """Encode every response in the coding the client accepts and the settings allow.
+
+    List it below `SecurityMiddleware`, above every middleware that reads the body.
+    """
+
+    sync_capable: ClassVar[bool] = True
+    async_capable: ClassVar[bool] = True
+
+    def __init__(self, get_response: GetResponse) -> None:
+        """Keep the next handler and follow its mode, sync or async."""
+        self.get_response = get_response
+        self.async_mode = iscoroutinefunction(get_response)
+        if self.async_mode:
+            markcoroutinefunction(self)
+
+    def __call__(
+        self, request: HttpRequest
+    ) -> HttpResponseBase | Coroutine[None, None, HttpResponseBase]:
+        """Return the compressed response, a coroutine under an async handler."""
+        if self.async_mode:
+            return self.__acall__(request)
+        response = cast("HttpResponseBase", self.get_response(request))
+        return compress_response(request, response)
+
+    async def __acall__(self, request: HttpRequest) -> HttpResponseBase:
+        """Return the compressed response, a large body compressed off the loop."""
+        response = await cast("Awaitable[HttpResponseBase]", self.get_response(request))
+        return await acompress_response(request, response)
+
+
+__all__ = ["CompressionMiddleware", "SharedCacheGuardMiddleware", "guard_shared_cache"]

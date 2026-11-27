@@ -9,13 +9,9 @@ from next.pages.checks.metadata import pages as metadata_pages
 from next.pages.checks.metadata.pages import loaded_metadata_pages
 from next.pages.manager import page
 from next.testing import reset_check_caches
-from tests.pages.checks.metadata.trees import (
-    INHERITED_CALLABLE,
-    metadata_page,
-    scope,
-    templated_page,
-)
-from tests.support import file_router_config_entry, patch_checks_router_manager
+from tests.pages.checks.metadata.trees import INHERITED_CALLABLE, metadata_page, scope
+from tests.support import file_router_config_entry, patch_checks_route_manager
+from tests.support.trees import templated_page
 
 
 class TestLoadedMetadataPages:
@@ -27,7 +23,7 @@ class TestLoadedMetadataPages:
         metadata_page(tmp_path, '{"title": "Home"}')
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS={"title": "Acme"})),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             pages = loaded_metadata_pages()
         [entry] = pages
@@ -38,7 +34,7 @@ class TestLoadedMetadataPages:
     def test_a_callable_marks_the_page_dynamic(self, tmp_path: Path) -> None:
         templated_page(tmp_path, INHERITED_CALLABLE)
         metadata_page(tmp_path / "leaf", '{"title": "Leaf"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             pages = loaded_metadata_pages()
         by_trail = {entry.url_path: entry for entry in pages}
         assert by_trail[""].dynamic is True
@@ -49,7 +45,7 @@ class TestLoadedMetadataPages:
     def test_a_folded_page_reports_its_chain(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": "Root"}')
         templated_page(tmp_path / "child", "x = 1\n")
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             pages = loaded_metadata_pages()
         by_trail = {entry.url_path: entry for entry in pages}
         assert by_trail["child"].declared is True
@@ -77,7 +73,7 @@ class TestOncePerRun:
     def test_a_repeat_reuses_the_pass_until_a_reset(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": "Home"}')
         with (
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             patch.object(
                 metadata_pages,
                 "discover_page_registrations",
@@ -91,11 +87,11 @@ class TestOncePerRun:
             assert loaded_metadata_pages() is not first
             assert discover.call_count == 2
 
-    def test_a_new_router_manager_folds_the_pages_again(self, tmp_path: Path) -> None:
+    def test_a_new_route_manager_folds_the_pages_again(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": "Home"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             first = loaded_metadata_pages()
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             second = loaded_metadata_pages()
         assert second is not first
         assert [entry.url_path for entry in second] == [""]
@@ -103,6 +99,6 @@ class TestOncePerRun:
     def test_a_manager_that_fails_to_build_answers_no_pages(self) -> None:
         error = Error("boom", id="next.E007")
         with patch.object(
-            metadata_pages, "get_router_manager", return_value=(None, [error])
+            metadata_pages, "get_route_manager", return_value=(None, [error])
         ):
             assert loaded_metadata_pages() == []

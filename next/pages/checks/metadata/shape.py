@@ -8,15 +8,9 @@ from typing import TYPE_CHECKING, Any, Final
 
 from django.conf import settings
 from django.conf.urls.i18n import is_language_prefix_patterns_used
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.checks.common import RegistrationSubject, registration_file_errors
 from next.deps.markers import unwrap_annotated
 from next.introspect import callable_name

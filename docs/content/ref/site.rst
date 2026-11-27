@@ -50,7 +50,7 @@ Checks
 It never calls either callable.
 ``check_site_url_for_deploy`` carries ``deploy=True`` and the ``seo`` tag and reports a missing ``URL`` unless ``SITE_ID`` pins a ``django.contrib.sites`` row, more sharply under ``ALLOWED_HOSTS = ["*"]``.
 The check on a closed site that still publishes a sitemap or a robots source lives in ``next.seo.checks``, see :doc:`seo`.
-The checks register through ``next.checks.catalog``, since ``next.pages`` imports ``next.site`` early, and :doc:`system-checks` lists their codes.
+The checks register through the ``next.site`` manifest, since ``next.pages`` imports ``next.site`` early, and :doc:`system-checks` lists their codes.
 
 .. automodule:: next.site.checks
    :members:

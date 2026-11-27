@@ -9,14 +9,16 @@ from pathlib import Path
 import pytest
 
 from next.static.runtime import (
-    CHUNK_PAYLOAD_KEYS,
     CHUNK_STATIC_PATHS,
+    DECLARED_CHUNK_KEYS,
+    LISTED_CHUNK_KEYS,
     NEXT_JS_STATIC_PATH,
 )
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT = ROOT / "next" / "client"
+BUILD = CLIENT / "build.mjs"
 
 pytestmark = pytest.mark.skipif(
     not (CLIENT / "next.ts").exists(), reason="needs the source checkout"
@@ -35,53 +37,73 @@ def _static_bundles() -> set[str]:
     return {NEXT_JS_STATIC_PATH, *CHUNK_STATIC_PATHS.values()}
 
 
+def _bundle(key: str) -> str:
+    """Return the name of the bundle that serves the chunk `key`."""
+    return CHUNK_STATIC_PATHS[key].removeprefix("next/next.").removesuffix(".min.js")
+
+
+def _entry_source(key: str) -> str:
+    """Return the source of the build entry the bundle of `key` is built from."""
+    entry = _build_entries()[f"next.{_bundle(key)}.min"]
+    return (ROOT / entry).read_text(encoding="utf-8")
+
+
 def _build_entries() -> dict[str, str]:
     """Return the `build:next` esbuild entries, output name to source file."""
     script = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-    command = script["scripts"]["build:next"]
-    assert "--outdir=next/static/next" in command
-    return dict(re.findall(r"(next(?:\.\w+)?\.min)=(\S+\.ts)", command))
+    assert script["scripts"]["build:next"] == f"node {BUILD.relative_to(ROOT)}"
+    source = BUILD.read_text(encoding="utf-8")
+    assert 'outdir: "next/static/next"' in source
+    return dict(re.findall(r'"(next(?:\.\w+)?\.min)": "(\S+\.ts)"', source))
 
 
 class TestChunkLists:
     """Every list of the chunks names the same ones."""
 
-    def test_module_keys_match_the_payload_chunk_map(self) -> None:
+    def test_module_keys_name_every_bundle(self) -> None:
         source = (CLIENT / "next.ts").read_text(encoding="utf-8")
-        modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(")
-        assert modules == set(CHUNK_STATIC_PATHS)
+        modules = _ts_strings(source, r"static #modules = Object\.fromEntries\(\s*")
+        assert modules == {_bundle(key) for key in CHUNK_STATIC_PATHS}
 
     def test_chunk_keys_name_every_shipped_chunk(self) -> None:
-        assert set(CHUNK_STATIC_PATHS) == {
+        assert set(LISTED_CHUNK_KEYS) == {
             "scripts",
             "stream",
             "ws",
             "csrf",
             "poll",
             "dev",
+            "forms",
+            "layers",
         }
-
-    def test_scripts_chunk_keys_match_the_payload_keys(self) -> None:
-        source = (CLIENT / "chunks.ts").read_text(encoding="utf-8")
-        assert _ts_strings(source, r"const CHUNK_KEYS =") == CHUNK_PAYLOAD_KEYS
+        assert {
+            "boundaries",
+            "reload",
+            "more",
+            "router",
+            "intent",
+        } == DECLARED_CHUNK_KEYS
+        assert set(CHUNK_STATIC_PATHS) == {*LISTED_CHUNK_KEYS, *DECLARED_CHUNK_KEYS}
 
     def test_build_writes_every_static_bundle(self) -> None:
         built = {f"next/{name}.js" for name in _build_entries()}
         assert built == _static_bundles()
 
-    def test_each_chunk_entry_lands_under_its_own_key(self) -> None:
-        entries = _build_entries()
-        for key, path in CHUNK_STATIC_PATHS.items():
-            entry = entries[path.removeprefix("next/").removesuffix(".js")]
-            source = (ROOT / entry).read_text(encoding="utf-8")
-            assert f'Next._land("{key}"' in source, entry
+    def test_each_entry_extends_the_runtime_under_its_bundle_name(self) -> None:
+        for key in CHUNK_STATIC_PATHS:
+            name = _bundle(key)
+            source = _entry_source(key)
+            assert f'Next._extend(\n  "{name}"' in source or (
+                f'Next._extend("{name}"' in source
+            ), key
+            assert "_land" not in source, key
 
-    def test_each_chunk_entry_is_named_by_its_key(self) -> None:
+    def test_each_chunk_entry_is_named_by_its_bundle(self) -> None:
         entries = _build_entries()
         for key, path in CHUNK_STATIC_PATHS.items():
-            assert path == f"next/next.{key}.min.js"
-            entry = entries[f"next.{key}.min"]
-            assert entry == f"next/client/entries/{key}.ts"
+            name = _bundle(key)
+            assert path == f"next/next.{name}.min.js"
+            assert entries[f"next.{name}.min"] == f"next/client/entries/{name}.ts"
 
     def test_build_hook_checks_every_static_bundle(self) -> None:
         tree = ast.parse((ROOT / "build_hooks.py").read_text(encoding="utf-8"))

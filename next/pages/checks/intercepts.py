@@ -8,16 +8,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final, NamedTuple
 
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
-from next.checks.common import RunMemo, get_router_manager, iter_scanned_pages
+from next.checks import NEXT, register
+from next.checks.common import RunMemo, get_route_manager, iter_scanned_pages
 from next.pages.access import anonymous_admitted, default_login, page_access, routed
 from next.pages.errors import PageMetadataShapeError
 from next.pages.loaders import load_page_module, serves
 from next.pages.manager import page
 from next.pages.metadata.normalize import normalize_metadata
-from next.ports import router_access_slot
+from next.ports import route_access_slot
 from next.utils import (
     LAYOUT_TEMPLATE,
     ROUTE_BRACKET_PATTERN,
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
 
-    from next.urls import RouterManager
+    from next.urls import RouteManager
 
     from .walk import TreeIntercept
 
@@ -57,10 +57,10 @@ class ServedIntercept(NamedTuple):
     module: types.ModuleType | None
 
 
-def _read_routed_trails(router_manager: RouterManager) -> dict[Path, dict[str, Path]]:
+def _read_routed_trails(route_manager: RouteManager) -> dict[Path, dict[str, Path]]:
     """Return the routed pages of every tree by trail, keyed by the resolved tree."""
     trails: dict[Path, dict[str, Path]] = {}
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         for root, url_path, page_path in iter_scanned_pages(router):
             if routed(page_path):
                 trails.setdefault(root.path.resolve(), {}).setdefault(
@@ -74,12 +74,10 @@ _routed_trails: RunMemo[dict[Path, dict[str, Path]]] = RunMemo()
 
 def routed_trails() -> Mapping[Path, Mapping[str, Path]]:
     """Return the routed pages of every tree by trail, read once per run."""
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return {}
-    return _routed_trails.get(
-        router_manager, lambda: _read_routed_trails(router_manager)
-    )
+    return _routed_trails.get(route_manager, lambda: _read_routed_trails(route_manager))
 
 
 def target_of(hit: TreeIntercept) -> Path | None:
@@ -108,10 +106,10 @@ def targeted_intercepts() -> Iterator[ServedIntercept]:
 
     A broken `page.py` is left to the import check, a missing target to `next.E170`.
     """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return
-    yield from _targeted.get(router_manager, _read_targeted)
+    yield from _targeted.get(route_manager, _read_targeted)
 
 
 def served_intercepts() -> Iterator[ServedIntercept]:
@@ -280,7 +278,7 @@ def _kwarg_errors(served: ServedIntercept) -> list[CheckMessage]:
     Both sides are read by the router's own parser, so a mixed segment counts.
     """
     hit = served.hit
-    access = router_access_slot.get()
+    access = route_access_slot.get()
     captured = access.page_kwargs(hit.root, hit.target_trail)
     if captured is None:
         return []

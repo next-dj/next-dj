@@ -6,7 +6,6 @@ The items are read lazily, so a sitemap page reads only the rows it lists.
 from __future__ import annotations
 
 import datetime as dt
-import functools
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ from django.db.models import Count, Max, Q, QuerySet
 from django.urls import NoReverseMatch
 from django.utils import timezone, translation
 
-from next.caches import DEFAULT_CACHE_SIZE
+from next.caches import DEFAULT_CACHE_SIZE, pure_cache
 from next.deps.resolver import current_resolver
 from next.introspect import describe_callable
 from next.pages import page
@@ -137,7 +136,7 @@ def effective_limit(options: SitemapOptions, languages: Sequence[str]) -> int:
     return max(1, min(options.limit, MAX_LIMIT // links))
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@pure_cache(DEFAULT_CACHE_SIZE)
 def _glob_pattern(glob: str) -> re.Pattern[str]:
     """Compile an `exclude` glob, where brackets are literal since trails use them."""
     return re.compile(

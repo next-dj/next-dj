@@ -35,36 +35,36 @@ class TestCookieConsentBackend:
     def test_a_request_without_the_cookie_is_undecided(self) -> None:
         assert CookieConsentBackend().read(consent_request()) == UNDECIDED
 
-    @pytest.mark.parametrize(
-        "value", ["2:analytics|marketing:1700", "1:analytics,marketing:1700"]
-    )
-    def test_the_granted_categories_are_read_in_either_format(self, value: str) -> None:
-        read = CookieConsentBackend().read(consent_request(value))
+    def test_the_granted_categories_are_read(self) -> None:
+        read = CookieConsentBackend().read(
+            consent_request("2:analytics|marketing:1700")
+        )
         assert read == Consent(
             frozenset({NECESSARY, "analytics", "marketing"}), decided=True
         )
 
-    def test_each_format_keeps_its_own_separator(self) -> None:
+    def test_a_comma_is_part_of_a_category_name(self) -> None:
         read = CookieConsentBackend().read(consent_request("2:analytics,ads:1"))
         assert read.granted == frozenset({NECESSARY, "analytics,ads"})
 
-    @pytest.mark.parametrize("value", ["2::1700", "1::1700"])
-    def test_a_choice_of_nothing_is_decided(self, value: str) -> None:
-        read = CookieConsentBackend().read(consent_request(value))
+    def test_a_choice_of_nothing_is_decided(self) -> None:
+        read = CookieConsentBackend().read(consent_request("2::1700"))
         assert read == Consent(frozenset({NECESSARY}), decided=True)
 
     def test_the_runtime_entry_names_the_cookie(self) -> None:
         backend = CookieConsentBackend()
         assert backend.client_config() == {"cookie": backend.cookie()}
 
-    @pytest.mark.parametrize("value", ["3:analytics:1", "analytics", "2:a", ""])
+    @pytest.mark.parametrize(
+        "value", ["1:analytics:1", "3:analytics:1", "analytics", "2:a", ""]
+    )
     def test_a_foreign_value_is_undecided(self, value: str) -> None:
         assert CookieConsentBackend().read(consent_request(value)) == UNDECIDED
 
     def test_the_cookie_name_is_an_option(self) -> None:
         backend = CookieConsentBackend({"OPTIONS": {"cookie_name": "c"}})
         assert backend.cookie_name == "c"
-        assert backend.read(cookie_request(c="1:analytics:1")).allows("analytics")
+        assert backend.read(cookie_request(c="2:analytics:1")).allows("analytics")
 
     def test_an_unusable_cookie_name_falls_back(self) -> None:
         backend = CookieConsentBackend({"OPTIONS": {"cookie_name": 3}})

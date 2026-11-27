@@ -7,16 +7,10 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, cast
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.core.exceptions import ImproperlyConfigured
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.checks.common import RunMemo, errors_for_unknown_keys, raw_scope
 from next.pages.errors import PageMetadataShapeError
 from next.pages.metadata.backends import configured_renderer_class

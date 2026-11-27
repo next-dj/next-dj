@@ -3,18 +3,17 @@
 
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
-import type { Envelope } from "./apply";
+import type { BeforeApply, Envelope } from "./apply";
 import { createScriptsLoader, lazyChunk } from "./chunks";
-import type { ChunkDeps, Lazy, ScriptsChunk, ScriptsFactory } from "./chunks";
+import type { ChunkDeps, Lazy, ScriptsChunk } from "./chunks";
 import type { ConsentChange } from "./consent";
 import { readCsrf } from "./csrf";
-import type { CsrfMint } from "./csrf";
-import type { SseFactory } from "./sse";
-import type { PollFactory } from "./poll";
-import type { WsTransportFactory } from "./ws";
+import type { Kernel, Modules } from "./kernel";
 import type { NavigatedDetail, NavigationState } from "./navigation";
-import { scriptNonce } from "./protocol";
-import type { Diagnostics, PartialError } from "./protocol";
+import { ATTR_STREAMED, LOADING, PROTOCOL, markBusy, scriptNonce } from "./protocol";
+import type { PartialError } from "./protocol";
+import type { Router } from "./router";
+import type { Settled } from "./wire";
 
 /** The client context store, shared by _init, the context op, and csrf meta. */
 export type NextContext = Readonly<Record<string, unknown>>;
@@ -22,23 +21,13 @@ export type NextContext = Readonly<Record<string, unknown>>;
 export type { PartialError, PartialErrorKind } from "./protocol";
 
 export type { NavigatedDetail, NavigationAction, NavigationState } from "./navigation";
-export type { Asset, AssetLoad, Envelope, FormMeta, Patch } from "./apply";
+export type { Asset, AssetLoad, BeforeApply, Envelope, FormMeta, Patch } from "./apply";
 export type { ConsentChange } from "./consent";
 export type { ScriptsChunk } from "./chunks";
 export type { ScriptStatus } from "./scripts";
 export type { StreamMeta } from "./sse";
-export type { Outcome } from "./wire";
+export type { Outcome, Settled } from "./wire";
 export type { SubmitAction } from "./partial";
-
-/** The module each single-module chunk registers through Next._land, by chunk name. */
-interface NextModules {
-  scripts: ScriptsFactory;
-  stream: SseFactory;
-  ws: WsTransportFactory;
-  csrf: CsrfMint;
-  poll: PollFactory;
-  dev: Diagnostics;
-}
 
 /** The lazily fetched chunks Next.ready awaits, keyed by name. */
 export interface NextChunks {
@@ -58,7 +47,7 @@ export interface NextEventMap {
     method: string;
     intent: { zone?: string; uid?: string };
   };
-  "partial:before-apply": { envelope: Envelope };
+  "partial:before-apply": BeforeApply;
   // ok is false when any op threw or named an unknown verb, and stale when a newer
   // request superseded the envelope. nodes are the roots the mount pass ran over.
   "partial:applied": {
@@ -68,6 +57,7 @@ export interface NextEventMap {
     stale?: true;
   };
   "partial:error": PartialError;
+  "partial:settled": Settled;
   "partial:layer-opened": { opener: HTMLElement | null };
   "partial:layer-accepted": { result: unknown };
   "partial:layer-dismissed": { reason: string };
@@ -78,7 +68,7 @@ export interface NextEventMap {
     state: "connecting" | "open" | "closed";
     code?: string;
   };
-  "next:toast": { text: string; variant: string };
+  "next:toast": { text: string; variant: string; element: Element };
   "next:navigated": NavigatedDetail;
   "next:consent": ConsentChange;
   "next:script-loaded": { name: string };
@@ -127,6 +117,13 @@ const record = ({ target, type }: Event): void => {
 };
 document.addEventListener("load", record, true);
 document.addEventListener("error", record, true);
+addEventListener("load", () => {
+  if (
+    document.querySelector(`[${ATTR_STREAMED}]`) &&
+    (window.$nx ?? []).push === [].push
+  )
+    markBusy([...document.querySelectorAll(LOADING)])("incomplete");
+});
 
 /** The window-exposed runtime facade, a static class since there is one per page. */
 class Next {
@@ -143,13 +140,24 @@ class Next {
 
   // One loader per chunk. The dev chunk is fetched only when the payload has $dev.
   static #modules = Object.fromEntries(
-    ["scripts", "stream", "ws", "csrf", "poll", "dev"].map((key) => [
-      key,
-      lazyChunk(Next.#chunk, key),
-    ]),
-  ) as { [K in keyof NextModules]: Lazy<NextModules[K]> };
+    [
+      "scripts",
+      "stream",
+      "ws",
+      "csrf",
+      "poll",
+      "dev",
+      "forms",
+      "layers",
+      "boundaries",
+      "reload",
+      "more",
+      "router",
+      "intent",
+    ].map((key) => [key, lazyChunk(Next.#chunk, key)]),
+  ) as { [K in keyof Modules]: Lazy<Modules[K]> };
 
-  static partial: PartialSurface = createPartial({
+  static #runtime = createPartial({
     dispatch: Next.#chunk.dispatch,
     mergeContext: (data) => Next.#mergeContext(data),
     context: Next.#chunk.context,
@@ -157,7 +165,15 @@ class Next {
     ws: Next.#modules.ws,
     csrf: Next.#modules.csrf,
     poll: Next.#modules.poll,
+    forms: Next.#modules.forms,
+    layers: Next.#modules.layers,
+    load: (name, src) => Next.#modules[name].load(src) as never,
+    module: (name) => Next.#modules[name].get() as never,
+    scripts: () => Next.ready("scripts"),
+    nonce: NONCE,
   });
+
+  static partial: PartialSurface = Next.#runtime.partial;
 
   /** Consent per category, set once the scripts chunk has loaded. */
   static consent: ScriptsChunk["consent"] | undefined;
@@ -187,8 +203,13 @@ class Next {
   };
 
   static navigation = {
-    current: (): NavigationState => Next.partial._current(),
+    current: (): NavigationState => Next.#runtime.current(),
   };
+
+  /** The client router, undefined until its bundle has evaluated. */
+  static get router(): Router | undefined {
+    return Next.#modules.router.get();
+  }
 
   static get context(): Readonly<Record<string, unknown>> {
     return Object.freeze({ ...Next.#context });
@@ -198,14 +219,16 @@ class Next {
   static _init(context: Record<string, unknown>): void {
     // Stored first, since the chunk loaders below read $chunks from it.
     Next.#context = context;
+    // A cached runtime from another release must not read this server's formats.
+    if (context.$protocol !== undefined)
+      Next.#runtime.kernel.release(context.$protocol === PROTOCOL);
     // Only the boolean true enables the dev channel, a "true" string does not. It is
     // enabled before the initial trigger scan, and the diagnostics are attached once
     // the dev chunk has loaded, unless a later payload turned the channel off.
     if (context.$dev === true) {
-      Next.partial._configure({ dev: true });
+      Next.#runtime.dev();
       Next.#modules.dev.whenLoaded((diagnostics) => {
-        if (Next.#context.$dev === true)
-          Next.partial._configure({ dev: true, diagnostics });
+        if (Next.#context.$dev === true) Next.#runtime.dev(diagnostics);
       });
     }
     // A page that cannot mint a token carries no $csrf, so an absent key keeps a
@@ -231,10 +254,20 @@ class Next {
     return Next.#chunks[chunk]();
   }
 
-  /** Register the module a lazy chunk exports, called by the chunk as it evaluates. */
-  static _land<K extends keyof NextModules>(key: K, value: NextModules[K]): void {
-    // A chunk from another release may name a module this runtime does not know.
-    (Next.#modules[key] as Lazy<NextModules[K]> | undefined)?.land(value);
+  /**
+   * Install a chunk, called by its bundle as it evaluates.
+   *
+   * A second copy of a bundle installs nothing, and a bundle of another build than the
+   * runtime installs nothing and reloads the page once.
+   */
+  static _extend<K extends keyof Modules>(
+    name: K,
+    install: (kernel: Kernel) => Modules[K],
+    build: string,
+  ): void {
+    const chunk = Next.#modules[name] as Lazy<Modules[K]> | undefined;
+    if (build !== __BUILD__) Next.#runtime.kernel.release(false);
+    else if (chunk && !chunk.landed()) chunk.land(install(Next.#runtime.kernel));
   }
 
   /** Subscribe to a runtime event, returning an unsubscribe function. */
@@ -256,9 +289,11 @@ class Next {
   }
 
   // A merge replaces the store with a new object, leaving earlier snapshots intact.
+  // JSON has no undefined, so a merge reads an undefined value as a deletion.
   static #mergeContext(data: Record<string, unknown>): void {
     const changed = Object.keys(data);
-    Next.#context = { ...Next.#context, ...data };
+    const all = Object.entries({ ...Next.#context, ...data });
+    Next.#context = Object.fromEntries(all.filter(([, value]) => value !== undefined));
     Next.#bus.emit("context-updated", { context: Next.#context, changed });
   }
 }

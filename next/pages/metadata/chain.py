@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Final, NamedTuple
+from functools import partial
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, override
 
 from next.conf.settings import fail_loudly
+from next.deps.context import ResolutionContext
 from next.deps.resolver import current_resolver
+from next.deps.scope import bridged_scope
 from next.diagnostics import FailureLog, exception_text, type_name
-from next.introspect import callable_name
+from next.introspect import callable_name, is_coroutine_callable
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.pages.loaders import AncestorStamps, load_page_module
 from next.utils import is_intercept_name, is_route_group, strip_route_groups
@@ -40,6 +43,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.http import HttpRequest
+
+    from next.diagnostics import Guard
 
     from .registry import PageMetadataEntry, PageMetadataRegistry
 
@@ -329,6 +334,18 @@ def static_metadata(registry: PageMetadataRegistry, file_path: Path) -> StaticMe
     return StaticMetadata(entry.static, refused)
 
 
+def _callable_guard(source: ChainSource, source_name: str, *, contain: bool) -> Guard:
+    """Return the guard a metadata callable runs under, containing it with `contain`."""
+    return _failures.guard(
+        source.file_path,
+        "The @page.metadata callable %s raised %s, so the page renders without "
+        "what it returns. Fix the callable, or raise Http404 for a missing object.",
+        source_name,
+        catch=_EVERY if contain else (),
+        detail=type_name,
+    )
+
+
 def _fold_tail(
     prefix: FoldState,
     tail: Iterable[ChainSource],
@@ -351,14 +368,7 @@ def _fold_tail(
             state = fold_segment(state, source.segment)
             continue
         source_name = f"{callable_name(func)} in {source.file_path}"
-        guard = _failures.guard(
-            source.file_path,
-            "The @page.metadata callable %s raised %s, so the page renders without "
-            "what it returns. Fix the callable, or raise Http404 for a missing object.",
-            source_name,
-            catch=_EVERY if contain else (),
-            detail=type_name,
-        )
+        guard = _callable_guard(source, source_name, contain=contain)
         with guard:
             resolved = active.resolve_dependencies(
                 func,
@@ -369,6 +379,36 @@ def _fold_tail(
                 **url_kwargs,
             )
             segment = normalize_metadata(func(**resolved), source=source_name)
+        if guard.failed:
+            continue
+        state = fold_segment(state, replace(segment, trail=source.segment.trail))
+    return state
+
+
+async def _afold_tail(
+    prefix: FoldState,
+    tail: Iterable[ChainSource],
+    *,
+    request: HttpRequest | None,
+    url_kwargs: Mapping[str, object],
+    dep_cache: dict[str, Any],
+    context_data: MutableMapping[str, object],
+    contain: bool,
+) -> FoldState:
+    """Fold `tail` over `prefix` as `_fold_tail` does, awaiting each callable."""
+    state = prefix
+    active = current_resolver()
+    context = ResolutionContext.for_page(request, url_kwargs, dep_cache, context_data)
+    for source in tail:
+        func = source.func
+        if func is None:
+            state = fold_segment(state, source.segment)
+            continue
+        source_name = f"{callable_name(func)} in {source.file_path}"
+        guard = _callable_guard(source, source_name, contain=contain)
+        with guard:
+            value = await active.acall(func, replace(context, stack=[]))
+            segment = normalize_metadata(value, source=source_name)
         if guard.failed:
             continue
         state = fold_segment(state, replace(segment, trail=source.segment.trail))
@@ -401,6 +441,7 @@ def fold_chain(
     """Fold the chain of `file_path`, `overlay` standing as the page's own segment.
 
     The overlay merges over the page's own dict, and a failing callable raises.
+    An async callable folds through the bridge, so a sync caller still gets its keys.
     """
     entry = chain_entry(registry, file_path)
     if overlay is None:
@@ -412,6 +453,21 @@ def fold_chain(
         sources = _overlaid(entry, file_path, overlay)
     dynamic = any(source.func is not None for source in sources)
     context = context_data() if dynamic and context_data is not None else {}
+    if any(is_coroutine_callable(source.func) for source in sources):
+        state = bridged_scope(
+            dep_cache,
+            partial(
+                _afold_tail,
+                start,
+                tuple(sources),
+                request=request,
+                url_kwargs=url_kwargs or {},
+                dep_cache=dep_cache,
+                context_data=context,
+                contain=False,
+            ),
+        )
+        return finish(state)
     state = _fold_tail(
         start,
         sources,
@@ -498,12 +554,55 @@ class MetadataThunk:
         )
         return finish(state)
 
+    async def afold(
+        self, entry: ChainEntry, context_data: MutableMapping[str, object]
+    ) -> Metadata:
+        """Fold `entry`, the contained chain of the render, awaiting its callables.
+
+        A callable that fails is left out, as `fold` leaves it out.
+        """
+        if entry.folded is not None:
+            return entry.folded
+        state = await _afold_tail(
+            entry.prefix,
+            entry.tail,
+            request=self.request,
+            url_kwargs=self.url_kwargs,
+            dep_cache=self.dep_cache,
+            context_data=context_data,
+            contain=True,
+        )
+        return finish(state)
+
+
+class FoldedMetadata(MetadataThunk):
+    """A metadata thunk whose chain the async path folded before the template render."""
+
+    __slots__ = ("metadata",)
+
+    def __init__(self, thunk: MetadataThunk, metadata: Metadata) -> None:
+        """Hold the fold beside what `thunk` holds."""
+        super().__init__(
+            thunk.registry,
+            thunk.file_path,
+            thunk.request,
+            thunk.url_kwargs,
+            thunk.dep_cache,
+        )
+        self.metadata = metadata
+
+    @override
+    def folded(self) -> Metadata:
+        """Return the fold made ahead of the render."""
+        return self.metadata
+
 
 __all__ = [
     "REFUSED_ROBOTS",
     "ChainEntry",
     "ChainRefusal",
     "ChainSource",
+    "FoldedMetadata",
     "MetadataDeclaration",
     "MetadataOrigin",
     "MetadataThunk",

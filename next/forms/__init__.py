@@ -20,6 +20,7 @@ from .backends import (
     FormActionBackend,
     RegistryBackendSnapshot,
     RegistryFormActionBackend,
+    ResponseShaper,
 )
 from .base import (
     BaseForm,
@@ -181,6 +182,7 @@ __all__ = [
     "RegexField",
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
+    "ResponseShaper",
     "Select",
     "SelectMultiple",
     "SessionFormWizardBackend",

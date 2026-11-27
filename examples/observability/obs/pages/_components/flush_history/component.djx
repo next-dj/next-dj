@@ -1,0 +1,22 @@
+{% if flushes %}
+  <table class="w-full text-sm" data-flush-history>
+    <thead class="text-left text-muted-foreground">
+      <tr>
+        <th class="py-2 pr-4">Minute</th>
+        <th class="py-2 pl-4 text-right">Counters</th>
+        <th class="py-2 pl-4 text-right">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for flush in flushes %}
+        <tr class="border-t border-border">
+          <td class="py-2 pr-4 font-mono text-xs"><time datetime="{{ flush.minute|date:'c' }}">{{ flush.minute|date:"Y-m-d H:i" }}</time></td>
+          <td class="py-2 pl-4 text-right tabular-nums">{{ flush.counters }}</td>
+          <td class="py-2 pl-4 text-right tabular-nums">{{ flush.total }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="text-sm text-muted-foreground">Nothing has been flushed yet. Run <code class="font-mono">flush_metrics</code> to persist the counters.</p>
+{% endif %}

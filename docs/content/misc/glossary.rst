@@ -14,6 +14,11 @@ Terms used throughout the next.dj documentation.
       Form-less functions register through ``@action("name")``.
       The framework derives a stable dispatch URL from the action name.
 
+   active link
+      A navigation link the server marks with ``aria-current="page" data-next-current="page"`` when it points at the current page and with ``data-next-current="ancestor"`` when it points at an ancestor.
+      The client router keeps the marks current after each navigation.
+      See :doc:`/content/topics/router/active-links`.
+
    asset
       A file registered with the static pipeline.
       Has a stem, an extension, and an owner (page, layout, or component).
@@ -38,6 +43,29 @@ Terms used throughout the next.dj documentation.
    backend
       A subsystem implementation named by a dotted path in ``NEXT_FRAMEWORK``.
       Used for the router, the components backend, the static backend chain, the form action chain, the form wizard drafts, the partial protocol, the sitemap sections, the consent store, the realtime broker, and the ticket binding.
+
+   boundary
+      A page body or a component call that owns a loading UI, an error UI, or both, through the ``loading.djx`` and ``error.djx`` beside it.
+      See :doc:`/content/topics/boundaries/index`.
+
+   boundary token
+      The signed value on the wrapper of a client-trip boundary that names the component, its props, the URL, and the permissions the call site rendered it under.
+      The browser sends it back to fetch the component, and the server refuses an expired or altered one.
+      See :doc:`/content/topics/boundaries/loading`.
+
+   client-trip
+      The delivery of a deferred boundary on a later request instead of in the same response, in the modes ``load``, ``visible``, and ``manual``.
+      It renders from the declared props alone, since the context of the call site does not travel.
+      See :doc:`/content/topics/boundaries/loading`.
+
+   deferred boundary
+      A boundary with a ``loading.djx``, whose content renders after the shell, either in the same response as a ``stream`` boundary or on a later request as a client-trip one.
+      See :doc:`/content/topics/boundaries/loading`.
+
+   error UI
+      The ``error.djx`` of a component or a page directory, which replaces a subtree whose render failed and leaves the rest of the response as it was.
+      It reads ``error``, with the kind, the digest, and whether a retry is possible.
+      See :doc:`/content/topics/boundaries/errors`.
 
    broker
       The realtime backend that numbers, stores, and fans out topic messages, ``MemoryBroker`` by default and ``RedisBroker`` across processes.
@@ -114,6 +142,22 @@ Terms used throughout the next.dj documentation.
       The access requirement declared on an action through ``Meta.login_required`` and ``Meta.permission_required``, or the matching ``@action`` keywords.
       Stored as an ``ActionGuard`` on the registry metadata and enforced before the form is built.
       See :ref:`topics-forms-actions-guards`.
+      On a page with a ``loading.djx``, a ``@context`` callable declared ``guard=True`` is also a guard.
+      It runs before the first byte, so its 404, 403, or 400 keeps the status of the response, see :doc:`/content/topics/boundaries/loading`.
+
+   job
+      The work that fills one deferred boundary.
+      It runs on a lane, and its result settles the boundary as ready, as an error, or as a timeout.
+      See :doc:`/content/topics/boundaries/async`.
+
+   lane
+      Where a job runs.
+      The pool lane is a bounded process-wide thread pool, and the request lane is the thread that ran the view, where jobs run one after another.
+      See :doc:`/content/topics/boundaries/async`.
+
+   loader
+      A ``Loader`` over a batch function, which gathers the keys one request scope asks for into a few calls of that function.
+      See :doc:`/content/topics/boundaries/async`.
 
    inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
@@ -127,6 +171,11 @@ Terms used throughout the next.dj documentation.
    layer
       A server-initiated overlay stacked above the current page, opened by the ``layer.open`` patch verb or a ``data-next-layer`` link.
       The client runtime hosts each layer in its own ``<dialog>`` element and closes the top layer on accept, dismissal, or Back.
+      See :doc:`/content/topics/partial-rendering/layers`, and :doc:`/content/topics/router/index` for how the router treats a link that opens one.
+
+   loading UI
+      The ``loading.djx`` of a component or a page directory, which the response shows in place of content that renders later.
+      See :doc:`/content/topics/boundaries/loading`.
 
    layout
       A ``layout.djx`` file in an ancestor directory.
@@ -146,7 +195,7 @@ Terms used throughout the next.dj documentation.
 
    manager
       The singleton orchestrator for one subsystem.
-      Examples include ``page``, ``components_manager``, ``router_manager``, and ``next.forms.manager.form_action_manager``.
+      Examples include ``page``, ``components_manager``, ``route_manager``, and ``next.forms.manager.form_action_manager``.
 
    morph
       The default patch verb.
@@ -174,6 +223,11 @@ Terms used throughout the next.dj documentation.
       Comes from ``APP_DIRS`` and ``DIRS`` in ``PAGE_BACKENDS``.
       A ``sitemap.py``, ``robots.py``, ``robots.txt``, or ``scripts.py`` at its top serves the tree's crawler documents or declares its third-party scripts.
 
+   pager
+      An object that cuts the rows of a list into the ``Window`` the query string of the request asks for, ``NumberPager`` by ``?page=N`` and ``KeysetPager`` by ``?cursor=<token>``.
+      A context callable names it in an ``Annotated[Paging, <pager>]`` parameter.
+      See :doc:`/content/topics/partial-rendering/reference`.
+
    robots source
       The one file a site serves ``/robots.txt`` from, a ``robots.py`` declaring ``RobotsRule`` groups or a static ``robots.txt`` served as written.
       A site has exactly one, and ``manage.py check`` reports a second.
@@ -187,6 +241,16 @@ Terms used throughout the next.dj documentation.
    multi-project layout
       Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``COMPONENT_BACKENDS``.
       See :doc:`/content/topics/multi-project`.
+
+   prefetch
+      A fetch of a page the visitor is about to open, made by the client router before the click so the navigation applies an answer already in memory.
+      A shell prefetch asks for the page with every deferred boundary at its loading UI.
+      See :doc:`/content/topics/router/prefetch`.
+
+   press
+      The start of the page request at the press of a link, before the click, so the click adopts an answer that is already on its way.
+      ``ROUTER["PRESS"]`` decides which pointers send the full request, and ``data-next-press`` overrides it for the links inside an element.
+      See :doc:`/content/topics/router/prefetch`.
 
    partial request
       A request the client runtime marks with the ``X-Next-Request`` header.
@@ -258,6 +322,11 @@ Terms used throughout the next.dj documentation.
    request cache
       The dependency cache a form dispatch attaches to the request, shared by its handler and by the context functions, metadata callables, and components of the re-render.
 
+   request scope
+      The ``RequestScope`` an async render opens around its callables, which computes each shared dependency once and hands every later reader the same value or the same error.
+      It also bounds the batches of a ``Loader``.
+      See :doc:`/content/topics/boundaries/async`.
+
    re-render
       The dispatch path that re-renders the origin page after a failed form validation.
 
@@ -291,6 +360,11 @@ Terms used throughout the next.dj documentation.
    JS context serializer
       Implementations of ``next.static.JsContextSerializer`` that encode values for ``window.Next.context``.
       Not the frozen form specs in ``next.forms.serializers``.
+
+   shell
+      The response as first rendered, with every deferred boundary replaced by its loading UI.
+      A streamed response sends it at once and writes each boundary as its job settles.
+      See :doc:`/content/topics/boundaries/streaming`.
 
    slot
       A named area inside a component template filled with caller content through the block form ``{% #component "name" %}`` … ``{% /component %}``, see :doc:`/content/topics/components`.

@@ -416,7 +416,8 @@ class DjangoTunnel:
         _LIVE.add(task)
         task.add_done_callback(self._settle)
         try:
-            await asyncio.shield(task)
+            await asyncio.wait((task,))
+            task.result()
         except asyncio.CancelledError:
             exchange.gone.set()
             await self._release(task)

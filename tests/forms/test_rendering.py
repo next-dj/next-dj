@@ -12,6 +12,7 @@ from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
 from next.csrf import defer_token
+from next.diagnostics import degraded, degraded_status, watch_degraded
 from next.forms import (
     ActionRegistration,
     ComponentFileWidget,
@@ -24,7 +25,7 @@ from next.forms.manager import form_action_manager
 from next.forms.nodes import FormNode
 from next.forms.rendering import ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
-from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
+from next.partial.keys import KEY_ATTR, TARGET_ATTR
 from tests.forms.actions import SimpleForm
 
 
@@ -209,6 +210,80 @@ class TestRenderInvalidPage:
         )
         assert "<main>" in third
         assert "<p>v2</p>" in third
+
+
+_EXPLODING = """
+from next.pages import context
+
+
+def _explode():
+    raise ValueError("body")
+
+
+@context("boom")
+def boom():
+    return _explode
+"""
+
+_FAILING_CONTEXT = """
+from next.pages import context
+
+
+@context("value")
+def value():
+    raise ValueError("context")
+"""
+
+
+class TestRenderInvalidPageBoundaries:
+    """A page boundary contains a failed re-render at the status of the form flow."""
+
+    def _render(self, mock_http_request, page_file: Path) -> str:
+        backend = form_action_manager.default_backend
+        return backend.render_invalid_page(
+            mock_http_request(method="POST", POST=QueryDict()),
+            "simple_form",
+            SimpleForm(data={}),
+            page_file_path=page_file,
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "body"),
+        [(_EXPLODING, "{{ form.name }}{{ boom }}"), (_FAILING_CONTEXT, "{{ value }}")],
+        ids=("body", "context"),
+    )
+    def test_a_failure_renders_the_error_ui_without_a_status(
+        self, mock_http_request, tmp_path, source: str, body: str
+    ) -> None:
+        (tmp_path / "layout.djx").write_text("<main>{% template %}</main>")
+        (tmp_path / "leaf").mkdir()
+        (tmp_path / "leaf" / "error.djx").write_text("<p>form page down</p>")
+        page_file = tmp_path / "leaf" / "page.py"
+        page_file.write_text(source)
+        (tmp_path / "leaf" / "template.djx").write_text(body)
+        watch_degraded()
+
+        html = self._render(mock_http_request, page_file)
+
+        assert html.startswith("<main><div id=")
+        assert "<p>form page down</p>" in html
+        assert degraded() is True
+        assert degraded_status() is None
+        watch_degraded()
+
+    def test_a_working_page_renders_the_bound_form(
+        self, mock_http_request, tmp_path
+    ) -> None:
+        (tmp_path / "error.djx").write_text("<p>form page down</p>")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        (tmp_path / "template.djx").write_text("{{ form.is_bound }}")
+        watch_degraded()
+
+        html = self._render(mock_http_request, page_file)
+
+        assert html == "True"
+        assert degraded() is False
 
 
 class TestFormTagSyntax:
@@ -1049,21 +1124,21 @@ class TestFormNodePartialAttrs:
         node = self._node(
             form_engine, '{% form "simple_form" zone="board" %}x{% endform %}'
         )
-        assert node.has_partial_attr(FORM_ZONE_ATTR) is True
-        assert node.has_partial_attr(FORM_KEY_ATTR) is False
+        assert node.has_partial_attr(TARGET_ATTR) is True
+        assert node.has_partial_attr(KEY_ATTR) is False
 
     def test_key_param_answers_under_the_key_attribute(self, form_engine) -> None:
         """A key= param is visible under the attribute name it compiles to."""
         node = self._node(
             form_engine, '{% form "simple_form" key="row-7" %}x{% endform %}'
         )
-        assert node.has_partial_attr(FORM_KEY_ATTR) is True
+        assert node.has_partial_attr(KEY_ATTR) is True
 
     def test_plain_form_carries_no_partial_attribute(self, form_engine) -> None:
         """A form tag without partial params answers no to every attribute."""
         node = self._node(form_engine, '{% form "simple_form" %}x{% endform %}')
-        assert node.has_partial_attr(FORM_ZONE_ATTR) is False
-        assert node.has_partial_attr(FORM_KEY_ATTR) is False
+        assert node.has_partial_attr(TARGET_ATTR) is False
+        assert node.has_partial_attr(KEY_ATTR) is False
 
 
 class TestFormTagPartialParams:

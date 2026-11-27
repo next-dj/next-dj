@@ -6,9 +6,8 @@ from typing import TYPE_CHECKING, Any
 from django.http import HttpResponse, HttpResponseBadRequest
 
 from next.deps.resolver import current_resolver
-from next.ports import partial_shaper_slot
 
-from .permissions import _enforce_object_permissions, _enforce_view_permissions
+from .permissions import _enforce_object_permissions
 from .responses import (
     _HTTP_ERROR_FLOOR,
     ActionOutcome,
@@ -52,15 +51,10 @@ def _maybe_validate_only(
 
     Runs only after both authorization layers pass, so no validator is an oracle.
     """
-    shaper = partial_shaper_slot.get()
-    intent = shaper.intent(request)
-    if not intent.validate_fields:
-        return None
-    return shaper.shape_validate(
+    return backend.shaper.validate(
         backend,
         request,
         form,
-        intent,
         action_name=action_name,
         uid=state.uid or "",
         wizard=wizard,
@@ -74,13 +68,10 @@ def _bind_wizard_step(
     wizard_class: "type[FormWizard]",
     state: "_DispatchState",
 ) -> "HttpResponse | tuple[FormWizard, str, django_forms.Form]":
-    """Authorize the step POST and bind its form, or return an early response.
+    """Bind the step form and check its object, or return an early response.
 
-    Permission layers and validate-only run before any storage write.
+    The object check and validate-only run before any storage write.
     """
-    denial = _enforce_view_permissions(wizard_class, request, action_name, state)
-    if denial is not None:
-        return denial
     wizard = wizard_class(
         request=request, url_kwargs=state.url_kwargs, base_path=state.origin_match.path
     )
@@ -91,7 +82,7 @@ def _bind_wizard_step(
     form_kwargs = wizard.get_form_kwargs(step_name)
     files = request.FILES if hasattr(request, "FILES") else None
     form = form_class(request.POST, files, **form_kwargs)
-    denial = _enforce_object_permissions(form, request, action_name, state)
+    denial = _enforce_object_permissions(form, request, state)
     if denial is not None:
         return denial
     validated = _maybe_validate_only(

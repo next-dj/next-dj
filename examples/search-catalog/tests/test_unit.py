@@ -1,21 +1,12 @@
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from catalog.demo import seed_demo
-from catalog.deps import (
-    DFilters,
-    DPage,
-    FiltersProvider,
-    PageProvider,
-    PageRequest,
-    _decimal_or_none,
-    parse_filters,
-)
+from catalog.deps import DFilters, FiltersProvider, _decimal_or_none, parse_filters
 from catalog.forms import PRESETS, PresetFilterForm
 from catalog.models import Category, Filters, Lead, Product
-from catalog.services import cached_search
+from catalog.services import cached_count, search
 from catalog.templatetags.catalog_qs import querystring
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
@@ -30,9 +21,6 @@ _KEY_CHANGES = {
     "price_min": Decimal(100),
     "price_max": Decimal(50),
     "in_stock": True,
-    "sort": "price_desc",
-    "page": 2,
-    "per_page": 10,
     "category": "electronics",
 }
 
@@ -42,22 +30,19 @@ def _param(annotation: object) -> SimpleNamespace:
     return SimpleNamespace(name="value", annotation=annotation)
 
 
-def _resolve_page(rf, query: str) -> PageRequest:
-    """Run `PageProvider` against a request carrying `query`."""
-    request = rf.get("/" + (f"?{query}" if query else ""))
-    return PageProvider().resolve(_param(None), SimpleNamespace(request=request))
+def _scope(category: str | None) -> Category | None:
+    """Return the category a slug names, `None` for the whole catalog."""
+    return Category.objects.get(slug=category) if category else None
 
 
-def _search(
-    *,
-    page: int = 1,
-    per_page: int = 100,
-    category: str | None = None,
-    **filters: object,
-) -> dict[str, Any]:
-    """Run `cached_search` with the given `Filters` fields, paging and category slug."""
-    scope = Category.objects.get(slug=category) if category else None
-    return cached_search(Filters(**filters), page, per_page, category=scope)
+def _search(*, category: str | None = None, **filters: object) -> list[Product]:
+    """Run `search` with the given `Filters` fields and category slug."""
+    return list(search(Filters(**filters), category=_scope(category)))
+
+
+def _count(*, category: str | None = None, **filters: object) -> int:
+    """Run `cached_count` with the given `Filters` fields and category slug."""
+    return cached_count(Filters(**filters), category=_scope(category))
 
 
 class TestDemoData:
@@ -135,37 +120,52 @@ class TestProductQuerySet:
         assert Product.objects.brand_list() == ["Acme", "Globex", "Hooli", "Initech"]
 
 
-class TestCachedSearch:
-    """Cover the cached, paginated search behind both listing pages."""
+class TestSearch:
+    """Cover the lazy search behind both listing pages and its cached count."""
+
+    def test_the_rows_come_back_in_the_asked_order(self, demo_data) -> None:
+        """Return every match in the order the filter set asks for."""
+        rows = _search(sort="price_asc")
+        assert rows == list(Product.objects.matching(Filters(sort="price_asc")))
+        assert len(rows) == Product.objects.count()
 
     def test_category_scopes_the_results(self, demo_data) -> None:
         """Return only the products of the category passed in."""
-        payload = _search(sort="price_asc", category="books")
+        rows = _search(sort="price_asc", category="books")
         books = set(Product.objects.filter(category__slug="books"))
         assert books != set(Product.objects.all())
-        assert set(payload["products"]) == books
-        assert payload["total"] == len(books)
+        assert set(rows) == books
 
-    def test_repeat_search_reads_from_the_cache(
+    def test_the_count_matches_the_rows(self, demo_data) -> None:
+        """Count the rows the same filter set selects."""
+        assert _count(category="books") == len(_search(category="books"))
+
+    def test_a_repeat_count_reads_from_the_cache(
         self, demo_data, django_assert_num_queries
     ) -> None:
-        """Answer an identical search from the cache without touching the database."""
-        first = _search(sort="price_asc", per_page=5)
+        """Answer an identical count from the cache without touching the database."""
+        first = _count(brands=("Acme",))
         with django_assert_num_queries(0):
-            second = _search(sort="price_asc", per_page=5)
+            second = _count(brands=("Acme",))
         assert second == first
+
+    def test_the_sort_shares_one_count(
+        self, demo_data, django_assert_num_queries
+    ) -> None:
+        """Serve every ordering of one search from the count the first one stored."""
+        first = _count(sort="price_asc")
+        with django_assert_num_queries(0):
+            assert _count(sort="name") == first
 
     @pytest.mark.parametrize(
         ("field", "value"), _KEY_CHANGES.items(), ids=list(_KEY_CHANGES)
     )
     def test_cache_key_tells_each_field_apart(self, demo_data, field, value) -> None:
-        """Serve a fresh search, not the cached one, when a single field changes."""
-        base = {"sort": "price_asc", "per_page": 5}
-        changed = {**base, field: value}
-        first = _search(**base)
-        second = _search(**changed)
+        """Serve a fresh count, not the cached one, when a single field changes."""
+        first = _count()
+        second = _count(**{field: value})
         cache.clear()
-        fresh = _search(**changed)
+        fresh = _count(**{field: value})
         assert fresh != first
         assert second == fresh
 
@@ -224,52 +224,6 @@ class TestParseFilters:
     def test_decimal_or_none_blank(self) -> None:
         """Return `None` when the input is empty."""
         assert _decimal_or_none(None) is None
-
-
-class TestPageProvider:
-    """Cover the `PageProvider` value clamping and fallbacks."""
-
-    @pytest.mark.parametrize(
-        ("query", "expected"),
-        [
-            ("", PageRequest(number=1, per_page=6)),
-            ("page=abc", PageRequest(number=1, per_page=6)),
-            ("per_page=oops", PageRequest(number=1, per_page=6)),
-            ("page=0", PageRequest(number=1, per_page=6)),
-            ("per_page=999", PageRequest(number=1, per_page=60)),
-            ("page=3&per_page=12", PageRequest(number=3, per_page=12)),
-        ],
-        ids=(
-            "empty_query_string",
-            "unparsable_page",
-            "unparsable_per_page",
-            "page_below_one",
-            "per_page_above_max",
-            "both_values_honoured",
-        ),
-    )
-    def test_resolve_clamps_and_falls_back(self, rf, query, expected) -> None:
-        """Clamp both paging values and fall back on anything unparsable."""
-        assert _resolve_page(rf, query) == expected
-
-    @pytest.mark.parametrize(
-        ("annotation", "expected"),
-        [(DPage, None), (int, False)],
-        ids=("own_marker", "foreign_annotation"),
-    )
-    def test_static_can_handle(self, annotation, expected) -> None:
-        """Drop a foreign annotation for good and leave `DPage` to the context."""
-        assert PageProvider().static_can_handle(_param(annotation)) is expected
-
-    @pytest.mark.parametrize(
-        ("annotation", "attached", "expected"),
-        [(DPage, True, True), (DPage, False, False), (int, True, False)],
-        ids=("marker_with_request", "marker_without_request", "foreign_annotation"),
-    )
-    def test_can_handle(self, rf, annotation, attached, expected) -> None:
-        """Claim `DPage` only while the context carries a request."""
-        context = SimpleNamespace(request=rf.get("/") if attached else None)
-        assert PageProvider().can_handle(_param(annotation), context) is expected
 
 
 class TestFiltersProvider:
@@ -354,15 +308,17 @@ class TestZoneSets:
     def test_listing_zones_join_into_a_partial_target(self) -> None:
         """Encode the all-products set as one comma-delimited target value."""
         assert zone_target(LISTING_ZONES) == (
-            "catalog-results,catalog-more,catalog-count,catalog-pager,catalog-chips"
+            "catalog-results,catalog-count,catalog-results-more,"
+            "catalog-results-less,catalog-chips"
         )
 
-    def test_category_zones_drop_the_append_sentinel(self) -> None:
-        """Leave `catalog-more` out of the paginated category listing."""
+    def test_category_zones_swap_the_sentinel_for_the_pager(self) -> None:
+        """Paginate the category listing instead of growing it on scroll."""
         assert zone_target(CATEGORY_ZONES) == (
             "catalog-results,catalog-count,catalog-pager,catalog-chips"
         )
-
-    def test_category_set_is_a_subset_of_the_listing_set(self) -> None:
-        """Keep both listings on the same zone vocabulary."""
-        assert set(CATEGORY_ZONES) < set(LISTING_ZONES)
+        assert set(LISTING_ZONES) ^ set(CATEGORY_ZONES) == {
+            "catalog-results-more",
+            "catalog-results-less",
+            "catalog-pager",
+        }

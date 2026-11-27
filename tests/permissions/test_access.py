@@ -20,7 +20,6 @@ from next.permissions.access import (
     check,
     declared,
     declared_files,
-    forget_login_default,
     holds,
     login_by_default,
     login_middleware,
@@ -409,14 +408,13 @@ class TestLoginByDefault:
         ):
             assert login_by_default() is False
 
-    def test_another_setting_keeps_the_memo(self) -> None:
+    def test_the_memo_holds_until_a_setting_moves(self) -> None:
         with override_settings(MIDDLEWARE=[LOGIN_REQUIRED_MIDDLEWARE]):
             assert login_by_default() is True
-            settings.MIDDLEWARE = []
-            forget_login_default(setting="DEBUG")
-            assert login_by_default() is True
-            forget_login_default(setting="MIDDLEWARE")
-            assert login_by_default() is False
+            with override_settings(DEBUG=True):
+                assert login_by_default() is True
+            with override_settings(MIDDLEWARE=[]):
+                assert login_by_default() is False
 
     def test_installed_apps_drop_the_memo(self) -> None:
         installed = [

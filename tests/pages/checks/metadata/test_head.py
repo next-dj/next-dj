@@ -11,19 +11,14 @@ from next.pages.checks import (
 from next.pages.checks.metadata.head import viewport_pairs
 from next.pages.metadata import Viewport
 from next.pages.metadata.scope import SITE_SOURCE
-from tests.pages.checks.metadata.trees import (
-    INHERITED_CALLABLE,
-    framework,
-    metadata_page,
-    scope,
-    templated_page,
-)
-from tests.support import I18N, check_ids, patch_checks_router_manager
+from tests.pages.checks.metadata.trees import INHERITED_CALLABLE, metadata_page, scope
+from tests.support import I18N, check_ids, patch_checks_route_manager
+from tests.support.trees import framework, templated_page
 
 
 def _messages(tmp_path: Path, metadata: str) -> list[tuple[str, str]]:
     metadata_page(tmp_path, metadata)
-    with patch_checks_router_manager(pages_directory=tmp_path):
+    with patch_checks_route_manager(pages_directory=tmp_path):
         return [(message.id, message.msg) for message in check_metadata_head_tags()]
 
 
@@ -87,7 +82,7 @@ class TestLinks:
             'metadata = {"links": [{"rel": "preconnect", '
             '"href": lazy(str, str)("ftp://x/a")}]}\n',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_head_tags() == []
 
     def test_a_preload_without_as_is_e123(self, tmp_path: Path) -> None:
@@ -238,7 +233,7 @@ class TestSocialFolds:
 
     def test_a_derivable_language_is_silent(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"og": {"type": "website"}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_social_folds() == []
 
     def test_a_declared_locale_of_another_form_is_w108(self, tmp_path: Path) -> None:
@@ -246,7 +241,7 @@ class TestSocialFolds:
             tmp_path,
             '{"og": {"locale": "en-US", "locale_alternates": ["de_DE", "fr"]}}',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_social_folds()
         assert check_ids(messages) == ["next.W108", "next.W108"]
         assert "'en-US'" in messages[0].msg
@@ -256,7 +251,7 @@ class TestSocialFolds:
         metadata_page(
             tmp_path, '{"og": {"locale": "ar_AA", "locale_alternates": ["no_NO"]}}'
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_social_folds()
         assert check_ids(messages) == ["next.W108", "next.W108"]
         assert "Facebook reads ar_AR" in messages[0].msg
@@ -269,7 +264,7 @@ class TestSocialFolds:
     def test_an_underived_language_is_one_w108(self, tmp_path: Path) -> None:
         metadata_page(tmp_path / "a", '{"og": {"locale_alternates": True}}')
         metadata_page(tmp_path / "b", '{"og": {"type": "website"}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_social_folds()
         assert check_ids(messages) == ["next.W108"]
         assert "'ast', 'kab'" in messages[0].msg
@@ -277,7 +272,7 @@ class TestSocialFolds:
     @override_settings(**I18N)
     def test_a_page_without_og_is_silent(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": "T"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_social_folds() == []
 
 
@@ -313,7 +308,7 @@ class TestLiterals:
             '<html><meta name="theme-color" content="#000">{% template %}</html>',
             '{"theme_color": "#fff"}',
         )
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             messages = check_metadata_head_literals()
         assert check_ids(messages) == ["next.W109"]
         assert "'theme_color'" in messages[0].msg
@@ -333,7 +328,7 @@ class TestLiterals:
         self, tmp_path: Path, layout: str, metadata: str
     ) -> None:
         pages = self._project(tmp_path, layout, metadata)
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_head_literals() == []
 
     def test_a_render_page_is_silent(self, tmp_path: Path) -> None:
@@ -344,7 +339,7 @@ class TestLiterals:
             pages,
             'metadata = {"viewport": "x"}\n\ndef render(request):\n    return "x"\n',
         )
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_head_literals() == []
 
     def test_a_page_a_callable_rewrites_is_silent(self, tmp_path: Path) -> None:
@@ -354,5 +349,5 @@ class TestLiterals:
             '{"viewport": "width=device-width"}',
         )
         templated_page(pages, INHERITED_CALLABLE)
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_head_literals() == []

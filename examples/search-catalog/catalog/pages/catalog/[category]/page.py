@@ -1,18 +1,21 @@
-from catalog.deps import DFilters, DPage
-from catalog.models import Category
-from catalog.services import brands, cached_search
+from typing import Annotated
+
+from catalog.deps import DFilters, listing
+from catalog.models import Category, Product
+from catalog.services import brands, cached_count, search
 from catalog.zones import CATEGORY_ZONES, zone_target
 from django.shortcuts import get_object_or_404
 
 from next import context, page
 from next.pages import MetadataDict
+from next.partial import Paging, Window
 
 
 @context("filter_zones")
 def filter_zones() -> str:
     """Name every zone the live filter re-renders on a category listing.
 
-    The listing paginates, so the set drops `catalog-more` and keeps the pager.
+    The listing paginates, so the set drops the sentinel zone and keeps the pager.
     """
     return zone_target(CATEGORY_ZONES)
 
@@ -29,10 +32,18 @@ def category_meta(category: Category) -> MetadataDict:
     return {"title": category.name}
 
 
-@context("page_obj")
-def page_obj(category: Category, filters: DFilters, page: DPage) -> dict:
-    """Return the cached search payload scoped to the current category."""
-    return cached_search(filters, page.number, page.per_page, category=category)
+@context("products")
+def products(
+    category: Category, filters: DFilters, page: Annotated[Paging, listing]
+) -> Window[Product]:
+    """Return the page of the search scoped to the current category."""
+    return page.paginate(search(filters, category=category))
+
+
+@context("total")
+def total(category: Category, filters: DFilters) -> int:
+    """Return how many products of the category the search selects."""
+    return cached_count(filters, category=category)
 
 
 @context("all_brands")

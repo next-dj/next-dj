@@ -1,4 +1,7 @@
 import inspect
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import pytest
@@ -8,8 +11,11 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models import QuerySet
 
 from next.deps import ResolutionContext
+from next.deps.loader import count_job
 from next.deps.plan import InjectionPlan, ParameterFiller, ParameterPlan
 from next.deps.providers import ParameterProvider
+from next.deps.resolver import DependencyResolver
+from next.deps.scope import RequestScope
 
 
 class PlanEntry(NamedTuple):
@@ -98,3 +104,35 @@ def install_visibility_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
         (Group, _visible_groups),
     ):
         monkeypatch.setattr(model._default_manager, "visible_to", hook, raising=False)
+
+
+@contextmanager
+def counted(scope: RequestScope | None, deadline: float) -> Generator[None]:
+    """Count the code of the block as one job of the request, admitted as it starts."""
+    job = count_job(scope, deadline)
+    if job is None:
+        yield
+        return
+    try:
+        with job.running():
+            yield
+    finally:
+        job.end()
+
+
+@dataclass(slots=True)
+class UnhashableHandler:
+    """Callable object no mapping can key, the way an `eq=True` dataclass is."""
+
+    tag: str = "x"
+
+    def __call__(self, plain: int = 3) -> int:
+        return plain
+
+
+def themed_resolver() -> DependencyResolver:
+    """Fresh resolver with its providers loaded and the `theme` dependency bound."""
+    planned = DependencyResolver()
+    planned.dependency("theme")(lambda: "dark")
+    planned._sync_providers()
+    return planned

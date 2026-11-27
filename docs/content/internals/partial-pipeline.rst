@@ -17,8 +17,8 @@ A zone request names one or more zones of a page and gets their re-rendered HTML
 A form dispatch that happens to be partial gets the patches its outcome implies, which may morph a zone, morph the failed form alone, raise a toast, or drive a navigation.
 
 Both paths build a ``Patches`` builder, turn it into an ``Envelope``, and hand that to the active protocol backend for serialisation.
-Neither path is reached by an area importing ``next.partial``.
-The page view and the form dispatcher both call through the ``PartialShaper`` port, which ``AppConfig.ready`` binds to ``PartialShaperImpl`` from ``next.partial.ports``.
+The page view in ``next.views`` sits above ``next.partial`` and calls it directly.
+The form dispatcher never imports it and asks the backend's ``ResponseShaper``, which defaults to ``FormShaper`` from ``next.partial.shaping.shaper`` through the ``OPTIONS["SHAPER"]`` dotted path.
 
 Pipeline
 --------
@@ -50,12 +50,16 @@ Modules
 ``next.partial.headers``.
    The request header names, the ``PartialIntent`` value object, ``partial_intent``, ``is_partial_request``, and ``set_partial_vary``.
    ``partial_intent`` parses once and memoises the result on the request, and a request without the ``X-Next-Request`` switch shares one frozen empty intent rather than building a new one.
-   ``VARY_HEADERS`` names the four headers that change the body, the switch, the zone list, the merge mode, and the asserted version, while the validate, origin, and request-id headers stay out because they never change what a shared cache could store.
+   ``VARY_HEADERS`` names the eight headers that change the body under one URL, the switch, the zone list, the merge mode, the asserted version, the boundary, the navigation, the declared layouts, and the prefetch, while the validate and request-id headers stay out because they never change what a shared cache could store.
+   ``set_stream_vary`` adds ``Accept`` to a read that may answer a stream, a stream adds ``Accept`` and ``Accept-Encoding`` itself, and a zone response adds ``X-Next-Origin`` while the active-link pass marks its links against that origin, see :ref:`topics-partial-rendering-reference-vary`.
 
 ``next.partial.zone``.
    The ``{% zone %}`` tag, its ``ZoneOptions``, the ``ZoneNode`` that renders inline, and the ``ZonePartial`` that renders the body alone.
-   ``ZonePartial`` pushes its own render-context state, which is what lets one zone body render outside the page render it was compiled in, and it delegates ``get_exception_info`` back to the page template so a ``DEBUG`` traceback still points at the real source.
-   ``ZoneNode.render`` wraps the body in the addressable marker element, and a lazy zone renders only its placeholder branch inside a wrapper carrying ``data-next-lazy``, the hint that tells the client to fetch the rest.
+   ``ZonePartial`` keeps no per-render state and renders its body under a render-context state owned by the page template, binding that template to the context when none is bound, which is what lets one zone body render outside the page render it was compiled in and keeps a ``DEBUG`` traceback pointing at the real source.
+   Only a render with no page template binds the ``ZonePartial`` itself, whose ``get_exception_info`` answers no debug info.
+   ``ZoneNode.render`` always renders the body inline inside the addressable marker element, and a ``reload="loading"`` zone follows it with its ``loading.<zone>.djx`` in a ``<template data-next-loading>`` stash, once per zone and response.
+   A ``reload="loading"`` zone body renders inside a ``stashing`` block of ``next.boundaries.stash``, so each ``defer="inline"`` component inside stashes its ``loading.djx`` under its boundary key once.
+   ``next.pages.skeletons`` finds the skeleton file beside the page body or the layout that declares the zone, with the walk held until the page registry reloads and repeated on every render while template edits are watched.
 
 ``next.partial.registry``.
    Two unrelated records behind one address, ``ops`` for the patch verbs and ``zones`` for the zones of a compiled template.
@@ -96,8 +100,8 @@ Modules
 ``next.partial.origin``.
    ``resolve_partial_origin``, which names the host page a request morphs out of band.
 
-``next.partial.ports``.
-   ``PartialShaperImpl``, the implementation behind the ``PartialShaper`` slot.
+``next.partial.shaping.shaper``.
+   ``FormShaper``, the default ``ResponseShaper`` of every form backend.
 
 ``next.partial.errors``.
    The thirteen exceptions a caller that breaks a wire contract meets, from ``UnknownZoneError`` and ``UnknownPatchOpError`` to ``ForeignPageNotAuthorizedError`` and ``CrossSiteHrefError``.
@@ -109,18 +113,18 @@ Where the view branches
 -----------------------
 
 There is no separate partial URL and no partial middleware.
-A page is mounted under one view, built by ``unified_view`` in ``next.pages.manager.views``, and that view decides per request.
+A page is mounted under one view, built by ``unified_view`` in ``next.views.pages``, and that view decides per request.
 
 A page whose body comes from files on disk takes the static branch, and a page with a ``render()`` function takes the resolving branch.
 Both branches do the same thing at the end.
-They read the ``PartialShaper`` slot and ask it for the intent.
-A non-empty ``intent.zones`` hands off to ``zone_response``, and anything else renders the full page and stamps the partial ``Vary`` headers on the way out.
+They read the intent through ``partial_intent``.
+``route_request`` in ``next.views.kinds`` takes the ``RequestKind.ZONE`` the partial participant claims for a non-empty ``intent.zones``, whose serve point hands off to ``zone_response``, and anything else renders the full page and stamps the partial ``Vary`` headers on the way out.
 
 The resolving branch resolves the page body first, so a ``render()`` that returns its own ``HttpResponse`` short-circuits before the partial branch is reached at all.
 It also passes the ``dynamic`` flag through, because a body a ``render()`` produced per request has no compiled zone source to re-render, which is the 400 the zone branch answers with.
 
 The form dispatcher branches at the same seam.
-``FormActionDispatch`` shapes a partial outcome through ``shape_response`` on the port rather than by importing the shaping package, which is why ``next.forms`` does not depend on ``next.partial``.
+``FormActionBackend.shape_response`` asks the backend's ``shaper`` first, a class named by a dotted path rather than imported, which is why ``next.forms`` does not depend on ``next.partial``.
 
 Rendering a zone
 ----------------
@@ -141,7 +145,7 @@ The context registry then skips any ``@context`` whose declared zones are disjoi
 
 Fifth it renders each zone body through ``render_zone_body``, which returns the bare body and the wrapped element, and it seeds a fresh ``StaticCollector`` so the co-located assets the bodies pull in ride back in the envelope.
 
-The whole pass is timed only when something listens to ``zone_rendered``, so a production render with no receiver pays no clock reads.
+Each zone body is timed on its own, the context build left out, and only when something listens to ``zone_rendered``, so a production render with no receiver pays no clock reads.
 
 Registries
 ----------
@@ -172,9 +176,9 @@ The zone index is per compiled template and weakly held, so it lives exactly as 
 The composed page template itself is memoised by ``next.pages``, and the composition is re-read from disk only under ``DEBUG``, see :doc:`page-discovery`.
 A zone render therefore costs no template compile on a warm process.
 
-``asset_version`` is a process-wide ``functools.cache``.
+``asset_version`` is a process-wide ``memo(SETTINGS)`` of ``next.caches``.
 Every partial response stamps it, and the resolution reads the pinned ``VERSION``, then ``STATIC_VERSION``, then the manifest branch, which reads the storage's ``manifest_hash`` and hashes the staticfiles path mapping only when the storage records none, so it resolves once per configuration rather than once per request.
-It is cleared on ``settings_reloaded`` and on a ``setting_changed`` naming ``STORAGES`` or ``STATIC_ROOT``, because the storage behind the manifest hash is configured on the Django half of the settings.
+It is cleared on any settings change, because the storage behind the manifest hash is configured on the Django half of the settings.
 
 The partial intent is memoised on the request object, so the page view, the dispatcher, and a template tag all read one parse.
 
@@ -183,7 +187,7 @@ The checks add a fifth, the composed-pages memo in ``next.pages.checks.composed`
 Signals
 -------
 
-``zone_registered`` fires the first time a compiled template is indexed, once per zone, with the template, the name, and the lazy and poll options.
+``zone_registered`` fires the first time a compiled template is indexed, once per zone, with the template, the name, and the poll and reload options.
 ``zone_rendered`` fires once per rendered zone of a batch, with the page path, the request, and the duration.
 ``patch_op_registered`` fires on every ``register_patch_op`` call that succeeds, including one that names a verb already on record.
 ``sse_stream_opened`` and ``sse_stream_closed`` bracket a patch stream, the second carrying the duration and the number of envelopes sent.

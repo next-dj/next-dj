@@ -6,7 +6,7 @@ from django.core.checks import Error
 
 from next.pages.loaders import module_stamps
 from next.pages.scan import iter_serialized_page_context_keys, load_scanned_page_modules
-from tests.support import MalformedRootsRouter, patch_checks_router_manager
+from tests.support import MalformedRootsRouter, patch_checks_route_manager
 
 
 class TestSerializedPageContextKeys:
@@ -17,9 +17,9 @@ class TestSerializedPageContextKeys:
         page_file.write_text(textwrap.dedent(body))
         return page_file
 
-    def test_no_router_manager_reports_nothing(self) -> None:
+    def test_no_route_manager_reports_nothing(self) -> None:
         with patch(
-            "next.pages.scan.get_router_manager", return_value=(None, [Error("x")])
+            "next.pages.scan.get_route_manager", return_value=(None, [Error("x")])
         ):
             assert list(iter_serialized_page_context_keys()) == []
 
@@ -36,7 +36,7 @@ class TestSerializedPageContextKeys:
             """,
         )
         with (
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             patch(
                 "next.discovery.walk_page_tree",
                 return_value=[("first", page_file), ("second", page_file)],
@@ -64,7 +64,7 @@ class TestSerializedPageContextKeys:
         (tmp_path / "link").symlink_to(real, target_is_directory=True)
         linked = tmp_path / "link" / "page.py"
         with (
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             patch(
                 "next.discovery.walk_page_tree",
                 return_value=[("real", page_file), ("link", linked)],
@@ -90,26 +90,26 @@ class TestSerializedPageContextKeys:
                 return {"$dev": True}
             """,
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert list(iter_serialized_page_context_keys()) == []
 
     def test_virtual_page_path_is_skipped(self, tmp_path) -> None:
         (tmp_path / "virtual").mkdir()
         (tmp_path / "virtual" / "template.djx").write_text("<p>ok</p>\n")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert list(iter_serialized_page_context_keys()) == []
 
     def test_unimportable_page_is_skipped(self, tmp_path) -> None:
         self._write_page(tmp_path, "def broken(:\n")
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert list(iter_serialized_page_context_keys()) == []
 
     def test_a_router_reporting_the_wrong_tree_shape_is_skipped(self, tmp_path) -> None:
         # On the render path, bare paths from a plugin may not raise an AttributeError.
         manager = MagicMock()
         manager.backends = (MalformedRootsRouter([tmp_path]),)
-        with patch("next.pages.scan.get_router_manager", return_value=(manager, [])):
+        with patch("next.pages.scan.get_route_manager", return_value=(manager, [])):
             assert list(iter_serialized_page_context_keys()) == []
 
 
@@ -119,7 +119,7 @@ class TestLoadScannedPageModules:
     def test_each_routed_page_module_is_executed(self, tmp_path: Path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "ok"\n')
-        with patch_checks_router_manager(pages_directory=tmp_path) as (manager, _r, _d):
+        with patch_checks_route_manager(pages_directory=tmp_path) as (manager, _r, _d):
             load_scanned_page_modules(manager)
         assert module_stamps((page_file,)) == (page_file.stat().st_mtime_ns,)
 
@@ -133,6 +133,6 @@ class TestLoadScannedPageModules:
         unrouted.mkdir()
         stray = unrouted / "page.py"
         stray.write_text('template = "ok"\n')
-        with patch_checks_router_manager(pages_directory=routed) as (manager, _r, _d):
+        with patch_checks_route_manager(pages_directory=routed) as (manager, _r, _d):
             load_scanned_page_modules(manager)
         assert module_stamps((stray,)) == (None,)

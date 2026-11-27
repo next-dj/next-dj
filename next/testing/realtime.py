@@ -4,7 +4,7 @@ import asyncio
 import itertools
 import json
 from collections import deque
-from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
+from collections.abc import AsyncIterator, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from types import MappingProxyType, TracebackType
@@ -21,8 +21,9 @@ from django.db import close_old_connections
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import RequestFactory
 
+from next.identity import session_store_class
 from next.realtime.backends import MemoryBroker
-from next.realtime.binding import session_store_class, ticket_binding
+from next.realtime.binding import ticket_binding
 from next.realtime.frames import Refusal, Reply, UpstreamError
 from next.realtime.manager import broker_manager
 from next.realtime.messages import Message
@@ -411,7 +412,7 @@ async def aissue_socket_ticket(
 
 
 @contextmanager
-def override_websocket_mount(*, mounted: bool = False) -> Iterator[None]:
+def override_websocket_mount(*, mounted: bool = False) -> Generator[None]:
     """Set whether this process serves the WebSocket, restoring the flag on exit.
 
     A `WebSocketApp` marks the whole process, so a later WSGI test would offer `ws`.
@@ -535,8 +536,7 @@ class SseReader:
         await self.aclose()
 
     def _feed(self, chunk: bytes) -> None:
-        text = chunk.decode()
-        self._buffer += text.replace("\r\n", "\n").replace("\r", "\n")
+        self._buffer += _unified(chunk.decode())
 
     def _pop(self) -> SseEvent | None:
         """Dispatch the next complete event block, skipping blocks with no data."""
@@ -548,24 +548,51 @@ class SseReader:
         return None
 
     def _dispatch(self, block: str) -> SseEvent | None:
-        fields: dict[str, str] = {}
-        data: list[str] = []
-        for line in block.split("\n"):
-            if not line or line.startswith(":"):
-                continue
+        event, retry = _parsed(block)
+        if retry is not None:
+            self.retry = retry
+        return event
+
+
+def _unified(text: str) -> str:
+    """Return `text` with each SSE line end as LF, so a U+2028 stays in its line."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _fields(block: str) -> Iterator[tuple[str, str]]:
+    """Yield the field and value of each line of an SSE block, comments left out."""
+    for line in block.split("\n"):
+        if line and not line.startswith(":"):
             name, _, value = line.partition(":")
-            value = value.removeprefix(" ")
-            if name == "data":
-                data.append(value)
-            elif name == "retry" and value.isdigit():
-                self.retry = int(value)
-            else:
-                fields[name] = value
-        if not data:
-            return None
-        return SseEvent(
-            fields.get("event", "message"), "\n".join(data), fields.get("id")
-        )
+            yield name, value.removeprefix(" ")
+
+
+def _parsed(block: str) -> tuple[SseEvent | None, int | None]:
+    """Return the event an SSE block dispatches, `None` with no data, and its retry."""
+    fields: dict[str, str] = {}
+    data: list[str] = []
+    retry = None
+    for name, value in _fields(block):
+        if name == "data":
+            data.append(value)
+        elif name == "retry" and value.isdigit():
+            retry = int(value)
+        else:
+            fields[name] = value
+    if not data:
+        return None, retry
+    event = SseEvent(fields.get("event", "message"), "\n".join(data), fields.get("id"))
+    return event, retry
+
+
+def sse_events(text: str) -> tuple[list[SseEvent], bool]:
+    """Return the events of a whole SSE body and whether it stops inside an event.
+
+    Heartbeats, other comments and the `retry` hint never surface, as in `SseReader`.
+    """
+    *blocks, rest = _unified(text).split("\n\n")
+    events = [event for block in blocks if (event := _parsed(block)[0]) is not None]
+    return events, next(_fields(rest), None) is not None
 
 
 async def _cancelled(pull: "asyncio.Future[bytes]") -> bool:
@@ -647,7 +674,7 @@ def capture_published(*topics: str) -> PublishedMessages:
 
 
 @contextmanager
-def memory_broker(**options: object) -> Iterator[MemoryBroker]:
+def memory_broker(**options: object) -> Generator[MemoryBroker]:
     """Serve realtime from a fresh `MemoryBroker` in the block, `options` its `OPTIONS`.
 
     The configured broker is built anew on its first use after the block.
@@ -671,4 +698,5 @@ __all__ = [
     "issue_socket_ticket",
     "memory_broker",
     "override_websocket_mount",
+    "sse_events",
 ]

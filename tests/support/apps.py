@@ -12,7 +12,7 @@ from django.conf import settings
 from django.test import override_settings
 
 from next.urls.backends import _InstalledApps
-from tests.support.helpers import file_router_config_entry
+from tests.support.helpers import ROUTER_OFF, file_router_config_entry
 from tests.support.pages import write_page
 from tests.support.patches import importable_dir
 
@@ -143,12 +143,13 @@ def installed_apps(
     The URLconf is imported on first resolve, so its `pages()` calls find the apps.
     """
     entry = file_router_config_entry(app_dirs=True, dirs=list(dirs))
+    merged = {"PAGE_BACKENDS": [entry], "ROUTER": ROUTER_OFF, **(framework or {})}
     with ExitStack() as stack:
         stack.enter_context(importable_dir(root))
         stack.enter_context(
             override_settings(
                 INSTALLED_APPS=[*settings.INSTALLED_APPS, *names],
-                NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], **(framework or {})},
+                NEXT_FRAMEWORK=merged,
                 **overrides,
             )
         )

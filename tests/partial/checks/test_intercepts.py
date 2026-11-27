@@ -16,7 +16,6 @@ from next.partial.checks.intercepts import (
 )
 from next.partial.registry import own_zones
 from next.ports import action_owners_slot
-from tests.pages.checks.metadata.trees import component_template
 from tests.support import write_page
 from tests.support.access import PAGE_HEAD
 from tests.support.cases.intercepts import (
@@ -28,14 +27,8 @@ from tests.support.cases.intercepts import (
     zone_body,
 )
 from tests.support.checks import located, run_check, write_files
+from tests.support.components import write_component
 from tests.support.guards import GUARDED_CHILDREN, wrap
-
-
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
 
 
 class TestInterceptZonesUnique:
@@ -85,7 +78,7 @@ class TestInterceptZonesUnique:
     def test_a_target_zone_inside_a_binding_component_is_no_claim(
         self, root: Path
     ) -> None:
-        component_template(root, "guarded", GUARDED_CHILDREN)
+        write_component(root, "guarded", body=GUARDED_CHILDREN, loading=None)
         write_page(root, "photo", PAGE_HEAD, body=wrap("guarded", zone_body("modal")))
         write_page(root, "(.)photo", PAGE_HEAD, body=zone_body("modal"))
 

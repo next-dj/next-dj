@@ -2,32 +2,33 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from functools import partial
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
-from unittest import mock
 
 import pytest
 from django.test import RequestFactory
 
-from next.partial.manager import partial_backend_manager
 from next.static import NextScriptBuilder, ScriptInjectionPolicy
 from next.static.collector import StaticCollector
 from next.static.runtime import (
+    CHUNK_STATIC_PATHS,
     CSRF_PAYLOAD_KEY,
+    DECLARED_CHUNK_KEYS,
     DEV_PAYLOAD_KEY,
+    LISTED_CHUNK_KEYS,
     NEXT_JS_STATIC_PATH,
-    REALTIME_PAYLOAD_KEY,
     RESERVED_PAYLOAD_KEYS,
-    RealtimeOffer,
+    BundleLoad,
     _failures as runtime_failures,
+    bundle_load,
     csrf_payload_for,
-    forget_realtime_offer,
+    dropped_script,
     nonce_attr,
-    realtime_offer,
+    payload_entry,
+    payload_in_script,
 )
 from next.static.serializers import resolve_serializer
-from next.testing import override_next_settings
-from tests.support.codecs import TextStreamCodec
 
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ class TestNextScriptBuilderDefaults:
     def test_init_script_passes_payload(self) -> None:
         builder = NextScriptBuilder(URL)
         out = builder.init_script({"user": "alice"})
-        assert out == '<script>Next._init({"user":"alice"});</script>'
+        assert out == '<script data-next-init>Next._init({"user":"alice"});</script>'
 
     def test_init_script_serializes_django_types(self) -> None:
 
@@ -156,7 +157,7 @@ class TestNextScriptBuilderNonce:
             f'<script src="{URL}" nonce="n0"></script>'
         )
         assert builder.init_script({}, nonce="n0") == (
-            '<script nonce="n0">Next._init({});</script>'
+            '<script data-next-init nonce="n0">Next._init({});</script>'
         )
 
     def test_the_nonce_is_escaped(self) -> None:
@@ -229,7 +230,7 @@ class TestNextScriptBuilderCustomTemplates:
             URL, init_template="<script>window.MyNext.boot({payload})</script>"
         )
         out = builder.init_script({"x": 1})
-        assert out == '<script>window.MyNext.boot({"x":1})</script>'
+        assert out == '<script data-next-init>window.MyNext.boot({"x":1})</script>'
 
     def test_custom_policy(self) -> None:
         builder = NextScriptBuilder(URL, policy=ScriptInjectionPolicy.DISABLED)
@@ -276,7 +277,86 @@ class TestNextScriptBuilderFromOptions:
         assert "data-x" in builder.preload_link()
         assert "async" in builder.script_tag()
         payload = json.dumps({"a": 1}, separators=(",", ":"))
-        assert builder.init_script({"a": 1}) == f"<script>boot({payload})</script>"
+        assert builder.init_script({"a": 1}) == (
+            f"<script data-next-init>boot({payload})</script>"
+        )
+
+
+class TestChunkScript:
+    """A streamed chunk pushes its payload through the chunk template, escaped."""
+
+    def test_the_default_template_pushes_onto_the_queue(self) -> None:
+        builder = NextScriptBuilder(URL)
+        assert builder.chunk_script("0", nonce="n") == (
+            f'<script nonce="n">(self.$nx||=[]).push(0){SELF_REMOVAL}</script>'
+        )
+
+    def test_markup_and_line_separators_are_escaped(self) -> None:
+        text = "</script><!--" + chr(0x2028)
+        payload = json.dumps({"h": text}, ensure_ascii=False)
+        script = NextScriptBuilder(URL).chunk_script(payload)
+        body = script.removeprefix("<script>").removesuffix("</script>")
+        assert "<" not in body
+        assert chr(0x2028) not in body
+        assert "\\u003C/script\\u003E" in body
+
+    def test_a_chunk_template_comes_from_the_options(self) -> None:
+        builder = NextScriptBuilder.from_options(
+            URL, {"chunk_template": "<script{nonce_attr}>q.push({payload})</script>"}
+        )
+        assert builder.chunk_script("1") == "<script>q.push(1)</script>"
+
+    def test_a_broken_chunk_template_falls_back_to_the_default(self) -> None:
+        runtime_failures.clear()
+        builder = NextScriptBuilder(URL, chunk_template="<script>{oops}</script>")
+        assert builder.chunk_script("1") == (
+            f"<script>(self.$nx||=[]).push(1){SELF_REMOVAL}</script>"
+        )
+
+    def test_a_payload_outside_script_text_falls_back_to_the_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        runtime_failures.clear()
+        template = "<script{nonce_attr} data-c='{payload}'>{payload}</script>"
+        with caplog.at_level("WARNING", logger="next.static.runtime"):
+            builder = NextScriptBuilder(URL, chunk_template=template)
+        assert builder.chunk_script("1") == (
+            f"<script>(self.$nx||=[]).push(1){SELF_REMOVAL}</script>"
+        )
+        assert "outside the text of a <script> element" in caplog.text
+
+
+class TestPayloadInScript:
+    """A chunk payload is safe as the text of a script element alone."""
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "<script{nonce_attr}>(self.$nx||=[]).push({payload})</script>",
+            "<script>a({payload})</script><script>b({payload})</script>",
+            "<script>{oops}</script>",
+            "<SCRIPT>{payload}</Script >",
+            "<script\n>{payload}</script/>",
+            "<script>{payload}</script\t\n bar>",
+        ],
+    )
+    def test_script_text_holds_the_payload(self, template: str) -> None:
+        assert payload_in_script(template) is True
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "<script data-x='{payload}'></script>",
+            "<p>{payload}</p>",
+            "<script>{payload}",
+            "<script>a</script foo>{payload}<script>b</script>",
+            "<script>a</SCRIPT\t\n bar>{payload}</script>",
+            "<script>a</script/>{payload}</script>",
+            "<script-x>{payload}</script>",
+        ],
+    )
+    def test_an_attribute_or_markup_does_not(self, template: str) -> None:
+        assert payload_in_script(template) is False
 
 
 class TestInitScriptGoldenParity:
@@ -297,7 +377,7 @@ class TestInitScriptGoldenParity:
             js_context, key_serializers=key_serializers, encoded=encoded
         )
         expected = _reference_init_payload(js_context, key_serializers)
-        assert new == f"<script>Next._init({expected});</script>"
+        assert new == f"<script data-next-init>Next._init({expected});</script>"
         return new
 
     def test_default_serializer_simple_value(self) -> None:
@@ -316,7 +396,7 @@ class TestInitScriptGoldenParity:
             key_serializers=collector.js_context_serializers(),
             encoded=collector.js_context_encoded(),
         )
-        assert out == "<script>Next._init({});</script>"
+        assert out == "<script data-next-init>Next._init({});</script>"
 
     def test_per_key_serializer_override(self) -> None:
         collector = StaticCollector()
@@ -359,7 +439,7 @@ class TestInitScriptEscaping:
 
     def _payload(self, out: str) -> str:
         """Return the `Next._init` argument stripped of the script wrapper."""
-        prefix = "<script>Next._init("
+        prefix = "<script data-next-init>Next._init("
         suffix = ");</script>"
         assert out.startswith(prefix)
         assert out.endswith(suffix)
@@ -397,7 +477,7 @@ class TestInitScriptEscaping:
         value = {"user": "alice", "score": 42}
         out = builder.init_script(value)
         expected = resolve_serializer().dumps(value)
-        assert out == f"<script>Next._init({expected});</script>"
+        assert out == f"<script data-next-init>Next._init({expected});</script>"
 
 
 class TestNextJsStaticPath:
@@ -406,83 +486,173 @@ class TestNextJsStaticPath:
         assert NEXT_JS_STATIC_PATH.endswith(".js")
 
 
-TRANSPORTS = "next.realtime.ports.active_transports"
-PARTIAL_BACKEND = "next.partial.manager.partial_backend_manager.get"
-TURBO = "text/vnd.turbo-stream.html"
-WEBSOCKET = {"TRANSPORTS": ["ws", "sse"]}
-BOTH_TRANSPORTS = f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["ws","sse"],'
+class TestDeclaredBundles:
+    """The bundles a page declares by tag ship like any chunk, never in `$chunks`."""
 
+    def test_they_ship_and_are_never_listed(self) -> None:
+        assert {
+            "boundaries",
+            "reload",
+            "more",
+            "router",
+            "intent",
+        } == DECLARED_CHUNK_KEYS
+        assert set(CHUNK_STATIC_PATHS) >= DECLARED_CHUNK_KEYS
+        assert set(LISTED_CHUNK_KEYS).isdisjoint(DECLARED_CHUNK_KEYS)
+        assert set(LISTED_CHUNK_KEYS) | DECLARED_CHUNK_KEYS == set(CHUNK_STATIC_PATHS)
 
-class TestRealtimePayload:
-    """The `$realtime` entry is sent only where it moves off the runtime defaults."""
-
-    def test_the_stock_configuration_sends_no_entry(self) -> None:
-        out = NextScriptBuilder(URL).init_script({"$chunks": {"stream": "/s.js"}})
-        assert out == '<script>Next._init({"$chunks":{"stream":"/s.js"}});</script>'
-        assert realtime_offer() == RealtimeOffer("", websocket=False)
-
-    def test_an_active_websocket_advertises_both_transports(self) -> None:
-        with override_next_settings(REALTIME=WEBSOCKET):
-            out = NextScriptBuilder(URL).init_script({"$chunks": {}})
-            assert realtime_offer().websocket is True
-        assert (
-            f'{BOTH_TRANSPORTS}"content_type":"application/vnd.next.patches+json"}}'
-        ) in out
-
-    def test_changing_the_transports_drops_the_memoised_entry(self) -> None:
-        builder = NextScriptBuilder(URL)
-        before = builder.init_script({"$chunks": {}})
-        with override_next_settings(REALTIME=WEBSOCKET):
-            during = builder.init_script({"$chunks": {}})
-        after = builder.init_script({"$chunks": {}})
-        assert REALTIME_PAYLOAD_KEY not in before
-        assert BOTH_TRANSPORTS in during
-        assert after == before
-
-    @pytest.mark.usefixtures("forgotten_realtime_offer")
-    def test_another_partial_backend_names_its_content_type(self) -> None:
-        with mock.patch(PARTIAL_BACKEND) as get_backend:
-            get_backend.return_value.content_type = TURBO
-            out = NextScriptBuilder(URL).init_script({"$chunks": {}})
-            assert realtime_offer().websocket is False
-        assert (
-            f'"{REALTIME_PAYLOAD_KEY}":{{"protocol":2,"transports":["sse"],'
-            f'"content_type":"{TURBO}"}}'
-        ) in out
-
-    def test_a_payload_without_chunks_carries_no_entry(self) -> None:
-        with override_next_settings(REALTIME=WEBSOCKET):
-            out = NextScriptBuilder(URL).init_script({"user": "alice"})
-        assert REALTIME_PAYLOAD_KEY not in out
-
-    @pytest.mark.usefixtures("forgotten_realtime_offer")
-    def test_a_reset_partial_backend_drops_the_memoised_entry(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("streams", "urgent", "load"),
+        [
+            (True, True, BundleLoad.EAGER),
+            (True, False, BundleLoad.LAZY),
+            (False, True, BundleLoad.DEFERRED),
+            (False, False, BundleLoad.LAZY),
+        ],
+    )
+    def test_the_load_follows_the_stream_and_the_urgency(
+        self, *, streams: bool, urgent: bool, load: BundleLoad
     ) -> None:
-        assert realtime_offer().entry == ""
-        monkeypatch.setattr(
-            partial_backend_manager,
-            "_select_config",
-            lambda: {"BACKEND": "tests.support.codecs.TextStreamCodec"},
-        )
-        partial_backend_manager.reset()
-        try:
-            entry = realtime_offer().entry
-            assert isinstance(partial_backend_manager.get(), TextStreamCodec)
-        finally:
-            monkeypatch.undo()
-            partial_backend_manager.reset()
-        assert '"content_type":"text/plain"' in entry
-        assert realtime_offer().entry == ""
+        assert bundle_load(streams=streams, urgent=urgent) is load
 
-    @pytest.mark.usefixtures("forgotten_realtime_offer")
-    def test_the_offer_is_resolved_once_until_it_is_forgotten(self) -> None:
-        with mock.patch(TRANSPORTS, return_value=("sse",)) as transports:
-            first = realtime_offer()
-            assert realtime_offer() is first
-            forget_realtime_offer()
-            realtime_offer()
-        assert transports.call_count == 2
+    def test_each_load_names_its_attributes(self) -> None:
+        assert {load: load.value for load in BundleLoad} == {
+            BundleLoad.LAZY: ' async fetchpriority="low"',
+            BundleLoad.EAGER: " async",
+            BundleLoad.DEFERRED: " defer",
+        }
+
+    def test_a_lazy_tag_loads_async_at_low_priority(self) -> None:
+        tag = NextScriptBuilder(URL).bundle_tag(
+            "/a&b.js", load=BundleLoad.LAZY, nonce="n"
+        )
+        assert (
+            tag
+            == '<script async fetchpriority="low" src="/a&amp;b.js" nonce="n"></script>'
+        )
+
+    def test_an_eager_tag_loads_async_at_once(self) -> None:
+        tag = NextScriptBuilder(URL).bundle_tag("/s/a.js", load=BundleLoad.EAGER)
+        assert tag == '<script async src="/s/a.js"></script>'
+
+    def test_a_deferred_tag_waits_for_the_document(self) -> None:
+        tag = NextScriptBuilder(URL).bundle_tag("/s/a.js", load=BundleLoad.DEFERRED)
+        assert tag == '<script defer src="/s/a.js"></script>'
+
+    def test_the_script_tag_template_renders_it(self) -> None:
+        builder = NextScriptBuilder(
+            URL,
+            script_tag_template=(
+                '<SCRIPT crossorigin="anonymous" src="{url}"{nonce_attr}></SCRIPT>'
+            ),
+        )
+        assert builder.bundle_tag("/s/a.js", load=BundleLoad.DEFERRED, nonce="n") == (
+            '<SCRIPT defer crossorigin="anonymous" src="/s/a.js" nonce="n"></SCRIPT>'
+        )
+
+    def test_a_custom_element_named_like_script_takes_the_default(self) -> None:
+        builder = NextScriptBuilder(
+            URL, script_tag_template='<script-loader src="{url}"></script-loader>'
+        )
+        assert builder.bundle_tag("/s/a.js", load=BundleLoad.EAGER) == (
+            '<script async src="/s/a.js"></script>'
+        )
+
+    def test_a_template_without_a_script_element_takes_the_default(self) -> None:
+        builder = NextScriptBuilder(
+            URL, script_tag_template='<link rel="modulepreload" href="{url}">'
+        )
+        assert builder.bundle_tag("/s/a.js", load=BundleLoad.LAZY) == (
+            '<script async fetchpriority="low" src="/s/a.js"></script>'
+        )
+
+
+SELF_REMOVAL = ";document.currentScript?.remove()"
+ROUTER_ENTRY = '"$router":{"scope":"</script>","boundaries":"/r.js"}'
+WIRE_ENTRY = '"$version":"0","$protocol":2'
+
+
+class TestSharedEntries:
+    """The shared provider entries are escaped once, the request ones each time."""
+
+    def test_the_shared_entries_follow_the_chunks_in_order(self) -> None:
+        out = NextScriptBuilder(URL).init_script(
+            {"$chunks": {}}, shared=(WIRE_ENTRY, '"$stream":true')
+        )
+        assert out == (
+            '<script data-next-init>Next._init({"$chunks":{},'
+            '"$version":"0","$protocol":2,"$stream":true});</script>'
+        )
+
+    def test_a_payload_without_chunks_carries_no_shared_entry(self) -> None:
+        out = NextScriptBuilder(URL).init_script({"user": "a"}, shared=(WIRE_ENTRY,))
+        assert '"$version"' not in out
+
+    def test_a_request_entry_beside_the_shared_ones_is_escaped(self) -> None:
+        builder = NextScriptBuilder(URL)
+        hostile = "</script><b>" + chr(0x2028) + chr(0x2029)
+        context = {CSRF_PAYLOAD_KEY: {"token": hostile}, "$chunks": {"s": "/<s>.js"}}
+        shared = (WIRE_ENTRY, ROUTER_ENTRY)
+        first = builder.init_script(context, shared=shared)
+        second = builder.init_script(context, shared=shared)
+        payload = first.removeprefix("<script data-next-init>Next._init(").removesuffix(
+            ");</script>"
+        )
+        assert second == first
+        assert not {"<", ">", "&", chr(0x2028), chr(0x2029)} & set(payload)
+        decoded = json.loads(payload)
+        assert decoded[CSRF_PAYLOAD_KEY] == {"token": hostile}
+        assert decoded["$chunks"] == {"s": "/<s>.js"}
+        assert decoded["$router"] == {"scope": "</script>", "boundaries": "/r.js"}
+        assert list(decoded) == [
+            CSRF_PAYLOAD_KEY,
+            "$chunks",
+            "$version",
+            "$protocol",
+            "$router",
+        ]
+
+    def test_every_page_of_a_busy_builder_keeps_its_own_entries(self) -> None:
+        builder = NextScriptBuilder(URL)
+        pages = [{"$chunks": {"s": f"/s{index}.js"}} for index in range(80)]
+        for _ in range(2):
+            for page in pages:
+                out = builder.init_script(page)
+                assert f'"$chunks":{{"s":"{page["$chunks"]["s"]}"}}' in out
+
+
+class TestHeldTags:
+    """A tag without a nonce repeats on every page, so the builder keeps it."""
+
+    def test_a_tag_without_a_nonce_is_built_once(self) -> None:
+        builder = NextScriptBuilder(URL)
+        for build in (
+            builder.preload_link,
+            builder.script_tag,
+            partial(builder.bundle_tag, "/b.js", load=BundleLoad.LAZY),
+        ):
+            assert build() is build()
+            assert build(nonce="n") == build(nonce="n")
+            assert build(nonce="n") is not build(nonce="n")
+
+    def test_a_busy_builder_drops_what_it_held(self) -> None:
+        builder = NextScriptBuilder(URL)
+        first = builder.script_tag("/s0.js")
+        for index in range(80):
+            assert builder.script_tag(f"/s{index}.js").endswith(
+                f'"/s{index}.js"></script>'
+            )
+        again = builder.script_tag("/s0.js")
+        assert again == first
+        assert again is not first
+
+
+class TestPayloadEntry:
+    """A provider spells one entry as its encoded key before its encoded value."""
+
+    def test_the_key_is_encoded(self) -> None:
+        assert payload_entry("$x", "1") == '"$x":1'
+        assert payload_entry('q"', "[]") == '"q\\"":[]'
 
 
 class TestReservedPayloadKeys:
@@ -490,7 +660,20 @@ class TestReservedPayloadKeys:
 
     def test_holds_every_framework_wire_name(self) -> None:
         assert (
-            frozenset({"$csrf", "$dev", "$chunks", "$realtime", "$scripts", "$consent"})
+            frozenset(
+                {
+                    "$csrf",
+                    "$dev",
+                    "$chunks",
+                    "$realtime",
+                    "$stream",
+                    "$version",
+                    "$protocol",
+                    "$scripts",
+                    "$consent",
+                    "$router",
+                }
+            )
             == RESERVED_PAYLOAD_KEYS
         )
 
@@ -558,3 +741,58 @@ class TestUnformattableTemplates:
             "/n.js", script_tag_template="<script data-x='{{}}' src='{url}'></script>"
         )
         assert builder.script_tag() == "<script data-x='{}' src='/n.js'></script>"
+
+
+class TestDroppedScript:
+    """The first script a swap would not run, read as the browser parses the markup."""
+
+    @pytest.mark.parametrize(
+        ("html", "nonce", "found"),
+        [
+            pytest.param("<p>plain</p>", None, None, id="none"),
+            pytest.param("<script>a()</script>", None, "<script>", id="inline"),
+            pytest.param('<script nonce="n">a()</script>', "n", None, id="nonce"),
+            pytest.param(
+                '<script nonce="x">a()</script>',
+                "n",
+                '<script nonce="x">',
+                id="foreign",
+            ),
+            pytest.param(
+                '<script nonce="n" src="/a.js"></script>',
+                "n",
+                '<script nonce="n" src="/a.js">',
+                id="src",
+            ),
+            pytest.param(
+                '<SCRIPT type="text/javascript">a()</SCRIPT>',
+                None,
+                '<SCRIPT type="text/javascript">',
+                id="typed",
+            ),
+            pytest.param(
+                '<script type="application/ld+json">{}</script>', None, None, id="data"
+            ),
+            pytest.param(
+                "<template><script>a()</script></template>", None, None, id="template"
+            ),
+            pytest.param(
+                "<noscript><script>a()</script></noscript>", None, None, id="noscript"
+            ),
+            pytest.param(
+                "</template><template><template></template><script>a()</script>"
+                "</template><script>b()</script><script>c()</script>",
+                None,
+                "<script>",
+                id="nested",
+            ),
+        ],
+    )
+    def test_the_first_dropped_script(
+        self, html: str, nonce: str | None, found: str | None
+    ) -> None:
+        assert dropped_script(html, nonce) == found
+
+    def test_the_first_tag_wins(self) -> None:
+        html = '<script src="/a.js"></script><script src="/b.js"></script>'
+        assert dropped_script(html, None) == '<script src="/a.js">'

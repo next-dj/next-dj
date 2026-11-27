@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from next.seo.discovery import discover_seo_roots, page_tree_roots
-from next.urls import router_manager
+from next.urls import route_manager
 from tests.support import POSTS_ITEMS, routed, write_tree
 
 
@@ -31,8 +31,8 @@ class TestBenchDiscovery:
     @pytest.mark.benchmark(group="seo.discovery")
     def test_discover_every_source(self, tmp_path: Path, benchmark) -> None:
         with routed(_tree(tmp_path)):
-            assert len(discover_seo_roots(router_manager)) == 1
-            benchmark(discover_seo_roots, router_manager)
+            assert len(discover_seo_roots(route_manager)) == 1
+            benchmark(discover_seo_roots, route_manager)
 
     @pytest.mark.benchmark(group="seo.discovery")
     def test_memoised_roots(self, tmp_path: Path, benchmark) -> None:

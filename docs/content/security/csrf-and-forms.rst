@@ -27,6 +27,8 @@ Token delivery
 
 A token in the HTML sets the CSRF cookie and ``Vary: Cookie``, which keeps a CDN from caching the page, and a token baked into a cached copy goes stale.
 ``NEXT_FRAMEWORK["CSRF_DELIVERY"]`` decides where a rendered page puts it, and its default ``"auto"`` defers the token on a page whose ``cache`` lets a shared cache keep it, see :doc:`/content/ref/settings` for the three modes.
+On a private page ``"auto"`` embeds the token only once the render read one, so a page with a ``{% form %}`` carries it in the form and in ``$csrf``, and a page without one hands the runtime the endpoint and sets no cookie.
+A streamed page mints the token with its shell, since a form in a deferred boundary renders after the headers leave.
 
 A deferred page renders ``{% form %}`` without the hidden field and hands the runtime ``{"header": ..., "url": "/_next/csrf/"}`` in place of the token.
 The runtime fetches ``/_next/csrf/`` once, on the first focus or press inside a form and before the first unsafe request at the latest, and sends the token in the CSRF header, which Django reads when the form field is absent.

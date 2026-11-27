@@ -19,9 +19,8 @@ from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 
-from next.realtime import binding as binding_module
+from next.identity import read_only_store, session_user, stored_session
 from next.realtime.access import Access, AccessCheck
-from next.realtime.binding import session_user, stored_session
 from next.realtime.limits import heartbeat_seconds
 from next.realtime.pool import run_detached
 from tests.support.realtime import ServerClock, signed_in_session
@@ -45,9 +44,10 @@ def test_heartbeat_seconds_invalid_value_falls_back_to_default(
         assert heartbeat_seconds() == expected
 
 
-def test_heartbeat_seconds_non_mapping_setting_falls_back_to_default() -> None:
+def test_heartbeat_seconds_read_the_default_of_a_non_mapping_setting() -> None:
+    expected = heartbeat_seconds()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
-        assert heartbeat_seconds() == 25.0
+        assert heartbeat_seconds() == expected
 
 
 def test_access_check_throttles_the_authorizer_to_one_call_per_interval(
@@ -576,7 +576,7 @@ def test_read_only_store_drops_every_write() -> None:
     session.create()
     key = session.session_key
     stored = _stored_rows()
-    store = binding_module._read_only(SessionStore)(key)
+    store = read_only_store(SessionStore)(key)
     store["note"] = "changed"
     store.save()
     store.delete()
@@ -592,7 +592,7 @@ class _Engines:
 
 def test_read_only_store_keeps_the_signing_salt_of_a_nested_engine() -> None:
     engine = _Engines.SessionStore
-    assert binding_module._read_only(engine)().key_salt == engine().key_salt
+    assert read_only_store(engine)().key_salt == engine().key_salt
 
 
 @pytest.fixture(params=_ENGINES)

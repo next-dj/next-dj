@@ -1,15 +1,15 @@
-// The runtime side of the lazy chunks. Consent and third-party scripts ship in
-// next.scripts.min.js, fetched only when the payload carries them, and Next.ready
-// resolves once it has loaded. The SSE bridge, the CSRF token fetch, the poller and
-// the dev diagnostics each ship in a chunk of their own, fetched on first use.
+// The runtime side of the lazy chunks. Every chunk registers through Next._extend as it
+// evaluates, whether the runtime fetched it or the server declared its tag. The runtime
+// takes the URL from the `$chunks` payload entry, or from the caller for a bundle the
+// router names, and Next.ready resolves the scripts chunk once it has loaded.
 
 import type { Consent } from "./consent";
-import { asString, fire, isRecord } from "./protocol";
+import { PAYLOAD_CONSENT, PAYLOAD_SCRIPTS, asString, fire, isRecord } from "./protocol";
 import type { PartialError } from "./protocol";
 import type { Scripts } from "./scripts";
 
 // The payload keys that need the chunk on this page.
-const CHUNK_KEYS = ["$scripts", "$consent"];
+const CHUNK_KEYS = [PAYLOAD_SCRIPTS, PAYLOAD_CONSENT];
 
 // How long a chunk fetch may run before it counts as failed, so a stalled request
 // cannot block Next.ready, a deferred CSRF token or a stream indefinitely.
@@ -75,54 +75,79 @@ export interface ScriptsLoaderDeps extends ChunkDeps {
 export interface LazyModule<T> {
   /** The module, undefined until its chunk has evaluated. */
   get(): T | undefined;
-  /** Resolve with the module, fetching its chunk if needed, or undefined on failure. */
-  load(): Promise<T | undefined>;
+  /**
+   * Resolve with the module, fetching its chunk if needed, or undefined on failure.
+   *
+   * src names a bundle the payload lists elsewhere, the `$chunks` entry otherwise.
+   */
+  load(src?: string): Promise<T | undefined>;
   /** Run fn with the module on its first landing, even one after a failed attempt. */
   whenLoaded(fn: (value: T) => void): void;
 }
 
 /** A lazy module plus the registration call its chunk makes. */
 export interface Lazy<T> extends LazyModule<T> {
+  /** Whether the chunk has evaluated, so a second copy of its bundle installs nothing. */
+  landed(): boolean;
   /** Store the module the chunk exports. The first copy to evaluate is kept. */
   land(value: T): void;
+}
+
+/** Append a chunk's script, calling done once on load, error or timeout, unless cancelled. */
+export function appendScript(
+  doc: Document,
+  src: string,
+  nonce: string | undefined,
+  done: (loaded: boolean, el: HTMLScriptElement) => void,
+): () => void {
+  const el = doc.createElement("script");
+  const cancel = (): void => {
+    clearTimeout(timer);
+    el.onload = el.onerror = null;
+  };
+  const end = (loaded: boolean): void => {
+    cancel();
+    done(loaded, el);
+  };
+  el.onload = () => end(true);
+  el.onerror = () => end(false);
+  if (nonce !== undefined) el.nonce = nonce;
+  el.src = src;
+  doc.head.append(el);
+  const timer = setTimeout(end, CHUNK_TIMEOUT, false);
+  return cancel;
 }
 
 /**
  * A loader for a chunk carrying one module, with at most one fetch in flight.
  *
- * The URL is the chunk's `$chunks` entry in the seeded payload, the only source, since
- * a hashing or signing storage serves the chunk under a URL the client cannot derive. A
- * missing entry or a failed fetch resolves undefined, and a failed fetch is retried on
- * the next call, CHUNK_ATTEMPTS times in all. A file that loads without registering its
+ * The URL comes from the payload, the `$chunks` entry or one the caller read elsewhere,
+ * as a hashing or signing storage serves it under a URL the client cannot derive. A
+ * missing URL or a failed fetch resolves undefined, and a failed fetch is retried on the
+ * next call, CHUNK_ATTEMPTS times in all. A file that loads without registering its
  * module counts as failed, as does one not registered within CHUNK_TIMEOUT.
  */
 export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
   const doc = deps.document ?? document;
+  let landed = false;
   let value: T | undefined;
   let pending: Promise<T | undefined> | undefined;
   let settle: ((value: T | undefined) => void) | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
   let attempts = 0;
   // A timed-out tag may still evaluate, so its subscribers outlive the attempt.
   const waiting: ((value: T) => void)[] = [];
 
-  function load(): Promise<T | undefined> {
-    if (value !== undefined) return Promise.resolve(value);
+  function load(src?: string): Promise<T | undefined> {
+    if (landed) return Promise.resolve(value);
     if (pending !== undefined) return pending;
     const chunks = deps.context().$chunks;
-    const url = isRecord(chunks) ? asString(chunks[key]) : undefined;
+    const url = src ?? (isRecord(chunks) ? asString(chunks[key]) : undefined);
     if (url === undefined || attempts >= CHUNK_ATTEMPTS)
       return Promise.resolve(undefined);
     attempts += 1;
-    const el = doc.createElement("script");
-    if (deps.nonce !== undefined) el.nonce = deps.nonce;
-    // Per attempt, since another script may remove the tag before it reports.
-    let failed = false;
-    const fail = (): void => {
-      // Nothing to do once the module is registered or this attempt has failed.
-      if (failed || value !== undefined) return;
-      failed = true;
-      clearTimeout(timer);
+    // Any end before the module registers fails, a file that ran without it included.
+    cancel = appendScript(doc, url, deps.nonce, (_loaded, el) => {
       // A retry appends a new tag, so the failed one is removed.
       el.remove();
       pending = undefined;
@@ -132,13 +157,7 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
         url,
         error: new Error(`${key} chunk failed`),
       } satisfies PartialError);
-    };
-    el.onerror = fail;
-    // A file that ran without registering its module fails too, so no caller hangs.
-    el.onload = fail;
-    el.src = url;
-    doc.head.append(el);
-    timer = setTimeout(fail, CHUNK_TIMEOUT);
+    });
     pending = new Promise((resolve) => (settle = resolve));
     return pending;
   }
@@ -147,18 +166,20 @@ export function lazyChunk<T>(deps: ChunkDeps, key: string): Lazy<T> {
     get: () => value,
     load,
     whenLoaded(fn) {
-      if (value !== undefined) fn(value);
+      if (landed) fn(value as T);
       else if (attempts < CHUNK_ATTEMPTS || pending !== undefined) {
         waiting.push(fn);
         void load();
       }
     },
-    land(landed) {
-      if (value !== undefined) return;
-      value = landed;
-      clearTimeout(timer);
-      settle?.(landed);
-      for (const fn of waiting.splice(0)) fn(landed);
+    landed: () => landed,
+    land(module) {
+      if (landed) return;
+      landed = true;
+      value = module;
+      cancel?.();
+      settle?.(module);
+      for (const fn of waiting.splice(0)) fn(module);
     },
   };
 }

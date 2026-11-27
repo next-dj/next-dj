@@ -10,7 +10,9 @@ import time
 from collections.abc import Callable, Sequence
 from typing import override
 
-from .binding import LiveIdentity, ticket_binding
+from next.identity import LiveIdentity
+
+from .binding import ticket_binding
 from .pool import run_detached
 
 

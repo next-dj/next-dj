@@ -1,4 +1,4 @@
-"""Router manager, lazy urlpatterns sequence, and settings-reload wiring."""
+"""Route manager, lazy urlpatterns sequence, and settings-reload wiring."""
 
 from __future__ import annotations
 
@@ -10,15 +10,17 @@ from django.urls import URLPattern, URLResolver, clear_url_caches, path
 from django.urls.resolvers import RoutePattern
 
 from next.backends import backend_entries, load_backends, resolve_setting_class
+from next.caches import ROUTES
 from next.csrf import CSRF_URL_NAME, csrf_view
 from next.forms.manager import form_action_manager
 from next.intercept import intercepts
-from next.pages.manager.views import fit_page_caches
+from next.pages.manager.patterns import fit_page_caches
 from next.ports import seo_routes_slot
 
-from .backends import RouterBackend
+from .backends import PageBackend
 from .resolver import TrieURLResolver
-from .signals import router_backend_loaded, router_reloaded
+from .scope import SCOPE_URL_NAME, scope_view
+from .signals import page_backend_loaded, routes_reloaded
 from .urlconf import MountedPatterns
 
 
@@ -53,13 +55,13 @@ seo_routes_version = SeoRoutesVersion()
 """Moved when the SEO routes slot binds and on every reset of the SEO sources."""
 
 
-class RouterManager:
-    """Load `RouterBackend` instances from `NEXT_FRAMEWORK` and iterate them."""
+class RouteManager:
+    """Load `PageBackend` instances from `NEXT_FRAMEWORK` and iterate them."""
 
     def __init__(self) -> None:
         """Empty backend list until the first load."""
         self._version = next(_version_counter)
-        self._backends: list[RouterBackend] = []
+        self._backends: list[PageBackend] = []
         self._config_cache: list[dict[str, Any]] | None = None
         self._loaded: bool = False
         self._building_thread: int | None = None
@@ -88,7 +90,7 @@ class RouterManager:
                 self.reload()
 
     @property
-    def backends(self) -> tuple[RouterBackend, ...]:
+    def backends(self) -> tuple[PageBackend, ...]:
         """Return the loaded backends in routing order, loading on first read.
 
         The returned tuple is a snapshot detached from the live list.
@@ -112,9 +114,15 @@ class RouterManager:
 
         Iteration yields patterns, so the manager offers no `len` or indexing.
         """
+        for _backend, pattern in self.owned():
+            yield pattern
+
+    def owned(self) -> Generator[tuple[PageBackend, URLPattern | URLResolver]]:
+        """Each pattern of each backend beside the backend that built it."""
         self._ensure_loaded()
         for backend in self._backends:
-            yield from backend.generate_urls()
+            for pattern in backend.generate_urls():
+                yield backend, pattern
 
     def reload(self, *, notify: bool = True) -> None:
         """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
@@ -129,8 +137,8 @@ class RouterManager:
             try:
                 built = load_backends(
                     self._get_next_pages_config(),
-                    base=RouterBackend,
-                    signal=router_backend_loaded if notify else None,
+                    base=PageBackend,
+                    signal=page_backend_loaded if notify else None,
                 )
             finally:
                 self._building_thread = None
@@ -145,7 +153,8 @@ class RouterManager:
             self._loaded = True
             if notify:
                 clear_url_caches()
-                router_reloaded.send(sender=type(self))
+                ROUTES.move()
+                routes_reloaded.send(sender=type(self))
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
         """Router entries from `PAGE_BACKENDS`, read once per load."""
@@ -154,15 +163,15 @@ class RouterManager:
         return self._config_cache
 
 
-router_manager = RouterManager()
+route_manager = RouteManager()
 
 
 def reload_router_settings(**kwargs: object) -> None:
-    """Rebuild router backends and drop the built URL resolver on settings reload.
+    """Rebuild page backends and drop the built URL resolver on settings reload.
 
     The slot keeps its identity so the outer include resolver picks up the replacement.
     """
-    router_manager.reload()
+    route_manager.reload()
     urlpatterns.reset()
 
 
@@ -176,7 +185,7 @@ def reload_app_routers(*, setting: str, **kwargs: object) -> None:
     The rebuild bumps the version behind the lazy patterns and clears the URL caches.
     """
     if setting in _ROUTED_SETTINGS:
-        router_manager.reload()
+        route_manager.reload()
 
 
 class _RoutedPages:
@@ -194,7 +203,7 @@ class _RoutedPages:
     def fit(self, build: object, patterns: list[URLPattern | URLResolver]) -> None:
         """Record the patterns of one build and size the page caches by every build."""
         with self._lock:
-            version = router_manager.version
+            version = route_manager.version
             if version != self._version:
                 self._version = version
                 self._builds = {}
@@ -208,6 +217,12 @@ routed_pages = _RoutedPages()
 _CSRF_PATTERN = path("_next/csrf/", csrf_view, name=CSRF_URL_NAME)
 """The endpoint the runtime fetches a CSRF token from when the page HTML omits it."""
 
+_SCOPE_PATTERN = path("_next/routes/<str:digest>/", scope_view, name=SCOPE_URL_NAME)
+"""The endpoint the client router fetches the route table from, named by its digest."""
+
+_ENDPOINTS = (_CSRF_PATTERN, _SCOPE_PATTERN)
+"""The framework endpoints ahead of every form action and page."""
+
 
 class _LazyUrlPatterns(MountedPatterns):
     """Defer expanding CSRF, form, router and SEO patterns until first use."""
@@ -215,11 +230,12 @@ class _LazyUrlPatterns(MountedPatterns):
     def __init__(self) -> None:
         """Empty cache until the first pattern build."""
         self._cache: tuple[VersionToken, list[URLPattern | URLResolver]] | None = None
+        self._owners: dict[int, PageBackend] = {}
 
     def version_token(self) -> VersionToken:
         """Return the router, form-action and SEO route versions keying caches."""
         return (
-            router_manager.version,
+            route_manager.version,
             form_action_manager.version,
             seo_routes_version.value,
         )
@@ -231,10 +247,12 @@ class _LazyUrlPatterns(MountedPatterns):
             return cache[1]
         seo_routes = seo_routes_slot.peek()
         # Pages expand first, since loading a page module registers its form actions.
-        pages = list(router_manager)
+        owned = list(route_manager.owned())
+        pages = [pattern for _backend, pattern in owned]
+        self._owners = {id(pattern): backend for backend, pattern in owned}
         routed_pages.fit(app_name, pages)
         patterns: list[URLPattern | URLResolver] = [
-            _CSRF_PATTERN,
+            *_ENDPOINTS,
             *form_action_manager,
             *pages,
             *(() if seo_routes is None else seo_routes.patterns()),
@@ -245,6 +263,11 @@ class _LazyUrlPatterns(MountedPatterns):
         # Versions are read after the build, since pages can bump the forms version.
         self._cache = (self.version_token(), patterns)
         return patterns
+
+    @override
+    def owner(self, entry: URLPattern | URLResolver) -> PageBackend | None:
+        """Return the page backend whose patterns this list built `entry` from."""
+        return self._owners.get(id(entry))
 
 
 def build_url_resolver(
@@ -295,10 +318,10 @@ urlpatterns = _LazyResolverSlot()
 
 
 __all__ = [
-    "RouterManager",
+    "RouteManager",
     "app_name",
+    "route_manager",
     "routed_pages",
-    "router_manager",
     "seo_routes_version",
     "urlpatterns",
 ]

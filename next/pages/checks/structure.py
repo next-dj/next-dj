@@ -7,16 +7,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.urls.converters import get_converters
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     WALK_HINT,
     PageRootsError,
     first_visit,
     get_page_roots,
-    get_router_manager,
+    get_route_manager,
     page_tree_skip_names,
     read_page_roots,
 )
@@ -40,13 +40,13 @@ def check_pages_structure(*args: object, **kwargs: object) -> list[CheckMessage]
     """Check each router's pages tree for layouts, naming, and structure."""
     errors: list[CheckMessage] = []
 
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
 
     # Nested and doubly-mounted roots reach one directory through several trees.
     seen: set[Path] = set()
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         # The one check naming a failing `page_roots`, so one report per router.
         try:
             roots = read_page_roots(router)
@@ -132,12 +132,12 @@ def check_unrouted_working_directory_pages(
 
     Nothing else reports this, since the other checks only walk trees routers report.
     """
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
     routed = {
         root.path.resolve()
-        for router in router_manager.backends
+        for router in route_manager.backends
         for root in get_page_roots(router)
     }
     return [

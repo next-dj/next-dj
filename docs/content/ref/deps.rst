@@ -6,7 +6,7 @@ Dependency injection reference
 Module summary
 --------------
 
-``next.deps`` exposes the resolver, the parameter providers and their registry, the dependency cache, and the public markers used in annotations, ``DObject`` among them.
+``next.deps`` exposes the resolver, the parameter providers and their registry, the dependency cache, the public markers used in annotations, ``DObject`` among them, and the async machinery, the request scope, the ``Loader``, and the segment runner.
 
 Public API
 ----------
@@ -48,6 +48,23 @@ The hook returns either ``None`` or a ``next.deps.ParameterFiller``, a callable 
 Returning ``None``, which is what the base class answers, leaves the parameter on the plain ``resolve`` path, and so does leaving the hook undefined altogether.
 The hook belongs to ``CompilingParameterProvider`` rather than to ``ParameterProvider``, so a provider written against the mandatory contract alone still passes an ``isinstance`` check against it.
 A ``compile_resolve`` that is present but not callable is refused with a ``TypeError`` naming the class, the way a missing ``static_can_handle`` is.
+
+``compile_aresolve`` is the async counterpart, declared by ``AsyncCompilingParameterProvider``.
+The async replay of a plan, the one an async page or component render runs, asks it once per parameter and awaits the ``AsyncParameterFiller`` it returns, and ``None`` keeps the parameter on the sync filler.
+``RegisteredParameterProvider`` answers ``None`` and declares ``blocking``, ``True`` unless a provider that only reads memory sets it ``False``, which ``static_blocking`` reads to decide whether the async replay runs the filler as a blocking segment on the request thread.
+
+``static_reach`` is declared by ``ReachingParameterProvider`` and names each callable that filling a parameter calls, as a pair of the key it is memoised under and the callable, with ``None`` as the key of a callable resolved inline such as the source of ``Context(callable)``.
+The compiler reads it once per async plan, so a key two consumers of one render reach is shared through the request scope and runs once, whether the dependency is sync or async.
+``RegisteredParameterProvider`` answers an empty tuple, and a provider without the hook still resolves correctly while the keys it reaches are computed in its own segment.
+
+``static_answers`` is declared by ``AnsweringParameterProvider`` and tells whether filling a parameter raises ``Http404`` or ``PermissionDenied`` by contract, as ``ObjectProvider`` does for a ``DObject`` row the scope does not see.
+A ``@context`` callable with such a parameter, directly or through a callable ``static_reach`` names, runs before the shell of a deferred page boundary, see :ref:`topics-boundaries-loading`.
+``RegisteredParameterProvider`` answers ``False``, and a provider without the hook never makes a callable run before the shell.
+
+``static_reads`` is declared by ``ReadingParameterProvider`` and returns a ``ContextReads`` that tells the context graph of a page what filling a parameter reads, the context ``keys`` the parameter names itself, the ``nested`` keys it reads under another name, the named ``dependencies`` it resolves, and the ``calls`` it runs as ``static_reach`` pairs, whose own parameters the graph reads in turn.
+The graph orders the ``@context`` callables of a page by these reads, so two callables that read nothing of each other run side by side in an async render.
+``READS_NOTHING`` stands for a parameter filled from the request alone, as the URL kwargs, the query, the form, and the consent providers answer.
+``RegisteredParameterProvider`` answers ``READS_EVERY``, and so does a provider without the hook, which orders its callable after every one before it.
 
 .. automodule:: next.deps.providers
    :members:
@@ -94,6 +111,10 @@ Markers
 .. automodule:: next.deps.markers
    :members:
 
+Other areas declare their own markers on the same base.
+``DUrl`` and ``DQuery`` of ``next.urls`` read the captured path and the query string, see :doc:`urls`.
+``Paging`` of ``next.partial`` is a plain class rather than a marker, named as ``Annotated[Paging, <pager>]``, and hands a context callable the pager of an infinite list bound to the request, see :ref:`ref-partial-infinite-lists`.
+
 Objects
 ~~~~~~~
 
@@ -110,6 +131,9 @@ See :ref:`topics-di-dobject` for the topic guide.
 Cache
 ~~~~~
 
+``DependencyCache`` stores what a named ``Depends("name")`` and a ``Depends(factory)`` returned and the rows ``DObject`` loads, so each of them runs once per cache, within one render unit on a sync and an async render alike, see :ref:`topics-dependency-injection`.
+A form action dispatch publishes its cache on the request under the attribute ``REQUEST_DEP_CACHE_ATTR`` names, and ``render_dep_cache`` hands a render that cache, so a hook and the render it triggers share their providers.
+
 .. automodule:: next.deps.cache
    :members:
 
@@ -119,11 +143,13 @@ Errors
 .. automodule:: next.deps.errors
    :members:
 
+``AsyncDependencyError`` is raised for an async callable a resolve cannot await, an async generator or an ``async def`` handed to the sync ``resolve_dependencies``, and it subclasses ``AsyncCallableError``, so a module load reports it as ``next.E218``.
+``MissingKeyError`` is raised by a ``Loader`` for a key its batch function returned no value for, and it is a ``LookupError`` rather than a ``KeyError``, so a template lookup cannot hide it.
 ``DependencyCycleError`` carries the chain that closed the loop on ``cycle``, and ``UnknownDependencyError`` carries the missing ``name``, the ``param_name`` it was asked for, the ``suggestion`` a close registered name produced, and the ``func`` the failed resolve attributed it to.
 ``UnboundObjectError`` subclasses :exc:`~django.core.exceptions.ImproperlyConfigured` and carries the ``param_name`` of the ``DObject`` parameter, the ``key`` it found nothing under, and ``parent``, which is ``True`` when that key is a missing parent context value rather than a missing URL kwarg.
 For an ``obj=DObject[Model]`` of an access declaration, ``param_name`` holds the label of the model and ``key`` its ``model_name``, and the dispatcher answers that variant with 400 as well.
 The form dispatcher answers an ``UnboundObjectError`` for a missing URL kwarg with 400 Bad Request and a logged warning, since the origin the client sent lacks the kwarg, and lets the parent variant raise.
-All three are re-exported from ``next.deps``, so a caller never imports the module directly.
+Every error is re-exported from ``next.deps``, so a caller never imports the module directly.
 
 Context
 ~~~~~~~
@@ -136,6 +162,22 @@ A context key cannot shadow a reserved resolver input.
 ``resolve_dependencies`` reads the same frozenset to tell its fixed inputs from the URL kwargs, so one list governs both the split and the refusal.
 A context mapping reaches resolution as it is, on the page path and on the component path alike, and the reserved names are invisible to the name-based providers rather than stripped from a copy.
 See :doc:`/content/internals/di-resolver` for the resolution detail.
+
+The request scope an async render shares its dependencies through and the runner of its blocking steps are framework-internal, see :ref:`internals-di-request-scope`.
+
+Loader
+~~~~~~
+
+``Loader(batch, *, max_batch=None, window=None)`` gathers the keys one request scope loads into one call of ``batch`` per window.
+``batch`` is a plain ``def`` or an ``async def`` that takes a sequence of keys and returns a mapping by key or a sequence in key order.
+``await loader.load(key)`` loads on the event loop, and ``loader.load_sync(key)`` on a thread, refusing an event loop thread.
+A ``max_batch`` or ``window`` left at ``None`` follows ``LOADER["MAX_BATCH"]`` and ``LOADER["WINDOW"]``, see :doc:`settings`.
+An ``async def`` batch function runs on the event loop and may not reach the ORM or a thread-sensitive ``sync_to_async`` call, which raises ``RuntimeError``.
+``rows(Model)`` returns the shared loader of ``Model`` rows by primary key, one ``pk__in`` query per batch through the default manager with no access scoping.
+See :doc:`/content/topics/boundaries/async` for the guide.
+
+.. automodule:: next.deps.loader
+   :members: Loader, rows
 
 Signals
 -------

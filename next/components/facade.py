@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from django.template.loader import get_template
+
+from next.boundaries.markup import builtin_error_ui
+from next.conf.boundaries import boundary_settings
 
 from .manager import components_manager
+from .renderers import render_error_template
 from .signals import component_rendered
 
 
@@ -13,6 +19,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.http import HttpRequest
+
+    from next.boundaries.failures import BoundaryFailure
 
     from .info import ComponentInfo
 
@@ -45,9 +53,73 @@ def render_component(
     return html
 
 
+def _render_file(
+    info: ComponentInfo,
+    path: Path,
+    context_data: Mapping[str, Any],
+    request: HttpRequest | None,
+) -> str:
+    """Render the boundary file at `path` beside `info`, nothing when unreadable."""
+    template = components_manager.template_loader.load_file(path)
+    if template is None:
+        return ""
+    return render_error_template(info, template, context_data, request)
+
+
+def _render_default(
+    name: str | None, context_data: Mapping[str, Any], request: HttpRequest | None
+) -> str | None:
+    """Render the default template `name`, `None` when the settings name none."""
+    if name is None:
+        return None
+    return get_template(name).render(dict(context_data), request)
+
+
+def render_component_error(
+    info: ComponentInfo,
+    context_data: Mapping[str, Any],
+    request: HttpRequest | None = None,
+    *,
+    deferred: bool = False,
+    wrapped: bool = True,
+) -> str:
+    """Render the `error.djx` of `info`, or nothing when it has no readable one.
+
+    A deferred one without it renders `BOUNDARIES["ERROR_TEMPLATE"]` or the built-in UI.
+    """
+    files = info.files
+    path = None if files is None else files.error
+    if path is not None:
+        return _render_file(info, path, context_data, request)
+    if not deferred:
+        return ""
+    default = boundary_settings().error_template
+    if default is not None:
+        return get_template(default).render(dict(context_data), request)
+    if not wrapped:
+        return ""
+    return builtin_error_ui(cast("BoundaryFailure", context_data["error"]))
+
+
+def render_component_loading(
+    info: ComponentInfo,
+    context_data: Mapping[str, Any],
+    request: HttpRequest | None = None,
+) -> str:
+    """Render the `loading.djx` of `info`, else `BOUNDARIES["LOADING_TEMPLATE"]`."""
+    files = info.files
+    path = None if files is None else files.loading
+    if path is not None:
+        return _render_file(info, path, context_data, request)
+    default = boundary_settings().loading_template
+    return _render_default(default, context_data, request) or ""
+
+
 __all__ = [
     "collect_visible_components",
     "get_component",
     "load_component_template",
     "render_component",
+    "render_component_error",
+    "render_component_loading",
 ]

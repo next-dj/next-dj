@@ -15,9 +15,7 @@ from flags.models import Flag
 from flags.signals import access_denied_count
 
 from next.testing import (
-    assert_has_class,
     assert_metadata,
-    assert_missing_class,
     find_anchor,
     find_form,
     render_component_by_name,
@@ -313,30 +311,36 @@ class TestMetricsPage:
         assert "No renders recorded yet." in body
 
 
+CURRENT_PAGE = 'aria-current="page"'
+ANCESTOR = 'data-next-current="ancestor"'
+
+
 class TestActiveNav:
-    """The shared `nav_link` component highlights the current section."""
+    """The router marks the links of each nav, which `nav_link` styles from the marks."""
 
-    def test_admin_link_is_active_on_admin_metrics(self, next_client) -> None:
+    def test_admin_link_marks_an_ancestor_on_admin_metrics(self, next_client) -> None:
         body = next_client.get("/admin/metrics/").content.decode()
-        assert_has_class(
-            find_anchor(body, href="/admin/", text="Admin"), "font-semibold"
-        )
+        anchor = find_anchor(body, href="/admin/", text="Admin")
+        assert ANCESTOR in anchor
+        assert CURRENT_PAGE not in anchor
 
-    def test_admin_link_not_active_on_home(self, next_client) -> None:
+    def test_admin_link_is_unmarked_on_home(self, next_client) -> None:
         body = next_client.get("/").content.decode()
-        assert_missing_class(
-            find_anchor(body, href="/admin/", text="Admin"), "font-semibold"
-        )
+        anchor = find_anchor(body, href="/admin/", text="Admin")
+        assert "data-next-current" not in anchor
+
+    def test_the_home_link_marks_only_home(self, next_client) -> None:
+        home = next_client.get("/").content.decode()
+        metrics = next_client.get("/admin/metrics/").content.decode()
+        assert CURRENT_PAGE in find_anchor(home, href="/", text="Active")
+        assert "data-next-current" not in find_anchor(metrics, href="/", text="Active")
 
     def test_admin_subnav_metrics_active_only_on_metrics(self, next_client) -> None:
         body = next_client.get("/admin/metrics/").content.decode()
-        assert_has_class(
-            find_anchor(body, href="/admin/metrics/", text="Render metrics"),
-            "font-semibold",
-        )
-        assert_missing_class(
-            find_anchor(body, href="/admin/", text="Flags"), "font-semibold"
-        )
+        metrics = find_anchor(body, href="/admin/metrics/", text="Render metrics")
+        flags = find_anchor(body, href="/admin/", text="Flags")
+        assert CURRENT_PAGE in metrics
+        assert CURRENT_PAGE not in flags
 
 
 class TestPostDeleteReceiver:

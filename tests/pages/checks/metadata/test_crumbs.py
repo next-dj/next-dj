@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 
 from next.pages.checks.metadata.crumbs import check_route_group_breadcrumbs
-from tests.pages.checks.metadata.trees import templated_page
 from tests.support.cases.groupnames import CRUMB_CASES, CrumbCase
 from tests.support.checks import located, run_check
+from tests.support.trees import templated_page
 
 
 class TestRouteGroupBreadcrumbs:

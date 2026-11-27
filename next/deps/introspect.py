@@ -6,7 +6,7 @@ import inspect
 from types import MethodType
 from typing import TYPE_CHECKING, Any, get_type_hints
 
-from next.caches import LruCache
+from next.caches import ROUTES, LruCache
 
 
 if TYPE_CHECKING:
@@ -32,9 +32,11 @@ HINT_ERRORS: tuple[type[Exception], ...] = (
 _EMPTY = inspect.Parameter.empty
 
 # Bounded as the reloader mints new function objects per save, keyed by `__func__`.
-_signature_cache: LruCache[IntrospectKey, inspect.Signature] = LruCache()
-_type_hints_cache: LruCache[IntrospectKey, dict[str, Any]] = LruCache()
-_var_keyword_cache: LruCache[IntrospectKey, bool] = LruCache()
+_signature_cache: LruCache[IntrospectKey, inspect.Signature] = LruCache(
+    depends=(ROUTES,)
+)
+_type_hints_cache: LruCache[IntrospectKey, dict[str, Any]] = LruCache(depends=(ROUTES,))
+_var_keyword_cache: LruCache[IntrospectKey, bool] = LruCache(depends=(ROUTES,))
 
 
 def introspect_key(func: Callable[..., Any]) -> IntrospectKey:

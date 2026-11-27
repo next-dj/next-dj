@@ -1,3 +1,4 @@
+import gzip
 from io import StringIO
 
 import pytest
@@ -5,7 +6,7 @@ from django.core.management import call_command
 from django.urls import NoReverseMatch, reverse
 from myapp.models import Item
 
-from next.testing import assert_metadata
+from next.testing import assert_metadata, find_anchor
 from next.urls import page_reverse
 
 
@@ -18,6 +19,23 @@ def test_the_home_page_is_public(next_client) -> None:
     response = next_client.get("/")
     assert response.status_code == 200
     assert b"It works" in response.content
+
+
+def test_a_page_leaves_compressed_for_a_client_that_accepts_it(next_client) -> None:
+    response = next_client.get("/", headers={"Accept-Encoding": "gzip"})
+    assert response["Content-Encoding"] == "gzip"
+    assert "Accept-Encoding" in response["Vary"]
+    assert b"It works" in gzip.decompress(response.content)
+
+
+def test_the_main_nav_marks_the_page_on_screen(next_client, alice) -> None:
+    next_client.force_login(alice)
+    home = next_client.get("/").content.decode()
+    items = next_client.get(PAGE).content.decode()
+    assert 'aria-current="page"' in find_anchor(home, href="/", text="Home")
+    assert "data-next-current" not in find_anchor(home, href=PAGE, text="My items")
+    assert 'aria-current="page"' in find_anchor(items, href=PAGE, text="My items")
+    assert "data-next-current" not in find_anchor(items, href="/", text="Home")
 
 
 def test_the_head_folds_the_site_defaults(next_client) -> None:
@@ -34,7 +52,10 @@ def test_the_head_folds_the_site_defaults(next_client) -> None:
 
 def test_static_names_resolve_to_urls(next_client) -> None:
     body = next_client.get("/").content.decode()
-    assert '<link rel="stylesheet" href="/static/shared/css/tokens.css?v=v1">' in body
+    assert (
+        '<link data-next-asset="page" rel="stylesheet" '
+        'href="/static/shared/css/tokens.css?v=v1">'
+    ) in body
     assert '<script type="module" src="/static/shared/js/base.mjs?v=v1">' in body
     assert (
         '<link rel="icon" href="https://template.example/static/home/icon.svg" '

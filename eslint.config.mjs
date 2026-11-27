@@ -8,6 +8,7 @@ const TS_SOURCES = [
   "next/client/entries/*.ts",
   "vitest.config.ts",
   "eslint.config.mjs",
+  "next/client/build.mjs",
 ];
 
 export default tseslint.config(
@@ -50,10 +51,19 @@ export default tseslint.config(
       "@typescript-eslint/no-extraneous-class": ["error", { allowStaticOnly: true }],
       // Morph hooks return `boolean | void` so implicit-void callbacks fit.
       "@typescript-eslint/no-invalid-void-type": "off",
+      // A TEST label marks a harness seam the shipped build drops, never a jump target.
+      "no-unused-labels": "off",
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "LabeledStatement[label.name!='TEST']",
+          message: "Only the TEST label is allowed, it marks a harness seam.",
+        },
+      ],
     },
   },
   {
-    files: ["eslint.config.mjs"],
+    files: ["eslint.config.mjs", "next/client/build.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
   },
   {

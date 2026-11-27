@@ -87,7 +87,9 @@ def _redis(server: fakeredis.FakeServer, clock: ServerClock) -> FakeServerBroker
 
 def _memory(**presence: object) -> MemoryBroker:
     return MemoryBroker(
-        presence={"WINDOW": WINDOW, **presence}, schedule=manual_schedule(lambda: 0.0)
+        presence={"WINDOW": WINDOW, **presence},
+        clock=lambda: 0.0,
+        schedule=manual_schedule(lambda: 0.0),
     )
 
 

@@ -17,7 +17,7 @@ about: Suggest an idea or improvement for next.dj
 
 ## Examples and extensibility
 
-<!-- New user-facing behavior usually includes an example under `examples/` with tests (see CONTRIBUTING.md Examples). Does this touch extension points (loaders, router backends, factories)? See CONTRIBUTING.md Extensibility. -->
+<!-- New user-facing behavior usually includes an example under `examples/` with tests (see CONTRIBUTING.md Examples). Does this touch extension points (loaders, page backends, factories)? See CONTRIBUTING.md Extensibility. -->
 
 - [ ] I expect this would need a new or updated example under `examples/`
 - [ ] This relates to replaceable/extension APIs in `next/`

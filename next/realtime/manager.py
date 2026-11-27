@@ -7,6 +7,7 @@ from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import instantiate_backend, resolve_backend_class
+from next.caches import FRAMEWORK
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
 
@@ -102,6 +103,9 @@ broker_manager = BrokerManager()
 def forget_realtime_broker(**kwargs: object) -> None:
     """Reset the manager when the framework settings reload."""
     broker_manager.reset()
+
+
+FRAMEWORK.attach(forget_realtime_broker)
 
 
 __all__ = ["BrokerManager", "broker_class", "broker_manager", "forget_realtime_broker"]

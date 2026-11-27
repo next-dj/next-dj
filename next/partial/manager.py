@@ -1,6 +1,5 @@
 """Facade owning the protocol-backend manager and version resolution."""
 
-import functools
 import hashlib
 import json
 from typing import TYPE_CHECKING
@@ -9,6 +8,7 @@ from django.contrib.staticfiles.storage import ManifestFilesMixin, staticfiles_s
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import SingleBackendManager
+from next.caches import FRAMEWORK, SETTINGS, memo
 from next.conf import next_framework_settings
 
 from .backends import PartialProtocolBackend
@@ -39,7 +39,7 @@ partial_backend_manager = SingleBackendManager(
 )
 
 
-@functools.cache
+@memo(SETTINGS)
 def asset_version() -> str:
     """Return the memoised asset version stamped on a partial response.
 
@@ -100,19 +100,7 @@ def _hash_mapping(hashed_files: "Mapping[str, str]") -> str:
     return digest[:_HASH_WIDTH]
 
 
-def forget_partial_backend(**kwargs: object) -> None:
-    """Drop the cached backend and version so a reloaded config takes effect."""
-    partial_backend_manager.reset()
-    asset_version.cache_clear()
-
-
-def forget_asset_version(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised version when the staticfiles configuration moves.
-
-    `settings_reloaded` covers only the `NEXT_FRAMEWORK` half of the configuration.
-    """
-    if setting in _STORAGE_SETTINGS:
-        asset_version.cache_clear()
+FRAMEWORK.attach(partial_backend_manager.reset)
 
 
 __all__ = ["asset_version", "partial_backend_manager", "pinned_version"]

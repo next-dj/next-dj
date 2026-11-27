@@ -4,10 +4,12 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
+from django.contrib.auth.models import Group
 from django.http import HttpRequest
 from django.test import override_settings
 
@@ -35,6 +37,8 @@ from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.introspect import defining_file
 from next.pages.loaders import _load_python_module
+from next.transactions import AtomicOverride
+from next.transactions.checks import check_atomic_declarations
 from tests.support import importable_dir
 
 
@@ -882,3 +886,99 @@ class TestPermissionHookAnnotationSafety:
         annotation = hook.__annotations__["return"]
         assert annotation is PermissionOutcome
         assert not isinstance(annotation, str)
+
+
+def _registered_atomic(name: str) -> object:
+    meta = form_action_manager.default_backend.get_meta(name)
+    assert meta is not None
+    return meta.get("atomic")
+
+
+class TestMetaAtomic:
+    """`Meta.atomic` reaches the action meta as `@action(atomic=...)` does."""
+
+    def test_no_declaration_stores_nothing(self) -> None:
+        class PlainAtomicForm(Form):
+            email = django_forms.EmailField()
+
+        assert _registered_atomic("plain_atomic_form") is None
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (True, AtomicOverride(atomic=True)),
+            (False, AtomicOverride(atomic=False)),
+            ("writes", AtomicOverride(atomic="writes")),
+            (
+                AtomicOverride(atomic=True, aliases=["default"]),
+                AtomicOverride(atomic=True, aliases=("default",)),
+            ),
+        ],
+    )
+    def test_a_form_declaration_is_stored(
+        self, value: object, expected: AtomicOverride
+    ) -> None:
+        class DeclaredAtomicForm(Form):
+            email = django_forms.EmailField()
+
+            class Meta:
+                atomic = value
+
+        assert _registered_atomic("declared_atomic_form") == expected
+
+    def test_a_model_form_declaration_is_stored(self) -> None:
+        class GroupAtomicForm(ModelForm):
+            class Meta:
+                model = Group
+                fields = ("name",)
+                atomic = False
+
+        assert _registered_atomic("group_atomic_form") == AtomicOverride(atomic=False)
+
+    def test_a_subclass_inherits_the_declaration(self) -> None:
+        class BaseAtomicForm(Form):
+            class Meta:
+                atomic = False
+
+        class ChildAtomicForm(BaseAtomicForm):
+            pass
+
+        assert _registered_atomic("child_atomic_form") == AtomicOverride(atomic=False)
+
+    def test_a_wizard_declaration_is_stored(self) -> None:
+        class AtomicWizardStep(Form):
+            name = django_forms.CharField()
+
+            class Meta:
+                abstract = True
+
+        class AtomicWizard(forms_wizard.FormWizard):
+            class Meta:
+                steps: ClassVar = [("name", AtomicWizardStep)]
+                atomic = False
+
+        assert _registered_atomic("atomic_wizard") == AtomicOverride(atomic=False)
+
+    @pytest.mark.parametrize(
+        ("value", "fragment"),
+        [
+            ("no", "atomic must be True, False, 'writes', None or an AtomicOverride"),
+            (AtomicOverride(atomic=True, aliases="default"), "aliases must be"),
+        ],
+    )
+    def test_an_unusable_declaration_is_dropped_and_reported_as_e240(
+        self, value: object, fragment: str
+    ) -> None:
+        class BadAtomicForm(Form):
+            email = django_forms.EmailField()
+
+            class Meta:
+                atomic = value
+
+        assert _registered_atomic("bad_atomic_form") is None
+        (message,) = check_atomic_declarations()
+        assert message.id == "next.E240"
+        assert message.msg.startswith("Meta.atomic of 'TestMetaAtomic.")
+        assert "BadAtomicForm' declares no transaction, since " in message.msg
+        assert fragment in message.msg
+        assert "Meta.atomic" in message.hint

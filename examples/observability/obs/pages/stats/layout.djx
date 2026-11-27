@@ -6,7 +6,9 @@
         <p class="text-sm text-muted-foreground">Window: {{ window }}</p>
       {% endzone %}
     </div>
-    {% component "filter_window" live_zone=live_zone %}
+    {% zone "stats-filter" %}
+      {% component "filter_window" live_zone=live_zone %}
+    {% endzone %}
   </section>
 
   {% component "stats_nav" %}

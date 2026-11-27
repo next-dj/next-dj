@@ -37,6 +37,9 @@ describe("readCsrf", () => {
       header: "X-CSRFToken",
       url: CSRF_URL,
     });
+    expect(
+      readCsrf({ header: "X-CSRFToken", url: CSRF_URL, cookie: "csrftoken" }),
+    ).toEqual({ header: "X-CSRFToken", url: CSRF_URL, cookie: "csrftoken" });
   });
 
   it("reads a half-filled or foreign payload as absent", () => {
@@ -61,6 +64,36 @@ describe("mintCsrf", () => {
 });
 
 describe("the deferred token", () => {
+  afterEach(() => {
+    document.cookie = "csrftoken=; max-age=0";
+  });
+
+  it("sends a cookie scripts may read and asks the endpoint for nothing", async () => {
+    const { fetch, calls } = minting();
+    document.cookie = "other=1";
+    document.cookie = "csrftoken=secret";
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL, cookie: "csrftoken" });
+    expect(await csrf.ensure()).toEqual({ header: "X-CSRFToken", token: "secret" });
+    document.cookie = "csrftoken=rotated";
+    expect(await csrf.ensure()).toEqual({ header: "X-CSRFToken", token: "rotated" });
+    expect(calls).toEqual([]);
+    document.cookie = "other=; max-age=0";
+  });
+
+  it("asks the endpoint once when the named cookie is absent", async () => {
+    const { fetch, calls, release } = minting();
+    const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
+    csrf.set({ header: "X-CSRFToken", url: CSRF_URL, cookie: "csrftoken" });
+    const pending = Promise.all([csrf.ensure(), csrf.ensure()]);
+    release();
+    expect(await pending).toEqual([
+      { header: "X-CSRFToken", token: "minted" },
+      { header: "X-CSRFToken", token: "minted" },
+    ]);
+    expect(calls).toHaveLength(1);
+  });
+
   it("mints once for concurrent callers, with the request flag and no cache", async () => {
     const { fetch, calls, release } = minting();
     const csrf = createCsrf({ mint: chunkModules.csrf, fetch });
@@ -305,7 +338,7 @@ describe("a mutation on a page with a deferred token", () => {
         if (event === "partial:error") errors.push(detail);
       },
       mergeContext: () => undefined,
-    });
+    }).partial;
     partial._configure({
       document,
       navigate: () => undefined,

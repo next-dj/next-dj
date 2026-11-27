@@ -14,18 +14,15 @@ from next.pages.checks import (
     check_page_metadata_shape,
 )
 from next.testing import override_next_settings
-from tests.pages.checks.metadata.trees import (
-    NAMED_CALLABLE,
-    metadata_page,
-    templated_page,
-)
+from tests.pages.checks.metadata.trees import NAMED_CALLABLE, metadata_page
 from tests.support import (
     BASE,
     I18N_URLCONF,
     check_ids,
     importable_dir,
-    patch_checks_router_manager,
+    patch_checks_route_manager,
 )
+from tests.support.trees import templated_page
 
 
 DICT_AND_CALLABLE = """
@@ -87,24 +84,24 @@ class TestPageShape:
             tmp_path,
             '{"title": "Home", "twitter": {"card": "summary"}, "canonical": True}',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_page_metadata_shape() == []
 
     def test_a_page_without_metadata_is_silent(self, tmp_path: Path) -> None:
         templated_page(tmp_path, "x = 1\n")
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_page_metadata_shape() == []
 
     def test_a_dict_beside_a_callable_is_e102(self, tmp_path: Path) -> None:
         page_file = templated_page(tmp_path, DICT_AND_CALLABLE)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert check_ids(messages) == ["next.E102"]
         assert messages[0].obj == str(page_file)
 
     def test_a_callable_named_metadata_is_e102(self, tmp_path: Path) -> None:
         page_file = templated_page(tmp_path, NAMED_CALLABLE)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert check_ids(messages) == ["next.E102"]
         assert "Rename the callable" in messages[0].msg
@@ -112,7 +109,7 @@ class TestPageShape:
 
     def test_a_non_mapping_is_e103(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '"Home"')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert check_ids(messages) == ["next.E103"]
         assert "'str'" in messages[0].msg
@@ -151,7 +148,7 @@ class TestPageShape:
         self, tmp_path: Path, metadata: str, fragment: str
     ) -> None:
         page_file = metadata_page(tmp_path, metadata)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert check_ids(messages) == ["next.E104"]
         assert fragment in messages[0].msg
@@ -164,17 +161,17 @@ class TestPageShape:
     )
     def test_an_empty_title_is_e105(self, tmp_path: Path, metadata: str) -> None:
         metadata_page(tmp_path, metadata)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_ids(check_page_metadata_shape()) == ["next.E105"]
 
     def test_a_page_template_without_default_is_e100(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"title": {"template": "{title} · X"}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_ids(check_page_metadata_shape()) == ["next.E100"]
 
     def test_two_jsonld_objects_with_one_id_is_w103(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"jsonld": [{"@id": "#p"}, {"@id": "#p"}]}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert check_ids(messages) == ["next.W103"]
         assert "'/#p'" in messages[0].msg
@@ -184,7 +181,7 @@ class TestPageShape:
     ) -> None:
         parent = metadata_page(tmp_path, '{"foo": 1}')
         metadata_page(tmp_path / "child", '{"title": "Child"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_metadata_shape()
         assert [(m.id, m.obj) for m in messages] == [("next.E104", str(parent))]
 
@@ -200,7 +197,7 @@ class TestRegistrationFiles:
             "def meta() -> dict:\n"
             "    return {}\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_registration_files() == []
 
     def test_a_callable_imported_from_a_helper_is_e106(self, tmp_path: Path) -> None:
@@ -211,7 +208,7 @@ class TestRegistrationFiles:
         helper.write_text("def donated() -> dict:\n    return {'title': 'x'}\n")
         page_file = templated_page(tmp_path, IMPORTED_CALLABLE)
         with (
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             importable_dir(tmp_path),
         ):
             messages = check_metadata_registration_files()
@@ -234,7 +231,7 @@ class TestRegistrationFiles:
         )
         templated_page(tmp_path, "import donor.helpers\n")
         with (
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             importable_dir(tmp_path),
         ):
             messages = check_metadata_registration_files()
@@ -262,7 +259,7 @@ class TestCallableReturnsMapping:
             f"def meta() {annotation}:\n"
             "    return {}\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_callable_returns_mapping() == []
 
     def test_a_non_mapping_annotation_is_e108(self, tmp_path: Path) -> None:
@@ -273,7 +270,7 @@ class TestCallableReturnsMapping:
             "def meta() -> str:\n"
             "    return 'x'\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_callable_returns_mapping()
         assert check_ids(messages) == ["next.E108"]
         assert "meta" in messages[0].msg
@@ -289,7 +286,7 @@ class TestParentParameter:
     )
     def test_a_metadata_parameter_is_e121(self, tmp_path: Path, source: str) -> None:
         page_file = templated_page(tmp_path, source)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_parent_parameter()
         assert check_ids(messages) == ["next.E121"]
         assert "'parent'" in messages[0].msg
@@ -306,7 +303,7 @@ class TestParentParameter:
             "    return {}\n",
         )
         metadata_page(tmp_path / "child", '{"title": "Child"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_parent_parameter() == []
 
     def test_an_unreadable_signature_is_skipped(self, tmp_path: Path) -> None:
@@ -318,7 +315,7 @@ class TestParentParameter:
             "    return {}\n\n"
             "meta.__signature__ = 'unreadable'\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_parent_parameter() == []
 
 
@@ -327,14 +324,14 @@ class TestUrlSchemes:
 
     def test_a_foreign_scheme_is_a_shape_error(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"canonical": "javascript:alert(1)"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_ids(check_page_metadata_shape()) == ["next.E104"]
 
     def test_a_lazy_url_is_left_to_the_render_that_forces_it(
         self, tmp_path: Path
     ) -> None:
         templated_page(tmp_path, LAZY_FOREIGN_URLS)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_page_metadata_shape() == []
             assert check_metadata_noindex_canonical() == []
 
@@ -346,7 +343,7 @@ class TestHreflangPatterns:
         self, tmp_path: Path
     ) -> None:
         page_file = metadata_page(tmp_path, '{"alternates": {"languages": True}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_hreflang_patterns()
         assert check_ids(messages) == ["next.W087"]
         assert "'next.urls'" in messages[0].msg
@@ -357,19 +354,19 @@ class TestHreflangPatterns:
         self, tmp_path: Path
     ) -> None:
         metadata_page(tmp_path, '{"alternates": {"languages": True}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_hreflang_patterns() == []
 
     @override_settings(ROOT_URLCONF=I18N_URLCONF)
     def test_the_prefix_is_read_once_for_many_pages(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"alternates": {"languages": True}}')
         metadata_page(tmp_path / "child", '{"alternates": {"languages": True}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_hreflang_patterns() == []
 
     def test_a_mapping_is_silent(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"alternates": {"languages": {"en": "/en/"}}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_hreflang_patterns() == []
 
 
@@ -391,7 +388,7 @@ class TestNoindexCanonical:
         page_file = metadata_page(tmp_path, metadata)
         with (
             override_next_settings(SITE={"URL": site}),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_metadata_noindex_canonical()
         assert check_ids(messages) == ["next.W088"]
@@ -413,7 +410,7 @@ class TestNoindexCanonical:
         metadata_page(tmp_path, metadata)
         with (
             override_next_settings(SITE={"URL": BASE}),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_metadata_noindex_canonical() == []
 
@@ -421,7 +418,7 @@ class TestNoindexCanonical:
         metadata_page(tmp_path, '{"canonical": "https://other.example/x/"}')
         with (
             override_next_settings(SITE={"URL": BASE, "INDEXABLE": False}),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_ids(check_metadata_noindex_canonical()) == ["next.W088"]
 
@@ -433,7 +430,7 @@ class TestNoindexCanonical:
         rule = MagicMock(side_effect=AssertionError)
         with (
             override_next_settings(SITE={"URL": BASE, "INDEXABLE": rule}),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_ids(check_metadata_noindex_canonical()) == ["next.W088"]
         rule.assert_not_called()
@@ -446,7 +443,7 @@ class TestNoindexCanonical:
         rule = MagicMock(side_effect=AssertionError)
         with (
             override_next_settings(SITE={"URL": rule}),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_metadata_noindex_canonical() == []
         rule.assert_not_called()
@@ -463,7 +460,7 @@ class TestEnumValues:
             '"resizes-content"}, "twitter": {"card": "player", "player": '
             '{"url": "/p", "width": 1, "height": 1}}}',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_enum_values() == []
 
     @pytest.mark.parametrize(
@@ -484,14 +481,14 @@ class TestEnumValues:
         self, tmp_path: Path, metadata: str, fragment: str
     ) -> None:
         metadata_page(tmp_path, metadata)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_enum_values()
         assert check_ids(messages) == ["next.E104"]
         assert fragment in messages[0].msg
 
     def test_a_string_viewport_is_not_read_for_enums(self, tmp_path: Path) -> None:
         metadata_page(tmp_path, '{"viewport": "viewport-fit=fill"}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_enum_values() == []
 
     def test_the_defaults_are_checked(self) -> None:

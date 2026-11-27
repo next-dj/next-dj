@@ -158,7 +158,7 @@ Names the layout avoids
 ``providers.py``, a ``backends.py`` that holds DI providers, ``receivers.py``, ``policy.py``, ``access.py``, ``facades.py``, ``selectors.py``, and ``queries.py`` stay out of an application.
 The reason is the same for all of them, one obvious place per role.
 Reads live on the ``QuerySet``, DI in ``deps.py``, signals and their receivers in ``signals.py``, and the operations other applications call in ``services.py``.
-A ``backends.py`` that subclasses a real next.dj backend, such as ``StaticFilesBackend`` or ``FileRouterBackend``, keeps its name.
+A ``backends.py`` that subclasses a real next.dj backend, such as ``StaticFilesBackend`` or ``FilePageBackend``, keeps its name.
 
 Delivery stays in pages
 -----------------------
@@ -257,7 +257,7 @@ A project ``static/`` directory is reached through Django ``STATICFILES_DIRS`` i
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
            }
@@ -317,7 +317,7 @@ A project that hosts a global layout or a project-wide page tree adds an entry t
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "DIRS": [str(BASE_DIR / "chrome")],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",

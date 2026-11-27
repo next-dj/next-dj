@@ -1,0 +1,6 @@
+<div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-6 text-sm text-muted-foreground" data-audit-error>
+  <p>The totals could not be loaded.</p>
+  {% if error.retry %}
+    <button type="button" data-next-retry class="rounded-md border border-border bg-background px-3 py-1 text-foreground hover:bg-accent">Try again</button>
+  {% endif %}
+</div>

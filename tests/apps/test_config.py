@@ -3,14 +3,16 @@ from __future__ import annotations
 import ast
 import gc
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 from django.apps import apps
 from django.conf import settings
 from django.core.signals import setting_changed
+from django.db.backends.signals import connection_created
 from django.test import override_settings
 from django.urls import Resolver404, resolve
 from django.utils import autoreload
@@ -20,37 +22,48 @@ from django.utils.autoreload import (
 )
 
 import next as next_package
-from next.apps import autoreload as next_autoreload, components as next_components
-from next.checks.catalog import CHECK_MODULES
+from next.apps import (
+    autodiscover as next_autodiscover,
+    autoreload as next_autoreload,
+    components as next_components,
+    staticfiles as next_staticfiles,
+    templates as next_templates,
+)
+from next.apps.areas import CHECK_MODULES, MANIFESTS
 from next.components import FileComponentsBackend, components_manager
+from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.defer.assembly import inline_sink
+from next.defer.connections import connection_sources
+from next.defer.manager import defer_manager
 from next.deps import resolver
 from next.deps.introspect import _signature_cache
+from next.deps.resolver import apply_resolver_setting
+from next.discovery import get_pages_directories_for_watch
+from next.manifest import Bind
 from next.pages import loaders as pages_loaders
 from next.pages.ports import PageScanImpl
-from next.pages.watch import get_pages_directories_for_watch
-from next.partial.ports import PartialShaperImpl
 from next.ports import (
     PortSlot,
+    deferrals_slot,
     page_scan_slot,
-    page_scripts_slot,
-    partial_shaper_slot,
-    realtime_negotiation_slot,
-    router_access_slot,
+    page_scripts,
+    page_views_slot,
+    route_access_slot,
     seo_routes_slot,
+    server_load_slot,
     static_assets_slot,
 )
-from next.realtime.ports import RealtimeNegotiationImpl
-from next.scripts.ports import PageScriptsImpl
 from next.seo.manager import seo_manager
 from next.seo.ports import SeoRoutesImpl
 from next.server import NextStatReloader
 from next.static import get_static_manager
 from next.static.ports import StaticAssetsImpl
-from next.urls import router_manager
+from next.urls import route_manager
 from next.urls.manager import seo_routes_version
-from next.urls.ports import RouterAccessImpl
-from next.urls.signals import router_reloaded
+from next.urls.ports import RouteAccessImpl
+from next.urls.signals import routes_reloaded
+from next.views import page_view
 from tests.support import (
     DUMMY_COMPONENTS_BACKEND,
     DummyComponentsBackend,
@@ -69,10 +82,7 @@ if TYPE_CHECKING:
 
 _PROCESS_SLOTS = (
     page_scan_slot,
-    page_scripts_slot,
-    partial_shaper_slot,
-    realtime_negotiation_slot,
-    router_access_slot,
+    route_access_slot,
     seo_routes_slot,
     static_assets_slot,
 )
@@ -83,7 +93,7 @@ def _page_backend_entry(
 ) -> dict[str, object]:
     """One ``PAGE_BACKENDS`` entry for the file router."""
     return {
-        "BACKEND": "next.urls.FileRouterBackend",
+        "BACKEND": "next.urls.FilePageBackend",
         "PAGES_DIR": "pages",
         "APP_DIRS": app_dirs,
         "DIRS": list(dirs or []),
@@ -174,7 +184,7 @@ class TestNextFrameworkConfig:
         """`runserver` boots through a backend that answers the wrong shape."""
         root = tmp_path / "shell"
         root.mkdir()
-        build = RouterAccessImpl().create_backend
+        build = RouteAccessImpl().create_backend
 
         def malformed_first(config: dict) -> object:
             if config["BACKEND"] == "broken.Backend":
@@ -183,7 +193,7 @@ class TestNextFrameworkConfig:
 
         with (
             patch.object(
-                RouterAccessImpl, "create_backend", side_effect=malformed_first
+                RouteAccessImpl, "create_backend", side_effect=malformed_first
             ),
             override_settings(
                 NEXT_FRAMEWORK={
@@ -204,7 +214,7 @@ class TestNextFrameworkConfig:
         """`runserver` boots through a third-party backend whose tree listing fails."""
         root = tmp_path / "shell"
         root.mkdir()
-        build = RouterAccessImpl().create_backend
+        build = RouteAccessImpl().create_backend
 
         def broken_first(config: dict) -> object:
             if config["BACKEND"] == "broken.Backend":
@@ -212,7 +222,7 @@ class TestNextFrameworkConfig:
             return build(config)
 
         with (
-            patch.object(RouterAccessImpl, "create_backend", side_effect=broken_first),
+            patch.object(RouteAccessImpl, "create_backend", side_effect=broken_first),
             override_settings(
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
@@ -251,7 +261,7 @@ class TestARouterReloadDropsThePageRootMemos:
             assert manager.page_roots() == ()
 
             (tmp_path / "pages").mkdir()
-            router_manager.reload()
+            route_manager.reload()
             tree = (tmp_path / "pages").resolve()
 
             assert get_pages_directories_for_watch() == [tree]
@@ -267,7 +277,7 @@ class TestARouterReloadDropsThePageRootMemos:
         resolver.resolve_dependencies(fn)
         assert _signature_cache
         assert resolver._plan_cache
-        router_manager.reload()
+        route_manager.reload()
         assert not _signature_cache
         assert not resolver._plan_cache
 
@@ -443,113 +453,114 @@ class TestAppModulesLoadBeforeComponents:
         assert log.read_text().splitlines() == ["deps", "component"]
 
 
-class TestDependencyResolverInstall:
-    """``ready()`` points the DI singleton at the configured resolver class."""
+class _Recorded:
+    """A port binding or startup step that notes its run before doing it."""
 
-    STEPS: ClassVar[tuple[str, ...]] = (
-        "apply_resolver_setting",
-        "page_scan_slot",
-        "partial_shaper_slot",
-        "realtime_negotiation_slot",
-        "router_access_slot",
-        "page_scripts_slot",
-        "seo_routes_slot",
-        "seo_routes_version",
-        "static_assets_slot",
-        "autoreload",
-        "templates",
-        "staticfiles",
-        "autodiscover",
-        "components",
+    def __init__(self, made: list[str], name: str, step: object) -> None:
+        self._made, self._name, self._step = made, name, step
+
+    def apply(self) -> None:
+        self._made.append(self._name)
+        self._step.apply()
+
+    def __call__(self) -> None:
+        self._made.append(self._name)
+        self._step()
+
+
+def _recorded(made: list[str]) -> tuple[object, ...]:
+    """Return every manifest with its bindings and startup steps noting their runs."""
+    return tuple(
+        replace(
+            manifest,
+            ports=tuple(
+                _Recorded(made, f"{manifest.name}.port", binding)
+                for binding in manifest.ports
+            ),
+            startup=tuple(
+                _Recorded(made, step.__qualname__, step) for step in manifest.startup
+            ),
+        )
+        for manifest in MANIFESTS
+    )
+
+
+class TestDependencyResolverInstall:
+    """``ready()`` composes every area before any step that imports user modules."""
+
+    INSTALLS: ClassVar[tuple[object, ...]] = (
+        next_autoreload,
+        next_templates,
+        next_staticfiles,
+        next_autodiscover,
+        next_components,
     )
 
     def test_ready_applies_the_setting_before_it_imports_user_modules(self) -> None:
-        """The resolver is configured ahead of every step that imports user code."""
+        """The resolver and every port come ahead of every step that imports user code."""
         config = apps.get_app_config("next")
-        recorder = Mock()
+        made: list[str] = []
         with ExitStack() as stack:
-            for step in self.STEPS:
+            stack.enter_context(patch("next.apps.config.MANIFESTS", _recorded(made)))
+            for module in self.INSTALLS:
                 stack.enter_context(
-                    patch(f"next.apps.config.{step}", getattr(recorder, step))
+                    patch.object(
+                        module,
+                        "install",
+                        side_effect=lambda name=module.__name__: made.append(name),
+                    )
                 )
             config.ready()
-        made = [name for name, _args, _kwargs in recorder.mock_calls]
-        assert made == [
-            "apply_resolver_setting",
-            "page_scan_slot.set",
-            "partial_shaper_slot.set",
-            "realtime_negotiation_slot.set",
-            "router_access_slot.set",
-            "page_scripts_slot.set",
-            "seo_routes_slot.set",
-            "seo_routes_version.move",
-            "static_assets_slot.set",
-            "autoreload.install",
-            "templates.install",
-            "staticfiles.install",
-            "autodiscover.install",
-            "components.install",
-        ]
+        installs = [module.__name__ for module in self.INSTALLS]
+        composed = made[: -len(installs)]
+        assert made[-len(installs) :] == installs
+        assert "apply_resolver_setting" in composed
+        assert composed.count("seo.port") == 1
+        assert composed.index("seo.port") < composed.index("SeoRoutesVersion.move")
 
-    @pytest.mark.parametrize(
-        ("slot_name", "subject", "implementation"),
-        [
-            pytest.param("page_scan_slot", "page scan port", PageScanImpl, id="scan"),
-            pytest.param(
-                "partial_shaper_slot", "partial shaper", PartialShaperImpl, id="shaper"
-            ),
-            pytest.param(
-                "realtime_negotiation_slot",
-                "realtime negotiation port",
-                RealtimeNegotiationImpl,
-                id="realtime",
-            ),
-            pytest.param(
-                "router_access_slot",
-                "router access port",
-                RouterAccessImpl,
-                id="router",
-            ),
-            pytest.param(
-                "page_scripts_slot", "page scripts port", PageScriptsImpl, id="scripts"
-            ),
-            pytest.param("seo_routes_slot", "seo routes port", SeoRoutesImpl, id="seo"),
-            pytest.param(
-                "static_assets_slot",
-                "static assets port",
-                StaticAssetsImpl,
-                id="static",
-            ),
-        ],
-    )
-    def test_ready_binds_every_port_before_discovery_can_fail(
-        self, slot_name: str, subject: str, implementation: type
-    ) -> None:
+    def test_the_deps_area_applies_the_resolver_setting(self) -> None:
+        [deps] = [manifest for manifest in MANIFESTS if manifest.name == "deps"]
+        assert deps.startup == (apply_resolver_setting,)
+
+    def test_ready_binds_every_port_before_discovery_can_fail(self) -> None:
         """A discovery failure leaves no process behind with an unbound port."""
         config = apps.get_app_config("next")
-        slot = PortSlot(subject)
         with (
-            patch(f"next.apps.config.{slot_name}", slot),
             patch.object(next_components, "install", side_effect=RuntimeError("boom")),
             pytest.raises(RuntimeError, match="boom"),
         ):
             config.ready()
-        assert isinstance(slot.get(), implementation)
+        bound = [binding for manifest in MANIFESTS for binding in manifest.ports]
+        assert all(binding.slot.get() is binding.impl for binding in bound)
+
+    @pytest.mark.parametrize(
+        ("slot", "bound"),
+        [
+            pytest.param(deferrals_slot, inline_sink, id="deferrals"),
+            pytest.param(page_views_slot, page_view, id="views"),
+            pytest.param(server_load_slot, defer_manager, id="load"),
+        ],
+    )
+    def test_ready_binds_the_composed_callables(
+        self, slot: PortSlot[object], bound: object
+    ) -> None:
+        """The sink, the file router's view factory and the shed's pool load."""
+        apps.get_app_config("next").ready()
+        assert slot.get() is bound
 
     def test_a_second_ready_rebinds_the_ports_without_doubling_the_wiring(self) -> None:
         """Django readies an app once, but a test process calls `ready` repeatedly."""
         config = apps.get_app_config("next")
-        connected = len(router_reloaded.receivers)
+        connected = len(routes_reloaded.receivers)
 
         config.ready()
 
-        assert len(router_reloaded.receivers) == connected
+        assert len(routes_reloaded.receivers) == connected
+        named = [p.name for manifest in MANIFESTS for p in manifest.providers]
+        assert sorted(provider.name for provider in page_scripts) == sorted(named)
         assert [type(slot.get()) for slot in _PROCESS_SLOTS] == [
             PageScanImpl,
-            PageScriptsImpl,
-            PartialShaperImpl,
-            RealtimeNegotiationImpl,
-            RouterAccessImpl,
+            RouteAccessImpl,
             SeoRoutesImpl,
             StaticAssetsImpl,
         ]
@@ -565,9 +576,15 @@ class TestDependencyResolverInstall:
     ) -> None:
         """An app that resolves a URL in its own `ready()` cannot hide the sitemap."""
         slot = PortSlot["SeoRoutesImpl"]("seo routes port")
+        manifests = tuple(
+            replace(manifest, ports=(Bind(slot, SeoRoutesImpl()),))
+            if manifest.name == "seo"
+            else manifest
+            for manifest in MANIFESTS
+        )
         with (
             routed(write_tree(tmp_path / "pages", sitemap="")),
-            patch("next.apps.config.seo_routes_slot", slot),
+            patch("next.apps.config.MANIFESTS", manifests),
             patch("next.urls.manager.seo_routes_slot", slot),
         ):
             with pytest.raises(Resolver404):
@@ -580,7 +597,7 @@ class TestDependencyResolverInstall:
         apps.get_app_config("next").ready()
         before = seo_manager.version
 
-        router_manager.reload()
+        route_manager.reload()
 
         assert seo_manager.version != before
 
@@ -596,12 +613,18 @@ class TestReceiversConnectInReady:
     """Every invalidation receiver is wired by `ready()`, once, never at import time."""
 
     @pytest.mark.parametrize(
-        "signal", [setting_changed, settings_reloaded, router_reloaded]
+        "signal",
+        [setting_changed, settings_reloaded, routes_reloaded, connection_created],
     )
     def test_a_second_ready_adds_no_receiver(self, signal) -> None:
         before = _live_count(signal)
         apps.get_app_config("next").ready()
         assert _live_count(signal) == before
+
+    def test_a_settings_reload_drops_the_detected_sources(self) -> None:
+        connection_sources()
+        next_framework_settings.reload()
+        assert connection_sources.cache_info().currsize == 0
 
     def test_no_module_connects_a_receiver_at_import_time(self) -> None:
         connected = [

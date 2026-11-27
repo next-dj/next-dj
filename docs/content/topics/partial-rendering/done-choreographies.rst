@@ -136,6 +136,46 @@ The deciding argument is not the round trip but the authorization and the decoup
 The re-GET keeps the list's rights where they live, in the list's view, and leaves the wizard portable.
 Reach for the page-addressed morph when the one extra GET is genuinely visible and the wizard is dedicated to one host page.
 
+A wizard that also runs on its own page
+---------------------------------------
+
+Both choreographies assume the wizard sits in a layer.
+A wizard whose steps also open as a standalone page has no layer to close there, and ``layer_close`` on an empty stack does nothing, so the toast would show over a finished form that never leaves.
+``partial_intent(request).layer`` holds the host page path when the last step was submitted inside a layer and ``None`` otherwise, see :ref:`partial-layer-submissions`.
+``done`` closes the layer in the first case and redirects with a flash message in the second.
+
+.. code-block:: python
+   :caption: request/[step]/page.py
+
+   from typing import Any
+
+   from access.models import AccessRequest
+   from django.contrib import messages
+   from django.http import HttpRequest, HttpResponse
+   from django.shortcuts import redirect
+
+   from next.forms import FormWizard
+   from next.partial import Patches, partial_intent
+
+   class AccessRequestWizard(FormWizard):
+       def done(
+           self, request: HttpRequest, cleaned_data: dict[str, Any]
+       ) -> HttpResponse:
+           """Create the access request, closing its layer or leaving its page."""
+           access_request = AccessRequest.objects.create(**cleaned_data)
+           if partial_intent(request).layer:
+               return (
+                   Patches(request)
+                   .layer_close(result={"id": access_request.pk})
+                   .toast("Request created", variant="success")
+                   .response()
+               )
+           messages.success(request, "Request created")
+           return redirect(f"/request/{access_request.pk}/audit/")
+
+The redirect reaches the audit page under the runtime as a ``visit`` and without it as a plain redirect, and the page shows the message once.
+A ``Patches`` answer that a request without the runtime receives degrades the same way, because ``response`` turns its queued toasts into messages before the 303 to ``fallback``, see :ref:`partial-toasts-without-runtime`.
+
 See also
 --------
 

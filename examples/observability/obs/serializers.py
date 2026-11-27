@@ -7,7 +7,7 @@ ENVELOPE_VERSION = 1
 
 
 class PydanticJsContextSerializer(_FrameworkPydantic):
-    """Global default. Subclass kept for clarity in settings."""
+    """Global default, named in settings."""
 
 
 class WrappedJsContextSerializer:

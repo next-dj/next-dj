@@ -3,7 +3,7 @@
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.exceptions import BadRequest
 from django.db.models import Model
@@ -36,6 +36,10 @@ from next.forms.transport import (
     tunneled,
 )
 from next.permissions.markers import OPEN
+from next.ports import marked_zones, stamp_router
+from next.requests import RequestKind
+from next.transactions import atomic_scope, request_atomic
+from next.wire import RESPONSE_ACTION, RESPONSE_FORM
 
 from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
@@ -44,6 +48,8 @@ from .permissions import (
     _check_owner_page_access,
     _check_page_access,
     _check_tree_access,
+    _declared_view_permissions,
+    _emit_form_access_denied,
     _enforce_object_permissions,
     _enforce_registered_permissions,
     _enforce_view_permissions,
@@ -74,8 +80,11 @@ if TYPE_CHECKING:
     from next.forms.backends import ActionMeta, FormActionBackend
     from next.forms.base import BaseForm as NextBaseForm
     from next.forms.origin import OriginMatch
+    from next.forms.transport import SessionPin
     from next.forms.wizard import FormWizard
     from next.permissions.markers import AccessRule
+
+    from .permissions import DenialReason, HookLayer
 
 
 logger = logging.getLogger(__name__)
@@ -97,15 +106,32 @@ class FormActionDispatch:
         action_name: str,
         meta: "ActionMeta",
     ) -> "HttpResponseBase":
-        """Validate the form, run the handler, or re-render errors.
+        """Authorize the action, then validate the form and run the handler atomically.
 
-        The posted origin page authorizes the request, a tunnel needs `transport="any"`.
+        A refused request opens no transaction, so a denial receiver's writes survive.
+        A login or logout inside the action clears the client router.
         """
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
+        with marked_zones(request):
+            response = FormActionDispatch._transported(
+                backend, request, action_name, meta
+            )
+        return stamp_router(response, request)
+
+    @staticmethod
+    def _transported(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+    ) -> "HttpResponseBase":
+        """Run the action the posted origin authorizes, a tunnel needing `"any"`."""
         transport = meta.get("transport", "http")
         if not tunneled(request):
-            response = FormActionDispatch._unbound(backend, request, action_name, meta)
+            response = FormActionDispatch._unbound(
+                backend, request, action_name, meta, None
+            )
             if transport != "http":
                 response[TRANSPORT_HEADER] = transport
             return response
@@ -123,11 +149,13 @@ class FormActionDispatch:
     ) -> "HttpResponseBase":
         """Run a tunneled action whose session key may not change.
 
-        A rotation stops it before the store writes, and the action's writes are undone.
+        A rotation stops it before the store writes and rolls its transaction back.
         """
         pin = pin_session(request)
         try:
-            response = FormActionDispatch._unbound(backend, request, action_name, meta)
+            response = FormActionDispatch._unbound(
+                backend, request, action_name, meta, pin
+            )
         except SessionRotationError:
             pass
         else:
@@ -147,10 +175,13 @@ class FormActionDispatch:
         request: "HttpRequest",
         action_name: str,
         meta: "ActionMeta",
+        pin: "SessionPin | None",
     ) -> "HttpResponseBase":
         """Admit the action, a 400 for an origin that lacks a URL kwarg it needs."""
         try:
-            return FormActionDispatch._admitted(backend, request, action_name, meta)
+            return FormActionDispatch._admitted(
+                backend, request, action_name, meta, pin
+            )
         except UnboundObjectError as exc:
             if exc.parent:
                 raise
@@ -169,6 +200,7 @@ class FormActionDispatch:
         request: "HttpRequest",
         action_name: str,
         meta: "ActionMeta",
+        pin: "SessionPin | None",
     ) -> "HttpResponseBase":
         """Route the action once the page tree, its guard and the origin admit it."""
         origin_match = resolve_origin(request)
@@ -190,7 +222,37 @@ class FormActionDispatch:
             guard=guard,
         )
         setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
-        return FormActionDispatch._route(backend, request, action_name, meta, state)
+        try:
+            return FormActionDispatch._atomic(
+                backend, request, action_name, meta, state, pin
+            )
+        finally:
+            state.emit_form_access_denied(request, action_name)
+
+    @staticmethod
+    def _atomic(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+        state: "_DispatchState",
+        pin: "SessionPin | None",
+    ) -> "HttpResponseBase":
+        """Run the declared class's view check, then route inside the transaction.
+
+        A rotation the action swallowed still raises here, so the block rolls back.
+        """
+        denial = _declared_view_permissions(meta, request, state)
+        if denial is not None:
+            return denial
+        scope = atomic_scope(request, RequestKind.ACTION, meta.get("atomic"))
+        with request_atomic(scope):
+            response = FormActionDispatch._route(
+                backend, request, action_name, meta, state
+            )
+            if pin is not None and pin.rotated:
+                raise SessionRotationError
+        return response
 
     @staticmethod
     def _route(
@@ -280,19 +342,22 @@ class FormActionDispatch:
         meta: "ActionMeta",
         state: "_DispatchState",
     ) -> HttpResponse:
-        """Resolve the form class, enforce the view hook, then bind and dispatch."""
+        """Resolve the form class, then bind and dispatch.
+
+        A class a factory produced answers its view check here, inside the transaction.
+        """
+        declared = meta.get("form_class")
         resolved_form_class, init_kwargs = _resolve_form_class(
-            meta.get("form_class"),
+            declared,
             request,
             state.url_kwargs,
             (state.dep_cache, state.dep_stack),
             action_name=action_name,
         )
-        denial = _enforce_view_permissions(
-            resolved_form_class, request, action_name, state
-        )
-        if denial is not None:
-            return denial
+        if not isinstance(declared, type):
+            denial = _enforce_view_permissions(resolved_form_class, request, state)
+            if denial is not None:
+                return denial
         params = _FormDispatchParams(
             action_name=action_name,
             handler=meta.get("handler"),
@@ -352,10 +417,8 @@ class FormActionDispatch:
                 bound=True,
                 action_name=params.action_name,
             )
-        _enforce_registered_permissions(
-            form, request, params.action_name, params.object_permissions, state
-        )
-        denial = _enforce_object_permissions(form, request, params.action_name, state)
+        _enforce_registered_permissions(form, request, params.object_permissions, state)
+        denial = _enforce_object_permissions(form, request, state)
         if denial is not None:
             return denial
         validated = _maybe_validate_only(
@@ -442,9 +505,9 @@ class FormActionDispatch:
                 outcome.url_kwargs,
             )
             response = HttpResponse(html)
-            response["X-Next-Form"] = "invalid"
+            response[RESPONSE_FORM] = "invalid"
             if outcome.uid:
-                response["X-Next-Action"] = outcome.uid
+                response[RESPONSE_ACTION] = outcome.uid
             return response
         if outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE:
             return HttpResponseRedirect(cast("str", outcome.redirect_to))
@@ -471,6 +534,28 @@ class _DispatchState:
     origin_match: "OriginMatch"
     uid: str | None = None
     guard: "AccessRule" = OPEN
+    denial: "tuple[HookLayer, DenialReason] | None" = None
+
+    def refuse(self, layer: "HookLayer", reason: "DenialReason") -> None:
+        """Record the denial of a permission hook, announced once its block closes."""
+        self.denial = (layer, reason)
+
+    def emit_form_access_denied(self, request: "HttpRequest", action_name: str) -> None:
+        """Send `form_access_denied` for the recorded denial, outside any transaction.
+
+        A check inside the transaction is announced only after its refusal rolled back.
+        """
+        if self.denial is None:
+            return
+        layer, reason = self.denial
+        _emit_form_access_denied(
+            request,
+            action_name,
+            self.uid,
+            layer=layer,
+            reason=reason,
+            sender=self.signal_sender,
+        )
 
     @property
     def page_path(self) -> "Path | None":

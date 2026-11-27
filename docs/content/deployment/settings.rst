@@ -43,6 +43,7 @@ Component module loading
 ``LAZY_COMPONENT_MODULES`` already defaults to ``False``, which is the production value, so a deployment writes the key only to turn lazy loading on.
 The framework discovers the component tree eagerly in both modes, so the registry knows every component name before traffic.
 The flag controls only when each ``component.py`` module is imported.
+
 With the default ``False``, every ``component.py`` is imported during startup, so any import-time error surfaces before the first request.
 With ``True``, a ``component.py`` is imported on the first render that resolves the component rather than during startup.
 See :ref:`ref-settings` and :doc:`/content/topics/testing` for lazy behaviour and testing helpers.
@@ -144,7 +145,7 @@ Realtime
    }
 
 Set ``BROKER`` to ``RedisBroker``, because the default ``MemoryBroker`` reaches subscribers of one process only.
-Until it does, ``manage.py check --deploy`` reports ``next.W149``.
+Until it does, ``manage.py check --deploy`` reports ``next.W149`` for a project that uses realtime.
 The ``max_connections`` and ``SUBSCRIBE_MAX_CONNECTIONS`` values are placeholders.
 The subscription pool needs one connection per open stream of the process, and the command pool one per Redis call the process runs at once, see :doc:`/content/howto/fan-out-across-processes-with-redis` and :ref:`deployment-capacity`.
 
@@ -180,6 +181,64 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
 
 Keep only the keys the deployment changes.
 The framework supplies the default for every key left out, so there is no need to duplicate the full default structures documented on :doc:`/content/ref/settings`.
+
+Deferred boundaries
+-------------------
+
+The keys below decide capacity, time limits, token binding, compression, and transactions of a process that serves pages with deferred boundaries.
+Each one has a default that suits a single process, and the page :doc:`boundaries` explains how they combine under each server.
+:doc:`/content/ref/settings` holds the full shape of every scope.
+
+``DEFER`` sets capacity.
+
+- ``REQUEST_CONCURRENCY`` is the requests a process serves at once and sizes the stream limit and the connection budget, so set it to the threads of a WSGI worker.
+- ``MAX_STREAMS`` caps the open streams of a process, and ``"auto"`` derives the cap from the server.
+- ``EXECUTOR["OPTIONS"]["MAX_WORKERS"]`` caps the pool threads of the default ``LaneExecutor`` and with them the database connections beyond the request threads.
+- ``EXECUTOR["PARALLEL"]`` set to ``False`` keeps every job on the request thread.
+- ``EXECUTOR["OPTIONS"]["MAX_QUEUE"]``, ``EXECUTOR["QUEUE_TIMEOUT"]``, and ``EXECUTOR["SHED_DELAY"]`` bound the queue of the pool, and the default ``ADMISSION`` reads them to decide when a job moves to its request thread or is shed.
+- ``MAX_REQUEST_JOBS`` caps the request-lane work of a process under ASGI.
+
+``DEFER`` sets time limits.
+
+- ``DEADLINE`` is the seconds every job of a response has before it settles as ``timeout``, and ``WRITE_GRACE`` the seconds past it a stream keeps writing.
+- ``WRITE_TIMEOUT`` closes an ASGI stream whose client takes no write for that long.
+- ``DEADLINE_TO_DB`` passes the remaining time to PostgreSQL as a statement timeout and defaults to ``"always"``.
+- ``EXECUTOR["OPTIONS"]["SHUTDOWN_TIMEOUT"]`` is the grace a pool gives running jobs as the process exits.
+
+``DEFER["TOKENS"]["OPTIONS"]`` sets the tokens of client-trip boundaries.
+
+- ``BINDING`` ties a token to its visitor and defaults to ``"auto"``, which binds the signed-in user, and ``"none"`` keeps a shared page shared.
+- ``MAX_AGE`` is the life of a token in seconds, and ``EPOCH`` revokes every token issued before its last change.
+- ``SEAL`` of ``EncryptedSeal`` hides the props in the token, and ``STORAGE`` and ``CACHE_ALIAS`` move the claims to a cache every process reaches.
+
+``BOUNDARIES`` sets what the visitor and the error tracker see.
+
+- ``REPORTER`` receives every failure an error boundary contained, and ``KINDS`` hides the cause of a failure from the visitor when set to ``"opaque"``.
+- ``ATOMIC`` sets when a boundary opens a savepoint, and ``"writes"`` opens one at the first write.
+
+``LOADER`` sets batching.
+
+- ``WINDOW`` is the seconds a loader waits to gather lookups, and ``MAX_BATCH`` the most lookups one batch holds.
+
+``COMPRESSION`` decides which layer compresses.
+
+- ``ENABLED`` set to ``False`` leaves compression to the proxy, and ``STREAMS`` and ``PADDING`` shape how streams compress and how much random padding blunts BREACH.
+
+``TRANSACTIONS`` decides which requests run in a transaction.
+
+- ``SAFE`` and ``UNSAFE`` default to ``"auto"``, which wraps each alias with ``ATOMIC_REQUESTS`` and nothing else, and a database held in a transaction keeps the jobs of that request on its thread.
+
+.. code-block:: python
+   :caption: config/settings/prod.py
+
+   NEXT_FRAMEWORK = {
+       "DEFER": {
+           "REQUEST_CONCURRENCY": 8,
+           "EXECUTOR": {"OPTIONS": {"MAX_WORKERS": 4}},
+       },
+   }
+
+The values above are placeholders, and a load run against the target hardware sets the real ones, see :ref:`deployment-capacity`.
 
 Runtime script overrides
 ------------------------

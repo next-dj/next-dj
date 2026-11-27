@@ -1,9 +1,12 @@
 from unittest.mock import patch
 
+import pytest
+
 import next.partial.patches as patches_module
 from next.testing import NextClient, envelope_of
 
 
+@pytest.mark.django_db()
 class TestOneZoneRenderPerInvalidPost:
     """A partial invalid POST renders the failed form's zone exactly once.
 

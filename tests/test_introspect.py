@@ -1,6 +1,6 @@
 import functools
+from collections.abc import AsyncIterator
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 from asgiref.sync import async_to_sync
@@ -11,8 +11,8 @@ from next.introspect import (
     declared_file,
     defining_file,
     is_async_callable,
+    is_coroutine_callable,
     refuse_async,
-    refuse_async_render,
     registering_file,
 )
 from next.pages.loaders import _load_python_module
@@ -215,6 +215,11 @@ class _AsyncCallable:
         return "ok"
 
 
+class _AsyncStreamCall:
+    async def __call__(self) -> AsyncIterator[str]:
+        yield "ok"
+
+
 class _SyncCallable:
     def __call__(self) -> str:
         return "ok"
@@ -277,6 +282,36 @@ class TestIsAsyncCallable:
     )
     def test_sync_callables_pass(self, func: object) -> None:
         assert not is_async_callable(func)
+        assert not is_coroutine_callable(func)
+
+
+class TestIsCoroutineCallable:
+    """``is_coroutine_callable`` answers for an awaitable call, not an iterated one."""
+
+    @pytest.mark.parametrize(
+        "func",
+        [
+            pytest.param(_async_view, id="async-function"),
+            pytest.param(functools.partial(_async_view), id="partial"),
+            pytest.param(wraps_decorator(_async_view), id="wraps-decorator"),
+            pytest.param(_AsyncCallable(), id="async-call-instance"),
+        ],
+    )
+    def test_coroutine_callables_are_detected(self, func: object) -> None:
+        assert is_coroutine_callable(func)
+
+    @pytest.mark.parametrize(
+        "func",
+        [
+            pytest.param(_async_stream, id="async-generator"),
+            pytest.param(functools.partial(_async_stream), id="partial"),
+            pytest.param(wraps_decorator(_async_stream), id="wraps-decorator"),
+            pytest.param(_AsyncStreamCall(), id="async-generator-call-instance"),
+        ],
+    )
+    def test_async_generators_are_async_but_no_coroutine(self, func: object) -> None:
+        assert is_async_callable(func)
+        assert not is_coroutine_callable(func)
 
 
 class TestRefuseAsync:
@@ -284,6 +319,12 @@ class TestRefuseAsync:
 
     def test_sync_callable_passes(self) -> None:
         refuse_async(_sync_view, "page.py render")
+
+    def test_async_generator_raises(self) -> None:
+        with pytest.raises(
+            AsyncCallableError, match=r'The page\.py render "_async_stream"'
+        ):
+            refuse_async(_async_stream, "page.py render")
 
     def test_async_callable_raises_naming_role_and_file(self) -> None:
         with pytest.raises(AsyncCallableError) as caught:
@@ -294,31 +335,3 @@ class TestRefuseAsync:
         assert __file__ in message
         assert "next.dj pages, context and actions are sync" in message
         assert caught.value.role == "page.py render"
-
-
-def _module(**members: object) -> ModuleType:
-    module = ModuleType("page_module")
-    module.__dict__.update(members)
-    return module
-
-
-class TestRefuseAsyncRender:
-    """``refuse_async_render`` reads a module ``render`` only when it is callable."""
-
-    @pytest.mark.parametrize(
-        "module",
-        [
-            pytest.param(None, id="no-module"),
-            pytest.param(_module(), id="no-render"),
-            pytest.param(_module(render="not callable"), id="not-callable"),
-            pytest.param(_module(render=_sync_view), id="sync"),
-        ],
-    )
-    def test_passes(self, module: ModuleType | None) -> None:
-        refuse_async_render(module, "page.py render")
-
-    def test_async_render_raises_naming_role(self) -> None:
-        with pytest.raises(AsyncCallableError) as caught:
-            refuse_async_render(_module(render=_async_view), "component.py render")
-
-        assert caught.value.role == "component.py render"

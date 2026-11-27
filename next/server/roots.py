@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from next.components import component_watch_roots
-from next.pages.watch import get_pages_directories_for_watch
+from next.discovery import get_pages_directories_for_watch
 
 
 if TYPE_CHECKING:

@@ -3,4 +3,4 @@
 import { createDiagnostics } from "../diagnostics";
 
 // The chunk evaluates after _init seeded the context, so the payload can be checked.
-window.Next._land("dev", createDiagnostics(window.Next.context));
+window.Next._extend("dev", (kernel) => createDiagnostics(kernel.context()), __BUILD__);

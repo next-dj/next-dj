@@ -369,7 +369,7 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",

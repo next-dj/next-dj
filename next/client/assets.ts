@@ -4,14 +4,18 @@
 // visit under a reload-once flag, so a stale CDN cannot loop the page.
 
 import { defaultClock, defaultNavigate, defaultSession } from "./adapters";
-import { assetLoad, isAsset } from "./apply";
+import { isAsset } from "./apply";
 import type { Asset, AssetLoad } from "./apply";
-import { sameOrigin, scriptNonce } from "./protocol";
+import { ATTR_STREAMED, sameOrigin, scriptNonce } from "./protocol";
 import type { PartialError } from "./protocol";
 import type { Clock, Navigate } from "./wire";
 
 const RELOAD_FLAG = "next:partial:reloaded";
+// Kept apart from RELOAD_FLAG, and held until a page boots on a matching release.
+const STALE_FLAG = "next:partial:stale";
 const CSS_TIMEOUT_MS = 3000;
+
+type Waiters = ((ok: boolean) => void)[];
 
 /**
  * Insert a stylesheet and signal load, timeout, or error through one callback.
@@ -62,21 +66,30 @@ export interface Assets {
    *
    * With none missing done runs synchronously, or at the end of a running parse.
    */
-  loadCss(manifest: readonly Asset[], done: () => void): void;
+  loadCss(manifest: readonly Asset[], done: () => void, zones?: string[]): void;
   /**
    * Run the missing script and module verbs after the ops, each source once per page.
    */
   loadJs(manifest: readonly Asset[]): void;
   /** The current asset version known to the client, sent on every request. */
   version(): string;
+  /** Take the version the init payload names, the one the first request asserts. */
+  pin(version: string): void;
+  /**
+   * Record whether the server speaks this runtime's release, reloading once if not.
+   *
+   * A page that still mismatches after the reload reports it and stays put.
+   */
+  release(current: boolean): void;
   /**
    * Compare the envelope version against the known one, true meaning do not apply.
    *
    * A mismatch starts a full visit under the reload-once flag, or fires partial:error.
    */
-  versionMismatch(envelopeVersion: string, url: string): boolean;
-  /** Record the version of an applied envelope and clear the reload-once flag. */
+  versionMismatch(envelopeVersion: string, url: string, zones?: string[]): boolean;
+  /** Clear the reload-once flag once a versioned envelope has applied. */
   acceptVersion(envelopeVersion: string): void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -89,7 +102,7 @@ export function createAssets(deps: AssetsDeps): Assets {
   const session = deps.session ?? defaultSession();
   const cssTimeout = deps.cssTimeoutMs ?? CSS_TIMEOUT_MS;
   // Every URL inserted or scanned, normalised by urlKey, the dedup key.
-  const loaded = new Set<string>();
+  const loaded = new Map<string, Waiters | null>();
   // Copied onto every dynamically inserted asset so CSP keeps allowing them.
   const nonce = scriptNonce(doc);
   let knownVersion = "";
@@ -119,6 +132,8 @@ export function createAssets(deps: AssetsDeps): Assets {
   // Whether this instance has taken its one baseline scan. A delta can arrive
   // before seed(), and an unseeded registry would re-insert the whole manifest.
   let seeded = false;
+  // Set from a catch-up scan until the task that took it ends.
+  let scanned = false;
 
   function seed(): void {
     seeded = true;
@@ -134,31 +149,37 @@ export function createAssets(deps: AssetsDeps): Assets {
     };
   }
 
-  // Re-seed in front of a delta whose loader has cleared the parse window, so
-  // the seed prefix is completed with a full scan and the watch then drops.
+  // Re-seed in front of a delta, so the seed prefix is completed with a full scan. A
+  // streamed page is still parsing, so its watch stays until the parse ends.
   function catchUp(): void {
     // An unseeded registry takes its one baseline scan here instead.
     if (!seeded) {
       seed();
       return;
     }
-    const settled = unwatch;
-    if (settled === undefined) return;
+    if (unwatch === undefined || scanned) return;
     scan();
-    settled();
+    // The CSS and the JS phase of one apply share the scan the first one took.
+    scanned = true;
+    queueMicrotask(() => (scanned = false));
+    if (doc.readyState !== "loading") unwatch();
   }
 
   // Hold an asset phase back until the document is fully parsed, since a delta
   // taken mid-document counts a not-yet-reached tag as missing and doubles it.
-  // A `lazy="load"` zone GET fires exactly in that window.
+  // A `defer="load"` zone GET fires exactly in that window.
   function whenParsed(run: () => void): void {
-    if (doc.readyState !== "loading") {
+    const parsed = (): void => {
+      catchUp();
       run();
+    };
+    if (doc.readyState !== "loading" || doc.querySelector(`[${ATTR_STREAMED}]`)) {
+      parsed();
       return;
     }
     const onParsed = (): void => {
       deferred.delete(onParsed);
-      run();
+      parsed();
     };
     deferred.add(onParsed);
     doc.addEventListener("DOMContentLoaded", onParsed, { once: true });
@@ -168,21 +189,21 @@ export function createAssets(deps: AssetsDeps): Assets {
     for (const link of doc.querySelectorAll<HTMLLinkElement>(
       'link[rel="stylesheet"][href]',
     )) {
-      loaded.add(urlKey(link.href));
+      claim(urlKey(link.href));
     }
     // A server-rendered module is a <script type="module" src>, so the src
     // attribute seeds it like any other script and it never mounts twice.
     for (const script of doc.querySelectorAll<HTMLScriptElement>("script[src]")) {
-      loaded.add(urlKey(script.src));
+      claim(urlKey(script.src));
     }
     // Seed the inline bodies already materialised into the head, keyed by the
     // verb that would have inserted them, so a first zone GET does not re-run.
     for (const style of doc.querySelectorAll<HTMLStyleElement>("style")) {
-      loaded.add(inlineKey("link", textOf(style)));
+      claim(inlineKey("link", textOf(style)));
     }
     for (const script of doc.querySelectorAll<HTMLScriptElement>("script:not([src])")) {
       const load = script.type === "module" ? "module" : "script";
-      loaded.add(inlineKey(load, textOf(script)));
+      claim(inlineKey(load, textOf(script)));
     }
   }
 
@@ -190,14 +211,14 @@ export function createAssets(deps: AssetsDeps): Assets {
   // before the insert, so a doubled manifest entry still inserts once.
   function claim(key: string): boolean {
     if (loaded.has(key)) return false;
-    loaded.add(key);
+    loaded.set(key, null);
     return true;
   }
 
   // The verb an entry asks for, undefined when it is malformed or its kind has none.
   function verbOf(asset: Asset): AssetLoad | undefined {
     if (!isAsset(asset)) return undefined;
-    return assetLoad(asset.kind, asset.load, asset.inline);
+    return asset.load;
   }
 
   function insertStyle(body: string): void {
@@ -216,13 +237,26 @@ export function createAssets(deps: AssetsDeps): Assets {
     return el;
   }
 
+  function fail(message: string, zones?: string[], url?: string): void {
+    deps.dispatch("partial:error", {
+      kind: "asset",
+      ...(url === undefined ? {} : { url }),
+      error: new Error(message),
+      ...(zones === undefined ? {} : { zones }),
+    } satisfies PartialError);
+  }
+
   // done runs inside the parse gate with the delta, so an envelope that arrives
   // mid-parse applies its ops once the document is fully parsed.
-  function loadCss(manifest: readonly Asset[], done: () => void): void {
+  function loadCss(
+    manifest: readonly Asset[],
+    done: () => void,
+    zones?: string[],
+  ): void {
     whenParsed(() => {
-      catchUp();
       // Inline styles insert synchronously and never join the url delta done waits on.
-      const urls: string[] = [];
+      const waits: Waiters[] = [];
+      const starts: (() => void)[] = [];
       for (const asset of manifest) {
         if (verbOf(asset) !== "link") continue;
         if (asset.inline !== undefined) {
@@ -230,39 +264,50 @@ export function createAssets(deps: AssetsDeps): Assets {
           continue;
         }
         if (isEmptyUrl(asset)) continue;
-        if (claim(urlKey(asset.url))) urls.push(asset.url);
+        const key = urlKey(asset.url);
+        if (!loaded.has(key)) {
+          const own: Waiters = [];
+          loaded.set(key, own);
+          starts.push(() => {
+            loadLink(
+              asset.url,
+              nonce,
+              (ok) => {
+                if (loaded.get(key) === own) loaded.set(key, null);
+                for (const settle of own.splice(0)) settle(ok);
+              },
+              clock,
+              cssTimeout,
+            );
+          });
+        }
+        const waiters = loaded.get(key);
+        if (waiters) waits.push(waiters);
       }
-      if (urls.length === 0) {
+      if (waits.length === 0) {
         done();
         return;
       }
       // A 404 or timeout on one sheet must not strand the envelope, so each
       // settles on its own and the ops run once the last one resolves.
-      let pending = urls.length;
+      let pending = waits.length;
       let errored = false;
       const settle = (ok: boolean): void => {
         if (!ok) errored = true;
         pending -= 1;
         if (pending > 0) return;
         // The ops already ran, partial:error only reports the styling gap.
-        if (errored) {
-          deps.dispatch("partial:error", {
-            kind: "asset",
-            error: new Error("a stylesheet failed to load"),
-          } satisfies PartialError);
-        }
+        if (errored) fail("a stylesheet failed to load", zones);
         done();
       };
-      for (const url of urls) {
-        loadLink(url, nonce, settle, clock, cssTimeout);
-      }
+      for (const waiters of waits) waiters.push(settle);
+      for (const start of starts) start();
     });
   }
 
   // One pass in manifest order, so module and classic scripts keep the server's order.
   function loadJs(manifest: readonly Asset[]): void {
     whenParsed(() => {
-      catchUp();
       for (const asset of manifest) {
         const load = verbOf(asset);
         if (load !== "script" && load !== "module") continue;
@@ -282,31 +327,28 @@ export function createAssets(deps: AssetsDeps): Assets {
     });
   }
 
-  function versionMismatch(envelopeVersion: string, url: string): boolean {
-    if (envelopeVersion === "" || envelopeVersion === knownVersion) return false;
-    if (knownVersion === "") {
-      // The first envelope teaches the live version, nothing to be out of sync yet.
-      knownVersion = envelopeVersion;
+  function versionMismatch(
+    envelopeVersion: string,
+    url: string,
+    zones?: string[],
+  ): boolean {
+    // A page whose payload names no version asserts none, as on the server.
+    if (
+      envelopeVersion === "" ||
+      knownVersion === "" ||
+      envelopeVersion === knownVersion
+    )
       return false;
-    }
     const target = sameOrigin(url, doc);
     if (target === undefined) {
-      deps.dispatch("partial:error", {
-        kind: "asset",
-        url,
-        error: new Error("cross-origin reload refused"),
-      } satisfies PartialError);
+      fail("cross-origin reload refused", zones, url);
       return true;
     }
     if (readFlag()) {
       // A reload already happened and the version still mismatches, so a stale
       // CDN is serving the old bundle. Degrade to plain navigation, no loop.
       clearFlag();
-      deps.dispatch("partial:error", {
-        kind: "asset",
-        url,
-        error: new Error("asset version mismatch after reload"),
-      } satisfies PartialError);
+      fail("asset version mismatch after reload", zones, url);
       return true;
     }
     setFlag();
@@ -314,10 +356,19 @@ export function createAssets(deps: AssetsDeps): Assets {
     return true;
   }
 
+  // The version is the payload's, never taught by a reply, so only the flag clears.
   function acceptVersion(envelopeVersion: string): void {
-    if (envelopeVersion === "") return;
-    knownVersion = envelopeVersion;
-    clearFlag();
+    if (envelopeVersion !== "") clearFlag();
+  }
+
+  function release(current: boolean): void {
+    if (current) session.remove(STALE_FLAG);
+    else if (session.get(STALE_FLAG) === "1")
+      fail("the runtime is from another release than the server");
+    else {
+      session.set(STALE_FLAG, "1");
+      navigate(doc.location.href);
+    }
   }
 
   function readFlag(): boolean {
@@ -332,14 +383,19 @@ export function createAssets(deps: AssetsDeps): Assets {
     session.remove(RELOAD_FLAG);
   }
 
-  return {
+  const exposed = {
     seed,
     loadCss,
     loadJs,
     version: () => knownVersion,
+    pin: (version) => void (knownVersion = version),
+    release,
     versionMismatch,
     acceptVersion,
-    _reset() {
+  } satisfies Omit<Assets, "_reset"> as Assets;
+
+  TEST: {
+    exposed._reset = () => {
       // A discarded instance must stop watching a document it no longer seeds.
       // seeded stays set, since a rescan here would read that same document.
       unwatch?.();
@@ -349,8 +405,10 @@ export function createAssets(deps: AssetsDeps): Assets {
       deferred.clear();
       loaded.clear();
       knownVersion = "";
-    },
-  };
+    };
+  }
+
+  return exposed;
 }
 
 // An empty url resolves to the document itself, so such an entry would fetch

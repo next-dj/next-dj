@@ -29,7 +29,7 @@ Follow the ordering Django's :doc:`middleware reference <django:ref/middleware>`
 Framework specific surfaces
 ---------------------------
 
-The framework adds five surfaces that warrant attention.
+The framework adds six surfaces that warrant attention.
 
 File router input.
    Captured URL parameters and query values reach Python through the dependency resolver.
@@ -50,6 +50,10 @@ Partial rendering endpoints.
 Realtime socket.
    The WebSocket serves topic streams, upstream events, and, for actions that opt in, tunneled form requests.
    See `The WebSocket tunnel`_ and :doc:`/content/topics/realtime`.
+
+Client router navigations.
+   A page URL also answers navigation envelopes, and the browser keeps layouts and snapshots between requests.
+   See `The client router`_.
 
 Common threats
 --------------
@@ -91,7 +95,7 @@ Origin spoofing.
 
 Caching and content negotiation.
    A full page response and a partial response can answer the same URL with different bodies, so the framework declares what it negotiated on.
-   Every response the routed page view returns carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, stamped by ``set_partial_vary``, and the partial responses carry the same set.
+   Every page the routed view renders carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version, X-Next-Boundary, X-Next-Navigate, X-Next-Layouts, X-Next-Prefetch``, stamped by ``set_partial_vary``, and the partial responses and navigation envelopes carry the same set.
    A shared cache keyed on the URL alone must honour ``Vary`` or it can store a patch envelope under the URL and hand it to a plain browser visit.
    A ``render`` function that returns its own response short-circuits before the stamp, so a page that answers that way and is cached publicly sets the header itself.
 
@@ -193,6 +197,32 @@ Every zone morph enforces page-level access on its own.
 A ``morph(zone=..., page=...)`` onto a foreign page checks that page's access rule and re-runs its authorization chain, and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
 A ``morph(zone=...)`` without ``page=`` renders the posted origin page and authorizes it the same way, raising ``ForeignPageNotAuthorizedError`` when that page refuses the requester.
 
+.. _security-boundary-tokens:
+
+Boundary tokens
+~~~~~~~~~~~~~~~
+
+A client-trip component boundary reloads through the page URL with a signed token, and every reload runs the page refusal, the page guards, the access rule of the component, and the recorded ``{% has_perm %}`` permissions again for the current user.
+The token names the component, its props, the URL, and the permissions of the call site, and a reload renders only that component.
+It is bound by default, ``"auto"``, to the user ``AuthenticationMiddleware`` put on the request, so a token minted for a signed-in user opens the boundary for that user alone, and a logout or a password change revokes it.
+Every anonymous visitor proves one subject, so a shell minted for anonymous visitors stays shareable, and a component whose props name an object of an anonymous session, such as a cart or a draft, declares ``tokens={"binding": "session"}`` so the token opens that object for its own session alone.
+``DEFER["TOKENS"]["OPTIONS"]["BINDING"]`` set to ``"none"`` binds nobody, and within ``MAX_AGE`` any client that holds such a token replays it and reads what its own account may see of that boundary, which ``next.W186`` reports in a project running ``AuthenticationMiddleware``.
+A token lives ``MAX_AGE`` seconds, ten minutes by default, and ``EPOCH`` revokes every token issued before it.
+The props travel in the token signed and readable, so keep a secret out of a prop of a client-trip component, or set ``SEAL`` to ``EncryptedSeal``, which hides them.
+The props are a snapshot of the call when the page rendered, and a reload never renders the page template, so a ``{% if %}`` or a ``{% for %}`` around the call holds only when the token is minted.
+A visitor who loses that access keeps loading the boundary with the token in the page until it expires after ``MAX_AGE``, which ``next.W159`` reports.
+The visibility of a client-trip boundary is therefore an access rule of its component, with ``obj=`` naming the prop for the right to one object, or a page callable declared ``@context(..., guard=True)``, since a reload checks both again.
+Both seals use ``SECRET_KEY`` and ``SECRET_KEY_FALLBACKS``, and the token is refused before any key is tried when it outgrows ``MAX_BYTES``.
+
+A guard in the context of a page that has a ``loading.djx`` runs before the first byte only when its callable is declared ``@context(..., guard=True)``, or has a parameter whose provider answers a status by contract.
+Every other callable under a ``loading.djx`` is deferred, so a status it raises reaches the visitor as an error UI under ``200``, and a reload of a client-trip boundary does not run it again.
+Mark each access check of such a page ``guard=True``, and ``next.W169`` reports one that is not.
+See :doc:`/content/topics/boundaries/loading` for the rule and :doc:`/content/topics/boundaries/errors` for what the visitor sees.
+
+A token that is expired, minted under another version of the claims, or whose claims the storage lost or could not answer for answers ``409`` with ``X-Next-Reload: token_expired``, which reloads the page once.
+Any other refusal of a token answers one empty ``403`` that names a reason only under ``DEBUG``, and every refusal sends ``boundary_token_rejected``.
+No setting limits the rate of reloads, so a project that must cap them does so at the proxy by the ``X-Next-Boundary`` header, see :doc:`/content/deployment/boundaries`.
+
 What a custom backend must preserve
 -----------------------------------
 
@@ -202,9 +232,43 @@ Replacing a backend replaces the code that enforces a guarantee, so each family 
 - The same hand-rolled ``dispatch`` also skips the authorization of the resolved origin page, so a guard living in a page's ``render()`` stops covering the submissions that backend serves.
 - A ``FormWizardBackend`` keeps each draft reachable only by the requester that wrote it, which both bundled backends get by keying on the session, so a store keyed on anything a client supplies hands one visitor another's partially entered data.
 - A ``StaticBackend`` that overrides a tag renderer takes on the URL escaping, because the finished tag is spliced past the template engine and the bundled renderers escape ``str(url)`` through :func:`html.escape`, see :doc:`static-assets`.
-- A router backend that contributes patterns of its own sends requests to views the file router never built, so those views carry no page guard of the framework's and their authorization lives in the view itself or in middleware.
+- A page backend that contributes patterns of its own sends requests to views the file router never built, so those views carry no page guard of the framework's and their authorization lives in the view itself or in middleware.
 - A partial protocol backend serialises the envelope a page already produced, so it inherits the access decisions above and adds one of its own only when it reads values the shaper did not put there.
-- A port implementation rebound in ``AppConfig.ready`` replaces framework code rather than wrapping it, so an implementation behind ``partial_shaper_slot`` owns the ``Vary`` stamp described under `Common threats`_ and the foreign-page authorization chain, see :doc:`/content/ref/ports`.
+- A port implementation rebound in ``AppConfig.ready`` replaces framework code rather than wrapping it, so it owns every check the shipped implementation ran, see :doc:`/content/ref/ports`.
+- A ``ResponseShaper`` named under a form backend's ``OPTIONS["SHAPER"]`` replaces ``FormShaper`` rather than wrapping it, so it owns the foreign-page authorization of the patch envelopes it builds, while the pipeline still runs both permission layers before it asks the shaper to validate.
+
+The client router
+-----------------
+
+A navigation runs the page view a document request runs, so the access rules, the guards, and the ``render()`` of the page decide it unchanged, and a redirect or a denial they answer with is sent ``private, no-store``.
+The router adds the guarantees below, each enforced on the server, see :doc:`/content/topics/router/sessions`.
+
+- A navigation whose ``Sec-Fetch-Site`` names anything but ``same-origin`` is refused ``403`` with an empty body before any render.
+- Every navigation answer, an envelope, a streamed navigation, and each empty refusal, is sent ``Cache-Control: private, no-store``, and the browser keeps its snapshots in tab memory alone, never in the HTTP cache.
+- ``X-Next-Layouts`` is parsed against a strict grammar and ignored past 32 entries or 1 KB, and it only decides how much of the render of the request in flight the answer carries.
+- The slot and zone markers carry an id minted per response, so page content cannot pose as a marker.
+- A login, a logout, and a session whose key changed during the request set ``X-Next-Router: clear`` on the response, a form action response included.
+  A navigation answered under it morphs the whole body rather than keep chrome rendered for the old session, and the router drops every snapshot and every prefetched answer it holds once it reads the directive.
+  ``router_clear(request)`` sets the same directive for a change the session does not show.
+- A redirect a navigation meets after such a change, or after a CSRF rotation, is answered with a ``visit`` envelope that carries the cookies and the directive, so the change reaches a fresh document instead of a redirect the fetch follows unseen.
+- Every partial request other than a ``GET`` drops the snapshots and the prefetched answers before it leaves.
+- An inline script in navigated HTML runs only when its ``nonce`` is the CSP nonce of the response.
+- ``X-Next-Origin`` is read only as a same-site path, and any other value is ignored.
+- A path that opens with ``//`` is answered with a hard load of the single-slash path, and the router follows no answer to another origin.
+
+A prefetch runs the context callables of the page, and a full one, sent at the press of a link, runs its deferred jobs too, which a job that started keeps doing when the visitor leaves.
+``ROUTER["PRESS"] = "off"`` keeps every press at the shell depth, and ``data-next-press="off"`` does the same for the links inside one element.
+An answer may be shown to the visitor with no further request, so code that acts on a visit declares ``page.router(prefetch=False)``, see :ref:`topics-router-prefetch-visits`.
+Under the default ``ROUTER["SCOPE"]`` of ``"pages"`` the router fetches and prefetches only the URLs a page answers, so a hover or a click never sends a request to a plain Django view with an effect on ``GET``, see :ref:`topics-router-scope`.
+A route the route table cannot carry exactly loads as a document rather than through the router, and ``next.W192`` names the pages that lose the router that way.
+The one gap is a converter of its own whose ``to_python()`` rejects a value its pattern matched, since Django then passes the path on to a later route the table does not consult.
+Under ``"all"`` such a view runs from a hover prefetch and twice from a click, so its link carries ``data-next-router="off"`` or its prefix goes into ``ROUTER["EXCLUDE"]``, and ``next.W191`` names the prefixes.
+The route table the router fetches is public and lists the shape of each page route and of each route in front of a page.
+``ROUTER["SPECULATION"]`` lets the browser prefetch every same-origin link the router does not own, which often includes a sign-out or a download link marked ``data-next-router="off"``.
+A page or an endpoint that changes state on a ``GET`` declares ``page.router(prefetch=False)`` or carries ``data-next-prefetch="off"`` on its links, see :doc:`/content/topics/router/prefetch`.
+
+A ``NavigationCut`` or ``ChromeDigest`` named in ``ROUTER`` sees the rendered page and decides only what the answer carries of it.
+The view applies the session rule after the cut, so a response that clears the router keeps no layout whatever a replacement cut returns.
 
 Production hardening
 --------------------
@@ -248,6 +312,7 @@ The framework system checks cover configuration mistakes that affect security.
 - ``next.W061`` reports an action that declares ``Meta.success_message`` while the messages framework is not fully installed, which makes the submission raise ``MessageFailure``.
 - ``next.W145`` reports an action that opts in to the WebSocket tunnel while messages are stored in a cookie.
 - ``next.W146`` reports an explicit ``WebSocketApp`` origin that ``CSRF_TRUSTED_ORIGINS`` does not cover, whose tunneled posts fail the CSRF check.
+- ``next.W186`` reports a project running ``AuthenticationMiddleware`` whose ``BINDING`` mints boundary tokens bound to nobody.
 - ``next.E159``, ``next.E160``, ``next.E162`` to ``next.E166``, ``next.W127``, ``next.W129``, ``next.W130``, ``next.W131``, and ``next.W150`` report access declarations that guard nothing, name no permission, or contradict the login default, see :ref:`ref-system-checks`.
 
 Run them with ``uv run python manage.py check``.

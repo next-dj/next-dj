@@ -15,15 +15,16 @@ from types import (
     FunctionType,
     MethodType,
     MethodWrapperType,
-    ModuleType,
 )
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeGuard
+
+from django.core.exceptions import ImproperlyConfigured
 
 from next.errors import AsyncCallableError
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
 
 _CLASS_BODY_MEMBERS: tuple[str, ...] = ("__call__", "__init__")
@@ -88,13 +89,33 @@ def registering_file() -> Path:
     return Path(sys._getframe(2).f_code.co_filename)
 
 
-def registering_site() -> tuple[Path, bool]:
-    """Return the file calling the caller of this helper, and whether its top level did.
+class DeclaringSite(NamedTuple):
+    """The file of a declaring call, whether its top level made it, and its globals."""
+
+    path: Path
+    top_level: bool
+    namespace: dict[str, object]
+
+
+def refused_declaration(
+    call: str, site: DeclaringSite, problem: str
+) -> ImproperlyConfigured:
+    """Return the error a declaring call written outside its shape raises at once."""
+    return ImproperlyConfigured(
+        f"{call} in {site.path} declares nothing, since {problem}."
+    )
+
+
+def registering_site() -> DeclaringSite:
+    """Return the site that called the caller of this helper, which declarations read.
 
     Module code runs once per load, so only a call from there declares for good.
     """
-    code = sys._getframe(2).f_code
-    return Path(code.co_filename), code.co_name == "<module>"
+    frame = sys._getframe(2)
+    code = frame.f_code
+    return DeclaringSite(
+        Path(code.co_filename), code.co_name == "<module>", frame.f_globals
+    )
 
 
 def declared_file(
@@ -130,20 +151,48 @@ def describe_callable(func: Callable[..., Any]) -> str:
 # Plain routines. Anything else, a `__get__`-only descriptor too, has `__call__` read.
 _ROUTINE_TYPES = (FunctionType, MethodType, BuiltinFunctionType, MethodWrapperType)
 
-
-def _declares_async(target: object) -> bool:
-    """Return whether `target` itself is an async function or an async `__call__`."""
-    if inspect.iscoroutinefunction(target) or inspect.isasyncgenfunction(target):
-        return True
-    if isinstance(target, _ROUTINE_TYPES) or inspect.isclass(target):
-        return False
-    call = inspect.getattr_static(type(target), "__call__", None)
-    # A staticmethod or classmethod `__call__` is read raw, so its function decides.
-    call = getattr(call, "__func__", call)
-    return inspect.iscoroutinefunction(call) or inspect.isasyncgenfunction(call)
-
-
 _ASYNC_CODE_FLAGS = inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR
+
+
+def _routine_flag(routine: object) -> int:
+    """Return the async code flag of a routine, or 0 for a sync one."""
+    if inspect.iscoroutinefunction(routine):
+        return inspect.CO_COROUTINE
+    if inspect.isasyncgenfunction(routine):
+        return inspect.CO_ASYNC_GENERATOR
+    return 0
+
+
+def _declared_flag(target: object) -> int:
+    """Return the async code flag `target` itself or its `__call__` declares.
+
+    A staticmethod or classmethod `__call__` is read raw, so its function decides.
+    """
+    flag = _routine_flag(target)
+    if flag or isinstance(target, _ROUTINE_TYPES) or inspect.isclass(target):
+        return flag
+    call = inspect.getattr_static(type(target), "__call__", None)
+    return _routine_flag(getattr(call, "__func__", call))
+
+
+def _async_flag(func: object) -> int:
+    """Return the async code flag a call to `func` answers with, 0 for a sync call."""
+    plain = func.__func__ if type(func) is MethodType else func
+    if type(plain) is FunctionType and not plain.__dict__:
+        # With no marker and no wrapped layer, the code flags of a bare function decide.
+        return plain.__code__.co_flags & _ASYNC_CODE_FLAGS
+    seen: set[int] = set()
+    target: object = func
+    while target is not None and id(target) not in seen:
+        seen.add(id(target))
+        flag = _declared_flag(target)
+        if flag:
+            return flag
+        if isinstance(target, functools.partial):
+            target = target.func
+        else:
+            target = getattr(target, "__wrapped__", None)
+    return 0
 
 
 def is_async_callable(func: object) -> bool:
@@ -151,34 +200,18 @@ def is_async_callable(func: object) -> bool:
 
     It walks partials and `__wrapped__` layers, a sync wrapper passes a coroutine on.
     """
-    plain = func.__func__ if type(func) is MethodType else func
-    if type(plain) is FunctionType and not plain.__dict__:
-        # With no marker and no wrapped layer, the code flags of a bare function decide.
-        return bool(plain.__code__.co_flags & _ASYNC_CODE_FLAGS)
-    seen: set[int] = set()
-    target: object = func
-    while target is not None and id(target) not in seen:
-        seen.add(id(target))
-        if _declares_async(target):
-            return True
-        if isinstance(target, functools.partial):
-            target = target.func
-        else:
-            target = getattr(target, "__wrapped__", None)
-    return False
+    return bool(_async_flag(func))
+
+
+def is_coroutine_callable(func: object) -> TypeGuard[Callable[..., Awaitable[object]]]:
+    """Return whether calling `func` hands back a coroutine, an async generator not."""
+    return _async_flag(func) == inspect.CO_COROUTINE
 
 
 def refuse_async(func: Callable[..., Any], role: str) -> None:
     """Raise `AsyncCallableError` naming `role` and `func` when `func` is async."""
     if is_async_callable(func):
         raise AsyncCallableError(role, describe_callable(func))
-
-
-def refuse_async_render(module: ModuleType | None, role: str) -> None:
-    """Raise `AsyncCallableError` naming `role` when the module `render` is async."""
-    render = getattr(module, "render", None)
-    if callable(render):
-        refuse_async(render, role)
 
 
 class MisattributedContext(NamedTuple):
@@ -218,6 +251,7 @@ class MisattributionLog:
 
 
 __all__ = [
+    "DeclaringSite",
     "MisattributedContext",
     "MisattributionLog",
     "callable_name",
@@ -226,8 +260,9 @@ __all__ = [
     "defining_file",
     "describe_callable",
     "is_async_callable",
+    "is_coroutine_callable",
     "refuse_async",
-    "refuse_async_render",
+    "refused_declaration",
     "registering_file",
     "registering_site",
 ]

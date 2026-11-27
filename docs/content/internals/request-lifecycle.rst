@@ -78,6 +78,72 @@ After the body is in hand the view builds the render context and runs every ``@c
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
 The render context also carries a deferred fold of the page metadata, which ``{% metadata %}`` in the root layout resolves as the composed template renders, so a ``@page.metadata`` callable runs after every ``@context`` function and reads the same dependency cache.
 
+.. _internals-request-lifecycle-participants:
+
+The view skeleton and its participants
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``next.views.pages`` holds a skeleton that names no feature.
+Every feature that takes part in a page request is a participant registered in ``next.lifecycle.lifecycle``, and the skeleton runs the points the participants named for the page, the kind of request, and the safety of its method.
+The skeleton runs the same steps for every request.
+
+1. Classify.
+   ``route_request`` reads the partial switch, asks each participant's claim for a partial request, and keeps the most specific kind, ``boundary`` before ``zone`` before ``navigate``.
+   A request no participant claims is a ``page``.
+2. Admit.
+   The gates of the kind run before the page is read and before any transaction opens.
+   An ``admit`` answers a request that needs no render.
+   The page access runs next unless a gate ``answers`` the kind itself, and each ``refuse`` shapes a refusal.
+3. Plan.
+   ``PagePlans`` composes the page, analyses the template once, and asks every participant for its ``Share`` of each kind and method.
+   The plan holds the result as ready tuples, so a request reads one ``Points`` and calls nothing to decide.
+4. Around.
+   The ``around`` blocks open in registry order and wrap the rest of the request.
+5. Serve.
+   A kind with a ``serve`` point answers from it inside the ``block`` points.
+   Any other kind resolves the body, sync or in one drive, builds the response policy, and renders inside the ``block`` points.
+6. Respond.
+   The ``respond`` point of the innermost participant that names one turns the HTML into a response.
+   With none the HTML becomes a plain ``HttpResponse``.
+7. Finish.
+   One step stamps the page headers by the kind of request, then runs every ``finish`` point, last participant first.
+   A stream passes the step inside a block that closes it on failure.
+
+The participants of the framework and their points, in registry order.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 22 64
+
+   * - Participant
+     - Kind
+     - Points
+   * - ``transactions``
+     - every kind
+     - ``around`` opens the transaction the method rule or ``page.transaction()`` gives the request, with the lazy savepoint session of the error boundaries.
+       A safe request of a page that opens no alias and holds no error boundary gets no point.
+   * - ``partial``
+     - ``zone``, ``navigate``, ``page``
+     - Claims a request naming zones and ``serve`` answers it with the envelope, straight from the template for a plain page no intercept serves.
+       A navigation gets the stream ``block`` its deferred boundaries fill.
+       A plain document that spells no layer link turns the layer pass off in a ``block``.
+   * - ``defer``
+     - ``boundary``, ``page``, ``navigate``, ``zone``
+     - Claims a request carrying a token, its gate checks the method, the site, and the page access itself, and ``serve`` answers the reload.
+       A page gate drops the token field so nothing echoes it.
+       A render that may defer gets the gathering ``block``, the ``respond`` that streams the page, and the ``finish`` that settles the stream headers.
+   * - ``router``
+     - ``navigate``, ``page``, ``zone``
+     - Claims a navigation while the router is on and gates it on the site, the version, an intercept, a prefetch opt-out, and the pool load.
+       Its ``block`` binds the router state, rendering the kept slot alone where fixed chrome lets it, ``respond`` answers with the envelope, and ``finish`` stamps ``X-Next-Router``.
+       A document gets the router or the link-pass ``block`` and the stamp, a zone the marking ``block``, the ``X-Next-Origin`` vary, and the stamp.
+
+The ``defer`` participant is the entry to the boundary machinery, and :doc:`boundary-pipeline` follows a boundary from its tag to its streamed fragment and a token reload from its claim to its answer.
+The ``router`` participant is the entry to the client router, and :doc:`router-pipeline` follows a navigation through the gate, the cut, and the envelope.
+
+A page none of them takes part in runs the bare render with no call on their behalf, so ``PagePlan.plain`` together with empty points is the fast path, not a second copy of the view.
+The plan is built again when the page, a counter it read, or ``lifecycle.version`` moves, and a settings change moves that version.
+
 Zone requests
 ~~~~~~~~~~~~~
 
@@ -260,9 +326,10 @@ Extension points
 ----------------
 
 - Add an entry to ``MIDDLEWARE`` to intercept the request before next.dj sees it.
+- Register a participant with ``next.lifecycle.register_participant`` to take part in the page request itself, see :doc:`/content/topics/extending`.
 - Subscribe to ``page_rendered`` to observe render duration, asset counts, and the context keys of each response.
 - Subclass ``StaticBackend`` to change how the collector renders.
-- Subclass ``RouterBackend`` to feed the resolver from a different source.
+- Subclass ``PageBackend`` to feed the resolver from a different source.
 
 See also
 --------
@@ -272,4 +339,6 @@ See also
    :doc:`page-discovery` for how the page is resolved.
    :doc:`url-router` for the URL dispatcher.
    :doc:`action-dispatch` for the form submission path.
+   :doc:`boundary-pipeline` for deferred boundaries and their streams.
+   :doc:`router-pipeline` for the client router navigation.
    :doc:`/content/topics/file-router` for the URL semantics.

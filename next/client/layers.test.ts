@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryAdapter } from "./apply";
 import { createLayers, nativeDialog } from "./layers";
-import type { DialogAdapter, LayerDeps, LayerStack, PopStateAdapter } from "./layers";
+import type { DialogAdapter, LayerDeps, PopStateAdapter } from "./layers";
+import { createStack } from "./stack";
+import type { Stack } from "./stack";
+import { landed } from "./test-doubles";
 import { createNavigation } from "./navigation";
 import type { Navigation } from "./navigation";
-import { HEADER_ORIGIN, HEADER_ZONE, pageKey } from "./protocol";
+import { HEADER_ORIGIN, HEADER_ZONE, markBusy, pageKey } from "./protocol";
 
 interface Dispatched {
   event: string;
@@ -25,27 +28,34 @@ function mockDialog() {
 }
 
 // Every stack registers here so the afterEach resets them all, leaking no dialogs.
-const madeStacks: LayerStack[] = [];
+const madeStacks: Stack[] = [];
 
 // The runtime shares one navigation with the applier. A case that brings none gets
 // one over its history seam, or over window.history.
 function createTrackedLayers(
-  deps: Omit<LayerDeps, "navigation"> & {
+  deps: Omit<LayerDeps, "navigation" | "mark"> & {
     navigation?: Navigation;
     history?: HistoryAdapter;
+    popstate?: PopStateAdapter;
   },
-): LayerStack {
-  const { history, ...rest } = deps;
-  const layers = createLayers({
-    ...rest,
-    navigation:
-      deps.navigation ??
-      createNavigation({
-        dispatch: deps.dispatch,
-        ...(deps.document !== undefined ? { document: deps.document } : {}),
-        ...(history !== undefined ? { history } : {}),
-      }),
+): Stack {
+  const { history, popstate, ...rest } = deps;
+  const navigation =
+    deps.navigation ??
+    createNavigation({
+      dispatch: deps.dispatch,
+      ...(deps.document !== undefined ? { document: deps.document } : {}),
+      ...(history !== undefined ? { history } : {}),
+    });
+  const stack = createStack({
+    dispatch: deps.dispatch,
+    ...(deps.document !== undefined ? { document: deps.document } : {}),
+    chunk: landed(createLayers),
+    build: (factory) => factory({ ...rest, navigation, mark: markBusy }),
+    popped: () => navigation.popped(() => undefined),
+    navigate: () => undefined,
   });
+  const layers: Stack = { ...stack, install: (doc) => stack.install(doc, popstate) };
   madeStacks.push(layers);
   return layers;
 }
@@ -92,7 +102,7 @@ function makeStack() {
 }
 
 describe("layer stack", () => {
-  let layers: LayerStack;
+  let layers: Stack;
   let dispatched: Dispatched[];
   let fetched: { url: string; zone: string }[];
   let dismissed: ((reason: string) => void)[];
@@ -254,17 +264,6 @@ describe("layer stack", () => {
     const item = document.querySelector("[data-next-toasts] [data-next-toast]");
     expect(item?.querySelector("img")).toBeNull();
     expect(item?.textContent).toBe("<img src=x onerror=alert(1)>");
-  });
-
-  it("busy marks initiator and target and releases them", () => {
-    const a = document.createElement("button");
-    const b = document.createElement("div");
-    const release = layers.busy(a, b);
-    expect(a.getAttribute("aria-busy")).toBe("true");
-    expect(b.hasAttribute("data-next-busy")).toBe(true);
-    release();
-    expect(a.hasAttribute("aria-busy")).toBe(false);
-    expect(b.hasAttribute("data-next-busy")).toBe(false);
   });
 
   it("a delegated click on a layer link opens without breaking no-JS links", () => {
@@ -443,6 +442,37 @@ describe("layer stack", () => {
     expect(hosts).toHaveLength(1);
     expect(hosts[0]!.children).toHaveLength(1);
     expect(hosts[0]!.textContent).toBe("two");
+  });
+
+  it("puts a toast into the tray the page renders and builds none of its own", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="chrome"><div data-next-toasts id="tray"></div></div>';
+    const item = layers.toast("saved", "success");
+    expect(document.querySelectorAll("[data-next-toasts]")).toHaveLength(1);
+    expect(item.parentElement!.id).toBe("tray");
+  });
+
+  it("prefers a tray inside the top layer over the page tray", async () => {
+    document.body.innerHTML = '<div data-next-toasts id="page"></div>';
+    await layers.open(null, "/w/", "z");
+    const modalTray = document.createElement("div");
+    modalTray.setAttribute("data-next-toasts", "");
+    document.querySelector('dialog [data-next-zone="z"]')!.append(modalTray);
+    expect(layers.toast("saved", "info").parentElement).toBe(modalTray);
+  });
+
+  it("returns the toast item and carries it on the next:toast detail", () => {
+    const item = layers.toast("saved", "success");
+    const event = dispatched.find((d) => d.event === "next:toast");
+    expect(item.getAttribute("data-next-toast")).toBe("success");
+    expect(event?.detail).toEqual({ text: "saved", variant: "success", element: item });
+  });
+
+  it("_reset leaves a tray the page rendered in place", () => {
+    document.body.innerHTML = '<div data-next-toasts id="tray"></div>';
+    layers.toast("hi", "info");
+    layers._reset();
+    expect(document.getElementById("tray")).not.toBeNull();
   });
 
   it("ignores a click whose target is not an Element", () => {
@@ -1038,7 +1068,7 @@ describe("a server-initiated open seeds a zone, an href, both, or neither", () =
 });
 
 describe("layer intercepting URL lifecycle", () => {
-  let layers: LayerStack;
+  let layers: Stack;
   let dispatched: Dispatched[];
   let fire: () => void;
 
@@ -1710,5 +1740,80 @@ describe("layer head scoping from the audit", () => {
     expect(document.title).toBe("Upper");
     layers.close({ result: 1 });
     expect(document.title).toBe("Feed");
+  });
+});
+
+describe("a prefetched layer body", () => {
+  const prefetched = vi.fn<(input: string, init: RequestInit) => Promise<Response>>();
+
+  type Taker = NonNullable<LayerDeps["take"]>;
+
+  function stack(taker?: Taker, loaded = true) {
+    const sent: Parameters<LayerDeps["fetch"]>[0][] = [];
+    const dispatched: Dispatched[] = [];
+    const layers = createTrackedLayers({
+      dispatch: (event, detail) => void dispatched.push({ event, detail }),
+      fetch: async (request) => void sent.push(request),
+      document,
+      dialog: mockDialog().adapter,
+      history: { push: () => undefined, replace: () => undefined },
+      ...(loaded ? { take: taker ?? (() => undefined) } : {}),
+    });
+    return { layers, sent, dispatched };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("sends the body through the answer the prefetch holds for the link and zone", async () => {
+    const take = vi.fn<NonNullable<Taker>>().mockReturnValue(prefetched);
+    const { layers, sent } = stack(take);
+    await layers.open(null, "/m/", "sheet");
+    expect(take).toHaveBeenCalledWith("/m/", "sheet");
+    expect(sent[0]!.send).toBe(prefetched);
+  });
+
+  it("asks for the answer while the address bar still shows the host page", async () => {
+    history.replaceState(null, "", "/host/");
+    const seen: string[] = [];
+    const layers = createTrackedLayers({
+      dispatch: () => undefined,
+      fetch: async () => undefined,
+      document,
+      dialog: mockDialog().adapter,
+      take: () => {
+        seen.push(location.pathname);
+        return undefined;
+      },
+    });
+    try {
+      await layers.open(null, "/m/", "sheet");
+      expect(location.pathname).toBe("/m/");
+      expect(seen).toEqual(["/host/"]);
+    } finally {
+      history.replaceState(null, "", "/");
+    }
+  });
+
+  it("fetches as before when no prefetch holds an answer or none is loaded", async () => {
+    const held = stack(() => undefined);
+    await held.layers.open(null, "/m/", "sheet");
+    expect(held.sent[0]!.send).toBeUndefined();
+    const idle = stack();
+    await idle.layers.open(null, "/m/", "sheet");
+    expect(idle.sent[0]!.send).toBeUndefined();
+    const bare = stack(undefined, false);
+    await bare.layers.open(null, "/m/", "sheet");
+    expect(bare.sent[0]!.send).toBeUndefined();
+  });
+
+  it("names the zone root a loading UI fills in the opened event", async () => {
+    const { layers, dispatched } = stack();
+    await layers.open(null, "/m/", "sheet");
+    const opened = dispatched.find((d) => d.event === "partial:layer-opened")!;
+    expect(opened.detail.root).toBe(
+      document.querySelector('dialog [data-next-zone="sheet"]'),
+    );
   });
 });

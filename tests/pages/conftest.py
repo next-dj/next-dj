@@ -1,8 +1,11 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
 
+from next.deps import provider_registry
+from next.pages.declarations import page_declarations
+from next.pages.loaders import forget_layout_texts
 from next.pages.signals import (
     context_registered,
     metadata_registered,
@@ -10,6 +13,8 @@ from next.pages.signals import (
     template_loaded,
 )
 from next.testing import SignalRecorder, capture_signals
+from tests.support import restored_provider_registry, rewrite_in_tick
+from tests.support.pages import write_page
 
 
 @pytest.fixture()
@@ -41,8 +46,52 @@ def capture_metadata_registered() -> Generator[SignalRecorder, None, None]:
 
 
 @pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    """Return an empty `pages` directory, the root of a page tree under test."""
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
+def framework_providers() -> Generator[None, None, None]:
+    """Keep only the providers the framework ships, dropping the ones tests declared.
+
+    A provider a test declares stays registered, and a context graph reads it as unknown.
+    """
+    with restored_provider_registry():
+        provider_registry.replace(
+            [cls for cls in provider_registry if cls.__module__.startswith("next.")]
+        )
+        yield
+
+
+@pytest.fixture()
+def fresh_declarations() -> Generator[None, None, None]:
+    """Start and end the test with no `page` declaration of any kind."""
+    page_declarations.reset()
+    yield
+    page_declarations.reset()
+
+
+@pytest.fixture()
+def page_declaring() -> Callable[[Path, str], Path]:
+    """Return a writer of a `page.py` that runs a declaration and serves a template."""
+
+    def write(directory: Path, declaration: str) -> Path:
+        return write_page(
+            directory,
+            source=f"from next.pages import page\n\n{declaration}\n\ntemplate = '<p>x</p>'\n",
+        )
+
+    return write
+
+
+@pytest.fixture()
+def error_file(tmp_path: Path) -> Path:
+    """Write an `error.djx` that shows its frame, its kind and any leaked key."""
+    path = tmp_path / "error.djx"
+    rewrite_in_tick(path, "{{ frame }}|{{ error.kind }}|{{ leaked|default:'clean' }}")
+    forget_layout_texts()
+    return path
+
+
+@pytest.fixture()
+def loading_file(tmp_path: Path) -> Path:
+    """Write a `loading.djx` that shows its frame."""
+    path = tmp_path / "loading.djx"
+    rewrite_in_tick(path, "<i>wait {{ frame|default:'' }}</i>")
+    forget_layout_texts()
+    return path

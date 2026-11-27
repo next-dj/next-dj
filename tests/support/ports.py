@@ -1,20 +1,9 @@
-from __future__ import annotations
-
 import inspect
-from collections import Counter
-from typing import TYPE_CHECKING, NoReturn
+from pathlib import Path
 
-from next.partial.headers import partial_intent
+from django.http import HttpRequest
 
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from django.forms import BaseForm, BaseFormSet
-    from django.http import HttpRequest, HttpResponse
-
-    from next.forms.wizard import FormWizard
-    from next.partial.headers import PartialIntent
+from next.static import StaticCollector
 
 
 def port_methods(port: type) -> list[str]:
@@ -41,67 +30,34 @@ def parameter_shape(owner: type, name: str) -> list[tuple[str, object, object]]:
     ]
 
 
-def _shaping_refused(method: str) -> NoReturn:
-    """Fail the test because a caller entered a shape method it had to skip."""
-    msg = f"{method} was entered for a request whose intent asks for no shaping."
-    raise AssertionError(msg)
+class StubRender:
+    """A `ScriptRender` a provider test hands its share, its bundles at `/b/<name>`."""
 
-
-class IntentOnlyShaper:
-    """Shaper stub that answers intent lookups and refuses to shape anything.
-
-    Intent parsing stays real, so a call site takes its production branch.
-    """
-
-    def __init__(self) -> None:
-        """Start with every call counter at zero."""
-        self.calls: Counter[str] = Counter()
-
-    def intent(self, request: HttpRequest) -> PartialIntent:
-        """Count the lookup and return the real intent parsed from the headers."""
-        self.calls["intent"] += 1
-        return partial_intent(request)
-
-    def zone_response(
+    def __init__(
         self,
-        page_path: Path,
-        request: HttpRequest,
-        intent: PartialIntent,
         *,
-        dynamic_body: bool,
-        url_kwargs: dict[str, object],
-        dep_cache: dict[str, object],
-    ) -> NoReturn:
-        """Fail because a request naming no zone must never reach here."""
-        del page_path, request, intent, dynamic_body, url_kwargs, dep_cache
-        _shaping_refused("zone_response")
+        collector: StaticCollector | None = None,
+        request: HttpRequest | None = None,
+        page_path: Path | None = None,
+        runtime: bool = True,
+        streams: bool = False,
+        nonce: str | None = None,
+        bundles: bool = True,
+    ) -> None:
+        """Hold the render facts, a bare collector unless one is given."""
+        self.collector = collector or StaticCollector()
+        self.request = request
+        self.page_path = page_path
+        self.runtime = runtime
+        self.streams = streams
+        self.entries: dict[str, object] = {}
+        self._nonce = nonce
+        self._bundles = bundles
+        self.minted = 0
 
-    def shape_response(
-        self, backend: object, request: HttpRequest, outcome: object
-    ) -> NoReturn:
-        """Fail because a non-partial outcome must never reach here."""
-        del backend, request, outcome
-        _shaping_refused("shape_response")
+    def nonce(self) -> str | None:
+        self.minted += 1
+        return self._nonce
 
-    def shape_validate(
-        self,
-        backend: object,
-        request: HttpRequest,
-        form: BaseForm | BaseFormSet,
-        intent: PartialIntent,
-        *,
-        action_name: str,
-        uid: str,
-        wizard: FormWizard | None = None,
-    ) -> NoReturn:
-        """Fail because a submission naming no validate field must never reach here."""
-        del backend, request, form, intent, action_name, uid, wizard
-        _shaping_refused("shape_validate")
-
-    def set_vary(self, response: HttpResponse) -> None:
-        """Count the call and leave the headers alone.
-
-        Declaring `Vary` is not shaping, so refusing would fail every page response.
-        """
-        del response
-        self.calls["set_vary"] += 1
+    def bundle_url(self, name: str) -> str | None:
+        return f"/b/{name}" if self._bundles else None

@@ -22,6 +22,7 @@ from library.demo import DEMO_BOOKS, seed_demo
 from library.models import Book, Chapter, Tag
 from shadcn_admin.forms import AdminFormSpec, AdminInlineSpec, InlineRights
 
+from next.router import CutKind
 from next.testing import (
     NextClient,
     assert_metadata,
@@ -41,7 +42,8 @@ EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 STATIC_URL = settings.STATIC_URL
 ELEMENT_ID_RE = re.compile(r'\sid="([^"]+)"')
 CRUMB_NAV_RE = re.compile(r'<nav aria-label="Breadcrumb"[^>]*>(.*?)</nav>', re.DOTALL)
-CRUMB_LINK_RE = re.compile(r'<a href="([^"]*)"( aria-current="page")?[^>]*>([^<]*)</a>')
+CRUMB_LINK_RE = re.compile(r'<a href="([^"]*)"([^>]*)>([^<]*)</a>')
+CURRENT_PAGE = 'aria-current="page"'
 
 
 def action_form(client: NextClient, body: str, action_name: str) -> str:
@@ -55,8 +57,8 @@ def crumbs(html: str) -> list[tuple[str, str, bool]]:
     if nav is None:
         return []
     return [
-        (label, href, bool(current))
-        for href, current, label in CRUMB_LINK_RE.findall(nav.group(1))
+        (label, href, CURRENT_PAGE in attrs)
+        for href, attrs, label in CRUMB_LINK_RE.findall(nav.group(1))
     ]
 
 
@@ -97,6 +99,15 @@ class TestDashboard:
         logout_url = admin_client.get_action_url("admin:logout")
         assert body.count(f'action="{logout_url}"') == 1
         assert "Sign out" in find_form(body, action=logout_url)
+
+    def test_a_navigation_keeps_the_shell_and_refreshes_its_zones(self, admin_client):
+        step = admin_client.navigate("/admin/library/book/", origin="/admin/")
+        assert step.kind is CutKind.SLOT
+        assert step.envelope is not None
+        assert "Sign out" in step.envelope.html_for_zone("account")
+        trail = step.envelope.html_for_zone("breadcrumbs")
+        assert 'aria-label="Breadcrumb"' in trail
+        assert "Books" in trail
 
     def test_each_app_reaches_the_sidebar_and_a_dashboard_card(self, admin_client):
         body = admin_client.get("/admin/").content.decode()

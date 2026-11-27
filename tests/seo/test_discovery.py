@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from django.test import override_settings
 
-from next.discovery import get_router_manager
+from next.discovery import get_route_manager
 from next.pages.loaders import has_load_errors
 from next.seo import SeoSourceImportError, discovery as seo_discovery
 from next.seo.discovery import (
@@ -37,7 +37,7 @@ from tests.support import (
 
 
 def _roots() -> tuple[SeoRoot, ...]:
-    manager, _errors = get_router_manager()
+    manager, _errors = get_route_manager()
     assert manager is not None
     return discover_seo_roots(manager)
 

@@ -11,7 +11,7 @@ from .context import (
     component,
     context,
 )
-from .errors import ComponentModuleImportError
+from .errors import ComponentContextConflictError, ComponentModuleImportError
 from .facade import (
     collect_visible_components,
     get_component,
@@ -19,12 +19,12 @@ from .facade import (
     render_component,
 )
 from .info import ComponentInfo
-from .loading import ModuleCache, ModuleLoader
 from .manager import (
     ComponentsManager,
     components_manager,
     register_components_folder_from_router_walk,
 )
+from .modules import ModuleCache, ModuleLoader
 from .registry import ComponentRegistry, ComponentVisibilityResolver
 from .renderers import (
     CachedComponentTemplateLoader,
@@ -35,11 +35,16 @@ from .renderers import (
     SimpleComponentRenderer,
 )
 from .scanner import ComponentScanner, component_extra_roots_from_config
-from .watch import component_watch_roots, get_component_paths_for_watch
+from .watch import (
+    component_watch_roots,
+    get_component_paths_for_watch,
+    refresh_component_files,
+)
 
 
 __all__ = [
     "CachedComponentTemplateLoader",
+    "ComponentContextConflictError",
     "ComponentContextManager",
     "ComponentContextRegistry",
     "ComponentInfo",
@@ -68,6 +73,7 @@ __all__ = [
     "get_component",
     "get_component_paths_for_watch",
     "load_component_template",
+    "refresh_component_files",
     "register_components_folder_from_router_walk",
     "render_component",
     "signals",

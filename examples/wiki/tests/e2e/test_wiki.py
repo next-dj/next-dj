@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from e2e_support.browser import (
     PageProbe,
@@ -9,13 +11,15 @@ from e2e_support.browser import (
     wait_for_apply,
     wait_for_runtime,
 )
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Locator, Page, Route, expect
 from wiki.models import Article
 
 
 pytestmark = pytest.mark.e2e
 
 RESULTS_ZONE = "[data-next-zone='search-results']"
+SKELETON = f"{RESULTS_ZONE} [data-search-skeleton]"
+QUERY_REQUEST = re.compile(r"/search/\?q=")
 QUERY_FIELD = "#id_q"
 BODY_FIELD = "#id_body_md"
 PREVIEW = "[data-markdown-preview] .markdown-body"
@@ -115,6 +119,33 @@ def test_a_burst_of_keystrokes_collapses_into_one_zone_request(
     assert requests[0].request.method == "GET"
     assert "q=routing" in requests[0].url
     assert next_probe.partial_requests() == requests
+
+
+def test_a_slow_search_shows_the_skeleton_until_the_results_land(
+    page: Page, base_url: str
+) -> None:
+    seed_articles()
+    page.goto(f"{base_url}/search/")
+    wait_for_runtime(page)
+    held: list[Route] = []
+
+    def hold(route: Route) -> None:
+        held.append(route)
+
+    page.route(QUERY_REQUEST, hold)
+    seen = applied_count(page)
+    with page.expect_request(QUERY_REQUEST):
+        page.locator(QUERY_FIELD).press_sequentially("routing", delay=20)
+
+    expect(page.locator(SKELETON)).to_be_visible()
+
+    held[0].continue_()
+    wait_for_apply(page, seen)
+
+    expect(page.locator(SKELETON)).to_have_count(0)
+    article_hits = results_group(page, "Article results").locator("li")
+    expect(article_hits).to_have_text(["Routing internals"])
+    page.unroute(QUERY_REQUEST)
 
 
 def test_typing_markdown_repaints_the_preview_with_real_markup(

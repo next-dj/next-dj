@@ -36,7 +36,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "pages",
@@ -228,33 +228,21 @@ Every `{% component %}` prop compiles as a Django `FilterExpression`, so `title=
 
 The card also ships a co-located [`component.css`](shortener/pages/_components/link_card/component.css). The collector emits it once per page no matter how many cards render.
 
-### 8. Shared `nav_link`: one place for the active-state logic
+### 8. Shared `nav_link`: the framework marks the current link
 
-Root nav and admin subnav both need the same active-state rule. The logic lives once in the shared kit at [`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py), registered as a global component root through `COMPONENT_BACKENDS[0]["DIRS"]` in [`config/settings.py`](config/settings.py):
+Root nav and admin subnav need the same rule, and neither the example nor the shared kit writes it. Every full page passes through the framework's active-link pass, which marks each anchor inside a `<nav>`, a `[role=navigation]` or a `[data-next-nav]` element. A link to the current path gains `aria-current="page" data-next-current="page"`, a link to a segment prefix of it gains `data-next-current="ancestor"`, and a link to `/` is never an ancestor. The header links fill the `nav` slot of the shared `app_shell`, which renders them inside `<nav aria-label="Main">`, and the admin subnav sits inside the shared `nav` component, itself a `<nav>`.
 
-```python
-@component.context("is_active")
-def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
-    match = getattr(request, "resolver_match", None)
-    if match is None:
-        return False
-    view_name = match.view_name
-    if active_when:
-        return active_when in view_name
-    return view_name == url_name
-```
-
-Usage:
+[`_shared/_components/nav_link/component.py`](../_shared/_components/nav_link/component.py) only resolves the `href` and picks one class string per variant. Each string styles the marks through Tailwind's attribute variants, `aria-[current=page]:` for the current page and, on the `bar` variant, `data-[next-current=ancestor]:` for a section the visitor is inside:
 
 ```djx
-{# exact match #}
+{# exact page: the Stats tab is marked on /admin/stats/ only #}
 {% component "nav_link" url_name="next:page_admin_stats" label="Stats" variant="tabs" %}
 
-{# prefix match: stays active across every URL name that contains 'page_admin' #}
-{% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
+{# section: the header link reads as current anywhere under /admin/ #}
+{% component "nav_link" url_name="next:page_admin" label="admin" variant="bar" %}
 ```
 
-No `request.path` string-munging, no custom template tag, no context processor. Django populates `request.resolver_match.view_name` and the component reads it.
+No `resolver_match` lookup, no substring match on view names, no context processor. The `tabs` variant leaves the ancestor mark unstyled, so the "Links" tab at `/admin/` stays dim on `/admin/stats/` while the header link stays lit. `TestActiveNav` in [`tests/test_integration.py`](tests/test_integration.py) asserts the marks on both navs.
 
 ### 9. URL names and `{% url %}`
 
@@ -392,6 +380,17 @@ URL                       Name  File                                            
 The intercept [`page.py`](shortener/pages/admin/%28.%29links/%5Bslug%5D/page.py) declares `page.public()` like every page of this example, resolves the row through `DLink[Link]` from the `slug` of the target URL, and adds the clicks still waiting in the cache. Its metadata titles the tab `Quick look · peeked · next.dj shortener` until the modal closes. The [`template.djx`](shortener/pages/admin/%28.%29links/%5Bslug%5D/template.djx) wraps the `link_card` and two `stat_card` tiles in `{% zone "link-peek" %}` and leaves the reset form out, so the destructive action lives on the full page only.
 
 `TestLinkPeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, reload and the link to the full page.
+
+### 16. Keeping one page out of compression
+
+`CompressionMiddleware` sits in `MIDDLEWARE` and compresses every buffered HTML page over the minimum size for a client that sends `Accept-Encoding`. The detail page of a link, [`admin/links/[slug]/page.py`](shortener/pages/admin/links/%5Bslug%5D/page.py), renders a CSRF token for its reset form beside a slug the visitor chose in the URL. Compressing a body that holds a secret next to input the visitor controls leaks the secret through the size of the result, so the page opts out with one module-level call:
+
+```python
+page.public()
+page.compress(enabled=False)
+```
+
+Every response of that page goes out plain, the full page and its zone answers alike, while `/admin/` and the other pages keep their encoding. `TestCompressionOptOut` asks both for `gzip` and checks that `/admin/links/<slug>/` answers with no `Content-Encoding` header and `/admin/` answers with `gzip`.
 
 ## Gotchas
 

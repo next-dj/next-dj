@@ -1,6 +1,17 @@
+from pathlib import Path
+
 import pytest
 
-from next.pages.placeholder import ROOT_MARKER, RootScan, opens_html_document, scan_root
+from next.pages.placeholder import (
+    NO_WRAPPER,
+    ROOT_MARKER,
+    RootScan,
+    is_quoted,
+    opens_html_document,
+    quote_source,
+    scan_root,
+    unquote_source,
+)
 
 
 _BODY = "<html>{% template %}</html>"
@@ -246,3 +257,27 @@ class TestOpensHtmlDocument:
 
     def test_a_bare_block_tag_opens_nothing(self) -> None:
         assert opens_html_document("{%  %}<p>x</p>") is False
+
+
+class TestBoundarySources:
+    """The boundary tag quotes its sources one way and reads them back the same."""
+
+    def test_a_source_round_trips_through_its_quoting(self) -> None:
+        source = Path("/pages/a b/error.djx")
+
+        quoted = quote_source(source)
+
+        assert quoted == '"/pages/a%20b/error.djx"'
+        assert is_quoted(quoted) is True
+        assert unquote_source(quoted) == source
+
+    def test_no_source_quotes_empty(self) -> None:
+        assert quote_source(None) == '""'
+        assert unquote_source('""') is None
+
+    @pytest.mark.parametrize("bit", ['"', "x", "/x", "'x'"])
+    def test_an_unquoted_argument_is_refused(self, bit: str) -> None:
+        assert is_quoted(bit) is False
+
+    def test_the_no_wrapper_mark_is_a_dash(self) -> None:
+        assert NO_WRAPPER == "-"

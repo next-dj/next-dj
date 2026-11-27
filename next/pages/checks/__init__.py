@@ -7,10 +7,13 @@ from __future__ import annotations
 
 from .access import check_declaring_modules, check_public_beside_requirements
 from .contexts import (
+    check_async_context_reads,
+    check_async_dependency_cycles,
     check_context_functions,
     check_context_registration_files,
     check_single_keyless_context,
 )
+from .gating import check_gated_reads, check_hidden_guards
 from .groups import check_parenthesised_directory_names, check_pointless_route_groups
 from .intercepts import (
     check_intercept_default_login,
@@ -60,6 +63,8 @@ from .zones import check_context_reads_foreign_zone
 
 
 __all__ = [
+    "check_async_context_reads",
+    "check_async_dependency_cycles",
     "check_conditional_get_order",
     "check_context_functions",
     "check_context_processor_signature",
@@ -69,6 +74,8 @@ __all__ = [
     "check_csrf_endpoint_reversible",
     "check_csrf_in_session",
     "check_declaring_modules",
+    "check_gated_reads",
+    "check_hidden_guards",
     "check_intercept_default_login",
     "check_intercept_inert_declarations",
     "check_intercept_layouts",

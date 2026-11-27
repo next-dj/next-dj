@@ -138,7 +138,6 @@ from tests.support.helpers import (
     next_framework_settings_stand_in,
     rewrite_in_tick,
     touch_later,
-    typing_optional,
 )
 from tests.support.pages import (
     build_nested_page,
@@ -166,9 +165,9 @@ from tests.support.patches import (
     bound_dependency,
     importable_dir,
     patch_checks_components_manager,
-    patch_checks_router_manager,
-    patch_checks_router_manager_with_routers,
-    patched_router_manager,
+    patch_checks_route_manager,
+    patch_checks_route_manager_with_routers,
+    patched_route_manager,
     patched_watch_sources,
     record_calls,
     restored_provider_registry,
@@ -186,12 +185,7 @@ from tests.support.permissions import (
     owns_group,
     restored_permissions,
 )
-from tests.support.ports import (
-    IntentOnlyShaper,
-    call_shape,
-    parameter_shape,
-    port_methods,
-)
+from tests.support.ports import call_shape, parameter_shape, port_methods
 from tests.support.routers import (
     ENTRY_ROUTER,
     AppRootRouter,
@@ -315,7 +309,6 @@ __all__ = [
     "EntryRouter",
     "FinderInstallCase",
     "GuardedTenantForm",
-    "IntentOnlyShaper",
     "LayoutConfigCase",
     "MalformedRootsRouter",
     "MetadataMergeCase",
@@ -396,9 +389,9 @@ __all__ = [
     "partial_meta",
     "partial_request",
     "patch_checks_components_manager",
-    "patch_checks_router_manager",
-    "patch_checks_router_manager_with_routers",
-    "patched_router_manager",
+    "patch_checks_route_manager",
+    "patch_checks_route_manager_with_routers",
+    "patched_route_manager",
     "patched_watch_sources",
     "path_under",
     "plain_get",
@@ -421,7 +414,6 @@ __all__ = [
     "throwaway_apps",
     "tick_scenario",
     "touch_later",
-    "typing_optional",
     "unified_view",
     "unwrapped_decorator",
     "watching_components_entry",

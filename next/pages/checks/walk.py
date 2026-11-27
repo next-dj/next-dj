@@ -12,7 +12,7 @@ from next.checks.common import (
     RunMemo,
     first_visit,
     get_page_roots,
-    get_router_manager,
+    get_route_manager,
     page_tree_skip_names,
 )
 from next.utils import (
@@ -31,7 +31,7 @@ from next.utils import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from next.urls import RouterManager
+    from next.urls import RouteManager
     from next.utils import PageRoot
 
 
@@ -163,12 +163,12 @@ class _Walker:
         self.level(directory, raw_trail, url_trail, scope)
 
 
-def _walk(router_manager: RouterManager) -> TreeWalk:
+def _walk(route_manager: RouteManager) -> TreeWalk:
     """Walk every tree each router reports, a tree two routers share walked once."""
     reached: set[Path] = set()
     directories: list[TreeDirectory] = []
     intercepts: list[TreeIntercept] = []
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         skip_names = page_tree_skip_names(router)
         roots = get_page_roots(router)
         for root in roots:
@@ -191,10 +191,10 @@ _walks: RunMemo[TreeWalk] = RunMemo()
 
 def tree_walk() -> TreeWalk:
     """Return the walk of every routed tree, taken once per run."""
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return TreeWalk()
-    return _walks.get(router_manager, lambda: _walk(router_manager))
+    return _walks.get(route_manager, lambda: _walk(route_manager))
 
 
 __all__ = ["InterceptScope", "TreeDirectory", "TreeIntercept", "TreeWalk", "tree_walk"]

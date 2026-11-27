@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator, Iterator, MutableMapping
+from collections.abc import AsyncIterator, Generator, Iterator, MutableMapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
@@ -27,7 +27,7 @@ _CANCEL_ESCAPES_HANDLER = django.VERSION >= (6, 1)
 
 
 @contextmanager
-def _partial_backend_config(backends: list[dict]) -> Iterator[None]:
+def _partial_backend_config(backends: list[dict]) -> Generator[None]:
     """Activate a PARTIAL_BACKENDS config with a manager reset around it."""
     with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backends}):
         partial_backend_manager.reset()
@@ -103,12 +103,17 @@ class TestSyncStream:
         assert frame.startswith(b"event: next-patches")
         assert b'"server_time":' in frame
 
-    def test_event_frame_rejects_an_unsupported_source_item(
-        self, request_obj: object
+    @pytest.mark.parametrize(
+        "item",
+        [b"event: next-patches\ndata: {}\n\n", object()],
+        ids=["bytes", "object"],
+    )
+    def test_a_source_item_that_is_no_patch_is_refused(
+        self, request_obj: object, item: object
     ) -> None:
-        response = PatchEventStream(request_obj, iter(()))
+        response = PatchEventStream(request_obj, [item])
         with pytest.raises(TypeError, match="must yield a patch"):
-            response._event_frame(object())
+            _consume(response)
 
 
 class TestPolitenessHeaders:

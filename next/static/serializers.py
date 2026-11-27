@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import functools
 import json
 import logging
 from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 from django.core.serializers.json import DjangoJSONEncoder
 
+from next.caches import FRAMEWORK, pure_cache
 from next.conf import import_class_cached, next_framework_settings
 from next.diagnostics import FailureLog, isolated_build, mark_degraded
 
@@ -68,7 +68,7 @@ class PydanticJsContextSerializer:
         return json.dumps(value, cls=self._encoder, separators=(",", ":"))
 
 
-@functools.cache
+@pure_cache()
 def _pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
     """Return the encoder unwrapping `BaseModel` of the validated module.
 
@@ -112,11 +112,7 @@ class _Configured:
 
 
 _configured = _Configured()
-
-
-def forget_serializer(**kwargs: object) -> None:
-    """Drop the held serializer, so a settings reload builds the new one."""
-    _configured.forget()
+FRAMEWORK.attach(_configured.forget)
 
 
 def _instantiate(path: str) -> JsContextSerializer:

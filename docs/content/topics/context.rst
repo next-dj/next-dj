@@ -141,7 +141,7 @@ The zone keyword
 ~~~~~~~~~~~~~~~~
 
 ``zone="name"`` binds a callable to one :doc:`zone <partial-rendering/zones>`.
-A zone GET that asks for any other zone skips the callable before its dependencies are resolved, so a lazy or polling neighbour does not pay for it.
+A zone GET that asks for any other zone skips the callable before its dependencies are resolved, so a polling neighbour or a ``{% more %}`` sentinel does not pay for it.
 
 .. code-block:: python
    :caption: admin/audit/page.py
@@ -155,7 +155,18 @@ A zone GET that asks for any other zone skips the callable before its dependenci
        return list(AuditEntry.objects.all()[:100])
 
 A full page render carries no zone batch and runs every page level callable, tagged or not.
-When the callable must also stay idle on a full render, keep the ``zone_requested`` guard inside its body, see :doc:`partial-rendering/scenarios`.
+When the callable must also stay idle on a full render, it checks ``zone_requested`` inside its body, see :doc:`/content/ref/partial`.
+
+.. code-block:: python
+
+   from next import context
+   from next.partial import zone_requested
+
+   @context("entries", zone="audit-table")
+   def entries(request) -> list[AuditEntry]:
+       if not zone_requested(request, "audit-table"):
+           return []
+       return list(AuditEntry.objects.all()[:100])
 
 A zone declared inside the body of a requested zone counts as requested with it, so its bound callables run when the outer body renders.
 
@@ -251,10 +262,11 @@ The framework computes the template scope in this order.
 4. Context processors run after every ``@context`` callable.
    A processor is called with the request, and the callable must declare a parameter named ``request``.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
-   The second source is the ``OPTIONS.context_processors`` list on the first ``TEMPLATES`` entry in Django settings.
+   The second source is the ``OPTIONS.context_processors`` list on the first ``DjangoTemplates`` entry of ``TEMPLATES``, the engine every page compiles on, in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update``, so a processor key overwrites a page or inherited value.
+   A callable a deferred page boundary runs later keeps this order, so the processor value wins there too.
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
 
 A later step that uses the same key overrides earlier values.
@@ -473,7 +485,7 @@ Give each function a key or merge them.
 ``check_context_reads_foreign_zone`` reports ``next.W077`` for a callable that reads the key of a provider bound to a zone it does not share.
 A zone GET that does not name the bound zone skips the provider while the reader still runs and receives ``None``.
 
-``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` does not accept a ``request`` parameter.
+``check_context_processor_signature`` reports ``next.E040`` when a processor listed under ``OPTIONS.context_processors`` cannot be called with the request as its one positional argument, which is how Django calls it, so the parameter may be named ``_request`` when the processor does not read it.
 The check covers ``PAGE_BACKENDS`` entries only, not the Django ``TEMPLATES`` list.
 
 See also

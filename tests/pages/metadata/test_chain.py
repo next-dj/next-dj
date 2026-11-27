@@ -1,3 +1,4 @@
+import asyncio
 import threading
 import time
 from collections.abc import Callable, Generator
@@ -25,6 +26,7 @@ from next.pages.metadata import RESET, OpenGraph, Robots
 from next.pages.metadata.chain import (
     REFUSED_ROBOTS,
     ChainEntry,
+    FoldedMetadata,
     MetadataDeclaration,
     MetadataOrigin,
     MetadataThunk,
@@ -415,6 +417,18 @@ class TestCallables:
             meta = _fold(registry, leaf, dep_cache=cache)
         assert meta.title == "cached"
 
+    def test_an_async_callable_folds_through_the_bridge_for_a_sync_caller(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+
+        async def leaf_meta(slug: str) -> dict[str, str]:
+            return {"title": f"Async {slug}"}
+
+        registry.register(leaf, leaf_meta)
+        meta = fold_chain(registry, leaf, dep_cache={}, url_kwargs={"slug": "s"})
+        assert meta.title == "Async s"
+
     def test_a_none_value_from_a_callable_inherits(
         self, registry: PageMetadataRegistry, tmp_path: Path
     ) -> None:
@@ -661,7 +675,9 @@ class TestContainedFailures:
         """`fold_chain` lets the caller decide, so `Patches.meta` can skip its op."""
         (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
         registry.register(leaf, lambda: {"title": 3})
-        with pytest.raises(PageMetadataShapeError):
+        with pytest.raises(
+            PageMetadataShapeError, match="metadata key 'title' as 'int'"
+        ):
             fold_chain(registry, leaf, dep_cache={})
 
 
@@ -1003,6 +1019,12 @@ class TestOrigins:
             MetadataOrigin("*", f"leaf_meta in {leaf}"),
         )
 
+    def test_a_page_setting_no_key_names_no_source(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+        assert metadata_origins(chain_entry(registry, leaf)) == ()
+
 
 class TestThunk:
     """The render-time thunk folds against the context passed to each read."""
@@ -1023,6 +1045,31 @@ class TestThunk:
         (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
         thunk = MetadataThunk(registry, leaf, None, {}, {})
         assert thunk.folded() is thunk.fold({})
+
+    def test_an_async_fold_of_a_static_chain_reads_the_memo(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        (leaf,) = write_page_chain(tmp_path, [("leaf", LEAF)])
+        thunk = MetadataThunk(registry, leaf, None, {}, {})
+        entry = contained_chain(registry, leaf)
+
+        assert asyncio.run(thunk.afold(entry, {})) is entry.folded
+
+    def test_an_async_fold_awaits_the_callable_against_the_context(
+        self, registry: PageMetadataRegistry, tmp_path: Path
+    ) -> None:
+        async def meta(user: str, slug: str) -> dict[str, str]:
+            return {"title": f"{user} {slug}"}
+
+        (leaf,) = write_page_chain(tmp_path, [("leaf", PLAIN)])
+        registry.register(leaf, meta)
+        thunk = MetadataThunk(registry, leaf, None, {"slug": "post"}, {})
+        entry = contained_chain(registry, leaf)
+
+        folded = asyncio.run(thunk.afold(entry, {"user": "Ann"}))
+
+        assert folded.title == "Ann post"
+        assert FoldedMetadata(thunk, folded).folded() is folded
 
 
 class TestRouteGroups:

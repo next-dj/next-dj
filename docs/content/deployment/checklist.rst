@@ -124,13 +124,25 @@ Database
 - Apply every migration before starting the new process.
 - Run ``uv run python manage.py migrate --plan`` to confirm the migration set.
 - Take a snapshot before applying destructive or high-risk schema changes.
+- Budget the PostgreSQL connections against ``max_connections``, as ``next.W189`` states under ``--deploy``.
+  One process may hold ``DEFER["REQUEST_CONCURRENCY"]`` plus ``DEFER["EXECUTOR"]["OPTIONS"]["MAX_WORKERS"]``, multiplied by the worker processes of every host.
+- Put a transaction pooler such as PgBouncer in front of the database, set ``OPTIONS['pool']``, or lower ``MAX_WORKERS`` when the sum does not fit, see :ref:`deployment-pooler`.
+- Raise ``CONN_MAX_AGE`` above ``0`` or pool the connections, since at ``0`` each boundary a pool thread runs opens a connection of its own.
 
 Server
 ------
 
+Read :doc:`boundaries` for the topologies, the connection formula, the proxy settings, the process lifecycle, the rolling deploy, and the failure table of deferred boundaries.
+
 - Pick WSGI or ASGI based on whether the project uses streaming responses, SSE, or WebSockets.
 - Configure the worker count based on the expected concurrency and a load run, see :ref:`deployment-capacity`.
+- Set ``DEFER["REQUEST_CONCURRENCY"]`` to the threads of a threaded WSGI worker, since the stream limit and the connection budget start from it, see :ref:`deployment-topologies`.
+- Share ``SECRET_KEY`` and ``DEFER["TOKENS"]["OPTIONS"]["EPOCH"]`` between every process of a rolling release, and rotate the key through ``SECRET_KEY_FALLBACKS`` in two releases, see :doc:`boundaries`.
 - Set the worker timeout above the slowest expected handler.
+- Let one layer compress responses, the application through ``CompressionMiddleware`` or the proxy with ``COMPRESSION["ENABLED"]`` set to ``False``, see :ref:`deployment-compression`.
+- Keep ``next.middleware.CompressionMiddleware`` listed while ``COMPRESSION["STREAMS"]`` is ``"middleware"``, which ``next.W193`` checks.
+- Check that a page with deferred boundaries streams behind the proxy, with ``curl -N``, see :doc:`platforms`.
+- Set the proxy ``send_timeout`` to a few seconds above ``DEFER["DEADLINE"]``, since a streamed page asks nginx not to buffer it and a client that stops reading holds the stream slot, the worker thread under WSGI, and its connections, see :ref:`deployment-slow-clients`.
 
 See :doc:`wsgi-asgi` for the server choice.
 
@@ -139,9 +151,21 @@ Monitoring
 
 - Forward ``page_rendered`` and ``action_dispatched`` to your metrics pipeline.
 - Forward ``form_validation_failed`` to alerting when failure rate exceeds the baseline.
-- Track ``router_reloaded`` if the project routes through a dynamic router.
+- Track ``routes_reloaded`` if the project routes through a dynamic router.
 - Forward ``sse_stream_opened``, ``sse_stream_closed``, and ``zone_rendered`` when the project uses partial rendering.
+- Forward ``page_stream_closed`` and ``page_stream_declined`` when pages have deferred boundaries, see :doc:`/content/howto/send-boundary-failures-to-sentry-and-tracing`, and alert on ``timeouts``, ``shed``, and ``cut``, since a page whose boundaries all timed out still answers 200, see :doc:`/content/topics/boundaries/streaming`.
+- Handle the ``next.defer`` and ``next.boundaries`` loggers at ``WARNING``, where timeouts, shed jobs, cut streams, absorbed statuses, and deployments that never stream are logged.
+- Point the error tracker at :data:`~django.core.signals.got_request_exception`, which every deferred job that raised outside its error boundaries reaches, and at ``BOUNDARIES["REPORTER"]`` or ``boundary_failed`` for the failures an ``error.djx`` contained, see :doc:`/content/topics/boundaries/errors`.
 - Forward ``message_published``, ``upstream_received``, ``upstream_rejected``, ``stream_subscribed``, and ``stream_unsubscribed`` when the project publishes realtime streams, and watch the Redis connection count and the ``4401`` close rate beside them, see :ref:`deployment-capacity`.
+
+.. _deployment-kill-switch:
+
+Switching boundaries off in an incident
+---------------------------------------
+
+``DEFER["DELIVERY"]["OPTIONS"]["STREAM"]`` set to ``False`` assembles every page inline, and ``DEFER["EXECUTOR"]["PARALLEL"]`` set to ``False`` keeps every job on the request thread.
+Both take effect when the processes restart, and a project policy that reads a shared flag switches streaming off without one.
+Client-trip boundaries answer to the proxy and to ``EPOCH`` instead, see :doc:`/content/howto/switch-boundaries-off-in-an-incident`.
 
 System checks
 -------------
@@ -157,8 +181,9 @@ A clean exit is required for the deployment to proceed.
 
 The ``--deploy`` flag is what matters here, because the framework registers its deployment checks for that flag alone and a plain ``check`` never runs them.
 A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on import, ``next.E084`` for a ``component.py`` that does, and ``next.E072`` for a composed page template that does not compile, and the deployment run repeats them.
-``manage.py check --deploy`` adds these framework warnings.
+``manage.py check --deploy`` adds these framework messages.
 
+- ``next.E223`` reports a boundary token storage whose ``CACHE_ALIAS`` names a ``LocMemCache``.
 - ``next.W083`` reports an asset version that never moves.
 - ``next.W090`` reports a client runtime bundle or lazy chunk the static files storage cannot serve.
 - ``next.W110`` reports a missing ``SITE["URL"]``.
@@ -166,8 +191,10 @@ A plain ``check`` already reports ``next.E017`` for a ``page.py`` that raises on
 - ``next.W111`` reports a closed site that still publishes crawler documents.
 - ``next.W118`` reports a script over plain HTTP.
 - ``next.W119`` reports an insecure consent cookie.
-- ``next.W149`` reports a process-local realtime broker.
+- ``next.W149`` reports a process-local realtime broker in a project that uses realtime.
 - ``next.W151`` reports a Redis subscription pool left at the redis-py default of 100 connections.
+- ``next.W189`` reports the connections one process may hold on a PostgreSQL alias without ``OPTIONS['pool']``, to be multiplied by the worker processes.
+- ``next.W186``, which every ``check`` runs, reports boundary tokens bound to nobody in a project running ``AuthenticationMiddleware``.
 
 See :ref:`ref-system-checks` for the full catalog.
 

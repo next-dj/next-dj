@@ -8,9 +8,9 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 | URL | Description |
 | --- | --- |
-| `/` | Overview with four headline counters in a polling zone, a React sparkline, and a lazy-loaded busiest-pages widget. |
+| `/` | Overview with five headline counters in a polling zone, a React sparkline, a busiest-pages widget that fetches itself once the page loads, and a render-latency table that streams in behind its `loading.djx` and whose `error.djx` stands in for it alone when the counter store loses half of a pair, and a flush history read only once its button is pressed. |
 | `/stats/` | Live page with the Chart.js bar chart and the window filter. `?window=1m`, `?window=5m`, and `?window=1h` each re-aggregate over real minute buckets. |
-| `/stats/pages/` | Per-page render counts pulled from the cumulative `pages.rendered` kind. |
+| `/stats/pages/` | Per-page render counts and mean render times, a page boundary whose table streams in under the stats tabs. |
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
@@ -21,7 +21,7 @@ The page tree is `obs/pages/`. The components live next to the pages that use th
 
 The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
 
-The overview shows the other two zone modes. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders, which shows that the polling works. The busiest-pages widget below the sparkline is a `lazy="load"` zone: the first paint ships only its `{% placeholder %}` branch and the body arrives through one batched zone-GET as soon as the page loads. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so the lazy GET for the widget skips the four counter aggregations it would never read, while the full render still runs them.
+The overview shows a polling zone next to a component that loads later. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the five tiles, so the components counter also counts the poll's own renders, which shows that the polling works. The busiest-pages widget below the sparkline is a deferred component: its `component.py` calls `component.defer("load", props=("limit",))` and the call site passes `limit=5`, so the token the wrapper carries names the component and that one prop, and the first paint ships only the `loading.djx` beside it and the browser fetches the component in one GET as soon as the page loads. The component reads its own rows through `@component.context`, which is what lets it render on that later request without the page. A request of its own can fail on the way, so an `error.djx` stands in for the widget alone and offers a `data-next-retry` button that sends the request again. The `totals` provider is declared as `@context("totals", zone="overview-totals")`, so a GET of any other zone skips the five counter aggregations it would never read, while the full render still runs them, and the widget's own request never runs page callables at all.
 
 ## How to run
 
@@ -68,7 +68,7 @@ obs/
 ├── apps.py                   <- registers the jsx kind and the metric-pulse verb
 ├── models.py                 <- MetricSnapshot persisted by flush_metrics
 ├── forms.py                  <- WindowFilterForm, partial apply emits metric-pulse
-├── metrics.py                <- LocMemCache counter API, bucketed and cumulative
+├── metrics.py                <- LocMemCache counter API, bucketed and cumulative, mean render times
 ├── backends.py               <- CountingComponentsBackend, BabelJsxBackend
 ├── static_policies.py        <- InstrumentedDedup
 ├── serializers.py            <- PydanticJsContextSerializer + WrappedJsContextSerializer
@@ -78,10 +78,12 @@ obs/
 ├── management/commands/flush_metrics.py
 └── pages/
     ├── page.py               <- @context totals
-    ├── template.djx          <- poll zone with the overview grid, React sparkline, lazy busiest-pages widget
+    ├── template.djx          <- poll zone with the overview grid, React sparkline, deferred busiest-pages widget, streamed latency widget, flush history on demand
     ├── _components/
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
-    │   ├── busiest_pages/    <- lazy-zone body, component-level top_by_kind lookup
+    │   ├── busiest_pages/    <- component.defer("load", props=("limit",)), a skeleton loading.djx, an error.djx with a retry, its own top_by_kind lookup
+    │   ├── flush_history/    <- component.defer("manual"), the button in loading.djx, a retry in error.djx, the minutes flush_metrics ran in
+    │   ├── latency_widget/   <- mean render time per page, streamed behind loading.djx, error.djx contains its failures
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
     │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, chart.js cdn via stats/page.py
@@ -98,7 +100,7 @@ obs/
         ├── template.djx      <- live-totals zone
         ├── template.js       <- defineOp("metric-pulse") flash handler, co-located
         ├── template.css      <- metric-pulse keyframe, co-located
-        ├── pages/
+        ├── pages/            <- page.defer(timeout="3s"), loading.djx and error.djx beside page.py, a page boundary
         ├── components/
         ├── forms/
         └── static/
@@ -218,7 +220,7 @@ The same `Next._init(...)` payload carries the keys the framework owns outright.
 
 ### 6. The receivers and the counter keys
 
-[obs/signals.py](obs/signals.py) wires the framework signals of nine groups. Every receiver delegates to `metrics.incr(kind, key)`, which bumps both the cumulative counter and the current minute bucket. The handlers stay thin because the example is a map between signal names and metric keys.
+[obs/signals.py](obs/signals.py) wires the framework signals of ten groups. Every receiver delegates to `metrics.incr(kind, key)`, which bumps both the cumulative counter and the current minute bucket. The handlers stay thin because the example is a map between signal names and metric keys.
 
 A counter is addressed by a `kind` and a `key`. When the interesting part of an event is its subject, the kind names the family and the key carries the subject: a page path, a component name, or an action name. When the event is a bare occurrence, the kind is the group and the key is the signal name.
 
@@ -228,12 +230,13 @@ A counter is addressed by a `kind` and a `key`. When the interesting part of an 
 | deps | `provider_registered` | `deps` | `provider_registered` |
 | pages | `template_loaded`, `context_registered`, `page_rendered` | `pages.template`, `pages.context`, `pages.rendered`, `pages.duration_ms_total` | page path |
 | urls | `route_registered` | `urls.route` | URL path |
-| urls | `router_reloaded` | `urls` | `router_reloaded` |
+| urls | `routes_reloaded` | `urls` | `routes_reloaded` |
 | components | `component_registered`, `components_registered`, `component_rendered` | `components.registered`, `components.rendered` | component name |
 | forms | `action_registered`, `action_dispatched`, `form_validation_failed` | `forms.action_registered`, `forms.action_dispatched`, `forms.validation_failed` | action name |
 | static | `asset_registered`, `collector_finalized`, `html_injected` | `static` | `asset_registered`, `collector_finalized`, `html_injected`, `injected_bytes_total` |
 | server | `watch_specs_ready` | `server` | `watch_specs_ready` |
-| backends | `component_backend_loaded`, `form_backend_loaded`, `partial_backend_loaded`, `router_backend_loaded`, `static_backend_loaded`, `wizard_backend_loaded` | `backends` | backend class name |
+| boundaries | `boundary_failed` | `boundaries.failed` | boundary name |
+| backends | `component_backend_loaded`, `form_backend_loaded`, `partial_backend_loaded`, `page_backend_loaded`, `static_backend_loaded`, `wizard_backend_loaded` | `backends` | backend class name |
 
 The page signals carry an absolute path, so `page_key` in [obs/signals.py](obs/signals.py) rewrites it relative to `BASE_DIR` before it becomes a counter key. Without that step `/stats/pages/` would publish the machine's home directory in every row.
 
@@ -241,7 +244,7 @@ The page signals carry an absolute path, so `page_key` in [obs/signals.py](obs/s
 
 The `backends` group is one receiver for six signals. Every settings-driven backend family (components, form actions, the form wizard, the file router, static assets, and partial rendering) announces a built backend through the same `config` and `instance` payload, so `on_backend_loaded` takes the tuple of all six and keys the counter by `type(instance).__name__`. Nothing in the handler knows which family sent it, which is the point: a new backend family joins the dashboard by being added to `BACKEND_LOADED_SIGNALS`.
 
-Every group has at least one receiver. `TestSignalGroupsCovered` proves it by walking the dashboard and asserting that every group in the table increments at least once. Three signals never fire on a plain render, so the test provokes a settings reload, a provider definition, and a watch-spec resolution inside the recorder window. The settings reload is also what re-arms the `backends` group: a manager builds its backends once and caches them until the settings version moves.
+Every group has at least one receiver. `TestSignalGroupsCovered` proves it by walking the dashboard and asserting that every group in the table but `boundaries` increments at least once, since a healthy walk never fails a boundary and `TestLatencyWidget` provokes that one. Three signals never fire on a plain render, so the test provokes a settings reload, a provider definition, and a watch-spec resolution inside the recorder window. The settings reload is also what re-arms the `backends` group: a manager builds its backends once and caches them until the settings version moves.
 
 ### 7. The filter form, time-bucketing, and `action_dispatched`
 
@@ -253,7 +256,7 @@ The form component lives under [`_components/filter_window/`](obs/pages/_compone
 
 ### 8. A project-defined patch verb, `metric-pulse`
 
-The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which makes the verb available through the generic `op()` channel on the builder. An unregistered verb is refused at build time with `UnknownPatchOpError`. `register_patch_op` raises `BuiltinPatchOpError` for a name that shadows a built-in verb, and the system check `next.E090` reports a name that is no valid verb token. A partial apply returns
+The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. The layout renders the form inside its own `{% zone "stats-filter" %}`, because `live_zone` belongs to the index alone and a form outside a zone would make the layout differ between the tabs. The client router therefore keeps the layout on a tab change and re-renders the form, with the target on `/stats/` and without it elsewhere. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which makes the verb available through the generic `op()` channel on the builder. An unregistered verb is refused at build time with `UnknownPatchOpError`. `register_patch_op` raises `BuiltinPatchOpError` for a name that shadows a built-in verb, and the system check `next.E090` reports a name that is no valid verb token. A partial apply returns
 
 ```python
 Patches(request).morph(zone="live-totals").morph(zone="stats-window").op(
@@ -347,6 +350,8 @@ scrape_configs:
       - targets: ["obs.internal:8000"]
 ```
 
+The exposition runs to tens of kilobytes of text, and Prometheus asks for it with `Accept-Encoding: gzip`, so `next.middleware.CompressionMiddleware`, second in `MIDDLEWARE` right after `SecurityMiddleware`, sends every scrape compressed with no code in the view, which `TestMetricsEndpoint` checks.
+
 In production the endpoint is better kept off the public internet altogether: a reverse proxy that serves `/metrics/` only to the monitoring network, or a separate internal port, with the token as a second line. The series name no user, but they tell an outsider how many people are connected and when.
 
 #### PromQL
@@ -381,6 +386,71 @@ The code here is deliberately single-process. Every uvicorn or gunicorn worker k
 Multiprocess mode changes the Gauge. Each worker writes its own file, and the gauge needs a `multiprocess_mode` that says how to fold them, `livesum` for the open-streams gauge. The live modes drop a worker only when `mark_process_dead` removes its file, so a worker that dies past the exit hook keeps its last count in the sum until the directory is wiped. Process and GC metrics are not part of a multiprocess registry.
 
 A receiver connected while a stream is open never sees that stream close, as the signals reference spells out. These receivers connect at startup, before the first stream, so the gauge never drops below zero.
+
+### 12. A widget that fails alone
+
+The render-latency table on the overview divides the `pages.duration_ms_total` counter of each page by its `pages.rendered` counter. The two sit under separate cache keys, and `LocMemCache` holds at most `MAX_ENTRIES` keys, 300 by default. Once the store is full the next write culls the least recently used third, and `read_all` touches the keys in the arbitrary order of the index set, so a cull can take one half of a pair and keep the other. `read_all` already skips a missing counter, which is harmless for a total and wrong for a ratio, because a duration with no render count beside it has nothing to divide by. [`metrics.latency_by_page`](obs/metrics.py) raises `CounterLostError` instead of inventing a mean.
+
+```
+_components/latency_widget/
+├── component.py     <- @component.context latencies, metrics.latency_by_page(limit=5)
+├── component.djx    <- the shared counter_list as a table
+├── loading.djx      <- the line the shell shows while the means are computed
+└── error.djx        <- the shared alert with the digest as a reference code
+```
+
+The `error.djx` beside `component.djx` is what turns the component into an error boundary. Whatever raises inside it, the context function, the template, or the nested `counter_list`, stops there. The rest of the page renders as usual, and the place of the widget shows `error.djx` inside a `<div data-next-boundary="…" data-next-state="error" data-next-error="error">` wrapper the framework adds. The template reads the call-site context plus `error`, and `error.digest` is the code the `next.boundaries` logger records beside the traceback, so the reference on screen is what an operator searches the log for. Under `DEBUG` the wrapper also shows the exception and its traceback.
+
+```django
+{% #component "alert" variant="warning" title="Render latency is unavailable" %}
+  {% #slot "content" %}
+    <p>The counters behind this widget are incomplete, ...</p>
+    <p class="mt-2 text-xs text-muted-foreground">Reference <code class="font-mono">{{ error.digest }}</code></p>
+  {% /slot %}
+{% /component %}
+```
+
+The response keeps status 200 and goes out with `Cache-Control: private, no-store`, since a page missing one of its widgets must not land in a shared cache. `flush_metrics` empties the store, and from then on every render writes both counters of its pair again, so the widget recovers on its own.
+
+`NextClient` re-raises the first contained failure by default, so no other test can pass over a broken widget unnoticed. `TestLatencyWidget` in [`tests/test_integration.py`](tests/test_integration.py) deletes a render count the way a cull would and asserts that a plain request raises `CounterLostError`. Inside `boundary_errors("render")`, or under the `rendered_boundary_errors` fixture, it asserts the error UI, the rest of the dashboard, the status, the cache header, and the failure `response.boundary_failures` lists. The e2e suite repeats the scenario in a browser.
+
+A failure the `error.djx` contained is a handled error, so it never reaches `got_request_exception` and an access log still reads 200. `next.boundaries.signals.boundary_failed` is sent once per contained failure with the boundary `name`, its `addressing`, the `kind`, the `digest` and the `exception`. [`obs/signals.py`](obs/signals.py) hangs one receiver on it:
+
+```python
+@receiver(boundary_failed)
+def on_boundary_failed(name: str, **kwargs: object) -> None:
+    incr("boundaries.failed", name)
+```
+
+The overview shows the total as a fifth tile, `Boundary failures`, that polls with the other four. A receiver that sent the failure to an error tracker instead would take the same keyword arguments, and the digest it receives is the reference code the visitor sees on screen. `test_each_contained_failure_is_counted_by_its_boundary` renders the overview twice with the culled counter and reads `{"latency_widget": 2}` back, and `test_the_overview_tile_shows_the_failure_total` reads the tile through a zone GET.
+
+### 13. A streamed widget and the press of a link
+
+The `loading.djx` beside the latency widget makes every call of it a `stream` boundary, since its `component.py` names no other mode. The overview goes out as a shell with the loading line in the widget's place, the job reads the counters during the same response, and the table arrives as a chunk that settles the boundary as `ready`. A browser that loads the overview as a document sees the same, a crawler gets the page assembled inline, and under `DEBUG` the `X-Next-Stream` header names the delivery, with the reason when the page is assembled inline. The SQLite database keeps the job on the request thread, which still streams.
+
+The client router asks for that page in two depths. Hovering a link sends `X-Next-Prefetch: 1`, the shell alone with no job run. Pressing a link with the mouse sends `X-Next-Prefetch: full` before the click, an answer that runs the job and streams like a navigation, and the click that follows adopts it instead of sending a request of its own. A hovered link therefore shows the prefetched shell at the click while the full answer streams the table in. A press released off the link aborts its request, a modifier click leaves the press alone, and a touch keeps the shell prefetch, which is what `ROUTER["PRESS"] = "mouse"`, the default, asks for.
+
+`TestLatencyStream` in [`tests/test_integration.py`](tests/test_integration.py) reads the overview as a stream and the two prefetch depths through `NextClient`. [`tests/e2e/test_press.py`](tests/e2e/test_press.py) drives the five pointer paths in a browser that reports a desktop Chrome user agent, since the default bot pattern of the delivery policy matches `HeadlessChrome`, and holds the widget's job with `next.testing.boundary_gate` so the loading line is on screen until the test lets the job run.
+
+### 14. A page boundary and a widget on demand
+
+The overview streams one widget, and `/stats/pages/` streams the whole body of a page. Its directory holds a `loading.djx` and an `error.djx` beside `page.py`, which makes the page itself a boundary.
+
+```
+stats/pages/
+├── page.py          <- page.defer(timeout="3s"), a guard on the window, @context rows
+├── template.djx     <- the table of render counts and mean render times
+├── loading.djx      <- a skeleton with an sr-only label
+└── error.djx        <- the shared alert with the digest as a reference code
+```
+
+The `rows` callable walks the whole counter index twice, once for the render counts and once for the durations it divides by them, which is the slow part of the page on a store that has seen many pages. The stats layout above the directory renders in the shell, the heading, the window label and the tabs, and the skeleton sits where the layout places the body, so a tab change shows the tabs at once and the table when its job settles. `page.defer(timeout="3s")` gives that job three seconds before the boundary settles as `timeout`.
+
+The mean of a page reads both halves of a counter pair, so the culled pair of section 12 fails this page too. The `error.djx` in the directory holds that failure where the table would be, under the same tabs. A streamed page has already sent its status, so it stays 200 with the error UI in a chunk, while a page assembled inline answers 500 with the layout around the error UI, as an error boundary of a page body does. `TestPageRendersBoundary` reads both through `get_stream` and `get`.
+
+Only a guard can answer with a status there. A context callable under a `loading.djx` runs in the job after the shell, so a `raise Http404` in it would arrive as the error UI of a page that already said 200, and `manage.py check` warns about it as `next.W169`. `known_window` is declared `@context("known_window", guard=True)`, which runs it before the first byte and lets `/stats/pages/?window=2d` answer an honest 404 under a streaming server too. The `window` it reads comes from the stats page above, and the tabs offer `1m`, `5m` and `1h`. `test_an_unknown_window_stays_a_404_when_the_page_streams` shows that `get_stream` finds no stream to read, since the answer is the 404 itself.
+
+The flush history on the overview is the other end of the scale. `flush_metrics` adds a row per counter on every run, so the table grows without bound, and nobody needs it on every visit. Its `component.py` calls `component.defer("manual")`, and its `loading.djx` holds a `<button data-next-fetch>`, so the first paint carries the button and a token, and the browser fetches the component only when the button is pressed. `MetricSnapshot.objects.flushes(limit)` groups the rows by the minute they were written in. `TestFlushHistory` asserts the button on the first paint and reads the component through `get_boundary`, as the press does.
 
 ## Out of scope
 

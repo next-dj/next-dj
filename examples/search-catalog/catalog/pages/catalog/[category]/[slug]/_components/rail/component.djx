@@ -1,0 +1,12 @@
+<section class="space-y-3" data-rail="{{ by }}">
+  <h2 class="text-lg font-semibold">{{ title }}</h2>
+  {% if picks %}
+    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {% for product in picks %}
+        <li>{% component "product_card" %}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-muted-foreground">Nothing else in stock yet.</p>
+  {% endif %}
+</section>

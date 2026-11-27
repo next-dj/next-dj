@@ -89,3 +89,52 @@ jobs:
       uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+
+  asgiref:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.asgiref == 'main' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        asgiref: ["asgiref==3.12.0", "main"]
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        sparse-checkout: |
+          pyproject.toml
+          tests
+          .github
+        sparse-checkout-cone-mode: false
+    - name: Download prebuilt wheel and requirements
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: next-dj-dist
+        path: dist
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.12"
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        version: "0.11.2"
+    - name: Create venv and install wheel + dev requirements
+      run: |
+        uv venv --python 3.12
+        uv pip install -r dist/requirements-dev.txt
+        uv pip install --no-deps --force-reinstall dist/*.whl
+    - name: Install asgiref ${{ matrix.asgiref }}
+      if: matrix.asgiref != 'main'
+      run: uv pip install "${{ matrix.asgiref }}"
+    - name: Install asgiref from its main branch
+      if: matrix.asgiref == 'main'
+      run: uv pip install "asgiref @ git+https://github.com/django/asgiref@main"
+    - name: Verify asgiref version
+      run: |
+        uv run --no-project python -c 'import asgiref; print(f"asgiref version: {asgiref.__version__}")'
+    - name: Run the asgiref contract tests
+      run: >-
+        uv run --no-project pytest tests/bridge tests/defer/executors
+        tests/defer/coordinator tests/deps/test_loader.py
+        -p no:randomly --no-cov

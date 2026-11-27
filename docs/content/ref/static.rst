@@ -46,6 +46,7 @@ Assets
 
 ``static_name`` is what the default backend resolves through, and it is exported so a custom backend reads a reference the way core does.
 It returns the normalised name a reference holds, ``None`` for a reference that is already a URL, and raises ``StaticAssetTraversalError`` for a name that climbs above the staticfiles root.
+``default_kinds`` is the ``KindRegistry`` every backend reads, so ``default_kinds.register`` in ``AppConfig.ready`` adds an asset kind, and ``default_placeholders`` is the ``PlaceholderRegistry`` of the slots a page renders its assets into.
 
 Errors
 ~~~~~~
@@ -66,7 +67,7 @@ Manager
 It builds its wrapped ``StaticManager`` lazily on first access.
 ``reset_default_manager`` drops that wrapped instance so the next access rebuilds it, which keeps the manager consistent when ``NEXT_FRAMEWORK`` changes under ``override_settings``.
 ``get_static_manager`` returns the live ``StaticManager`` instance behind the lazy ``default_manager`` handle, and ``next.testing.patching`` uses it to patch a backend directly in tests.
-``collect_component_assets`` is the entry point that folds a component's co-located assets into a caller-supplied collector, and ``next.templatetags.components`` and ``next.forms.widgets`` both call it.
+``collect_component_assets`` is the entry point that folds a component's co-located assets into a caller-supplied collector, and a component call and ``next.forms.widgets`` both reach it through the ``StaticAssets`` port.
 
 Ports
 ~~~~~
@@ -84,6 +85,8 @@ Injection
    :members:
 
 ``StaticManager.inject`` delegates to a ``PlaceholderInjector`` bound to the manager, which reads the active backend, the URL rewrite, and the script builder through it.
+The injector runs the page script providers of ``next.ports.page_scripts`` in rank order, so the release, the realtime offer, the stream flag, the client router and the third-party scripts reach a page without the static area naming any of them, see :doc:`ports`.
+``InjectionProvider.listed_chunks`` takes the optional chunks a render switches on, ``dev`` under ``DEBUG`` and whatever a provider lists, such as ``ws``.
 
 Runtime
 ~~~~~~~

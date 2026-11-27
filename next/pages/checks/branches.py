@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from next.checks.common import (
     first_visit,
     get_page_roots,
-    get_router_manager,
+    get_route_manager,
     page_tree_skip_names,
 )
 from next.pages.loaders import PAGE_MODULE, shared_layouts
@@ -128,11 +128,11 @@ def empty_branches(action_dirs: Collection[Path]) -> Iterator[EmptyBranch]:
 
     `action_dirs` names the directories whose files declare an action.
     """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return
     seen: set[Path] = set()
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         skip_dir_names = page_tree_skip_names(router)
         for root in get_page_roots(router):
             if not root.path.is_dir():

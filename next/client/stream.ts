@@ -6,6 +6,7 @@ import {
   ATTR_ZONE,
   ECHO_LIMIT,
   EPOCH,
+  PROTOCOL,
   SEQ,
   SERVER_TIME,
   TOPIC,
@@ -84,6 +85,8 @@ export interface StreamDeps {
   pageUrl?: (el: Element) => string;
   // The monotonic clock the resume gate reads to measure the hidden span.
   now?: () => number;
+  // Told when a hello names another wire protocol, the runtime then reloads once.
+  release?: (current: boolean) => void;
 }
 
 /** The bridge handle, scanned per apply and fed own request ids by the wire. */
@@ -107,6 +110,7 @@ export interface Stream {
   ): () => void;
   /** Metadata for the event currently being delivered to a callback. */
   meta(): StreamMeta | undefined;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -374,6 +378,12 @@ export function createStream(deps: StreamDeps): Stream {
   function onHello(connection: Connection, data: string): void {
     const raw = control(data);
     if (raw === undefined) return;
+    // A server of another release speaks frames this runtime may misread.
+    if (raw.protocol !== PROTOCOL) {
+      detachConnection(connection, "protocol");
+      deps.release?.(false);
+      return;
+    }
     connection.live = true;
     sampleTime(raw[SERVER_TIME]);
     const topics = raw.topics;
@@ -644,7 +654,7 @@ export function createStream(deps: StreamDeps): Stream {
     else resume();
   });
 
-  return {
+  const exposed = {
     scan,
     remember,
     forget,
@@ -654,10 +664,13 @@ export function createStream(deps: StreamDeps): Stream {
     on(topic, name, callback) {
       const listener = { topic, name, callback };
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      return () => void listeners.delete(listener);
     },
     meta: () => currentMeta,
-    _reset() {
+  } satisfies Omit<Stream, "_reset"> as Stream;
+
+  TEST: {
+    exposed._reset = () => {
       for (const connection of connections.values()) {
         connection.control.close();
         cancelResync(connection);
@@ -672,6 +685,8 @@ export function createStream(deps: StreamDeps): Stream {
       pausedAt = 0;
       if (detachVisibility !== null) detachVisibility();
       detachVisibility = null;
-    },
-  };
+    };
+  }
+
+  return exposed;
 }

@@ -6,10 +6,10 @@ from django.apps import apps
 from django.conf import settings
 from django.contrib.messages.storage.cookie import CookieStorage
 from django.contrib.messages.storage.fallback import FallbackStorage
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.utils.module_loading import import_string
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.forms.dispatch.permissions import COMPONENT_MODULE, owner_rule
 from next.pages.access import render_guard
 from next.pages.checks.access import access_in_use, load_declarations, tree_pages

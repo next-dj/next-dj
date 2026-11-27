@@ -47,6 +47,53 @@ class TestNextStatReloader:
             next(gen)
             mock_snapshot.assert_called()
 
+    def test_boundary_files_are_read_only_once_a_tree_changed_shape(
+        self, tmp_path: Path
+    ) -> None:
+        """A component `error.djx` that appears is seen on the next tick, none before."""
+        pages = tmp_path / "pages"
+        card = tmp_path / "components" / "card"
+        pages.mkdir()
+        card.mkdir(parents=True)
+        reloader = NextStatReloader()
+        with (
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch(
+                "next.server.autoreload.get_pages_directories_for_watch",
+                return_value=[pages],
+            ),
+            patch(
+                "next.server.autoreload.component_watch_roots",
+                return_value=[card.parent],
+            ),
+            patch("next.server.autoreload.refresh_component_files") as refresh,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+            assert refresh.call_count == 1
+            (card / "error.djx").write_text("failed")
+            os.utime(card, (card.stat().st_atime, card.stat().st_mtime + 5))
+            next(gen)
+            next(gen)
+            assert refresh.call_count == 2
+
+    def test_unread_page_trees_refresh_the_boundary_files_every_tick(self) -> None:
+        reloader = NextStatReloader()
+        with (
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch(
+                "next.server.autoreload.get_pages_directories_for_watch",
+                side_effect=OSError("unreadable"),
+            ),
+            patch("next.server.autoreload.refresh_component_files") as refresh,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+
+        assert refresh.call_count == 2
+
     @pytest.mark.parametrize(
         ("reloader_tick_scenario", "num_ticks", "expect"),
         [

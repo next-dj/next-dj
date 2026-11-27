@@ -13,7 +13,7 @@ from next.components.sources import (
     reached_components,
     reset_components_manager_cache,
 )
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from tests.support import DummyComponentsBackend
 
 
@@ -47,7 +47,7 @@ class TestComponentsManagerCache:
     def test_settings_reloaded_signal_resets_cache(self) -> None:
         with patch("next.components.sources.ComponentsManager") as mock_cls:
             get_components_manager()
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             get_components_manager()
         assert mock_cls.call_count == 2
 
@@ -109,7 +109,7 @@ class TestSerializedComponentContextKeys:
         )
         assert self._keys(backend) == []
 
-    def test_backend_without_component_files_is_skipped(self, tmp_path: Path) -> None:
+    def test_backend_without_component_files_is_skipped(self) -> None:
         assert self._keys(DummyComponentsBackend({})) == []
 
 

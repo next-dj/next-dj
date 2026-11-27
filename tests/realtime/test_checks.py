@@ -1,7 +1,10 @@
 import importlib.util
 import math
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
+from pathlib import Path
 from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.core.checks import CheckMessage, Error
@@ -10,13 +13,16 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.test import override_settings
 from django.urls import URLPattern, include, path
+from django.views import View
 
+from next.identity import TicketBinding
 from next.realtime import (
     MemoryBroker,
     RedisBroker,
     SessionBinding,
     SignedCookieBinding,
-    TicketBinding,
+    Upstream,
+    checks,
 )
 from next.realtime.checks import (
     check_broker_deployment,
@@ -24,11 +30,13 @@ from next.realtime.checks import (
     check_shared_broker,
     check_ticket_introspection,
 )
+from next.realtime.handlers import HandlerRegistry, Route
 from next.realtime.manager import BrokerManager
 from next.realtime.replay import MAX_SIZE, MAX_TTL
 from next.realtime.transports import active_transports
 from next.realtime.views import TicketIntrospectionView
 from tests.support.cases.realtime import INVALID_CONNECTION_LIMITS
+from tests.support.checks import written
 
 
 class CustomBroker(MemoryBroker):
@@ -74,7 +82,9 @@ def test_check_builtin_backend_path_bad_options_report_errors() -> None:
 def test_check_ignores_missing_or_non_mapping_realtime_setting() -> None:
     with override_settings(NEXT_FRAMEWORK={}):
         assert check_realtime_settings() == []
-    with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
+    with written({"REALTIME": "invalid"}):
+        assert check_realtime_settings() == []
+    with written({"REALTIME": None}), override_settings(MIDDLEWARE=[]):
         assert check_realtime_settings() == []
 
 
@@ -382,7 +392,7 @@ def test_check_ignores_server_side_or_unimportable_session_engines(engine: str) 
     assert _ids(NEXT_FRAMEWORK=_WS, SESSION_ENGINE=engine) == set()
 
 
-@pytest.mark.parametrize("config", [{}, {"REALTIME": None}, None, {"REALTIME": {}}])
+@pytest.mark.parametrize("config", [{}, None, {"REALTIME": {}}])
 def test_check_automatic_transports_leave_warnings_to_the_mounted_app(
     config: object,
 ) -> None:
@@ -483,15 +493,6 @@ def test_check_w149_is_a_deployment_check() -> None:
         include_deployment_checks=True
     )
     assert check_shared_broker not in check_registry.get_checks()
-
-
-def test_check_w149_warns_the_default_memory_broker() -> None:
-    with override_settings(NEXT_FRAMEWORK={}):
-        [warning] = check_shared_broker()
-    assert warning.id == "next.W149"
-    assert "MemoryBroker keeps topics inside one process" in warning.msg
-    assert "next.realtime.RedisBroker" in str(warning.hint)
-    assert "SILENCED_SYSTEM_CHECKS" in str(warning.hint)
 
 
 def test_check_w149_warns_a_memory_broker_subclass() -> None:
@@ -694,3 +695,83 @@ def test_check_reports_upstream_and_tunnel_limits(
     with override_settings(NEXT_FRAMEWORK={"REALTIME": realtime}):
         messages = check_realtime_settings()
     assert [message.id for message in messages] == ids
+
+
+def _typing(upstream: Upstream) -> None:
+    pass
+
+
+@contextmanager
+def _unused_realtime(
+    urlconf: object = "", pages: tuple[Path, ...] = ()
+) -> Generator[None]:
+    """Run the deploy check on a project that touches realtime only as asked."""
+    with (
+        override_settings(NEXT_FRAMEWORK={}, ROOT_URLCONF=urlconf),
+        patch.object(checks, "handler_registry", HandlerRegistry()),
+        patch.object(checks, "get_route_manager", return_value=(MagicMock(), [])),
+        patch.object(checks, "iter_existing_scanned_pages", return_value=pages),
+    ):
+        yield
+
+
+def _page(tmp_path: Path, source: str) -> Path:
+    page_file = tmp_path / "page.py"
+    page_file.write_text(source)
+    return page_file
+
+
+def test_check_w149_stays_quiet_for_a_project_without_realtime() -> None:
+    with _unused_realtime():
+        assert check_shared_broker() == []
+
+
+def test_check_w149_stays_quiet_without_a_route_manager() -> None:
+    with (
+        _unused_realtime(),
+        patch.object(checks, "get_route_manager", return_value=(None, [])),
+    ):
+        assert check_shared_broker() == []
+
+
+def test_check_w149_warns_the_default_memory_broker_of_an_upstream_handler() -> None:
+    with _unused_realtime():
+        checks.handler_registry.add(Route.bind("room:{id}", "typing", _typing))
+        [warning] = check_shared_broker()
+    assert warning.id == "next.W149"
+    assert "MemoryBroker keeps topics inside one process" in warning.msg
+    assert "next.realtime.RedisBroker" in str(warning.hint)
+    assert "SILENCED_SYSTEM_CHECKS" in str(warning.hint)
+
+
+def test_check_w149_warns_a_project_that_configures_realtime() -> None:
+    with (
+        _unused_realtime(),
+        override_settings(NEXT_FRAMEWORK={"REALTIME": {"HEARTBEAT": 10}}),
+    ):
+        assert {message.id for message in check_shared_broker()} == {"next.W149"}
+
+
+def test_check_w149_warns_a_project_that_routes_tickets() -> None:
+    with _unused_realtime(_INCLUDED):
+        assert {message.id for message in check_shared_broker()} == {"next.W149"}
+
+
+@pytest.mark.parametrize(
+    "urlconf", ["tests.realtime.absent_urls", _urlconf(path("ping/", View.as_view()))]
+)
+def test_check_w149_stays_quiet_for_urls_without_tickets(urlconf: object) -> None:
+    with _unused_realtime(urlconf):
+        assert check_shared_broker() == []
+
+
+def test_check_w149_warns_a_page_that_streams_topics(tmp_path: Path) -> None:
+    page_file = _page(tmp_path, "from next.realtime import TopicStream\n")
+    with _unused_realtime(pages=(tmp_path / "missing.py", page_file)):
+        assert {message.id for message in check_shared_broker()} == {"next.W149"}
+
+
+def test_check_w149_stays_quiet_for_pages_without_topics(tmp_path: Path) -> None:
+    page_file = _page(tmp_path, "from next.realtime import MemoryBroker\nVALUE = 1\n")
+    with _unused_realtime(pages=(page_file,)):
+        assert check_shared_broker() == []

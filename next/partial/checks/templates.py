@@ -5,11 +5,11 @@ Compiling the whole tree makes it a deployment check.
 
 from typing import TYPE_CHECKING
 
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 from django.template import TemplateDoesNotExist, TemplateSyntaxError
 
-from next.checks import NEXT
-from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.checks import NEXT, register
+from next.checks.common import first_visit, get_route_manager, iter_scanned_page_pairs
 from next.pages import page
 from next.pages.checks.composed import is_templated
 
@@ -29,11 +29,11 @@ def check_composed_templates_compile(
     The zone checks skip such a page, so the error would otherwise surface as a 500.
     """
     messages: list[CheckMessage] = []
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return messages
     seen: set[Path] = set()
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):
             if not first_visit(page_path, seen) or not is_templated(page_path):
                 continue

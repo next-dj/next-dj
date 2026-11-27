@@ -1,7 +1,6 @@
 """The site identity that `NEXT_FRAMEWORK["SITE"]` declares, read once per reload."""
 
 import enum
-import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from django.http import HttpRequest
 from django.http.request import split_domain_port
 from django.utils.functional import Promise
 
+from next.caches import FRAMEWORK, memo, pure_cache
 from next.conf.defaults import DEFAULTS
 from next.conf.imports import import_callable
 from next.conf.scopes import scope_value
@@ -74,7 +74,7 @@ def is_url_literal(value: str) -> bool:
     return "://" in value
 
 
-@functools.lru_cache(maxsize=256)
+@pure_cache(256)
 def url_origin(value: str) -> tuple[str, str] | None:
     """Return the scheme and the host of an http or https origin, else `None`.
 
@@ -116,7 +116,7 @@ def _indexable_rule(value: object) -> IndexableRule | None:
     return value if isinstance(value, bool) or callable(value) else None
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def site_config() -> SiteConfig:
     """Return the site identity read from the settings, memoised until a reload."""
     name = scope_value("SITE", "NAME")

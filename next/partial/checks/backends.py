@@ -4,10 +4,12 @@ from typing import Final
 
 from django.conf import settings
 from django.contrib.staticfiles.storage import ManifestFilesMixin
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import import_class_cached, next_framework_settings
+from next.conf.checks import error_for_unusable_path
+from next.conf.imports import class_problem
 from next.partial.backends import PartialProtocolBackend
 from next.partial.manager import MANIFEST_VERSION, PARTIAL_BACKENDS_KEY, VERSION_OPTION
 from next.partial.sse import (
@@ -53,7 +55,7 @@ def check_partial_backends_is_a_list(
 ) -> list[CheckMessage]:
     """Error when `PARTIAL_BACKENDS` is not a list (`next.E067`).
 
-    The settings layer silently drops a non-list value, so only this reports it.
+    The settings merge keeps the default for a non-list value, so only this names it.
     """
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
@@ -64,8 +66,8 @@ def check_partial_backends_is_a_list(
     return [
         Error(
             f"NEXT_FRAMEWORK[{PARTIAL_BACKENDS_KEY!r}] must be a list. The "
-            "value is ignored, so the default protocol backend loads instead "
-            "of the configured one.",
+            "settings keep the default protocol backend and every request raises "
+            "ImproperlyConfigured until it is fixed.",
             obj=settings,
             id=E_BACKENDS_NOT_A_LIST,
         )
@@ -111,6 +113,29 @@ def check_partial_backend_names_a_path(
                 id=E_BACKEND_WITHOUT_PATH,
             )
         )
+    return messages
+
+
+@register(NEXT)
+def check_partial_backend_paths(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Report a PARTIAL_BACKENDS entry whose BACKEND names no usable backend."""
+    messages: list[CheckMessage] = []
+    for index, config in enumerate(partial_backend_configs()):
+        dotted = config.get("BACKEND") if isinstance(config, dict) else None
+        if not isinstance(dotted, str):
+            continue
+        problem = class_problem(dotted, PartialProtocolBackend)
+        if problem is not None:
+            messages.append(
+                error_for_unusable_path(
+                    f"NEXT_FRAMEWORK[{PARTIAL_BACKENDS_KEY!r}][{index}]['BACKEND']",
+                    dotted,
+                    problem,
+                    "the first partial request raises ImproperlyConfigured",
+                    "Name a concrete PartialProtocolBackend subclass, such as "
+                    "'next.partial.JsonPartialProtocolBackend'.",
+                )
+            )
     return messages
 
 
@@ -322,6 +347,7 @@ __all__ = [
     "check_manifest_version_has_manifest_storage",
     "check_partial_backend_implements_stream_data",
     "check_partial_backend_names_a_path",
+    "check_partial_backend_paths",
     "check_partial_backend_sse_options",
     "check_partial_backends_is_a_list",
     "check_single_partial_backend",

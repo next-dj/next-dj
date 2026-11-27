@@ -30,3 +30,8 @@
     </a>
   </p>
 </article>
+
+<div class="mt-8 grid gap-8 lg:grid-cols-2">
+  {% component "rail" by="category" title="More in this category" %}
+  {% component "rail" by="price" title="At a similar price" %}
+</div>

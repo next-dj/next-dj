@@ -1,4 +1,4 @@
-"""URL routing, router backends, and URL parameter injection providers.
+"""URL routing, page backends, and URL parameter injection providers.
 
 `_LazyUrlPatterns` and the tree-walk helpers are internals, kept out of `__all__`.
 """
@@ -6,14 +6,14 @@
 from next.utils import PageRoot
 
 from . import checks, signals
-from .backends import FileRouterBackend, RouterBackend
+from .backends import FilePageBackend, PageBackend
 from .errors import (
     DuplicateURLParameterError,
     InvalidURLParameterError,
     ReservedURLParameterError,
     URLParameterError,
 )
-from .manager import RouterManager, app_name, router_manager, urlpatterns
+from .manager import RouteManager, app_name, route_manager, urlpatterns
 from .markers import (
     DQuery,
     DUrl,
@@ -33,14 +33,14 @@ __all__ = [
     "DQuery",
     "DUrl",
     "DuplicateURLParameterError",
-    "FileRouterBackend",
+    "FilePageBackend",
     "HttpRequestProvider",
     "InvalidURLParameterError",
+    "PageBackend",
     "PageRoot",
     "QueryParamProvider",
     "ReservedURLParameterError",
-    "RouterBackend",
-    "RouterManager",
+    "RouteManager",
     "TrieURLResolver",
     "URLParameterError",
     "URLPatternParser",
@@ -53,7 +53,7 @@ __all__ = [
     "page_reverse_in",
     "page_reverse_lazy",
     "pages",
-    "router_manager",
+    "route_manager",
     "signals",
     "urlpatterns",
     "with_query",

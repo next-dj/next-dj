@@ -6,16 +6,19 @@ import inspect
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple, get_origin
 
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     RegistrationSubject,
     discover_page_registrations,
-    get_router_manager,
+    get_route_manager,
     registration_file_errors,
 )
+from next.deps.errors import DependencyCycleError
 from next.deps.introspect import HINT_ERRORS, cached_type_hints
+from next.deps.resolver import current_resolver
+from next.introspect import callable_name
 from next.pages.manager import page
 
 from .access import tree_pages
@@ -25,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from next.pages.graph import ContextGraph
     from next.pages.registry import ZoneBinding
 
 
@@ -47,10 +51,10 @@ def load_routed_pages() -> list[tuple[str, Path]] | None:
 
     `None` means the routers failed to load, which `next.E007` reports.
     """
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return None
-    return discover_page_registrations(router_manager)
+    return discover_page_registrations(route_manager)
 
 
 def loaded_page_contexts() -> list[PageContexts]:
@@ -188,9 +192,94 @@ def check_single_keyless_context(*args: object, **kwargs: object) -> list[CheckM
     return errors
 
 
+def _async_pages() -> list[Path]:
+    """Return every routed `page.py` whose render runs an async context callable."""
+    return [
+        entry.page_path
+        for entry in loaded_page_contexts()
+        if page.contexts.awaits(entry.page_path)
+    ]
+
+
+def _serialising_reads(page_path: Path, graph: ContextGraph) -> list[CheckMessage]:
+    """Return a warning for each sync callable naming the key of an async one.
+
+    A serial graph overlaps nothing, so only a parallel one has an overlap to lose.
+    """
+    if not graph.parallel:
+        return []
+    warnings: list[CheckMessage] = []
+    steps = graph.steps
+    for index, step in enumerate(steps):
+        if step.is_async:
+            continue
+        awaited = sorted(
+            callable_name(steps[earlier].func)
+            for earlier in graph.reads[index]
+            if steps[earlier].is_async
+        )
+        if not awaited:
+            continue
+        warnings.append(
+            DjangoWarning(
+                f"The sync @context callable '{callable_name(step.func)}' of "
+                f"{page_path} reads the async {', '.join(awaited)} by name, so it "
+                "waits for them on the request thread and the callables after it "
+                "cannot overlap them.",
+                hint="Declare the reading callable 'async def', or pass the value "
+                "it needs another way.",
+                obj=str(page_path),
+                id="next.W163",
+            )
+        )
+    return warnings
+
+
+@register(Tags.templates, NEXT)
+def check_async_context_reads(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Warn about a sync `@context` reading an async one by name (`next.W163`)."""
+    warnings: list[CheckMessage] = []
+    for page_path in _async_pages():
+        warnings.extend(_serialising_reads(page_path, page.contexts.graph(page_path)))
+    return warnings
+
+
+@register(Tags.templates, NEXT)
+def check_async_dependency_cycles(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Warn about a named-dependency cycle an async `@context` reaches (`next.W168`).
+
+    The async plan compiler finds it without running anything, the render raises it.
+    """
+    warnings: list[CheckMessage] = []
+    resolver = current_resolver()
+    for page_path in _async_pages():
+        for step in page.contexts.graph(page_path).steps:
+            if not step.is_async:
+                continue
+            name = callable_name(step.func)
+            try:
+                resolver.awaits(step.func, key=f"{page_path}:{name}")
+            except DependencyCycleError as error:
+                warnings.append(
+                    DjangoWarning(
+                        f"The async @context callable '{name}' of {page_path} "
+                        f"reaches a cycle of named dependencies: {error}",
+                        hint="Break the cycle, one of the dependencies must stop "
+                        "naming the other.",
+                        obj=str(page_path),
+                        id="next.W168",
+                    )
+                )
+    return warnings
+
+
 __all__ = [
     "PageContexts",
     "annotation_mismatch",
+    "check_async_context_reads",
+    "check_async_dependency_cycles",
     "check_context_functions",
     "check_context_registration_files",
     "check_single_keyless_context",

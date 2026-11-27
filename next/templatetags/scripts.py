@@ -19,6 +19,7 @@ from next.consent.manager import consent_configured, server_mode
 from next.consent.markers import joint_category
 from next.diagnostics import FailureLog
 from next.pages.responses import vary_on_cookie
+from next.partial.keys import CONSENTED_ATTR
 from next.scripts.manager import CONSENT_NOTE, GATED_NOTE, SCRIPT_NOTE, GatedNote
 from next.scripts.nodes import ConsentedTagNode
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY
@@ -142,7 +143,8 @@ class ConsentedNode(ConsentedTagNode):
             collector.note(CONSENT_NOTE, category)
         if not server_mode(request):
             return format_html(
-                '<template data-next-consented="{}">{}</template>{}{}',
+                '<template {}="{}">{}</template>{}{}',
+                CONSENTED_ATTR,
                 category,
                 SafeString(self._render_held(context, collector, category)),
                 SafeString(self.denied.render(context)),

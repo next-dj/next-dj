@@ -55,7 +55,7 @@ gate.save(update_fields=['enabled', 'updated_at'])
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "frame")],
             "PAGES_DIR": "pages",
@@ -277,23 +277,11 @@ The two database receivers mean the cache and the DB can never drift apart. Togg
 
 `component_rendered` is the components-area counterpart, sent from `next.components` once per component render with the `ComponentInfo` in `info`. `_count_feature_guard` filters on `info.name` and bumps a second counter. The signal fires after the render regardless of what came back, so a `feature_guard` whose `render()` returned an empty string still counts. The number answers how often the gate was consulted, not how often it let something through. `/admin/metrics/` shows it as a stat card beside the per-page table.
 
-### 9. Shared `nav_link` component: active state from `request.resolver_match`
+### 9. Shared `nav_link` component: active state from the framework's marks
 
-Same pattern as the other examples, with no duplication and no manual "current page" flags. The link component reads the view name from the resolver and compares:
+Same pattern as the other examples, with no duplication and no manual "current page" flags. The header links fill the `nav` slot of the shared `app_shell`, which renders `<nav aria-label="Main">`, and the subnav sits inside the shared `nav` component. The framework marks each anchor inside a navigation container on every full page: `aria-current="page" data-next-current="page"` on a link to the current path and `data-next-current="ancestor"` on a link to a segment prefix of it.
 
-```python
-@component.context("is_active")
-def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
-    match = getattr(request, "resolver_match", None)
-    if match is None:
-        return False
-    view_name = match.view_name
-    if active_when:
-        return active_when in view_name
-    return view_name == url_name
-```
-
-The root header uses `active_when="page_admin"` so `/admin/` and `/admin/metrics/` both highlight the "Admin" tab. The subnav inside the admin layout uses exact matches (`next:page_admin`, `next:page_admin_metrics`).
+The shared [`nav_link`](../_shared/_components/nav_link/component.py) styles those marks through `aria-[current=page]:` and, on the `bar` variant, `data-[next-current=ancestor]:`. The header "Admin" link therefore reads as current on `/admin/` and on `/admin/metrics/` with no extra argument, while "Active" points at `/`, which is never an ancestor. The subnav uses the `tabs` variant, which styles the current page alone, so "Flags" stays dim on `/admin/metrics/`.
 
 ### 10. URL names from the file router
 

@@ -11,15 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.pages.responses import cache_problems
 from next.seo.discovery import SLUG, SOURCE_NAMES, SeoRoot, SeoSource
 from next.seo.markers import CHANGEFREQS, RobotsRule, is_number

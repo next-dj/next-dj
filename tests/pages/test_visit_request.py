@@ -1,14 +1,28 @@
 from pathlib import Path
 
 import pytest
-from django.http import HttpResponse
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse
+from django.middleware.csrf import CsrfViewMiddleware
 from django.test import RequestFactory
-from django.urls import clear_script_prefix, set_script_prefix
+from django.test.utils import override_script_prefix
 
+from next.csrf import NONCE_ATTR, nonce_minted
 from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.pages import page
 from next.pages.loaders import _load_python_module
-from next.pages.visits import visit_request
+from next.pages.metadata.resolve import RESOLVED_METADATA_ATTR
+from next.pages.responses import (
+    RENDER_FLAGS,
+    ResponsePolicy,
+    cache_control,
+    cookie_varies,
+    finish_response,
+    personal_render,
+)
+from next.pages.visits import HANDED_BACK, hand_back, visit_request, visiting
 from next.testing import NextClient, envelope_of
+from tests.support.pages import write_page
 
 
 _SITE_PAGES = Path(__file__).resolve().parent.parent / "site_pages"
@@ -17,11 +31,9 @@ _ACTION_PATH = "/_next/form/uid/"
 
 
 @pytest.fixture()
-def dispatch_post():
+def dispatch_post(rf: RequestFactory):
     """Return a POST to the dispatch endpoint, the shape an origin is posted with."""
-    return RequestFactory().post(
-        _ACTION_PATH, data={"note": "hi"}, QUERY_STRING="stale=1"
-    )
+    return rf.post(_ACTION_PATH, data={"note": "hi"}, QUERY_STRING="stale=1")
 
 
 class TestVisitRequestPresentsTheOriginUrl:
@@ -99,11 +111,8 @@ class TestVisitRequestUnderAScriptPrefix:
     """A sub-path deployment strips its mount point from `path_info`."""
 
     def test_path_info_drops_the_prefix(self, dispatch_post) -> None:
-        set_script_prefix("/app/")
-        try:
+        with override_script_prefix("/app/"):
             visit = visit_request(dispatch_post, "/app/notes/")
-        finally:
-            clear_script_prefix()
         assert (visit.path, visit.path_info) == ("/app/notes/", "/notes/")
 
 
@@ -150,3 +159,101 @@ class TestShapeGuardedOriginAnswersAsOnAVisit:
         self, shaped_client: NextClient
     ) -> None:
         assert b"classified" not in _post_note(shaped_client, "/shaped/").content
+
+
+_MARKING_RENDER = """
+from django.http import HttpRequest, HttpResponseRedirect
+from django.middleware.csrf import get_token
+
+from next.csrf import NONCE_ATTR
+from next.pages.responses import mark_bound_render, vary_on_cookie
+
+
+def render(request: HttpRequest) -> HttpResponseRedirect:
+    get_token(request)
+    vary_on_cookie(request)
+    mark_bound_render(request)
+    setattr(request, NONCE_ATTR, "visit-nonce")
+    return HttpResponseRedirect("/closed/")
+"""
+
+_QUIET_RENDER = """
+def render() -> str:
+    return "<p>open</p>"
+"""
+
+
+def _fail_a_visit(request: HttpRequest) -> None:
+    with visiting(request, "/notes/") as visit:
+        visit.META["CSRF_COOKIE_NEEDS_UPDATE"] = True
+        raise LookupError
+
+
+def _authorize(file_path: Path, request: HttpRequest) -> HttpResponse:
+    denial, _dynamic = page.authorization_outcome(file_path, request, "/marked/")
+    assert isinstance(denial, HttpResponse)
+    return denial
+
+
+class TestVisitHandsBackWhatItsRenderMarked:
+    """A flag the render of a visit sets reaches the response of the live request."""
+
+    def test_every_render_flag_reaches_the_live_request(
+        self, tmp_path: Path, dispatch_post: HttpRequest
+    ) -> None:
+        _authorize(write_page(tmp_path, "", _MARKING_RENDER), dispatch_post)
+        assert all(getattr(dispatch_post, name) is True for name in RENDER_FLAGS)
+        assert personal_render(dispatch_post)
+        assert cookie_varies(dispatch_post)
+
+    def test_the_minted_nonce_reaches_the_live_request(
+        self, tmp_path: Path, dispatch_post: HttpRequest
+    ) -> None:
+        _authorize(write_page(tmp_path, "", _MARKING_RENDER), dispatch_post)
+        assert getattr(dispatch_post, NONCE_ATTR) == "visit-nonce"
+        assert nonce_minted(dispatch_post)
+
+    def test_a_read_token_sets_the_cookie_of_the_live_response(
+        self, tmp_path: Path, dispatch_post: HttpRequest
+    ) -> None:
+        file_path = write_page(tmp_path, "", _MARKING_RENDER)
+        middleware = CsrfViewMiddleware(lambda request: _authorize(file_path, request))
+        response = middleware(dispatch_post)
+        assert settings.CSRF_COOKIE_NAME in response.cookies
+        assert "Cookie" in response["Vary"]
+
+    def test_a_shared_cache_of_the_live_response_turns_private(
+        self, tmp_path: Path, dispatch_post: HttpRequest
+    ) -> None:
+        file_path = write_page(tmp_path, "", _MARKING_RENDER)
+        _authorize(file_path, dispatch_post)
+        policy = ResponsePolicy(cache=cache_control({"public": True, "max_age": 60}))
+        response = finish_response(HttpResponse("x"), policy, dispatch_post, file_path)
+        assert "private" in response["Cache-Control"]
+        assert "Cookie" in response["Vary"]
+
+    def test_a_render_that_marks_nothing_leaves_the_live_request_alone(
+        self, tmp_path: Path, dispatch_post: HttpRequest
+    ) -> None:
+        denial, _dynamic = page.authorization_outcome(
+            write_page(tmp_path, "", _QUIET_RENDER), dispatch_post, "/marked/"
+        )
+        assert denial is None
+        assert not any(hasattr(dispatch_post, name) for name in HANDED_BACK)
+        assert "CSRF_COOKIE_NEEDS_UPDATE" not in dispatch_post.META
+
+    def test_what_belongs_to_the_visit_stays_on_it(
+        self, dispatch_post: HttpRequest
+    ) -> None:
+        visit = visit_request(dispatch_post, "/notes/")
+        setattr(visit, RESOLVED_METADATA_ATTR, object())
+        hand_back(visit, dispatch_post)
+        assert not hasattr(dispatch_post, RESOLVED_METADATA_ATTR)
+        assert dispatch_post.method == "POST"
+
+    def test_a_failing_render_still_hands_back(
+        self, dispatch_post: HttpRequest
+    ) -> None:
+        with pytest.raises(LookupError):
+            _fail_a_visit(dispatch_post)
+        assert dispatch_post.META["CSRF_COOKIE_NEEDS_UPDATE"] is True

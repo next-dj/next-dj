@@ -682,7 +682,8 @@ That covers a new cookie, a changed value, a deletion, a message stored in a coo
 
 A login, a logout, or any other rotation or flush of the session is refused earlier, when the action calls ``cycle_key()`` or ``flush()`` on ``request.session``.
 The call raises before the session store writes, so the stored session and its signed-in user stay intact, and the reply is ``http_only`` as well.
-With ``ATOMIC_REQUESTS`` the database work of the action rolls back, and without it whatever ran before the rotation stays, a ``user_logged_out`` receiver included.
+A tunneled action runs in the transaction of the action, so the refusal rolls back the database work done before the rotation, that of a ``user_logged_out`` receiver included.
+An action that runs without a transaction, under ``TRANSACTIONS["UNSAFE"] = False`` or with ``@action(atomic=False)``, keeps that work.
 
 On ``http_only`` the client fires ``partial:error`` of kind ``undelivered`` with the reason ``http_only`` and then reloads the page, so the post is not repeated and the page shows the state the server holds.
 The event cannot be cancelled, and its listeners run before the reload.

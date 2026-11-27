@@ -61,7 +61,7 @@ A metadata callable that fails is logged, the patch is left out, and the zone st
 A zone GET served by the target itself carries no ``meta`` patch.
 
 A request from inside the modal runs the same selection and both access checks every time.
-A refresh, a poll, a lazy zone, a stream, and a pagination link GET the layer URL, or the href of the pagination link, with ``X-Next-Zone`` only.
+A refresh, a poll, a stream, and a pagination link GET the layer URL, or the href of the pagination link, with ``X-Next-Zone`` only.
 A pagination href is therefore rendered on the target path, and a query string is fine.
 A nested zone of the intercept page is selected like its outer zone.
 The target and the intercept each climb their own file-system ancestors for access, and the stricter chain wins.
@@ -104,6 +104,34 @@ Deny by raising ``PermissionDenied`` or ``Http404``, or by returning an ``HttpRe
 The intercept declares its own access, and a check reports one that leaves a public target's modal behind the default login, see :doc:`/content/ref/system-checks`.
 :doc:`/content/howto/open-a-page-as-a-modal-over-another` walks the whole setup.
 
+Before the answer arrives
+-------------------------
+
+The dialog opens before its request leaves, with an empty zone container that carries ``data-next-busy`` and ``aria-busy="true"``.
+No framework CSS is applied, so ``dialog[data-next-dialog] > [data-next-busy]:empty`` styles that wait, and the container stays empty when no loading UI is declared.
+
+A ``loading.<zone>.djx`` beside the template that declares the zone a layer opens is its loading UI, the same file a ``reload="loading"`` zone of that name shows.
+A page that holds a ``data-next-layer`` link carries it in a ``<template data-next-layer="<zone>">`` before the first link of each zone, whichever template wrote the link and whether its attributes are literals or variables.
+A link a variable writes as safe markup, such as ``{{ menu }}`` holding ready HTML, is invisible to the source, so a document ``GET`` carries no loading UI for it, the same contract :doc:`/content/topics/router/active-links` sets for a container written that way.
+The first link of a zone names the page whose file the template holds, and an intercept that serves the zone over that page wins over it.
+The file renders over the request alone, since the context of the page it belongs to is not built yet.
+A page, a zone answer, and an appended page of rows all carry it, and the reload bundle loads with it.
+
+The layer shows the template in its container once ``data-next-delay`` on the link passes, 150 milliseconds when it is absent, so an answer that comes sooner never flashes it.
+The answer replaces it, the container stays busy until then, and an answer that fails leaves the container empty again.
+``next.W187`` reports a ``loading.<zone>.djx`` whose zone neither opens in a layer nor reloads to its loading UI.
+
+.. code-block:: jinja
+   :caption: gallery/pages/feed/(..)photo/[int:photo]/loading.photo-modal.djx
+
+   <article class="modal" aria-hidden="true">
+     <div class="skeleton skeleton-title"></div>
+     <div class="skeleton skeleton-image"></div>
+   </article>
+
+Under the client router the answer often arrives before the click.
+A layer link is prefetched like a link the router owns, by intent, in view, or at the press of the pointer, and the layer that opens takes that answer and sends nothing, see :doc:`/content/topics/router/prefetch`.
+
 Titles under a layer
 --------------------
 
@@ -122,7 +150,7 @@ Which page a title belongs to decides how long it lasts.
    * - The layer's own page, through the layer body, a zone GET inside the layer, or a mutation fired from it.
        The ``meta`` patch of an intercept page is included, see `Opening another page's zone over its own URL`_.
      - Lasts as long as the layer.
-   * - The host page or a lower layer, through a poll of the base page, a lazy zone GET, or a stream the host subscribed.
+   * - The host page or a lower layer, through a poll of the base page or a stream the host subscribed.
      - Becomes the title the covering layer restores, so the newest title of the page underneath survives the close.
        It shows at once when the covering layers set no title of their own.
        Otherwise the layer title stays in the tab until they close.
@@ -197,15 +225,74 @@ Foreign-zone authorization
 --------------------------
 
 The layer runtime sends ``X-Next-Origin`` with the host page on the modal body fetch, the accepted re-GET, and a mutation fired inside the layer, and a handler reads it back through ``resolve_partial_origin`` to address a zone of that page with ``morph(page=, url_kwargs=)``.
+Of these requests only the mutation sets ``partial_intent(request).layer``, see `Answering a submission from a layer`_.
 ``morph(zone=)`` always renders against the posted form origin and ignores the header.
 The server authorizes the page behind every zone render whose own view did not run, the one the handler names and the one the posted form origin names alike, raising ``ForeignPageNotAuthorizedError`` when that page may not be rendered for the requester.
 This keeps a page-addressed render in a response from reaching a zone the requester has no claim on.
 A foreign page whose module fails to import, or that sits under a ``page.py`` that fails to import, raises ``PageModuleImportError`` from the same authorization step in production too, rather than turning the in-flight request into a 404 and dropping the patches already queued for it.
 
+.. _partial-layer-submissions:
+
+Answering a submission from a layer
+-----------------------------------
+
+A form that renders both inside a layer and on its own page needs two answers.
+Inside the layer the handler closes it and shows a toast, while on the standalone page there is no layer to close and ``layer_close`` does nothing.
+``partial_intent(request).layer`` tells the two apart.
+It holds the host page path of the layer the mutation was submitted from, query string included, and ``None`` otherwise.
+
+The runtime stamps ``X-Next-Origin`` on an unsafe request only for a form submitted inside a layer, so ``layer`` is set only for a method other than ``GET``, ``HEAD``, ``OPTIONS``, and ``TRACE`` that carries the header with a same-site path.
+A navigation, a prefetch, the layer body load, and the accepted re-GET send the header on a ``GET`` and leave ``layer`` at ``None``.
+A submission outside every layer and a request without the runtime leave it at ``None`` as well.
+An inline validation request inside a layer carries no origin, so its ``layer`` is ``None`` too.
+
+.. code-block:: python
+   :caption: records/page.py
+
+   from django.contrib import messages
+   from django.http import HttpRequest, HttpResponse
+   from django.shortcuts import redirect
+   from records.models import Record
+
+   from next import action
+   from next.partial import Patches, partial_intent
+
+   @action("archive_record")
+   def archive_record(request: HttpRequest) -> HttpResponse:
+       """Archive the record, closing the layer it was opened in."""
+       pk = int(request.POST["record_id"])
+       Record.objects.filter(pk=pk).update(archived=True)
+       if partial_intent(request).layer:
+           return (
+               Patches(request)
+               .layer_close(result={"id": pk})
+               .toast("Record archived", variant="success")
+               .response()
+           )
+       messages.success(request, "Record archived")
+       return redirect("/records/")
+
+The redirect serves both remaining cases.
+Under the runtime the action answers it with a ``visit``, and without the runtime the browser follows it.
+In both cases the next page shows the flash message once.
+
+.. _partial-toasts-without-runtime:
+
+Toasts without the runtime
+--------------------------
+
+A request without the runtime has no tray to show a toast in, so ``Patches.response`` adds every queued toast to :doc:`django.contrib.messages <django:ref/contrib/messages>` before its 303.
+The variants ``info``, ``success``, ``warning``, and ``error`` map to the message level of the same name, and any other variant maps to ``INFO``.
+The page the redirect lands on renders the messages like any other flash, once, because the answer is always a redirect.
+Without the ``MessageMiddleware`` on the request the toasts are dropped and the 303 stands.
+A partial request keeps its toasts in the envelope and adds no message, the mirror of the drain that turns pending messages into toasts under the runtime, see :doc:`reference`.
+
 Styling layers and toasts
 -------------------------
 
-The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
+The runtime creates a bare ``<dialog data-next-dialog>`` for every layer.
+Toasts go into the first element with ``data-next-toasts`` found top layer down, so a tray the layout or a modal renders receives them.
+Only a page that renders no tray gets one from the runtime, a ``<div data-next-toasts aria-live="polite">`` at the end of the body, built on the first toast.
 No framework CSS is applied.
 The selectors are the hook.
 

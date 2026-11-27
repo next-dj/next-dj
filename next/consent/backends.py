@@ -18,13 +18,6 @@ COOKIE_VERSION: Final = "2"
 The granted categories are joined by `|`, a cookie octet no category name contains.
 """
 
-_SEPARATORS: Final[Mapping[str, str]] = {COOKIE_VERSION: "|", "1": ","}
-"""The category separator of every format the backend reads.
-
-Format `1` joins the names with commas, which RFC 6265 excludes from a cookie value.
-It is still read for the cookies browsers already hold.
-"""
-
 _COOKIE_PARTS: Final = 3
 _COOKIE_DEFAULTS: Final[Mapping[str, object]] = DEFAULTS["CONSENT"]["OPTIONS"]
 
@@ -84,10 +77,9 @@ class CookieConsentBackend(ConsentBackend):
         if not isinstance(raw, str):
             return UNDECIDED
         parts = raw.split(":")
-        separator = _SEPARATORS.get(parts[0])
-        if len(parts) != _COOKIE_PARTS or separator is None:
+        if len(parts) != _COOKIE_PARTS or parts[0] != COOKIE_VERSION:
             return UNDECIDED
-        granted = {category for category in parts[1].split(separator) if category}
+        granted = {category for category in parts[1].split("|") if category}
         return Consent(frozenset({NECESSARY, *granted}), decided=True)
 
     @override

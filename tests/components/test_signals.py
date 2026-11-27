@@ -293,6 +293,7 @@ class TestComponentRenderedSignal:
         render_component(info, {"title": "Hello"})
         assert len(capture_component_rendered) == 1
         event = capture_component_rendered.events[0]
+        assert event.sender is ComponentsManager
         assert event.kwargs["info"] is info
         assert event.kwargs["template_path"] == template_path
 

@@ -23,7 +23,7 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
     {
         "PAGE_BACKENDS": [
             {
-                "BACKEND": "next.urls.FileRouterBackend",
+                "BACKEND": "next.urls.FilePageBackend",
                 "DIRS": [],
                 "APP_DIRS": True,
                 "PAGES_DIR": "pages",
@@ -33,6 +33,7 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
         "URL_NAME_TEMPLATE": "page_{name}",
         "URL_RESOLVER": "next.urls.TrieURLResolver",
         "DEPENDENCY_RESOLVER": "next.deps.DependencyResolver",
+        "LOADER": {"WINDOW": 0.001, "MAX_BATCH": 500},
         "COMPONENT_BACKENDS": [
             {
                 "BACKEND": "next.components.FileComponentsBackend",
@@ -47,7 +48,10 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
         "STATIC_DISCOVERY_CACHE": True,
         "STATIC_VERSION": None,
         "FORM_ACTION_BACKENDS": [
-            {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}}
+            {
+                "BACKEND": "next.forms.RegistryFormActionBackend",
+                "OPTIONS": {"SHAPER": "next.partial.FormShaper"},
+            }
         ],
         "PARTIAL_BACKENDS": [
             {
@@ -121,6 +125,138 @@ DEFAULTS: Final[Mapping[str, Any]] = MappingProxyType(
         "FORM_WIZARD_BACKEND": {
             "BACKEND": "next.forms.SessionFormWizardBackend",
             "OPTIONS": {},
+        },
+        "TRANSACTIONS": {
+            "SAFE": AUTO,
+            "UNSAFE": AUTO,
+            "ALIASES": ("default",),
+            "RULE": None,
+        },
+        "BOUNDARIES": {
+            "LOADING_TEMPLATE": None,
+            "ERROR_TEMPLATE": None,
+            "RAISE": False,
+            "REPORTER": None,
+            "ATOMIC": "writes",
+            "KINDS": "detailed",
+            "DEBUG_DETAIL": True,
+        },
+        "DEFER": {
+            "EXECUTOR": {
+                "BACKEND": "next.defer.LaneExecutor",
+                "OPTIONS": {
+                    "MAX_WORKERS": 8,
+                    "MAX_QUEUE": 64,
+                    "CONN_IDLE": 60.0,
+                    "SHUTDOWN_TIMEOUT": 5.0,
+                },
+                "PER_REQUEST": 4,
+                "QUEUE_TIMEOUT": 0.05,
+                "SHED_DELAY": 1.0,
+                "MAX_REQUEST_JOBS": 16,
+                "PARALLEL": True,
+                "SQLITE": "request",
+                "THREAD_LOCAL_MIDDLEWARE": (),
+            },
+            "DELIVERY": {
+                "BACKEND": "next.defer.DefaultDeliveryPolicy",
+                "OPTIONS": {"STREAM": True, "BOTS": None, "SYNC_WORKERS": "inline"},
+            },
+            "SERVER": {
+                "BACKEND": "next.defer.DefaultServerProbe",
+                "OPTIONS": {
+                    "INCREMENTAL": None,
+                    "CONCURRENT": None,
+                    "BUFFERED_MARKS": None,
+                },
+            },
+            "TOKENS": {
+                "BACKEND": "next.defer.StackedTokenBackend",
+                "OPTIONS": {
+                    "STORAGE": "next.defer.InlineStorage",
+                    "SEAL": "next.defer.SignedSeal",
+                    "BINDING": "auto",
+                    "CARRIER": "header",
+                    "MAX_AGE": 600,
+                    "MAX_BYTES": 2048,
+                    "MAX_STORED_BYTES": 65536,
+                    "CACHE_ALIAS": "default",
+                    "EPOCH": 1,
+                },
+            },
+            "CONNECTION_STATE": [],
+            "THREAD_STATE": [],
+            "ADMISSION": {"BACKEND": "next.defer.QueueDelay", "OPTIONS": {}},
+            "DEADLINE": 10.0,
+            "DEADLINE_TO_DB": "always",
+            "WRITE_GRACE": 2.0,
+            "WRITE_TIMEOUT": 10.0,
+            "REQUEST_CONCURRENCY": 1,
+            "MAX_BOUNDARIES": 64,
+            "MAX_PER_SITE": 4,
+            "MAX_DEPTH": 4,
+            "MAX_INSTANCES": 1000,
+            "MAX_STREAMS": "auto",
+            "NOSCRIPT": True,
+        },
+        "COMPRESSION": {
+            "ENABLED": True,
+            "BACKENDS": [
+                {
+                    "BACKEND": "next.compression.ZstdBackend",
+                    "OPTIONS": {"LEVEL": 3, "WINDOW": 17},
+                },
+                {
+                    "BACKEND": "next.compression.BrotliBackend",
+                    "OPTIONS": {"LEVEL": 4, "WINDOW": 18},
+                },
+                {"BACKEND": "next.compression.GzipBackend", "OPTIONS": {"LEVEL": 4}},
+            ],
+            "ORDER": ("zstd", "br", "gzip"),
+            "MIN_SIZE": 1024,
+            "CONTENT_TYPES": (
+                "text/*",
+                "application/json",
+                "application/*+json",
+                "application/x-ndjson",
+                "application/javascript",
+                "application/xml",
+                "application/*+xml",
+                "image/svg+xml",
+            ),
+            "STREAMS": "self",
+            "SSE": True,
+            "SSE_TOPICS": "off",
+            "PADDING": 32,
+            "COALESCE": 0.002,
+            "RESPECT_NO_TRANSFORM": True,
+            "EXCLUDE": None,
+        },
+        "ROUTER": {
+            "ENABLED": True,
+            "SCOPE": "pages",
+            "EXCLUDE": (),
+            "FOREIGN": "hard",
+            "PREFETCH": "intent",
+            "PREFETCH_DELAY": 0.065,
+            "PREFETCH_TTL": 30.0,
+            "PREFETCH_SHELL_TTL": 300.0,
+            "PREFETCH_ENTRIES": 16,
+            "PRESS": "mouse",
+            "SNAPSHOTS": 10,
+            "PROGRESS_DELAY": 0.15,
+            "PROGRESS": True,
+            "TRANSITIONS": False,
+            "INTERCEPT": "opt_in",
+            "SPECULATION": None,
+            "CUT": "next.router.VerifiedCut",
+            "DIGEST": "next.router.ChromeDigest",
+            "SHED": "next.router.LoadShed",
+            "ACTIVE_LINKS": {
+                "ENABLED": True,
+                "PASS": "template",
+                "CONTAINERS": ("nav", "[role=navigation]", "[data-next-nav]"),
+            },
         },
     }
 )

@@ -2,4 +2,4 @@
 
 import { createWebSocketTransport } from "../ws";
 
-window.Next._land("ws", createWebSocketTransport);
+window.Next._extend("ws", () => createWebSocketTransport, __BUILD__);

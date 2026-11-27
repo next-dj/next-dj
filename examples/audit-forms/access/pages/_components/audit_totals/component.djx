@@ -1,0 +1,4 @@
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2" data-audit-totals>
+  {% component "stat_card" label="Backend rows" value=totals.backend hint="Written inside dispatch by the custom backend." %}
+  {% component "stat_card" label="Signal rows" value=totals.signal hint="Written by receivers once the action commits." %}
+</div>

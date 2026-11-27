@@ -5,8 +5,9 @@ from django.test import override_settings
 
 from next.pages.checks import check_metadata_title_templates
 from next.pages.metadata.scope import SITE_SOURCE
-from tests.pages.checks.metadata.trees import metadata_page, scope, templated_page
-from tests.support import I18N, check_ids, patch_checks_router_manager
+from tests.pages.checks.metadata.trees import metadata_page, scope
+from tests.support import I18N, check_ids, patch_checks_route_manager
+from tests.support.trees import templated_page
 
 
 PER_LANGUAGE_TEMPLATE = """
@@ -32,7 +33,7 @@ class TestTitleTemplates:
         defaults = {"title": {"template": "{title} · Acme", "default": "Acme"}}
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults)),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_metadata_title_templates() == []
 
@@ -54,7 +55,7 @@ class TestTitleTemplates:
         defaults = {"title": {"template": template, "default": "Acme"}}
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults)),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.E099"]
@@ -66,7 +67,7 @@ class TestTitleTemplates:
         page_file = metadata_page(
             tmp_path, '{"title": {"template": "{nope}", "default": "X"}}'
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.E099"]
         assert str(page_file) in messages[0].msg
@@ -78,7 +79,7 @@ class TestTitleTemplates:
         templated_page(tmp_path, PER_LANGUAGE_TEMPLATE)
         with (
             override_settings(**I18N),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.E099"]
@@ -92,7 +93,7 @@ class TestTitleTemplates:
         templated_page(tmp_path, PER_LANGUAGE_TEMPLATE)
         with (
             override_settings(USE_I18N=False),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_metadata_title_templates() == []
 
@@ -102,7 +103,7 @@ class TestTitleTemplates:
         defaults = {"title": {"template": "{nope}", "default": "Acme"}}
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults), **I18N),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.E099"]
@@ -113,7 +114,7 @@ class TestTitleTemplates:
         languages = [("en", "English"), ("de", "German"), ("de-at", "Austrian")]
         with (
             override_settings(**{**I18N, "LANGUAGES": languages}),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.E099"]
@@ -123,7 +124,7 @@ class TestTitleTemplates:
         defaults = {"title": {"template": "Acme", "default": "Acme"}}
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS=defaults)),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.W084"]
@@ -135,7 +136,7 @@ class TestTitleTemplates:
         page_file = metadata_page(
             tmp_path, '{"title": {"template": "%s · Site", "default": "Site"}}'
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_title_templates()
         assert check_ids(messages) == ["next.W084"]
         assert messages[0].obj == str(page_file)
@@ -145,6 +146,6 @@ class TestTitleTemplates:
     ) -> None:
         with (
             override_settings(NEXT_FRAMEWORK=scope(DEFAULTS={"title": "Acme"})),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_metadata_title_templates() == []

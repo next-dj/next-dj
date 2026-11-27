@@ -1,20 +1,45 @@
 """Zone template tag, its node, and the standalone zone-body renderable."""
 
+import functools
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast, override
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, cast, override
 
 from django.template import Library, TemplateSyntaxError
 from django.template.base import Node, NodeList, Template
 from django.template.engine import Engine
+from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.text import unescape_string_literal
 
-from next.utils import child_nodelists
+from next.boundaries.stash import stash_markup, stashing
+from next.errors import DurationError
+from next.pages.layouts import ZONE, enclosed, request_response_id
+from next.pages.skeletons import render_skeleton, zone_skeleton
+from next.seeding import REQUEST_KEY, TEMPLATE_PATH_KEY
+from next.static.collector import require_bundle
+from next.static.runtime import RELOAD_CHUNK_KEY
+from next.utils import child_nodelists, parse_duration
+from next.wire import CURRENT_ATTR
+
+from .keys import (
+    FOCUS_ATTR,
+    MATCH_ATTR,
+    NAV_ATTR,
+    PERSIST_ATTR,
+    PREFETCH_ATTR,
+    PRESS_ATTR,
+    RESERVE_ATTR,
+    ROUTER_ATTR,
+    SCROLL_ATTR,
+    SCROLL_REGION_ATTR,
+    TOASTS_ATTR,
+)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from django.template.base import Origin, Parser, Token
     from django.template.context import Context
@@ -23,21 +48,84 @@ if TYPE_CHECKING:
 register = Library()
 
 ZONE_ATTR = "data-next-zone"
-LAZY_ATTR = "data-next-lazy"
 POLL_ATTR = "data-next-poll"
+RELOAD_ATTR = "data-next-reload"
+DELAY_ATTR = "data-next-delay"
+
+KEEP: Final = "keep"
+LOADING: Final = "loading"
+DEFAULT_DELAY_MS: Final = 150
 
 _DEFAULT_TAG = "div"
 _ZONE_NAME_INDEX = 1
 _END_ZONE = ("endzone",)
-_PLACEHOLDER_THEN_END = ("placeholder", "endzone")
-_LAZY_TRIGGERS = frozenset({"load", "revealed"})
+_RELOADS: Final = (KEEP, LOADING)
 _TAG_KWARG = "tag"
-_LAZY_KWARG = "lazy"
 _POLL_KWARG = "poll"
+_RELOAD_KWARG = "reload"
+_DELAY_KWARG = "delay"
+_STASHED: Final = "next.zone.stashed"
+_KWARGS: Final = (_TAG_KWARG, _POLL_KWARG, _RELOAD_KWARG, _DELAY_KWARG)
 _MIN_POLL_MS = 1000
 _MAX_POLL_MS = 2_147_483_647
 _MS_PER_SECOND = 1000
 _POLL_DIGITS = re.compile(r"[0-9]+")
+_GLOBAL_ATTRS: Final = frozenset(
+    {
+        "accesskey",
+        "autocapitalize",
+        "autocorrect",
+        "autofocus",
+        "class",
+        "contenteditable",
+        "dir",
+        "draggable",
+        "enterkeyhint",
+        "hidden",
+        "id",
+        "inert",
+        "inputmode",
+        "is",
+        "itemid",
+        "itemprop",
+        "itemref",
+        "itemscope",
+        "itemtype",
+        "lang",
+        "popover",
+        "role",
+        "slot",
+        "spellcheck",
+        "style",
+        "tabindex",
+        "title",
+        "translate",
+        "writingsuggestions",
+    }
+)
+_PREFIXED_ATTR = re.compile(r"(?:aria|data)-[a-z0-9][a-z0-9._-]*")
+_RESERVED_ATTR_PREFIX: Final = "data-next-"
+_OFF: Final = "off"
+_AUTHOR_ATTRS: Final = frozenset(
+    {
+        CURRENT_ATTR,
+        FOCUS_ATTR,
+        MATCH_ATTR,
+        NAV_ATTR,
+        PERSIST_ATTR,
+        PREFETCH_ATTR,
+        PRESS_ATTR,
+        RESERVE_ATTR,
+        ROUTER_ATTR,
+        SCROLL_ATTR,
+        SCROLL_REGION_ATTR,
+        TOASTS_ATTR,
+    }
+)
+"""The hand-written `data-next-*` names the runtime reads on any element.
+
+The runtime never writes them on a zone wrapper, and only reserve tunes a zone reload.
+"""
 
 
 def _literal(raw: str, subject: str) -> str:
@@ -71,55 +159,98 @@ class ZoneOptions:
     """
 
     tag: str = _DEFAULT_TAG
-    lazy: str | None = None
     poll: int | None = None
-
-    def __post_init__(self) -> None:
-        """Reject the exclusive lazy and poll modes appearing together."""
-        if self.lazy is not None and self.poll is not None:
-            msg = "ZoneOptions cannot combine poll with lazy, the modes are exclusive."
-            raise ValueError(msg)
+    reload: str = KEEP
+    delay: int | None = None
+    html: str = ""
+    """The author's HTML attributes of the wrapper, escaped once at compile time."""
 
     @property
-    def delivery_attrs(self) -> str:
-        """Wrapper attributes of a delivered zone body, without the lazy hint."""
-        return "" if self.poll is None else f' {POLL_ATTR}="{self.poll}"'
-
-    @property
-    def full_attrs(self) -> str:
-        """Wrapper attributes of the zone on a full page render."""
-        if self.lazy is None:
-            return self.delivery_attrs
-        return f' {LAZY_ATTR}="{self.lazy}"'
+    def attrs(self) -> str:
+        """Wrapper attributes of the zone, the defaults left unwritten."""
+        attrs = "" if self.poll is None else f' {POLL_ATTR}="{self.poll}"'
+        if self.reload == LOADING:
+            attrs += f' {RELOAD_ATTR}="{LOADING}"'
+        if self.delay is not None:
+            attrs += f' {DELAY_ATTR}="{self.delay}"'
+        return attrs + self.html
 
 
 def render_zone_body(
-    partial: "ZonePartial", name: str, options: ZoneOptions, context: "Context"
+    partial: "ZonePartial",
+    name: str,
+    options: ZoneOptions,
+    context: "Context",
+    *,
+    page_template: Template | None = None,
+    around: "Callable[[Callable[[], str]], str] | None" = None,
+    stashed: bool = False,
 ) -> tuple[SafeString, SafeString]:
     """Render one zone body and its addressable wrapper element.
 
     Returned separately since append/prepend graft the bare body, morph the wrapper.
+    An `around` call renders the body, as the page boundaries enclosing the zone do.
     """
-    body = partial.render(context)
-    wrapped = _wrap_zone(options.tag, name, body, extra=options.delivery_attrs)
-    return body, wrapped
+    if options.reload == LOADING:
+        return _render_loading_body(
+            partial, name, options, context, page_template, around, stashed=stashed
+        )
+    if around is None:
+        body = partial.render(context, page_template=page_template)
+    else:
+        render = functools.partial(partial.render, context, page_template=page_template)
+        body = SafeString(around(render))
+    return body, _wrap_zone(options.tag, name, body, extra=options.attrs)
+
+
+def _render_loading_body(
+    partial: "ZonePartial",
+    name: str,
+    options: ZoneOptions,
+    context: "Context",
+    page_template: Template | None,
+    around: "Callable[[Callable[[], str]], str] | None",
+    *,
+    stashed: bool,
+) -> tuple[SafeString, SafeString]:
+    """Render a zone reloading to its loading UI, the inline boundary stashes inside.
+
+    A `stashed` zone carries its own skeleton in its wrapper, which only a morph places.
+    """
+    render = functools.partial(partial.render, context, page_template=page_template)
+    with stashing():
+        body = render() if around is None else SafeString(around(render))
+    require_bundle(context, RELOAD_CHUNK_KEY)
+    inner = body + _skeleton_stash(name, context) if stashed else body
+    return body, _wrap_zone(options.tag, name, inner, extra=options.attrs)
+
+
+def _skeleton_stash(name: str, context: "Context") -> str:
+    """Return the `loading.<zone>.djx` stash of `name`, once per zone and response."""
+    seen = cast("dict[object, bool]", context.render_context.dicts[0])
+    slot = (_STASHED, name)
+    path = context.get(TEMPLATE_PATH_KEY)
+    if slot in seen or not isinstance(path, str | Path):
+        return ""
+    skeleton = zone_skeleton(Path(path), name)
+    if skeleton is None:
+        return ""
+    seen[slot] = True
+    return stash_markup(name, render_skeleton(skeleton, context))
 
 
 def render_zone_standalone(
     partial: "ZonePartial", name: str, options: ZoneOptions, context: "Context"
 ) -> SafeString:
-    """Render one zone body wrapped in its addressable element.
-
-    The wrapper drops the lazy hint because the body has already arrived.
-    """
+    """Render one zone body wrapped in its addressable element."""
     _body, wrapped = render_zone_body(partial, name, options, context)
     return wrapped
 
 
 class ZonePartial:
-    """Standalone renderable for one zone body that owns its template state.
+    """Standalone renderable for one zone body, shared by every thread rendering it.
 
-    `get_exception_info` delegates so DEBUG tracebacks stay honest.
+    It keeps no per-render state, so a render's page template rides the render context.
     """
 
     def __init__(
@@ -130,64 +261,59 @@ class ZonePartial:
         self.name = name
         self.origin = origin
         self.engine = engine
-        self.page_template: Template | None = None
 
-    def render(self, context: "Context") -> SafeString:
-        """Render the zone body inside its own template state."""
+    def render(
+        self, context: "Context", *, page_template: Template | None = None
+    ) -> SafeString:
+        """Render the zone body inside its own template state.
+
+        The page template, bound or passed, answers DEBUG for nested zones as well.
+        """
         if isinstance(context.template, Template):
-            self.page_template = context.template
+            page_template = context.template
         as_template = cast("Template", self)
-        with context.render_context.push_state(as_template):
+        owner = as_template if page_template is None else page_template
+        with context.render_context.push_state(owner):
             if context.template is None:
-                with context.bind_template(as_template):
+                with context.bind_template(owner):
                     context.template_name = self.name
                     return self.nodelist.render(context)
             return self.nodelist.render(context)
 
     def get_exception_info(
-        self, exception: Exception, token: "Token"
+        self, _exception: Exception, _token: "Token"
     ) -> dict[str, object]:
-        """Delegate debug info to the page template so tracebacks stay honest."""
-        if self.page_template is None:
-            return {}
-        return self.page_template.get_exception_info(exception, token)
+        """Return no debug info, as a render without a page template has no source."""
+        return {}
 
 
 class ZoneNode(Node):
-    """A named zone of a page template, rendered inline or as a placeholder.
+    """A named zone of a page template, always rendered inline."""
 
-    A lazy zone renders only its placeholder branch, its body arrives later as a patch.
-    """
-
-    child_nodelists = ("nodelist", "placeholder")
+    child_nodelists = ("nodelist",)
 
     def __init__(
-        self,
-        name: str,
-        partial: ZonePartial,
-        *,
-        options: ZoneOptions,
-        placeholder: NodeList | None = None,
+        self, name: str, partial: ZonePartial, *, options: ZoneOptions
     ) -> None:
         """Store the zone name, its body partial, and its rendering options."""
         self.name = name
         self.partial = partial
         self.nodelist = partial.nodelist
         self.options = options
-        self.placeholder = placeholder if placeholder is not None else NodeList()
 
     @override
     def render(self, context: "Context") -> SafeString:
-        """Render the zone inline on a full page render."""
-        options = self.options
-        if options.lazy is not None:
-            return _wrap_zone(
-                options.tag,
-                self.name,
-                self.placeholder.render(context),
-                extra=options.full_attrs,
-            )
-        return render_zone_standalone(self.partial, self.name, options, context)
+        """Render the zone inline, its reload skeleton stashed after it once.
+
+        Under the client router the zone sits between enclosing comments.
+        """
+        wrapped = render_zone_standalone(self.partial, self.name, self.options, context)
+        if self.options.reload == LOADING:
+            wrapped = SafeString(wrapped + _skeleton_stash(self.name, context))
+        response_id = request_response_id(context.get(REQUEST_KEY))
+        if response_id is None:
+            return wrapped
+        return SafeString(enclosed(ZONE, response_id, wrapped))
 
 
 type Ancestor = type[Node] | tuple[type[Node], ...]
@@ -221,9 +347,8 @@ def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
     if not name:
         msg = "{% zone %} tag requires a non-empty quoted zone name."
         raise TemplateSyntaxError(msg)
-    tag = _DEFAULT_TAG
-    lazy: str | None = None
-    poll: int | None = None
+    values: dict[str, str] = {}
+    html: dict[str, str] = {}
     for part in bits[_ZONE_NAME_INDEX + 1 :]:
         key, sep, raw = part.partition("=")
         if not sep:
@@ -232,34 +357,73 @@ def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
                 'as key="value" with no spaces around =.'
             )
             raise TemplateSyntaxError(msg)
-        value = _literal(raw, f"{key}=")
-        if key == _TAG_KWARG:
-            tag = value or _DEFAULT_TAG
-        elif key == _LAZY_KWARG:
-            lazy = _validate_lazy(value)
-        elif key == _POLL_KWARG:
-            poll = _validate_poll(value)
+        if key in _KWARGS:
+            values[key] = _literal(raw, f"{key}=")
         else:
-            msg = (
-                f"{{% zone %}} got an unknown option {key!r}. The valid "
-                "options are tag, lazy, and poll."
-            )
+            html[_attribute_name(key)] = _attribute_value(key, raw)
+    reload = _validate_reload(values.get(_RELOAD_KWARG, KEEP))
+    delay = None
+    if _DELAY_KWARG in values:
+        if reload != LOADING:
+            msg = f'{{% zone %}} delay= applies to reload="{LOADING}" only.'
             raise TemplateSyntaxError(msg)
-    try:
-        options = ZoneOptions(tag=tag, lazy=lazy, poll=poll)
-    except ValueError as error:
-        msg = "{% zone %} cannot combine poll= with lazy=, the modes are exclusive."
-        raise TemplateSyntaxError(msg) from error
+        delay = _validate_delay(values[_DELAY_KWARG])
+    poll = values.get(_POLL_KWARG)
+    options = ZoneOptions(
+        tag=values.get(_TAG_KWARG) or _DEFAULT_TAG,
+        poll=None if poll is None else _validate_poll(poll),
+        reload=reload,
+        delay=delay,
+        html="".join(format_html(' {}="{}"', key, raw) for key, raw in html.items()),
+    )
     return name, options
 
 
-def _validate_lazy(value: str) -> str:
-    """Return a validated lazy trigger or raise on an unknown value."""
-    if value not in _LAZY_TRIGGERS:
-        triggers = ", ".join(sorted(_LAZY_TRIGGERS))
-        msg = f"{{% zone %}} lazy must be one of {triggers}, got {value!r}."
+def _attribute_name(key: str) -> str:
+    """Return `key` when it names an HTML global, `aria-*` or `data-*` attribute.
+
+    The runtime owns the other `data-next-*` names, and an unknown one is a misspelling.
+    """
+    if key.startswith(_RESERVED_ATTR_PREFIX) and key not in _AUTHOR_ATTRS:
+        msg = f"{{% zone %}} reserves the {key!r} attribute for the framework."
+        raise TemplateSyntaxError(msg)
+    if key in _GLOBAL_ATTRS or _PREFIXED_ATTR.fullmatch(key):
+        return key
+    msg = (
+        f"{{% zone %}} got an unknown option {key!r}. The valid options are tag, "
+        "poll, reload, and delay, plus the HTML global, aria-* and data-* attributes "
+        "of the wrapper."
+    )
+    raise TemplateSyntaxError(msg)
+
+
+def _attribute_value(key: str, raw: str) -> str:
+    """Return the literal value of a wrapper attribute, reserve accepting off alone."""
+    value = _literal(raw, f"{key}=")
+    if key == RESERVE_ATTR and value != _OFF:
+        msg = f"{{% zone %}} {RESERVE_ATTR} must be {_OFF}, got {value!r}."
         raise TemplateSyntaxError(msg)
     return value
+
+
+def _validate_reload(value: str) -> str:
+    """Return a validated reload mode or raise on an unknown value."""
+    if value not in _RELOADS:
+        modes = ", ".join(_RELOADS)
+        msg = f"{{% zone %}} reload must be one of {modes}, got {value!r}."
+        raise TemplateSyntaxError(msg)
+    return value
+
+
+def _validate_delay(value: str) -> int | None:
+    """Return the delay in ms, `None` for the default one, from a duration literal."""
+    try:
+        seconds = parse_duration(value)
+    except DurationError as error:
+        msg = f"{{% zone %}} delay= refuses its value, {error}."
+        raise TemplateSyntaxError(msg) from error
+    ms = round(seconds * _MS_PER_SECOND)
+    return None if ms == DEFAULT_DELAY_MS else ms
 
 
 def _validate_poll(value: str) -> int:
@@ -291,33 +455,26 @@ def _validate_poll(value: str) -> int:
 
 @register.tag(name="zone")
 def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
-    """Compile `{% zone "name" tag=... lazy=... poll=... %}` … `{% endzone %}`.
+    """Compile `{% zone "name" tag=... poll=... reload=... %}` … `{% endzone %}`.
 
     Registers nothing with the zone registry, derived from the compiled page template.
     """
     name, options = _parse_options(token)
-    body = parser.parse(_PLACEHOLDER_THEN_END)
-    placeholder: NodeList | None = None
-    if parser.next_token().contents.split()[0] == "placeholder":
-        placeholder = parser.parse(_END_ZONE)
-        parser.delete_first_token()
-    if placeholder is not None and options.lazy is None:
-        msg = (
-            f'{{% zone "{name}" %}} placeholder requires lazy=, a zone that '
-            "shows its body never renders the placeholder branch."
-        )
-        raise TemplateSyntaxError(msg)
+    body = parser.parse(_END_ZONE)
+    parser.delete_first_token()
     partial = ZonePartial(
         nodelist=body, name=name, origin=parser.origin, engine=Engine.get_default()
     )
-    return ZoneNode(
-        name=name, partial=partial, options=options, placeholder=placeholder
-    )
+    return ZoneNode(name=name, partial=partial, options=options)
 
 
 __all__ = [
-    "LAZY_ATTR",
+    "DEFAULT_DELAY_MS",
+    "DELAY_ATTR",
+    "KEEP",
+    "LOADING",
     "POLL_ATTR",
+    "RELOAD_ATTR",
     "ZONE_ATTR",
     "Ancestor",
     "ZoneNode",

@@ -1,16 +1,16 @@
-"""Cross-area helpers for paths, `DIRS` entries, page trees, routes, and edit watching.
+"""Cross-area helpers for paths, `DIRS` entries, page trees, routes, edits and HTML.
 
 It sits below the subpackages that share it, so no shared object closes a cycle.
 """
 
 from __future__ import annotations
 
-import functools
 import importlib.machinery
 import importlib.util
 import logging
 import os
 import re
+import reprlib
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -29,9 +29,18 @@ from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
 from django.utils.regex_helper import normalize
 
-from next.caches import DEFAULT_CACHE_SIZE, BoundedCache
-from next.diagnostics import Capture
-from next.errors import InvalidDirsError
+from next.caches import (
+    DEFAULT_CACHE_SIZE,
+    FRAMEWORK,
+    ROUTES,
+    SETTINGS,
+    BoundedCache,
+    IdentityMemo,
+    instance_dict,
+    memo,
+    pure_cache,
+)
+from next.errors import DurationError, InvalidDirsError
 from next.stamps import fresh, settled, snapshot
 
 
@@ -39,6 +48,7 @@ if TYPE_CHECKING:
     import types
     from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 
+    from django.http import HttpRequest
     from django.template.base import Node
 
 
@@ -80,13 +90,6 @@ def non_negative_number(value: object, ceiling: float) -> TypeGuard[float]:
     )
 
 
-def after_fork(reset: Callable[[], object]) -> None:
-    """Run `reset` in every forked child, nothing on a platform that cannot fork."""
-    register = getattr(os, "register_at_fork", None)
-    if register is not None:
-        register(after_in_child=reset)
-
-
 ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]"
 )
@@ -109,13 +112,13 @@ _UNREVERSIBLE_TRAIL: Final = "[[route]]"
 """The trail of a `re_path()` route Django cannot reverse, a wildcard listing none."""
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@pure_cache(DEFAULT_CACHE_SIZE)
 def prefix_trail(prefix: str) -> str:
     """Return a Django `path()` prefix as a trail, `<int:pk>` read as `[int:pk]`."""
     return _DJANGO_PARAMETER.sub(r"[\1]", prefix.strip("/"))
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@pure_cache(DEFAULT_CACHE_SIZE)
 def regex_trail(regex: str) -> str:
     """Return a `re_path()` route as a trail, read the way Django reverses it.
 
@@ -211,26 +214,21 @@ def decode_url_path(path: str) -> str:
     return repercent_broken_unicode(unquote_to_bytes(path)).decode()
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@pure_cache()
+def meta_key(name: str) -> str:
+    """Return the WSGI `META` key of a header name."""
+    return "HTTP_" + name.upper().replace("-", "_")
+
+
+def request_header(request: HttpRequest, name: str) -> str | None:
+    """Return a request header value from `META`, skipping the parsed headers map."""
+    return request.META.get(meta_key(name))
+
+
+@memo(SETTINGS, ROUTES, maxsize=DEFAULT_CACHE_SIZE)
 def resolved_tree(path: Path) -> Path:
-    """Return the resolved form of a page tree, memoised across the process."""
+    """Return the resolved form of a page tree, again once settings or routes move."""
     return path.resolve()
-
-
-# Memos of resolved paths that a layer keys its own way, dropped with this one.
-_RESOLUTION_CLEARERS: list[Callable[[], None]] = []
-
-
-def on_forget_resolved_trees(clear: Callable[[], None]) -> None:
-    """Register a memo of resolved paths to drop whenever this module drops its own."""
-    _RESOLUTION_CLEARERS.append(clear)
-
-
-def forget_resolved_trees() -> None:
-    """Drop every memoised resolution, so a re-pointed tree is read again."""
-    resolved_tree.cache_clear()
-    for clear in _RESOLUTION_CLEARERS:
-        clear()
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -366,12 +364,12 @@ def resolve_base_dir() -> Path | None:
 
 
 _app_holding_cache: BoundedCache[tuple[str, bool], tuple[str, str] | None] = (
-    BoundedCache()
+    BoundedCache(depends=(SETTINGS,))
 )
 _MISS: Final = object()
 
 
-@functools.cache
+@memo(SETTINGS)
 def _resolved_app_roots() -> tuple[tuple[str, Path], ...]:
     """Return each installed app label with its resolved root, deepest root first."""
     roots = [(c.label, Path(c.path).resolve()) for c in apps.get_app_configs()]
@@ -405,16 +403,19 @@ def app_holding(path: str | Path, *, resolved: bool = False) -> tuple[str, str] 
     return found
 
 
-def forget_app_holdings(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised app lookups when the app list moves."""
-    if setting == "INSTALLED_APPS":
-        _app_holding_cache.clear()
-        _resolved_app_roots.cache_clear()
+_SETTINGS: Final = instance_dict(settings)
+"""The dict `LazySettings` caches read settings in, so `DEBUG` skips the proxy lookup.
+
+Every settings write or override drops the cached value, so no read here goes stale.
+"""
 
 
 def template_edits_watched() -> bool:
     """Whether the caches revalidate snapshots, since autoreload misses `.djx` edits."""
-    return bool(settings.DEBUG)
+    debug = _SETTINGS.get("DEBUG", _MISS)
+    if debug is _MISS:
+        debug = settings.DEBUG
+    return bool(debug)
 
 
 def _dir_entry_candidate(item: Path, base_dir: Path | None) -> Path | None:
@@ -685,24 +686,25 @@ class _PageTreeWalk:
             self.mark(child, source, marker, child_trail, child_raw)
 
 
-_MIDDLEWARE_CLASSES: dict[str, type] = {}
+_MIDDLEWARE_CLASSES: BoundedCache[str, type | None] = BoundedCache(depends=(FRAMEWORK,))
 
 
 def _middleware_class(path: str) -> type | None:
-    """Import a `MIDDLEWARE` entry, `None` when it does not import as a class.
+    """Import a `MIDDLEWARE` entry once per settings load, `None` when it is no class.
 
-    Only a class is kept, so an entry fixed after a failed import is read again.
+    A failure is remembered too, so a streamed request never retries a broken import.
     """
-    known = _MIDDLEWARE_CLASSES.get(path)
-    if known is not None:
-        return known
-    capture = Capture()
-    with capture:
+    try:
+        return _MIDDLEWARE_CLASSES[path]
+    except KeyError:
+        pass
+    try:
         found = import_string(path)
-    if capture.failed or not isinstance(found, type):
-        return None
-    _MIDDLEWARE_CLASSES[path] = found
-    return found
+    except ImportError:
+        found = None
+    resolved = found if isinstance(found, type) else None
+    _MIDDLEWARE_CLASSES[path] = resolved
+    return resolved
 
 
 def is_middleware(entry: object, base: str) -> bool:
@@ -724,6 +726,41 @@ def middleware_listed(middleware: Iterable[object], base: str) -> bool:
     return any(is_middleware(entry, base) for entry in middleware)
 
 
+class _Installed:
+    """What `settings.MIDDLEWARE` lists, each answer held while the list stays the one.
+
+    An override or a reload sets another list, so the held answers need no receiver.
+    """
+
+    __slots__ = ("_answers",)
+
+    def __init__(self) -> None:
+        """Start before the first read."""
+        self._answers: IdentityMemo[dict[str, bool]] = IdentityMemo()
+
+    def lists(self, base: str) -> bool:
+        """Return whether the list held now names `base` or a subclass of it."""
+        middleware = settings.MIDDLEWARE
+        answers = self._answers.get(middleware, dict)
+        found = answers.get(base)
+        if found is None:
+            found = answers[base] = middleware_listed(middleware or (), base)
+        return found
+
+    def forget(self) -> None:
+        """Drop the answers, which also follow the classes the entries import to."""
+        self._answers.forget()
+
+
+_installed: Final = _Installed()
+FRAMEWORK.attach(_installed.forget)
+
+
+def middleware_installed(base: str) -> bool:
+    """Whether `settings.MIDDLEWARE` lists `base` or a subclass, asked once per list."""
+    return _installed.lists(base)
+
+
 def child_nodelists(node: Node) -> Iterator[NodeList]:
     """Yield each child node list a node declares on `child_nodelists`."""
     for attr in node.child_nodelists:
@@ -742,3 +779,190 @@ def redirect_or_fallback(
     with suppress(DisallowedRedirect):
         return HttpResponseRedirect(target, status=status)
     return HttpResponseRedirect(fallback, status=status)
+
+
+MAX_DURATION: Final = 86_400
+"""The longest duration an option takes, one day in seconds."""
+
+_DURATION = re.compile(r"(?P<amount>[0-9]+(?:\.[0-9]+)?)(?P<unit>ms|s)")
+_MS_PER_SECOND: Final = 1000
+_SHOWN_DIGITS: Final = 18
+
+
+def _shown(value: object) -> str:
+    """Return how an error names a value, a huge integer without its digits."""
+    if isinstance(value, int) and abs(value) >= 10**_SHOWN_DIGITS:
+        return "a very large integer"
+    return reprlib.repr(value)
+
+
+def _literal_seconds(value: str) -> float:
+    """Return the seconds a `"2s"` or `"500ms"` literal names."""
+    match = _DURATION.fullmatch(value)
+    if match is None:
+        msg = f"a duration literal reads like '2s' or '500ms', got {_shown(value)}"
+        raise DurationError(msg)
+    seconds = float(match["amount"])
+    return seconds / _MS_PER_SECOND if match["unit"] == "ms" else seconds
+
+
+def parse_duration(value: object) -> float:
+    """Return seconds from a number of seconds or a `"2s"` or `"500ms"` literal.
+
+    A bare numeric string is refused, since a template literal reads it as milliseconds.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        msg = f"a duration is a number of seconds or a '2s' literal, got {value!r}"
+        raise DurationError(msg)
+    seconds = _literal_seconds(value) if isinstance(value, str) else value
+    if not 0 <= seconds <= MAX_DURATION:
+        msg = (
+            "a duration is a number of seconds from 0 up to one day, got "
+            f"{_shown(value)}"
+        )
+        raise DurationError(msg)
+    return float(seconds)
+
+
+VOID_ELEMENTS: Final = frozenset(
+    {
+        "area",
+        "base",
+        "basefont",
+        "bgsound",
+        "br",
+        "col",
+        "embed",
+        "frame",
+        "hr",
+        "img",
+        "input",
+        "keygen",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+"""The start tags an HTML parser never leaves open, obsolete ones included."""
+
+RAW_TEXT_ELEMENTS: Final = frozenset(
+    {
+        "iframe",
+        "noembed",
+        "noframes",
+        "noscript",
+        "script",
+        "style",
+        "textarea",
+        "title",
+        "xmp",
+    }
+)
+"""The elements whose content an HTML parser reads as text up to their own end tag."""
+
+_FOREIGN_ROOTS: Final = frozenset({"svg", "math"})
+_INTEGRATION_POINTS: Final = frozenset(
+    {"foreignobject", "desc", "annotation-xml", "mi", "mo", "mn", "ms", "mtext"}
+)
+"""The foreign elements whose children are HTML again, where a slash closes nothing."""
+
+_ELEMENT_SCAN: Final = re.compile(
+    r"<!--(?:-?>|.*?(?:--!?>|\Z))"
+    rf"|<(?P<raw>{'|'.join(sorted(RAW_TEXT_ELEMENTS))})(?=[\s/>])"
+    r"(?:[^>\"']|\"[^\"]*\"|'[^']*')*>.*?(?:</(?P=raw)\s*>|\Z)"
+    r"|<(?P<close>/?)(?P<name>[A-Za-z][^\s/>]*)"
+    r"(?P<attrs>(?:[^>\"']|\"[^\"]*\"|'[^']*')*)>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _element_opens(name: str, attrs: str, *, foreign: bool) -> tuple[bool, bool]:
+    """Return whether a start tag stays open and whether its children are foreign.
+
+    A browser honours a self-closing slash only on an `svg` or `math` or inside one.
+    """
+    if name in VOID_ELEMENTS:
+        return False, foreign
+    own = foreign or name in _FOREIGN_ROOTS
+    if own and attrs.rstrip().endswith("/"):
+        return False, foreign
+    return True, name in _FOREIGN_ROOTS or (foreign and name not in _INTEGRATION_POINTS)
+
+
+def open_elements(text: str) -> list[tuple[str, str]]:
+    """Return the lowercased name and the attributes of each element `text` leaves open.
+
+    Comments, raw-text elements, void elements and self-closing tags leave none open.
+    """
+    stack: list[tuple[str, str]] = []
+    foreign: list[bool] = [False]
+    for match in _ELEMENT_SCAN.finditer(text):
+        name = match["name"]
+        if name is None:
+            continue
+        lowered = name.lower()
+        if not match["close"]:
+            opened, inner = _element_opens(lowered, match["attrs"], foreign=foreign[-1])
+            if opened:
+                stack.append((lowered, match["attrs"]))
+                foreign.append(inner)
+            continue
+        for depth in range(len(stack) - 1, -1, -1):
+            if stack[depth][0] == lowered:
+                del stack[depth:]
+                del foreign[depth + 1 :]
+                break
+    return stack
+
+
+def root_ends(body: str) -> tuple[list[int], bool]:
+    """Return where the name of each top-level element ends and whether text is loose.
+
+    Loose text is text outside every element, which no root element can carry.
+    """
+    ends: list[int] = []
+    foreign: list[bool] = [False]
+    loose = False
+    position = 0
+    for match in _ELEMENT_SCAN.finditer(body):
+        top = len(foreign) == 1
+        if top and body[position : match.start()].strip():
+            loose = True
+        position = match.end()
+        tag = match["raw"] or match["name"]
+        if tag is None:
+            continue
+        if match["close"]:
+            loose = loose or top
+            if not top:
+                foreign.pop()
+            continue
+        if top:
+            ends.append(match.start() + 1 + len(tag))
+        if match["raw"] is None:
+            opened, inner = _element_opens(
+                tag.lower(), match["attrs"], foreign=foreign[-1]
+            )
+            if opened:
+                foreign.append(inner)
+    if len(foreign) == 1 and body[position:].strip():
+        loose = True
+    return ends, loose
+
+
+def root_miss(ends: list[int], *, loose: bool) -> str | None:
+    """Return how the roots `root_ends` found miss a single element, `None` for one."""
+    if loose:
+        return "loose text"
+    if len(ends) == 1:
+        return None
+    return f"{len(ends)} root elements"
+
+
+def misrooted(body: str) -> str | None:
+    """Return how `body` misses a single root element, `None` when it has one."""
+    ends, loose = root_ends(body)
+    return root_miss(ends, loose=loose)

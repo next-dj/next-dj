@@ -37,13 +37,6 @@ _PROBE = (
 _PEEK_AND_SIDE = zone_body("peek") + '{% zone "side" %}{{ side_probe }}{% endzone %}'
 
 
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
-
-
 def _site(root: Path, *, intercept_source: str = "", peek: str | None = None) -> None:
     write_page(root, "photo/[int:pk]", PAGE_HEAD, body="<p>photo</p>")
     write_page(
@@ -148,7 +141,7 @@ class TestMorphPicksOverTheRequestZones:
 
         assert served == wide
         assert envelope.ops[0].html == '<div data-next-zone="peek">peek</div>'
-        assert len(patches._render_contexts) == 1
+        assert patches._origin_context is None
 
     def test_a_zone_the_intercept_lacks_renders_from_the_origin(
         self, root: Path
@@ -200,3 +193,24 @@ class TestRefusingInterceptOnTheActionPath:
             resolve("/photo/3/")
             with pytest.raises(PageModuleImportError):
                 _served_target(request, target, {"pk": 3})
+
+
+class TestInterceptSkeleton:
+    """A zone an intercept serves carries its skeleton, which the document lacks."""
+
+    def test_the_morph_holds_the_stash_inside_the_zone(self, root: Path) -> None:
+        _site(root, peek='{% zone "peek" reload="loading" %}<p>p</p>{% endzone %}')
+        (root / "(.)photo" / "[int:pk]" / "loading.peek.djx").write_text("<i>s</i>")
+
+        with routed(root):
+            response = NextClient().get_zones("/photo/3/", "peek")
+
+        envelope = envelope_of(response)
+        [morph] = [op for op in envelope.ops if op["op"] == "morph"]
+        assert morph["html"] == (
+            '<div data-next-zone="peek" data-next-reload="loading"><p>p</p>'
+            '<template data-next-loading="peek"><i>s</i></template></div>'
+        )
+        assert "/static/next/next.reload.min.js" in [
+            asset["url"] for asset in envelope.assets
+        ]

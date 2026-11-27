@@ -38,7 +38,7 @@ Nothing is stored in the database, so `migrate` only builds Django's own tables.
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "site")],
             "PAGES_DIR": "pages",
@@ -142,7 +142,7 @@ Three methods, three responsibilities:
 
 ### 4. Nested layout, breadcrumbs and the meta bar
 
-[`pages/posts/layout.djx`](blog/pages/posts/layout.djx) wraps every post. It renders the breadcrumb trail, the title, the publication date, the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots.
+[`pages/posts/layout.djx`](blog/pages/posts/layout.djx) wraps every post. It renders the breadcrumb trail, the title, the publication date, the reading time and the share button, and a `prose` container that receives the article HTML through `{% template %}`. The outer [`site/layout.djx`](site/layout.djx) wraps that article in turn, which makes the post pages a two-level layout composition across two page roots. The trail and the header read the `article` of the post page below, so they sit in the `post-header` zone. The client router then keeps both layouts on a navigation from one post to another and re-renders that zone beside the new article, which is what `next.W183` asks of a layout that reads a page key.
 
 The trail is not spelled by hand:
 
@@ -273,7 +273,7 @@ The integration tests read the head back through `next.testing.assert_metadata`,
 
 ### 11. Context processor for site-wide chrome
 
-[`blog/context_processors.py`](blog/context_processors.py) returns `site_tagline`, `site_year`, and `site_path` for every template rendered through the router. `site_path` is read straight off `request.path` and rendered by the footer, so the processor uses the argument the `next.E040` check requires it to accept instead of ignoring it.
+[`blog/context_processors.py`](blog/context_processors.py) returns `site_tagline`, `site_year`, and `site_path` for every template rendered through the router. `site_path` is read straight off `request.path` and rendered by the footer, so the processor uses the argument the `next.E040` check requires it to accept instead of ignoring it. A processor that reads the path changes the chrome on every page, and `next.W176` counts every key it returns as such a value, so [`site/layout.djx`](site/layout.djx) renders the tagline in the `tagline` zone and the footer in the `site-footer` zone, which the router re-renders on each navigation while the shell stays.
 
 ### 12. URL names from the file router
 
@@ -317,15 +317,30 @@ The framework renders the group and appends the `Sitemap:` line itself, absolute
 
 A callable `@page.metadata` belongs to its own page, so [`print/page.py`](blog/pages/posts/[slug]/print/page.py) titles the sheet from the front matter and marks it `noindex`. The title template from the settings still applies. `sitemap.py` lists the route in `exclude`, which keeps the sitemap check quiet for a dynamic route that is not listed.
 
+### 15. Prefetching the links in view
+
+A blog is read on phones as much as on desktops, and a touch screen has no hover to warn the router of the next tap. [`config/settings.py`](config/settings.py) therefore turns the viewport prefetch on:
+
+```python
+NEXT_FRAMEWORK = {
+    ...,
+    "ROUTER": {"PREFETCH": "viewport"},
+}
+```
+
+Every post link the router owns is prefetched once it scrolls into view, on top of the default hover and focus prefetch, so the first tap on a post in the list lands on an answer already in memory. Each prefetch renders the target page on the server, which is cheap here, since a post is a Markdown file on disk and nothing reads or writes the database. A page that acts on a visit declares `page.router(prefetch=False)` instead, and a site whose browser tests write to an in-memory SQLite database while prefetches read it keeps the default `"intent"`.
+
+The "Print view" link in [`posts/layout.djx`](blog/pages/posts/layout.djx) opts out with `data-next-prefetch="off"`. The print view starts its own root layout, so a navigation to it is a hard load: the router answers with a `visit` operation and the browser loads the URL as a new document. A prefetch of that link would render the whole print page for an answer the click never applies. `TestIndex` reads the `prefetch` mode the page hands the router, and `TestPrintView` the attribute on the link and the `visit` cut of the navigation.
+
 ## Gotchas
 
 ### A page needs a body source, and a layout is none
 
 `next.E012` fails when a `page.py` has none of a `render()` function, a `template` attribute, or a loader that can load it. A `layout.djx` beside or above the file does not satisfy it, since a layout only wraps a body, and such a file routes no URL. `/about/` passes through its `template.md`, the post route through its `template.djx`.
 
-### The nav components resolve against `resolver_match`
+### The nav links are marked by the framework
 
-The header calls the shared [`nav_link`](../_shared/_components/nav_link/component.py) component with `variant="bar"`, and its `is_active` callable compares `request.resolver_match.view_name` with the `url_name` prop. This blog only needs the exact match. The `active_when` prop for a substring match is exercised by [`examples/shortener`](../shortener/).
+The header fills the `nav` slot of the shared `app_shell` with [`nav_link`](../_shared/_components/nav_link/component.py) calls in the `bar` variant, and the shell renders them inside `<nav aria-label="Main">`. The framework's active-link pass gives the link to the current path `aria-current="page"`, and the component styles it through Tailwind's `aria-[current=page]:` variant. Neither the blog nor the shared kit compares URLs. The breadcrumb trail of the post layout sits in a `<nav>` too, and its current crumb is a `<span>` rather than a link, so the pass leaves it as written.
 
 ### The asset-version guard needs a deploy stamp
 

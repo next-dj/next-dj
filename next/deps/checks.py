@@ -1,4 +1,4 @@
-"""System checks for the `DObject` parameters a project declares.
+"""System checks for the `LOADER` scope and the `DObject` parameters a project declares.
 
 Annotations, routes and registries alone are read, so no user code or query runs.
 """
@@ -7,17 +7,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     RunMemo,
     discover_page_registrations,
-    get_router_manager,
+    get_route_manager,
     iter_scanned_pages,
+    raw_scope,
 )
 from next.components.context import component
 from next.components.sources import components_listed, import_component_modules
+from next.conf.checks import error_for_misfit
+from next.conf.loader import SCOPE, SHAPE
+from next.conf.shapes import misfits
 from next.discovery import iter_scanned_intercepts
 from next.forms.base import FORM_HOOKS
 from next.forms.checks.sources import iter_registered_actions
@@ -49,7 +53,7 @@ if TYPE_CHECKING:
 
     from next.pages.registry import PageContextEntry
     from next.permissions.markers import Requirement
-    from next.urls import RouterManager
+    from next.urls import RouteManager
     from next.utils import PageRoot
 
 
@@ -165,15 +169,13 @@ def _page_run(root: PageRoot, url_path: str, page_path: Path) -> _PageRun:
     return _PageRun(route.url, page_path, route.kwargs, steps, metadata, objects)
 
 
-def _loaded_pages(
-    router_manager: RouterManager,
-) -> Iterator[tuple[PageRoot, str, Path]]:
+def _loaded_pages(route_manager: RouteManager) -> Iterator[tuple[PageRoot, str, Path]]:
     """Yield each page that loaded once, with the tree the walk found it in.
 
     An intercept page comes under its target trail. A bodiless `page.py` is left out.
     """
-    loaded = {path for _url_path, path in discover_page_registrations(router_manager)}
-    for router in router_manager.backends:
+    loaded = {path for _url_path, path in discover_page_registrations(route_manager)}
+    for router in route_manager.backends:
         scanned = (*iter_scanned_pages(router), *iter_scanned_intercepts(router))
         for root, url_path, page_path in scanned:
             if page_path in loaded and routed(page_path):
@@ -222,11 +224,11 @@ def _form_callables() -> Iterator[Callable[..., Any]]:
             yield from _form_class_callables(step_class)
 
 
-def _collect_sites(router_manager: RouterManager) -> _ObjectSites:
+def _collect_sites(route_manager: RouteManager) -> _ObjectSites:
     """Read every place a `DObject` parameter can sit for one check run."""
     pages = tuple(
         _page_run(root, url_path, page_path)
-        for root, url_path, page_path in _loaded_pages(router_manager)
+        for root, url_path, page_path in _loaded_pages(route_manager)
     )
     return _ObjectSites(
         pages=pages,
@@ -244,10 +246,10 @@ def object_sites() -> _ObjectSites | None:
 
     A router that fails to build is reported once by `next.E007`.
     """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return None
-    return _sites.get(router_manager, lambda: _collect_sites(router_manager))
+    return _sites.get(route_manager, lambda: _collect_sites(route_manager))
 
 
 def _all_callables(sites: _ObjectSites) -> Iterator[Callable[..., Any]]:
@@ -562,7 +564,18 @@ def check_object_hints(*args: object, **kwargs: object) -> list[CheckMessage]:
     ]
 
 
+@register(NEXT)
+def check_loader_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Validate the keys and the value shapes of the `LOADER` scope."""
+    scope = raw_scope(SCOPE)
+    if scope is None:
+        return []
+    prefix = f"NEXT_FRAMEWORK[{SCOPE!r}]"
+    return [error_for_misfit(prefix, misfit) for misfit in misfits(scope, SHAPE)]
+
+
 __all__ = [
+    "check_loader_settings",
     "check_object_component_contexts",
     "check_object_declarations",
     "check_object_form_parents",

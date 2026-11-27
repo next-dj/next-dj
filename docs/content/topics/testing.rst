@@ -58,6 +58,9 @@ Every helper is importable from the ``next.testing`` package as well as from its
    * - ``seo``
      - ``parse_sitemap``, ``SitemapUrl``
      - Reading the URLs a sitemap or a sitemap index response lists.
+   * - ``streaming``, ``boundaries``, ``tokens``
+     - ``read_stream``, ``aread_stream``, ``StreamedPage``, ``StreamedChunk``, ``boundary_errors``, ``recorded_failures``, ``HeldFailures``, ``boundary_gate``, ``gated``, ``parallel_boundaries``, ``issue_boundary_token``, ``freeze_token_clock``, ``expire_boundary_token``
+     - Reading a streamed page, recording the failures boundaries contain, holding a deferred job, rendering the error UI of a boundary, and minting tokens, see `Testing deferred boundaries`_.
    * - ``realtime``
      - ``memory_broker``, ``capture_published``, ``PublishedMessages``, ``SseReader``, ``SseEvent``, ``WebSocketCommunicator``, ``MemoryPort``, ``issue_socket_ticket``, ``aissue_socket_ticket``, ``SocketTicket``, ``override_websocket_mount``
      - Isolating the broker, recording publications, and driving an SSE stream or a WebSocket, see `Testing realtime`_.
@@ -322,7 +325,7 @@ A test that switches to a URLconf with ``pages()`` includes, or away from one, t
    def test_staff_log(next_client: NextClient) -> None:
        assert next_client.get("/staff/log/").status_code == 200
 
-Code that assigns ``ROOT_URLCONF`` directly calls ``router_manager.reload()`` from ``next.urls`` after each assignment, the one that restores the old value included.
+Code that assigns ``ROOT_URLCONF`` directly calls ``route_manager.reload()`` from ``next.urls`` after each assignment, the one that restores the old value included.
 
 NextClient
 ----------
@@ -846,6 +849,16 @@ Both accept ``request``, ``form``, ``url_kwargs``, and ``context_data``, and ``m
 Pass ``resolve_call`` a callable whose annotated parameters a provider can fill, then assert on the returned mapping.
 Use these helpers for testing custom providers without booting the router.
 
+Testing deferred boundaries
+---------------------------
+
+``NextClient.get_stream(url)`` reads a page with ``stream`` boundaries as a threaded server streams it, and returns a ``StreamedPage`` with the ``shell`` that carries the loading UI, the ``chunks`` that settle each boundary, and ``final_html()``, the page with every chunk applied.
+``StreamedPage.boundary(name)`` returns the chunk of one boundary by its component name or the path a page boundary is named by.
+``NextClient.get_boundary(url, name)`` reloads a client-trip component the way the browser does, and ``NextClient.reload_boundary(url, token)`` sends a token as it is and returns the raw response, so a test reads the refusal that a token minted for another client earns.
+A boundary that fails re-raises in the test unless the block runs under ``boundary_errors("render")``, and ``recorded_failures()`` collects every failure a boundary contains inside the block.
+``boundary_gate(component=...)`` holds a job until the test releases it, ``gated(name)`` does the same for a component name without checking that a source holds it, and ``parallel_boundaries()`` runs the jobs of the block on the pool.
+The recipe with every helper is :doc:`/content/howto/test-a-page-with-deferred-boundaries`.
+
 Testing realtime
 ----------------
 
@@ -886,7 +899,7 @@ A second call turns them on.
    def test_deploy_checks_pass() -> None:
        call_command("check", deploy=True, fail_level="WARNING", verbosity=0)
 
-That run adds ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, ``next.W149``, and ``next.W151``, see :doc:`/content/deployment/checklist` for what each one reports.
+That run adds ``next.E223``, ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, ``next.W149``, and ``next.W151``, see :doc:`/content/deployment/checklist` for what each one reports.
 A suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
 The same suite selects a shared realtime broker, or lists ``next.W149`` in ``SILENCED_SYSTEM_CHECKS`` for a single-process deployment, because the default ``MemoryBroker`` keeps topics inside one process.
 A suite on ``RedisBroker`` sets the connection limit ``next.W151`` asks for, or lists the code in ``SILENCED_SYSTEM_CHECKS``.

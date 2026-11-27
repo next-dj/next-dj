@@ -1,11 +1,13 @@
 """System checks for the `NEXT_FRAMEWORK` keys the forms subsystem reads."""
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error
+from django.core.exceptions import ImproperlyConfigured
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import import_class_cached
-from next.forms.backends import FormActionBackend
+from next.forms.backends import FormActionBackend, ResponseShaper
+from next.forms.manager import form_action_manager
 from next.forms.wizard import FormWizardBackend
 
 
@@ -69,6 +71,31 @@ def _validate_single_form_action_backend(
             )
         ]
     return []
+
+
+@register(NEXT)
+def check_form_action_shapers(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Resolve the response shaper of every loaded form action backend (`next.E241`).
+
+    A bad `OPTIONS["SHAPER"]` would otherwise fail every form POST with a 500.
+    """
+    errors: list[CheckMessage] = []
+    for backend in form_action_manager.backends:
+        try:
+            shaper: object = backend.shaper
+        except ImproperlyConfigured as exc:
+            errors.append(Error(str(exc), obj=settings, id="next.E241"))
+            continue
+        if not isinstance(shaper, ResponseShaper):
+            errors.append(
+                Error(
+                    f"Form action backend {type(backend).__name__!r} answers through "
+                    f"{shaper!r}, which defines no shape() and validate().",
+                    obj=settings,
+                    id="next.E241",
+                )
+            )
+    return errors
 
 
 @register(NEXT)
@@ -158,6 +185,7 @@ def check_form_anchor_files(*args: object, **kwargs: object) -> list[CheckMessag
 
 __all__ = [
     "check_form_action_backends_configuration",
+    "check_form_action_shapers",
     "check_form_anchor_files",
     "check_form_wizard_backend",
 ]

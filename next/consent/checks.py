@@ -7,9 +7,9 @@ from collections.abc import Mapping
 from typing import Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import errors_for_unknown_keys, raw_scope
 from next.conf import import_class_cached
 from next.conf.defaults import AUTO

@@ -17,7 +17,7 @@ from django.urls import (
 )
 from django.utils import translation
 
-from next.caches import LruCache
+from next.caches import ROUTES, SETTINGS, LruCache
 
 
 _URLCONF_SETTINGS: Final = frozenset({"ROOT_URLCONF", "LANGUAGES", "LANGUAGE_CODE"})
@@ -30,7 +30,9 @@ type _PathKey = tuple[str, str, str]
 type _Paths = tuple[tuple[str, str], ...]
 
 # Keyed by route, so every language variant of a page shares one entry.
-_translated: Final[LruCache[_RouteKey | _PathKey, _Paths]] = LruCache()
+_translated: Final[LruCache[_RouteKey | _PathKey, _Paths]] = LruCache(
+    depends=(SETTINGS, ROUTES)
+)
 
 
 def _own_language(local_path: str) -> str:
@@ -161,11 +163,6 @@ def x_default_url(pairs: Sequence[tuple[str, str]]) -> str | None:
 def forget_translated_urls(**kwargs: object) -> None:
     """Drop the hreflang memo after a URLconf, router or language change."""
     _translated.clear()
-
-
-def forget_urlconf_translations(*, setting: str, **kwargs: object) -> None:
-    if setting in _URLCONF_SETTINGS:
-        _translated.clear()
 
 
 __all__ = ["forget_translated_urls", "hreflang_urls", "translated_url", "x_default_url"]

@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Applier } from "./apply";
 import type { HistoryAdapter } from "./apply";
 import { createLayers } from "./layers";
-import type { LayerStack, PopStateAdapter } from "./layers";
+import type { PopStateAdapter } from "./layers";
+import { markBusy } from "./protocol";
+import { createStack } from "./stack";
+import type { Stack } from "./stack";
 import { createNavigation } from "./navigation";
 import type { Navigation } from "./navigation";
 import { pageKey } from "./protocol";
 import { createTriggers } from "./triggers";
-import { chunkModules } from "./test-doubles";
+import { chunkModules, landed } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -51,7 +54,7 @@ describe("the commit phase", () => {
   let dispatched: Dispatched[];
   let writes: { action: string; href: string; title: string }[];
   let navigation: Navigation;
-  let layers: LayerStack;
+  let layers: Stack;
   let applier: Applier;
   let back: () => void;
   let order: string[];
@@ -78,26 +81,33 @@ describe("the commit phase", () => {
     });
     const manual = manualPopstate();
     back = manual.back;
-    layers = createLayers({
+    layers = createStack({
       dispatch,
-      fetch: async (request) =>
-        void applier.apply(
-          envelope([
-            {
-              op: "morph",
-              target: { zone: request.zone },
-              html: `<div data-next-zone="${request.zone}">body</div>`,
-            },
-            { op: "meta", title: "Photo" },
-          ]),
-          { page: new URL(request.url, location.href).pathname },
-        ),
-      document,
-      dialog: { open: () => () => undefined },
-      navigation,
-      popstate: manual.popstate,
+      chunk: landed(createLayers),
+      build: (factory) =>
+        factory({
+          dispatch,
+          fetch: async (request) =>
+            void applier.apply(
+              envelope([
+                {
+                  op: "morph",
+                  target: { zone: request.zone },
+                  html: `<div data-next-zone="${request.zone}">body</div>`,
+                },
+                { op: "meta", title: "Photo" },
+              ]),
+              { page: new URL(request.url, location.href).pathname },
+            ),
+          document,
+          dialog: { open: () => () => undefined },
+          navigation,
+          mark: markBusy,
+        }),
+      popped: () => navigation.popped(() => undefined),
+      navigate: () => undefined,
     });
-    layers.install(document);
+    layers.install(document, manual.popstate);
     applier = new Applier({
       dispatch,
       mergeContext: () => undefined,
@@ -193,6 +203,55 @@ describe("the commit phase", () => {
     );
   });
 
+  it("a quiet url op writes the entry and announces no page view", () => {
+    applier.apply(
+      envelope([
+        { op: "url", href: "/feed/?page=2", quiet: true },
+        { op: "url", href: "/feed/?page=3", action: "replace", quiet: true },
+      ]),
+    );
+    expect(writes).toEqual([
+      { action: "push", href: "/feed/?page=2", title: "Feed" },
+      { action: "replace", href: "/feed/?page=3", title: "Feed" },
+    ]);
+    expect(location.pathname + location.search).toBe("/feed/?page=3");
+    expect(navigated()).toEqual([]);
+  });
+
+  it("a quiet url op beside a meta op announces the title change alone", () => {
+    applier.apply(
+      envelope([
+        { op: "meta", title: "Feed, page 2" },
+        { op: "url", href: "/feed/?page=2", action: "replace", quiet: true },
+      ]),
+    );
+    expect(navigated()).toEqual([
+      {
+        url: `${location.origin}/feed/?page=2`,
+        path: "/feed/?page=2",
+        title: "Feed, page 2",
+        action: "none",
+      },
+    ]);
+  });
+
+  it("a quiet url op after a push leaves that push to announce", () => {
+    applier.apply(
+      envelope([
+        { op: "url", href: "/feed/?page=2" },
+        { op: "url", href: "/feed/?page=2&more=1", action: "replace", quiet: true },
+      ]),
+    );
+    expect(navigated()).toEqual([
+      {
+        url: `${location.origin}/feed/?page=2&more=1`,
+        path: "/feed/?page=2&more=1",
+        title: "Feed",
+        action: "push",
+      },
+    ]);
+  });
+
   it("a title-only change is announced with no history action", () => {
     applier.apply(envelope([{ op: "meta", title: "Feed (3)" }]));
     expect(navigated()).toEqual([
@@ -272,6 +331,23 @@ describe("the commit phase", () => {
     expect(reloads).toBe(0);
     expect(navigated()).toEqual([
       expect.objectContaining({ path: "/feed/", action: "pop" }),
+    ]);
+  });
+
+  it("a Back onto a zone-pushed entry is announced once with its own title", async () => {
+    applier.apply(
+      envelope([
+        { op: "url", href: "/feed/?page=2" },
+        { op: "meta", title: "Page 2" },
+      ]),
+    );
+    await layers.open(null, "/photos/1/", "photo");
+    dispatched.length = 0;
+    window.history.replaceState(null, "", "/feed/?page=2");
+    back();
+    expect(reloads).toBe(0);
+    expect(navigated()).toEqual([
+      { url: location.href, path: "/feed/?page=2", title: "Page 2", action: "pop" },
     ]);
   });
 
@@ -440,6 +516,7 @@ describe("a filter submit replaces the URL through the navigation", () => {
       abort: () => undefined,
       history: navigation.asHistory(),
       poll: chunkModules.poll,
+      forms: chunkModules.forms,
     });
     const detach = triggers.install(document);
     const input = document.querySelector("input")!;
@@ -467,6 +544,96 @@ describe("the history view of the navigation", () => {
     navigation.asHistory().push("/b/");
     expect(location.pathname).toBe("/b/");
     expect(dispatched[0]!.detail).toMatchObject({ path: "/b/", action: "push" });
+  });
+});
+
+describe("the history entries the navigation writes", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  function written() {
+    const states: unknown[] = [];
+    const history: HistoryAdapter = {
+      push: (href, state) => {
+        states.push(state);
+        window.history.pushState(state, "", href);
+      },
+      replace: (href, state) => {
+        states.push(state);
+        window.history.replaceState(state, "", href);
+      },
+    };
+    return { history, states };
+  }
+
+  it("stamps every entry with a fresh key and the kind of write", () => {
+    const { history, states } = written();
+    const navigation = createNavigation({ dispatch: () => undefined, history });
+    navigation.asHistory().push("/a/");
+    navigation.asHistory().replace("/b/");
+    navigation.hold("/c/", "/c/", () => undefined);
+    expect(states).toEqual([
+      { next: 1, kind: "nav", key: expect.any(String) },
+      { next: 1, kind: "nav", key: expect.any(String) },
+      { next: 1, kind: "layer", key: expect.any(String) },
+    ]);
+    const keys = new Set(states.map((state) => (state as { key: string }).key));
+    expect(keys.size).toBe(3);
+    expect(window.history.state).toEqual(states[2]);
+  });
+
+  it("asks the last answerer for a pop no layer took", () => {
+    const { history } = written();
+    const dispatched: Dispatched[] = [];
+    let reloads = 0;
+    let answer: string | undefined = "/x/";
+    const navigation = createNavigation({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      history,
+      reload: () => (reloads += 1),
+      answer: () => answer,
+    });
+    navigation.asHistory().push("/a/");
+    dispatched.length = 0;
+    window.history.replaceState(null, "", "/x/");
+    navigation.popped(() => undefined);
+    expect(reloads).toBe(0);
+    expect(dispatched).toEqual([]);
+    const commit = navigation.begin();
+    commit.claim("/x/");
+    commit.write({ href: "/x/", action: "replace" });
+    commit.end();
+    expect(dispatched).toEqual([
+      expect.objectContaining({
+        detail: expect.objectContaining({ path: "/x/", action: "pop" }),
+      }),
+    ]);
+    answer = undefined;
+    window.history.replaceState(null, "", "/y/");
+    navigation.popped(() => undefined);
+    expect(reloads).toBe(1);
+    navigation.popped(() => "/y/");
+    expect(reloads).toBe(1);
+  });
+
+  it("drops a taken pop that another move of the bar superseded", () => {
+    const { history } = written();
+    const dispatched: Dispatched[] = [];
+    const navigation = createNavigation({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      history,
+      answer: () => "/x/",
+    });
+    navigation.asHistory().push("/a/");
+    window.history.replaceState(null, "", "/x/");
+    navigation.popped(() => undefined);
+    navigation.asHistory().push("/b/");
+    window.history.replaceState(null, "", "/x/");
+    const commit = navigation.begin();
+    commit.claim("/x/");
+    commit.end();
+    expect(dispatched.map(({ detail }) => detail.action)).toEqual(["push", "push"]);
   });
 });
 

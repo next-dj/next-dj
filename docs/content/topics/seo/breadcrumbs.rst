@@ -64,11 +64,11 @@ Route groups and intercepts
 Crumb trails are URL trails, so a route group leaves them like it leaves the URL, see :ref:`topics-file-router-route-groups`.
 A ``page.py`` whose own directory is a group gives no crumb.
 Its other metadata, the title and the description among them, still folds into the pages below it.
-A ``breadcrumb`` declared in the metadata of a group ``page.py`` is dropped, and :ref:`next.W136 <ref-system-checks>` reports it.
+A ``breadcrumb`` declared in the metadata of a group ``page.py`` is dropped, and ``next.W136`` reports it.
 The crumbs of a page below a group link to the group-free URLs.
 
 An intercept page builds no breadcrumbs, since its zone response renders no layout.
-:ref:`next.W138 <ref-system-checks>` reports a ``breadcrumb`` declared on one.
+``next.W138`` reports a ``breadcrumb`` declared on one.
 
 The tag
 -------
@@ -83,10 +83,11 @@ The tag
      {% template %}
    </article>
 
-The markup is ``<nav aria-label="Breadcrumb"><ol>`` with one ``<li>`` per crumb, a link where the crumb has a URL and ``aria-current="page"`` on the current one, every label escaped.
+The markup is ``<nav aria-label="Breadcrumb"><ol>`` with one ``<li>`` per crumb, a link where the crumb has a URL, every label escaped, ``aria-current="page" data-next-current="page"`` on the current crumb and ``data-next-current="ancestor"`` on each ancestor link but a home path such as ``/`` or a language root.
+The crumbs compare paths as the active-link pass does, so the trail renders the same with ``ROUTER["ACTIVE_LINKS"]`` on or off.
 A page without crumbs renders nothing.
 
-``{% breadcrumbs as crumbs %}`` binds the tuple of ``Breadcrumb`` values to ``crumbs`` instead of rendering, each with ``label``, ``url``, and ``current``, for markup of the project's own.
+``{% breadcrumbs as crumbs %}`` binds the tuple of ``Breadcrumb`` values to ``crumbs`` instead of rendering, each with ``label``, ``url``, ``current``, and ``ancestor``, for markup of the project's own.
 
 .. code-block:: jinja
    :caption: blog/pages/posts/layout.djx

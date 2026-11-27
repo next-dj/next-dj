@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.checks.common import get_router_manager
+from next.checks.common import get_route_manager
 from next.pages import page
 from next.pages.errors import PageMetadataConflictError, PageMetadataShapeError
 from next.seo.manager import seo_manager
@@ -24,8 +24,8 @@ def loaded_seo_roots() -> tuple[SeoRoot, ...]:
 
     A router that fails to start yields no tree, as `next.E007` already reports it.
     """
-    router_manager, init_errors = get_router_manager()
-    if router_manager is None or init_errors:
+    route_manager, init_errors = get_route_manager()
+    if route_manager is None or init_errors:
         return ()
     return seo_manager.roots()
 

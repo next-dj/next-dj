@@ -1,7 +1,7 @@
 import asyncio
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import override
 
@@ -78,7 +78,7 @@ class LiveAsgiServer(uvicorn.Server):
 
 
 @contextmanager
-def serve_asgi(app: ASGIApplication, websocket: str) -> Iterator[LiveAsgiServer]:
+def serve_asgi(app: ASGIApplication, websocket: str) -> Generator[LiveAsgiServer]:
     """Serve an ASGI app under uvicorn on an ephemeral local port in a thread."""
     sock = socket.socket()
     try:
@@ -122,7 +122,7 @@ def serve_asgi(app: ASGIApplication, websocket: str) -> Iterator[LiveAsgiServer]
 @contextmanager
 def serve_realtime(
     request: pytest.FixtureRequest, websocket: str = WEBSOCKET_IMPLEMENTATION
-) -> Iterator[LiveAsgiServer]:
+) -> Generator[LiveAsgiServer]:
     """Serve the project behind its realtime endpoint, drained after a passed test.
 
     A failed test keeps its pages open for the screenshot, its streams outlive a drain.

@@ -5,7 +5,7 @@ Getting started
 
 This section gets you from zero to a running next.dj project.
 Read the overview to learn the mental model, map your Django vocabulary onto it, then install the package.
-The six tutorial parts build a small Notes application from there.
+The seven tutorial parts build a small Notes application from there.
 
 .. rubric:: Read first
 
@@ -39,10 +39,13 @@ The six tutorial parts build a small Notes application from there.
 :doc:`tutorial06`
    Make the index live with zones and partial rendering, with a no-JavaScript fallback.
 
+:doc:`tutorial07`
+   Add a slow block that shows a loading UI first and contains its own failure with an error UI.
+
 .. rubric:: After the tutorial
 
 :doc:`limitations`
-   The deliberate boundaries of the framework, from the synchronous pipeline to the single partial backend.
+   The deliberate boundaries of the framework, from the sync-only action handlers to the single partial backend.
 
 :doc:`whatsnext`
    Where to go for deeper topics, recipes, and reference material.
@@ -60,5 +63,6 @@ The six tutorial parts build a small Notes application from there.
    tutorial04
    tutorial05
    tutorial06
+   tutorial07
    limitations
    whatsnext

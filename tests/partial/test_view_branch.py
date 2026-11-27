@@ -1,8 +1,16 @@
 import pytest
 from django.test import Client
 
-from next.partial.headers import CONTENT_TYPE
-from next.testing import NextClient, envelope_of
+from next.partial import Patches, ZoneRenderResult
+from next.partial.headers import CONTENT_TYPE, VARY_HEADERS, MergeMode
+from next.partial.stream import PROTOCOL
+from next.partial.view import _patch_zone
+from next.static.manager import default_manager
+from next.testing import NextClient, envelope_of, override_next_settings
+
+
+WRAPPED = '<div data-next-zone="nav"><nav></nav></div>'
+BARE = "<nav></nav>"
 
 
 class TestZoneGetEnvelope:
@@ -44,6 +52,17 @@ class TestZoneGetEnvelope:
         vary = response.get("Vary", "")
         assert "X-Next-Request" in vary
         assert "X-Next-Zone" in vary
+
+    def test_a_marked_zone_varies_once_on_each_name(self) -> None:
+        response = NextClient().get_zones("/zoned/", "alpha")
+        varied = [name.strip() for name in response["Vary"].split(",")]
+        assert varied == [*VARY_HEADERS, "Accept", "X-Next-Origin"]
+
+    def test_an_unmarked_zone_does_not_vary_on_the_origin(self) -> None:
+        with override_next_settings(ROUTER={"ACTIVE_LINKS": {"ENABLED": False}}):
+            response = NextClient().get_zones("/zoned/", "alpha")
+        varied = [name.strip() for name in response["Vary"].split(",")]
+        assert varied == [*VARY_HEADERS, "Accept"]
 
 
 class TestZoneGetBadRequests:
@@ -105,12 +124,33 @@ class TestZoneGetVersionConflict:
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["alpha"]
 
+    def test_a_foreign_protocol_is_a_conflict(self) -> None:
+        response = NextClient().get(
+            "/zoned/",
+            HTTP_X_NEXT_REQUEST="1",
+            HTTP_X_NEXT_ZONE="alpha",
+            HTTP_X_NEXT_PROTOCOL=str(PROTOCOL + 1),
+        )
+        assert response.status_code == 409
+        assert response["Cache-Control"] == "private, no-store"
+
+    def test_the_server_protocol_renders(self) -> None:
+        response = NextClient().get(
+            "/zoned/",
+            HTTP_X_NEXT_REQUEST="1",
+            HTTP_X_NEXT_ZONE="alpha",
+            HTTP_X_NEXT_PROTOCOL=str(PROTOCOL),
+        )
+        assert response.status_code == 200
+        assert envelope_of(response).zone_targets() == ["alpha"]
+
     def test_matching_version_renders(self) -> None:
         client = NextClient()
         version = envelope_of(client.get_zones("/zoned/", "alpha")).version
         response = client.get_zones("/zoned/", "alpha", version=version)
         assert response.status_code == 200
 
+    @pytest.mark.django_db()
     def test_stale_version_on_post_is_executed(self) -> None:
         client = NextClient(enforce_csrf_checks=False)
         response = client.post(
@@ -170,11 +210,14 @@ class TestFullRenderUnchanged:
         assert b'data-next-zone="alpha"' in body
         assert b'data-next-zone="beta"' in body
 
-    def test_full_render_shows_lazy_placeholder(self) -> None:
-        response = Client().get("/zoned/")
-        body = response.content.decode()
-        assert "loading" in body
-        assert "later hi" not in body
+    def test_full_render_paints_every_zone_and_stashes_the_skeleton(self) -> None:
+        body = Client().get("/zoned/").content.decode()
+        assert (
+            '<div data-next-zone="later" data-next-reload="loading" '
+            'data-next-delay="300"><p>later hi</p></div>'
+            '<template data-next-loading="later"><p>loading hi</p>\n</template>'
+        ) in body
+        assert body.count("<template data-next-loading=") == 1
 
     def test_full_render_has_no_partial_headers(self) -> None:
         response = Client().get("/zoned/")
@@ -185,3 +228,30 @@ class TestFullRenderUnchanged:
         response = Client().get("/zoned/", HTTP_X_NEXT_REQUEST="1")
         assert response.status_code == 200
         assert response["Content-Type"] == "text/html; charset=utf-8"
+
+
+class TestZonePatchMarks:
+    """The active-link pass runs over the HTML each zone patch carries."""
+
+    @pytest.mark.parametrize(
+        ("merge", "failed", "op", "html"),
+        [
+            pytest.param(None, False, "morph", WRAPPED, id="morph"),
+            pytest.param(MergeMode.APPEND, False, "append", BARE, id="append"),
+            pytest.param(MergeMode.PREPEND, False, "prepend", BARE, id="prepend"),
+            pytest.param(MergeMode.APPEND, True, "morph", WRAPPED, id="failed"),
+        ],
+    )
+    def test_the_patched_html_is_marked(
+        self, merge: MergeMode | None, *, failed: bool, op: str, html: str
+    ) -> None:
+        result = ZoneRenderResult(
+            html={"nav": WRAPPED},
+            bodies={"nav": BARE},
+            collector=default_manager.create_collector(),
+            failed=failed,
+        )
+        patches = Patches.versioned("v1")
+        _patch_zone(patches, "nav", result, merge, lambda text: f"[{text}]")
+        [patch] = patches.envelope().ops
+        assert (patch.op, patch.html) == (op, f"[{html}]")

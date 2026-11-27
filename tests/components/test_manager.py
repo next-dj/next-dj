@@ -9,7 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.template import Context, Template
 from django.test import RequestFactory, override_settings
 
-from next.caches import DEFAULT_CACHE_SIZE
+from next.caches import DEFAULT_CACHE_SIZE, FRAMEWORK
 from next.components import (
     CachedComponentTemplateLoader,
     ComponentInfo,
@@ -29,10 +29,7 @@ from next.components import (
     register_components_folder_from_router_walk,
     render_component,
 )
-from next.components.manager import (
-    _configured_template_loader_class,
-    forget_component_backends,
-)
+from next.components.manager import _configured_template_loader_class
 from next.components.renderers import (
     TemplateSource,
     _CompiledTemplate,
@@ -362,11 +359,11 @@ class TestSettingsReloadedIsLazy:
         assert list(recorder) == []
         assert isinstance(manager.backends[0], DummyComponentsBackend)
 
-    def test_receiver_invalidates_the_module_level_manager(self) -> None:
-        """The wired receiver drops the shared manager state without a rebuild."""
+    def test_a_settings_reload_invalidates_the_module_level_manager(self) -> None:
+        """The reload drops the shared manager state without a rebuild."""
         components_manager._ensure_backends()
         with patch("next.components.manager.load_backends") as load_backends_mock:
-            forget_component_backends()
+            FRAMEWORK.move()
         load_backends_mock.assert_not_called()
         assert components_manager._loaded is False
 
@@ -703,7 +700,9 @@ class TestComponentRenderers:
         out = render_component(info, {})
         assert "ok" in out
 
-    def test_composite_template_render_injects_request(self, tmp_path: Path) -> None:
+    def test_composite_template_render_injects_request(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
         """_render_with_template adds request to context when provided."""
         d = tmp_path / "rq"
         d.mkdir()
@@ -712,12 +711,12 @@ class TestComponentRenderers:
         info = ComponentInfo(
             "rq", tmp_path, "", d / "component.djx", d / "component.py", False
         )
-        req = RequestFactory().get("/hello")
+        req = rf.get("/hello")
         html = render_component(info, {}, request=req)
         assert "/hello" in html
 
     def test_composite_template_render_includes_csrf_token(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
         """{% csrf_token %} works in component.djx when request is passed."""
         d = tmp_path / "csrf"
@@ -727,7 +726,7 @@ class TestComponentRenderers:
         info = ComponentInfo(
             "csrf", tmp_path, "", d / "component.djx", d / "component.py", False
         )
-        req = RequestFactory().get("/")
+        req = rf.get("/")
         html = render_component(info, {}, request=req)
         assert "csrfmiddlewaretoken" in html
 
@@ -737,9 +736,11 @@ class TestComponentRenderers:
         _merge_csrf_context(ctx, None)
         assert "csrf_token" not in ctx
 
-    def test_merge_csrf_context_skips_when_csrf_token_present(self) -> None:
+    def test_merge_csrf_context_skips_when_csrf_token_present(
+        self, rf: RequestFactory
+    ) -> None:
         """Do not replace an existing ``csrf_token`` (caller supplied)."""
-        req = RequestFactory().get("/")
+        req = rf.get("/")
         existing = "__test_merge_csrf_existing__"
         ctx: dict[str, object] = {"csrf_token": existing}
         _merge_csrf_context(ctx, req)
@@ -774,14 +775,14 @@ class TestComponentRenderers:
         assert r.render(info, {}, None) == ""
 
     def test_simple_renderer_passes_request_and_csrf_for_forms(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
         """SimpleComponentRenderer adds request and csrf_token for {% csrf_token %}."""
         (tmp_path / "s.djx").write_text("<b>{% csrf_token %}</b>")
         info = ComponentInfo("s", tmp_path, "", tmp_path / "s.djx", None, True)
         tl = ComponentTemplateLoader(ModuleLoader())
         sr = SimpleComponentRenderer(tl)
-        req = RequestFactory().get("/")
+        req = rf.get("/")
         html = sr.render(info, {}, request=req)
         assert "csrfmiddlewaretoken" in html
         assert "<b>" in html
@@ -1369,7 +1370,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
@@ -1399,7 +1400,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
@@ -1431,7 +1432,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
@@ -1497,7 +1498,7 @@ class TestGetComponentPathsForWatch:
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
                         {
-                            "BACKEND": "next.urls.FileRouterBackend",
+                            "BACKEND": "next.urls.FilePageBackend",
                             "PAGES_DIR": "pages",
                             "APP_DIRS": False,
                             "DIRS": [str(pages_root)],
@@ -1508,7 +1509,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 side_effect=ValueError("bad config"),
             ),
         ):
@@ -1524,7 +1525,7 @@ class TestGetComponentPathsForWatch:
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
                         {
-                            "BACKEND": "next.urls.FileRouterBackend",
+                            "BACKEND": "next.urls.FilePageBackend",
                             "PAGES_DIR": "pages",
                             "APP_DIRS": False,
                             "DIRS": [str(pages_root)],
@@ -1556,7 +1557,7 @@ class TestGetComponentPathsForWatch:
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
                         {
-                            "BACKEND": "next.urls.FileRouterBackend",
+                            "BACKEND": "next.urls.FilePageBackend",
                             "PAGES_DIR": "pages",
                             "APP_DIRS": False,
                             "DIRS": [str(pages_root)],
@@ -1697,7 +1698,7 @@ class TestGetComponentPathsForWatch:
             assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
 
-    def test_survives_a_router_whose_tree_listing_raises(self, tmp_path: Path) -> None:
+    def test_survives_a_router_whose_tree_listing_raises(self) -> None:
         """`collectstatic` reaches this scan, so a raising router costs its paths only."""
         with (
             override_settings(
@@ -1713,7 +1714,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 return_value=RaisingRootsRouter(),
             ),
         ):
@@ -1740,7 +1741,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 return_value=RootPagesRouter([pages_root]),
             ),
         ):
@@ -1757,7 +1758,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],

@@ -15,6 +15,7 @@ from next.urls import (
     URLParameterError,
     URLPatternParser,
 )
+from next.views import page_view
 
 
 def _noop_view(request):
@@ -319,7 +320,9 @@ class TestCreateUrlPatternFileContext:
         """The wrapped error names the page file and chains the original."""
         page_file = tmp_path / "page.py"
         with pytest.raises(DuplicateURLParameterError) as excinfo:
-            page_instance.create_url_pattern("[a-b]/[a_b]", page_file, url_parser)
+            page_instance.create_url_pattern(
+                "[a-b]/[a_b]", page_file, url_parser, page_view
+            )
         error = excinfo.value
         assert error.param_name == "a_b"
         assert error.url_path == "[a-b]/[a_b]"
@@ -334,7 +337,9 @@ class TestCreateUrlPatternFileContext:
         """A directory Django would refuse reports the page file too."""
         page_file = tmp_path / "page.py"
         with pytest.raises(InvalidURLParameterError) as excinfo:
-            page_instance.create_url_pattern("user/[2fa]", page_file, url_parser)
+            page_instance.create_url_pattern(
+                "user/[2fa]", page_file, url_parser, page_view
+            )
         error = excinfo.value
         assert error.param_name == "2fa"
         assert error.url_path == "user/[2fa]"
@@ -345,7 +350,7 @@ class TestCreateUrlPatternFileContext:
 
 
 class TestGeneratePatternsFileContext:
-    """FileRouterBackend leaves a refused page unrouted and logs it with its file."""
+    """FilePageBackend leaves a refused page unrouted and logs it with its file."""
 
     def test_a_refused_page_is_logged_and_left_unrouted(
         self, router, tmp_path, caplog

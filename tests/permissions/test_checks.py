@@ -16,18 +16,12 @@ from next.permissions.checks import (
     check_permission_predicates,
     check_permissions_known,
 )
-from tests.pages.checks.metadata.trees import (
-    component_template,
-    framework,
-    layout_root,
-    templated_page,
-)
 from tests.support import (
     MODEL_BACKEND,
     OBJECT_PERMISSION_BACKENDS,
     check_ids,
     next_framework_settings_stand_in,
-    patch_checks_router_manager,
+    patch_checks_route_manager,
     routed,
     write_page,
 )
@@ -37,6 +31,8 @@ from tests.support.access import (
     page_source,
     write_guard,
 )
+from tests.support.components import write_component
+from tests.support.trees import framework, layout_root, templated_page
 
 
 class SubclassedBackend(ObjectPermissionBackend):
@@ -232,13 +228,16 @@ class TestPermissionsKnownInTemplates:
         )
 
     def test_an_unknown_name_in_a_component_template_warns(self, pages: Path) -> None:
-        component = component_template(pages, "badge", _tag("'blog.nope'"))
+        component = (
+            write_component(pages, "badge", body=_tag("'blog.nope'"), loading=None)
+            / "component.djx"
+        )
         templated_page(pages / "hello", "x = 1\n", "<p>no tag</p>")
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             assert _warned(_TEMPLATE) == [(str(component), "blog.nope")]
 
     def test_a_component_a_page_reaches_is_named_once(self, pages: Path) -> None:
-        component_template(pages, "badge", _tag("'blog.nope'"))
+        write_component(pages, "badge", body=_tag("'blog.nope'"), loading=None)
         page_file = templated_page(
             pages / "hello", "x = 1\n", '{% component "badge" %}'
         )
@@ -266,13 +265,13 @@ class TestPermissionsKnownInTemplates:
     )
     def test_a_name_something_grants_is_silent(self, pages: Path, perm: str) -> None:
         add_perm("blog.change_post", two_params)
-        component_template(pages, "badge", _tag(perm))
+        write_component(pages, "badge", body=_tag(perm), loading=None)
         templated_page(pages / "hello", "x = 1\n", _tag(perm))
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             assert _warned(_TEMPLATE) == []
 
     def test_a_component_that_does_not_compile_is_skipped(self, pages: Path) -> None:
-        component_template(pages, "broken", "{% has_perm %}")
+        write_component(pages, "broken", body="{% has_perm %}", loading=None)
         templated_page(pages / "hello", "x = 1\n", "<p>x</p>")
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             assert _warned(_TEMPLATE) == []
@@ -285,14 +284,11 @@ class TestPermissionsKnownInTemplates:
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             assert _warned(_TEMPLATE) == [(str(page_file), "blog.nope")]
 
-    @pytest.mark.parametrize("backends", [[], "not-a-list"])
-    def test_no_component_backends_reads_pages_only(
-        self, pages: Path, backends: object
-    ) -> None:
+    def test_no_component_backends_reads_pages_only(self, pages: Path) -> None:
         page_file = templated_page(pages / "hello", "x = 1\n", _tag("'blog.nope'"))
         with (
-            override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": backends}),
-            patch_checks_router_manager(pages_directory=pages),
+            override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": []}),
+            patch_checks_route_manager(pages_directory=pages),
         ):
             assert _warned(_TEMPLATE) == [(str(page_file), "blog.nope")]
 

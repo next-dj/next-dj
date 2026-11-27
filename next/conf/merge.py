@@ -1,6 +1,6 @@
 """One-level merge of the user `NEXT_FRAMEWORK` mapping over framework defaults.
 
-A user value replaces the default whole, and a mistyped one is dropped and checked.
+A user value replaces the default whole, a mistyped one keeps it and requests refuse.
 """
 
 from __future__ import annotations
@@ -37,6 +37,12 @@ DICT_KEYS: Final[frozenset[str]] = frozenset(
         "SITE",
         "SEO",
         "CONSENT",
+        "TRANSACTIONS",
+        "BOUNDARIES",
+        "LOADER",
+        "DEFER",
+        "COMPRESSION",
+        "ROUTER",
     }
 )
 STR_KEYS: Final[frozenset[str]] = frozenset(
@@ -52,6 +58,9 @@ STR_KEYS: Final[frozenset[str]] = frozenset(
 OPTIONAL_STR_KEYS: Final[frozenset[str]] = frozenset(
     {"JS_CONTEXT_SERIALIZER", "STATIC_VERSION"}
 )
+WARNED_KEYS: Final[frozenset[str]] = frozenset({"JS_CONTEXT_SERIALIZER"})
+"""Keys whose reader falls back to its default and logs, so a misfit only warns."""
+
 BOOL_KEYS: Final[frozenset[str]] = frozenset(
     {
         "STRICT_CONTEXT",
@@ -86,10 +95,27 @@ def accepted_value(key: str, raw: object) -> object:
     return UNSET
 
 
+def expected_type(key: str) -> str:
+    """Return how a message names the type the merge takes for one top-level key."""
+    if key in LIST_KEYS:
+        return "a list"
+    if key in DICT_KEYS:
+        return "a dict"
+    return "a str or None" if key in OPTIONAL_STR_KEYS else "a str"
+
+
+def _merged_value(key: str, raw: object, default: object) -> object:
+    """Return what one user value merges to, `UNSET` for a type its key never takes."""
+    value = accepted_value(key, raw)
+    if value is UNSET and raw is None and default is None:
+        return None
+    return value
+
+
 def merge_user_settings(
     defaults: Mapping[str, Any], user: Mapping[str, Any] | None
 ) -> dict[str, Any]:
-    """Return the frozen defaults with every usable user value laid over them.
+    """Return the frozen defaults with every user value of a usable type laid over them.
 
     The framework `DEFAULTS` reuse their import-time freeze, other mappings freeze here.
     """
@@ -101,12 +127,29 @@ def merge_user_settings(
     if not user:
         return merged
     for key in defaults:
-        if key not in user:
-            continue
-        value = accepted_value(key, user[key])
-        if value is not UNSET:
-            merged[key] = value
+        if key in user:
+            value = _merged_value(key, user[key], defaults[key])
+            if value is not UNSET:
+                merged[key] = value
     return merged
+
+
+def mistyped(
+    defaults: Mapping[str, Any], user: Mapping[str, Any] | None
+) -> dict[str, str]:
+    """Return each key whose user value has a type it does not take, with a sentence.
+
+    The merge keeps the default there, so startup and checks run and requests refuse.
+    """
+    return {
+        key: f"NEXT_FRAMEWORK[{key!r}] must be {expected_type(key)}, "
+        f"got {type(user[key]).__name__!r}."
+        for key in defaults
+        if user
+        and key in user
+        and key not in WARNED_KEYS
+        and _merged_value(key, user[key], defaults[key]) is UNSET
+    }
 
 
 __all__ = [
@@ -117,6 +160,9 @@ __all__ = [
     "OPTIONAL_STR_KEYS",
     "STR_KEYS",
     "UNSET",
+    "WARNED_KEYS",
     "accepted_value",
+    "expected_type",
     "merge_user_settings",
+    "mistyped",
 ]

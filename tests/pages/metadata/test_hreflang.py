@@ -14,11 +14,9 @@ from django.urls import (
 from django.utils import translation
 
 import next.pages.metadata.hreflang as hreflang_module
-from next.caches import LruCache
-from next.conf.signals import settings_reloaded
+from next.caches import ROUTES, LruCache
+from next.conf import next_framework_settings
 from next.pages.metadata.hreflang import hreflang_urls, translated_url, x_default_url
-from next.urls import RouterManager
-from next.urls.signals import router_reloaded
 from tests.support import (
     I18N,
     I18N_PREFIXED_URLCONF,
@@ -41,6 +39,15 @@ def _changed(setting: str) -> None:
 def i18n() -> Iterator[None]:
     with override_settings(**I18N_ROUTED):
         yield
+
+
+@pytest.fixture()
+def thread_urlconf() -> Iterator[None]:
+    """Give the thread the i18n URLconf over another root one, as a request has it."""
+    with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
+        set_urlconf(I18N_URLCONF)
+        yield
+        set_urlconf(None)
 
 
 @pytest.mark.usefixtures("i18n")
@@ -98,14 +105,9 @@ class TestHreflangUrls:
         monkeypatch.setattr(hreflang_module, "reverse", fake_reverse)
         assert hreflang_urls("/headed/") == (("en", "/headed/"), ("de", "/de/headed/"))
 
+    @pytest.mark.usefixtures("thread_urlconf")
     def test_the_thread_urlconf_is_honoured(self) -> None:
-        with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
-            set_urlconf(I18N_URLCONF)
-            try:
-                pairs = hreflang_urls("/headed/")
-            finally:
-                set_urlconf(None)
-        assert pairs[1] == ("de", "/de/headed/")
+        assert hreflang_urls("/headed/")[1] == ("de", "/de/headed/")
 
     def test_translations_are_memoised(self, monkeypatch) -> None:
         calls = record_calls(monkeypatch, hreflang_module, "reverse")
@@ -231,29 +233,29 @@ class TestWithoutLanguagePatterns:
 
 
 class TestInvalidation:
-    """The memo drops on a reload, a URLconf or language change and a router reload."""
+    """The memo drops on a reload, any setting change and a router reload."""
 
     @pytest.mark.parametrize(
         ("invalidate", "translations"),
         [
-            (lambda: settings_reloaded.send(sender=None), 4),
-            (lambda: router_reloaded.send(sender=RouterManager), 4),
+            (next_framework_settings.reload, 4),
+            (ROUTES.move, 4),
             (lambda: _changed("ROOT_URLCONF"), 4),
             (lambda: _changed("LANGUAGES"), 4),
             (lambda: _changed("LANGUAGE_CODE"), 4),
-            (lambda: _changed("DEBUG"), 2),
+            (lambda: _changed("DEBUG"), 4),
         ],
         ids=[
             "settings_reloaded",
-            "router_reloaded",
+            "routes_reloaded",
             "urlconf",
             "languages",
             "language_code",
-            "other_setting",
+            "any_setting",
         ],
     )
     @override_settings(**I18N_ROUTED)
-    def test_a_second_read_translates_again_only_after_a_drop(
+    def test_a_second_read_translates_again_after_a_drop(
         self,
         monkeypatch: pytest.MonkeyPatch,
         invalidate: Callable[[], object],

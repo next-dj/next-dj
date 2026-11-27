@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 
 import pytest
@@ -32,6 +32,7 @@ from next.testing import (
     capture_signals,
     memory_broker,
 )
+from tests.support.errors import HaltError
 from tests.support.realtime import ServerClock, issue_session_ticket
 
 
@@ -73,12 +74,12 @@ class _EndingBroker(MemoryBroker):
 
 
 @contextmanager
-def _ended() -> Iterator[Iterator[Message | None]]:
+def _ended() -> Generator[Iterator[Message | None]]:
     yield iter(())
 
 
 @asynccontextmanager
-async def _aended() -> AsyncIterator[AsyncIterator[Message | None]]:
+async def _aended() -> AsyncGenerator[AsyncIterator[Message | None]]:
     yield _nothing()
 
 
@@ -98,7 +99,7 @@ class _DroppingBroker(MemoryBroker):
 
 
 @contextmanager
-def _dropped() -> Iterator[Iterator[Message | None]]:
+def _dropped() -> Generator[Iterator[Message | None]]:
     yield _sync_drop()
 
 
@@ -109,7 +110,7 @@ def _sync_drop() -> Iterator[Message | None]:
 
 
 @asynccontextmanager
-async def _adropped() -> AsyncIterator[AsyncIterator[Message | None]]:
+async def _adropped() -> AsyncGenerator[AsyncIterator[Message | None]]:
     yield _async_drop()
 
 
@@ -130,7 +131,7 @@ class _BreakingBroker(MemoryBroker):
 
 
 @contextmanager
-def _broken() -> Iterator[Iterator[Message | None]]:
+def _broken() -> Generator[Iterator[Message | None]]:
     yield _sync_break()
 
 
@@ -141,7 +142,7 @@ def _sync_break() -> Iterator[Message | None]:
 
 
 @asynccontextmanager
-async def _abroken() -> AsyncIterator[AsyncIterator[Message | None]]:
+async def _abroken() -> AsyncGenerator[AsyncIterator[Message | None]]:
     yield _async_break()
 
 
@@ -277,6 +278,38 @@ class TestLifecycle:
 
         assert asyncio.run(scenario()) == [stream_subscribed, stream_unsubscribed]
         assert heard == ["subscribed"]
+
+    def test_a_cancelled_open_whose_send_fails_reports_nothing_to_the_loop(
+        self,
+    ) -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        reported: list[dict[str, object]] = []
+
+        async def failing(**_kwargs: object) -> None:
+            entered.set()
+            await release.wait()
+            raise HaltError
+
+        async def scenario() -> None:
+            loop = asyncio.get_running_loop()
+            loop.set_exception_handler(lambda _, context: reported.append(context))
+            lifecycle = StreamLifecycle(object(), "ws")
+            stream_subscribed.connect(failing, weak=False)
+            try:
+                opening = asyncio.create_task(lifecycle.aopen(("room:1",)))
+                await entered.wait()
+                opening.cancel()
+                await asyncio.sleep(0)
+                release.set()
+                with pytest.raises(HaltError):
+                    await opening
+                await asyncio.sleep(0)
+            finally:
+                stream_subscribed.disconnect(failing)
+
+        asyncio.run(scenario())
+        assert reported == []
 
     def test_a_failing_receiver_is_logged_and_the_others_still_hear(
         self, recorder: SignalRecorder, caplog: pytest.LogCaptureFixture
@@ -480,7 +513,7 @@ def _broken_receiver(**kwargs: object) -> None:
 
 
 @contextmanager
-def _failing_receivers() -> Iterator[None]:
+def _failing_receivers() -> Generator[None]:
     stream_subscribed.connect(_broken_receiver, weak=False)
     stream_unsubscribed.connect(_broken_receiver, weak=False)
     try:

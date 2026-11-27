@@ -6,6 +6,7 @@ from django.dispatch import Signal
 from django.test import override_settings
 from django.urls.resolvers import URLResolver
 
+from next import backends
 from next.backends import (
     BackendListManager,
     SingleBackendManager,
@@ -409,9 +410,74 @@ class TestCachingAndReset:
     def test_reset_before_any_get_is_harmless(self) -> None:
         with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
             manager = _manager()
-            manager.reset()
+            assert manager.reset() is None
 
             assert type(manager.get()) is AlphaBackend
+
+    def test_peek_builds_nothing_and_reset_hands_the_dropped_backend_back(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            manager = _manager()
+            assert manager.peek() is None
+            backend = manager.get()
+            assert manager.peek() is backend
+            assert manager.reset() is backend
+            assert manager.peek() is None
+
+    def test_forget_drops_the_backend_and_swaps_the_lock(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            manager = _manager()
+            first = manager.get()
+            lock = manager._lock
+            manager.forget()
+            assert manager._lock is not lock
+            assert manager.get() is not first
+
+    def test_a_forked_child_frees_the_lock_and_keeps_the_backend(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": ALPHA}}):
+            manager = _manager()
+            backend = manager.get()
+            manager._lock.acquire()
+            backends._forked()
+            assert manager._lock.acquire(blocking=False)
+            assert manager.get() is backend
+
+    def test_a_backend_another_thread_built_under_the_lock_is_kept(self) -> None:
+        CountingBackend.instances = 0
+        with override_settings(NEXT_FRAMEWORK={_DICT_SETTING: {"BACKEND": COUNTING}}):
+            manager = _manager()
+            won = AlphaBackend({})
+            lock = LockWonByAnotherThread(manager, "_backend", value=won)
+            manager._lock = lock
+            assert manager.get() is won
+        assert lock.entered == 1
+        assert CountingBackend.instances == 0
+
+
+class TestConfigReader:
+    """A family whose entry lives below the top level reads it through `config`."""
+
+    def test_the_reader_names_the_entry(self) -> None:
+        entry = {"BACKEND": ALPHA, "OPTIONS": {"a": 1}}
+        manager = SingleBackendManager(
+            _UNKNOWN_SETTING, base=FakeBackend, config=lambda: entry
+        )
+        backend = manager.get()
+        assert type(backend) is AlphaBackend
+        assert backend.config == entry
+
+    @pytest.mark.parametrize("read", [lambda: "not an entry", lambda: None])
+    def test_a_reader_without_an_entry_takes_the_default(self, read) -> None:
+        manager = SingleBackendManager(
+            _UNKNOWN_SETTING, base=FakeBackend, default=BETA, config=read
+        )
+        assert type(manager.get()) is BetaBackend
+
+    def test_an_unimportable_entry_names_the_bound_key(self) -> None:
+        manager = SingleBackendManager(
+            "DEFER", base=FakeBackend, config=lambda: {"BACKEND": MISSING}
+        )
+        with pytest.raises(BackendImportError, match=r"NEXT_FRAMEWORK\['DEFER'\]"):
+            manager.get()
 
 
 @pytest.mark.parametrize(("setting", "shape"), _FAMILY_SHAPES)
@@ -683,3 +749,34 @@ class TestBackendErrorAttributes:
         assert caught.value.setting == "URL_RESOLVER"
         assert caught.value.dotted == FOREIGN
         assert caught.value.base_name == "django.urls.resolvers.URLResolver"
+
+
+class TestResolveSettingClassRefusals:
+    """A dotted-path setting naming no class of its family raises with its key."""
+
+    def test_a_value_that_is_no_path_is_refused(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK={"METADATA": {"RENDERER": 3}}),
+            pytest.raises(SettingNotSubclassError) as caught,
+        ):
+            resolve_setting_class(
+                "RENDERER",
+                scope="METADATA",
+                base=FakeBackend,
+                shipped=AlphaBackend,
+                base_path="tests.support.backends.FakeBackend",
+            )
+
+        assert caught.value.setting == "RENDERER"
+
+    def test_an_abstract_class_is_refused(self) -> None:
+        with (
+            override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": ABSTRACT}),
+            pytest.raises(AbstractBackendError),
+        ):
+            resolve_setting_class(
+                "URL_RESOLVER",
+                base=AbstractFakeBackend,
+                shipped=ConcreteFakeBackend,
+                base_path=ABSTRACT,
+            )

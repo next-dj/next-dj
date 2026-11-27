@@ -3,6 +3,7 @@ from django.test import override_settings
 
 from next.seo.checks import check_seo_settings
 from tests.support import check_ids
+from tests.support.checks import written
 
 
 DEFAULT = {"BACKEND": "next.seo.PageTreeSitemapBackend", "OPTIONS": {}}
@@ -23,7 +24,8 @@ class TestSeoSettings:
     def test_no_scope_or_a_wrong_scope_type_is_left_to_the_settings_check(self) -> None:
         with override_settings(NEXT_FRAMEWORK={}):
             assert check_seo_settings() == []
-        assert _check(["x"]) == []
+        with written({"SEO": ["x"]}):
+            assert check_seo_settings() == []
         with override_settings(NEXT_FRAMEWORK="junk"):
             assert check_seo_settings() == []
 
@@ -43,7 +45,7 @@ class TestSeoSettings:
             ("next.seo.PageTreeSitemapBackend", "expected a mapping with BACKEND"),
             ({"BACKEND": "nope.Nope"}, "names no usable sitemap backend"),
             ({"BACKEND": "next.seo.SitemapBackend"}, "names no usable sitemap backend"),
-            ({"BACKEND": "next.urls.FileRouterBackend"}, "names no usable"),
+            ({"BACKEND": "next.urls.FilePageBackend"}, "names no usable"),
             ({"OPTIONS": {}}, "names no usable sitemap backend"),
             ({**DEFAULT, "OPTIONS": []}, "['OPTIONS'] is [], expected a mapping"),
         ],

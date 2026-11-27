@@ -6,9 +6,9 @@ A zone set reads the composed template, so a page that fails to compose is skipp
 from collections.abc import Collection
 from pathlib import Path
 
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.pages.checks.intercepts import (
     ServedIntercept,
     joined,

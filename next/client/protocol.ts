@@ -1,27 +1,20 @@
 // The shared wire vocabulary, the contract with the server that several runtime
 // modules must agree on. Module-local constants stay in their module.
 
-/** The envelope content-type. Must match the server exactly. */
-export const CONTENT_TYPE = "application/vnd.next.patches+json";
-export const ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9";
+// A statement labelled TEST is a harness seam. The shipped build drops every such
+// statement through esbuild's dropLabels, the unit build runs it as plain code.
+declare global {
+  /** The id every bundle of one build shares, a digest of the client sources. */
+  const __BUILD__: string;
+}
 
-/** The intent and negotiation headers a partial request stamps. */
-export const REQUEST_FLAG = "X-Next-Request";
+import { ATTR_ERROR, ATTR_STATE, ATTR_STREAMED, HEADER_ROUTER } from "./protocol.gen";
+
+export * from "./protocol.gen";
+
+/** The negotiation header a partial request stamps beside the generated ones. */
 export const HEADER_ACCEPT = "Accept";
-export const HEADER_ZONE = "X-Next-Zone";
-export const HEADER_MERGE = "X-Next-Merge";
-export const HEADER_VERSION = "X-Next-Version";
-export const HEADER_REQUEST_ID = "X-Next-Request-Id";
-export const HEADER_ORIGIN = "X-Next-Origin";
-export const ORIGIN_FIELD = "_next_form_origin";
-/** Stream metadata and control-frame event names mirrored by next.partial.keys. */
-export const TOPIC = "topic";
-export const SEQ = "seq";
-export const EPOCH = "epoch";
-export const SERVER_TIME = "server_time";
-export const SSE_HELLO = "next-hello";
-export const SSE_SKIP = "next-skip";
-export const SSE_END = "next-end";
+
 // The last 25 own request ids, matching the server-side echo window. Overflow is
 // safe, since a dropped id only causes an extra refresh.
 export const ECHO_LIMIT = 25;
@@ -81,33 +74,111 @@ export interface Diagnostics {
   keyed: (el: Element) => void;
   /** Warn on hand-written trigger attributes and seeded values the runtime ignores. */
   attrs(root: ParentNode): void;
+  /** Warn that an element fetch dropped, as the page loads no bundle that serves it. */
+  unserved(el: Element): void;
+  /** Show why a DEBUG server refused the token of a boundary, on it and in the console. */
+  rejected(el: Element, detail: string): void;
 }
 
-/** The data-next-* attributes the runtime resolves across module boundaries. */
-export const ATTR_ZONE = "data-next-zone";
-export const ATTR_ACTION = "data-next-action";
-export const ATTR_KEY = "data-next-key";
+/** The prefix every attribute of the protocol shares. */
+export const ATTR_PREFIX = "data-next-";
+/** The data-next-* attributes only the runtime reads, the shared ones generated. */
 export const ATTR_STREAM = "data-next-stream";
-export const ATTR_POLL = "data-next-poll";
-export const ATTR_TRANSPORT = "data-next-transport";
+export const ATTR_BUSY = "data-next-busy";
+export const ATTR_ACCEPTED = "data-next-accepted";
+export const ATTR_BATCH = "data-next-batch";
+export const ATTR_RUN = "data-next-run";
+export const ATTR_DIALOG = "data-next-dialog";
+export const ATTR_KEEP = "data-next-keep";
+export const ATTR_MORPH_EVENTS = "data-next-morph-events";
+export const ATTR_PENDING = "data-next-pending";
+export const ATTR_NAVIGATING = "data-next-navigating";
+export const ATTR_TOAST = "data-next-toast";
+export const ATTR_TRANSITION = "data-next-transition";
+/** A boundary still waiting for its content, a literal so a chunk drops ATTR_STATE. */
+export const LOADING = "[data-next-state=loading]";
+
+// Kept apart from the version guard's flag in assets.ts, so neither clears the other.
+export const NAVIGATED_FLAG = "next:partial:navigated";
+
+let tick = 0;
+const stamps = new WeakMap<Element, number>();
+export const stamp = (el: Element): void => void stamps.set(el, ++tick);
+export const stamped = (el: Element | null): number =>
+  el ? Math.max(stamps.get(el) ?? 0, stamped(el.parentElement)) : 0;
+export const now = (): number => tick;
+
+export const streaming = (doc: Document): boolean =>
+  doc.querySelector(`[${ATTR_STREAMED}]`) !== null;
+
+export function duration(raw: string | null | undefined): number | undefined {
+  const match = /^(\d+)(m?s)?$/.exec(raw ?? "");
+  return match ? Number(match[1]) * (match[2] === "s" ? 1000 : 1) : undefined;
+}
+
+type Hold = [count: number, state: string | null, error: string | null];
+
+const holds = new WeakMap<Element, Hold>();
+
+function put(el: Element, name: string, value: string | null): void {
+  if (value === null) el.removeAttribute(name);
+  else el.setAttribute(name, value);
+}
+
+export const isBusy = (el: Element): boolean => holds.has(el);
+
+export function markBusy(
+  elements: readonly (Element | null)[],
+  quiet?: boolean,
+): (fault?: string | null) => void {
+  const marked = elements.flatMap((el): [Element, Hold][] => {
+    if (el === null) return [];
+    let held = holds.get(el);
+    if (held === undefined) {
+      held = [0, el.getAttribute(ATTR_STATE), el.getAttribute(ATTR_ERROR)];
+      holds.set(el, held);
+      el.removeAttribute(ATTR_ERROR);
+      if (held[1] !== null && held[1] !== "ready")
+        el.setAttribute(ATTR_STATE, "loading");
+    }
+    held[0] += 1;
+    el.setAttribute(ATTR_BUSY, "");
+    if (!quiet) el.setAttribute("aria-busy", "true");
+    return [[el, held]];
+  });
+  return (fault) => {
+    for (const [el, held] of marked.splice(0)) {
+      if ((held[0] -= 1) > 0) continue;
+      holds.delete(el);
+      el.removeAttribute(ATTR_BUSY);
+      el.removeAttribute("aria-busy");
+      if (fault === undefined) {
+        put(el, ATTR_STATE, held[1]);
+        put(el, ATTR_ERROR, held[2]);
+      } else {
+        const kind = el.getAttribute(ATTR_ERROR) ?? fault;
+        put(el, ATTR_STATE, kind === null ? "ready" : "error");
+        put(el, ATTR_ERROR, kind);
+      }
+    }
+  };
+}
 
 /** The transport a request may ride, `any` letting a POST go over the open socket. */
 export type WireTransport = "http" | "any";
 
-/** The tunnel refusals the client acts on beyond reporting them. */
-export const REFUSAL_DISABLED = "disabled";
-export const REFUSAL_STALE = "stale";
-export const REFUSAL_HTTP_ONLY = "http_only";
-
 /** A partial:error, a discriminated union so a listener branches on kind. */
-export type PartialError =
+export type PartialError = (
   | { kind: "network"; url?: string; error: unknown }
+  | { kind: "timeout"; url: string; error: unknown }
   | { kind: "http"; status: number; body: string }
   | { kind: "parse"; body: string; error: unknown }
   | { kind: "op"; op: string; target?: string; error: unknown }
   | { kind: "asset"; url?: string; error: unknown }
   | { kind: "csrf"; url?: string; error: unknown }
-  | { kind: "undelivered"; url: string; reason: string };
+  | { kind: "undelivered"; url: string; reason: string }
+  | { kind: "incomplete"; boundaries: string[] }
+) & { zones?: string[] };
 
 /** The discriminant of PartialError, aliased for listeners that switch on it. */
 export type PartialErrorKind = PartialError["kind"];
@@ -170,9 +241,11 @@ export function fire(
   dispatch: (event: string, detail: Record<string, unknown>) => void,
   event: string,
   detail: Record<string, unknown>,
-): void {
-  doc.dispatchEvent(new CustomEvent(event, { detail }));
+  cancelable = false,
+): boolean {
+  const passed = doc.dispatchEvent(new CustomEvent(event, { detail, cancelable }));
   dispatch(event, detail);
+  return passed;
 }
 
 /**
@@ -187,13 +260,14 @@ export function scriptNonce(doc: Document): string | undefined {
   return value === "" ? undefined : value;
 }
 
+/** A short random key, unique enough to tell entries and marks of one page apart. */
+export const uid = (): string => Math.random().toString(36).slice(2);
+
 // A new request id. crypto.randomUUID is missing on a plain-HTTP origin although the
 // lib type declares it, so a timestamp id is the fallback.
 export function newId(): string {
   const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
-  return impl?.randomUUID
-    ? impl.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return impl?.randomUUID ? impl.randomUUID() : `${Date.now()}-${uid()}`;
 }
 
 /** Match a selector across a subtree, folding in the root when it matches too. */
@@ -212,4 +286,26 @@ export function addZone(
   const zones = batches.get(url);
   if (zones === undefined) batches.set(url, [zone]);
   else zones.push(zone);
+}
+
+/** A URL without its fragment, the page identity a navigation and a prefetch share. */
+export const bare = (href: string): string => href.replace(/#.*/s, "");
+
+/** The media type of a response, its content-type without parameters. */
+export const mime = (response: Response): string =>
+  (response.headers.get("content-type") ?? "").replace(/;.*/, "").trim();
+
+/** Whether the router header of a response lists the given directive. */
+export const says = (response: Response | undefined, word: string): boolean =>
+  (response?.headers.get(HEADER_ROUTER) ?? "")
+    .split(",")
+    .some((token) => token.trim() === word);
+
+export function blank(
+  data: Record<string, unknown>,
+  context: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  for (const name of Object.keys(context))
+    if (!name.startsWith("$") && !(name in data)) data[name] = undefined;
+  return data;
 }

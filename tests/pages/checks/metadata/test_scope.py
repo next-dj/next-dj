@@ -6,6 +6,7 @@ from next.pages.metadata import RESET, Replace
 from next.pages.metadata.scope import METADATA_KEYS, SITE_SOURCE
 from tests.pages.checks.metadata.trees import DESCRIPTION, scope
 from tests.support import check_ids
+from tests.support.checks import written
 
 
 class TestSettingsScope:
@@ -30,7 +31,7 @@ class TestSettingsScope:
     def test_a_scope_with_nothing_to_report_is_silent(
         self, framework: dict[str, object]
     ) -> None:
-        with override_settings(NEXT_FRAMEWORK=framework):
+        with written(framework):
             assert check_metadata_settings_scope() == []
 
     def test_an_unknown_option_is_e035(self) -> None:

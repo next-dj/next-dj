@@ -15,14 +15,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from next.urls import FileRouterBackend
+    from next.urls import FilePageBackend
 
 
-def _router_for(tree: Path) -> FileRouterBackend:
+def _router_for(tree: Path) -> FilePageBackend:
     return file_router(app_dirs=False, dirs=[tree])
 
 
-def _app_dirs_router() -> FileRouterBackend:
+def _app_dirs_router() -> FilePageBackend:
     return file_router(app_dirs=True)
 
 

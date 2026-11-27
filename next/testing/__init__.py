@@ -6,13 +6,22 @@ Pure-Python utilities for Django `TestCase`, unittest and pytest.
 from __future__ import annotations
 
 from .actions import build_form_for, resolve_action_url
+from .boundaries import boundary_errors, boundary_gate, parallel_boundaries
 from .capture import (
     SignalEvent,
     SignalRecorder,
     capture_framework_signals,
     capture_signals,
 )
-from .client import NextClient, PartialEnvelope, envelope_of
+from .client import (
+    AsyncNextClient,
+    Navigation,
+    NextClient,
+    PartialEnvelope,
+    ReloadedBoundary,
+    declared_layouts,
+    envelope_of,
+)
 from .deps import make_resolution_context, resolve_call
 from .html import (
     assert_has_class,
@@ -59,16 +68,30 @@ from .realtime import (
     issue_socket_ticket,
     memory_broker,
     override_websocket_mount,
+    sse_events,
 )
 from .rendering import render_component_by_name, render_page
 from .seo import SitemapUrl, parse_sitemap
+from .streaming import StreamedChunk, StreamedPage, aread_stream, read_stream
+from .tokens import (
+    FrozenClock,
+    NoSeal,
+    expire_boundary_token,
+    freeze_token_clock,
+    issue_boundary_token,
+)
 
 
 __all__ = [
+    "AsyncNextClient",
+    "FrozenClock",
     "MemoryPort",
+    "Navigation",
     "NextClient",
+    "NoSeal",
     "PartialEnvelope",
     "PublishedMessages",
+    "ReloadedBoundary",
     "SignalEvent",
     "SignalRecorder",
     "SitemapUrl",
@@ -76,25 +99,34 @@ __all__ = [
     "SseEvent",
     "SseReader",
     "StaticCollectorProxy",
+    "StreamedChunk",
+    "StreamedPage",
     "WebSocketCommunicator",
     "aissue_socket_ticket",
+    "aread_stream",
     "assert_has_class",
     "assert_metadata",
     "assert_missing_class",
+    "boundary_errors",
+    "boundary_gate",
     "build_form_for",
     "capture_framework_signals",
     "capture_published",
     "capture_signals",
     "clear_loaded_dirs",
+    "declared_layouts",
     "eager_load_components",
     "eager_load_pages",
     "envelope_of",
+    "expire_boundary_token",
     "find_anchor",
     "find_form",
     "form_action",
     "form_fields",
+    "freeze_token_clock",
     "hidden_fields",
     "init_payload",
+    "issue_boundary_token",
     "issue_socket_ticket",
     "make_resolution_context",
     "memory_broker",
@@ -104,8 +136,10 @@ __all__ = [
     "override_next_settings",
     "override_provider",
     "override_websocket_mount",
+    "parallel_boundaries",
     "parse_sitemap",
     "patch_static_collector",
+    "read_stream",
     "render_component_by_name",
     "render_page",
     "reset_check_caches",
@@ -120,4 +154,5 @@ __all__ = [
     "reset_seo",
     "resolve_action_url",
     "resolve_call",
+    "sse_events",
 ]

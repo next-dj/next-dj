@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import threading
+from collections.abc import Coroutine
+from contextvars import ContextVar, Token
+from dataclasses import replace
+from functools import partial
 from operator import attrgetter
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, Final, cast, overload, override
 
 from django.utils.functional import SimpleLazyObject, empty
 
 from next.backends import resolve_setting_class
-from next.caches import LruCache
-from next.introspect import describe_callable, refuse_async
+from next.caches import ROUTES, LruCache, instance_dict
+from next.introspect import describe_callable, is_async_callable, is_coroutine_callable
 
-from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache
+from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, request_memo
 from .context import RECEIVER_NAMES, RESERVED_KEYS, ResolutionContext
-from .errors import DependencyCycleError, UnknownDependencyError
+from .errors import AsyncDependencyError, DependencyCycleError, UnknownDependencyError
 from .introspect import (
     HINT_ERRORS,
     IntrospectKey,
@@ -26,15 +31,29 @@ from .introspect import (
     forget_introspection_caches,
     introspect_key,
 )
-from .plan import EMPTY_PLAN, InjectionPlan, compile_plan
+from .plan import (
+    EMPTY_PLAN,
+    AsyncPlan,
+    Blocking,
+    Colour,
+    InjectionPlan,
+    compile_async_plan,
+    compile_plan,
+    edge_deferred,
+    empty_async_plan,
+    replay,
+)
 from .providers import ParameterProvider, RegisteredParameterProvider
 from .registry import _Address, _address, provider_registry
+from .runner import bridge, run_isolated
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
     from django.http import HttpRequest
+
+    from .plan import AsyncParameterFiller, AwaitedEntry, Source
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +64,13 @@ _CLAIMED_RESERVED = frozenset(
     {"_cache", "request", "form", "cleaned_data", "_context_data", "_stack"}
 )
 _UNCLAIMED_RESERVED: tuple[str, ...] = tuple(RESERVED_KEYS - _CLAIMED_RESERVED)
+
+_compiling: ContextVar[tuple[tuple[str, bool], ...]] = ContextVar(
+    "next_deps_compiling", default=()
+)
+_shares: ContextVar[frozenset[str]] = ContextVar(
+    "next_deps_shares", default=frozenset()
+)
 
 
 class _Described:
@@ -110,6 +136,201 @@ def _drop[P](holder: list[P], provider: object) -> bool:
     return True
 
 
+def _branch(context: ResolutionContext) -> ResolutionContext:
+    """Return `context` with a stack of its own, for one of several concurrent entries.
+
+    Entries sharing one list would pop each other's names off it.
+    """
+    return replace(context, stack=list(context.stack))
+
+
+async def _awaited(fill: AsyncParameterFiller, context: ResolutionContext) -> object:
+    """Await one filler inside a coroutine, the shape a task is created from."""
+    return await fill(context)
+
+
+async def _stop(tasks: list[asyncio.Task[object]]) -> None:
+    """Cancel the tasks still running and wait until each of them has ended."""
+    pending = [task for task in tasks if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending)
+
+
+def _failures(tasks: list[asyncio.Task[object]]) -> list[BaseException]:
+    """Return the error of every task that failed, in entry order."""
+    return [
+        error
+        for task in tasks
+        if not task.cancelled() and (error := task.exception()) is not None
+    ]
+
+
+def _log_failures(failures: list[BaseException]) -> None:
+    """Log at debug level the failures of a group that another error stands for."""
+    for error in failures:
+        logger.debug(
+            "A dependency of an async group failed beside the error the group raised.",
+            exc_info=error,
+        )
+
+
+async def _await_group(
+    entries: tuple[AwaitedEntry, ...],
+    context: ResolutionContext,
+    result: dict[str, Any],
+) -> None:
+    """Fill a group of async entries, concurrently once there are two or more.
+
+    The first failure stops its siblings and the earliest entry's error is raised alone.
+    """
+    if len(entries) == 1:
+        ((name, fill),) = entries
+        result[name] = await fill(context)
+        return
+    tasks = [
+        asyncio.create_task(_awaited(fill, _branch(context))) for _name, fill in entries
+    ]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+    except asyncio.CancelledError:
+        await _stop(tasks)
+        _log_failures(_failures(tasks))
+        raise
+    await _stop(tasks)
+    failures = _failures(tasks)
+    if failures:
+        _log_failures(failures[1:])
+        raise failures[0]
+    for (name, _fill), task in zip(entries, tasks, strict=True):
+        result[name] = task.result()
+
+
+def _awaitable(func: Callable[..., Any], name: str | None = None) -> bool:
+    """Return whether `func` is a coroutine function, refusing an async generator."""
+    if not is_async_callable(func):
+        return False
+    if not is_coroutine_callable(func):
+        raise AsyncDependencyError(func, name=name)
+    return True
+
+
+def _enter_shares(plan: AsyncPlan) -> Token[frozenset[str]] | None:
+    """Add the keys `plan` shares to the current ones, None when none is new."""
+    shared = plan.shared
+    if not shared:
+        return None
+    current = _shares.get()
+    if shared <= current:
+        return None
+    return _shares.set(current | shared)
+
+
+def _fill_segment(
+    entries: InjectionPlan, context: ResolutionContext
+) -> tuple[object, ...]:
+    """Fill a blocking segment in signature order and hand its values back whole."""
+    return tuple([replay(entry, context) for entry in entries])
+
+
+def _finish_call(
+    entries: InjectionPlan,
+    filled: Mapping[str, Any],
+    target: Callable[..., object],
+    context: ResolutionContext,
+) -> object:
+    """Fill the last blocking segment, then call the sync target with every argument."""
+    kwargs = dict(filled)
+    for entry in entries:
+        kwargs[entry[0]] = replay(entry, context)
+    return target(**kwargs)
+
+
+_NO_SEGMENT = Blocking(())
+
+
+def sharing() -> bool:
+    """Return whether the request memo of this context shares any key at all."""
+    memo = request_memo.get()
+    if memo is None:
+        return False
+    return memo.share_all or bool(memo.shared) or bool(_shares.get())
+
+
+def _shares_any(keys: frozenset[str]) -> bool:
+    """Return whether the request memo of this context shares one of `keys`."""
+    memo = request_memo.get()
+    if memo is None:
+        return False
+    return (
+        memo.share_all
+        or not keys.isdisjoint(memo.shared)
+        or not keys.isdisjoint(_shares.get())
+    )
+
+
+async def _seeded[T](
+    resolver: DependencyResolver,
+    sources: tuple[Source, ...],
+    fill: Callable[[ResolutionContext], T],
+    context: ResolutionContext,
+) -> T:
+    """Resolve the shared keys of `sources` on the loop, then run `fill` after them."""
+    await resolver.aseed_sources(sources, context)
+    return await run_isolated(fill, context)
+
+
+def _segment[T](
+    resolver: DependencyResolver,
+    step: Blocking,
+    fill: Callable[[ResolutionContext], T],
+    context: ResolutionContext,
+) -> Awaitable[T]:
+    """Run `fill` as the segment of `step`, once the shared keys it reaches resolve.
+
+    A segment reaching no shared key costs no coroutine beyond the runner's own.
+    """
+    keys = step.keys
+    if keys and _shares_any(keys):
+        return _seeded(resolver, step.sources, fill, context)
+    return run_isolated(fill, context)
+
+
+async def _areplay(
+    resolver: DependencyResolver,
+    plan: AsyncPlan,
+    context: ResolutionContext,
+    target: Callable[..., object] | None,
+) -> tuple[dict[str, Any], object]:
+    """Replay `plan`, calling a sync `target` inside its last blocking segment.
+
+    A segment fills a private cache copy merged back once it returns, never in part.
+    """
+    result: dict[str, Any] = {}
+    for entry in plan.pure:
+        result[entry[0]] = replay(entry, context)
+    steps = plan.steps
+    tail = _NO_SEGMENT
+    if target is not None and steps:
+        last = steps[-1]
+        if isinstance(last, Blocking):
+            tail = last
+            steps = steps[:-1]
+    for step in steps:
+        if isinstance(step, Blocking):
+            fill = partial(_fill_segment, step.entries)
+            values = await _segment(resolver, step, fill, context)
+            for entry, value in zip(step.entries, values, strict=True):
+                result[entry[0]] = value
+        else:
+            await _await_group(step.entries, context, result)
+    if target is None:
+        return result, None
+    finish = partial(_finish_call, tail.entries, result, target)
+    return result, await _segment(resolver, tail, finish, context)
+
+
 def forget_dep_caches(**kwargs: object) -> None:
     """Drop the introspection memos, so a reloaded module leaves none behind.
 
@@ -130,6 +351,7 @@ class DependencyResolver:
     ) -> None:
         """Initialise with explicit providers or defer to the auto-registry."""
         self._dependency_callables: dict[str, Callable[..., Any]] = {}
+        self._async_dependency_callables: dict[str, Callable[..., Any]] = {}
         # Reentrant, as building a provider may resolve through this resolver.
         self._lock = threading.RLock()
         self._head: list[ParameterProvider] = []
@@ -149,6 +371,10 @@ class DependencyResolver:
         )
         # Dependency callables filling nothing, checked by identity so a rebind is seen.
         self._leaf_dependencies: dict[str, Callable[..., Any]] = {}
+        self._dependencies_version = 0
+        self._aplan_cache: LruCache[IntrospectKey, tuple[int, int, AsyncPlan]] = (
+            LruCache()
+        )
 
     def _instantiate(
         self, cls: type[RegisteredParameterProvider]
@@ -198,6 +424,12 @@ class DependencyResolver:
             self._rebuild()
             self._registry_seen = version
 
+    @property
+    def providers(self) -> tuple[ParameterProvider, ...]:
+        """Return the providers in claim order, synced with the auto-registry first."""
+        self._sync_providers()
+        return tuple(self._providers)
+
     def skips(self, param: inspect.Parameter) -> bool:
         """Return True for `self` / `cls` and variadic parameters.
 
@@ -213,7 +445,8 @@ class DependencyResolver:
 
         Unresolved hints mark the plan provisional, and an async `func` is refused.
         """
-        refuse_async(func, "dependency-injected callable")
+        if is_async_callable(func):
+            raise AsyncDependencyError(func)
         try:
             sig = cached_signature(func)
         except (ValueError, TypeError):
@@ -273,30 +506,41 @@ class DependencyResolver:
     ) -> Callable[..., Any]:
         """Register a callable as a dependency reachable through `Depends("name")`.
 
-        Drops any leaf note for the name, so the new callable is looked at afresh.
+        A coroutine function is kept for the async path, an async generator raises.
         """
-        refuse_async(callable_dep, f"dependency {name!r}")
-        self._dependency_callables[name] = callable_dep
+        if _awaitable(callable_dep, name):
+            self._async_dependency_callables[name] = callable_dep
+            self._dependency_callables.pop(name, None)
+        else:
+            self._dependency_callables[name] = callable_dep
+            self._async_dependency_callables.pop(name, None)
         self._leaf_dependencies.pop(name, None)
+        self._dependencies_version += 1
         return callable_dep
 
     def forget_caches(self) -> None:
         """Drop the compiled plans and leaf notes, recompiled on the next resolve."""
         self._plan_cache.clear()
+        self._aplan_cache.clear()
         self._leaf_dependencies.clear()
 
     def get_dependency(self, name: str) -> Callable[..., Any] | None:
         """Return the callable bound to `name`, or None when nothing is bound."""
-        return self._dependency_callables.get(name)
+        bound = self._dependency_callables.get(name)
+        return self._async_dependency_callables.get(name) if bound is None else bound
 
     def dependencies(self) -> Mapping[str, Callable[..., Any]]:
-        """Return a read-only view of every named dependency and its callable."""
-        return MappingProxyType(self._dependency_callables)
+        """Return a read-only snapshot of every named dependency and its callable."""
+        return MappingProxyType(
+            {**self._dependency_callables, **self._async_dependency_callables}
+        )
 
     def unregister_dependency(self, name: str) -> None:
         """Drop the binding for `name`, tolerating a name that has none."""
         self._dependency_callables.pop(name, None)
+        self._async_dependency_callables.pop(name, None)
         self._leaf_dependencies.pop(name, None)
+        self._dependencies_version += 1
 
     def dependency(
         self, name: str
@@ -322,11 +566,7 @@ class DependencyResolver:
         """
         callable_dep = self._dependency_callables.get(name)
         if callable_dep is None:
-            raise UnknownDependencyError(
-                name,
-                None if param is None else param.name,
-                registered=tuple(self._dependency_callables),
-            )
+            return self._bridge_unbound(name, context, param)
 
         if name in context.stack:
             cycle_start = context.stack.index(name)
@@ -360,6 +600,33 @@ class DependencyResolver:
             # Every nested resolution pops what it pushed, so this name is on top.
             context.stack.pop()
             context.cache.unmark_in_progress(name)
+
+    def _unknown(
+        self, name: str, param: inspect.Parameter | None
+    ) -> UnknownDependencyError:
+        """Return the error for a name no binding of either colour serves."""
+        return UnknownDependencyError(
+            name,
+            None if param is None else param.name,
+            registered=(*self._dependency_callables, *self._async_dependency_callables),
+        )
+
+    def _bridge_unbound(
+        self, name: str, context: ResolutionContext, param: inspect.Parameter | None
+    ) -> object:
+        """Resolve a name the sync dict misses through the bridge, raising when unbound.
+
+        A finished value skips the bridge, an in-progress mark crosses it to the cycle.
+        """
+        if name not in self._async_dependency_callables:
+            raise self._unknown(name, param)
+        cached = context.cache.get(name)
+        if cached is not _CACHE_MISS and cached is not _IN_PROGRESS:
+            return cached
+        return bridge(
+            f"dependency {name!r}",
+            lambda: self.aresolve_callable_dependency(name, context, param=param),
+        )
 
     def add_provider(self, provider: ParameterProvider) -> None:
         """Append a provider after the existing list."""
@@ -491,10 +758,225 @@ class DependencyResolver:
 
         return self.resolve(func, context)
 
+    def _compile_async_plan(self, func: Callable[..., Any]) -> tuple[AsyncPlan, bool]:
+        """Compile the async plan for `func` and say whether it is settled to cache.
+
+        Unresolved hints mark the plan provisional, and an async generator is refused.
+        """
+        target = Colour.ASYNC if _awaitable(func) else Colour.BLOCKING
+        try:
+            sig = cached_signature(func)
+        except (ValueError, TypeError):
+            return empty_async_plan(target), True
+        try:
+            hints = cached_type_hints(func)
+        except HINT_ERRORS:
+            logger.debug(
+                "Type hints of %s did not resolve, so its async plan reads the raw "
+                "annotations and is compiled again on the next resolve.",
+                _Described(func),
+                exc_info=True,
+            )
+            plan = compile_async_plan(
+                sig, {}, self._providers, self.skips, target, self._planned
+            )
+            return plan, False
+        plan = compile_async_plan(
+            sig, hints, self._providers, self.skips, target, self._planned
+        )
+        return plan, True
+
+    def _aplan_for(self, func: Callable[..., Any]) -> AsyncPlan:
+        """Return the async plan for `func`, recompiled once providers or bindings move.
+
+        The versions are read before the compile, so a racing change stamps it stale.
+        """
+        self._sync_providers()
+        providers_version = self._providers_version
+        dependencies_version = self._dependencies_version
+        key = introspect_key(func)
+        try:
+            entry = self._aplan_cache.get(key)
+        except TypeError:
+            return self._compile_async_plan(func)[0]
+        if (
+            entry is not None
+            and entry[0] == providers_version
+            and entry[1] == dependencies_version
+        ):
+            return entry[2]
+        plan, settled = self._compile_async_plan(func)
+        if settled:
+            self._aplan_cache[key] = (providers_version, dependencies_version, plan)
+        return plan
+
+    def _planned(self, func: Callable[..., Any], key: str | None) -> AsyncPlan | None:
+        """Return the async plan of `func` reached under `key`, None for an open cycle.
+
+        A cycle a deferring provider may break is left to the runtime stack check.
+        """
+        mark = describe_callable(func) if key is None else key
+        chain = _compiling.get()
+        deferred = edge_deferred()
+        keys = [named for named, _deferred in chain]
+        if mark in keys:
+            if not deferred and not any(edge for _named, edge in chain):
+                raise DependencyCycleError([*keys[keys.index(mark) :], mark])
+            return None
+        token = _compiling.set((*chain, (mark, deferred)))
+        try:
+            return self._aplan_for(func)
+        finally:
+            _compiling.reset(token)
+
+    def awaits(self, func: Callable[..., Any], *, key: str) -> bool:
+        """Return whether calling `func` on the async path awaits anything.
+
+        A cycle a deferring provider may break awaits, left to the runtime stack check.
+        """
+        plan = self._planned(func, key)
+        return plan is None or plan.awaits
+
+    def awaits_dependency(self, name: str) -> bool:
+        """Return whether the binding of `name` awaits anything, False for none."""
+        bound = self.get_dependency(name)
+        return False if bound is None else self.awaits(bound, key=name)
+
+    async def _amemo(
+        self, key: str, compute: Callable[[], Coroutine[Any, Any, object]]
+    ) -> object:
+        """Return what `compute` makes of `key`, through the request memo if one is set.
+
+        The memo shares a key the plans count twice or its owner declares.
+        """
+        memo = request_memo.get()
+        if memo is None:
+            return await compute()
+        shared = memo.share_all or key in memo.shared or key in _shares.get()
+        return await memo.scope.resolve(key, compute, shared=shared)
+
+    async def aseed_sources(
+        self, sources: tuple[Source, ...], context: ResolutionContext
+    ) -> None:
+        """Resolve through the request scope each of `sources` it shares, in order.
+
+        A segment fills a private copy of the cache, so only the scope runs a key once.
+        """
+        memo = request_memo.get()
+        if memo is None:
+            return
+        share_all = memo.share_all
+        declared = memo.shared
+        counted = _shares.get()
+        for key, func in sources:
+            if share_all or key in declared or key in counted:
+                await self.acall_factory(func, key, context)
+
+    async def aseed(self, func: Callable[..., Any], context: ResolutionContext) -> None:
+        """Resolve the shared keys `func` reaches, for its sync resolve in a segment."""
+        sources = self._aplan_for(func).sources
+        if sources:
+            await self.aseed_sources(sources, context)
+
+    async def aresolve_callable_dependency(
+        self,
+        name: str,
+        context: ResolutionContext,
+        *,
+        param: inspect.Parameter | None = None,
+    ) -> object:
+        """Resolve a named dependency on the async path, awaiting an async binding."""
+        callable_dep = self.get_dependency(name)
+        if callable_dep is None:
+            raise self._unknown(name, param)
+        return await self.acall_factory(callable_dep, name, context)
+
+    async def acall_factory(
+        self, factory: Callable[..., Any], key: str, context: ResolutionContext
+    ) -> object:
+        """Call `factory` on the async path once per cache and request memo under `key`.
+
+        An in-progress mark is a sync resolution elsewhere, so it reads as a miss.
+        """
+        stack = context.stack
+        if key in stack:
+            raise DependencyCycleError([*stack[stack.index(key) :], key])
+        cached = context.cache.get(key)
+        if cached is not _CACHE_MISS and cached is not _IN_PROGRESS:
+            return cached
+        stack.append(key)
+        try:
+            value = await self._amemo(
+                key, lambda: self.acall(factory, _branch(context))
+            )
+        finally:
+            stack.pop()
+        context.cache.set(key, value)
+        return value
+
+    async def aresolve(
+        self, func: Callable[..., object], context: ResolutionContext
+    ) -> dict[str, Any]:
+        """Return keyword arguments for `func`, awaiting what its async plan awaits.
+
+        The first call compiles the plan into its own cache, the sync plans stay apart.
+        """
+        plan = self._aplan_for(func)
+        token = _enter_shares(plan)
+        try:
+            result, _value = await _areplay(self, plan, context, None)
+        except UnknownDependencyError as exc:
+            exc.attribute_to(func)
+            raise
+        finally:
+            if token is not None:
+                _shares.reset(token)
+        return result
+
+    @overload
+    async def acall[T](
+        self, func: Callable[..., Coroutine[Any, Any, T]], context: ResolutionContext
+    ) -> T: ...
+
+    @overload
+    async def acall[T](
+        self, func: Callable[..., T], context: ResolutionContext
+    ) -> T: ...
+
+    async def acall(
+        self, func: Callable[..., Any], context: ResolutionContext
+    ) -> object:
+        """Call `func` with its resolved arguments and return its value, awaiting it.
+
+        A sync `func` returning a coroutine has it awaited, other awaitables come back.
+        """
+        plan = self._aplan_for(func)
+        target = None if plan.target is Colour.ASYNC else func
+        token = _enter_shares(plan)
+        try:
+            kwargs, value = await _areplay(self, plan, context, target)
+        except UnknownDependencyError as exc:
+            exc.attribute_to(func)
+            raise
+        finally:
+            if token is not None:
+                _shares.reset(token)
+        if target is None:
+            return await func(**kwargs)
+        if isinstance(value, Coroutine):
+            return await value
+        return value
+
 
 # One holder every reference points at, so none keeps a resolver the setting replaced.
 _holder = SimpleLazyObject(DependencyResolver)
 resolver: DependencyResolver = cast("DependencyResolver", _holder)
+
+_HANDLE: Final = instance_dict(_holder)
+"""The instance dict the holder keeps `_wrapped` in, read without the proxy lookup.
+
+Every swap writes the same dict, so a read here sees it at no `LazyObject` cost.
+"""
 
 RegisteredParameterProvider.resolver = resolver
 
@@ -515,10 +997,11 @@ def current_resolver() -> DependencyResolver:
 
     Read on a render path, as an attribute off the holder is a forwarded call.
     """
-    if _holder._wrapped is empty:
+    built = _HANDLE["_wrapped"]
+    if built is empty:
         _holder._setup()
-    built: DependencyResolver = _holder._wrapped
-    return built
+        built = _HANDLE["_wrapped"]
+    return cast("DependencyResolver", built)
 
 
 def apply_resolver_setting() -> None:
@@ -535,3 +1018,6 @@ def apply_resolver_setting() -> None:
 def reapply_resolver_setting(**kwargs: object) -> None:
     """Rebuild the resolver singleton when the framework settings change."""
     apply_resolver_setting()
+
+
+ROUTES.attach(forget_dep_caches)

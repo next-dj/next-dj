@@ -12,13 +12,7 @@ from django.core.management import call_command
 from shortener.cache import CLICK_PREFIX, increment_clicks, pending_clicks
 from shortener.models import Link
 
-from next.testing import (
-    assert_has_class,
-    assert_metadata,
-    assert_missing_class,
-    envelope_of,
-    find_anchor,
-)
+from next.testing import assert_metadata, envelope_of, find_anchor
 
 
 pytestmark = pytest.mark.django_db
@@ -35,6 +29,9 @@ class SubnavCase:
     inactive_href: str
     inactive_text: str
 
+
+CURRENT_PAGE = 'aria-current="page"'
+ANCESTOR = 'data-next-current="ancestor"'
 
 SUBNAV_CASES: tuple[SubnavCase, ...] = (
     SubnavCase("on-index", "/admin/", "/admin/", "Links", "/admin/stats/", "Stats"),
@@ -139,36 +136,36 @@ class TestFlushClicks:
 
 
 class TestActiveNav:
-    """Active link highlighting uses `request.resolver_match.view_name`."""
+    """The router marks the links of each nav, which `nav_link` styles from the marks."""
 
     @pytest.mark.parametrize("case", SUBNAV_CASES, ids=lambda case: case.id)
-    def test_admin_subnav_highlights_the_visited_section(
+    def test_admin_subnav_marks_the_visited_section(
         self, next_client, case: SubnavCase
     ) -> None:
         body = next_client.get(case.path).content.decode()
-        assert_has_class(
-            find_anchor(body, href=case.active_href, text=case.active_text),
-            "font-semibold",
-        )
-        assert_missing_class(
-            find_anchor(body, href=case.inactive_href, text=case.inactive_text),
-            "font-semibold",
-        )
+        active = find_anchor(body, href=case.active_href, text=case.active_text)
+        inactive = find_anchor(body, href=case.inactive_href, text=case.inactive_text)
+        assert CURRENT_PAGE in active
+        assert CURRENT_PAGE not in inactive
 
-    def test_root_admin_link_is_active_on_detail_page(
+    def test_root_admin_link_marks_an_ancestor_on_the_detail_page(
         self, next_client, make_link
     ) -> None:
         make_link("deep")
         body = next_client.get("/admin/links/deep/").content.decode()
-        assert_has_class(
-            find_anchor(body, href="/admin/", text="admin"), "font-semibold"
-        )
+        anchor = find_anchor(body, href="/admin/", text="admin")
+        assert ANCESTOR in anchor
+        assert CURRENT_PAGE not in anchor
 
-    def test_root_admin_link_not_active_on_home(self, next_client) -> None:
+    def test_root_admin_link_is_unmarked_on_home(self, next_client) -> None:
         body = next_client.get("/").content.decode()
-        assert_missing_class(
-            find_anchor(body, href="/admin/", text="admin"), "font-semibold"
-        )
+        anchor = find_anchor(body, href="/admin/", text="admin")
+        assert "data-next-current" not in anchor
+
+    def test_the_header_links_sit_in_the_main_nav(self, next_client) -> None:
+        body = next_client.get("/").content.decode()
+        nav = body.split('<nav aria-label="Main"', 1)[1].split("</nav>", 1)[0]
+        assert 'href="/admin/"' in nav
 
 
 class TestAdminSurface:
@@ -386,6 +383,22 @@ class TestResetClicksMorphsForeignBadge:
         assert response.status_code == 303
         assert response["Location"] == f"/admin/links/{link.slug}/"
         assert cache.get(f"{CLICK_PREFIX}hot") is None
+
+
+class TestCompressionOptOut:
+    """The link page keeps its CSRF token beside a slug the visitor picks."""
+
+    def test_the_link_page_is_sent_plain(self, next_client, make_link) -> None:
+        make_link("peeked")
+        response = next_client.get(
+            "/admin/links/peeked/", headers={"Accept-Encoding": "gzip"}
+        )
+        assert response.status_code == 200
+        assert "Content-Encoding" not in response.headers
+
+    def test_a_page_without_the_declaration_is_compressed(self, next_client) -> None:
+        response = next_client.get("/admin/", headers={"Accept-Encoding": "gzip"})
+        assert response.headers["Content-Encoding"] == "gzip"
 
 
 class TestLinkPeek:

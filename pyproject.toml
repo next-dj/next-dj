@@ -27,6 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "asgiref>=3.12,<3.14",
     "django>=5.2,<6.2",
 ]
 
@@ -34,8 +35,17 @@ dependencies = [
 testing = [
     "defusedxml>=0.7",
 ]
+zstd = [
+    "zstandard>=0.23; python_version < '3.14'",
+]
 broker = [
     "redis>=8",
+]
+brotli = [
+    "brotli>=1.1",
+]
+crypto = [
+    "cryptography>=44",
 ]
 
 [project.urls]
@@ -46,6 +56,8 @@ Repository = "https://github.com/next-dj/next-dj"
 
 [dependency-groups]
 dev = [
+    "zstandard>=0.23; python_version < '3.14'",
+    "brotli>=1.1",
     "uvicorn>=0.38",
     "wsproto>=1.2",
     "websockets>=16",
@@ -80,6 +92,7 @@ compat = [
     "rules>=3.5",
 ]
 codspeed = [
+    "brotli>=1.1",
     "pytest-codspeed==5.0.4",
     "pytest-test-groups==1.2.1",
 ]
@@ -123,6 +136,13 @@ artifacts = [
     "next/static/next/next.csrf.min.js",
     "next/static/next/next.poll.min.js",
     "next/static/next/next.dev.min.js",
+    "next/static/next/next.forms.min.js",
+    "next/static/next/next.layers.min.js",
+    "next/static/next/next.boundaries.min.js",
+    "next/static/next/next.reload.min.js",
+    "next/static/next/next.more.min.js",
+    "next/static/next/next.router.min.js",
+    "next/static/next/next.intent.min.js",
 ]
 exclude = [
     "next/client/",
@@ -148,6 +168,13 @@ artifacts = [
     "next/static/next/next.csrf.min.js",
     "next/static/next/next.poll.min.js",
     "next/static/next/next.dev.min.js",
+    "next/static/next/next.forms.min.js",
+    "next/static/next/next.layers.min.js",
+    "next/static/next/next.boundaries.min.js",
+    "next/static/next/next.reload.min.js",
+    "next/static/next/next.more.min.js",
+    "next/static/next/next.router.min.js",
+    "next/static/next/next.intent.min.js",
 ]
 exclude = [
     "next/client/*.test.ts",
@@ -218,7 +245,14 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 
+[tool.typos.files]
+extend-exclude = ["tests/**/golden/"]
+
+[tool.typos.default]
+extend-ignore-re = ["gAAAAA[A-Za-z0-9_=-]+"]
+
 [tool.typos.default.extend-words]
+acount = "acount"
 asend = "asend"
 
 [tool.ruff]

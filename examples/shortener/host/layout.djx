@@ -3,8 +3,8 @@
 {% component "page_head" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="next.dj shortener" brand_href="/" brand_icon="🔗" %}
-    {% #slot "actions" %}
-      {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
+    {% #slot "nav" %}
+      {% component "nav_link" url_name="next:page_admin" label="admin" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}
       {% template %}

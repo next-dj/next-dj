@@ -20,11 +20,14 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`reload-routes-from-code`
    Trigger router reload at runtime.
 
-:doc:`write-a-router-backend`
-   Implement a router backend that reads URLs from a database.
+:doc:`write-a-page-backend`
+   Implement a page backend that reads URLs from a database.
 
 :doc:`read-query-parameters`
    Read query-string values with the ``DQuery`` marker.
+
+:doc:`page-a-list-by-cursor`
+   Page an infinite list by an opaque cursor with ``KeysetPager``, and sign its tokens or write a pager of another scheme.
 
 :doc:`add-a-custom-template-loader`
    Plug an extra ``TemplateLoader`` into ``TEMPLATE_LOADERS``.
@@ -46,6 +49,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
 :doc:`group-pages-by-section`
    Scope layouts and access to a section of pages with a route group that leaves the URL alone.
+
+:doc:`add-a-page-declaration`
+   Add your own ``page.py`` call beside ``page.transaction()`` and ``page.router()``, with its parse, default, and inheritance.
 
 .. rubric:: SEO
 
@@ -73,6 +79,35 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
 :doc:`share-components-across-projects`
    Reuse a UI kit across several page roots.
+
+.. rubric:: Boundaries, transactions, and the router
+
+:doc:`show-a-loading-state`
+   Send a page with a loading UI and fill a slow component in when it is ready.
+
+:doc:`contain-a-failure-with-an-error-boundary`
+   Show an error UI in place of a failed component or page body, roll back its writes, and offer a retry.
+
+:doc:`batch-lookups-with-a-loader`
+   Gather the lookups of many components into one query with a ``Loader``.
+
+:doc:`run-a-page-in-a-transaction`
+   Wrap a page in a transaction with ``page.transaction()`` or take it out of one, and read what the boundaries issue.
+
+:doc:`tune-router-prefetch-and-press`
+   Tune or turn off the prefetch on hover, scroll, and press, for the project, a link, or a page.
+
+:doc:`replace-the-boundary-token-storage`
+   Keep the claims of a boundary token in a store of your own, or replace the token backend.
+
+:doc:`replay-request-state-on-a-pool-thread`
+   Carry a tenant ``search_path`` or a thread-local to the pool thread of a deferred job with ``ConnectionState`` and ``ThreadState``.
+
+:doc:`switch-boundaries-off-in-an-incident`
+   Take streaming and parallel jobs back to a plain page with settings, a proxy rule, or a policy that reads a shared flag.
+
+:doc:`send-boundary-failures-to-sentry-and-tracing`
+   Forward contained and uncontained boundary failures to Sentry, trace each job with OpenTelemetry, and count how streams end.
 
 .. rubric:: Static assets
 
@@ -137,10 +172,16 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`test-a-page-with-actions`
    Test a page that posts to a registered action.
 
+:doc:`test-a-page-with-deferred-boundaries`
+   Read the shell and the chunks of a streamed page, hold a job with a gate, and reload a client-trip component.
+
 :doc:`test-a-component-in-isolation`
    Render and assert on one component without a page.
 
 .. rubric:: Integration and operations
+
+:doc:`enable-response-compression`
+   Compress responses and streamed pages, keep a page plain, and decide who compresses behind a proxy.
 
 :doc:`integrate-django-admin`
    Run Django admin alongside next.dj pages.
@@ -186,8 +227,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    reverse-urls
    serve-an-application-under-a-prefix
    reload-routes-from-code
-   write-a-router-backend
+   write-a-page-backend
    read-query-parameters
+   page-a-list-by-cursor
    add-a-custom-template-loader
    require-login-on-pages
    internationalize-routes
@@ -195,6 +237,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    give-a-section-its-own-document-shell
    open-a-page-as-a-modal-over-another
    group-pages-by-section
+   add-a-page-declaration
    audit-seo-before-deploy
    cache-pages-on-a-cdn
    move-and-remove-pages
@@ -202,6 +245,15 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    resolve-feature-flags-with-di
    build-a-composite-component
    share-components-across-projects
+   show-a-loading-state
+   contain-a-failure-with-an-error-boundary
+   batch-lookups-with-a-loader
+   run-a-page-in-a-transaction
+   tune-router-prefetch-and-press
+   replace-the-boundary-token-storage
+   replay-request-state-on-a-pool-thread
+   switch-boundaries-off-in-an-incident
+   send-boundary-failures-to-sentry-and-tracing
    ship-a-site-wide-stylesheet
    use-a-compiled-stylesheet
    add-a-new-asset-kind
@@ -222,6 +274,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    extend-a-default-backend
    test-a-page-with-actions
    test-a-component-in-isolation
+   test-a-page-with-deferred-boundaries
+   enable-response-compression
    integrate-django-admin
    scope-requests-per-tenant
    observe-framework-signals

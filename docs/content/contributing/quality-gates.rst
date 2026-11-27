@@ -102,7 +102,7 @@ Benchmarks
 ----------
 
 Benchmarks live in ``tests/benchmarks/`` and stay out of the default test run through ``--ignore=tests/benchmarks``.
-``make bench`` runs them locally under pytest-benchmark with the ``perf`` marker, a warmup of 1000 iterations, a minimum of 10 rounds, garbage collection disabled, and result storage under ``.benchmarks/``.
+``make bench`` runs them locally under pytest-benchmark with the ``perf`` marker, garbage collection disabled, result storage under ``.benchmarks/``, and the warmup and round counts that ``BENCH_FLAGS`` in the ``Makefile`` sets.
 Local numbers compare only against other numbers from the same machine, so a pull request cites the CodSpeed report rather than a local delta.
 
 The CodSpeed workflow runs on every pull request and every push to ``main`` on a single Python version, and CodSpeed posts its report on the pull request.
@@ -146,7 +146,7 @@ That job checks the framework against the ecosystem packages a project is likely
 Client runtime
 --------------
 
-The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the seven bundles with esbuild.
+The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, checks formatting with Prettier, lints with ESLint, and builds the bundles with esbuild, which :doc:`/content/internals/client-runtime` lists.
 
 .. list-table::
    :header-rows: 1
@@ -176,15 +176,37 @@ The ``test-js`` job type-checks the TypeScript sources with ``tsc --noEmit``, ch
    * - ``next.dev.min.js``
      - ``next/client/entries/dev.ts``
      - Only under ``DEBUG``, when the payload carries ``$dev``, for the development diagnostics.
+   * - ``next.forms.min.js``
+     - ``next/client/entries/forms.ts``
+     - Only once a scan finds a validated form or a ``data-next-trigger`` element, for inline validation and filter forms.
+   * - ``next.layers.min.js``
+     - ``next/client/entries/layers.ts``
+     - Only once a scan finds a layer link or an envelope opens a layer, for the modal layers.
+   * - ``next.boundaries.min.js``
+     - ``next/client/entries/boundaries.ts``
+     - Declared by a streamed page, by a page whose partial responses may stream, and by a page with a client-trip boundary or an error UI that offers a retry.
+   * - ``next.reload.min.js``
+     - ``next/client/entries/reload.ts``
+     - Declared by a page with a ``reload="loading"`` zone or with a layer link whose zone has a ``loading.<zone>.djx``.
+   * - ``next.more.min.js``
+     - ``next/client/entries/more.ts``
+     - Declared by a ``{% more %}`` sentinel that sets ``prune=`` or ``url=``.
+   * - ``next.router.min.js``
+     - ``next/client/entries/router.ts``
+     - Declared by every routed document while the client router is on, for the router with its snapshots, scroll restore, and the navigation of a ``GET`` form.
+   * - ``next.intent.min.js``
+     - ``next/client/entries/intent.ts``
+     - Named by the router, which loads it once the page is idle, for the prefetch of links and layers and the active-link pass.
 
-The job then enforces a gzip budget on every bundle, 16384 bytes for ``next.min.js``, which ships on every page, and 3584, 4096, 4096, 768, 1024, and 2048 bytes for the scripts, stream, ws, csrf, poll, and dev chunks, and that budget check runs in continuous integration only.
-Growth past a budget calls for a lazily loaded chunk rather than a larger core file.
+The job then enforces a gzip budget on every bundle, each set in the budget step of ``.github/workflows/ci.yml``.
+That budget check runs in continuous integration only.
+Growth of the core file past its budget calls for a lazily loaded chunk rather than a larger core file, and a chunk that is lazy already has no further code to move out, so its own budget is the one a change raises, with the reason in the change.
 The job finishes with the vitest run and its coverage thresholds.
 
 ``next/client/next.ts`` is the entry point that mounts ``window.Next`` and pulls in the morph, apply, wire, layer, trigger, asset, and stream modules, and each chunk entry point hands itself to it when it evaluates.
 ``make build-js`` runs the same single esbuild call locally, minifying each bundle into ``next/static/next/`` with a source map beside it and targeting ES2022.
 The map is external and the bundle carries no ``sourceMappingURL`` comment, so browser devtools load the map only when a developer points them at it, while manifest storage finds no reference to rewrite at ``collectstatic`` time.
-``build_hooks.py`` reads all seven bundles before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
+``build_hooks.py`` reads every bundle before packaging and raises on a missing one or one that carries the comment, and ``NEXT_DJ_SKIP_JS_BUILD=1`` skips the npm run and packages the bundle already on disk.
 The compiled files are build products rather than tracked source files, and the packaging configuration lists them as build artefacts so a distribution carries them.
 
 Supply chain

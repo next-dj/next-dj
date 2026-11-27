@@ -111,7 +111,7 @@ It deduplicates the combined list by resolved path and glob, then emits ``watch_
 Reload decisions
 ----------------
 
-Two kinds of changes trigger a reload.
+Three kinds of change reach the running development server.
 
 Python module change.
    Django's reloader restarts the process.
@@ -122,18 +122,22 @@ Route set change.
    A per-tree signature of directory mtimes and directory count gates the rescan, so an unchanged tree reuses the cached route set.
    A page directory that appears or goes, an intercepting page that appears or goes, and a ``template.djx`` that appears or goes beside a ``page.py`` call ``notify_file_changed``, so Django restarts the process even when no watched file mtime changed.
 
+Boundary files.
+   A ``loading.djx`` or ``error.djx`` that appears or goes beside a component moves the mtime of its directory.
+   Each tick compares the directory signatures of the page trees and of the component roots, and calls ``refresh_component_files`` only when they changed shape, so a render never stats those files.
+
 A scan that raises ``OSError``, ``ImportError``, or ``ValueError`` costs that tick its route-set comparison.
 The reloader logs the reason at debug level, keeps the set collected by the previous tick, and carries on watching ``.py`` mtimes, so a tree that cannot be walked never stops the development server.
 
 The route set diff is taken by ``NextStatReloader`` from the configured page roots.
-A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
+A custom router that builds routes from another source rebuilds them through ``route_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
 
 Router lifetime
 ~~~~~~~~~~~~~~~
 
 Reading the page roots builds one router per ``PAGE_BACKENDS`` entry, and a router answers about the disk it probed while it was built.
 With ``DEBUG`` off the routers are held until the configuration behind them changes, so a static lookup and a reloader tick stop paying for a build per read.
-A settings reload, a change of ``BASE_DIR``, and ``router_manager.reload`` each build them again.
+A settings reload, a change of ``BASE_DIR``, and ``route_manager.reload`` each build them again.
 A build that dropped an entry is held by nothing, so a router that failed while the apps were still loading is tried again on the next read rather than staying out of the watch list for good.
 
 With ``DEBUG`` on nothing is held.
@@ -143,11 +147,18 @@ A page created inside a tree that is already watched needs no rebuild at all, be
 What is held whatever ``DEBUG`` is set to is the resolution of the trees the routers report.
 A root symlink re-pointed at another release therefore reaches the watcher only after a restart or a reconfigure.
 
+Memos and reloads
+~~~~~~~~~~~~~~~~~
+
+An in-process reload drops what it invalidates through the sources of ``next.caches``, see :ref:`internals-process-state`.
+``route_manager.reload`` moves ``ROUTES`` before it sends ``routes_reloaded``, and a settings reload moves ``SETTINGS`` and ``FRAMEWORK`` before it sends ``settings_reloaded``, so a receiver of either signal already reads fresh memos.
+A memo of a file read keeps the mtime stamp it was read under and revalidates against it while ``DEBUG`` is on, so a template edit needs no source at all.
+
 Extension points
 ----------------
 
 - Register extra ``(path, glob)`` pairs from ``AppConfig.ready`` through ``register_autoreload_watch_spec``.
-- Subscribe to ``router_reloaded`` to refresh an in-process cache when the routers are rebuilt.
+- Build an in-process cache of route data on ``next.caches`` with ``depends=(ROUTES,)``, so a router rebuild drops it, or subscribe to ``routes_reloaded`` for work beyond a drop.
 - Subscribe to ``watch_specs_ready`` for diagnostic logging during development.
 
 See also

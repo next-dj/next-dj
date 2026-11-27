@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from next.errors import AsyncCallableError
 from next.pages.errors import PageMetadataConflictError
 from next.pages.loaders import AncestorStamps
 from next.pages.metadata.chain import ChainEntry
@@ -228,9 +229,57 @@ class TestReset:
         assert registry.misattributed() == ()
         assert registry.version == before + 1
 
+    def test_every_write_reports_to_the_change_callback(self, page_file: Path) -> None:
+        writes: list[int] = []
+        registry = PageMetadataRegistry(on_change=lambda: writes.append(1))
+
+        registry.register(page_file, _wallet_meta)
+        registry.reset()
+
+        assert writes == [1, 1]
+
     def test_reset_drops_the_chain_memo_too(
         self, registry: PageMetadataRegistry, page_file: Path
     ) -> None:
         registry.remember(page_file, _entry())
         registry.reset()
         assert registry.chain(page_file) is None
+
+
+async def _async_meta() -> dict[str, str]:
+    return {"title": "Async"}
+
+
+async def _streamed_meta():
+    yield {"title": "Streamed"}
+
+
+class TestMetadataColour:
+    """A coroutine metadata callable makes the chain async, an async generator raises."""
+
+    def test_a_coroutine_function_registers_with_its_colour(self, registry) -> None:
+        registry.register(Path("/m/page.py"), _async_meta)
+
+        assert registry.entry(Path("/m/page.py")).is_async is True
+        assert registry.awaits(Path("/m/page.py")) is True
+
+    def test_an_async_generator_is_refused(self, registry) -> None:
+        with pytest.raises(AsyncCallableError, match=r"@page\.metadata callable"):
+            registry.register(Path("/m/page.py"), _streamed_meta)
+
+    def test_a_sync_chain_does_not_await(self, registry) -> None:
+        registry.register(Path("/m/page.py"), _wallet_meta, inherit=True)
+
+        assert registry.awaits(Path("/m/leaf/page.py")) is False
+
+    def test_an_inherited_ancestor_callable_makes_the_page_await(
+        self, registry
+    ) -> None:
+        registry.register(Path("/m/page.py"), _async_meta, inherit=True)
+
+        assert registry.awaits(Path("/m/leaf/page.py")) is True
+
+    def test_an_ancestor_callable_kept_to_its_own_page_does_not(self, registry) -> None:
+        registry.register(Path("/m/page.py"), _async_meta)
+
+        assert registry.awaits(Path("/m/leaf/page.py")) is False

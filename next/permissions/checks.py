@@ -5,17 +5,11 @@ from pathlib import Path
 from typing import Final, cast
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.template import Template, TemplateSyntaxError
 from django.template.base import NodeList
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.components.sources import components_listed, get_components_manager
 from next.conf import next_framework_settings
 from next.conf.defaults import USER_SETTING

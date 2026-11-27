@@ -9,22 +9,16 @@ from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.finders import AppDirectoriesFinder
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
-from next.checks.common import get_router_manager, import_backend_class
+from next.checks import NEXT, register
+from next.checks.common import get_route_manager, import_backend_class
 from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
+from next.discovery import get_page_root_keys_for_watch
 from next.pages.checks.layouts import iter_layout_ancestry
 from next.pages.checks.responses import private_pages_warning
 from next.pages.scan import iter_serialized_page_context_keys
-from next.pages.watch import get_page_root_keys_for_watch
 
 from .assets import default_kinds
 from .backends import DEFAULT_STATIC_BACKEND, StaticBackend, StaticFilesBackend
@@ -32,7 +26,9 @@ from .discovery import PathResolver, default_stems, find_role_files
 from .finders import NextAppDirectoriesFinder, scan_page_tree_assets
 from .nonce import nonce_active
 from .runtime import (
+    CHUNK_FIELDS,
     CHUNK_STATIC_PATHS,
+    CHUNK_TEMPLATE,
     DEV_CHUNK_KEY,
     INIT_FIELDS,
     NEXT_JS_STATIC_PATH,
@@ -42,6 +38,7 @@ from .runtime import (
     NextScriptBuilder,
     ScriptInjectionPolicy,
     dry_run_template,
+    payload_in_script,
 )
 from .serializers import JsContextSerializer
 
@@ -414,7 +411,12 @@ def check_app_directories_finder(*args: object, **kwargs: object) -> list[CheckM
     ]
 
 
-_RUNTIME_TEMPLATES: Final = ("preload_template", "script_tag_template", "init_template")
+_RUNTIME_TEMPLATES: Final = (
+    "preload_template",
+    "script_tag_template",
+    "init_template",
+    "chunk_template",
+)
 _BACKEND_TEMPLATES: Final = ("css_tag", "js_tag", "module_tag")
 
 
@@ -504,13 +506,13 @@ def check_layout_assets_above_trees(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
     """Warn about co-located assets of a layout above every page tree (`next.W135`)."""
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
     page_roots = tuple(get_page_root_keys_for_watch())
     resolver = PathResolver(lambda: page_roots)
     warnings: list[CheckMessage] = []
-    for layout_file in iter_layout_ancestry(router_manager):
+    for layout_file in iter_layout_ancestry(route_manager):
         if resolver.find_page_root(layout_file) is not None:
             continue
         found = find_role_files(
@@ -558,7 +560,11 @@ def check_script_policy(*args: object, **kwargs: object) -> list[CheckMessage]:
 
 
 def _template_fields(where: str) -> tuple[str, ...]:
-    return INIT_FIELDS if "init_template" in where else TAG_FIELDS
+    if "init_template" in where:
+        return INIT_FIELDS
+    if "chunk_template" in where:
+        return CHUNK_FIELDS
+    return TAG_FIELDS
 
 
 @register(NEXT)
@@ -584,6 +590,18 @@ def check_tag_templates_format(*args: object, **kwargs: object) -> list[CheckMes
                     id="next.E139",
                 )
             )
+            continue
+        if where == CHUNK_TEMPLATE and not payload_in_script(template):
+            errors.append(
+                Error(
+                    f"{where} is {template!r}, which puts {{payload}} outside the "
+                    "text of a <script> element, where its escaping does not hold, so "
+                    "the default chunk renders instead.",
+                    hint="Place {payload} in the text of the script element alone.",
+                    obj=settings,
+                    id="next.E139",
+                )
+            )
     return errors
 
 
@@ -596,14 +614,27 @@ _DEPLOYED_BUNDLES: Final = (
 """The runtime bundles a production page may load, the dev chunk left out."""
 
 
-def _bundle_problem(path: str) -> str | None:
-    """Return why the storage cannot serve a runtime bundle, `None` when it can."""
+_UNBUILT_HINT: Final = (
+    "Build the client runtime (npm run build:next in a source checkout) and run "
+    "manage.py collectstatic."
+)
+_UNCOLLECTED_HINT: Final = (
+    "Run manage.py collectstatic under the production STORAGES, so the storage "
+    "holds the bundles the installed runtime ships."
+)
+
+
+def _bundle_problem(path: str) -> tuple[str, str] | None:
+    """Return why the storage cannot serve a runtime bundle and the fix, or `None`."""
     if not finders.find(path):
-        return "no static files finder answers it, so the client runtime is unbuilt"
+        return (
+            "no static files finder answers it, so the client runtime is unbuilt",
+            _UNBUILT_HINT,
+        )
     try:
         staticfiles_storage.url(path)
     except ValueError:
-        return "the static files storage holds no entry for it"
+        return "the static files storage holds no entry for it", _UNCOLLECTED_HINT
     return None
 
 
@@ -614,12 +645,9 @@ def check_runtime_bundles_deployed(
     """Warn about a runtime bundle the deployed storage cannot serve (`next.W090`)."""
     return [
         DjangoWarning(
-            f"{path}: {problem}. Pages render without the runtime, or without the "
+            f"{path}: {problem[0]}. Pages render without the runtime, or without the "
             "feature the chunk carries.",
-            hint=(
-                "Build the client runtime (npm run build:next in a source checkout) "
-                "and run manage.py collectstatic."
-            ),
+            hint=problem[1],
             obj=settings,
             id="next.W090",
         )

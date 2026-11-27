@@ -5,13 +5,20 @@ from typing import TYPE_CHECKING
 import pytest
 from django.urls import resolve
 
-from tests.benchmarks.factories import build_layout_page
+from tests.benchmarks.factories import (
+    REQUEST_ROUNDS,
+    REQUEST_WARMUP_ROUNDS,
+    build_layout_page,
+    each_round,
+)
 from tests.support import PermissionHolder, QuietHolder, partial_meta, plain_get, routed
 from tests.support.access import write_guard
 
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from django.http import HttpRequest
 
 
 _URL = "/seg_0/seg_1/"
@@ -46,6 +53,14 @@ def _write_page(root: Path, shape: str) -> None:
         write_guard(root, _GUARDED_LAYOUT)
 
 
+def _holder() -> HttpRequest:
+    """Return the zone GET of a user holding the permission the zone asks for."""
+    request = plain_get(_URL)
+    request.META.update(partial_meta(zones="z"))
+    request.user = QuietHolder(_PERM)
+    return request
+
+
 class TestBenchZoneAccess:
     """A warm zone GET of a holder, by where the check over the zone sits."""
 
@@ -64,8 +79,12 @@ class TestBenchZoneAccess:
             assert response.status_code == 200
             assert b"SECRET" in response.content
             assert len(request.user.asked) == _ASKED[shape]
-            request.user = QuietHolder(_PERM)
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(_holder, **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )
 
     @pytest.mark.benchmark(group="partial.zone_access")
     def test_zone_get_refused_by_the_block(self, tmp_path: Path, benchmark) -> None:
@@ -82,5 +101,9 @@ class TestBenchZoneAccess:
             assert response.status_code == 400
             assert b"SECRET" not in response.content
             assert request.user.asked == []
-            request.user = QuietHolder(_PERM)
-            benchmark(match.func, request, **match.kwargs)
+            benchmark.pedantic(
+                match.func,
+                setup=each_round(_holder, **match.kwargs),
+                rounds=REQUEST_ROUNDS,
+                warmup_rounds=REQUEST_WARMUP_ROUNDS,
+            )

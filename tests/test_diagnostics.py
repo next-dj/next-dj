@@ -1,11 +1,17 @@
 import logging
+import sys
+from collections.abc import Iterator
 
 import pytest
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
+from django.core.handlers.exception import response_for_exception
+from django.core.signals import got_request_exception
 from django.http import Http404
+from django.http.multipartparser import MultiPartParserError
+from django.test import RequestFactory
 
 from next.caches import DEFAULT_CACHE_SIZE
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.diagnostics import (
     INTENDED_EXCEPTIONS,
     QUIET_PERIOD,
@@ -13,8 +19,12 @@ from next.diagnostics import (
     Capture,
     FailureLog,
     degraded,
+    degraded_status,
     exception_text,
+    mark_degraded,
+    report_request_exception,
     reset_failure_logs,
+    status_kept,
     watch_degraded,
 )
 from next.testing import override_next_settings
@@ -143,7 +153,7 @@ class TestBackendReadLog:
     ) -> None:
         with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
             log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
 
         assert caplog.text.count("failed to report its watched trees") == 2
@@ -218,7 +228,7 @@ class TestFailureLog:
         settings.DEBUG = False
         with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
             _contained(failures, "items")
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             _contained(failures, "items")
 
         assert caplog.text.count("items() in sitemap.py raised") == 2
@@ -248,6 +258,26 @@ class TestFailureLog:
 
         assert caplog.records == []
         assert degraded() is False
+
+    def test_a_malformed_multipart_body_keeps_the_django_400(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
+    ) -> None:
+        """A block reading an unparsable upload lets Django answer it, unlogged here."""
+        settings.DEBUG = False
+        watch_degraded()
+        request = RequestFactory().generic(
+            "POST", "/", b"x", content_type="multipart/form-data"
+        )
+        with (
+            caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"),
+            pytest.raises(MultiPartParserError) as info,
+            failures.guard("items", "items() raised"),
+        ):
+            request.POST.get("name")
+
+        assert caplog.records == []
+        assert degraded() is False
+        assert response_for_exception(request, info.value).status_code == 400
 
     def test_an_empty_pass_through_contains_an_intended_exception(
         self, failures: FailureLog, caplog: pytest.LogCaptureFixture, settings
@@ -335,6 +365,7 @@ class TestFailureLog:
             PermissionDenied,
             SuspiciousOperation,
             BadRequest,
+            MultiPartParserError,
         }
 
 
@@ -423,6 +454,56 @@ class TestQuietPeriod:
             "was last logged."
         )
 
+    def test_extra_rides_on_the_record_beside_the_count(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
+            failures.emit(logging.ERROR, "a", "failed %s", ("x",), extra={"tag": 1})
+
+        (record,) = caplog.records
+        assert record.tag == 1
+        assert record.suppressed == 0
+
+    def test_a_quiet_level_logs_each_left_out_occurrence(
+        self, failures: FailureLog, clock: _Clock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG, logger="next.tests.diagnostics"):
+            for tag in (1, 2, 3):
+                failures.emit(
+                    logging.ERROR,
+                    "a",
+                    "failed %s",
+                    ("x",),
+                    _BOOM,
+                    extra={"tag": tag},
+                    quiet=logging.DEBUG,
+                )
+            clock.now += QUIET_PERIOD
+            failures.emit(
+                logging.ERROR, "a", "failed %s", ("x",), extra={"tag": 4}, quiet=10
+            )
+
+        assert [(r.levelno, r.tag) for r in caplog.records] == [
+            (logging.ERROR, 1),
+            (logging.DEBUG, 2),
+            (logging.DEBUG, 3),
+            (logging.ERROR, 4),
+        ]
+        assert caplog.records[1].getMessage() == "failed x"
+        assert caplog.records[1].exc_info is not None
+        assert caplog.records[3].getMessage() == (
+            "failed x The same failure occurred 2 more times since it was last logged."
+        )
+
+    def test_without_a_quiet_level_a_left_out_occurrence_logs_nothing(
+        self, failures: FailureLog, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG, logger="next.tests.diagnostics"):
+            failures.emit(logging.ERROR, "a", "failed", ())
+            failures.emit(logging.ERROR, "a", "failed", ())
+
+        assert len(caplog.records) == 1
+
     def test_first_failure_answers_at_the_same_rate(
         self, failures: FailureLog, clock: _Clock
     ) -> None:
@@ -483,3 +564,148 @@ class TestDegraded:
             _contained(failures, "items")
         del info.value.__notes__
         assert degraded() is False
+
+
+class TestDegradedStatus:
+    """A contained failure may give the response a status, kept until the next watch."""
+
+    def test_a_clean_render_has_no_status(self) -> None:
+        watch_degraded()
+
+        assert degraded_status() is None
+        assert degraded() is False
+
+    def test_a_plain_mark_degrades_without_a_status(self) -> None:
+        watch_degraded()
+        mark_degraded()
+
+        assert degraded() is True
+        assert degraded_status() is None
+        watch_degraded()
+
+    def test_a_status_mark_degrades_with_its_status(self) -> None:
+        watch_degraded()
+        mark_degraded(500)
+
+        assert degraded() is True
+        assert degraded_status() == 500
+        watch_degraded()
+
+    def test_a_later_plain_mark_keeps_the_status(self) -> None:
+        watch_degraded()
+        mark_degraded(500)
+        mark_degraded()
+
+        assert degraded_status() == 500
+        watch_degraded()
+
+    def test_the_watch_drops_the_status(self) -> None:
+        mark_degraded(500)
+        watch_degraded()
+
+        assert degraded_status() is None
+
+
+class TestStatusKept:
+    """A block keeps the status its contained failures set off the response."""
+
+    def test_a_status_set_inside_degrades_without_it(self) -> None:
+        watch_degraded()
+        with status_kept():
+            mark_degraded(500)
+
+        assert degraded() is True
+        assert degraded_status() is None
+        watch_degraded()
+
+    def test_a_status_set_before_survives_the_block(self) -> None:
+        watch_degraded()
+        mark_degraded(503)
+        with status_kept():
+            mark_degraded(500)
+
+        assert degraded_status() == 503
+        watch_degraded()
+
+    def test_a_clean_block_leaves_the_render_clean(self) -> None:
+        watch_degraded()
+        with status_kept():
+            pass
+
+        assert degraded() is False
+
+
+@pytest.fixture()
+def handled() -> Iterator[list[BaseException | None]]:
+    """Record the exception being handled as each `got_request_exception` goes out."""
+    seen: list[BaseException | None] = []
+
+    def receiver(**kwargs: object) -> None:
+        seen.append(sys.exception())
+
+    got_request_exception.connect(receiver, weak=False)
+    try:
+        yield seen
+    finally:
+        got_request_exception.disconnect(receiver)
+
+
+def _settled() -> RuntimeError:
+    """Return an exception raised and caught, as a settled job hands one over."""
+    try:
+        _raise(RuntimeError("settled"))
+    except RuntimeError as error:
+        return error
+    raise AssertionError
+
+
+class TestReportRequestException:
+    """An exception a response survived is reported as Django reports an uncaught one."""
+
+    def test_a_settled_exception_is_the_one_handled_for_its_receivers(
+        self, handled: list[BaseException | None]
+    ) -> None:
+        error = _settled()
+        traceback, context = error.__traceback__, error.__context__
+        report_request_exception(error, None, ("k",), "failed", ())
+        assert handled == [error]
+        assert error.__traceback__ is traceback
+        assert error.__context__ is context
+
+    def test_another_exception_being_handled_leaves_no_context_behind(
+        self, handled: list[BaseException | None]
+    ) -> None:
+        error = _settled()
+        try:
+            _raise(KeyError("other"))
+        except KeyError:
+            report_request_exception(error, None, ("k",), "failed", ())
+        assert handled == [error]
+        assert error.__context__ is None
+
+    def test_the_exception_being_handled_is_sent_as_it_is(
+        self, handled: list[BaseException | None]
+    ) -> None:
+        held: list[RuntimeError] = []
+        try:
+            _raise()
+        except RuntimeError as error:
+            held.append(error)
+            traceback = error.__traceback__
+            report_request_exception(error, None, ("k",), "failed", ())
+        assert handled == held
+        assert held[0].__traceback__ is traceback
+
+    def test_the_record_keeps_a_bounded_rate_and_django_request_extras(
+        self, rf: RequestFactory, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        request = rf.get("/")
+        with caplog.at_level(logging.DEBUG, "django.request"):
+            for _ in range(2):
+                report_request_exception(
+                    _settled(), request, ("k",), "failed %s", ("x",)
+                )
+        records = [r for r in caplog.records if r.name == "django.request"]
+        assert [r.levelno for r in records] == [logging.ERROR, logging.DEBUG]
+        assert (records[0].request, records[0].status_code) == (request, 500)
+        assert records[0].getMessage() == "failed x"

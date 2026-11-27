@@ -291,14 +291,14 @@ The index template carries the create form, the search box, and the zone togethe
 No new models, no new URLs, and no client code.
 The behaviour rides the action dispatch and the file router the application already had.
 
-What the six parts built
-------------------------
+What the first six parts built
+------------------------------
 
-The finished Notes application is four pages, eight page context callables, one component with its own context and assets, and three form actions.
+The Notes application after these six parts is four pages, eight page context callables, one component with its own context and assets, and three form actions.
 
 In plain Django each page is a view plus a ``path()`` entry in a URL configuration, each context callable is a branch of a ``get_context_data`` on the view that owns it, and each form action is a further view with its own URL entry and its own redirect on success.
 Here a page is a directory holding a ``page.py`` and a ``template.djx``, a context callable is a decorated function beside them, and a form action is a class declaration that registers itself under a name derived from the class.
-The root URL configuration gained the ``include("next.urls")`` line in :doc:`install` and the login entry in :doc:`tutorial04`, and nothing else across the six parts.
+The root URL configuration gained the ``include("next.urls")`` line in :doc:`install` and the login entry in :doc:`tutorial04`, and nothing else across the first six parts.
 
 Common pitfalls
 ---------------
@@ -323,10 +323,12 @@ See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes
 Next steps
 ----------
 
-The Notes application is complete and live.
+The Notes application is live.
+The last part adds a slow block that shows a loading UI and contains its own failure.
 
 .. seealso::
 
+   :doc:`tutorial07` adds a block that loads after the shell, with a loading UI and an error UI.
    :doc:`whatsnext` lists where to go next, by topic.
-   :doc:`/content/topics/partial-rendering/index` covers zones, patches, modals, lazy zones, and the SSE bridge.
+   :doc:`/content/topics/partial-rendering/index` covers zones, patches, modals, components that load later, and the SSE bridge.
    :doc:`/content/topics/partial-rendering/scenarios` walks seven partial-rendering tasks from markup to handler.

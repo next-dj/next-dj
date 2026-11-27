@@ -8,16 +8,10 @@ from typing import TYPE_CHECKING, Final, cast
 from urllib.parse import urlsplit
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.template.base import TextNode
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.pages.checks.composed import iter_composed_pages
 from next.pages.loaders import renders_itself
 from next.pages.metadata.resolve import (

@@ -1,28 +1,37 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
 import pytest
+from django.template import Context
 
+from next.seeding import COLLECTOR_KEY
 from next.static import StaticAsset, StaticCollector
 from next.static.collector import (
     _EMPTY,
     HEAD_CLOSE,
+    DedupStrategy,
     DeepMergePolicy,
     FirstWinsPolicy,
     HashContentDedup,
     IdentityDedup,
+    JsContextPolicy,
     LastWinsPolicy,
     PlaceholderRegistry,
     PlaceholderSlot,
     RaiseOnConflictPolicy,
     UrlDedup,
     default_placeholders,
+    require_bundle,
 )
+from next.static.runtime import BUNDLE_NOTE, URGENT_NOTE
+from next.static.serializers import JsonJsContextSerializer
 
 
 CSS_URL = "https://example.com/a.css"
+BUNDLE_URL = "/static/next/next.reload.min.js"
 JS_URL = "https://example.com/a.js"
 
 
@@ -573,3 +582,331 @@ class TestPlaceholderConstants:
 
     def test_head_close(self) -> None:
         assert HEAD_CLOSE == "</head>"
+
+
+class _CopyingPolicy:
+    """Merge into a fresh mapping, as a policy that never mutates in place would."""
+
+    def merge(
+        self, existing: dict[str, object], key: str, value: object
+    ) -> dict[str, object]:
+        return {**existing, key: value}
+
+
+def _snapshot(collector: StaticCollector) -> tuple[object, ...]:
+    return (
+        set(collector._seen_keys),
+        {slot: list(bucket) for slot, bucket in collector._buckets.items()},
+        dict(collector._prepend_idx),
+        copy.deepcopy(collector._js_context),
+        dict(collector._js_context_encoded),
+        dict(collector._js_context_serializers),
+        {key: list(values) for key, values in collector._notes.items()},
+    )
+
+
+class _Draws:
+    """A seeded linear congruential stream, enough to vary the mutation sequences."""
+
+    def __init__(self, seed: int) -> None:
+        self._state = seed
+
+    def below(self, bound: int) -> int:
+        self._state = (self._state * 6364136223846793005 + 1442695040888963407) % 2**64
+        return (self._state >> 33) % bound
+
+    def pick[T](self, options: list[T]) -> T:
+        return options[self.below(len(options))]
+
+
+def _mutate(collector: StaticCollector, draws: _Draws, step: int) -> None:
+    choice = draws.below(6)
+    kind = draws.pick(["css", "js"])
+    if choice == 0:
+        collector.add(StaticAsset(url=f"/{draws.below(8)}.{kind}", kind=kind))
+    elif choice == 1:
+        url = f"/{draws.below(8)}.{kind}"
+        collector.add(StaticAsset(url=url, kind=kind), prepend=True)
+    elif choice == 2:
+        inline = f"body{draws.below(4)}()"
+        collector.add(StaticAsset(url="", kind=kind, inline=inline), prepend=True)
+    elif choice == 3:
+        collector.note(draws.pick(["a", "b"]), step)
+    elif choice == 4:
+        collector.add_js_context(draws.pick(["p", "q"]), {str(step % 3): step})
+    else:
+        serializer = draws.pick([None, JsonJsContextSerializer()])
+        collector.add_js_context(draws.pick(["q", "r"]), step, serializer=serializer)
+
+
+def _subtree(collector: StaticCollector, draws: _Draws, depth: int) -> None:
+    for step in range(1 + draws.below(6)):
+        if depth < 3 and draws.below(10) < 3:
+            before = _snapshot(collector)
+            mark = collector.mark()
+            _subtree(collector, draws, depth + 1)
+            if draws.below(2):
+                collector.rollback(mark)
+                assert _snapshot(collector) == before
+            else:
+                collector.release()
+        else:
+            _mutate(collector, draws, depth * 10 + step)
+
+
+class TestCollectorJournal:
+    """A mark journals every change so a rollback restores the collector exactly."""
+
+    def test_no_mark_keeps_no_journal(self, collector: StaticCollector) -> None:
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.note("k", 1)
+        collector.add_js_context("k", 1)
+        assert collector._journal is None
+
+    def test_a_mark_returns_the_journal_length(
+        self, collector: StaticCollector
+    ) -> None:
+        assert collector.mark() == 0
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        assert collector.mark() == 1
+
+    def test_an_inner_release_keeps_its_records_for_the_outer_rollback(
+        self, collector: StaticCollector
+    ) -> None:
+        outer = collector.mark()
+        collector.mark()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.release()
+        assert collector._journal is not None
+        assert len(collector._journal) == 1
+        collector.rollback(outer)
+        assert collector.assets_in_slot("styles") == ()
+        assert collector._journal is None
+
+    def test_the_last_release_drops_the_journal(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.mark()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.release()
+        assert collector._journal is None
+        assert [a.url for a in collector.assets_in_slot("styles")] == [CSS_URL]
+
+    def test_a_rollback_keeps_what_came_before_the_mark(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add(StaticAsset(url="/own.css", kind="css"))
+        collector.note("k", "kept")
+        mark = collector.mark()
+        collector.add(StaticAsset(url="/dep.css", kind="css"), prepend=True)
+        collector.add(StaticAsset(url=JS_URL, kind="js"))
+        collector.note("k", "dropped")
+        collector.note("other", "dropped")
+        collector.rollback(mark)
+        assert [a.url for a in collector.assets_in_slot("styles")] == ["/own.css"]
+        assert collector.assets_in_slot("scripts") == ()
+        assert collector.notes("k") == ["kept"]
+        assert collector.notes("other") == ()
+        assert collector._prepend_idx == {}
+
+    def test_a_rolled_back_asset_can_be_added_again(
+        self, collector: StaticCollector
+    ) -> None:
+        mark = collector.mark()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.rollback(mark)
+        assert collector.add(StaticAsset(url=CSS_URL, kind="css")) is True
+
+    def test_a_rollback_restores_the_prepend_cursor(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add(StaticAsset(url="/a.css", kind="css"), prepend=True)
+        mark = collector.mark()
+        collector.add(StaticAsset(url="/b.css", kind="css"), prepend=True)
+        collector.rollback(mark)
+        collector.add(StaticAsset(url="/c.css", kind="css"), prepend=True)
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/a.css",
+            "/c.css",
+        ]
+
+    def test_a_rollback_restores_an_overwritten_value(self) -> None:
+        collector = StaticCollector(js_context_policy=LastWinsPolicy())
+        custom = JsonJsContextSerializer()
+        collector.add_js_context("k", "first", serializer=custom)
+        mark = collector.mark()
+        collector.add_js_context("k", "second")
+        collector.add_js_context("new", 1, serializer=custom)
+        collector.rollback(mark)
+        assert collector.js_context() == {"k": "first"}
+        assert collector.js_context_encoded() == {"k": '"first"'}
+        assert collector.js_context_serializers() == {"k": custom}
+
+    def test_a_rollback_restores_a_dropped_fragment(self) -> None:
+        collector = StaticCollector(js_context_policy=DeepMergePolicy())
+        collector.add_js_context("k", {"a": 1})
+        mark = collector.mark()
+        collector.add_js_context("k", {"b": 2})
+        assert "k" not in collector._js_context_encoded
+        collector.rollback(mark)
+        assert collector.js_context() == {"k": {"a": 1}}
+        assert collector._js_context_encoded == {"k": '{"a":1}'}
+
+    def test_a_rollback_restores_the_mapping_a_policy_replaced(self) -> None:
+        collector = StaticCollector(js_context_policy=_CopyingPolicy())
+        collector.add_js_context("k", 1)
+        original = collector.js_context()
+        mark = collector.mark()
+        collector.add_js_context("k", 2)
+        assert collector.js_context() is not original
+        collector.rollback(mark)
+        assert collector.js_context() is original
+        assert original == {"k": 1}
+
+    def test_a_refused_merge_journals_nothing(self) -> None:
+        collector = StaticCollector(js_context_policy=RaiseOnConflictPolicy())
+        collector.add_js_context("k", 1)
+        mark = collector.mark()
+        with pytest.raises(KeyError, match="Duplicate JS context key"):
+            collector.add_js_context("k", 2)
+        assert collector._journal == []
+        collector.rollback(mark)
+        assert collector.js_context() == {"k": 1}
+
+    def test_an_unregistered_kind_records_no_key(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.mark()
+        with pytest.raises(KeyError, match="Unsupported asset kind"):
+            collector.add(StaticAsset(url="weird://x", kind="weird"))
+        assert collector._seen_keys == set()
+        assert collector._journal == []
+
+    def test_release_without_a_mark_raises(self, collector: StaticCollector) -> None:
+        with pytest.raises(RuntimeError, match="No collector mark is open"):
+            collector.release()
+
+    def test_rollback_without_a_mark_raises(self, collector: StaticCollector) -> None:
+        with pytest.raises(RuntimeError, match="No collector mark is open"):
+            collector.rollback(0)
+
+    @pytest.mark.parametrize("seed", range(60))
+    @pytest.mark.parametrize(
+        "policy",
+        [FirstWinsPolicy(), LastWinsPolicy(), DeepMergePolicy()],
+        ids=["first_wins", "last_wins", "deep_merge"],
+    )
+    @pytest.mark.parametrize(
+        "dedup", [UrlDedup(), IdentityDedup()], ids=["url", "identity"]
+    )
+    def test_random_nested_marks_restore_the_state_exactly(
+        self, seed: int, policy: JsContextPolicy, dedup: DedupStrategy
+    ) -> None:
+        draws = _Draws(seed)
+        collector = StaticCollector(dedup=dedup, js_context_policy=policy)
+        _subtree(collector, draws, 2)
+        before = _snapshot(collector)
+        mark = collector.mark()
+        _subtree(collector, draws, 0)
+        collector.rollback(mark)
+        assert _snapshot(collector) == before
+        assert collector._journal is None
+
+
+def _bundle_url(name: str) -> str | None:
+    return None if name == "more" else f"/static/next/next.{name}.min.js"
+
+
+class TestCollectorRequire:
+    """A declared bundle need is a noted `js` asset, journalled like any change."""
+
+    def test_a_need_is_a_js_asset_noted_by_url(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        collector.require("boundaries")
+        url = "/static/next/next.boundaries.min.js"
+        assert list(collector.assets_in_slot("scripts")) == [
+            StaticAsset(url=url, kind="js")
+        ]
+        assert collector.notes(BUNDLE_NOTE) == [url]
+        assert collector.notes(URGENT_NOTE) == ()
+
+    def test_a_repeated_need_is_recorded_once(self) -> None:
+        collector = StaticCollector(dedup=IdentityDedup(), bundle_url=_bundle_url)
+        collector.require("reload", urgent=True)
+        collector.require("reload", urgent=True)
+        assert len(collector.assets_in_slot("scripts")) == 1
+        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.reload.min.js"]
+        assert collector.notes(URGENT_NOTE) == [True]
+
+    def test_a_bundle_the_storage_lacks_records_only_the_urgency(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        collector.require("more", urgent=True)
+        assert collector.assets_in_slot("scripts") == ()
+        assert collector.notes(BUNDLE_NOTE) == ()
+        assert collector.notes(URGENT_NOTE) == [True]
+
+    def test_a_collector_without_a_resolver_records_no_bundle(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.require("boundaries")
+        assert collector.bundle_url is None
+        assert collector.assets_in_slot("scripts") == ()
+        assert collector.notes(BUNDLE_NOTE) == ()
+
+    def test_a_chunk_listed_in_the_payload_is_refused(
+        self, collector: StaticCollector
+    ) -> None:
+        with pytest.raises(ValueError, match="'csrf' names no declared bundle"):
+            collector.require("csrf")
+
+    def test_a_rollback_takes_the_need_and_its_urgency_back(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        mark = collector.mark()
+        collector.require("boundaries", urgent=True)
+        collector.rollback(mark)
+        assert collector.assets_in_slot("scripts") == ()
+        assert collector.notes(BUNDLE_NOTE) == ()
+        assert collector.notes(URGENT_NOTE) == ()
+        collector.require("boundaries")
+        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.boundaries.min.js"]
+
+    def test_a_need_kept_outside_the_mark_survives_its_rollback(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        collector.require("boundaries")
+        mark = collector.mark()
+        collector.require("boundaries", urgent=True)
+        collector.require("reload")
+        collector.rollback(mark)
+        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.boundaries.min.js"]
+        assert collector.notes(URGENT_NOTE) == ()
+
+
+class TestRequireBundle:
+    """The one call a tag makes to declare the bundle its markup needs."""
+
+    def test_a_context_records_on_its_collector(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        require_bundle(Context({COLLECTOR_KEY: collector}), "reload")
+        assert collector.notes(BUNDLE_NOTE) == [BUNDLE_URL]
+
+    def test_a_collector_records_directly(self) -> None:
+        collector = StaticCollector(bundle_url=_bundle_url)
+        require_bundle(collector, "reload", urgent=True)
+        assert collector.notes(BUNDLE_NOTE) == [BUNDLE_URL]
+        assert collector.notes(URGENT_NOTE) == [True]
+
+    @pytest.mark.parametrize(
+        "context",
+        [Context({COLLECTOR_KEY: "not a collector"}), Context()],
+        ids=["foreign-value", "no-key"],
+    )
+    def test_a_context_without_a_collector_records_nothing(
+        self, context: Context
+    ) -> None:
+        before = context.flatten()
+        assert require_bundle(context, "reload") is None
+        assert context.flatten() == before
+
+    def test_no_target_records_nothing(self) -> None:
+        assert require_bundle(None, "boundaries") is None

@@ -6,9 +6,9 @@ URLs reference
 Module summary
 --------------
 
-``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
+``next.urls`` exposes the page backends ``PageBackend`` and ``FilePageBackend``.
 It re-exports ``PageRoot`` from :doc:`utils`, the labelled page tree a backend reports from ``page_roots`` for the system checks to walk and for the development watcher to observe.
-It also exposes the ``RouterManager`` that builds and owns them.
+It also exposes the ``RouteManager`` that builds and owns them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface, together with the ``URLParameterError`` base and its ``DuplicateURLParameterError``, ``InvalidURLParameterError``, and ``ReservedURLParameterError`` refusals.
 
 It also exposes the ``page_reverse``, ``page_reverse_in``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, and ``pages``, which places one application page tree from a ``urls.py``.
@@ -21,7 +21,7 @@ Public API
 Backends
 ~~~~~~~~
 
-``FileRouterBackend`` routes the ``PAGES_DIR`` tree of every installed application that is not Django's own or ``next`` from the point where the root URLconf includes ``next.urls``, and leaves out each tree a ``pages()`` include claims.
+``FilePageBackend`` routes the ``PAGES_DIR`` tree of every installed application that is not Django's own or ``next`` from the point where the root URLconf includes ``next.urls``, and leaves out each tree a ``pages()`` include claims.
 
 ``page_roots`` reports every tree the router serves, the ``pages()`` trees of the root URLconf included, as ``PageRoot`` values.
 
@@ -60,16 +60,16 @@ Placing a tree
 ~~~~~~~~~~~~~~
 
 ``pages(app, subdir=None, *, namespace=None)`` returns the ``(urlconf_module, app_name, namespace)`` triple :func:`~django.urls.include` returns, so ``path("staff/", pages("audit"))`` places the ``PAGES_DIR`` tree of ``audit`` under ``/staff/``.
-Without ``subdir`` it places the tree named by the ``PAGES_DIR`` of the first ``FileRouterBackend`` of ``router_manager``, the router that builds every ``pages()`` tree, and raises ``ImproperlyConfigured`` when ``PAGE_BACKENDS`` lists no file router.
+Without ``subdir`` it places the tree named by the ``PAGES_DIR`` of the first ``FilePageBackend`` of ``route_manager``, the router that builds every ``pages()`` tree, and raises ``ImproperlyConfigured`` when ``PAGE_BACKENDS`` lists no file router.
 ``app`` is the label or the dotted name of an installed application, resolved when the call runs, so an unknown one raises ``LookupError`` while the URLconf imports.
 ``subdir`` is one plain directory name, and a missing one, one holding a separator, or ``""``, ``"."``, or ``".."`` raises ``ImproperlyConfigured`` at the same point.
 The application name of the triple is the application label, and the namespace defaults to it, so a second tree of the same application passes ``namespace=`` to keep its names apart.
 
-The include target builds its patterns on first read through the first ``FileRouterBackend`` of ``router_manager``, with the same walk, skip names, component registration, and ``route_registered`` signal as ``next.urls``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves.
+The include target builds its patterns on first read through the first ``FilePageBackend`` of ``route_manager``, with the same walk, skip names, component registration, and ``route_registered`` signal as ``next.urls``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves.
 Its pattern names stay relative to the tree, so ``page_reverse("log", namespace="audit")`` reverses ``audit/pages/log/page.py``.
 
 The router finds each ``pages()`` include by walking ``ROOT_URLCONF``, nested includes included, see :doc:`/content/internals/url-router`.
-The patterns of ``next.urls`` are cached per router version, so they follow a new ``ROOT_URLCONF`` only after ``router_manager.reload()``, which the ``setting_changed`` receiver ``reload_app_routers`` runs, see :ref:`topics-testing-urlconf`.
+The patterns of ``next.urls`` are cached per router version, so they follow a new ``ROOT_URLCONF`` only after ``route_manager.reload()``, which the ``setting_changed`` receiver ``reload_app_routers`` runs, see :ref:`topics-testing-urlconf`.
 A tree found there leaves the auto-assembly of ``next.urls``.
 A subdirectory other than ``PAGES_DIR`` routes only through a ``pages()`` include.
 :ref:`topics-file-router-trees` covers both places together.
@@ -84,8 +84,8 @@ Manager
 It is a ``Sequence`` rather than a ``list``, so a root URLconf hands it to ``include()`` and never concatenates or appends to it.
 Code that reads ``next.urls.urlpatterns`` directly observes that one element, not the individual page patterns.
 
-The wrapped sequence caches the concatenated pattern list against a three-part version token, one counter owned by ``RouterManager``, one by the form-action manager, and ``seo_routes_version`` of ``next.urls.manager`` for the SEO routes spliced in through a port.
-``router_manager.reload()`` bumps the router counter, registering or clearing form actions through ``form_action_manager`` bumps the forms counter, and binding the SEO routes port in ``NextFrameworkConfig.ready()`` or resetting the SEO sources moves the third, so the next access rebuilds the list exactly when something changed.
+The wrapped sequence caches the concatenated pattern list against a three-part version token, one counter owned by ``RouteManager``, one by the form-action manager, and ``seo_routes_version`` of ``next.urls.manager`` for the SEO routes spliced in through a port.
+``route_manager.reload()`` bumps the router counter, registering or clearing form actions through ``form_action_manager`` bumps the forms counter, and binding the SEO routes port in ``NextFrameworkConfig.ready()`` or resetting the SEO sources moves the third, so the next access rebuilds the list exactly when something changed.
 The spliced source is the SEO routes of :doc:`seo`, read through the ``SeoRoutes`` port of :doc:`ports`, each present only while its source exists, the sitemap routes while a backend serves a sitemap and the robots route while a page root carries a ``robots.py`` or a ``robots.txt``.
 The pattern set also carries ``/_next/csrf/``, named ``next:csrf``, the token endpoint of :doc:`csrf`, mounted whatever the sources.
 ``seo_routes_version`` holds a plain ``value``, so the token is read without a call across the port, and its ``move()`` takes its next value from the same process-wide counter as the router versions, so no two states share a number.
@@ -93,16 +93,16 @@ A sequence read before ``NextFrameworkConfig.ready()`` binds the port leaves the
 
 The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.
 A registration that bypasses the manager and writes into a backend directly is not tracked by the counters and does not appear in the cached list.
-The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
-A page added on disk after that first collection needs ``router_manager.reload()``, which rebuilds the backends and clears the Django resolver cache.
+The backends themselves are cached by ``route_manager`` and are only rebuilt when ``route_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
+A page added on disk after that first collection needs ``route_manager.reload()``, which rebuilds the backends and clears the Django resolver cache.
 Within a backend both the pattern list of each application tree and the patterns from the roots configured in ``DIRS`` are memoised after the first scan, and a settings reload recreates the backend with fresh caches.
 
 Reverse-name population iterates the wrapped sequence with ``reversed()``, which it answers through an explicit ``__reversed__`` that builds the pattern list once per pass.
 
-``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
+``RouteManager`` owns the active backend list, and the ``route_manager`` singleton exposes ``reload()`` to rebuild it.
 ``reload()`` loads the list through the shared backend loader, which logs and skips an entry whose ``BACKEND`` path does not resolve into the family and an entry whose backend answers ``ImproperlyConfigured``, a malformed file-router entry among them.
 Any other exception from a custom backend propagates and stops startup, because a constructor that refuses the entry is a bug in that backend rather than a misconfigured site.
-``reload(notify=False)`` rebuilds the backends without sending ``router_backend_loaded`` or ``router_reloaded`` and without clearing the intercept table or the Django URL caches, for a caller that reloads from inside a receiver of that signal.
+``reload(notify=False)`` rebuilds the backends without sending ``page_backend_loaded`` or ``routes_reloaded`` and without clearing the intercept table or the Django URL caches, for a caller that reloads from inside a receiver of that signal.
 
 ``backends`` returns the loaded list as a tuple and builds it from ``PAGE_BACKENDS`` on the first read, so a caller that asks before the first resolve reads the configured routers instead of an empty tuple.
 The build runs under a reentrant lock, so under a threaded server a read racing the first load waits for it rather than resolving against a list that is not there yet, while a backend consulting the manager while it is constructed still reads the pre-rebuild list.
@@ -136,7 +136,7 @@ Parser
 
 ``URLPatternParser`` raises a subclass of ``URLParameterError`` for a bracket segment it cannot turn into a Django route.
 The parser knows the route but not the file it came from, so the page manager catches whatever the ``parameter_error`` class attribute names and re-raises it through ``with_file``, which is what puts the offending ``page.py`` at the end of the message.
-``FileRouterBackend`` catches the same class around each page, logs the refusal as a warning through the ``next.urls.backends`` logger, and leaves that page unrouted, so one refused directory never aborts the URLconf and ``manage.py check`` still runs.
+``FilePageBackend`` catches the same class around each page, logs the refusal as a warning through the ``next.urls.backends`` logger, and leaves that page unrouted, so one refused directory never aborts the URLconf and ``manage.py check`` still runs.
 A parser subclass that adds a refusal of its own points ``parameter_error`` at a base covering every refusal it raises, so the page manager keeps naming the file and the router keeps skipping only the refused page.
 
 .. automodule:: next.urls.parser
@@ -260,19 +260,19 @@ Signals
 The URL subsystem fires four signals.
 
 ``route_registered``.
-   Sent by ``FileRouterBackend`` once per registered route, including virtual ``template.djx`` routes, with the ``url_path`` and ``file_path`` keyword arguments.
+   Sent by ``FilePageBackend`` once per registered route, including virtual ``template.djx`` routes, with the ``url_path`` and ``file_path`` keyword arguments.
 
-``router_backend_loaded``.
+``page_backend_loaded``.
    Sent once per ``PAGE_BACKENDS`` entry the manager instantiates, with the ``config`` copy and the built ``instance``.
    The sender is the resolved router class, so a receiver connected with ``sender=`` hears about one backend family alone.
    ``reload(notify=False)`` builds the backends without sending it.
 
-``router_reloaded``.
-   Sent by the router manager class after the router rebuilds, with no keyword arguments.
-   The sender is the ``RouterManager`` class.
+``routes_reloaded``.
+   Sent by the route manager class after the routes rebuild, with no keyword arguments.
+   The sender is the ``RouteManager`` class.
 
 ``intercept_registered``.
-   Sent by ``FileRouterBackend`` once per published intercept rule, with the ``target_file``, ``file_path``, and ``marker`` keyword arguments.
+   Sent by ``FilePageBackend`` once per published intercept rule, with the ``target_file``, ``file_path``, and ``marker`` keyword arguments.
 
 See :doc:`signals` and :doc:`/content/topics/signals` for the wider signal catalog.
 
@@ -298,13 +298,13 @@ Checks
       * - ``next.E003``
         - An entry carries no ``BACKEND`` key.
       * - ``next.E004``
-        - ``BACKEND`` names a path that is neither registered nor importable as a ``RouterBackend`` subclass.
+        - ``BACKEND`` names a path that is neither registered nor importable as a ``PageBackend`` subclass.
       * - ``next.E024``
-        - A ``FileRouterBackend`` entry carries no ``PAGES_DIR``.
+        - A ``FilePageBackend`` entry carries no ``PAGES_DIR``.
       * - ``next.E027``
         - ``PAGES_DIR`` is not a string.
       * - ``next.E025``
-        - A ``FileRouterBackend`` entry carries no ``APP_DIRS``.
+        - A ``FilePageBackend`` entry carries no ``APP_DIRS``.
       * - ``next.E005``
         - ``APP_DIRS`` is not a boolean.
       * - ``next.E006``
@@ -320,28 +320,28 @@ Checks
       * - ``next.E035``
         - An entry carries a key outside its allowed set, ``BACKEND``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, and ``PAGES_DIR`` for a file router, ``BACKEND`` alone otherwise.
 
-``check_router_manager``.
-   Reports :ref:`next.E007 <ref-system-checks>` once per run for a router that cannot be built, since every check that walks the routers skips that failure silently.
+``check_route_manager``.
+   Reports ``next.E007`` once per run for a router that cannot be built, since every check that walks the routers skips that failure silently.
 
 ``check_url_patterns``.
    Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
-   Fails with :ref:`next.E015 <ref-system-checks>` when two file routes convert to exactly the same Django path string.
+   Fails with ``next.E015`` when two file routes convert to exactly the same Django path string.
    Routes are compared from the URLconf root, the prefixes of ``pages()`` includes too, so two trees placed onto one URL conflict as well.
-   Fails with :ref:`next.E028 <ref-system-checks>` when a route repeats a captured parameter name, listing every conflicting name.
-   Fails with :ref:`next.E152 <ref-system-checks>` when a page captures a name the ``pages()`` prefix of its tree captures already, naming the page and the prefix.
-   Fails with :ref:`next.E082 <ref-system-checks>` for any other refusal the parser raises for a bracket segment, so a page the router left unrouted for a name the route compiler would reject is named at check time.
-   Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
+   Fails with ``next.E028`` when a route repeats a captured parameter name, listing every conflicting name.
+   Fails with ``next.E152`` when a page captures a name the ``pages()`` prefix of its tree captures already, naming the page and the prefix.
+   Fails with ``next.E082`` for any other refusal the parser raises for a bracket segment, so a page the router left unrouted for a name the route compiler would reject is named at check time.
+   Reports ``next.E016`` when pattern collection from a router raises.
 
 ``check_reserved_url_parameters``.
-   Fails with :ref:`next.E217 <ref-system-checks>` when a bracket segment takes a name dependency injection reserves, such as ``form``, ``request`` or ``self``.
+   Fails with ``next.E217`` when a bracket segment takes a name dependency injection reserves, such as ``form``, ``request`` or ``self``.
    ``check_url_patterns`` leaves that refusal to this check, so it surfaces once.
 
 ``check_reverse_name_collisions``.
-   Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name within one namespace.
-   It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so :ref:`next.E016 <ref-system-checks>` surfaces only once.
+   Fails with ``next.E039`` when two distinct routes collapse to the same reverse URL name within one namespace.
+   It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so ``next.E016`` surfaces only once.
 
 ``check_framework_routes_reachable``.
-   Fails with :ref:`next.E149 <ref-system-checks>` when ``ROOT_URLCONF`` resolves a framework endpoint such as ``_next/csrf/`` to another view.
+   Fails with ``next.E149`` when ``ROOT_URLCONF`` resolves a framework endpoint such as ``_next/csrf/`` to another view.
 
 .. automodule:: next.urls.checks
    :members:
@@ -360,7 +360,7 @@ Intercepts
 Ports
 -----
 
-``next.urls.ports`` holds ``RouterAccessImpl``, which binds router construction, manager construction, and the URL pattern parser to the ``RouterAccess`` port of :doc:`ports`.
+``next.urls.ports`` holds ``RouteAccessImpl``, which binds router construction, manager construction, and the URL pattern parser to the ``RouteAccess`` port of :doc:`ports`.
 The page watcher and the system checks need routers while ``next.urls`` itself imports ``next.pages``, so they read the port rather than importing back across that edge.
 
 See also

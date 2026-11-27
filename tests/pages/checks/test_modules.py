@@ -5,19 +5,19 @@ import pytest
 
 from next.components import ComponentInfo, FileComponentsBackend
 from next.components.checks import check_component_module_imports
-from next.components.loading import ModuleLoader
+from next.components.modules import ModuleLoader
 from next.pages.checks import check_page_module_imports
-from tests.support import patch_checks_components_manager, patch_checks_router_manager
+from tests.support import patch_checks_components_manager, patch_checks_route_manager
 
 
 _ASYNC_PAGES = [
     pytest.param(
-        "async def render():\n    return 'hi'\n", 'page.py render "render"', id="render"
+        "async def render():\n    yield 'hi'\n", 'page.py render "render"', id="render"
     ),
     pytest.param(
         "from next.pages import context\n\n"
         "@context('rows')\n"
-        "async def rows():\n    return [1]\n\n"
+        "async def rows():\n    yield 1\n\n"
         "template = 'ok'\n",
         '@context callable "rows"',
         id="context",
@@ -54,7 +54,7 @@ class TestAsyncPageCallables:
         page_file = tmp_path / "page.py"
         page_file.write_text(source)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_module_imports()
 
         assert [(m.id, m.obj) for m in messages] == [("next.E218", str(page_file))]
@@ -64,13 +64,13 @@ class TestAsyncPageCallables:
     def test_sync_page_reports_nothing(self, tmp_path: Path) -> None:
         (tmp_path / "page.py").write_text("def render():\n    return 'hi'\n")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_page_module_imports() == []
 
     def test_other_import_failure_is_e017(self, tmp_path: Path) -> None:
         (tmp_path / "page.py").write_text("raise RuntimeError('boom')\n")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert [m.id for m in check_page_module_imports()] == ["next.E017"]
 
     def test_vanished_page_reports_the_generic_e017(self, tmp_path: Path) -> None:
@@ -78,7 +78,7 @@ class TestAsyncPageCallables:
         page_file.write_text("template = 'ok'\n")
 
         with (
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             patch(
                 "next.pages.checks.modules.load_page_module", return_value=(None, None)
             ),
@@ -90,21 +90,19 @@ class TestAsyncPageCallables:
 
 
 class TestAsyncComponentCallables:
-    """`next.E218` names the async callable that stopped a `component.py`."""
+    """`next.E218` names the async generator that stopped a `component.py`."""
 
     @pytest.mark.parametrize(
         ("source", "named"),
         [
             pytest.param(
-                "async def render():\n    return 'hi'\n",
-                'component.py render "render"',
-                id="render",
+                "async def render():\n    yield 'hi'\n", '"render"', id="render"
             ),
             pytest.param(
                 "from next.components import context\n\n"
                 "@context('greeting')\n"
-                "async def greeting():\n    return 'hi'\n",
-                '@component.context callable "greeting"',
+                "async def greeting():\n    yield 'hi'\n",
+                '"greeting"',
                 id="context",
             ),
         ],

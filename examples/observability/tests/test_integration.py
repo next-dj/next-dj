@@ -1,12 +1,16 @@
 import re
+from io import StringIO
 
 import pytest
 from config.storages import MANIFEST_STORAGES
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import override_settings
 from obs import metrics
+from obs.metrics import PREFIX, CounterLostError
 from obs.models import MetricSnapshot
 
+from next.boundaries import ErrorKind
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
@@ -26,6 +30,7 @@ from next.forms.signals import (
 )
 from next.pages.signals import context_registered, page_rendered, template_loaded
 from next.partial.signals import partial_backend_loaded
+from next.router import CutKind
 from next.server import iter_all_autoreload_watch_specs
 from next.server.signals import watch_specs_ready
 from next.static import get_static_manager
@@ -35,15 +40,22 @@ from next.static.signals import (
     html_injected,
     static_backend_loaded,
 )
-from next.testing import SignalRecorder, assert_metadata, envelope_of, init_payload
-from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
+from next.testing import (
+    SignalRecorder,
+    assert_metadata,
+    boundary_errors,
+    envelope_of,
+    find_anchor,
+    init_payload,
+)
+from next.urls.signals import page_backend_loaded, route_registered, routes_reloaded
 
 
 GROUP_SAMPLES: dict[str, list] = {
     "conf": [settings_reloaded],
     "deps": [provider_registered],
     "pages": [template_loaded, context_registered, page_rendered],
-    "urls": [route_registered, router_reloaded],
+    "urls": [route_registered, routes_reloaded],
     "components": [component_registered, components_registered, component_rendered],
     "forms": [action_registered, action_dispatched, form_validation_failed],
     "static": [asset_registered, collector_finalized, html_injected],
@@ -52,7 +64,7 @@ GROUP_SAMPLES: dict[str, list] = {
         component_backend_loaded,
         form_backend_loaded,
         partial_backend_loaded,
-        router_backend_loaded,
+        page_backend_loaded,
         static_backend_loaded,
         wizard_backend_loaded,
     ],
@@ -156,6 +168,29 @@ class TestStatsTreeRendersEachSubpage:
         response = next_client.get(url)
         assert response.status_code == 200
         assert needle.encode() in response.content
+
+
+class TestNavMarks:
+    """The header nav and the stats tabs are marked for the page on screen."""
+
+    def test_the_visited_tab_is_the_current_page(self, next_client) -> None:
+        body = next_client.get("/stats/pages/").content.decode()
+        assert 'aria-current="page"' in find_anchor(
+            body, href="/stats/pages/", text="Pages"
+        )
+        assert 'data-next-current="ancestor"' in find_anchor(
+            body, href="/stats/", text="Live"
+        )
+        assert "data-next-current" not in find_anchor(
+            body, href="/stats/forms/", text="Forms"
+        )
+
+    def test_the_header_marks_the_section_and_spares_home(self, next_client) -> None:
+        body = next_client.get("/stats/pages/").content.decode()
+        assert 'data-next-current="ancestor"' in find_anchor(
+            body, href="/stats/", text="Stats"
+        )
+        assert "data-next-current" not in find_anchor(body, href="/", text="Overview")
 
 
 class TestLiveStatsSerializerOverride:
@@ -352,7 +387,7 @@ class TestSparklineStaysOutsideEveryZone:
                 html = envelope_of(next_client.get_zones(url, zone)).html_for_zone(zone)
                 assert "sparkline-mount" not in html
                 checked.append(zone)
-        assert set(checked) >= {"overview-totals", "busiest-pages", "live-totals"}
+        assert set(checked) >= {"overview-totals", "live-totals"}
 
 
 class TestFilterFormDispatch:
@@ -402,27 +437,45 @@ class TestPollZone:
         assert "Pages rendered" in envelope.html_for_zone("overview-totals")
 
 
-class TestLazyLoadZone:
-    """The busiest-pages widget ships a placeholder and loads its body lazily."""
+class TestBusiestPagesOnLoad:
+    """The busiest-pages widget ships its loading UI and fetches itself on load."""
 
-    def test_overview_lazy_load_widget_renders_hint(self, next_client) -> None:
+    def test_first_paint_ships_the_loading_ui(self, next_client) -> None:
         body = next_client.get("/").content.decode()
-        assert 'data-next-lazy="load"' in body
-        assert 'data-next-zone="busiest-pages"' in body
+        assert 'data-next-defer="load"' in body
         assert "Busiest pages" in body
         assert "Loading the busiest pages" in body
+        assert "No pages have been rendered yet." not in body
 
-    def test_lazy_zone_get_delivers_the_body(self, next_client) -> None:
+    def test_the_boundary_request_delivers_the_list(self, next_client) -> None:
         next_client.get("/stats/pages/")
-        response = next_client.get_zones("/", "busiest-pages")
-        envelope = envelope_of(response)
-        assert envelope.zone_targets() == ["busiest-pages"]
-        html = envelope.html_for_zone("busiest-pages")
-        assert "stats/pages/page.py" in html
-        assert "No pages have been rendered yet." not in html
-        assert "Loading the busiest pages" not in html
+        busiest = next_client.get_boundary("/", "busiest_pages")
+        assert busiest.state == "ready"
+        assert "stats/pages/page.py" in busiest.html
+        assert "Loading the busiest pages" not in busiest.html
 
-    def test_lazy_zone_get_skips_the_totals_provider(
+    def test_the_limit_prop_rides_in_the_token_and_caps_the_list(
+        self, next_client
+    ) -> None:
+        for number in range(8):
+            metrics.incr("pages.rendered", f"obs/pages/extra{number}/page.py", by=2)
+        body = next_client.get("/").content.decode()
+        assert 'data-next-defer="load"' in body
+        busiest = next_client.get_boundary("/", "busiest_pages")
+        assert busiest.html.count("obs/pages/extra") == 5
+
+    def test_a_failed_request_offers_a_retry(self, next_client, monkeypatch) -> None:
+        def _lost(kind: str, *, limit: int | None = None) -> list[tuple[str, int]]:
+            raise CounterLostError(kind, "obs/pages/page.py")
+
+        monkeypatch.setattr(metrics, "top_by_kind", _lost)
+        with boundary_errors("render"):
+            busiest = next_client.get_boundary("/", "busiest_pages")
+        assert busiest.state == "error"
+        assert "The busiest pages are unavailable" in busiest.html
+        assert "data-next-retry" in busiest.html
+
+    def test_the_boundary_request_skips_the_totals_provider(
         self, next_client, monkeypatch
     ) -> None:
         calls: list[str] = []
@@ -432,8 +485,224 @@ class TestLazyLoadZone:
             return 0
 
         monkeypatch.setattr(metrics, "total_for_kind", _record)
-        next_client.get_zones("/", "busiest-pages")
+        next_client.get_boundary("/", "busiest_pages")
         assert calls == []
+
+
+CULLED_PAGE = "obs/pages/stats/page.py"
+
+
+@pytest.fixture()
+def culled_render_count():
+    """Leave a duration total whose render count the cache already culled."""
+    metrics.incr("pages.rendered", CULLED_PAGE)
+    metrics.incr("pages.duration_ms_total", CULLED_PAGE, by=40)
+    cache.delete(f"{PREFIX}pages.rendered:{CULLED_PAGE}")
+    return CULLED_PAGE
+
+
+class TestLatencyWidget:
+    """The latency widget fails alone, its `error.djx` standing in for it."""
+
+    def test_widget_starts_with_its_empty_message(self, next_client) -> None:
+        body = next_client.get("/").content.decode()
+        assert "Render latency" in body
+        assert "No render times have been recorded yet." in body
+
+    def test_widget_lists_the_mean_render_time_per_page(self, next_client) -> None:
+        next_client.get("/stats/")
+        response = next_client.get("/")
+        body = response.content.decode()
+        assert "Mean ms" in body
+        assert CULLED_PAGE in body
+        assert response.boundary_failures == ()
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_a_culled_counter_replaces_the_widget_alone(self, next_client) -> None:
+        with boundary_errors("render"):
+            response = next_client.get("/")
+        body = response.content.decode()
+        assert response.status_code == 200
+        assert 'data-next-state="error" data-next-error="error"' in body
+        assert "Render latency is unavailable" in body
+        assert "Mean ms" not in body
+        assert "Pages rendered" in body
+        assert "sparkline-mount" in body
+        assert "Loading the busiest pages" in body
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_the_failure_is_recorded_with_its_digest(self, next_client) -> None:
+        with boundary_errors("render"):
+            response = next_client.get("/")
+        [failure] = response.boundary_failures
+        assert (failure.name, failure.addressing, failure.kind) == (
+            "latency_widget",
+            "component",
+            "error",
+        )
+        assert isinstance(failure.exception, CounterLostError)
+        reference = f'Reference <code class="font-mono">{failure.digest}</code>'
+        assert reference in response.content.decode()
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_each_contained_failure_is_counted_by_its_boundary(
+        self, next_client
+    ) -> None:
+        with boundary_errors("render"):
+            next_client.get("/")
+            next_client.get("/")
+        assert metrics.read_kind("boundaries.failed") == {"latency_widget": 2}
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_the_overview_tile_shows_the_failure_total(self, next_client) -> None:
+        with boundary_errors("render"):
+            next_client.get("/")
+        response = next_client.get_zones("/", "overview-totals")
+        html = envelope_of(response).html_for_zone("overview-totals")
+        assert re.search(r"Boundary failures</p>\s*<p[^>]*>\s*1\s*</p>", html)
+
+    @pytest.mark.usefixtures("culled_render_count", "rendered_boundary_errors")
+    def test_the_degraded_page_stays_out_of_every_cache(self, next_client) -> None:
+        response = next_client.get("/")
+        assert response.status_code == 200
+        assert response["Cache-Control"] == "private, no-store"
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_without_the_opt_in_the_client_reraises(self, next_client) -> None:
+        with pytest.raises(CounterLostError):
+            next_client.get("/")
+
+
+LATENCY_LOADING = "Averaging the render times"
+
+
+def navigation_html(navigation) -> str:
+    return "".join(op.get("html") or "" for op in navigation.envelope.ops)
+
+
+class TestLatencyStream:
+    """The latency widget streams behind its `loading.djx` and settles in a chunk."""
+
+    def test_the_shell_ships_the_loading_ui_and_a_chunk_settles_it(
+        self, next_client
+    ) -> None:
+        next_client.get("/stats/")
+        streamed = next_client.get_stream("/")
+        assert LATENCY_LOADING in streamed.shell
+        assert "Mean ms" not in streamed.shell
+        chunk = streamed.boundary("latency_widget")
+        assert chunk.state == "ready"
+        assert CULLED_PAGE in chunk.html
+
+    @pytest.mark.parametrize(
+        ("sent", "shown", "hidden"),
+        [
+            ({"prefetch": True}, LATENCY_LOADING, "Mean ms"),
+            ({"headers": {"X-Next-Prefetch": "full"}}, "Mean ms", LATENCY_LOADING),
+        ],
+        ids=("shell", "full"),
+    )
+    def test_a_prefetch_depth_decides_whether_the_job_runs(
+        self, next_client, sent, shown, hidden
+    ) -> None:
+        next_client.get("/")
+        navigation = next_client.navigate("/", origin="/stats/", **sent)
+        html = navigation_html(navigation)
+        assert shown in html
+        assert hidden not in html
+
+
+PAGE_RENDERS = "/stats/pages/"
+PAGE_RENDERS_DIR = "obs/pages/stats/pages"
+
+
+class TestPageRendersBoundary:
+    """The page renders table is a page boundary, streamed behind its `loading.djx`."""
+
+    def test_the_shell_keeps_the_layout_and_shows_the_skeleton(
+        self, next_client
+    ) -> None:
+        streamed = next_client.get_stream(PAGE_RENDERS)
+        assert "data-page-renders-skeleton" in streamed.shell
+        assert find_anchor(streamed.shell, href="/stats/pages/", text="Pages")
+        assert "Per-page render counts" not in streamed.shell
+
+    def test_a_chunk_fills_in_the_counts_and_the_means(self, next_client) -> None:
+        next_client.get("/stats/")
+        streamed = next_client.get_stream(PAGE_RENDERS)
+        chunk = streamed.boundary(page=PAGE_RENDERS_DIR)
+        assert chunk.state == "ready"
+        assert "Mean ms" in chunk.html
+        assert CULLED_PAGE in chunk.html
+
+    def test_a_render_count_without_a_duration_shows_no_mean(self, next_client) -> None:
+        metrics.incr("pages.rendered", CULLED_PAGE)
+        body = next_client.get(PAGE_RENDERS).content.decode()
+        assert CULLED_PAGE in body
+        assert "&mdash;" in body
+
+    def test_an_unknown_window_stays_a_404(self, next_client) -> None:
+        assert next_client.get(f"{PAGE_RENDERS}?window=2d").status_code == 404
+
+    def test_an_unknown_window_stays_a_404_when_the_page_streams(
+        self, next_client
+    ) -> None:
+        with pytest.raises(AssertionError, match="answered 404 without a stream"):
+            next_client.get_stream(f"{PAGE_RENDERS}?window=2d")
+
+    def test_a_known_window_streams_the_table(self, next_client) -> None:
+        streamed = next_client.get_stream(f"{PAGE_RENDERS}?window=1h")
+        assert streamed.response.status_code == 200
+        assert streamed.boundary(page=PAGE_RENDERS_DIR).state == "ready"
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_a_culled_counter_streams_the_error_ui_in_place(self, next_client) -> None:
+        with boundary_errors("render"):
+            streamed = next_client.get_stream(PAGE_RENDERS)
+        chunk = streamed.boundary(page=PAGE_RENDERS_DIR)
+        assert (chunk.state, chunk.kind) == ("error", ErrorKind.ERROR)
+        assert "Page renders are unavailable" in chunk.html
+        assert streamed.response.status_code == 200
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_an_inline_page_keeps_its_layout_and_answers_500(self, next_client) -> None:
+        with boundary_errors("render"):
+            response = next_client.get(PAGE_RENDERS)
+        body = response.content.decode()
+        assert response.status_code == 500
+        assert "Page renders are unavailable" in body
+        assert find_anchor(body, href="/stats/", text="Live")
+        [failure] = response.boundary_failures
+        assert (failure.name, failure.addressing) == (
+            "obs/pages/stats/pages/loading.djx",
+            "page",
+        )
+        assert isinstance(failure.exception, CounterLostError)
+
+
+class TestFlushHistory:
+    """The flush history waits behind a button until the visitor asks for it."""
+
+    def test_the_first_paint_ships_the_button_alone(self, next_client) -> None:
+        body = next_client.get("/").content.decode()
+        assert 'data-next-defer="manual"' in body
+        assert "Show the flush history" in body
+        assert "data-flush-history" not in body
+
+    def test_the_fetch_says_when_nothing_was_flushed(self, next_client) -> None:
+        history = next_client.get_boundary("/", "flush_history")
+        assert history.state == "ready"
+        assert "Nothing has been flushed yet." in history.html
+
+    def test_the_fetch_lists_each_minute_a_flush_ran_in(self, next_client) -> None:
+        next_client.get("/stats/")
+        call_command("flush_metrics", stdout=StringIO())
+        rows = MetricSnapshot.objects.count()
+        history = next_client.get_boundary("/", "flush_history")
+        assert "data-flush-history" in history.html
+        assert (
+            f'<td class="py-2 pl-4 text-right tabular-nums">{rows}</td>' in history.html
+        )
 
 
 class TestMetricPulseVerb:
@@ -487,6 +756,16 @@ class TestMetricPulseVerb:
         body = next_client.get("/stats/pages/").content.decode()
         assert "/static/next/obs/pages/stats.js" not in body
         assert "data-next-target" not in body
+
+    def test_leaving_the_live_page_keeps_the_layout_and_drops_the_target(
+        self, next_client
+    ) -> None:
+        step = next_client.navigate("/stats/pages/", origin="/stats/")
+        assert step.kind is CutKind.SLOT
+        assert step.envelope is not None
+        form = step.envelope.html_for_zone("stats-filter")
+        assert 'name="window"' in form
+        assert "data-next-target" not in form
 
 
 class TestSignalGroupsCovered:

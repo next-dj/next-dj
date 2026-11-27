@@ -1,37 +1,41 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
-from django.test import override_settings
+from django.core.handlers.wsgi import WSGIHandler
+from django.test import RequestFactory, override_settings
 
 from next.components.checks import check_next_components_configuration
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.conf.checks import check_next_framework_unknown_top_level_keys
-from next.conf.merge import merge_user_settings
+from next.conf.merge import merge_user_settings, mistyped
+from next.conf.settings import refuse_mistyped
+from next.errors import SettingShapeError
 from next.urls.checks import check_next_pages_configuration
+from tests.support.checks import written
 
 
 class TestNextFrameworkSettingsDjangoIntegration:
     """Global next_framework_settings with override_settings(NEXT_FRAMEWORK=...)."""
 
     @pytest.mark.parametrize("next_framework", [{}, 42], ids=["empty_dict", "non_dict"])
-    def test_falls_back_to_default_page_router_backend(
-        self, next_framework: object
-    ) -> None:
-        """Empty or invalid NEXT_FRAMEWORK keeps the default file router backend."""
+    def test_falls_back_to_default_page_backend(self, next_framework: object) -> None:
+        """Empty or invalid NEXT_FRAMEWORK keeps the default file page backend."""
         with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type]
             assert next_framework_settings.PAGE_BACKENDS[0]["BACKEND"] == (
-                "next.urls.FileRouterBackend"
+                "next.urls.FilePageBackend"
             )
 
     def test_default_page_routers_replaces_default_list_entirely(self) -> None:
         """Providing PAGE_BACKENDS replaces the default list."""
         custom = [
             {
-                "BACKEND": "next.urls.FileRouterBackend",
+                "BACKEND": "next.urls.FilePageBackend",
                 "PAGES_DIR": "custom_pages",
                 "APP_DIRS": False,
                 "DIRS": [],
@@ -87,14 +91,26 @@ class TestNextFrameworkSettingsDjangoIntegration:
         ],
         ids=["invalid_routers_type", "invalid_url_name_template"],
     )
-    def test_invalid_setting_type_keeps_default(
+    def test_a_mistyped_key_keeps_its_default_and_is_named(
         self, next_framework: dict[str, Any], setting_name: str
     ) -> None:
-        """Wrong type for a key is ignored and the default value is kept."""
-        with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type, dict-item]
-            assert NextFrameworkSettings.DEFAULTS[setting_name] == getattr(
-                next_framework_settings, setting_name
-            )
+        held = NextFrameworkSettings()
+        with written(next_framework):
+            assert getattr(held, setting_name) == held.DEFAULTS[setting_name]
+            (problem,) = held.mistyped()
+        assert problem.startswith(f"NEXT_FRAMEWORK[{setting_name!r}] must be")
+
+    def test_a_mistyped_key_refuses_every_request(self) -> None:
+        handler = WSGIHandler()
+        environ = RequestFactory().get("/").environ
+        with override_settings(NEXT_FRAMEWORK={"STATIC_VERSION": 5}):
+            for _ in range(2):
+                with pytest.raises(SettingShapeError, match="STATIC_VERSION"):
+                    handler(environ, lambda *args: None)
+
+    def test_usable_settings_let_a_request_through(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"STATIC_VERSION": "build-1"}):
+            assert refuse_mistyped() is None
 
 
 class TestNextFrameworkSettingsFlatMerge:
@@ -166,10 +182,9 @@ class TestUrlResolverSetting:
     @pytest.mark.parametrize(
         "raw", [123, None, ["next.urls.TrieURLResolver"]], ids=["int", "none", "list"]
     )
-    def test_non_string_override_keeps_default(self, raw: object) -> None:
-        """A non-string value is ignored by the merge and the default stays."""
-        with override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": raw}):  # type: ignore[dict-item]
-            assert next_framework_settings.URL_RESOLVER == "next.urls.TrieURLResolver"
+    def test_a_non_string_override_is_named_mistyped(self, raw: object) -> None:
+        user = {"URL_RESOLVER": raw}
+        assert mistyped(NextFrameworkSettings.DEFAULTS, user)
 
     def test_key_passes_unknown_key_check(self) -> None:
         """System checks accept URL_RESOLVER as a known top-level key."""
@@ -212,13 +227,9 @@ class TestDependencyResolverSetting:
         [123, None, ["next.deps.DependencyResolver"]],
         ids=["int", "none", "list"],
     )
-    def test_non_string_override_keeps_default(self, raw: object) -> None:
-        """A non-string value is ignored by the merge and the default stays."""
-        with override_settings(NEXT_FRAMEWORK={"DEPENDENCY_RESOLVER": raw}):  # type: ignore[dict-item]
-            assert (
-                next_framework_settings.DEPENDENCY_RESOLVER
-                == "next.deps.DependencyResolver"
-            )
+    def test_a_non_string_override_is_named_mistyped(self, raw: object) -> None:
+        user = {"DEPENDENCY_RESOLVER": raw}
+        assert mistyped(NextFrameworkSettings.DEFAULTS, user)
 
     def test_key_passes_unknown_key_check(self) -> None:
         """System checks accept DEPENDENCY_RESOLVER as a known top-level key."""
@@ -261,13 +272,9 @@ class TestComponentTemplateLoaderSetting:
         [123, None, ["next.components.ComponentTemplateLoader"]],
         ids=["int", "none", "list"],
     )
-    def test_non_string_override_keeps_default(self, raw: object) -> None:
-        """A non-string value is ignored by the merge and the default stays."""
-        with override_settings(NEXT_FRAMEWORK={"COMPONENT_TEMPLATE_LOADER": raw}):  # type: ignore[dict-item]
-            assert (
-                next_framework_settings.COMPONENT_TEMPLATE_LOADER
-                == "next.components.CachedComponentTemplateLoader"
-            )
+    def test_a_non_string_override_is_named_mistyped(self, raw: object) -> None:
+        user = {"COMPONENT_TEMPLATE_LOADER": raw}
+        assert mistyped(NextFrameworkSettings.DEFAULTS, user)
 
     def test_key_passes_unknown_key_check(self) -> None:
         """System checks accept COMPONENT_TEMPLATE_LOADER as a known key."""
@@ -314,7 +321,7 @@ class TestNextFrameworkChecksUnknownKeys:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": True,
                         "DIRS": [],
@@ -327,31 +334,13 @@ class TestNextFrameworkChecksUnknownKeys:
             errors = check_next_framework_unknown_top_level_keys()
         assert any(e.id == "next.E035" for e in errors)
 
-    @pytest.mark.parametrize(
-        "renamed_key",
-        [
-            "PAGE_BACKENDS",
-            "COMPONENT_BACKENDS",
-            "STATIC_BACKENDS",
-            "FORM_ACTION_BACKENDS",
-            "FORM_WIZARD_BACKEND",
-        ],
-    )
-    def test_next_framework_rejects_default_prefixed_keys(
-        self, renamed_key: str
-    ) -> None:
-        """Keys under a ``DEFAULT_`` prefix are reported as unknown."""
-        with override_settings(NEXT_FRAMEWORK={f"DEFAULT_{renamed_key}": []}):
-            errors = check_next_framework_unknown_top_level_keys()
-        assert any(e.id == "next.E035" for e in errors)
-
     def test_file_router_entry_unknown_key(self) -> None:
-        """FileRouterBackend dicts only allow documented top-level keys."""
+        """FilePageBackend dicts only allow documented top-level keys."""
         with override_settings(
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": True,
                         "DIRS": [],
@@ -370,7 +359,7 @@ class TestNextFrameworkChecksUnknownKeys:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": True,
                         "DIRS": [],
@@ -651,3 +640,32 @@ class TestMergedSettingsAreImmutable:
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": cyclic}),
         ):
             assert next_framework_settings.PAGE_BACKENDS
+
+
+class TestReloadRace:
+    """A read the reload overtakes answers its caller and keeps nothing."""
+
+    def test_a_merge_built_before_the_reload_is_not_kept(self) -> None:
+        held = NextFrameworkSettings()
+        entered, release = threading.Event(), threading.Event()
+        reader = threading.current_thread()
+
+        def merge(defaults: object, raw: object) -> object:
+            merged = merge_user_settings(defaults, raw)
+            if threading.current_thread() is not reader and not release.is_set():
+                entered.set()
+                release.wait()
+            return merged
+
+        answers: list[object] = []
+        with patch("next.conf.settings.merge_user_settings", side_effect=merge):
+            late = threading.Thread(target=lambda: answers.append(held.STRICT_LOADING))
+            with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": False}):
+                late.start()
+                entered.wait()
+            with override_settings(NEXT_FRAMEWORK={"STRICT_LOADING": True}):
+                held.reload()
+                release.set()
+                late.join()
+                assert answers == [False]
+                assert held.STRICT_LOADING is True

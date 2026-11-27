@@ -31,11 +31,11 @@ Registered template loaders.
    The ordered list under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``, whose default first entry ``DjxTemplateLoader`` resolves the sibling ``template.djx``.
 
 A ``layout.djx`` is no body source, since it only wraps the body of the page beneath it.
-A ``page.py`` with none of the three sources routes no URL, even beside or under a ``layout.djx``, and :ref:`next.E012 <ref-system-checks>` reports it unless it declares access, passes context to the pages below, or serves an ``@action`` of its directory, see *A layout is no body* under :doc:`layouts`.
+A ``page.py`` with none of the three sources routes no URL, even beside or under a ``layout.djx``, and ``next.E012`` reports it unless it declares access, passes context to the pages below, or serves an ``@action`` of its directory, see *A layout is no body* under :doc:`layouts`.
 
 See *Render order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, and the full priority table lives under *Priority resolution* below.
+Multiple body sources trigger ``next.W043``, and the full priority table lives under *Priority resolution* below.
 
 Render order
 ------------
@@ -165,7 +165,7 @@ Keyed single value.
 Unkeyed dict.
    ``@context`` on a function that returns a dict merges the dict into the template scope.
    Useful when several values share a dependency you only want to resolve once.
-   The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports :ref:`next.E029 <ref-system-checks>`.
+   The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports ``next.E029``.
    A callable that answers a non-mapping at render time raises ``next.pages.PageContextShapeError``, a :class:`TypeError` subclass carrying the name of the callable and the path of the page it was building.
 
    .. code-block:: python
@@ -205,24 +205,28 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
 
 .. _topics-pages-sync-callables:
 
-Sync callables
---------------
+Sync and async callables
+------------------------
 
-A ``render``, an ``@context`` callable, an ``@action`` handler, and a form hook are plain ``def`` functions, because the framework calls them synchronously.
-An ``async def`` one raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as :ref:`next.E218 <ref-system-checks>`.
-Async code is reached through :func:`~asgiref.sync.async_to_sync`.
+A ``render``, an ``@context`` callable, and an ``@page.metadata`` callable may be ``async def`` coroutine functions, and one of them makes the render of its page async.
+The view stays a sync Django view under WSGI and ASGI alike, and it drives the async part of the render on an event loop while the request thread serves every synchronous call that part makes.
+An async ``@context`` callable therefore awaits native async I/O directly, and the Django async ORM, such as ``aget``, runs on the request thread inside the transaction of the request.
+Two async callables that do not read each other run concurrently.
 
 .. code-block:: python
    :caption: page.py
 
-   from asgiref.sync import async_to_sync
    from weather.client import fetch_forecast
 
    from next import context
 
    @context("forecast")
-   def forecast() -> dict:
-       return async_to_sync(fetch_forecast)()
+   async def forecast() -> dict:
+       return await fetch_forecast()
+
+An ``@action`` handler and a form hook stay plain ``def`` functions, because the form dispatch calls them synchronously.
+An ``async def`` one, and an async generator anywhere, raises ``AsyncCallableError`` when it registers or when its module loads, and ``manage.py check`` reports it as ``next.E218``.
+:doc:`/content/topics/boundaries/async` covers the request scope async values share, the ``Loader`` that batches lookups, and the lanes a deferred job runs on.
 
 Page access
 -----------
@@ -243,6 +247,36 @@ A requirement a section shares carries ``inherit=True``, which binds every page 
 
 ``page.public()`` lifts what every ``page.py`` above requires for that page alone, and ``manage.py permissions`` names the file of the lift.
 See :ref:`topics-permissions-tree` for the order of the checks and the answer to a refusal.
+
+Transactions
+------------
+
+Database transactions of next.dj views follow the HTTP method.
+A ``GET``, ``HEAD``, ``OPTIONS``, or ``TRACE`` request runs in autocommit and touches no connection before its first query, and any other method runs inside one transaction on each alias of ``TRANSACTIONS["ALIASES"]``, ``default`` alone unless the project names more.
+Page views, zone requests, and form action dispatch follow this rule in place of the ``ATOMIC_REQUESTS`` wrapping, which plain Django views keep, and the default ``"auto"`` wraps every request on an ``ATOMIC_REQUESTS`` alias as Django would, while ``manage.py check`` reports such an alias under an explicit choice as ``next.W154``.
+The view settles the access check before it opens the transaction, so a refused request opens none, and closes the transaction once the response object exists, so an exception rolls the work back, a returned response commits it whatever its status, and a :func:`~django.db.transaction.on_commit` hook waits for that commit.
+A row the access rule loads from the URL kwargs is read before the transaction and reused by the render, so a render that locks it reloads it with ``select_for_update()``.
+
+A ``page.py`` that writes on a ``GET``, or a page that must not hold a transaction on a ``POST``, declares its own choice at the top of the module.
+
+.. code-block:: python
+   :caption: shop/pages/checkout/page.py
+
+   from next import page
+
+   page.transaction(atomic=True, aliases=["default", "ledger"])
+
+``page.transaction()`` covers the full page, zone, boundary, and navigation requests of its page and none of the actions the page declares.
+A form action takes its own choice as ``@action(..., atomic=False)`` or ``Meta.atomic = False``, and ``TRANSACTIONS["RULE"]`` replaces the method table for the whole project, see ``TRANSACTIONS`` in :doc:`/content/ref/settings`.
+Inside an action an ``on_commit`` hook fires when the action's transaction commits, so a handler that sleeps, calls another service, or sends mail opts out to hold no connection in an open transaction, see :ref:`topics-forms-actions-transactions`.
+A streamed page writes its deferred boundaries after the view returned, so their jobs run outside this transaction, see :doc:`/content/topics/boundaries/async`.
+
+Loading and error UI
+--------------------
+
+A ``loading.djx`` in the page directory, in a directory above it inside the page tree, or beside a layout that wraps the page from another root turns everything below that directory into a deferred boundary, and the response shows the loading UI in its place until the job settles.
+An ``error.djx`` there turns it into an error boundary, which renders in place of a body or a context callable that failed, and ``page.defer(timeout=..., parallel=...)`` tunes the job of the page boundary.
+See :doc:`/content/topics/boundaries/loading` and :doc:`/content/topics/boundaries/errors`.
 
 Custom template loaders
 -----------------------
@@ -335,7 +369,7 @@ When more than one body source applies the framework picks the highest priority 
 The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
 
-When a page directory declares more than one body source, :ref:`next.W043 <ref-system-checks>` reports it.
+When a page directory declares more than one body source, ``next.W043`` reports it.
 The highest-priority source is used and the others are never consulted.
 
 Seeding a composed body from code
@@ -375,10 +409,10 @@ The router registers no catch-all pattern, so a path that matches no page direct
        path("admin/", admin.site.urls),
        path("reports/export/", views.export_report, name="export-report"),
        path("", include("next.urls")),
-       path("legacy/<int:pk>/", views.legacy_detail, name="legacy-detail"),
+       path("archive/<int:pk>/", views.archive_detail, name="archive-detail"),
    ]
 
-Here ``/reports/export/`` reaches the hand-written view even when a ``pages/reports/export/`` directory exists, and ``/legacy/7/`` reaches its view because no page directory claims that path.
+Here ``/reports/export/`` reaches the hand-written view even when a ``pages/reports/export/`` directory exists, and ``/archive/7/`` reaches its view because no page directory claims that path.
 The form action endpoints at ``/_next/form/<uid>/`` are part of the same include, so they follow the same ordering rule.
 
 What a plain view does not get
@@ -509,7 +543,8 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
    The request such a call carries describes the page, not the endpoint that asked on its behalf.
    The framework restates the live request as a GET of the URL under authorization, so ``request.method`` is ``GET``, ``request.path`` is the page URL, and ``request.GET`` holds that URL's query string, while the user, the session, and everything else a middleware attached come through untouched.
    A ``render`` that short-circuits on a missing query parameter, on a non-GET method, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
-   The live request is never modified, so the dispatcher reads its own POST as usual once ``render`` has answered.
+   The method, the path, and the POST of the live request stay as they were, so the dispatcher reads its own POST as usual once ``render`` has answered.
+   What ``render`` marks for the response comes back to the live request, so a cookie it read or a CSRF token it used reaches the response the dispatcher sends.
    One caller cannot name a URL, ``Patches.morph(zone=..., page=...)`` addressing the foreign page by file path rather than by URL, and its authorization call asks as a GET with no query and the live path in place.
 
 JSON endpoint
@@ -627,7 +662,7 @@ Without ``DEBUG`` the client sees the generic 500 page, and Django's ``django.re
 The blast radius is the broken page and the pages below it in every mode, since what it would have declared with ``inherit=True`` is unknown, see :ref:`topics-access`.
 The broken page still gets its URL pattern, so the error surfaces at the view rather than while the URL configuration is built, and every sibling page keeps its pattern and keeps serving.
 The record is keyed by modification time, so saving a fixed ``page.py`` clears it on the next request without a restart.
-``manage.py check`` reports the same failure as :ref:`next.E017 <ref-system-checks>`, naming the exception type and message, which catches a broken page before traffic reaches it.
+``manage.py check`` reports the same failure as ``next.E017``, naming the exception type and message, which catches a broken page before traffic reaches it.
 
 See :doc:`/content/ref/pages` for the exception class and :ref:`ref-settings` for the loudness table across ``DEBUG`` and the strict flags.
 

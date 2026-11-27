@@ -113,6 +113,7 @@ With an id the child walk pairs it by hard match, without one it pairs by positi
    <div data-chart data-next-keep></div>
 
 For a node the runtime should reconcile in some cases and not others, the per-node ``next:morph-element`` event carries a veto.
+The morph fires it only under a target or an ancestor marked ``data-next-morph-events``, as an event per node costs a large patch dearly, so the island root or its zone carries the attribute.
 A listener that calls ``preventDefault`` on it skips the morph of that node and its subtree, which lets a framework apply its own diff while the runtime stays out of the way.
 
 Two kinds of atomicity

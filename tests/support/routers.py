@@ -5,15 +5,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
-from next.urls import PageRoot, RouterBackend
-from next.urls.manager import router_manager
+from next.urls import PageBackend, PageRoot
+from next.urls.manager import route_manager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
 
-class RootPagesRouter(RouterBackend):
+class RootPagesRouter(PageBackend):
     """Third-party backend that routes root page trees and registers no components."""
 
     def __init__(self, root_trees: list[Path]) -> None:
@@ -29,7 +29,7 @@ class RootPagesRouter(RouterBackend):
         return [PageRoot(path=tree, label="Root") for tree in self._root_trees]
 
 
-class AppRootRouter(RouterBackend):
+class AppRootRouter(PageBackend):
     """Backend reporting one application tree, the shape ``APP_DIRS`` produces."""
 
     def __init__(self, path: Path, label: str = "App 'app'") -> None:
@@ -46,7 +46,7 @@ class AppRootRouter(RouterBackend):
         return [PageRoot(path=self._path, label=self._label)]
 
 
-class EntryRouter(RouterBackend):
+class EntryRouter(PageBackend):
     """Third-party backend built from the ``PAGE_BACKENDS`` entry that names it."""
 
     def __init__(self, config: Mapping[str, Any]) -> None:
@@ -58,7 +58,7 @@ class EntryRouter(RouterBackend):
         return []
 
 
-class RaisingRootsRouter(RouterBackend):
+class RaisingRootsRouter(PageBackend):
     """Backend whose tree listing raises, the way a database-backed one can."""
 
     def generate_urls(self) -> list:
@@ -71,7 +71,7 @@ class RaisingRootsRouter(RouterBackend):
         raise RuntimeError(msg)
 
 
-class MalformedRootsRouter(RouterBackend):
+class MalformedRootsRouter(PageBackend):
     """Backend whose tree listing answers the wrong shape rather than raising.
 
     It stands for a plugin with a type error that returns bare paths, not `PageRoot`s.
@@ -142,13 +142,13 @@ ENTRY_ROUTER: dict[str, object] = {"BACKEND": "tests.support.routers.EntryRouter
 
 
 @contextmanager
-def routers_from(*entries: Mapping[str, object]) -> Iterator[None]:
+def routers_from(*entries: Mapping[str, object]) -> Generator[None]:
     """Build the global routers from `entries` for the block, then from the settings."""
     try:
         with patch.object(
-            router_manager, "_get_next_pages_config", return_value=list(entries)
+            route_manager, "_get_next_pages_config", return_value=list(entries)
         ):
-            router_manager.reload()
+            route_manager.reload()
             yield
     finally:
-        router_manager.reload()
+        route_manager.reload()

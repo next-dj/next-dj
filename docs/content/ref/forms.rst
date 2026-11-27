@@ -86,6 +86,19 @@ Decorator
 
 .. autofunction:: next.forms.action
 
+``atomic=`` decides whether the action runs inside a request transaction and wins over ``TRANSACTIONS``, see :doc:`settings`.
+``True`` and ``False`` turn the transaction on or off on ``TRANSACTIONS["ALIASES"]``, ``"writes"`` opens it right before the first write, and an ``AtomicOverride`` of ``next.transactions`` names its own ``aliases``, ``"all"`` or a list of database aliases.
+Without it a ``POST`` runs inside a transaction by the default rule, with or without ``ATOMIC_REQUESTS``.
+The dispatch view is marked with :func:`~django.db.transaction.non_atomic_requests` on every alias, runs the access checks of the action before it opens the transaction, and closes it once the response object exists, so a refused request opens none, an exception rolls back, and a returned response commits whatever its status.
+The checks on the bound row run inside the transaction, and their refusal sends ``form_access_denied`` once it has rolled back.
+A tunneled action refused for rotating the session rolls its transaction back.
+Any other ``atomic=`` value, or an ``AtomicOverride`` holding a value of the wrong shape, applies nothing and is reported as ``next.E240``.
+A ``Form``, ``ModelForm``, or ``FormWizard`` registered through its own ``Meta`` declares the same choice as ``Meta.atomic``, read once at registration into the ``atomic`` field of its ``ActionRegistration`` and checked by the same rule.
+``Meta.atomic`` is inherited like the other ``Meta`` options, and an ``@action(form_class=F)`` without ``atomic=`` takes ``F.Meta.atomic``, while an ``atomic=`` on the decorator wins over it.
+A :func:`~django.db.transaction.on_commit` hook registered inside the action fires when the action's transaction commits, not when it is registered.
+An action whose handler does slow work outside the database, such as a sleep, an outbound HTTP call, or sending mail, opts out with ``atomic=False`` or ``Meta.atomic = False``, so it holds no connection inside an open transaction while that work runs.
+``page.transaction()`` does not cover the actions its page declares, see :ref:`topics-forms-actions-transactions`.
+
 Exceptions
 ~~~~~~~~~~
 
@@ -249,7 +262,7 @@ Backends
 ~~~~~~~~
 
 ``ActionRegistration`` is the value object passed to ``register_action``.
-It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, the ``requires_runtime`` and ``transport`` flags, the ``claims_name_binding`` flag, and the action target.
+It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, the ``requires_runtime`` and ``transport`` flags, the ``atomic`` override stored under the ``atomic`` key of ``ActionMeta``, the ``claims_name_binding`` flag, and the action target.
 The target is one of ``handler``, ``form_class``, or ``wizard_class``, which lets a single ``register_action`` call serve the ``@action`` decorator, a class-bound form, and a ``FormWizard``.
 ``claims_name_binding`` defaults to ``False``, which keeps a bare name bound to the registration that claimed it first.
 Setting it rebinds the name to this registration, which is what a test override needs to displace an action that is already registered.
@@ -262,9 +275,16 @@ It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispa
 A file outside both keeps its absolute path.
 ``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
 ``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
+It takes the declaring file of each handler as ``old_file`` and ``new_file`` and tells handlers apart by file and qualname, so a page module that runs under a second module name, as when a test imports it by its dotted path, is no collision.
 ``declaring_files`` lists the files whose registered action carries a given name across the configured backends.
 ``ActionMeta``, ``file_to_dotted_module``, ``scope_key_for``, ``build_action_guard``, ``record_possible_collision``, and ``declaring_files`` all import from ``next.forms.backends`` directly.
 A custom backend stores ``transport`` under the same key of ``ActionMeta``, because the dispatch and the ``{% form %}`` tag read the transport from there and treat a missing key as ``"http"``.
+``ResponseShaper`` is the strategy a backend asks before its default envelope, re-exported from ``next.forms``.
+``shape`` answers one outcome, and ``validate`` answers a submission that asks only to validate some fields, which the pipeline asks after both permission layers pass.
+A ``None`` from either leaves the request to the default pipeline, ``FormActionDispatch.shape_response`` for ``shape`` and the full submission for ``validate``.
+``FormActionBackend.shaper`` holds the instance of the class the entry's ``OPTIONS["SHAPER"]`` names, resolved once on first use, and the default ``next.partial.FormShaper`` answers partial requests with patch envelopes.
+``next.forms`` never imports ``next.partial``, the dotted path is the only link between them.
+A backend that overrides ``shape_response`` keeps partial shaping by calling ``super().shape_response`` or ``self.shaper.shape``, which ``next.W068`` checks.
 
 .. automodule:: next.forms.backends
    :members:

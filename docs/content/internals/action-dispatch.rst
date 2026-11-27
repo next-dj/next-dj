@@ -159,12 +159,11 @@ Modules
 ``next.forms.autodiscover``.
    The import of every installed app's ``forms`` module, so shared forms register on startup.
 
-``next.partial.shaping``.
-   The package behind the bound shaper, which turns a dispatch outcome into a patch envelope for a partial request, see `Partial shaping`_.
+``next.partial.shaping.shaper``.
+   ``FormShaper``, the default ``ResponseShaper`` a backend imports from its ``OPTIONS["SHAPER"]`` dotted path on first use, so the forms path never imports ``next.partial``.
 
-``next.ports``.
-   The ``PartialShaper`` protocol and the ``partial_shaper_slot`` the app config binds at startup.
-   The dispatch pipeline asks the slot whether a request is partial and hands it the outcome, so the forms path never imports ``next.partial``.
+``next.partial.shaping``.
+   The package behind ``FormShaper``, which turns a dispatch outcome into a patch envelope for a partial request, see `Partial shaping`_.
 
 Page tree access
 ----------------
@@ -189,7 +188,7 @@ The shared pipeline enforces this static guard right after the page tree access 
 An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
 
 On the form-class branch the guard leaves out every permission ``next.permissions`` has registered, and the dispatcher checks them once the form binds, as ``user.has_perm(perm, obj)``.
-``obj`` is the instance of a ``ModelForm`` that edits a saved row and ``None`` otherwise, and a refusal raises ``PermissionDenied`` after sending ``form_access_denied`` with ``layer="object"`` and ``reason="denied"``.
+``obj`` is the instance of a ``ModelForm`` that edits a saved row and ``None`` otherwise, and a refusal raises ``PermissionDenied`` and sends ``form_access_denied`` with ``layer="object"`` and ``reason="denied"`` once the transaction has rolled back.
 The split between the two sets is kept per permission tuple until the registry version moves.
 The wizard and handler-only branches bind no form at the guard, so the guard checks every permission there with no object.
 Every backend that delegates to ``FormActionDispatch.dispatch`` inherits the enforcement.
@@ -209,7 +208,8 @@ A backend whose ``dispatch`` drives the pipeline by hand rather than delegating 
 The ``render()`` under this call does not see the POST to ``/_next/form/<uid>/``.
 ``next.pages.visits.visit_request`` copies the live request and restates it as a GET of the URL being authorized, rewriting ``method``, ``path``, ``path_info``, ``GET``, ``POST``, ``META`` and ``resolver_match`` while carrying over everything a middleware attached, the user and the session included.
 It drops the dispatch dependency cache from the copy, and the guard resolves ``render()`` with a fresh cache, so no value the dispatch resolved reaches the answer.
-The copy leaves the live request untouched, so the dispatcher reads its own POST afterwards as it always did.
+The copy leaves the method, the path, and the POST of the live request alone, so the dispatcher reads its own POST afterwards.
+Once ``render()`` answers, ``next.pages.visits.hand_back`` copies back the render flags, the CSP nonce, and the CSRF cookie keys of ``META``, so the response the dispatcher sends stays private where the render read the visitor and sets the CSRF cookie where it read a token.
 A page that short-circuits on the request method, on a query parameter, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
 
 Each of the four authorization sites names the URL it asks about, the posted origin for a submission and for ``Patches.morph_zone``, the next step's URL for a wizard advance.
@@ -222,8 +222,9 @@ Two opt-in hooks layer per-request permission decisions on top of the static gua
 A request the static guard denies never reaches either hook.
 
 ``check_permissions`` is a view-level classmethod.
-The pipeline resolves it after origin resolution and the dependency-cache install, and after ``_resolve_form_class`` returns, so the hook reads off the resolved class and a factory ``form_class`` is covered.
-It runs before ``get_initial`` and form binding.
+For a declared wizard or form class the pipeline resolves it after origin resolution and the dependency-cache install, before the transaction opens.
+A factory ``form_class`` may load the row its form edits, so the pipeline runs the factory inside the transaction and resolves the hook on the class ``_resolve_form_class`` returns.
+Either way it runs before ``get_initial`` and form binding.
 
 ``has_object_permission`` is an object-level instance method.
 The pipeline resolves it after the form binds and before ``is_valid`` and the handler, so ``self.instance`` is the loaded target on a ``ModelForm``.
@@ -231,10 +232,19 @@ A denial here returns a bare HTTP 403 rather than re-rendering, because the form
 
 Both hooks are dependency-injected through ``resolver.resolve_dependencies`` with the per-request ``dep_cache`` and ``dep_stack`` the dispatcher publishes under ``REQUEST_DEP_CACHE_ATTR``, so a provider resolved in a hook is shared with ``get_initial`` and ``on_valid``.
 A return of ``None`` or ``True`` allows, ``False`` raises ``PermissionDenied``, an ``HttpResponse`` short-circuits, and any other type raises ``TypeError``.
-On a denial the dispatcher emits ``form_access_denied`` when a receiver is connected.
+On a denial the dispatcher records the layer and the reason on its state and emits ``form_access_denied`` once the transaction has closed, when a receiver is connected.
 A wizard enforces ``check_permissions`` once per step POST before the step binds, and the step form's ``has_object_permission`` is enforced per step after the step form binds and before ``is_valid``.
 A wizard step binds without ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step reads a fresh unsaved ``self.instance`` in that hook, not the URL-addressed target the standalone path loads.
 The guide covers the authoring contract at :ref:`topics-forms-actions-dynamic-guards`.
+
+Transaction
+-----------
+
+The page tree rule, the static guard, the origin and owner page authorization, and the ``check_permissions`` of a declared class run in autocommit, so a refused request opens no transaction.
+The transaction opens once they pass and wraps the form factory, ``get_initial``, binding, the checks on the bound row, validation, and the handler.
+The checks on the bound row stay inside because the row they judge is the row the handler writes, and a ``select_for_update()`` in ``get_initial`` raises outside a transaction.
+A refusal inside the block is announced after the block exits, so a ``form_access_denied`` receiver never runs in a transaction its refusal rolls back.
+A rotation a tunneled action swallowed raises ``SessionRotationError`` before the block exits, so the block rolls back.
 
 Validate-only short circuit
 ---------------------------
@@ -281,7 +291,7 @@ Partial shaping
 ---------------
 
 ``next.partial.shaping`` is what the last step of dispatch becomes when the request is a partial one.
-The base ``shape_response`` asks ``partial_shaper_slot`` about the request and hands a partial outcome to the bound shaper, which composes a patch envelope instead of a full page.
+The base ``shape_response`` asks ``backend.shaper`` first, and the default ``FormShaper`` composes a patch envelope for a partial request instead of a full page.
 The package splits into one-word submodules, ``outcomes`` for the routing of an outcome to its envelope, ``validate`` for the validate-only pass, ``scrub`` for error cleaning, ``targets`` for origin and zone resolution, ``csrf`` for the rotation marker, and ``responses`` for the serialisation.
 
 Outcome taxonomy
@@ -379,7 +389,8 @@ Extension points
 
 - Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
 - Override ``render_invalid_page`` for custom validation-error HTML, or ``shape_response`` for a custom response envelope.
-  The base ``shape_response`` asks ``partial_shaper_slot`` whether the request is partial and hands a partial outcome to the bound shaper, reaching the default full-page envelope only for a plain request, so an override that never calls ``super().shape_response`` disables the patch envelopes.
+  The base ``shape_response`` asks ``self.shaper`` first and reaches the default full-page envelope only when the shaper answers ``None``, so an override that calls neither ``super().shape_response`` nor ``self.shaper.shape`` disables the patch envelopes.
+- Name another ``ResponseShaper`` class under the entry's ``OPTIONS["SHAPER"]`` to change how every outcome and validate-only pass of the backend is shaped.
 - Register the custom backend through ``FORM_ACTION_BACKENDS``.
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.

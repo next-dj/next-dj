@@ -14,7 +14,7 @@ from next.utils import template_edits_watched
 if TYPE_CHECKING:
     from django.template import Template
 
-    from next.pages.loaders import LayoutTemplateLoader
+    from next.pages.loaders import BoundaryChain, LayoutTemplateLoader
 
 
 # Mtimes of every source behind one composition, keyed by its page path.
@@ -32,6 +32,8 @@ class PageTemplateCache:
         self.composed: PageCache[Path, str] = PageCache()
         self.compiled: PageCache[Path, Template] = PageCache()
         self.skeleton: PageCache[Path, str] = PageCache()
+        self.composed_chains: PageCache[Path, BoundaryChain] = PageCache()
+        self.skeleton_chains: PageCache[Path, BoundaryChain] = PageCache()
         # The skeleton keeps its own snapshot, or a composed refresh hides layout edits.
         self.composed_sources: SourceMtimes = PageCache()
         self.skeleton_sources: SourceMtimes = PageCache()
@@ -42,12 +44,15 @@ class PageTemplateCache:
         self.composed.clear()
         self.compiled.clear()
         self.skeleton.clear()
+        self.composed_chains.clear()
+        self.skeleton_chains.clear()
         self.composed_sources.clear()
         self.skeleton_sources.clear()
 
     def forget_composed(self, file_path: Path) -> None:
         """Drop the composed source of one page and the snapshot behind it."""
         self.composed.pop(file_path)
+        self.composed_chains.pop(file_path)
         self.composed_sources.pop(file_path)
 
     def record_composed(self, file_path: Path) -> None:

@@ -10,8 +10,10 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from collections.abc import (
+    AsyncGenerator,
     AsyncIterator,
     Callable,
+    Generator,
     Iterable,
     Iterator,
     Mapping,
@@ -632,7 +634,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         subscriber = _SyncSubscriber(self._queue_size)
 
         @contextmanager
-        def subscription() -> Iterator[Iterator[Message | None]]:
+        def subscription() -> Generator[Iterator[Message | None]]:
             self._register(selected, subscriber)
             try:
                 yield self._sync_messages(subscriber, timeout)
@@ -661,7 +663,7 @@ class MemoryBroker(BrokerBackend, PresenceWindow):
         subscriber = _AsyncSubscriber(loop, self._queue_size)
 
         @asynccontextmanager
-        async def subscription() -> AsyncIterator[AsyncIterator[Message | None]]:
+        async def subscription() -> AsyncGenerator[AsyncIterator[Message | None]]:
             self._register(selected, subscriber)
             try:
                 yield self._async_messages(subscriber, timeout)

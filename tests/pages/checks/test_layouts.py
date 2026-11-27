@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from next.checks.common import get_router_manager
+from next.checks.common import get_route_manager
 from next.pages.checks import check_layout_templates, check_root_marker_outside_layouts
 from next.pages.checks.layouts import iter_layout_ancestry
 from next.pages.placeholder import ROOT_MARKER
@@ -97,14 +97,14 @@ class TestLayoutAncestry:
         write_page(tmp_path / "pages", "b")
 
         with routed(tmp_path / "pages"):
-            manager, _errors = get_router_manager()
+            manager, _errors = get_route_manager()
             visited = list(iter_layout_ancestry(manager))
 
         assert visited.count(layout.resolve()) == 1
 
-    def test_a_failing_router_manager_checks_nothing(self) -> None:
+    def test_a_failing_route_manager_checks_nothing(self) -> None:
         with patch(
-            "next.pages.checks.layouts.get_router_manager", return_value=(None, [])
+            "next.pages.checks.layouts.get_route_manager", return_value=(None, [])
         ):
             assert check_layout_templates() == []
 
@@ -250,8 +250,8 @@ class TestStrayMarker:
         with routed(tmp_path):
             assert check_root_marker_outside_layouts() == []
 
-    def test_a_failing_router_manager_checks_nothing(self) -> None:
+    def test_a_failing_route_manager_checks_nothing(self) -> None:
         with patch(
-            "next.pages.checks.layouts.get_router_manager", return_value=(None, [])
+            "next.pages.checks.layouts.get_route_manager", return_value=(None, [])
         ):
             assert check_root_marker_outside_layouts() == []

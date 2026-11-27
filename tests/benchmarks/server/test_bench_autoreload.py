@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 from django.test import override_settings
 
-from next.pages.watch import get_pages_directories_for_watch
+from next.discovery import get_pages_directories_for_watch
 from next.server.autoreload import NextStatReloader, _tree_dir_signature
 from tests.benchmarks.factories import build_pages_tree
 from tests.support import file_router_config_entry

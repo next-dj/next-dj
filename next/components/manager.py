@@ -10,9 +10,10 @@ from next.backends import (
     load_backends,
     resolve_setting_class,
 )
+from next.caches import FRAMEWORK
 
 from .backends import _DEFAULT_BACKEND_PATH, ComponentsBackend
-from .loading import ModuleLoader
+from .modules import ModuleLoader
 from .renderers import (
     CachedComponentTemplateLoader,
     ComponentRenderer,
@@ -174,11 +175,6 @@ def register_components_folder_from_router_walk(
     components_manager.register_router_walk_folder(folder, pages_root, scope_relative)
 
 
-def forget_component_backends(**kwargs: object) -> None:
-    """Drop cached component backends when framework settings reload."""
-    components_manager.reset()
-
-
 def forget_render_pipeline(*, setting: str, **kwargs: object) -> None:
     """Drop the render pipeline when Django reports a `TEMPLATES` change.
 
@@ -186,6 +182,9 @@ def forget_render_pipeline(*, setting: str, **kwargs: object) -> None:
     """
     if setting == "TEMPLATES":
         components_manager.forget_render_pipeline()
+
+
+FRAMEWORK.attach(components_manager.reset)
 
 
 __all__ = [

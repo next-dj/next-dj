@@ -8,13 +8,13 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning
 from django.http import HttpRequest
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.deps import RESERVED_KEYS, ResolutionContext, resolver
 from next.deps.cache import DependencyCache
-from next.ports import router_access_slot
+from next.ports import route_access_slot
 
 from .contexts import loaded_page_contexts
 
@@ -136,7 +136,7 @@ def _url_parameter_names(url_path: str) -> list[str]:
 
 def _url_parser() -> URLPatternParser:
     """Return the parser the file router routes bracket segments through."""
-    return router_access_slot.get().url_parser()
+    return route_access_slot.get().url_parser()
 
 
 def _foreign_zone_warning(

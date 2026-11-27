@@ -8,6 +8,7 @@ Module summary
 
 The framework registers its template tags as Django builtins through ``next.apps.templates.install``.
 Templates therefore use them without an explicit ``{% load %}`` statement.
+Each library of ``next.templatetags`` registers its tags and parses their syntax, and the node a tag compiles to lives with the area that owns it, the component tags in ``next.components.tags`` and the page boundary tags in ``next.pages.nodes``.
 
 Forms
 -----
@@ -80,6 +81,11 @@ Components
    Renders a component by name with the given props.
    Each prop compiles into a template expression, so quoted strings, numbers, dotted lookups, and filter chains all resolve against the surrounding context.
 
+   ``defer=`` and ``timeout=`` are boundary options of the call, never props, and take literals only, so a template variable there raises ``TemplateSyntaxError`` at parse time.
+   ``defer=`` names the delivery mode of this call, ``stream``, ``load``, ``visible``, ``manual``, or ``inline``, over the mode the ``component.py`` declares, and ``timeout=`` bounds its job, as a number of seconds or a ``"2s"`` or ``"500ms"`` literal of at most one day.
+   ``reload=`` and ``delay=`` are reserved names, options of ``{% zone %}`` only, and a call that writes either raises ``TemplateSyntaxError`` at parse time.
+   A value outside its shape raises ``TemplateSyntaxError`` at parse time, see :doc:`/content/topics/boundaries/loading`.
+
 .. describe:: {% #component "<name>" %}...{% /component %}
 
    Block form.
@@ -146,12 +152,12 @@ Multiline tag bodies
 The framework adds one line-spanning branch to Django's template tag pattern during ``AppConfig.ready``, so a framework block tag may carry its arguments over several lines.
 That allows readable block components and slots when the argument list is long.
 
-The added branch matches twenty literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``has_perm``, ``layout``, ``metadata``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, in the void form and in the ``{% #name %}`` opening form alike.
+The added branch matches twenty-four literal tag names, ``action_url``, ``asset``, ``breadcrumbs``, ``collect_head``, ``collect_scripts``, ``collect_styles``, ``component``, ``consented``, ``form``, ``has_perm``, ``layout``, ``metadata``, ``more``, ``script``, ``set_slot``, ``slot``, ``template``, ``use_module``, ``use_script``, ``use_style``, and ``zone``, and the internal ``next:boundary``, ``/next:boundary``, and ``next:failed``, in the void form and in the ``{% #name %}`` opening form alike.
 Django's own block-tag branch stays behind it untouched, so every other tag lexes exactly as stock Django lexes it, in a DJX file and in a plain Django template alike.
 A newline inside ``{% if x %}`` still ends the tag, a third-party tag keeps its stock lexing, and a stray ``{%`` inside inline JavaScript swallows no more text than it does without next.dj installed.
 ``{{ ... }}`` and ``{# ... #}`` are outside the rebind entirely, so a newline still ends a variable or a comment.
 
-The closing forms and ``{% placeholder %}`` are outside the widened set, so ``{% /component %}``, ``{% endform %}``, and ``{% endzone %}`` stay single-line, which costs nothing because none of them takes an argument.
+The closing forms are outside the widened set, so ``{% /component %}``, ``{% endform %}``, and ``{% endzone %}`` stay single-line, which costs nothing because none of them takes an argument.
 
 Static pipeline
 ---------------
@@ -219,9 +225,10 @@ Static pipeline
 Partial rendering
 -----------------
 
-.. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" poll="<interval>" %}...{% placeholder %}...{% endzone %}
+.. describe:: {% zone "<name>" tag="<element>" poll="<interval>" reload="<mode>" delay="<duration>" <attribute>="<value>" %}...{% endzone %}
 
    Marks a named slice of a page template the server can re-render on its own.
+   A zone always renders inline, and a part of the page that loads later is a component with a ``loading.djx`` instead.
    The first argument is the quoted zone name, an ASCII slug that must be unique across the composed template, the layout chain plus the page body.
    On a full page render the body is wrapped in ``<div data-next-zone="<name>">`` so the client can address it, and a partial request re-renders only the body.
 
@@ -229,23 +236,46 @@ Partial rendering
    Use it where a ``<div>`` is invalid, for example ``tag="ul"`` inside a list or ``tag="tbody"`` inside a table.
    The wrapper carries ``data-next-zone`` whatever the tag.
 
-   ``lazy="load"`` or ``lazy="revealed"`` defers the body.
-   A lazy zone renders only its ``{% placeholder %}`` branch up front and fetches the body on ``ready`` for ``load`` or when it scrolls into view for ``revealed``.
-   Any other ``lazy`` value raises ``TemplateSyntaxError`` at parse time.
+   Any other ``key="value"`` pair whose key is an HTML global attribute, such as ``class``, ``id``, ``style``, or ``role``, or an ``aria-*`` or ``data-*`` attribute, is written on the wrapper after the framework's own attributes, escaped, on a full page render and a zone render alike.
+   The hand-written ``data-next-*`` attributes of :doc:`/content/ref/client`, ``data-next-nav``, ``data-next-toasts``, ``data-next-current``, ``data-next-match``, ``data-next-router``, ``data-next-prefetch``, ``data-next-press``, ``data-next-persist``, ``data-next-scroll``, ``data-next-scroll-region``, and ``data-next-focus``, are written the same way, so a zone can be a navigation container or the toast tray, and so is ``data-next-reserve``, described with ``reload=`` below.
+   Any other ``data-next-*`` key is reserved for the runtime, and any other key is an unknown option, both raising ``TemplateSyntaxError`` at parse time.
 
    ``poll="<interval>"`` re-GETs the body on the interval, read from a quoted ``5s`` or ``1500ms`` literal or a bare number of milliseconds, never from a template variable.
-   It is mutually exclusive with ``lazy=``, and an interval below one second, above the browser timer ceiling, or malformed raises ``TemplateSyntaxError`` at parse time.
+   An interval below one second, above the browser timer ceiling, or malformed raises ``TemplateSyntaxError`` at parse time.
+
+   ``reload="keep"``, the default, keeps the current content on screen while a request reloads the zone.
+   ``reload="loading"`` writes ``data-next-reload="loading"`` and shows loading content once the request outlasts ``delay=``, the zone's ``loading.<zone>.djx`` when the template beside it has one and the ``loading.djx`` of every component boundary inside.
+   ``delay="<duration>"`` reads a quoted ``"300ms"`` or ``"1s"`` literal, defaults to 150 milliseconds, is written as ``data-next-delay`` in milliseconds when it differs from the default, and applies to ``reload="loading"`` only.
+   The loading content holds the measured height of what it replaces as ``min-height``, and ``data-next-reserve="off"`` lets it shrink instead.
+   Any other ``reload`` value, a malformed duration, a ``delay=`` without ``reload="loading"``, or a ``data-next-reserve`` other than ``"off"`` raises ``TemplateSyntaxError`` at parse time.
 
    An option without ``=`` and an unknown option key also raise ``TemplateSyntaxError`` at parse time, so a typo fails the compile rather than being silently dropped.
    The name and every option value are quoted literals, so an unquoted bit raises rather than standing in for the variable it names.
 
-.. describe:: {% placeholder %}
+.. describe:: {% more zone="<zone>" next=<expr> %}...{% empty %}...{% endmore %}
 
-   Opens the placeholder branch of a lazy ``{% zone %}``, shown until the deferred body arrives.
-   It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it is reported as ``next.E064``.
-   The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
+   Renders the sentinel of an infinite list as the zone ``<zone>-more``, holding a real link to the batch ``next=`` names in the query string of the request.
+   ``next=`` takes the ``Window`` a pager returns, as in ``{% more zone="feed" next=rows %}``, and the tag reads the token of the next batch and the query parameter off it.
+   It also takes a raw token, a page number from 1 or a base64url slug, written under ``param=``, and ``None`` for the end of the list.
+   With ``previous=<expr>`` in place of ``next=`` the tag renders the zone ``<zone>-less`` with a link to the batch before the list, for a tag placed above it.
+   On the end of the list the zone holds the ``{% empty %}`` branch instead.
+   On the first window a ``previous=`` tag also holds, after its ``{% empty %}`` branch, a link to the first window with the ``hidden`` attribute, which the runtime shows once ``prune=`` drops the first rows.
+   ``zone=`` names the list zone, and ``mode=``, ``merge=``, ``margin=``, and ``param=`` tune the link, see :ref:`topics-partial-rendering-reference-more` for the options, their defaults, and the pagers.
+   ``prune=<rows>`` drops whole batches from the top of a long list and ``url="replace"`` or ``url="push"`` writes ``?<param>=<token>&_restore=<param>`` into the address bar after each batch, both on a ``next=`` tag only.
+   ``prune=`` needs a ``Window``, so with a raw token the tag raises ``TemplateSyntaxError`` at render under ``DEBUG`` or ``STRICT_LOADING`` and renders without pruning otherwise.
+   ``next.E235`` reports ``prune=`` or ``url=`` on a page whose context callables take no ``Annotated[Paging, <pager>]``.
+   An unknown option, a missing ``zone=``, or both or neither of ``next=`` and ``previous=`` raise ``TemplateSyntaxError`` at parse time.
 
-A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or a ``{% has_perm %}``, since a standalone render cannot repeat the decision, and a zone inside a ``{% has_perm %}`` is ``next.E161``, refused to a partial request.
+.. describe:: {{ page_obj|next_page }}
+
+   Returns the number of the page after a Django :class:`~django.core.paginator.Page`, and ``None`` on the last page or for any other value.
+   It adapts a list paged by a Django :class:`~django.core.paginator.Paginator` to the raw-token form of ``next=``.
+
+.. describe:: {{ page_obj|previous_page }}
+
+   Returns the number of the page before a Django :class:`~django.core.paginator.Page`, and ``None`` on page 1 or for any other value.
+
+A zone belongs to a page or layout, not a component, ``{% more %}`` included, and may not sit inside a ``{% for %}``, an ``{% if %}``, or a ``{% has_perm %}``, since a standalone render cannot repeat the decision, and a zone inside a ``{% has_perm %}`` is ``next.E161``, refused to a partial request.
 A zone directly inside a ``{% with %}`` draws the ``next.W067`` warning because the bindings are invisible to a standalone zone render.
 The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
 
@@ -309,8 +339,8 @@ Metadata
 .. describe:: {% breadcrumbs %}
               {% breadcrumbs as <name> %}
 
-   Renders the breadcrumb trail of the page as ``<nav aria-label="Breadcrumb"><ol>...</ol></nav>``, one ``<li>`` per crumb, a link where the crumb has a URL and ``aria-current="page"`` on the current one.
-   The ``as`` form binds the tuple of ``Breadcrumb`` values, each with ``label``, ``url``, and ``current``, and renders nothing.
+   Renders the breadcrumb trail of the page as ``<nav aria-label="Breadcrumb"><ol>...</ol></nav>``, one ``<li>`` per crumb, a link where the crumb has a URL, ``aria-current="page" data-next-current="page"`` on the current one, and ``data-next-current="ancestor"`` on each ancestor link but a home path.
+   The ``as`` form binds the tuple of ``Breadcrumb`` values, each with ``label``, ``url``, ``current``, and ``ancestor``, and renders nothing.
    The trail reuses the resolve ``{% metadata %}`` ran for the same render, and a render without crumbs renders nothing.
    Any other argument raises ``TemplateSyntaxError`` at parse time.
    See :doc:`/content/topics/seo/breadcrumbs`.
@@ -330,6 +360,14 @@ Scripts and consent
    The scripts that body registers then wait in ``$scripts`` for the category, while its stylesheets join the page.
    The category is one argument, a literal or a variable, and any other count raises ``TemplateSyntaxError``.
    A block that reaches a page only through a patch is revealed on a page that loaded with the consent state, which setting ``CONSENT`` guarantees, see :doc:`/content/topics/scripts/consent`.
+
+Page boundaries
+---------------
+
+Composition writes internal tags, among them ``{% next:boundary %}`` and ``{% next:failed %}``, at the slot of a directory that holds a ``loading.djx`` or an ``error.djx``.
+They install as builtins under a ``next:`` name, so no page template loads or spells them.
+They compile to ``PageBoundaryNode``, ``LayoutSlotNode``, ``FailedNode``, and ``EndNode`` of ``next.pages.nodes``.
+See :doc:`/content/topics/boundaries/loading`.
 
 Tag loading
 -----------

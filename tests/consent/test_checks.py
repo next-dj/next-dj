@@ -9,6 +9,7 @@ from next.consent.checks import (
     check_consent_settings,
 )
 from tests.support import check_ids
+from tests.support.checks import written
 
 
 class TestConsentSettings:
@@ -32,7 +33,7 @@ class TestConsentSettings:
         ids=["absent", "non_dict", "empty", "full"],
     )
     def test_a_usable_scope_is_silent(self, framework: dict[str, object]) -> None:
-        with override_settings(NEXT_FRAMEWORK=framework):
+        with written(framework):
             assert check_consent_settings() == []
 
     def test_an_unknown_key_is_e035(self) -> None:

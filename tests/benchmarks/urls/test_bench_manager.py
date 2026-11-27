@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from next.urls import router_manager, urlpatterns
+from next.urls import route_manager, urlpatterns
 
 
 if TYPE_CHECKING:
@@ -31,14 +31,14 @@ class TestBenchLazyUrlPatterns:
         benchmark(lazy_patterns.version_token)
 
 
-class TestBenchRouterManager:
+class TestBenchRouteManager:
     """Backend reads on the loaded manager, the state a resolve finds."""
 
     @pytest.mark.benchmark(group="urls.manager")
     def test_backends_snapshot(self, benchmark) -> None:
-        assert router_manager.backends
-        benchmark(lambda: router_manager.backends)
+        assert route_manager.backends
+        benchmark(lambda: route_manager.backends)
 
     @pytest.mark.benchmark(group="urls.manager")
     def test_iter_patterns(self, benchmark) -> None:
-        benchmark(lambda: list(router_manager))
+        benchmark(lambda: list(route_manager))

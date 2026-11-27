@@ -19,7 +19,7 @@ If ``/`` does not respond, revisit :doc:`install`.
 
 .. note::
 
-   Throughout the six parts, a captioned code block holds the complete content of the named file.
+   Throughout the seven parts, a captioned code block holds the complete content of the named file.
    A block that shows only a fragment says so in its caption, for example ``notes/forms.py, the create form``.
 
 Walkthrough

@@ -13,6 +13,7 @@ from next.forms.signals import action_dispatched, form_validation_failed
 from next.partial import Patches
 from next.realtime import MemoryBroker, presence, publish
 from next.realtime.signals import message_published
+from next.router import CutKind
 from next.testing import (
     NextClient,
     PartialEnvelope,
@@ -129,6 +130,14 @@ class TestPollDetailPage:
     ) -> None:
         body = _detail_html(next_client, poll)
         assert "2 open polls" in body
+
+    def test_a_navigation_keeps_the_shell_and_refreshes_the_count(
+        self, next_client: NextClient, poll: Poll, second_poll: Poll
+    ) -> None:
+        step = next_client.navigate(f"/polls/{poll.pk}/", origin="/polls/")
+        assert step.kind is CutKind.SLOT
+        assert step.envelope is not None
+        assert "2 open polls" in step.envelope.html_for_zone("open-polls")
 
     def test_initial_results_in_window_next_context(
         self, next_client: NextClient, poll: Poll

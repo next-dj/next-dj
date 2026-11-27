@@ -44,7 +44,7 @@ class TestValueObjects:
         ids=["metadata", "segment", "reset"],
     )
     def test_the_values_are_frozen(self, value: object, attribute: str) -> None:
-        with pytest.raises(FrozenInstanceError):
+        with pytest.raises(FrozenInstanceError, match="cannot assign to field"):
             setattr(value, attribute, "x")
 
     def test_empty_metadata_is_the_default_value(self) -> None:

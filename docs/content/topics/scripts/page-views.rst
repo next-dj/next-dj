@@ -27,7 +27,7 @@ The event
    * - ``action``
      - ``push`` or ``replace`` for a history write, ``pop`` for a Back or Forward gesture, and ``none`` for a change of the title alone.
 
-The event does not fire for the page load itself.
+The event does not fire for the page load itself, and not for an address a ``url`` operation writes with ``quiet: true``, such as the position a ``{% more %}`` batch records, since the visitor reads on in the same list.
 A vendor adapter counts the page it loads on from ``Next.navigation.current()`` and one more view for every ``next:navigated`` whose ``action`` is not ``none``.
 
 .. code-block:: javascript

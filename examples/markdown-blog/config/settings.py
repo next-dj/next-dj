@@ -23,6 +23,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "next.middleware.CompressionMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -70,7 +71,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             # The project-level page root `site/` holds the envelope and `site_footer`.
             "DIRS": [str(BASE_DIR / "site")],
@@ -98,6 +99,7 @@ NEXT_FRAMEWORK = {
         "blog.loaders.MarkdownTemplateLoader",
         "next.pages.loaders.DjxTemplateLoader",
     ],
+    "ROUTER": {"PREFETCH": "viewport"},
     "STATIC_VERSION": "v1",
     "SITE": {"URL": "https://blog.example", "NAME": "next.dj blog", "INDEXABLE": True},
     "METADATA": {

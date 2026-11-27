@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -20,6 +21,7 @@ from next.forms.manager import form_action_manager
 from next.forms.origin import OriginMatch
 from next.forms.signals import form_access_denied
 from next.forms.uid import ORIGIN_FIELD_NAME
+from next.partial.headers import REQUEST_FLAG, VALIDATE
 from next.permissions import add_perm
 from next.permissions.markers import OPEN, AccessRule, Requirement, predicate
 from next.testing import SignalRecorder, capture_signals
@@ -66,7 +68,7 @@ def rule(isolated_permissions, log) -> _Rule:
 
 
 @pytest.fixture()
-def denials() -> SignalRecorder:
+def denials() -> Generator[SignalRecorder]:
     with capture_signals(form_access_denied) as recorder:
         yield recorder
 
@@ -289,6 +291,22 @@ class TestObjectHook:
         assert self._submit(client_no_csrf).status_code == 403
         assert [step for step, _obj in log] == ["predicate", "hook"]
         assert _layers(denials) == [("object", "denied")]
+
+    def test_a_denied_validate_request_gets_the_denial(
+        self, client_no_csrf, rule: _Rule, hooked_form, log, denials
+    ) -> None:
+        """Validation runs after both layers, so a refused blur learns nothing."""
+        rule.allow = lambda: False
+        Group.objects.create(name="ada")
+        _member(client_no_csrf, "ada")
+        response = client_no_csrf.post(
+            form_action_manager.get_action_url("perm_hooked_group_form"),
+            data={ORIGIN_FIELD_NAME: "/groups/ada/", "name": "ada"},
+            headers={REQUEST_FLAG: "1", VALIDATE: "name"},
+        )
+        assert response.status_code == 403
+        assert _layers(denials) == [("object", "denied")]
+        assert [step for step, _obj in log] == ["predicate"]
 
     def test_both_passing_dispatch(
         self, client_no_csrf, rule: _Rule, hooked_form, log

@@ -15,9 +15,10 @@ from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page as page_manager
 from next.pages.access import page_access, refusal
 from next.partial import keys
-from next.partial.headers import RESPONSE_ACTION, RESPONSE_FORM, set_partial_vary
-from next.partial.patches import Patches, PatchResponse
+from next.partial.headers import set_partial_vary
+from next.partial.patches import Patches, PatchResponse, finished_zone
 from next.partial.render import render_zone
+from next.wire import RESPONSE_ACTION, RESPONSE_FORM
 
 from .csrf import _csrf_rotated
 from .responses import _envelope_response
@@ -208,7 +209,7 @@ def _advance_zone(
     result = render_zone(
         page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
     )
-    patches.morph({keys.ZONE: zone}, result.html[zone])
+    patches.morph({keys.ZONE: zone}, finished_zone(result.html[zone]))
     patches.absorb_zone_result(result)
 
 

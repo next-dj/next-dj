@@ -1,8 +1,8 @@
 LISTING_ZONES = (
     "catalog-results",
-    "catalog-more",
     "catalog-count",
-    "catalog-pager",
+    "catalog-results-more",
+    "catalog-results-less",
     "catalog-chips",
 )
 

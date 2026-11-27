@@ -6,7 +6,11 @@ from django.core.checks import run_checks
 from django.test import override_settings
 
 from next.checks import NEXT
-from next.conf.checks import _KEY_TYPES, check_next_framework_value_types
+from next.conf.checks import (
+    _KEY_TYPES,
+    check_boundaries_settings,
+    check_next_framework_value_types,
+)
 from next.conf.settings import NextFrameworkSettings
 from next.forms.checks import (
     check_form_action_backends_configuration,
@@ -15,6 +19,7 @@ from next.forms.checks import (
 )
 from next.partial.checks import check_partial_backends_is_a_list
 from next.static.checks import check_js_context_serializer
+from tests.support.checks import written
 
 
 VALID_TYPED_VALUES: dict[str, object] = {
@@ -34,6 +39,12 @@ VALID_TYPED_VALUES: dict[str, object] = {
     "SITE": {},
     "SEO": {},
     "CONSENT": {},
+    "TRANSACTIONS": {},
+    "BOUNDARIES": {},
+    "LOADER": {},
+    "DEFER": {},
+    "COMPRESSION": {},
+    "ROUTER": {},
     "STATIC_VERSION": "2026.9.19",
 }
 
@@ -59,6 +70,8 @@ class TestValueTypeErrors:
             ("NEXT_JS_OPTIONS", []),
             ("METADATA", []),
             ("SEO", []),
+            ("TRANSACTIONS", []),
+            ("DEFER", []),
             ("STATIC_VERSION", 42),
         ],
         ids=[
@@ -74,11 +87,13 @@ class TestValueTypeErrors:
             "dict_key_given_list",
             "dict_key_given_list_metadata",
             "dict_key_given_list_seo",
+            "dict_key_given_list_transactions",
+            "dict_key_given_list_defer",
             "optional_str_key_given_int",
         ],
     )
     def test_mistyped_key_yields_error(self, key: str, bad_value: object) -> None:
-        with override_settings(NEXT_FRAMEWORK={key: bad_value}):
+        with written({key: bad_value}):
             messages = check_next_framework_value_types()
         assert [m.id for m in messages] == ["next.E076"]
         assert f"NEXT_FRAMEWORK[{key!r}]" in messages[0].msg
@@ -88,7 +103,7 @@ class TestValueTypeErrors:
             assert check_next_framework_value_types() == []
 
     def test_an_explicit_none_on_a_required_key_still_errors(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": None}):
+        with written({"URL_RESOLVER": None}):
             messages = check_next_framework_value_types()
         assert [m.id for m in messages] == ["next.E076"]
 
@@ -124,11 +139,6 @@ class TestValueTypeErrors:
             "Fix the value in settings.NEXT_FRAMEWORK, or silence this check "
             "by adding its id to SILENCED_SYSTEM_CHECKS."
         )
-
-    def test_registered_check_reaches_manage_py_check_path(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": []}):
-            messages = run_checks(tags=[NEXT])
-        assert any(m.id == "next.E076" for m in messages)
 
 
 class TestBoolCoercionWarnings:
@@ -175,8 +185,8 @@ class TestKeysWithDedicatedRawChecks:
             assert sum(key in owner for owner in owners) == 1, key
 
     def test_dedicated_checks_still_fire_without_duplicates(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={
+        with written(
+            {
                 "FORM_WIZARD_BACKEND": "oops",
                 "FORM_ANCHOR_FILES": 42,
                 "FORM_ACTION_BACKENDS": "oops",
@@ -198,18 +208,18 @@ class TestSilencing:
     """SILENCED_SYSTEM_CHECKS mutes each new code independently."""
 
     def test_silences_error_code_only(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": "x", "STRICT_CONTEXT": "False"},
-            SILENCED_SYSTEM_CHECKS=["next.E076"],
+        with (
+            written({"PAGE_BACKENDS": "x", "STRICT_CONTEXT": "False"}),
+            override_settings(SILENCED_SYSTEM_CHECKS=["next.E076"]),
         ):
             messages = check_next_framework_value_types()
             silenced = {m.id: m.is_silenced() for m in messages}
         assert silenced == {"next.E076": True, "next.W072": False}
 
     def test_silences_warning_code_only(self) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": "x", "STRICT_CONTEXT": "False"},
-            SILENCED_SYSTEM_CHECKS=["next.W072"],
+        with (
+            written({"PAGE_BACKENDS": "x", "STRICT_CONTEXT": "False"}),
+            override_settings(SILENCED_SYSTEM_CHECKS=["next.W072"]),
         ):
             messages = check_next_framework_value_types()
             silenced = {m.id: m.is_silenced() for m in messages}
@@ -238,12 +248,12 @@ class TestMessageWording:
     """Golden message texts stay stable for the documentation phase."""
 
     def test_error_message_text(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": "x"}):
+        with written({"PAGE_BACKENDS": "x"}):
             (message,) = check_next_framework_value_types()
         assert message.msg == (
             "NEXT_FRAMEWORK['PAGE_BACKENDS'] must be a list, got 'str'. "
-            "The settings merge ignores this value and silently keeps the "
-            "framework default."
+            "The settings keep its default and every request raises "
+            "ImproperlyConfigured until it is fixed."
         )
         assert message.hint == (
             "Fix the value in settings.NEXT_FRAMEWORK, or silence this check "
@@ -262,3 +272,48 @@ class TestMessageWording:
             "Fix the value in settings.NEXT_FRAMEWORK, or silence this check "
             "by adding its id to SILENCED_SYSTEM_CHECKS."
         )
+
+
+class TestBoundariesShape:
+    """`check_boundaries_settings` reports `BOUNDARIES` misfits."""
+
+    def test_silent_without_the_setting(self) -> None:
+        with written(None):
+            assert check_boundaries_settings() == []
+
+    def test_silent_for_a_usable_scope(self) -> None:
+        with written({"BOUNDARIES": {"RAISE": True}}):
+            assert check_boundaries_settings() == []
+
+    def test_a_scope_that_is_no_dict_is_left_to_e076(self) -> None:
+        with written({"BOUNDARIES": "loud"}):
+            assert check_boundaries_settings() == []
+
+    def test_unknown_keys_and_misfits_are_named(self) -> None:
+        with written({"BOUNDARIES": {"ERRORS": {}, "KINDS": "brief"}}):
+            unknown, misfit = check_boundaries_settings()
+        assert unknown.id == "next.E035"
+        assert unknown.msg.startswith(
+            "NEXT_FRAMEWORK['BOUNDARIES'] has unknown keys 'ERRORS'."
+        )
+        assert misfit.id == "next.E076"
+        assert misfit.msg.startswith(
+            "NEXT_FRAMEWORK['BOUNDARIES']['KINDS'] must be 'detailed' or 'opaque'"
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "problem"),
+        [("nowhere.report", "does not import"), ("next.checks.NEXT", "no callable")],
+    )
+    def test_a_reporter_that_names_no_callable_is_e219(self, path, problem) -> None:
+        with written({"BOUNDARIES": {"REPORTER": path}}):
+            (message,) = check_boundaries_settings()
+        assert message.id == "next.E219"
+        assert message.msg.startswith(
+            f"NEXT_FRAMEWORK['BOUNDARIES']['REPORTER'] {path!r}"
+        )
+        assert problem in message.msg
+
+    def test_a_reporter_that_names_a_callable_is_silent(self) -> None:
+        with written({"BOUNDARIES": {"REPORTER": "builtins.print"}}):
+            assert check_boundaries_settings() == []

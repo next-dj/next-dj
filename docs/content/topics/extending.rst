@@ -3,15 +3,15 @@
 Extending
 =========
 
-next.dj exposes six extension mechanisms.
+next.dj exposes seven extension mechanisms.
 Each section below states what its mechanism replaces and where to register it.
 
 .. contents::
    :local:
    :depth: 2
 
-The six mechanisms
-------------------
+The seven mechanisms
+--------------------
 
 Backend.
    Replace or augment a complete subsystem.
@@ -19,7 +19,7 @@ Backend.
 
 Registry.
    Add new entries to a global list at startup.
-   Used for asset kinds, custom stems, and :doc:`dependency injection <dependency-injection>` providers.
+   Used for asset kinds, custom stems, :ref:`page script providers <topics-extending-page-scripts>`, and :doc:`dependency injection <dependency-injection>` providers.
 
 Protocol.
    Implement a runtime contract.
@@ -27,7 +27,7 @@ Protocol.
 
 Strategy.
    Swap an internal algorithm.
-   Used for static deduplication, the JS context conflict policy, the URL resolver, the dependency resolver, and the component template loader.
+   Used for static deduplication, the JS context conflict policy, the URL resolver, the dependency resolver, the component template loader, and the response shaper of a form backend.
    A strategy is named by a dotted path in settings and satisfies the contract its settings key declares.
 
 Signal.
@@ -36,7 +36,11 @@ Signal.
 
 Port.
    Replace the implementation one subsystem calls another through.
-   Used for the nine slots the table under Ports lists, one for each place a subsystem reaches another.
+   Used for the slots the table under Ports lists, one for each place a subsystem reaches another.
+
+Participant.
+   Take part in every page request.
+   Used for the client router, deferred boundaries, the partial protocol, and the transaction policy, and open to a project the same way.
 
 Backends
 --------
@@ -53,7 +57,7 @@ Subclass the base class listed for its family and register the dotted path in ``
      - Base class
    * - URL routing
      - ``PAGE_BACKENDS``
-     - ``next.urls.RouterBackend``
+     - ``next.urls.PageBackend``
    * - Components
      - ``COMPONENT_BACKENDS``
      - ``next.components.ComponentsBackend``
@@ -80,7 +84,7 @@ Subclass the base class listed for its family and register the dotted path in ``
      - ``next.realtime.BrokerBackend``
    * - Ticket binding
      - ``REALTIME["TICKET_BINDING"]``
-     - ``next.realtime.TicketBinding``
+     - ``next.identity.TicketBinding``
    * - Development server
      - ``DEV_SERVER``
      - ``next.server.asgi.ASGIServer``
@@ -281,6 +285,9 @@ The framework calls the strategy at a well known point in the pipeline.
    * - JS context conflict policy
      - ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS``
      - ``FirstWinsPolicy``
+   * - Form response shaper
+     - ``SHAPER`` in each form action backend ``OPTIONS``
+     - ``next.partial.FormShaper``
    * - URL resolver
      - ``URL_RESOLVER`` at the top level of ``NEXT_FRAMEWORK``
      - ``next.urls.TrieURLResolver``
@@ -298,7 +305,7 @@ Use a strategy when the customisation is a single algorithm rather than a comple
 
 Three strategies are configured at the top level of ``NEXT_FRAMEWORK`` rather than inside a backend ``OPTIONS`` mapping, and the metadata renderer inside the ``METADATA`` scope.
 ``URL_RESOLVER``, ``DEPENDENCY_RESOLVER``, ``COMPONENT_TEMPLATE_LOADER``, and ``METADATA["RENDERER"]`` each hold a single dotted path, and ``next.backends.resolve_setting_class`` reads all four against the base class its key declares, the last one through its ``scope`` argument.
-A value that is not a string is dropped by the settings merge for the three top-level keys, which leaves the default in place, and :ref:`next.E076 <ref-system-checks>` reports it on ``manage.py check``, while a non-string ``METADATA["RENDERER"]`` reaches the loader and is reported as ``next.E107``.
+A value that is not a string is dropped by the settings merge for the three top-level keys, which leaves the default in place, and ``next.E076`` reports it on ``manage.py check``, while a non-string ``METADATA["RENDERER"]`` reaches the loader and is reported as ``next.E107``.
 
 ``URL_RESOLVER`` names a ``django.urls.resolvers.URLResolver`` subclass, and the framework builds one instance of that class around the lazy list of page and form-action patterns.
 Swap it to change how a request path is matched against those patterns, for example to trade the default trie for a different index.
@@ -340,25 +347,25 @@ A port is the narrow surface one subsystem calls another through.
      - What it answers
    * - ``action_owners_slot``
      - Answers the ``page.py`` of every directory whose files declare an action.
+   * - ``deferrals_slot``
+     - Takes the deferred component calls of a render with no sink of its own, and runs and splices their jobs once it ends.
    * - ``form_routes_slot``
      - Answers the URL patterns of every form backend.
    * - ``page_scan_slot``
      - Executes every routed ``page.py`` and answers the ones that loaded.
-   * - ``partial_shaper_slot``
-     - Reads the partial intent off a request and shapes page and form responses into envelopes.
-   * - ``realtime_negotiation_slot``
-     - Answers the transports and the partial content types the ``$realtime`` entry of a page carries.
-   * - ``router_access_slot``
-     - Builds router backends and managers, answers the URL pattern parser, and the kwargs of a page trail.
-   * - ``page_scripts_slot``
-     - Answers the head scripts and the ``$scripts`` and ``$consent`` payload entries of one render.
+   * - ``route_access_slot``
+     - Builds page backends and managers, answers the URL pattern parser, and the kwargs of a page trail.
+   * - ``router_stamp_slot``
+     - Sets the ``X-Next-Router`` directives of the client router, a login or logout clear among them, on a form or action response.
+   * - ``zone_marking_slot``
+     - Opens the active-link pass over the zone HTML an action response renders, for the page the form lives on.
    * - ``seo_routes_slot``
      - Answers the sitemap and robots routes the lazy urlpatterns append, each only while its source exists.
    * - ``static_assets_slot``
      - Creates a collector, discovers page and component assets, and injects the placeholder tags.
 
-``NextFrameworkConfig.ready()`` binds all nine, ahead of every step that imports user code.
-Replace one by subclassing the shipped implementation and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
+``NextFrameworkConfig.ready()`` binds every slot in the table, ahead of every step that imports user code.
+Replace one by subclassing the shipped implementation, or wrapping it where the implementation is a function, and calling ``set`` on its slot from the ``ready()`` of an application listed after ``next`` in ``INSTALLED_APPS``, since a slot holds one implementation and the last binding wins.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -390,6 +397,116 @@ A backend family is configured in ``NEXT_FRAMEWORK`` and reloads itself when the
 Reach for a port only when no backend, strategy, or protocol covers the seam, because the protocols are narrower than the subsystems behind them and a replacement takes on whatever the shipped implementation was doing for every caller.
 See :doc:`/content/ref/ports` for the shipped implementation and the method contract of each.
 
+.. _topics-extending-page-scripts:
+
+Page script providers
+---------------------
+
+A page script provider adds tags to the head of every page, entries to its init payload, and declared bundles to its scripts.
+The release, the realtime offer, the stream flag, the client router and the third-party scripts are providers themselves, and the static injector knows none of them by name.
+A provider implements ``next.ports.PageScripts``, a ``name``, a ``priority``, the payload ``keys`` it writes, ``applies`` and ``share``, and registers on ``next.ports.page_scripts`` from the ``ready()`` of its application.
+
+.. code-block:: python
+   :caption: notes/scripts.py
+
+   import json
+
+   from next.ports import ScriptRender, ScriptShare
+
+   class BuildScripts:
+       name = "notes-build"
+       priority = 600
+       keys = frozenset({"$build"})
+
+       def applies(self) -> bool:
+           return True
+
+       def share(self, render: ScriptRender, /) -> ScriptShare:
+           return ScriptShare(
+               head='<meta name="notes-build" content="7">',
+               shared=f'"$build":{json.dumps("7")}',
+           )
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from django.apps import AppConfig
+   from notes.scripts import BuildScripts
+
+   from next.ports import page_scripts
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           page_scripts.register(BuildScripts())
+
+Every page that loads the runtime now carries ``"$build":"7"`` after the shipped entries, and its head carries the meta tag after theirs.
+``shared`` holds entries that are the same for every request of one configuration, already encoded, and the injector escapes them once.
+A value of one request goes in ``entries`` instead, which the page context serializer encodes.
+The ``keys`` keep page context from writing ``$build``, and ``applies`` is read once per settings load, so a provider that a setting turns off answers ``False`` there and costs a page nothing.
+The shipped providers rank from 100 to 500, so a ``priority`` above 500 places a provider after all of them, and a provider registered under a shipped ``name`` replaces it.
+See :doc:`/content/ref/ports` for every part a ``ScriptShare`` carries.
+
+.. _topics-extending-participants:
+
+Lifecycle participants
+----------------------
+
+A participant takes part in the requests a page view answers, beside the client router, deferred boundaries, the partial protocol, and the transaction policy, which are participants themselves.
+It implements ``next.lifecycle.Participant``, a ``name`` and three methods, and registers once from the ``ready()`` of its application.
+``share`` returns a ``next.lifecycle.Share`` naming only the points the participant needs for one page, kind of request, and method, and the page view runs them on every request of that page.
+
+.. code-block:: python
+   :caption: notes/lifecycle.py
+
+   from django.http.response import HttpResponseBase
+
+   from next.lifecycle import Gate, PageCall, PageFacts, Share
+   from next.requests import RequestKind
+
+   def _served_by(call: PageCall, response: HttpResponseBase) -> HttpResponseBase:
+       response["X-Served-By"] = "notes"
+       return response
+
+
+   _DOCUMENT = Share(finish=_served_by)
+
+
+   class ServedBy:
+       name = "notes.served-by"
+
+       def claim(self) -> None:
+           return None
+
+       def gate(self, kind: RequestKind) -> Gate | None:
+           return None
+
+       def share(self, facts: PageFacts) -> Share | None:
+           return _DOCUMENT if facts.kind is RequestKind.PAGE else None
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from django.apps import AppConfig
+   from notes.lifecycle import ServedBy
+
+   from next.lifecycle import register_participant
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           register_participant(ServedBy())
+
+``Share`` holds five optional points.
+``around`` wraps the serve after admission, ``block`` wraps the render, ``serve`` answers the kind in place of the page render, ``respond`` turns the HTML into a response, and ``finish`` passes every response on its way out.
+The innermost participant naming ``serve`` or ``respond`` is the one that answers.
+A ``Gate`` returned from ``gate`` runs before the page is read, its ``admit`` answering a request that needs no render and its ``refuse`` shaping an access refusal.
+``share`` and ``gate`` run once per page or kind, not per request, and a ``share`` that returns ``None`` keeps a page on the bare render, so a participant decides there whether it applies rather than on every request.
+A participant registered after ``next`` runs its blocks inside the framework's and its finish first, and registering one under a name already taken puts it in that place.
+See :ref:`internals-request-lifecycle-participants` for the steps every request runs.
+
 .. _topics-failure-containment:
 
 Failure containment
@@ -398,7 +515,7 @@ Failure containment
 Project and third-party code runs inside the framework on every request, a ``@page.metadata`` callable, a callable ``cache``, a sitemap items callable, a ``rules`` callable, a backend, a serializer, or a settings callable.
 Every area applies one policy when such code raises, and the pages that document each callable state only what its failure answers, a 404, a 503, a ``noindex``, or a fallback value.
 
-- ``Http404``, ``PermissionDenied``, ``SuspiciousOperation``, and ``BadRequest`` raised inside a view pass through in every mode, so Django answers 404, 403, or 400 as from any view.
+- ``Http404``, ``PermissionDenied``, ``SuspiciousOperation``, ``BadRequest``, and the ``MultiPartParserError`` of a malformed upload raised inside a view pass through in every mode, so Django answers 404, 403, or 400 as from any view.
   Code that runs outside any view, such as URL resolution or a middleware, contains them like any other failure.
 - Under ``DEBUG`` or ``NEXT_FRAMEWORK["STRICT_LOADING"]``, which ``next.conf.fail_loudly`` reads together, any other exception propagates with a note naming the source and the fix, so the technical error page points at the failing line.
 - Otherwise the failure is contained.
@@ -424,7 +541,7 @@ A call site outside any view passes ``pass_through=()``, and ``detail`` draws me
 Choosing between mechanisms
 ---------------------------
 
-- **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``PAGE_BACKENDS``.
+- **Add a new URL pattern source.** Subclass ``PageBackend`` and register it under ``PAGE_BACKENDS``.
 - **Change how a path is matched against the built patterns.** Name a ``URLResolver`` subclass under ``URL_RESOLVER``.
 - **Change how an injected parameter is filled.** Name a ``DependencyResolver`` subclass under ``DEPENDENCY_RESOLVER``.
   See :doc:`dependency-injection`.
@@ -446,6 +563,8 @@ Choosing between mechanisms
 - **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.
 - **Watch extra directories during development.** Call ``register_autoreload_watch_spec``.
   See *Autoreload watch specs* above.
+- **Act on every page request, its response included.** Register a participant with ``next.lifecycle.register_participant``.
+  See *Lifecycle participants* above.
 - **Change what one subsystem hands another.** Subclass the shipped port implementation and ``set`` it on its slot from ``AppConfig.ready``.
   See *Ports* above.
 
@@ -483,7 +602,7 @@ Position the app relative to ``next`` in ``INSTALLED_APPS`` by what it registers
    ]
 
 For every registry on this page the position does not change the outcome, as *App order in* ``INSTALLED_APPS`` above explains.
-A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds all nine slots and the last binding wins, so a package that replaces a port has to be listed after ``next``.
+A port replacement is the case that does, because ``NextFrameworkConfig.ready()`` binds every port slot and the last binding wins, so a package that replaces a port has to be listed after ``next``.
 A package that reuses an existing kind or placeholder name with different parameters fails at startup either way, and its position only decides which ``ready`` call raises.
 
 Declare the dependency on next.dj under its distribution name, and constrain it from below only.
@@ -515,4 +634,5 @@ See also
    :doc:`dependency-injection` for the provider registry and custom markers.
    :doc:`/content/howto/extend-a-default-backend` for the helper details.
    :doc:`/content/ref/conf` for the configuration surface.
+   :doc:`/content/ref/system-checks` for every check id this page names.
    :doc:`/content/internals/index` for how each subsystem composes.

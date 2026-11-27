@@ -6,17 +6,11 @@ from typing import TYPE_CHECKING, Final
 
 from django.conf import settings
 from django.conf.urls.i18n import is_language_prefix_patterns_used
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.diagnostics import Capture
 from next.seo.backends import PageTreeSitemapBackend, backend_path
 from next.seo.manager import seo_manager

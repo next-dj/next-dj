@@ -6,20 +6,27 @@ from io import StringIO
 import pytest
 from catalog import services as catalog_services
 from catalog.demo import CATEGORIES
+from catalog.deps import product_cards
 from catalog.landing import FAQ, LEAD_ZONE
 from catalog.models import Category, Lead, Product
 from catalog.zones import CATEGORY_ZONES, LISTING_ZONES, zone_target
 from django.core.cache import cache
 from django.core.checks import run_checks
 from django.core.management import call_command
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from next.testing import (
     NextClient,
     assert_metadata,
+    boundary_errors,
+    boundary_gate,
     envelope_of,
     find_anchor,
     find_form,
     init_payload,
+    override_next_settings,
+    parallel_boundaries,
     parse_sitemap,
 )
 
@@ -33,10 +40,25 @@ JSONLD_PATTERN = re.compile(r'<script type="application/ld\+json">(.*?)</script>
 KEY_PATTERN = re.compile(r'data-next-key="([^"]+)"')
 FILTER_FORM_PATTERN = re.compile(r"<form method=\"get\"[\s\S]*?>")
 MORE_ZONE_PATTERN = re.compile(
-    r'<div data-next-zone="catalog-more"[^>]*>([\s\S]*?)</div>'
+    r'<div data-next-zone="catalog-results-more"[^>]*>([\s\S]*?)</div>'
+)
+LESS_ZONE_PATTERN = re.compile(
+    r'<div data-next-zone="catalog-results-less"[^>]*>([\s\S]*?)</div>'
 )
 
 LISTING_TARGET = zone_target(LISTING_ZONES)
+PARTIAL_VARY = frozenset(
+    {
+        "X-Next-Request",
+        "X-Next-Zone",
+        "X-Next-Merge",
+        "X-Next-Version",
+        "X-Next-Boundary",
+        "X-Next-Navigate",
+        "X-Next-Layouts",
+        "X-Next-Prefetch",
+    }
+)
 CATEGORY_TARGET = zone_target(CATEGORY_ZONES)
 
 
@@ -55,9 +77,19 @@ def _slug_set(body: str) -> set[str]:
     return set(PRODUCT_SLUG_PATTERN.findall(body))
 
 
+def _vary(response) -> set[str]:
+    """Return the header names the `Vary` of a response lists."""
+    return {name.strip() for name in response["Vary"].split(",")}
+
+
 def _more_zone(body: str) -> str:
-    """Return the rendered body of the `catalog-more` zone."""
+    """Return the rendered body of the `catalog-results-more` zone."""
     return MORE_ZONE_PATTERN.search(body).group(1)
+
+
+def _less_zone(body: str) -> str:
+    """Return the rendered body of the `catalog-results-less` zone."""
+    return LESS_ZONE_PATTERN.search(body).group(1)
 
 
 def _cache_keys() -> list[str]:
@@ -243,6 +275,89 @@ class TestActiveFilterChip:
         assert "data-active-filter" not in body
 
 
+PRODUCT_URL = "/catalog/clothing/item-07/"
+
+
+def _picks(by: str) -> list[int]:
+    """Return the keys the rail `by` picks beside the product of `PRODUCT_URL`."""
+    product = Product.objects.get(slug="item-07")
+    return list(Product.objects.picks_for(product, by=by))
+
+
+@pytest.fixture()
+def batches(monkeypatch) -> list[list[int]]:
+    """Record the keys of every call the product loader makes to its batch."""
+    calls: list[list[int]] = []
+    batch = product_cards.batch
+
+    def recorded(keys):
+        calls.append(sorted(keys))
+        return batch(keys)
+
+    monkeypatch.setattr(product_cards, "batch", recorded)
+    return calls
+
+
+class TestProductRails:
+    """Two rails stream in beside the product and load their cards through one batch."""
+
+    def test_the_shell_ships_a_skeleton_per_rail(self, next_client, demo_data) -> None:
+        streamed = next_client.get_stream(PRODUCT_URL)
+        assert streamed.shell.count("data-rail-skeleton") == 2
+        assert "Loading At a similar price" in streamed.shell
+        assert "data-product-card" not in streamed.shell
+
+    def test_each_rail_settles_in_a_chunk_of_its_own(
+        self, next_client, demo_data
+    ) -> None:
+        streamed = next_client.get_stream(PRODUCT_URL)
+        assert [chunk.state for chunk in streamed.chunks] == ["ready", "ready"]
+        final = streamed.final_html()
+        assert 'data-rail="price"' in final
+        assert 'data-rail="category"' in final
+        shown = len(_picks("price")) + len(_picks("category"))
+        assert final.count("data-product-card") == shown
+
+    def test_a_rail_past_its_timeout_gives_way_to_its_error_ui(
+        self, next_client, demo_data
+    ) -> None:
+        with boundary_errors("render"), boundary_gate(component="rail"):
+            streamed = next_client.get_stream(PRODUCT_URL)
+        assert [chunk.kind for chunk in streamed.chunks] == ["timeout", "timeout"]
+        final = streamed.final_html()
+        assert final.count("These picks took too long to find") == 2
+        assert "data-next-retry" in final
+        assert "data-product-card" not in final
+
+    def test_the_error_ui_of_a_rail_names_its_title(
+        self, next_client, demo_data
+    ) -> None:
+        with boundary_errors("render"), boundary_gate(component="rail"):
+            streamed = next_client.get_stream(PRODUCT_URL)
+        final = streamed.final_html()
+        assert ">More in this category</h2>" in final
+        assert ">At a similar price</h2>" in final
+
+    def test_a_rail_with_nothing_in_stock_says_so(self, next_client, demo_data) -> None:
+        Product.objects.exclude(slug="item-07").update(in_stock=False)
+        body = next_client.get(PRODUCT_URL).content.decode()
+        assert body.count("Nothing else in stock yet.") == 2
+
+    @pytest.mark.django_db(transaction=True)
+    def test_the_rails_on_the_pool_share_one_batch(
+        self, next_client, demo_data, batches
+    ) -> None:
+        with parallel_boundaries(), override_next_settings(LOADER={"WINDOW": "1s"}):
+            next_client.get_stream(PRODUCT_URL)
+        assert batches == [sorted(set(_picks("price")) | set(_picks("category")))]
+
+    def test_the_rails_on_the_request_thread_load_one_after_the_other(
+        self, next_client, demo_data, batches
+    ) -> None:
+        next_client.get(PRODUCT_URL)
+        assert batches == [sorted(_picks("category")), sorted(_picks("price"))]
+
+
 class TestInheritContext:
     """Cover the `inherit_context=True` pathway."""
 
@@ -256,7 +371,7 @@ class TestInheritContext:
 
 
 class TestCacheHit:
-    """Cover the LocMem cache hit path of `cached_search`."""
+    """Cover the LocMem cache hit path of `cached_count`."""
 
     def test_two_identical_requests_share_one_cache_key(
         self, next_client, demo_data
@@ -273,6 +388,30 @@ class TestCacheHit:
         next_client.get("/catalog/?brand=Acme")
         next_client.get("/catalog/?brand=Globex")
         assert len(_cache_keys()) == 2
+
+    def test_every_window_of_a_search_shares_one_cache_entry(
+        self, next_client, demo_data
+    ) -> None:
+        """Count a search once for each page, each restored window and each sort."""
+        for query in (
+            "",
+            "?page=2",
+            "?page=3&_restore=page",
+            "?page=999",
+            "?sort=name",
+        ):
+            next_client.get(f"/catalog/{query}")
+        assert len(_cache_keys()) == 1
+
+    def test_a_window_reads_only_its_own_rows(self, next_client, demo_data) -> None:
+        """Read one page through `LIMIT` once the count sits in the cache."""
+        next_client.get("/catalog/electronics/")
+        with CaptureQueriesContext(connection) as captured:
+            next_client.get("/catalog/electronics/?page=2")
+        reads = [q["sql"] for q in captured if 'FROM "catalog_product"' in q["sql"]]
+        listing = [sql for sql in reads if "LIMIT 7 OFFSET 6" in sql]
+        assert len(listing) == 1
+        assert not [sql for sql in reads if "COUNT(" in sql]
 
 
 class TestResultsZone:
@@ -322,22 +461,25 @@ class TestResultsZone:
         assert "X-Next-Zone" in vary
         assert "X-Next-Merge" in vary
 
-    def test_full_page_declares_the_same_vary_set(self, next_client, demo_data) -> None:
-        full = next_client.get("/catalog/")
-        zoned = next_client.get_zones("/catalog/", "catalog-results")
-        declared = {name.strip() for name in zoned["Vary"].split(",")}
-        assert declared <= {name.strip() for name in full["Vary"].split(",")}
+    def test_full_page_declares_the_same_partial_vary_set(
+        self, next_client, demo_data
+    ) -> None:
+        full = _vary(next_client.get("/catalog/"))
+        zoned = _vary(next_client.get_zones("/catalog/", "catalog-results"))
+        assert full >= PARTIAL_VARY
+        assert zoned >= PARTIAL_VARY
+        assert zoned - full == {"Accept", "X-Next-Origin"}
 
 
 class TestInfiniteScrollAppend:
-    """Cover the revealed sentinel and the append merge it drives."""
+    """Cover the scroll-triggered sentinel and the append merge it drives."""
 
     def test_first_page_renders_a_sentinel_link(self, next_client, demo_data) -> None:
         body = next_client.get("/catalog/").content.decode()
-        assert 'id="results-sentinel"' in body
+        assert 'data-next-key="catalog-results-more"' in body
         assert 'data-next-merge="append"' in body
-        assert 'data-next-lazy="revealed"' in body
-        assert 'data-next-target="catalog-results,catalog-more"' in body
+        assert 'data-next-defer="visible"' in body
+        assert 'data-next-target="catalog-results,catalog-results-more"' in body
         assert "page=2" in body
 
     def test_sentinel_lives_outside_the_results_zone(
@@ -346,21 +488,21 @@ class TestInfiniteScrollAppend:
         body = next_client.get("/catalog/").content.decode()
         results = body.split('data-next-zone="catalog-results"', 1)[1]
         zone_body = results.split("</ul>", 1)[0]
-        assert "results-sentinel" not in zone_body
-        assert 'data-next-zone="catalog-more"' in body
+        assert "catalog-results-more" not in zone_body
+        assert 'data-next-zone="catalog-results-more"' in body
 
     def test_append_grows_results_and_replaces_the_sentinel(
         self, next_client, demo_data
     ) -> None:
         response = next_client.get_zones(
             "/catalog/?page=2",
-            "catalog-results,catalog-more",
+            "catalog-results,catalog-results-more",
             HTTP_X_NEXT_MERGE="append",
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["append", "append"]
-        assert envelope.zone_targets() == ["catalog-results", "catalog-more"]
+        assert envelope.zone_targets() == ["catalog-results", "catalog-results-more"]
 
     def test_append_to_results_carries_rows_only_not_the_sentinel(
         self, next_client, demo_data
@@ -368,15 +510,15 @@ class TestInfiniteScrollAppend:
         envelope = envelope_of(
             next_client.get_zones(
                 "/catalog/?page=2",
-                "catalog-results,catalog-more",
+                "catalog-results,catalog-results-more",
                 HTTP_X_NEXT_MERGE="append",
             )
         )
         results_html = envelope.html_for_zone("catalog-results")
-        assert "results-sentinel" not in results_html
+        assert "catalog-results-more" not in results_html
         assert KEY_PATTERN.findall(results_html)
-        more_html = envelope.html_for_zone("catalog-more")
-        assert 'id="results-sentinel"' in more_html
+        more_html = envelope.html_for_zone("catalog-results-more")
+        assert 'data-next-key="catalog-results-more"' in more_html
         assert "page=3" in more_html
 
     def test_appended_rows_do_not_overlap_the_first_page(
@@ -400,11 +542,11 @@ class TestInfiniteScrollAppend:
         self, next_client, demo_data
     ) -> None:
         more = _more_zone(next_client.get("/catalog/?page=999").content.decode())
-        assert 'id="results-sentinel"' in more
+        assert 'data-next-key="catalog-results-more"' in more
         assert "data-catalog-end" in more
         assert "<a" not in more
         assert "data-next-merge" not in more
-        assert "data-next-lazy" not in more
+        assert "data-next-defer" not in more
 
     def test_last_page_append_keeps_the_sentinel_id_on_the_end_marker(
         self, next_client, demo_data
@@ -412,21 +554,29 @@ class TestInfiniteScrollAppend:
         envelope = envelope_of(
             next_client.get_zones(
                 "/catalog/?page=999",
-                "catalog-results,catalog-more",
+                "catalog-results,catalog-results-more",
                 HTTP_X_NEXT_MERGE="append",
             )
         )
-        more_html = envelope.html_for_zone("catalog-more")
-        assert 'id="results-sentinel"' in more_html
+        more_html = envelope.html_for_zone("catalog-results-more")
+        assert 'data-next-key="catalog-results-more"' in more_html
         assert "data-catalog-end" in more_html
         assert "data-next-merge" not in more_html
         assert "page=" not in more_html
+
+    def test_the_listing_grows_on_scroll_without_a_pager(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/").content.decode()
+        assert 'data-next-zone="catalog-pager"' not in body
 
     def test_changing_the_query_re_morphs_both_zones(
         self, next_client, demo_data
     ) -> None:
         envelope = envelope_of(
-            next_client.get_zones("/catalog/?q=novel", "catalog-results,catalog-more")
+            next_client.get_zones(
+                "/catalog/?q=novel", "catalog-results,catalog-results-more"
+            )
         )
         assert envelope.op_verbs() == ["morph", "morph"]
 
@@ -517,7 +667,7 @@ class TestPresetFilterPushUrl:
                 partial=LISTING_TARGET,
             )
         )
-        more = envelope.html_for_zone("catalog-more")
+        more = envelope.html_for_zone("catalog-results-more")
         assert "sort=price_asc" in more
 
     def test_non_partial_apply_falls_back_to_a_redirect(
@@ -543,7 +693,7 @@ class TestFilterZoneScope:
     ) -> None:
         body = next_client.get("/catalog/electronics/").content.decode()
         assert f'data-next-target="{CATEGORY_TARGET}"' in _filter_form_tag(body)
-        assert "catalog-more" not in body
+        assert "catalog-results-more" not in body
         for zone in CATEGORY_ZONES:
             assert f'data-next-zone="{zone}"' in body
 
@@ -570,6 +720,111 @@ class TestFilterZoneScope:
         assert KEY_PATTERN.findall(results)
 
 
+class TestCategoryPager:
+    """A category listing pages through the same `NumberPager` with plain links."""
+
+    def test_the_first_page_links_forward_only(self, next_client, demo_data) -> None:
+        body = next_client.get("/catalog/electronics/").content.decode()
+        assert "Page 1 of 2" in body
+        assert "7 products" in body
+        assert len(_slug_set(body)) == 6
+        assert find_anchor(body, href="?page=2", text="Next")
+        with pytest.raises(LookupError):
+            find_anchor(body, text="Previous")
+
+    def test_the_last_page_links_back_only(self, next_client, demo_data) -> None:
+        body = next_client.get("/catalog/electronics/?page=2").content.decode()
+        assert "Page 2 of 2" in body
+        assert len(_slug_set(body)) == 1
+        assert find_anchor(body, href="?page=1", text="Previous")
+        with pytest.raises(LookupError):
+            find_anchor(body, text="Next")
+
+    def test_the_pager_keeps_the_active_filters(self, next_client, demo_data) -> None:
+        body = next_client.get("/catalog/electronics/?sort=name").content.decode()
+        assert find_anchor(body, href="?sort=name&page=2", text="Next")
+
+    def test_a_page_past_the_last_shows_no_rows_and_no_position(
+        self, next_client, demo_data
+    ) -> None:
+        body = next_client.get("/catalog/electronics/?page=9").content.decode()
+        assert not _slug_set(body)
+        assert "Page " not in body
+        with pytest.raises(LookupError):
+            find_anchor(body, text="Next")
+
+
+class TestWindowedListing:
+    """The sentinel prunes and syncs the address, a reload restores the window."""
+
+    def test_the_sentinel_prunes_and_replaces_the_address(
+        self, next_client, demo_data
+    ) -> None:
+        more = _more_zone(next_client.get("/catalog/").content.decode())
+        assert 'data-next-prune="120"' in more
+        assert 'data-next-url="replace"' in more
+
+    def test_a_restored_window_renders_every_page_up_to_it(
+        self, next_client, demo_data
+    ) -> None:
+        restored = next_client.get("/catalog/?page=3&_restore=page").content.decode()
+        alone = next_client.get("/catalog/?page=3").content.decode()
+        assert len(_slug_set(restored)) == 18
+        assert _slug_set(alone) < _slug_set(restored)
+        assert "page=4" in _more_zone(restored)
+
+    def test_a_restored_window_names_the_page_each_batch_falls_back_to(
+        self, next_client, demo_data
+    ) -> None:
+        restored = _more_zone(
+            next_client.get("/catalog/?page=3&_restore=page").content.decode()
+        )
+        assert 'data-next-back="3"' in restored
+        assert 'data-next-backs="1 2"' in restored
+        single = _more_zone(next_client.get("/catalog/?page=3").content.decode())
+        assert 'data-next-back="3"' in single
+        assert "data-next-backs" not in single
+
+    def test_the_first_page_holds_the_earlier_link_hidden(
+        self, next_client, demo_data
+    ) -> None:
+        for url in ("/catalog/", "/catalog/?page=3&_restore=page"):
+            less = _less_zone(next_client.get(url).content.decode())
+            assert less.count("<a") == 1
+            assert " hidden" in less
+
+    def test_a_deep_link_offers_the_page_before_it(
+        self, next_client, demo_data
+    ) -> None:
+        less = _less_zone(next_client.get("/catalog/?page=3").content.decode())
+        assert 'href="?page=2"' in less
+        assert 'data-next-target="catalog-results,catalog-results-less"' in less
+        assert 'data-next-merge="prepend"' in less
+        assert "Show earlier results" in less
+
+    def test_the_earlier_page_prepends_and_moves_the_link_up(
+        self, next_client, demo_data
+    ) -> None:
+        envelope = envelope_of(
+            next_client.get_zones(
+                "/catalog/?page=2",
+                "catalog-results,catalog-results-less",
+                HTTP_X_NEXT_MERGE="prepend",
+            )
+        )
+        assert envelope.op_verbs() == ["prepend", "prepend"]
+        assert 'href="?page=1"' in envelope.html_for_zone("catalog-results-less")
+
+    def test_a_new_search_resets_the_earlier_link(self, next_client, demo_data) -> None:
+        envelope = envelope_of(
+            next_client.get_zones("/catalog/?q=Item", LISTING_TARGET)
+        )
+        less = envelope.html_for_zone("catalog-results-less")
+        assert less.count("<a") == 1
+        assert 'href="?q=Item"' in less
+        assert " hidden>" in less
+
+
 class TestLiveFilterMorphsTheWholeListing:
     """A live filter GET refreshes the count, the pager, and the chip strip."""
 
@@ -583,7 +838,7 @@ class TestLiveFilterMorphsTheWholeListing:
         self, next_client, demo_data
     ) -> None:
         envelope = envelope_of(
-            next_client.get_zones("/catalog/?q=iPhone", LISTING_TARGET)
+            next_client.get_zones("/catalog/electronics/?q=iPhone", CATEGORY_TARGET)
         )
         pager = envelope.html_for_zone("catalog-pager")
         assert "Page 1 of 1" in pager
@@ -833,6 +1088,7 @@ class TestLanding:
         assert init_payload(response.content.decode())["$csrf"] == {
             "header": "X-Csrftoken",
             "url": "/_next/csrf/",
+            "cookie": "csrftoken",
         }
 
 

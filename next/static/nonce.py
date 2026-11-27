@@ -1,16 +1,15 @@
 """Resolve the CSP nonce of a request once, for every tag the framework renders."""
 
-import functools
 from collections.abc import Callable
 from typing import Final
 
-from django.conf import settings
 from django.http import HttpRequest
 
+from next.caches import FRAMEWORK, memo
 from next.conf import next_framework_settings
 from next.conf.sentinels import UNSET
 from next.csrf import CSP_NONCE_ATTR, NONCE_ATTR, nonce_minted
-from next.utils import middleware_listed
+from next.utils import middleware_installed
 
 
 CSP_MIDDLEWARE: Final = (
@@ -39,7 +38,7 @@ def request_nonce(request: HttpRequest) -> str | None:
     return None if value is None else str(value) or None
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def nonce_enabled() -> bool:
     """Return whether `CSP_NONCE` allows framework tags to carry the request nonce."""
     return bool(next_framework_settings.CSP_NONCE)
@@ -49,13 +48,7 @@ def nonce_active() -> bool:
     """Return whether tags get a nonce, which needs `CSP_NONCE` and a CSP middleware."""
     if not nonce_enabled():
         return False
-    middleware = getattr(settings, "MIDDLEWARE", None) or ()
-    return any(middleware_listed(middleware, path) for path in CSP_MIDDLEWARE)
-
-
-def forget_nonce_setting(**kwargs: object) -> None:
-    """Clear the memoised `CSP_NONCE` value, so a settings reload takes effect."""
-    nonce_enabled.cache_clear()
+    return any(map(middleware_installed, CSP_MIDDLEWARE))
 
 
 def resolve_nonce(request: HttpRequest | None) -> str | None:
@@ -78,7 +71,6 @@ __all__ = [
     "CSP_NONCE_ATTR",
     "NONCE_ATTR",
     "NonceResolver",
-    "forget_nonce_setting",
     "nonce_active",
     "nonce_enabled",
     "nonce_minted",

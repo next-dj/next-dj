@@ -82,7 +82,7 @@ The layout, the contexts, the access declarations, and the breadcrumbs of ``page
        return list(Operation.objects.filter(wallet=wallet))
 
 The route names the kwarg after the model, so ``DObject[Wallet]`` loads the row through ``visible_to(scope)`` and both contexts share one query, see :ref:`topics-di-dobject`.
-A directory under ``operations/`` must not capture ``wallet`` again, which ``manage.py check`` reports as :ref:`next.E152 <ref-system-checks>`.
+A directory under ``operations/`` must not capture ``wallet`` again, which ``manage.py check`` reports as ``next.E152``.
 
 Declare the access of each tree
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

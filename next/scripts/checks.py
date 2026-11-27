@@ -8,15 +8,9 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib.staticfiles import finders
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import next_framework_settings
 from next.consent.checks import category_list_problem
 from next.consent.manager import consent_categories, consent_configured, server_render

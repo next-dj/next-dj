@@ -58,6 +58,7 @@ Write the test.
        assert Note.objects.filter(title="First").exists()
 
 ``NextClient`` does not enforce CSRF by default, matching Django's test client, so the POST needs no token.
+The test takes the ``db`` fixture even for an action that writes nothing, because the action runs inside a transaction by default, see :ref:`the opt-out <ref-testing-action-transactions>`.
 
 Test the failure path
 ~~~~~~~~~~~~~~~~~~~~~

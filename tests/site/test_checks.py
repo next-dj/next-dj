@@ -8,6 +8,7 @@ from django.utils.translation import gettext_lazy
 
 from next.site.checks import check_site_settings, check_site_url_for_deploy
 from tests.support import check_ids, site_settings
+from tests.support.checks import written
 
 
 SITES_APPS = [*settings.INSTALLED_APPS, "django.contrib.sites"]
@@ -75,7 +76,7 @@ class TestSiteSettings:
             assert check_site_settings() == []
 
     def test_an_absent_or_mistyped_scope_is_left_to_the_conf_checks(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"SITE": "x"}):
+        with written({"SITE": "x"}):
             assert check_site_settings() == []
         with override_settings(NEXT_FRAMEWORK=[]):
             assert check_site_settings() == []

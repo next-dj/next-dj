@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from django import forms
+from django.db import connection
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 from django.test import RequestFactory
 
@@ -21,6 +22,8 @@ from next.forms.origin import (
 )
 from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
 from next.pages.access import forget_page_access
+from next.transactions import AtomicOverride
+from next.transactions.savepoints import WRITES
 from tests.benchmarks.factories import STAND_IN_PK
 from tests.support import PermissionHolder, QuietHolder, routed
 from tests.support.access import write_guard
@@ -128,6 +131,74 @@ def _action_request(origin: str, **fields: str) -> HttpRequest:
     )
 
 
+def _declared_action(
+    atomic: AtomicOverride | None,
+) -> tuple[RegistryFormActionBackend, ActionMeta]:
+    """Return a backend holding the bench action as a `Meta.atomic` registers it."""
+    backend = RegistryFormActionBackend()
+    backend.register_action(
+        ActionRegistration(
+            name="bench_action",
+            file_path=__file__,
+            scope="shared",
+            handler=_ok_handler,
+            form_class=_BenchForm,
+            atomic=atomic,
+        )
+    )
+    meta = backend.get_meta("bench_action")
+    assert meta is not None
+    return backend, meta
+
+
+def _records_the_block(**kwargs) -> HttpResponseRedirect:
+    """Redirect, naming in the URL whether the handler ran inside a transaction."""
+    return HttpResponseRedirect(f"/?atomic={int(connection.in_atomic_block)}")
+
+
+@pytest.mark.django_db(transaction=True)
+class TestBenchDispatchTransaction:
+    """The transaction a POST opens around its action, against the same POST without.
+
+    `Meta.atomic` reaches the registration as the override passed here.
+    """
+
+    @pytest.mark.parametrize(
+        "atomic",
+        [
+            pytest.param(None, id="default"),
+            pytest.param(AtomicOverride(atomic=True), id="atomic"),
+            pytest.param(AtomicOverride(atomic=False), id="non-atomic"),
+            pytest.param(AtomicOverride(atomic=WRITES), id="writes"),
+        ],
+    )
+    @pytest.mark.benchmark(group="forms.dispatch.atomic")
+    def test_dispatch_valid_form_by_meta_atomic(
+        self, atomic: AtomicOverride | None, benchmark
+    ) -> None:
+        inside = atomic is None or atomic.atomic is True
+        backend, meta = _declared_action(atomic)
+        request = _action_request("/items/42/", name="bench")
+        probe = ActionRegistration(
+            name="probe_action",
+            file_path=__file__,
+            scope="shared",
+            handler=_records_the_block,
+            form_class=_BenchForm,
+            atomic=atomic,
+        )
+        backend.register_action(probe)
+        probed = backend.get_meta("probe_action")
+        assert probed is not None
+        seen = FormActionDispatch.dispatch(backend, request, "probe_action", probed)
+        assert seen.url == f"/?atomic={int(inside)}"
+        response = benchmark(
+            FormActionDispatch.dispatch, backend, request, "bench_action", meta
+        )
+        assert isinstance(response, HttpResponseRedirect)
+
+
+@pytest.mark.django_db(transaction=True)
 class TestBenchDispatchEndToEnd:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_valid_form(self, benchmark) -> None:
@@ -335,6 +406,7 @@ def _tree_post(origin: str) -> HttpRequest:
     )
 
 
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.usefixtures("stand_in_scope")
 class TestBenchDispatchUnderTreeAccess:
     """A valid dispatch of an action whose `page.py` sits under a page tree rule."""

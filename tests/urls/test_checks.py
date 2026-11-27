@@ -18,14 +18,14 @@ from next.forms import RegistryFormActionBackend
 from next.forms.manager import form_action_manager
 from next.forms.uid import reverse_form_action
 from next.testing import override_next_settings, reset_check_caches
-from next.urls import PageRoot, RouterBackend
+from next.urls import PageBackend, PageRoot
 from next.urls.checks import (
     _collect_url_patterns,
     check_framework_routes_reachable,
     check_next_pages_configuration,
     check_reserved_url_parameters,
     check_reverse_name_collisions,
-    check_router_manager,
+    check_route_manager,
     check_url_patterns,
 )
 from tests.support import (
@@ -35,7 +35,7 @@ from tests.support import (
     importable_dir,
     installed_apps,
     isolated_form_registries,
-    patch_checks_router_manager_with_routers,
+    patch_checks_route_manager_with_routers,
     routed,
     write_app,
     write_page,
@@ -54,7 +54,7 @@ def _write_virtual_page(tree: Path, route: str) -> Path:
     return template_file
 
 
-class _TreeRouter(RouterBackend):
+class _TreeRouter(PageBackend):
     """Minimal router stub exposing the multi-tree traversal surface."""
 
     def __init__(
@@ -94,7 +94,7 @@ class _TreeRouter(RouterBackend):
         return roots
 
 
-class _BrokenRouter(RouterBackend):
+class _BrokenRouter(PageBackend):
     """Router stub whose tree listing fails with OSError."""
 
     def generate_urls(self) -> list:
@@ -119,7 +119,7 @@ class TestDoublyMountedTree:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_url_patterns(None)
             routes = [str(pattern.pattern) for pattern in router.generate_urls()]
 
@@ -144,7 +144,7 @@ class TestUrlConflictHint:
             trees.append(tree)
         router = _TreeRouter(root_trees=trees)
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         [error] = [m for m in messages if m.id == "next.E015"]
@@ -165,7 +165,7 @@ class TestCheckUrlPatterns:
         write_page(root_tree, "things/[str:id]")
         router = _TreeRouter(app_trees={"shop": app_tree}, root_trees=[root_tree])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e015 = [m for m in messages if m.id == "next.E015"]
@@ -182,7 +182,7 @@ class TestCheckUrlPatterns:
         write_page(root_tree, "about")
         router = _TreeRouter(app_trees={"shop": app_tree}, root_trees=[root_tree])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e015 = [m for m in messages if m.id == "next.E015"]
@@ -197,7 +197,7 @@ class TestCheckUrlPatterns:
         write_page(tree_b, "blog")
         router = _TreeRouter(root_trees=[tree_a, tree_b])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             path_messages = check_url_patterns(None)
             name_messages = check_reverse_name_collisions(None)
 
@@ -209,7 +209,7 @@ class TestCheckUrlPatterns:
         page_file = write_page(tmp_path, "[a-b]/[a_b]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e028 = [m for m in messages if m.id == "next.E028"]
@@ -223,7 +223,7 @@ class TestCheckUrlPatterns:
         write_page(tmp_path, "user/[id]/post/[slug]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         assert [m.id for m in messages] == []
@@ -233,7 +233,7 @@ class TestCheckUrlPatterns:
         page_file = write_page(tmp_path, "user/[id]/[id]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e028 = [m for m in messages if m.id == "next.E028"]
@@ -247,7 +247,7 @@ class TestCheckUrlPatterns:
         page_file = write_page(tmp_path, "a/[id]/[int:id]/[slug]/[slug]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e028 = [m for m in messages if m.id == "next.E028"]
@@ -262,7 +262,7 @@ class TestCheckUrlPatterns:
         page_file = write_page(tmp_path, "[[a]]/[[b]]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e028 = [m for m in messages if m.id == "next.E028"]
@@ -275,7 +275,7 @@ class TestCheckUrlPatterns:
         write_page(tmp_path, "user/[id]/[id]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = [*check_url_patterns(None), *check_reverse_name_collisions(None)]
 
         assert [m.id for m in messages] == ["next.E028"]
@@ -288,12 +288,12 @@ class TestCheckUrlPatterns:
         write_page(tree_b, "widgets/card")
 
         unskipped = _TreeRouter(root_trees=[tree_a, tree_b])
-        with patch_checks_router_manager_with_routers(routers=[unskipped]):
+        with patch_checks_route_manager_with_routers(routers=[unskipped]):
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         reset_check_caches()
         skipped = _TreeRouter(root_trees=[tree_a, tree_b], components_folder="widgets")
-        with patch_checks_router_manager_with_routers(routers=[skipped]):
+        with patch_checks_route_manager_with_routers(routers=[skipped]):
             assert check_url_patterns(None) == []
 
     def test_a_skip_name_the_router_declares_leaves_the_collection(
@@ -306,14 +306,14 @@ class TestCheckUrlPatterns:
         write_page(tree_b, "drafts/wip")
         router = _TreeRouter(root_trees=[tree_a, tree_b])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             assert any(m.id == "next.E015" for m in check_url_patterns(None))
 
         reset_check_caches()
         skipping = _TreeRouter(
             root_trees=[tree_a, tree_b], skip_names=frozenset({"drafts"})
         )
-        with patch_checks_router_manager_with_routers(routers=[skipping]):
+        with patch_checks_route_manager_with_routers(routers=[skipping]):
             assert check_url_patterns(None) == []
 
 
@@ -326,7 +326,7 @@ class TestCheckReverseNameCollisions:
         write_page(tmp_path, "foo_bar")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_reverse_name_collisions(None)
 
         assert len(messages) == 1
@@ -341,7 +341,7 @@ class TestCheckReverseNameCollisions:
         write_page(tmp_path, "year/month")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_reverse_name_collisions(None)
 
         assert messages == []
@@ -352,7 +352,7 @@ class TestCheckReverseNameCollisions:
         write_page(tmp_path, "a-[x]")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_reverse_name_collisions(None)
 
         assert len(messages) == 1
@@ -367,7 +367,7 @@ class TestCheckReverseNameCollisions:
 
         with (
             override_next_settings(URL_NAME_TEMPLATE="next-{name}"),
-            patch_checks_router_manager_with_routers(routers=[router]),
+            patch_checks_route_manager_with_routers(routers=[router]),
         ):
             messages = check_reverse_name_collisions(None)
 
@@ -377,13 +377,13 @@ class TestCheckReverseNameCollisions:
 
     def test_init_errors_are_left_to_the_router_check(self) -> None:
         """A failed manager initialisation skips quietly, `next.E007` reports it."""
-        init_error = Error("router manager unavailable", id="next.E007")
+        init_error = Error("route manager unavailable", id="next.E007")
 
         with patch(
-            "next.urls.checks.get_router_manager", return_value=(None, [init_error])
+            "next.urls.checks.get_route_manager", return_value=(None, [init_error])
         ):
             messages = check_reverse_name_collisions(None)
-            owned = check_router_manager(None)
+            owned = check_route_manager(None)
 
         assert messages == []
         assert owned == [init_error]
@@ -393,7 +393,7 @@ class TestCheckReverseNameCollisions:
 
         `next.E030` from the pages structure check names it, so it reports once.
         """
-        with patch_checks_router_manager_with_routers(routers=[_BrokenRouter()]):
+        with patch_checks_route_manager_with_routers(routers=[_BrokenRouter()]):
             path_messages = check_url_patterns(None)
             name_messages = check_reverse_name_collisions(None)
 
@@ -412,7 +412,7 @@ class TestReservedUrlParameters:
         write_page(tmp_path, "ok")
         router = file_router(app_dirs=False, dirs=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             reserved = check_reserved_url_parameters(None)
             patterns = check_url_patterns(None)
         routes = [str(pattern.pattern) for pattern in router.generate_urls()]
@@ -426,8 +426,8 @@ class TestReservedUrlParameters:
         assert [m.id for m in patterns] == []
         assert routes == ["ok/"]
 
-    def test_no_router_manager_reports_nothing(self) -> None:
-        with patch("next.urls.checks.get_router_manager", return_value=(None, [])):
+    def test_no_route_manager_reports_nothing(self) -> None:
+        with patch("next.urls.checks.get_route_manager", return_value=(None, [])):
             assert check_reserved_url_parameters(None) == []
 
 
@@ -486,7 +486,7 @@ class TestCollectionFailures:
     def test_a_tree_that_fails_to_walk_is_e016(self, tmp_path) -> None:
         write_page(tmp_path, "about")
         with (
-            patch_checks_router_manager_with_routers(
+            patch_checks_route_manager_with_routers(
                 routers=[_TreeRouter(root_trees=[tmp_path])]
             ),
             patch("next.urls.checks.scan_pages_tree", side_effect=OSError("denied")),
@@ -507,7 +507,7 @@ class TestPagesConfigurationCodes:
 
     def test_non_dict_page_backend_entry_is_e002(self) -> None:
         with override_settings(
-            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["next.urls.FileRouterBackend"]}
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["next.urls.FilePageBackend"]}
         ):
             errors = check_next_pages_configuration()
         assert [e.id for e in errors] == ["next.E002"]
@@ -549,7 +549,7 @@ class TestPagesConfigurationCodes:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": 1,
                         "APP_DIRS": True,
                         "DIRS": [],
@@ -893,7 +893,7 @@ class TestPagesTreeUrlChecks:
         routers = [file_router(app_dirs=True), file_router(app_dirs=False)]
 
         with installed_apps(tmp_path, "audit", urlconf=urlconf):
-            with patch_checks_router_manager_with_routers(routers=routers):
+            with patch_checks_route_manager_with_routers(routers=routers):
                 messages = check_url_patterns(None)
             roots = [root.prefix for router in routers for root in router.page_roots()]
 
@@ -936,7 +936,7 @@ class TestRouteGroupConflict:
         write_page(tmp_path, "(public)/login")
         router = _TreeRouter(root_trees=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_url_patterns(None)
 
         e015 = [m for m in messages if m.id == "next.E015"]

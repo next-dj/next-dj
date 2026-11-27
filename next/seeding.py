@@ -14,7 +14,7 @@ from next.ports import static_assets_slot
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -84,7 +84,7 @@ _ambient_frame: ContextVar[RenderFrame] = ContextVar(
 
 
 @contextmanager
-def ambient_frame(frame: RenderFrame) -> Iterator[None]:
+def ambient_frame(frame: RenderFrame) -> Generator[None]:
     """Publish `frame` for the widgets a binder had no instance to reach.
 
     A formset builds `empty_form` on access, so its widgets are born after the bind.

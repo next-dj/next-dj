@@ -1,18 +1,9 @@
 from pathlib import Path
 
-from tests.support import file_router_config_entry, write_page
+from tests.support.trees import templated_page
 
 
 DESCRIPTION = "A description long enough to pass the audit without any complaint."
-
-
-COMPONENTS = [
-    {
-        "BACKEND": "next.components.FileComponentsBackend",
-        "DIRS": [],
-        "COMPONENTS_DIR": "_components",
-    }
-]
 
 
 NAMED_CALLABLE = """
@@ -35,28 +26,6 @@ def meta() -> dict:
 """
 
 
-def templated_page(directory: Path, source: str, body: str | None = "<p>x</p>") -> Path:
-    """Write a `page.py` of `source` in `directory` beside a `body` template."""
-    return write_page(directory, source=source, body=body)
-
-
-def layout_root(tmp_path: Path) -> Path:
-    """Return a `pages` root in `tmp_path` with an `<html>` layout over every page."""
-    root = tmp_path / "pages"
-    root.mkdir()
-    (root / "layout.djx").write_text("<html>{% template %}</html>")
-    return root
-
-
-def component_template(pages: Path, name: str, body: str) -> Path:
-    """Write the `component.djx` of the component `name` under the `pages` root."""
-    folder = pages / "_components" / name
-    folder.mkdir(parents=True)
-    path = folder / "component.djx"
-    path.write_text(body)
-    return path
-
-
 def metadata_page(directory: Path, metadata: str) -> Path:
     """Write a templated page whose `page.py` holds the `metadata` dict literal."""
     return templated_page(directory, f"metadata = {metadata}\n")
@@ -65,11 +34,3 @@ def metadata_page(directory: Path, metadata: str) -> Path:
 def scope(**metadata: object) -> dict[str, object]:
     """Return the `NEXT_FRAMEWORK` mapping carrying `metadata` as its `METADATA`."""
     return {"METADATA": metadata}
-
-
-def framework(pages: Path) -> dict[str, object]:
-    """Return a `NEXT_FRAMEWORK` routing `pages` with file components enabled."""
-    return {
-        "PAGE_BACKENDS": [file_router_config_entry(pages_dir=pages)],
-        "COMPONENT_BACKENDS": COMPONENTS,
-    }

@@ -1,15 +1,34 @@
+import gc
+import os
+import threading
 from collections import OrderedDict
+from types import SimpleNamespace
 from typing import override
+from unittest.mock import Mock, patch
 
 import pytest
+from django.test import override_settings
 
+from next import caches
 from next.caches import (
     DEFAULT_CACHE_SIZE,
+    FORK,
+    FRAMEWORK,
     PAGE_HEADROOM,
+    ROUTES,
+    SETTINGS,
     BoundedCache,
+    IdentityMemo,
     LruCache,
+    Memo,
     PageCache,
+    Source,
+    instance_dict,
+    memo,
+    pure_cache,
+    sources,
 )
+from next.conf import next_framework_settings
 
 
 class _EmptiedEntries(OrderedDict[str, int]):
@@ -240,3 +259,215 @@ class TestLruCache:
         unhashable: dict[str, str] = {}
         with pytest.raises(TypeError):
             cache.get(unhashable)
+
+
+class TestIdentityMemo:
+    """The memo builds once per key object and again for another object."""
+
+    def test_a_repeat_with_the_same_key_builds_once(self) -> None:
+        memo: IdentityMemo[list[int]] = IdentityMemo()
+        key = object()
+        first = memo.get(key, lambda: [1])
+        assert memo.get(key, lambda: [2]) is first
+
+    def test_an_equal_key_is_not_the_same_key(self) -> None:
+        memo: IdentityMemo[str] = IdentityMemo()
+        memo.get([1], lambda: "first")
+        assert memo.get([1], lambda: "second") == "second"
+
+    def test_a_new_key_replaces_the_held_one(self) -> None:
+        memo: IdentityMemo[str] = IdentityMemo()
+        old = object()
+        memo.get(old, lambda: "old")
+        memo.get(object(), lambda: "new")
+        assert memo.get(old, lambda: "again") == "again"
+
+    def test_forget_builds_again(self) -> None:
+        memo: IdentityMemo[str] = IdentityMemo()
+        key = object()
+        memo.get(key, lambda: "before")
+        memo.forget()
+        assert memo.get(key, lambda: "after") == "after"
+
+
+class _Slotted:
+    """An owner without `__weakref__`, whose reset the source pins."""
+
+    __slots__ = ("calls",)
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def forget(self) -> None:
+        self.calls += 1
+
+
+class _Owner:
+    """An owner a source references weakly through its bound reset."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def forget(self) -> None:
+        self.calls += 1
+
+
+@pytest.fixture()
+def source() -> Source:
+    made = Source("test")
+    yield made
+    caches._SOURCES.remove(made)
+
+
+class TestSource:
+    """A source runs what attached to it on every move, in the order it attached."""
+
+    def test_a_move_advances_the_version_and_runs_each_reset_in_order(
+        self, source: Source
+    ) -> None:
+        order: list[str] = []
+        source.attach(lambda: order.append("first"))
+        source.attach(lambda: order.append("second"))
+        source.move()
+        assert source.version == 1
+        assert order == ["first", "second"]
+
+    def test_a_reset_of_an_owner_leaves_with_its_owner(self, source: Source) -> None:
+        owner = _Owner()
+        source.attach(owner.forget)
+        source.move()
+        assert owner.calls == 1
+        del owner
+        gc.collect()
+        source.move()
+        assert source._resets == []
+
+    def test_a_slotted_owner_keeps_its_reset_pinned(self, source: Source) -> None:
+        owner = _Slotted()
+        source.attach(owner.forget)
+        source.move()
+        assert owner.calls == 1
+
+    def test_every_source_is_listed(self, source: Source) -> None:
+        assert sources()[:4] == (SETTINGS, FRAMEWORK, ROUTES, FORK)
+        assert sources()[-1] is source
+
+    def test_a_forked_child_takes_free_locks_and_moves_fork(self) -> None:
+        held = SETTINGS._lock
+        version = FORK.version
+        caches._forked()
+        assert SETTINGS._lock is not held
+        assert FORK.version == version + 1
+
+    def test_a_platform_that_forks_hears_of_every_child(self) -> None:
+        with patch.object(os, "register_at_fork", create=True) as register:
+            caches._watch_forks()
+        register.assert_called_once_with(after_in_child=caches._forked)
+
+    def test_a_platform_without_fork_registers_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delattr(os, "register_at_fork", raising=False)
+        caches._watch_forks()
+
+
+class TestSettingsMoves:
+    """Any setting change moves `SETTINGS`, a framework reload moves both."""
+
+    def test_a_django_setting_moves_settings_only(self) -> None:
+        settings_version, framework_version = SETTINGS.version, FRAMEWORK.version
+        with override_settings(USE_TZ=False):
+            assert SETTINGS.version == settings_version + 1
+        assert FRAMEWORK.version == framework_version
+
+    def test_a_framework_reload_moves_both(self) -> None:
+        settings_version, framework_version = SETTINGS.version, FRAMEWORK.version
+        next_framework_settings.reload()
+        assert SETTINGS.version == settings_version + 1
+        assert FRAMEWORK.version == framework_version + 1
+
+
+class TestMemo:
+    """A memoised function keeps its answer until a source it names moves."""
+
+    def test_the_answer_holds_until_the_source_moves(self, source: Source) -> None:
+        build = Mock(side_effect=[1, 2])
+        read = memo(source)(build)
+        assert read() == read() == 1
+        source.move()
+        assert read() == 2
+
+    def test_a_bounded_memo_drops_the_oldest_answer(self, source: Source) -> None:
+        read = memo(source, maxsize=1)(lambda key: [key])
+        first = read("a")
+        read("b")
+        assert read("a") is not first
+
+    def test_an_answer_a_move_overtakes_is_not_kept(self, source: Source) -> None:
+        state = {"value": "old"}
+        entered, release = threading.Event(), threading.Event()
+        builds: list[str] = []
+
+        @memo(source)
+        def read() -> str:
+            value = state["value"]
+            builds.append(value)
+            if value == "old":
+                entered.set()
+                release.wait()
+            return value
+
+        answers: list[str] = []
+        reader = threading.Thread(target=lambda: answers.append(read()))
+        reader.start()
+        entered.wait()
+        state["value"] = "new"
+        source.move()
+        release.set()
+        reader.join()
+        assert answers == ["new"]
+        assert read() == "new"
+        assert builds == ["old", "new"]
+
+    def test_a_pure_cache_answers_once_per_argument(self) -> None:
+        build = Mock(side_effect=lambda key: key * 2)
+        read = pure_cache(4)(build)
+        assert read(2) == read(2) == 4
+        build.assert_called_once_with(2)
+
+
+class TestHeldMemo:
+    """`Memo` holds one value and keeps no build a move overtook."""
+
+    def test_the_value_holds_until_the_source_moves(self, source: Source) -> None:
+        held: Memo[object] = Memo(depends=(source,))
+        first = held.get(object)
+        assert held.get(object) is first
+        source.move()
+        assert held.get(object) is not first
+
+    def test_a_build_a_move_overtakes_is_not_kept(self, source: Source) -> None:
+        held: Memo[int] = Memo(depends=(source,))
+
+        def build() -> int:
+            source.move()
+            return 1
+
+        assert held.get(build) == 1
+        assert held.get(lambda: 2) == 2
+
+    def test_a_cache_clears_when_its_source_moves(self, source: Source) -> None:
+        cache: BoundedCache[str, int] = BoundedCache(depends=(source,))
+        cache["a"] = 1
+        source.move()
+        assert "a" not in cache
+
+
+class TestInstanceDict:
+    """The view is the owner's own dict, so the owner's writes show through."""
+
+    def test_the_view_follows_the_owner(self) -> None:
+        owner = SimpleNamespace(value=1)
+        view = instance_dict(owner)
+        owner.value = 2
+        assert view["value"] == 2

@@ -686,8 +686,8 @@ def test_cancelled_request_disconnects_and_never_cancels_the_app(
 class _Held(_App):
     """An app that ignores the disconnect and ends when the test lets it."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, *, fail: bool = False) -> None:
+        super().__init__(fail=fail)
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
@@ -697,6 +697,9 @@ class _Held(_App):
         await receive()
         self.started.set()
         await self.release.wait()
+        if self.fail:
+            msg = "app failed"
+            raise RuntimeError(msg)
         for event in self.events:
             await send(event)
 
@@ -720,6 +723,27 @@ def test_detached_app_keeps_its_slot_until_it_ends() -> None:
 
     answers = asyncio.run(scenario())
     assert answers == [Refusal.LIMIT, Reply(200, _MARKED, "ok")]
+
+
+def test_a_detached_app_failing_later_reports_nothing_to_the_loop() -> None:
+    app = _Held(fail=True)
+    reported: list[dict[str, object]] = []
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(lambda _, context: reported.append(context))
+        tunnel = _Routed(app, websocket_scope(_CSRF_COOKIE), _limits())
+        first = asyncio.create_task(tunnel(_request(), connection="c"))
+        await app.started.wait()
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        app.release.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert reported == []
 
 
 def test_hints_name_the_kept_headers() -> None:

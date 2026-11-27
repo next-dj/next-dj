@@ -64,7 +64,7 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
            },
@@ -159,7 +159,7 @@ Run the framework system checks under each module.
    uv run python manage.py check
    DJANGO_SETTINGS_MODULE=config.settings.prod uv run python manage.py check --deploy
 
-Both runs report no errors, and the production run lists the deployment warnings the base settings still earn, such as ``next.W110`` for a missing ``SITE["URL"]`` and ``next.W149`` for the in-process broker.
+Both runs report no errors, and the production run lists the deployment warnings the base settings still earn, such as ``next.W110`` for a missing ``SITE["URL"]``, and ``next.W149`` for the in-process broker once the project uses realtime.
 The development run has ``DEBUG`` on and the production run has it off.
 The production run carries the ``STRICT_CONTEXT`` override, the development run keeps the default.
 

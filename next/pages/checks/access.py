@@ -7,15 +7,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import RunMemo
 from next.components.sources import import_component_modules
 from next.discovery import (
     discover_page_registrations,
     first_visit,
-    get_router_manager,
+    get_route_manager,
     iter_scanned_page_pairs,
 )
 from next.pages.access import page_access
@@ -41,14 +41,14 @@ class TreePage(NamedTuple):
 
 def _read_trees() -> tuple[TreePage, ...]:
     """Load every `page.py` of the routed trees and read the rule of each."""
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return ()
-    discover_page_registrations(router_manager)
+    discover_page_registrations(route_manager)
     seen: set[Path] = set()
     return tuple(
         TreePage(page_path, page_access(page_path))
-        for router in router_manager.backends
+        for router in route_manager.backends
         for _url_path, page_path in iter_scanned_page_pairs(router)
         if first_visit(page_path, seen)
     )
@@ -59,8 +59,8 @@ _trees: RunMemo[tuple[TreePage, ...]] = RunMemo()
 
 def tree_pages() -> tuple[TreePage, ...]:
     """Return every `page.py` of the routed trees with its rule, read once per run."""
-    router_manager, _errors = get_router_manager()
-    return _trees.get(router_manager, _read_trees)
+    route_manager, _errors = get_route_manager()
+    return _trees.get(route_manager, _read_trees)
 
 
 def load_declarations() -> None:

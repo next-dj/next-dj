@@ -26,7 +26,7 @@ from next.pages.checks import (
 from next.pages.manager import page
 from next.pages.registry import PageContextRegistry
 from next.testing import reset_check_caches
-from next.urls import PageRoot, RouterBackend
+from next.urls import PageBackend, PageRoot
 from tests.support import (
     PAGE_BODY_SOURCE_CASES,
     PAGE_CONTENT_CASES,
@@ -40,11 +40,12 @@ from tests.support import (
     file_router,
     importable_dir,
     next_framework_settings_stand_in,
-    patch_checks_router_manager,
-    patch_checks_router_manager_with_routers,
+    patch_checks_route_manager,
+    patch_checks_route_manager_with_routers,
     restored_provider_registry,
 )
 from tests.support.access import PAGE_HEAD
+from tests.support.checks import written
 
 
 class TestRequestInContextCheck:
@@ -158,7 +159,7 @@ class TestLayoutChecks:
         page_file = tmp_path / "page.py"
         page_file.write_text("")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             warnings = check_layout_templates(None)
 
         assert [w.id for w in warnings] == (
@@ -176,7 +177,7 @@ class TestLayoutChecks:
         (inner / "page.py").write_text('template = "ok"\n')
 
         router = _MultiRootRouter([outer, inner])
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             warnings = check_layout_templates(None)
 
         assert [w.id for w in warnings] == ["next.W001"]
@@ -196,9 +197,7 @@ class TestMissingPageContentChecks:
         if case.layout_djx is not None:
             (tmp_path / "layout.djx").write_text(case.layout_djx)
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
 
         assert len([m for m in messages if m.id.startswith("next.E")]) == case.errors
@@ -210,7 +209,7 @@ class TestMemoAndBrokenPages:
 
     def test_a_tree_that_fails_to_walk_is_e011(self, tmp_path) -> None:
         with (
-            patch_checks_router_manager_with_routers(routers=[AppRootRouter(tmp_path)]),
+            patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]),
             patch(
                 "next.pages.checks.modules.walk_page_tree",
                 side_effect=OSError("denied"),
@@ -221,7 +220,7 @@ class TestMemoAndBrokenPages:
         assert "denied" in messages[0].msg
 
     def test_a_missing_tree_is_skipped(self, tmp_path) -> None:
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[AppRootRouter(tmp_path / "missing")]
         ):
             assert check_page_functions(None) == []
@@ -231,9 +230,7 @@ class TestMemoAndBrokenPages:
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert e012 == []
@@ -243,9 +240,7 @@ class TestMemoAndBrokenPages:
         page_file = tmp_path / "page.py"
         page_file.write_text('def render(request, **kwargs):\n    return "x"\n')
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert e012 == []
@@ -255,9 +250,7 @@ class TestMemoAndBrokenPages:
         page_file = tmp_path / "page.py"
         page_file.write_text("")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
         e012 = [m for m in messages if m.id == "next.E012"]
         assert len(e012) == 1
@@ -282,9 +275,7 @@ class TestMemoAndBrokenPages:
         """A page.py without a body that declares access answers to E166, not E012."""
         (tmp_path / "page.py").write_text(f"{PAGE_HEAD}{declarations}")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
 
         assert [m.id for m in messages] == expected
@@ -305,9 +296,7 @@ class TestMemoAndBrokenPages:
             '    return "menu"\n'
         )
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
 
         assert [m.id for m in messages] == expected
@@ -328,7 +317,7 @@ class TestMemoAndBrokenPages:
 
         router = AppRootRouter(tmp_path)
         with (
-            patch_checks_router_manager_with_routers(routers=[router]),
+            patch_checks_route_manager_with_routers(routers=[router]),
             patch("next.discovery.get_pages_directories", return_value=[tmp_path]),
         ):
             check_page_functions(None)
@@ -397,9 +386,7 @@ class TestBodySourceConflicts:
         if case.template_djx:
             (tmp_path / "template.djx").write_text("<h1>body</h1>")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
 
         w043 = [m for m in messages if m.id == "next.W043"]
@@ -423,7 +410,7 @@ def get_context_data():
     return {"key": "value"}
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path) as (
+        with patch_checks_route_manager(pages_directory=tmp_path) as (
             _mock_mgr,
             mock_router,
             _,
@@ -448,7 +435,7 @@ def get_context_data() -> str:
     return "not a dict"
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
             assert len(errors) == 1
             assert "must return a dictionary" in errors[0].msg
@@ -465,7 +452,7 @@ def get_context_data():
     return "not a dict"
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
             assert errors == []
 
@@ -479,7 +466,7 @@ def get_context_data():
             "    return {}\n"
         )
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
 
     def test_deferred_annotations_read_as_the_type_they_name(self, tmp_path) -> None:
@@ -493,7 +480,7 @@ def get_context_data():
             "    return {}\n"
         )
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
 
     def test_string_annotation_naming_no_type_is_left_alone(self, tmp_path) -> None:
@@ -506,7 +493,7 @@ def get_context_data():
             "    return {}\n"
         )
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
 
     def test_string_annotation_naming_a_non_mapping_still_errors(
@@ -521,7 +508,7 @@ def get_context_data():
             "    return {}\n"
         )
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
         assert [error.id for error in errors] == ["next.E029"]
 
@@ -536,15 +523,14 @@ def get_context_data() -> str:
     return {}
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
         assert len(errors) == 1
         assert errors[0].id == "next.E029"
 
-    def test_async_keyless_context_is_e218_not_e029(self, tmp_path) -> None:
-        """An `async def` keyless `@context` stops the import, so E218 names it."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("""
+    def test_async_keyless_context_reads_its_awaited_annotation(self, tmp_path) -> None:
+        """An `async def` keyless `@context` loads, and its result type must be a dict."""
+        (tmp_path / "page.py").write_text("""
 from next.pages import context
 
 @context
@@ -552,7 +538,21 @@ async def get_context_data() -> str:
     return {}
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
+            assert [m.id for m in check_context_functions(None)] == ["next.E029"]
+
+    def test_async_generator_keyless_context_is_e218_not_e029(self, tmp_path) -> None:
+        """An async generator keyless `@context` stops the import, so E218 names it."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("""
+from next.pages import context
+
+@context
+async def get_context_data() -> str:
+    yield {}
+        """)
+
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_functions(None) == []
             refused = [
                 m for m in check_page_module_imports(None) if m.obj == str(page_file)
@@ -570,7 +570,7 @@ def get_context_data() -> str:
     return {}
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             errors = check_context_functions(None)
         assert len(errors) == 1
         assert errors[0].id == "next.E029"
@@ -586,7 +586,7 @@ def get_context_data() -> str:
     return {}
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             first = check_context_functions(None)
             assert [error.id for error in first] == ["next.E029"]
 
@@ -609,7 +609,7 @@ def get_context_data():
     return "not a dict but with key"
         """)
 
-        with patch_checks_router_manager(pages_directory=tmp_path) as (
+        with patch_checks_route_manager(pages_directory=tmp_path) as (
             _mock_mgr,
             mock_router,
             _,
@@ -629,6 +629,26 @@ def _processor_with_request(request):
 
 
 def _processor_without_request():
+    return {}
+
+
+def _processor_with_any_name(_request):
+    return {"tagline": "x"}
+
+
+def _processor_with_varargs(*args):
+    return {}
+
+
+def _processor_with_an_optional_extra(request, extra=None):
+    return {}
+
+
+def _processor_keyword_only(*, request):
+    return {}
+
+
+def _processor_with_two_required(request, extra):
     return {}
 
 
@@ -652,7 +672,7 @@ class TestContextProcessorSignature:
         NEXT_FRAMEWORK={
             "PAGE_BACKENDS": [
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "next.urls.FilePageBackend",
                     "APP_DIRS": True,
                     "DIRS": [],
                     "PAGES_DIR": "pages",
@@ -673,7 +693,7 @@ class TestContextProcessorSignature:
         NEXT_FRAMEWORK={
             "PAGE_BACKENDS": [
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "next.urls.FilePageBackend",
                     "APP_DIRS": True,
                     "DIRS": [],
                     "PAGES_DIR": "pages",
@@ -696,7 +716,7 @@ class TestContextProcessorSignature:
         NEXT_FRAMEWORK={
             "PAGE_BACKENDS": [
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "next.urls.FilePageBackend",
                     "APP_DIRS": True,
                     "DIRS": [],
                     "PAGES_DIR": "pages",
@@ -717,7 +737,7 @@ class TestContextProcessorSignature:
         NEXT_FRAMEWORK={
             "PAGE_BACKENDS": [
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "next.urls.FilePageBackend",
                     "APP_DIRS": True,
                     "DIRS": [],
                     "PAGES_DIR": "pages",
@@ -743,7 +763,7 @@ class TestContextProcessorSignature:
         self, options
     ) -> None:
         backend = {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [],
             "PAGES_DIR": "pages",
@@ -763,9 +783,9 @@ class TestContextProcessorSignature:
         with override_settings(TEMPLATES=templates):
             assert [e.id for e in check_request_in_context()] == ["next.E019"]
 
-    @override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": "not a list"})
     def test_bad_settings_shape_is_tolerated(self) -> None:
-        errors = check_context_processor_signature()
+        with written({"PAGE_BACKENDS": "not a list"}):
+            errors = check_context_processor_signature()
         assert errors == []
 
     @override_settings(
@@ -773,7 +793,7 @@ class TestContextProcessorSignature:
             "PAGE_BACKENDS": [
                 "not a dict",
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "next.urls.FilePageBackend",
                     "APP_DIRS": True,
                     "DIRS": [],
                     "PAGES_DIR": "pages",
@@ -796,7 +816,7 @@ class TestContextProcessorSignature:
     )
     def test_an_uninspectable_processor_is_skipped(self, path: str) -> None:
         backend = {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [],
             "PAGES_DIR": "pages",
@@ -805,13 +825,36 @@ class TestContextProcessorSignature:
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
             assert check_context_processor_signature() == []
 
+    @pytest.mark.parametrize(
+        ("name", "errors"),
+        [
+            ("_processor_with_any_name", []),
+            ("_processor_with_varargs", []),
+            ("_processor_with_an_optional_extra", []),
+            ("_processor_keyword_only", ["next.E040"]),
+            ("_processor_with_two_required", ["next.E040"]),
+        ],
+    )
+    def test_django_calls_the_processor_positionally(
+        self, name: str, errors: list[str]
+    ) -> None:
+        backend = {
+            "BACKEND": "next.urls.FilePageBackend",
+            "APP_DIRS": True,
+            "DIRS": [],
+            "PAGES_DIR": "pages",
+            "OPTIONS": {"context_processors": [f"tests.pages.test_checks.{name}"]},
+        }
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [backend]}):
+            assert [e.id for e in check_context_processor_signature()] == errors
+
     def test_a_non_list_backend_setting_reports_nothing(self) -> None:
         stand_in = next_framework_settings_stand_in(PAGE_BACKENDS="not a list")
         with patch("next.pages.checks.processors.next_framework_settings", stand_in):
             assert check_context_processor_signature() == []
 
 
-class _MultiRootRouter(RouterBackend):
+class _MultiRootRouter(PageBackend):
     """Backend reporting several root trees, labelled the way the file router does."""
 
     def __init__(self, roots: list[Path]) -> None:
@@ -833,14 +876,14 @@ class TestPageModuleImports:
     def test_broken_page_reports_e017(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_module_imports(None)
         assert [m.id for m in messages] == ["next.E017"]
 
     def test_valid_page_reports_no_e017(self, tmp_path) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "ok"\n')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_module_imports(None)
         assert messages == []
 
@@ -856,7 +899,7 @@ class TestPageModuleImports:
         broken.write_text("def render( invalid syntax {\n")
 
         router = _MultiRootRouter([first_root, second_root])
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_page_module_imports(None)
 
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
@@ -871,7 +914,7 @@ class TestPageModuleImports:
         linked_root.symlink_to(real_root, target_is_directory=True)
 
         router = _MultiRootRouter([real_root, linked_root])
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_page_module_imports(None)
 
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
@@ -884,7 +927,7 @@ class TestPageModuleImports:
         (tmp_path / "link").symlink_to(real, target_is_directory=True)
         router = file_router(app_dirs=False, dirs=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_page_module_imports(None)
 
         assert [m.id for m in messages] == ["next.E017"]
@@ -894,7 +937,7 @@ class TestPageModuleImports:
         (tmp_path / "virtual").mkdir()
         (tmp_path / "virtual" / "template.djx").write_text("<p>ok</p>\n")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_module_imports(None)
         assert messages == []
 
@@ -905,13 +948,11 @@ class TestPageModuleImports:
         page_file.write_text("def render( invalid syntax {\n")
         (tmp_path / "template.djx").write_text("<p>ok</p>\n")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             body = check_page_functions(None)
         assert [m for m in body if m.id == "next.E012"] == []
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             imports = check_page_module_imports(None)
         assert [m.id for m in imports] == ["next.E017"]
 
@@ -923,7 +964,7 @@ class TestPageModuleImports:
         page_file = tmp_path / "page.py"
         page_file.write_text("def render( invalid syntax {\n")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_module_imports(None)
 
         assert [m.id for m in messages] == ["next.E017"]
@@ -943,13 +984,11 @@ class TestPageModuleImports:
         page_file = tmp_path / "page.py"
         page_file.write_text("import missing_dep_xyz\n")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             body = check_page_functions(None)
         assert [m for m in body if m.id == "next.E012"] == []
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             imports = check_page_module_imports(None)
         assert [m.id for m in imports] == ["next.E017"]
         assert "ModuleNotFoundError" in imports[0].msg
@@ -971,7 +1010,7 @@ class TestPageModuleImports:
     ) -> None:
         page_file = tmp_path / "page.py"
         page_file.write_text(page_body)
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_page_module_imports(None)
         assert [m.id for m in messages] == ["next.E017"]
         assert cause_marker in messages[0].msg
@@ -990,9 +1029,7 @@ class TestPageModuleImports:
         page_file.write_text(page_body)
         (tmp_path / "template.djx").write_text("<p>ok</p>\n")
 
-        with patch_checks_router_manager_with_routers(
-            routers=[AppRootRouter(tmp_path)]
-        ):
+        with patch_checks_route_manager_with_routers(routers=[AppRootRouter(tmp_path)]):
             messages = check_page_functions(None)
         assert [
             m for m in messages if m.id in {"next.E012", "next.E013", "next.W043"}
@@ -1027,7 +1064,7 @@ class TestContextReadsForeignZone:
             page_file,
             "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_context_reads_foreign_zone(None)
         assert [m.id for m in messages] == ["next.W077"]
         assert "count" in messages[0].msg
@@ -1043,7 +1080,7 @@ class TestContextReadsForeignZone:
             "def count(entries):\n"
             "    return len(entries)\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_context_reads_foreign_zone(None)
         assert [m.id for m in messages] == ["next.W077"]
 
@@ -1055,7 +1092,7 @@ class TestContextReadsForeignZone:
             "def count(entries):\n"
             "    return len(entries)\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_reader_with_a_default_is_silent(self, tmp_path) -> None:
@@ -1066,7 +1103,7 @@ class TestContextReadsForeignZone:
             "def count(entries=None):\n"
             "    return len(entries or [])\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_query_parameter_of_the_same_name_is_silent(self, tmp_path) -> None:
@@ -1078,7 +1115,7 @@ class TestContextReadsForeignZone:
             "    return entries\n",
             imports="from next.urls import DQuery\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_url_parameter_of_the_same_name_is_silent(self, tmp_path) -> None:
@@ -1087,7 +1124,7 @@ class TestContextReadsForeignZone:
             page_file,
             "@page.context('count')\ndef count(entries):\n    return entries\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_a_registered_provider_silences_w077(self, tmp_path) -> None:
@@ -1107,7 +1144,7 @@ class TestContextReadsForeignZone:
                 def resolve(self, param, context) -> object:
                     return []
 
-            with patch_checks_router_manager(pages_directory=tmp_path):
+            with patch_checks_route_manager(pages_directory=tmp_path):
                 assert check_context_reads_foreign_zone(None) == []
 
     def test_page_without_a_zone_bound_context_is_silent(self, tmp_path) -> None:
@@ -1116,7 +1153,7 @@ class TestContextReadsForeignZone:
             "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
             zone=None,
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_a_parameter_no_zone_binds_is_silent(self, tmp_path) -> None:
@@ -1124,7 +1161,7 @@ class TestContextReadsForeignZone:
             tmp_path / "page.py",
             "@page.context('count')\ndef count(title):\n    return title\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_an_unreadable_signature_reads_no_parameter(self, tmp_path) -> None:
@@ -1135,7 +1172,7 @@ class TestContextReadsForeignZone:
             "    return len(entries)\n\n"
             "count.__signature__ = 'unreadable'\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_context_reads_foreign_zone(None) == []
 
     def test_a_route_the_parser_refuses_captures_nothing(self, tmp_path) -> None:
@@ -1144,7 +1181,7 @@ class TestContextReadsForeignZone:
             page_file,
             "@page.context('count')\ndef count(entries):\n    return len(entries)\n",
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_context_reads_foreign_zone(None)
         assert [m.id for m in messages] == ["next.W077"]
 
@@ -1163,7 +1200,7 @@ class TestSingleKeylessContext:
             "def second() -> dict:\n"
             "    return {}\n"
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_single_keyless_context(None)
         assert [m.id for m in messages] == ["next.E018"]
         assert "first" in messages[0].msg
@@ -1177,7 +1214,7 @@ class TestSingleKeylessContext:
             "def only() -> dict:\n"
             "    return {}\n"
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_single_keyless_context(None)
         assert messages == []
 
@@ -1194,7 +1231,7 @@ class TestContextChecksDeduplicate:
             "    return {}\n"
         )
         routers = [_MultiRootRouter([tmp_path]), _MultiRootRouter([tmp_path])]
-        with patch_checks_router_manager_with_routers(routers=routers):
+        with patch_checks_route_manager_with_routers(routers=routers):
             messages = check_context_functions(None)
         assert [m.id for m in messages] == ["next.E029"]
 
@@ -1212,7 +1249,7 @@ class TestContextChecksDeduplicate:
         (tmp_path / "link").symlink_to(real, target_is_directory=True)
         router = file_router(app_dirs=False, dirs=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             messages = check_context_functions(None)
 
         root = tmp_path.resolve()
@@ -1235,7 +1272,7 @@ class TestContextRegistrationFileCheck:
         )
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_context_registration_files(None)
         assert [m.id for m in messages] == ["next.E074"]
@@ -1256,7 +1293,7 @@ class TestContextRegistrationFileCheck:
         )
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
             importable_dir(tmp_path),
         ):
             messages = check_context_registration_files(None)
@@ -1274,7 +1311,7 @@ class TestContextRegistrationFileCheck:
         )
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_context_registration_files(None)
         assert [m.id for m in messages] == ["next.E074"]
@@ -1290,7 +1327,7 @@ class TestContextRegistrationFileCheck:
         )
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_context_registration_files(None)
         assert messages == []
@@ -1300,7 +1337,7 @@ class TestRouterFailureIsReportedNotRaised:
     """A third-party router that cannot list its trees is a message, not a crash."""
 
     def test_a_raising_tree_listing_is_one_e030(self) -> None:
-        with patch_checks_router_manager_with_routers(routers=[RaisingRootsRouter()]):
+        with patch_checks_route_manager_with_routers(routers=[RaisingRootsRouter()]):
             messages = check_pages_structure(None)
 
         assert [m.id for m in messages] == ["next.E030"]
@@ -1309,7 +1346,7 @@ class TestRouterFailureIsReportedNotRaised:
 
     def test_every_other_page_check_stays_quiet(self) -> None:
         # The finding belongs to one check, so the rest of the run reports no tree.
-        with patch_checks_router_manager_with_routers(routers=[RaisingRootsRouter()]):
+        with patch_checks_route_manager_with_routers(routers=[RaisingRootsRouter()]):
             assert check_page_functions(None) == []
             assert check_page_module_imports(None) == []
             assert check_layout_templates(None) == []
@@ -1320,7 +1357,7 @@ class TestRouterFailureIsReportedNotRaised:
         (tmp_path / "bare" / "page.py").write_text("")
         routers = [RaisingRootsRouter(), RootPagesRouter([tmp_path])]
 
-        with patch_checks_router_manager_with_routers(routers=routers):
+        with patch_checks_route_manager_with_routers(routers=routers):
             structure = check_pages_structure(None)
             functions = check_page_functions(None)
 
@@ -1328,7 +1365,7 @@ class TestRouterFailureIsReportedNotRaised:
         assert [m.id for m in functions] == ["next.E012"]
 
     def test_a_wrong_tree_shape_is_one_e030_without_a_cause(self, tmp_path) -> None:
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[MalformedRootsRouter([tmp_path])]
         ):
             messages = check_pages_structure(None)
@@ -1339,14 +1376,14 @@ class TestRouterFailureIsReportedNotRaised:
 
     def test_the_checks_that_walk_survive_a_wrong_tree_shape(self, tmp_path) -> None:
         # These read trees through the swallowing seam, so a bare path costs reports.
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[MalformedRootsRouter([tmp_path])]
         ):
             assert check_layout_templates(None) == []
             assert check_unrouted_working_directory_pages(None) == []
 
 
-class TestRealFileRouterBackend:
+class TestRealFilePageBackend:
     """The real file router drives the page checks over both kinds of root."""
 
     def _build_project(self, tmp_path: Path) -> Path:
@@ -1369,7 +1406,7 @@ class TestRealFileRouterBackend:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_page_functions(None)
 
         e012 = [m for m in messages if m.id == "next.E012"]
@@ -1388,7 +1425,7 @@ class TestRealFileRouterBackend:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_page_functions(None)
 
         e012 = [m for m in messages if m.id == "next.E012"]
@@ -1404,7 +1441,7 @@ class TestRealFileRouterBackend:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_page_functions(None)
 
         e012 = [m for m in messages if m.id == "next.E012"]
@@ -1423,7 +1460,7 @@ class TestRealFileRouterBackend:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_pages_structure(None)
 
         e010 = [m for m in messages if m.id == "next.E010"]
@@ -1440,7 +1477,7 @@ class TestRealFileRouterBackend:
         (tmp_path / "bare").mkdir()
         (tmp_path / "bare" / "page.py").write_text("")
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             messages = check_page_functions(None)
@@ -1458,7 +1495,7 @@ class TestRealFileRouterBackend:
 
         with importable_dir(tmp_path):
             settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop_app"]
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_page_module_imports(None)
 
         assert [(m.id, m.obj) for m in messages] == [("next.E017", str(broken))]
@@ -1479,7 +1516,7 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         self._write_bodyless_page(tmp_path, "_components/card")
         router = file_router(app_dirs=False, dirs=[tmp_path])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             assert check_page_functions(None) == []
             assert check_pages_structure(None) == []
 
@@ -1488,7 +1525,7 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         self._write_bodyless_page(tmp_path, "drafts/wip")
         router = file_router(app_dirs=False, dirs=[tmp_path, Path("drafts")])
 
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             assert check_page_functions(None) == []
 
     def test_a_skip_name_the_router_declares_leaves_the_body_check(
@@ -1497,13 +1534,13 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         """A directory the backend's own walk refuses keeps its pages unchecked."""
         self._write_bodyless_page(tmp_path, "drafts/wip")
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
         ):
             assert check_page_functions(None) == []
 
         reset_check_caches()
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             assert [m.id for m in check_page_functions(None)] == ["next.E012"]
@@ -1514,13 +1551,13 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         """A parameter directory below a refused name raises no structural report."""
         (tmp_path / "drafts" / "[id]").mkdir(parents=True)
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
         ):
             assert check_pages_structure(None) == []
 
         reset_check_caches()
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             assert [m.id for m in check_pages_structure(None)] == ["next.E010"]
@@ -1532,7 +1569,7 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         page_file = self._write_bodyless_page(tmp_path, "items/[id]/drafts")
         page_file.with_name("template.djx").write_text("ok")
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[SkippingRouter([tmp_path], frozenset({"drafts"}))]
         ):
             messages = check_pages_structure(None)
@@ -1540,7 +1577,7 @@ class TestSkippedDirectoriesLeaveThePageChecks:
         assert 'Parameter directory "items/[id]"' in messages[0].msg
 
         reset_check_caches()
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             assert check_pages_structure(None) == []
@@ -1560,7 +1597,7 @@ class TestThirdPartyBackendReachesEverySeam:
         # next.E017 reaches the pairs through the framework's walk, not the backend's.
         broken = self._write_project(tmp_path)
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             messages = check_page_module_imports(None)
@@ -1570,7 +1607,7 @@ class TestThirdPartyBackendReachesEverySeam:
     def test_the_layout_check_sees_its_layouts(self, tmp_path) -> None:
         self._write_project(tmp_path)
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             warnings = check_layout_templates(None)
@@ -1590,7 +1627,7 @@ class TestThirdPartyBackendReachesEverySeam:
             "    return {}\n"
         )
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             annotations = check_context_functions(None)
@@ -1610,7 +1647,7 @@ class TestThirdPartyBackendReachesEverySeam:
 
         with (
             patch.object(page, "_context_manager", PageContextRegistry()),
-            patch_checks_router_manager_with_routers(
+            patch_checks_route_manager_with_routers(
                 routers=[RootPagesRouter([tmp_path])]
             ),
         ):
@@ -1634,7 +1671,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
             router = file_router(app_dirs=False)
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 messages = check_unrouted_working_directory_pages(None)
 
         assert [(m.id, m.obj) for m in messages] == [
@@ -1647,7 +1684,7 @@ class TestUnroutedWorkingDirectoryPages:
     def test_the_page_checks_leave_the_unrouted_tree_alone(
         self, tmp_path, monkeypatch
     ) -> None:
-        # The tree is no longer walked, so one warning stands for E012 and E017 hits.
+        # The tree is not walked, so one warning stands for E012 and E017 hits.
         self._write_unrouted_tree(tmp_path)
         (tmp_path / "pages" / "bare").mkdir()
         (tmp_path / "pages" / "bare" / "page.py").write_text("")
@@ -1655,7 +1692,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
             router = file_router(app_dirs=False)
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 functions = check_page_functions(None)
                 structure = check_pages_structure(None)
 
@@ -1667,7 +1704,7 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         router = file_router(app_dirs=False, dirs=[directory])
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             assert check_unrouted_working_directory_pages(None) == []
 
     def test_a_tree_routed_through_base_dir_is_silent(
@@ -1678,7 +1715,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with patch("next.utils.settings", Mock(BASE_DIR=tmp_path)):
             router = file_router(app_dirs=False)
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_a_project_without_the_directory_is_silent(
@@ -1688,7 +1725,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
             router = file_router(app_dirs=False)
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_a_directory_holding_no_page_is_silent(self, tmp_path, monkeypatch) -> None:
@@ -1700,7 +1737,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with patch("next.utils.settings", Mock(BASE_DIR=None)):
             router = file_router(app_dirs=False)
-            with patch_checks_router_manager_with_routers(routers=[router]):
+            with patch_checks_route_manager_with_routers(routers=[router]):
                 assert check_unrouted_working_directory_pages(None) == []
 
     def test_an_application_named_pages_is_silent(self, tmp_path, monkeypatch) -> None:
@@ -1711,17 +1748,17 @@ class TestUnroutedWorkingDirectoryPages:
         monkeypatch.chdir(tmp_path)
 
         router = file_router(app_dirs=False, dirs=[tmp_path / "pages" / "pages"])
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             assert check_unrouted_working_directory_pages(None) == []
 
-    def test_a_failing_router_manager_reports_nothing(
+    def test_a_failing_route_manager_reports_nothing(
         self, tmp_path, monkeypatch
     ) -> None:
         self._write_unrouted_tree(tmp_path)
         monkeypatch.chdir(tmp_path)
 
         with patch(
-            "next.pages.checks.structure.get_router_manager",
+            "next.pages.checks.structure.get_route_manager",
             return_value=(None, [Mock()]),
         ):
             assert check_unrouted_working_directory_pages(None) == []
@@ -1735,7 +1772,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with (
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
-            patch_checks_router_manager_with_routers(routers=[RootPagesRouter([])]),
+            patch_checks_route_manager_with_routers(routers=[RootPagesRouter([])]),
         ):
             assert check_unrouted_working_directory_pages(None) == []
 
@@ -1748,7 +1785,7 @@ class TestUnroutedWorkingDirectoryPages:
 
         with (
             patch("next.pages.checks.structure.next_framework_settings", stand_in),
-            patch_checks_router_manager_with_routers(routers=[RootPagesRouter([])]),
+            patch_checks_route_manager_with_routers(routers=[RootPagesRouter([])]),
         ):
             assert check_unrouted_working_directory_pages(None) == []
 
@@ -1757,14 +1794,14 @@ class TestPagesStructureWalk:
     """`check_pages_structure` skips a missing tree and reports one it cannot walk."""
 
     def test_a_missing_tree_is_skipped(self, tmp_path) -> None:
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path / "missing"])]
         ):
             assert check_pages_structure(None) == []
 
     def test_a_tree_that_fails_to_walk_is_e088(self, tmp_path) -> None:
         with (
-            patch_checks_router_manager_with_routers(
+            patch_checks_route_manager_with_routers(
                 routers=[RootPagesRouter([tmp_path])]
             ),
             patch(
@@ -1786,7 +1823,7 @@ class TestBracketDirectoryNamesDjangoRefuses:
         (directory / "page.py").write_text('template = "ok"\n')
         router = file_router(app_dirs=False, dirs=[tmp_path])
         reset_check_caches()
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             return check_pages_structure(None)
 
     @pytest.mark.parametrize(
@@ -1893,7 +1930,7 @@ class TestParameterDirectoryServesAPage:
     def test_no_report(self, tmp_path: Path, files: tuple[str, ...]) -> None:
         _touch(tmp_path, files)
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             assert check_pages_structure(None) == []
@@ -1919,7 +1956,7 @@ class TestParameterDirectoryServesAPage:
     ) -> None:
         _touch(tmp_path, files)
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             messages = check_pages_structure(None)

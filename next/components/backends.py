@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, override
 
 from next.conf import next_framework_settings
 
-from .loading import ModuleLoader
-from .registry import ComponentRegistry, ComponentVisibilityResolver
+from .modules import ModuleLoader
+from .registry import ComponentRegistry, ComponentVisibilityResolver, may_defer
 from .scanner import ComponentScanner, component_extra_roots_from_config
 
 
@@ -82,6 +82,21 @@ class ComponentsBackend(ABC):
         """
         return ()
 
+    def refresh_files(self) -> bool:
+        """Swap in the boundary files on disk now, answering whether any changed.
+
+        The development watcher calls it, so a render never looks at the disk for them.
+        """
+        return False
+
+    @property
+    def version(self) -> int:
+        """Return a counter that every change to the components of this backend moves.
+
+        A page plan reads it, and a backend whose components never change answers 0.
+        """
+        return 0
+
 
 class FileComponentsBackend(ComponentsBackend):
     """Load components from `DIRS` and from the filesystem walk in `next.urls`."""
@@ -99,6 +114,12 @@ class FileComponentsBackend(ComponentsBackend):
         self._loaded = False
         self._lock = threading.RLock()
 
+    @property
+    @override
+    def version(self) -> int:
+        """Return the mutation counter of the registry this backend fills."""
+        return self._registry.version
+
     @override
     def discover(self) -> None:
         """Scan every configured component root, once per backend instance."""
@@ -114,11 +135,17 @@ class FileComponentsBackend(ComponentsBackend):
                 self._loaded = True
 
     def _discover_and_register_all(self) -> None:
+        """Scan the roots, importing each `component.py` unless modules load lazily.
+
+        A lazy module may declare a delivery mode mid-render, so pages gather from now.
+        """
         for comp_root in self._extra_component_roots:
             self._registry.mark_as_root(comp_root)
             self._discover_in_component_root(comp_root)
         if not bool(getattr(next_framework_settings, "LAZY_COMPONENT_MODULES", False)):
             self._import_registered_modules()
+        elif self._distinct_module_paths():
+            may_defer()
 
     def _distinct_module_paths(self) -> tuple[Path, ...]:
         """Return each registered `component.py` path once, in discovery order."""
@@ -174,6 +201,13 @@ class FileComponentsBackend(ComponentsBackend):
     def watch_roots(self) -> tuple[Path, ...]:
         """Return the `DIRS` roots, re-read so a late-created root is watched."""
         return tuple(component_extra_roots_from_config(self._config))
+
+    @override
+    def refresh_files(self) -> bool:
+        """Swap in the boundary files of every component this backend has discovered."""
+        if not self._loaded:
+            return False
+        return self._registry.refresh_files()
 
     @override
     def get_component(self, name: str, template_path: Path) -> ComponentInfo | None:

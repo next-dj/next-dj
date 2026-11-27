@@ -1,5 +1,5 @@
 :layout: landing
-:description: next.dj. A full-stack Django framework with file-based routing, DJX templates, and modern web development patterns.
+:description: next.dj. A full-stack Django framework with file-based routing, components, forms, streamed boundaries, and a client router.
 
 next.dj
 =======

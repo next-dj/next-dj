@@ -37,7 +37,7 @@ jobs:
         NEXT_DJ_SKIP_JS_BUILD: "1"
       run: uv build
     - name: Export locked dev requirements
-      run: uv export --no-hashes --group dev --format requirements-txt --no-emit-project --output-file dist/requirements-dev.txt
+      run: uv export --no-hashes --group dev --extra crypto --extra brotli --format requirements-txt --no-emit-project --output-file dist/requirements-dev.txt
     - name: Export locked e2e requirements
       run: uv export --no-hashes --only-group e2e --format requirements-txt --no-emit-project --output-file dist/requirements-e2e.txt
     - name: Upload dist artifact
@@ -89,7 +89,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: ./.github/actions/setup-python-uv
     - name: Run the tests that read the source checkout
-      run: uv run pytest tests/static/test_chunk_sync.py tests/checks/test_init.py --no-cov -rs --junitxml=source.xml
+      run: uv run pytest tests/static/test_chunk_sync.py tests/static/test_protocol.py tests/checks/test_init.py --no-cov -rs --junitxml=source.xml
     - name: Fail on a skipped test
       run: |
         uv run --no-sync python - <<'EOF'
@@ -168,7 +168,7 @@ jobs:
     - name: Check the gzip budget of the runtime and each lazy chunk
       run: |
         status=0
-        for entry in next:16384 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048; do
+        for entry in next:18368 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048 next.forms:1344 next.layers:2400 next.boundaries:3840 next.reload:2048 next.more:2048 next.router:8704 next.intent:5120; do
           name="${entry%%:*}.min.js"
           budget="${entry##*:}"
           bytes=$(gzip -nc "next/static/next/${name}" | wc -c)

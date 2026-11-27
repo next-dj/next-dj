@@ -13,7 +13,7 @@ from next.deps import DObject, UnboundObjectError
 from next.deps.objects import SCOPE_DEPENDENCY
 from next.pages import page
 from next.pages.access import (
-    Gate,
+    AccessGate,
     enforce,
     forget_page_access,
     owner_access,
@@ -248,7 +248,7 @@ class TestMountedTrees:
     """A `pages()` tree starts its chain at its own root, never at the host."""
 
     @pytest.fixture()
-    def mounted(self, tmp_path) -> Path:
+    def mounted(self, tmp_path) -> Generator[Path]:
         app = write_app(tmp_path, "wallets", {"pages": ()})
         write_guard(app, _LOGIN_INHERIT)
         write_guard(app / "pages")
@@ -637,7 +637,7 @@ class _RecordingGate:
 
     def __init__(self) -> None:
         self.built: list[tuple[object, ...]] = []
-        self.gate = Gate(self._build, self._back)
+        self.gate = AccessGate(self._build, self._back)
 
     def _build(self, *args: object):
         self.built.append(args)
@@ -653,9 +653,9 @@ class _RecordingGate:
 class TestEnforce:
     """`enforce()` builds the lookup of its gate only for a rule asking something."""
 
-    def test_an_open_rule_builds_no_lookup(self) -> None:
+    def test_an_open_rule_builds_no_lookup(self, rf: RequestFactory) -> None:
         recording = _RecordingGate()
-        request = RequestFactory().get("/a/")
+        request = rf.get("/a/")
         request.user = PermissionHolder()
 
         denial = enforce(
@@ -665,9 +665,11 @@ class TestEnforce:
         assert denial is None
         assert recording.built == []
 
-    def test_a_rule_with_requirements_builds_one_lookup(self, tmp_path) -> None:
+    def test_a_rule_with_requirements_builds_one_lookup(
+        self, tmp_path, rf: RequestFactory
+    ) -> None:
         recording = _RecordingGate()
-        request = RequestFactory().get("/a/")
+        request = rf.get("/a/")
         request.user = PermissionHolder()
         url_kwargs = {"pk": 1}
         dep_cache: dict[str, object] = {}
@@ -690,22 +692,27 @@ class TestEnforce:
 class TestRefusal:
     """`refusal()` redirects to login, raises a 403, or raises for a broken chain."""
 
-    def test_a_denied_permission_raises_403(self, root) -> None:
+    def test_a_denied_permission_raises_403(self, root, rf: RequestFactory) -> None:
         page_path = write_page(
             root, "a", page_source('page.permission_required("auth.change_group")\n')
         )
-        request = RequestFactory().get("/a/")
+        request = rf.get("/a/")
         request.user = PermissionHolder()
 
         with routed(root), pytest.raises(PermissionDenied):
             refusal(page_path, request, {}, {})
 
-    def test_a_broken_page_above_raises_its_import_failure(self, root) -> None:
+    def test_a_broken_page_above_raises_its_import_failure(
+        self, root, rf: RequestFactory
+    ) -> None:
         write_guard(root, "raise RuntimeError('boom')\n")
         page_path = write_page(root, "a", page_source())
-        request = RequestFactory().get("/a/")
+        request = rf.get("/a/")
 
-        with routed(root), pytest.raises(PageModuleImportError):
+        with (
+            routed(root),
+            pytest.raises(PageModuleImportError, match="failed to import"),
+        ):
             refusal(page_path, request, {}, {})
 
     def test_a_fixed_page_above_applies_on_the_next_request(self, root) -> None:

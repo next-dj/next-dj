@@ -5,13 +5,13 @@ from django.dispatch import Signal
 
 route_registered: Signal = Signal(use_caching=True)
 intercept_registered: Signal = Signal(use_caching=True)
-router_reloaded: Signal = Signal(use_caching=True)
-router_backend_loaded: Signal = Signal(use_caching=True)
+routes_reloaded: Signal = Signal(use_caching=True)
+page_backend_loaded: Signal = Signal(use_caching=True)
 
 
 __all__ = [
     "intercept_registered",
+    "page_backend_loaded",
     "route_registered",
-    "router_backend_loaded",
-    "router_reloaded",
+    "routes_reloaded",
 ]

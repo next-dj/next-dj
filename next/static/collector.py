@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import enum
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
+from django.template import Context
+
+from next.seeding import COLLECTOR_KEY
+
 from .assets import StaticAsset, default_kinds
+from .runtime import BUNDLE_NOTE, DECLARED_CHUNK_KEYS, URGENT_NOTE
 from .serializers import JsContextSerializer, resolve_serializer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Hashable, Iterator, Sequence
+    from collections.abc import Collection, Hashable, Iterator, Mapping, Sequence
     from pathlib import Path
 
 
@@ -21,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 HEAD_CLOSE: str = "</head>"
+
+_BUNDLE_KIND = "js"
+
+type BundleUrl = Callable[[str], str | None]
+"""What answers the URL of a declared bundle, `None` when the storage lacks it."""
 
 # Shared so a missed lookup allocates nothing and returns nothing a caller could fill.
 _EMPTY: tuple[StaticAsset, ...] = ()
@@ -231,8 +243,60 @@ class JsContextPayload(NamedTuple):
     serializers: dict[str, JsContextSerializer]
 
 
+class _Absent(enum.Enum):
+    """Marks a mapping key that held no value before a journalled change."""
+
+    KEY = enum.auto()
+
+
+type _Previous[V] = V | _Absent
+
+
+class _Added(NamedTuple):
+    """Undo record of one `add`, `position` is the prepend index or -1 for an append."""
+
+    slot: str
+    key: Hashable
+    position: int
+
+
+class _Noted(NamedTuple):
+    """Undo record of one `note`."""
+
+    key: str
+
+
+class _Merged(NamedTuple):
+    """Undo record of one `add_js_context`, the values its key held before the merge."""
+
+    key: str
+    context: dict[str, Any]
+    value: _Previous[object]
+    encoded: _Previous[str]
+    serializer: _Previous[JsContextSerializer]
+
+
+type _Entry = _Added | _Noted | _Merged
+
+
+def _previous[V](mapping: Mapping[str, V], key: str) -> _Previous[V]:
+    """Return what `mapping` holds under `key`, the absent marker when nothing."""
+    return mapping.get(key, _Absent.KEY)
+
+
+def _restore[V](mapping: dict[str, V], key: str, previous: _Previous[V]) -> None:
+    """Put back what `mapping` held under `key` before a journalled change."""
+    if previous is _Absent.KEY:
+        mapping.pop(key, None)
+    else:
+        mapping[key] = previous
+
+
 class StaticCollector:
-    """Accumulate static asset references during a single page render."""
+    """Accumulate static asset references during a single page render.
+
+    A mark journals undo records, so a failed subtree can take back what it added.
+    """
 
     def __init__(
         self,
@@ -240,9 +304,14 @@ class StaticCollector:
         dedup: DedupStrategy | None = None,
         js_context_policy: JsContextPolicy | None = None,
         js_serializer: JsContextSerializer | None = None,
+        bundle_url: BundleUrl | None = None,
     ) -> None:
-        """Wire up dedup, JS-context policy, and JS serializer."""
+        """Wire up dedup, JS-context policy, JS serializer, and the bundle URLs.
+
+        Without `bundle_url` the collector records no bundle need, only urgency.
+        """
         self._dedup = dedup if dedup is not None else UrlDedup()
+        self._bundle_url = bundle_url
         self._js_policy = (
             js_context_policy if js_context_policy is not None else FirstWinsPolicy()
         )
@@ -254,6 +323,65 @@ class StaticCollector:
         self._js_context_serializers: dict[str, JsContextSerializer] = {}
         self._js_context_encoded: dict[str, str] = {}
         self._notes: dict[str, list[object]] = {}
+        self._journal: list[_Entry] | None = None
+        self._marks = 0
+
+    def mark(self) -> int:
+        """Start journalling every change and return the position `rollback` returns to.
+
+        Marks nest and share one journal, each ends with `release` or `rollback`.
+        """
+        if self._journal is None:
+            self._journal = []
+        self._marks += 1
+        return len(self._journal)
+
+    def release(self) -> None:
+        """End the innermost mark and keep its changes.
+
+        Its records stay for an outer rollback, and the last release drops the journal.
+        """
+        if self._journal is None:
+            msg = "No collector mark is open."
+            raise RuntimeError(msg)
+        self._marks -= 1
+        if not self._marks:
+            self._journal = None
+
+    def rollback(self, mark: int) -> None:
+        """Undo every change made since `mark`, newest first, and end that mark."""
+        journal = self._journal
+        if journal is None:
+            msg = "No collector mark is open."
+            raise RuntimeError(msg)
+        while len(journal) > mark:
+            self._undo(journal.pop())
+        self.release()
+
+    def _undo(self, entry: _Entry) -> None:
+        if isinstance(entry, _Added):
+            bucket = self._buckets[entry.slot]
+            if entry.position < 0:
+                bucket.pop()
+            else:
+                del bucket[entry.position]
+                if entry.position:
+                    self._prepend_idx[entry.slot] = entry.position
+                else:
+                    del self._prepend_idx[entry.slot]
+            if not bucket:
+                del self._buckets[entry.slot]
+            self._seen_keys.discard(entry.key)
+        elif isinstance(entry, _Noted):
+            values = self._notes[entry.key]
+            values.pop()
+            if not values:
+                del self._notes[entry.key]
+        else:
+            self._js_context = entry.context
+            _restore(entry.context, entry.key, entry.value)
+            _restore(self._js_context_encoded, entry.key, entry.encoded)
+            _restore(self._js_context_serializers, entry.key, entry.serializer)
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> bool:
         """Add the asset unless its dedup key was already recorded, and report which.
@@ -263,8 +391,8 @@ class StaticCollector:
         key = self._dedup.key(asset)
         if key in self._seen_keys:
             return False
-        self._seen_keys.add(key)
         slot = default_kinds.slot(asset.kind)
+        self._seen_keys.add(key)
         bucket = self._buckets.setdefault(slot, [])
         is_inline = asset.inline is not None
         use_prepend = prepend and not is_inline
@@ -273,7 +401,10 @@ class StaticCollector:
             bucket.insert(idx, asset)
             self._prepend_idx[slot] = idx + 1
         else:
+            idx = -1
             bucket.append(asset)
+        if self._journal is not None:
+            self._journal.append(_Added(slot, key, idx))
         return True
 
     def assets_in_slot(self, name: str) -> Sequence[StaticAsset]:
@@ -283,10 +414,34 @@ class StaticCollector:
     def note(self, key: str, value: object) -> None:
         """Append `value` under `key` for another area to read at injection time."""
         self._notes.setdefault(key, []).append(value)
+        if self._journal is not None:
+            self._journal.append(_Noted(key))
 
     def notes(self, key: str) -> Sequence[object]:
         """Return what the render noted under `key`, in the order it was noted."""
         return self._notes.get(key, _NO_NOTES)
+
+    @property
+    def bundle_url(self) -> BundleUrl | None:
+        """Return what resolves a declared bundle URL, which a job collector shares."""
+        return self._bundle_url
+
+    def require(self, name: str, *, urgent: bool = False) -> None:
+        """Record a need for the declared bundle `name`, deferred when `urgent`.
+
+        It is a noted `js` asset, so a rollback, a job delta and an envelope carry it.
+        """
+        if name not in DECLARED_CHUNK_KEYS:
+            msg = f"{name!r} names no declared bundle."
+            raise ValueError(msg)
+        if urgent and not self.notes(URGENT_NOTE):
+            self.note(URGENT_NOTE, value=True)
+        resolve = self._bundle_url
+        url = None if resolve is None else resolve(name)
+        if url is None or url in self.notes(BUNDLE_NOTE):
+            return
+        self.add(StaticAsset(url=url, kind=_BUNDLE_KIND))
+        self.note(BUNDLE_NOTE, url)
 
     def _get_js_serializer(self) -> JsContextSerializer:
         if self._js_serializer is None:
@@ -306,6 +461,28 @@ class StaticCollector:
         except (TypeError, ValueError) as e:
             msg = f"JS context value for key {key!r} is not serialisable: {e}"
             raise TypeError(msg) from e
+        journal = self._journal
+        if journal is None:
+            self._merge_js_context(key, value, encoded, serializer)
+            return
+        context = self._js_context
+        entry = _Merged(
+            key,
+            context,
+            _previous(context, key),
+            _previous(self._js_context_encoded, key),
+            _previous(self._js_context_serializers, key),
+        )
+        self._merge_js_context(key, value, encoded, serializer)
+        journal.append(entry)
+
+    def _merge_js_context(
+        self,
+        key: str,
+        value: object,
+        encoded: str,
+        serializer: JsContextSerializer | None,
+    ) -> None:
         self._js_context = self._js_policy.merge(self._js_context, key, value)
         if self._js_context.get(key) is value:
             self._js_context_encoded[key] = encoded
@@ -373,3 +550,15 @@ class StaticCollector:
             key: json.loads(self._encoded_fragment(key, value, default))
             for key, value in self._js_context.items()
         }
+
+
+def require_bundle(
+    target: Context | StaticCollector | None, name: str, *, urgent: bool = False
+) -> None:
+    """Record on the collector of `target` that the render needs the bundle `name`.
+
+    A render without a collector, such as a bare template render, records nothing.
+    """
+    collector = target.get(COLLECTOR_KEY) if isinstance(target, Context) else target
+    if isinstance(collector, StaticCollector):
+        collector.require(name, urgent=urgent)

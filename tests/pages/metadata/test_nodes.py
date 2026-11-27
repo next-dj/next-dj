@@ -39,7 +39,7 @@ def _render(source: str, **ctx) -> str:
 
 
 def _thunk(
-    tmp_path: Path, source: str, calls: list[int] | None = None
+    rf: RequestFactory, tmp_path: Path, source: str, calls: list[int] | None = None
 ) -> MetadataThunk:
     """Return a thunk over a fresh registry, counting the callable's runs in `calls`."""
     (leaf,) = write_page_chain(tmp_path, [("leaf", source)])
@@ -51,7 +51,7 @@ def _thunk(
             return {"title": lazy(translation.get_language, str)()}
 
         registry.register(leaf, meta)
-    return MetadataThunk(registry, leaf, RequestFactory().get("/leaf/"), {}, {})
+    return MetadataThunk(registry, leaf, rf.get("/leaf/"), {}, {})
 
 
 def _thunk_over(root: Path, meta: Callable[..., object]) -> MetadataThunk:
@@ -72,40 +72,46 @@ class TestMetadataNode:
     def test_a_foreign_value_under_the_key_renders_nothing(self) -> None:
         assert _render("a{% metadata %}b", **{METADATA_KEY: {"title": "T"}}) == "ab"
 
-    def test_a_thunk_renders_the_head_lines(self, tmp_path: Path) -> None:
-        thunk = _thunk(tmp_path, 'metadata = {"title": "T", "description": "D"}\n')
+    def test_a_thunk_renders_the_head_lines(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
+        thunk = _thunk(rf, tmp_path, 'metadata = {"title": "T", "description": "D"}\n')
         assert _render("{% metadata %}", **{METADATA_KEY: thunk}) == (
             '<title>T</title>\n<meta name="description" content="D">'
         )
 
     def test_the_request_of_the_thunk_resolves_the_canonical(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
-        thunk = _thunk(tmp_path, 'metadata = {"canonical": True}\n')
+        thunk = _thunk(rf, tmp_path, 'metadata = {"canonical": True}\n')
         with override_next_settings(SITE={"URL": "https://acme.example"}):
             html = _render("{% metadata %}", **{METADATA_KEY: thunk})
         assert html == '<link rel="canonical" href="https://acme.example/leaf/">'
 
-    def test_the_resolve_is_published_on_the_request(self, tmp_path: Path) -> None:
-        thunk = _thunk(tmp_path, 'metadata = {"title": "T"}\n')
+    def test_the_resolve_is_published_on_the_request(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
+        thunk = _thunk(rf, tmp_path, 'metadata = {"title": "T"}\n')
         _render("{% metadata %}", **{METADATA_KEY: thunk})
         resolved = published_metadata(thunk.request)
         assert resolved is not None
         assert resolved.title == "T"
 
-    def test_two_tags_resolve_the_thunk_once(self, tmp_path: Path) -> None:
+    def test_two_tags_resolve_the_thunk_once(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
         calls: list[int] = []
-        thunk = _thunk(tmp_path, "x = 1\n", calls)
+        thunk = _thunk(rf, tmp_path, "x = 1\n", calls)
         with translation.override("en"):
             html = _render("{% metadata %}|{% metadata %}", **{METADATA_KEY: thunk})
         assert html == "<title>en</title>|<title>en</title>"
         assert calls == [1]
 
     def test_a_tag_in_an_included_template_resolves_the_thunk_once(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
         calls: list[int] = []
-        thunk = _thunk(tmp_path, "x = 1\n", calls)
+        thunk = _thunk(rf, tmp_path, "x = 1\n", calls)
         inner = Template("{% metadata %}{% breadcrumbs %}")
         with translation.override("en"):
             html = _render(
@@ -134,9 +140,9 @@ class TestMetadataNode:
         assert node.render(context) == "<title>Second</title>"
 
     def test_a_lazy_title_renders_under_the_language_of_each_render(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
-        thunk = _thunk(tmp_path, "x = 1\n", [])
+        thunk = _thunk(rf, tmp_path, "x = 1\n", [])
         template = Template("{% metadata %}")
         context = Context({METADATA_KEY: thunk})
         with translation.override("de"):
@@ -145,9 +151,9 @@ class TestMetadataNode:
             assert template.render(context) == "<title>en</title>"
 
     def test_a_raising_renderer_renders_an_empty_head(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, rf: RequestFactory
     ) -> None:
-        thunk = _thunk(tmp_path, 'metadata = {"title": "T"}\n')
+        thunk = _thunk(rf, tmp_path, 'metadata = {"title": "T"}\n')
         watch_degraded()
         with patch(
             "next.pages.metadata.nodes.metadata_renderer", return_value=_RAISING
@@ -159,8 +165,10 @@ class TestMetadataNode:
         assert "Mock raised ValueError" in record.getMessage()
 
     @override_settings(DEBUG=True)
-    def test_a_raising_renderer_raises_under_debug(self, tmp_path: Path) -> None:
-        thunk = _thunk(tmp_path, 'metadata = {"title": "T"}\n')
+    def test_a_raising_renderer_raises_under_debug(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
+        thunk = _thunk(rf, tmp_path, 'metadata = {"title": "T"}\n')
         with (
             patch("next.pages.metadata.nodes.metadata_renderer", return_value=_RAISING),
             pytest.raises(ValueError, match="broken") as raised,
@@ -168,7 +176,9 @@ class TestMetadataNode:
             _render("{% metadata %}", **{METADATA_KEY: thunk})
         assert "renders empty" in raised.value.__notes__[0]
 
-    def test_the_tag_reaches_a_component_render(self, tmp_path: Path) -> None:
+    def test_the_tag_reaches_a_component_render(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
         (tmp_path / "head.djx").write_text("<head>{% metadata %}</head>")
         info = ComponentInfo(
             name="page_head",
@@ -178,7 +188,7 @@ class TestMetadataNode:
             module_path=None,
             is_simple=True,
         )
-        thunk = _thunk(tmp_path, 'metadata = {"title": "T"}\n')
+        thunk = _thunk(rf, tmp_path, 'metadata = {"title": "T"}\n')
         with patch.object(components_manager, "get_component", return_value=info):
             html = _render(
                 '{% component "page_head" %}',
@@ -214,6 +224,11 @@ metadata = {
 """
 
 
+def _trail(html: str) -> str:
+    start = html.index('<nav aria-label="Breadcrumb">')
+    return html[start : html.index("</nav>", start)]
+
+
 def _breadcrumb_tree(root: Path) -> Path:
     write_page(root, "", 'metadata = {"title": "Home"}\n', body=BODY)
     write_page(root, "blog", 'metadata = {"breadcrumb": "Blog"}\n', body=BODY)
@@ -237,21 +252,37 @@ class TestBreadcrumbsTag:
     def test_no_thunk_binds_an_empty_trail(self) -> None:
         assert _render("{% breadcrumbs as t %}{{ t|length }}") == "0"
 
-    def test_a_page_without_crumbs_renders_nothing(self, tmp_path: Path) -> None:
-        thunk = _thunk(tmp_path, "x = 1\n")
+    def test_a_page_without_crumbs_renders_nothing(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
+        thunk = _thunk(rf, tmp_path, "x = 1\n")
         assert _render("{% breadcrumbs %}", **{METADATA_KEY: thunk}) == ""
 
-    def test_a_crumb_without_a_url_renders_as_text(self, tmp_path: Path) -> None:
-        thunk = _thunk(tmp_path, 'metadata = {"title": "<Leaf>"}\n')
+    def test_a_crumb_without_a_url_renders_as_text(
+        self, tmp_path: Path, rf: RequestFactory
+    ) -> None:
+        thunk = _thunk(rf, tmp_path, 'metadata = {"title": "<Leaf>"}\n')
         assert _render("{% breadcrumbs %}", **{METADATA_KEY: thunk}) == (
             '<nav aria-label="Breadcrumb"><ol><li>&lt;Leaf&gt;</li></ol></nav>'
         )
 
-    def test_a_current_crumb_without_a_url_carries_aria_current(self) -> None:
+    def test_a_current_crumb_without_a_url_carries_the_page_marks(self) -> None:
         crumbs = (Breadcrumb("Home", "/"), Breadcrumb("Here", None, current=True))
         assert render_breadcrumbs(crumbs) == (
             '<nav aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li>'
-            '<li aria-current="page">Here</li></ol></nav>'
+            '<li aria-current="page" data-next-current="page">Here</li></ol></nav>'
+        )
+
+    def test_an_ancestor_crumb_carries_the_ancestor_mark(self) -> None:
+        crumbs = (
+            Breadcrumb("Blog", "/blog/", ancestor=True),
+            Breadcrumb("Post", "/blog/post/", current=True),
+        )
+        assert render_breadcrumbs(crumbs) == (
+            '<nav aria-label="Breadcrumb"><ol>'
+            '<li><a href="/blog/" data-next-current="ancestor">Blog</a></li>'
+            '<li><a href="/blog/post/" aria-current="page" data-next-current="page">'
+            "Post</a></li></ol></nav>"
         )
 
     @pytest.mark.parametrize(
@@ -278,9 +309,9 @@ class TestBreadcrumbTrail:
             html = Client().get("/blog/hello/").content.decode()
         assert (
             '<nav aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li>'
-            '<li><a href="/blog/">Blog</a></li>'
-            '<li><a href="/blog/hello/" aria-current="page">Post hello</a></li>'
-            "</ol></nav>"
+            '<li><a href="/blog/" data-next-current="ancestor">Blog</a></li>'
+            '<li><a href="/blog/hello/" aria-current="page" data-next-current="page">'
+            "Post hello</a></li></ol></nav>"
         ) in html
 
     def test_a_non_ascii_slug_is_current(self, tmp_path: Path) -> None:
@@ -288,7 +319,8 @@ class TestBreadcrumbTrail:
         with routed(root, **WITH_BASE):
             html = Client().get("/blog/café/").content.decode()
         assert (
-            '<li><a href="/blog/caf%C3%A9/" aria-current="page">Post café</a></li>'
+            '<li><a href="/blog/caf%C3%A9/" aria-current="page" '
+            'data-next-current="page">Post café</a></li>'
         ) in html
 
     def test_the_graph_gains_a_breadcrumb_list(self, tmp_path: Path) -> None:
@@ -337,7 +369,8 @@ class TestBreadcrumbTrail:
             html = Client().get("/shop/item/").content.decode()
         assert (
             '<ol><li><a href="/">Home</a></li>'
-            '<li><a href="/shop/item/" aria-current="page">Item</a></li></ol>'
+            '<li><a href="/shop/item/" aria-current="page" data-next-current="page">'
+            "Item</a></li></ol>"
         ) in html
 
     def test_false_drops_the_segment(self, tmp_path: Path) -> None:
@@ -345,7 +378,10 @@ class TestBreadcrumbTrail:
         with routed(root, **WITH_BASE):
             html = Client().get("/hidden/leaf/").content.decode()
         assert "Hidden" not in html.split("<body>")[1]
-        assert '<a href="/hidden/leaf/" aria-current="page">Leaf</a>' in html
+        assert (
+            '<a href="/hidden/leaf/" aria-current="page" data-next-current="page">'
+            "Leaf</a>"
+        ) in html
 
     def test_a_declared_breadcrumb_list_replaces_the_derived_one(
         self, tmp_path: Path
@@ -379,6 +415,23 @@ class TestBreadcrumbTrail:
         ):
             html = Client().get("/de/blog/hello/").content.decode()
         assert (
-            '<li><a href="/de/">Home</a></li><li><a href="/de/blog/">Blog</a></li>'
-            '<li><a href="/de/blog/hello/" aria-current="page">Post hello</a></li>'
+            '<li><a href="/de/">Home</a></li>'
+            '<li><a href="/de/blog/" data-next-current="ancestor">Blog</a></li>'
+            '<li><a href="/de/blog/hello/" aria-current="page" '
+            'data-next-current="page">Post hello</a></li>'
         ) in html
+
+    @pytest.mark.parametrize(
+        "path", ["/blog/hello/", "/shop/item/", "/blog/café/", "/hidden/leaf/"]
+    )
+    def test_the_trail_is_the_same_with_the_link_pass_off(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        root = _breadcrumb_tree(tmp_path / "pages")
+        with routed(root, **WITH_BASE):
+            on = Client().get(path).content.decode()
+        off_router = {"ENABLED": False, "ACTIVE_LINKS": {"ENABLED": False}}
+        with routed(root, ROUTER=off_router, **WITH_BASE):
+            off = Client().get(path).content.decode()
+        assert _trail(on) == _trail(off)
+        assert 'data-next-current="page"' in _trail(off)

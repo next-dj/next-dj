@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from next.caches import SETTINGS
 from next.forms import FormActionNotFoundError, RegistryFormActionBackend
 from next.forms.backends import ActionRegistration
 from next.forms.manager import FormActionManager
@@ -93,10 +94,9 @@ class TestBenchManagerLookups:
         """A lookup after the URL cache is dropped pays the reverse."""
         manager = _make_populated_manager()
         target = f"act_{_BULK // 2}"
-        backend = manager.default_backend
 
         def setup() -> tuple[tuple[str], dict[str, object]]:
-            backend.forget_urls()
+            SETTINGS.move()
             return (target,), {}
 
         benchmark.pedantic(manager.get_action_url, setup=setup, rounds=50)

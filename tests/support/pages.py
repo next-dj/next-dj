@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpRequest
 
-from next.pages.loaders import load_page_module
-from next.pages.manager.views import unified_view as build_unified_view
+from next.pages.loaders import BoundaryChain, PageBoundary, load_page_module
 from next.pages.metadata import resolve_metadata
-from next.pages.metadata.chain import MetadataThunk
+from next.pages.metadata.chain import FoldedMetadata, MetadataThunk
 from next.seeding import METADATA_KEY
+from next.views.pages import unified_view as build_unified_view
 from tests.support.partial_requests import partial_meta
 
 
@@ -144,3 +144,35 @@ def record_path_calls(
 
     monkeypatch.setattr(Path, method, counting)
     return calls
+
+
+def loaded_page(root: Path, source: str, trail: str = "") -> Path:
+    """Write and import one `page.py`, so its registrations reach the global page."""
+    page_file = write_page(root, trail, source)
+    _module, error = load_page_module(page_file)
+    assert error is None
+    return page_file
+
+
+def page_calls(page_file: Path) -> list[int]:
+    """Return the `calls` list the imported `page_file` module records into."""
+    module, _error = load_page_module(page_file)
+    assert module is not None
+    return module.calls
+
+
+def folded_metadata(context: dict[str, object]) -> FoldedMetadata:
+    """Return the metadata an async render folded into `context`."""
+    thunk = context[METADATA_KEY]
+    assert isinstance(thunk, FoldedMetadata)
+    return thunk
+
+
+def boundary_chain(*levels: int, root: Path = Path("/site")) -> BoundaryChain:
+    """Return a chain with one `error.djx` boundary at each of `levels`."""
+    return BoundaryChain.of(
+        tuple(
+            PageBoundary(level, level, root / str(level) / "error.djx", None)
+            for level in levels
+        )
+    )

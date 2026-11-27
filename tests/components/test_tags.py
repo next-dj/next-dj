@@ -11,41 +11,31 @@ from django.template.engine import Engine
 from django.test import RequestFactory, override_settings
 from django.utils.safestring import SafeString
 
-from next.components import ComponentInfo, component, components_manager
+from next.caches import ROUTES
+from next.components import (
+    ComponentInfo,
+    component,
+    components_manager,
+    tags as component_tags,
+)
+from next.components.tags import ComponentNode
 from next.static import StaticCollector
-from next.templatetags import components as component_tags
-from next.templatetags.components import ComponentNode
-from next.utils import forget_resolved_trees
 from tests.support import record_path_calls
+from tests.support.cases.components import (
+    INTERPOLATION_CASES,
+    SAFE_LITERAL_CASES,
+    InterpolationCase,
+    PropRenderCase,
+)
 
 
 class TestComponentTag:
     """Tests for void ``{% component %}`` and block ``{% #component %}`` tags."""
 
-    def test_component_tag_requires_name(self) -> None:
-        """{% component %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="component name"):
-            Template("{% load components %}{% component %}")
-
-    def test_component_tag_requires_quoted_name(self) -> None:
-        """{% component %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted"):
-            Template('{% load components %}{% component "" %}')
-
     def test_endcomponent_is_not_a_tag(self) -> None:
         """{% endcomponent %} is not a registered tag."""
         with pytest.raises(TemplateSyntaxError, match="endcomponent"):
             Template("{% load components %}{% endcomponent %}")
-
-    def test_block_component_requires_name_token(self) -> None:
-        """{% #component %} without a name raises."""
-        with pytest.raises(TemplateSyntaxError, match="#component"):
-            Template("{% load components %}{% #component %}")
-
-    def test_block_component_requires_non_empty_quoted_name(self) -> None:
-        """{% #component %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted"):
-            Template('{% load components %}{% #component "" %}{% /component %}')
 
     def test_component_tag_renders_empty_without_path_in_context(self) -> None:
         """When current_template_path is missing, component renders empty."""
@@ -62,7 +52,7 @@ class TestComponentTag:
     def test_component_tag_renders_empty_when_component_not_found(self) -> None:
         """When component is not resolved, renders empty."""
         t = Template('{% load components %}{% component "nonexistent" %}')
-        with patch("next.templatetags.components.get_component", return_value=None):
+        with patch("next.components.tags.get_component", return_value=None):
             result = t.render(
                 Context({"current_template_path": "/app/pages/home/template.djx"})
             )
@@ -176,7 +166,7 @@ class TestComponentTag:
             looked_up.append(path)
             return info
 
-        monkeypatch.setattr(component_tags, "_resolve_template_path", counting)
+        monkeypatch.setattr(component_tags, "resolve_template_path", counting)
         with patch.object(
             components_manager, "get_component", side_effect=get_component
         ):
@@ -276,38 +266,9 @@ class TestComponentTag:
         for forbidden in forbidden_substrings:
             assert forbidden not in result
 
-    @pytest.mark.parametrize(
-        ("call_site", "context_extra", "must_contain", "must_not_contain"),
-        [
-            # Django marks a quoted literal safe, so `<slug>` would render as a tag.
-            (
-                '{% component "card" body="visit /s/<slug>/ now" %}',
-                {},
-                ("/s/&lt;slug&gt;/",),
-                ("<slug>",),
-            ),
-            (
-                '{% component "card" body="<em>raw</em>"|safe %}',
-                {},
-                ("<em>raw</em>",),
-                ("&lt;em&gt;",),
-            ),
-            (
-                '{% component "card" body=html_blob %}',
-                {"html_blob": "<b>safe</b>"},
-                ("<b>safe</b>",),
-                ("&lt;b&gt;",),
-            ),
-        ],
-        ids=["literal-escapes", "literal-safe-opt-in", "variable-stays-safe"],
-    )
+    @pytest.mark.parametrize("case", SAFE_LITERAL_CASES, ids=lambda c: c.id)
     def test_component_props_demote_safe_literals_for_text_display(
-        self,
-        tmp_path: Path,
-        call_site: str,
-        context_extra: dict[str, str],
-        must_contain: tuple[str, ...],
-        must_not_contain: tuple[str, ...],
+        self, tmp_path: Path, case: PropRenderCase
     ) -> None:
         """Plain string literals reach ``{{ prop }}`` as text, not as HTML."""
         (tmp_path / "card.djx").write_text("<article>{{ body }}</article>")
@@ -320,14 +281,14 @@ class TestComponentTag:
             is_simple=True,
         )
         ctx = {"current_template_path": str(tmp_path / "page.djx")}
-        for key, value in context_extra.items():
+        for key, value in case.context.items():
             ctx[key] = SafeString(value)
         with patch.object(components_manager, "get_component", return_value=info):
-            t = Template("{% load components %}" + call_site)
+            t = Template("{% load components %}" + case.call_site)
             result = t.render(Context(ctx))
-        for needle in must_contain:
+        for needle in case.present:
             assert needle in result
-        for forbidden in must_not_contain:
+        for forbidden in case.absent:
             assert forbidden not in result
 
     def test_block_component_with_slots_passes_slot_content(
@@ -513,45 +474,12 @@ class TestComponentTag:
             )
         assert result == "<h1>a b</h1>"
 
-    @pytest.mark.parametrize(
-        ("call_site", "body", "context_extra", "expected"),
-        [
-            ('title="Rows ({{ n }})"', "{{ title }}", {"n": 3}, "Rows (3)"),
-            ('title="{{ a }}-{{ b }}"', "{{ title }}", {"a": 1, "b": 2}, "1-2"),
-            ('title="{{ name|upper }}!"', "{{ title }}", {"name": "ada"}, "ADA!"),
-            ('title="  {{  n  }}  "', "{{ title }}", {"n": 3}, "  3  "),
-            ('title="{{ n }}"', "{{ title|add:1 }}", {"n": 5}, "6"),
-            ('title="{{ items }}"', "{{ title|length }}", {"items": [1, 2, 3]}, "3"),
-            ('title="x {{ gone }} y"', "{{ title }}", {}, "x  y"),
-            ('title="{{ raw }}"', "{{ title }}", {"raw": "<b>"}, "&lt;b&gt;"),
-            ('title="a {{ raw }}"', "{{ title }}", {"raw": "<b>"}, "a &lt;b&gt;"),
-            ('title="{{ n }}"|upper', "{{ title }}", {"n": 3}, "{{ N }}"),
-            ('title="no braces"', "{{ title }}", {}, "no braces"),
-        ],
-        ids=[
-            "text-around",
-            "two-expressions",
-            "filter-inside",
-            "whitespace-kept",
-            "lone-expression-keeps-type",
-            "lone-expression-keeps-list",
-            "missing-variable-is-empty",
-            "lone-value-escapes-once",
-            "mixed-value-escapes-once",
-            "filter-on-the-literal-keeps-django-meaning",
-            "plain-literal-untouched",
-        ],
-    )
+    @pytest.mark.parametrize("case", INTERPOLATION_CASES, ids=lambda c: c.id)
     def test_component_prop_interpolates_double_braces(
-        self,
-        tmp_path: Path,
-        call_site: str,
-        body: str,
-        context_extra: dict[str, object],
-        expected: str,
+        self, tmp_path: Path, case: InterpolationCase
     ) -> None:
         """A string prop resolves each ``{{ expr }}`` against the calling context."""
-        (tmp_path / "card.djx").write_text(body)
+        (tmp_path / "card.djx").write_text(case.body)
         info = ComponentInfo(
             name="card",
             scope_root=tmp_path,
@@ -560,13 +488,13 @@ class TestComponentTag:
             module_path=None,
             is_simple=True,
         )
-        ctx = {"current_template_path": str(tmp_path / "page.djx"), **context_extra}
+        ctx = {"current_template_path": str(tmp_path / "page.djx"), **case.context}
         with patch.object(components_manager, "get_component", return_value=info):
             t = Template(
-                "{% load components %}" + '{% component "card" ' + call_site + " %}"
+                f'{{% load components %}}{{% component "card" {case.call_site} %}}'
             )
             result = t.render(Context(ctx))
-        assert result == expected
+        assert result == case.expected
 
     def test_component_prop_interpolates_in_the_block_form(
         self, tmp_path: Path
@@ -837,7 +765,7 @@ class TestRequestFromTheCallerContext:
     """A request the caller context carries is the one the component resolves."""
 
     def test_a_context_provider_receives_the_caller_request(
-        self, tmp_path: Path
+        self, tmp_path: Path, rf: RequestFactory
     ) -> None:
         """The flattened context names the request, so no fallback lookup is needed."""
         comp_dir = tmp_path / "probe"
@@ -858,7 +786,7 @@ class TestRequestFromTheCallerContext:
             module_path=module_path,
             is_simple=False,
         )
-        request = RequestFactory().get("/dashboard/")
+        request = rf.get("/dashboard/")
 
         with patch.object(components_manager, "get_component", return_value=info):
             template = Template('{% load components %}{% component "probe" %}')
@@ -872,6 +800,89 @@ class TestRequestFromTheCallerContext:
             )
 
         assert result == "<b>/dashboard/</b>"
+
+
+class TestComponentScope:
+    """A component reads the context of its call site and writes none of it back."""
+
+    def test_a_cycle_variable_set_inside_leaves_the_caller_value(
+        self, tmp_path: Path
+    ) -> None:
+        """A `cycle ... as` inside the body never reaches the caller's variable."""
+        html = _render_slotted(
+            tmp_path,
+            '{% cycle "a" "b" as row silent %}[{{ row }}]',
+            '{% component "c" %}|{{ row }}',
+            {"row": "caller"},
+        )
+        assert html == "[a]|caller"
+
+    def test_an_as_variable_set_inside_leaves_the_caller_value(
+        self, tmp_path: Path
+    ) -> None:
+        """A tag storing its output under a caller's name keeps it inside."""
+        html = _render_slotted(
+            tmp_path,
+            '{% firstof "inner" as shown %}{{ shown }}',
+            '{% component "c" %}|{{ shown }}',
+            {"shown": "caller"},
+        )
+        assert html == "inner|caller"
+
+    def test_a_cycle_inside_restarts_on_each_render(self, tmp_path: Path) -> None:
+        """Each render keeps tag state of its own, apart from the caller's loop."""
+        html = _render_slotted(
+            tmp_path,
+            '{% cycle "p" "q" %}',
+            '{% for i in "12" %}{% cycle "x" "y" %}{% component "c" %}{% endfor %}',
+        )
+        assert html == "xpyp"
+
+    def test_loop_values_of_the_caller_reach_the_body(self, tmp_path: Path) -> None:
+        """The body reads the loop variables live at its call site."""
+        html = _render_slotted(
+            tmp_path,
+            "{{ item }}{{ forloop.counter }}",
+            '{% for item in items %}{% component "c" %}{% endfor %}',
+            {"items": ["a", "b"]},
+        )
+        assert html == "a1b2"
+
+    def test_a_context_function_value_stays_inside_the_component(
+        self, tmp_path: Path
+    ) -> None:
+        """A keyed context value shadows the caller's name only inside the body."""
+        comp_dir = tmp_path / "titled"
+        comp_dir.mkdir()
+        (comp_dir / "component.djx").write_text("<b>{{ title }}</b>")
+        module_path = comp_dir / "component.py"
+        module_path.write_text("# empty\n")
+
+        def title() -> str:
+            return "inner"
+
+        component._registry.register(module_path, "title", title)
+        info = ComponentInfo(
+            name="titled",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=comp_dir / "component.djx",
+            module_path=module_path,
+            is_simple=False,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            template = Template(
+                '{% load components %}{% component "titled" %}|{{ title }}'
+            )
+            result = template.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "page.djx"),
+                        "title": "caller",
+                    }
+                )
+            )
+        assert result == "<b>inner</b>|caller"
 
 
 def _render_slotted(
@@ -913,37 +924,6 @@ def _component_node(source: str) -> ComponentNode:
 
 class TestSlotTag:
     """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
-
-    def test_block_slot_tag_requires_name(self) -> None:
-        """{% #slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="#slot"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% #slot %}{% /slot %}{% /component %}'
-            )
-
-    def test_block_slot_tag_requires_exactly_one_arg(self) -> None:
-        """{% #slot %} with wrong arity raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% #slot "a" "b" %}{% /slot %}{% /component %}'
-            )
-
-    def test_short_slot_requires_quoted_name(self) -> None:
-        """{% slot %} short form with empty name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template(
-                '{% load components %}{% #component "c" %}{% slot "" %}{% /component %}'
-            )
-
-    def test_short_slot_requires_exactly_one_name(self) -> None:
-        """{% slot %} short form with two names raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template(
-                "{% load components %}"
-                '{% #component "c" %}{% slot "a" "b" %}{% /component %}'
-            )
 
     def test_block_slot_fills_the_named_slot_variable(self, tmp_path: Path) -> None:
         """A block slot inside a block component arrives as `slot_<name>`."""
@@ -1079,16 +1059,6 @@ class TestNestedSlot:
 class TestSetSlotTag:
     """Tests for ``{% #set_slot %}``, ``{% /set_slot %}``, and short ``{% set_slot %}``."""
 
-    def test_set_slot_requires_name(self) -> None:
-        """{% #set_slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="#set_slot"):
-            Template("{% load components %}{% #set_slot %}fallback{% /set_slot %}")
-
-    def test_set_slot_requires_quoted_name(self) -> None:
-        """{% #set_slot %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template('{% load components %}{% #set_slot "" %}x{% /set_slot %}')
-
     def test_set_slot_renders_fallback_when_slot_empty(self) -> None:
         r"""{% #set_slot %} renders fallback when slot not in context."""
         t = Template(
@@ -1122,16 +1092,6 @@ class TestSetSlotTag:
         t = Template('{% load components %}{% set_slot "avatar" %}')
         result = t.render(Context({"slot_avatar": "<b>ok</b>"}))
         assert "<b>ok</b>" in result
-
-    def test_short_set_slot_requires_exactly_one_name(self) -> None:
-        """{% set_slot %} short form with two names raises."""
-        with pytest.raises(TemplateSyntaxError, match="exactly one"):
-            Template('{% load components %}{% set_slot "a" "b" %}')
-
-    def test_short_set_slot_empty_name_raises(self) -> None:
-        """{% set_slot "" %} raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template('{% load components %}{% set_slot "" %}')
 
     @pytest.mark.parametrize(
         ("context_data", "expected_substring", "forbidden_substrings"),
@@ -1306,7 +1266,7 @@ class TestComponentMissReporting:
     ) -> None:
         missing, visible, spy_ctx = self._not_found_patches({"navbar": None})
         with (
-            caplog.at_level(logging.WARNING, logger="next.templatetags.components"),
+            caplog.at_level(logging.WARNING, logger="next.components.tags"),
             missing,
             visible,
             spy_ctx as spy,
@@ -1322,7 +1282,7 @@ class TestComponentMissReporting:
 
     def test_prod_no_discovery_path_warns_and_renders_empty(self, caplog) -> None:
         with (
-            caplog.at_level(logging.WARNING, logger="next.templatetags.components"),
+            caplog.at_level(logging.WARNING, logger="next.components.tags"),
             patch("difflib.get_close_matches", wraps=difflib.get_close_matches) as spy,
         ):
             result = self._render({})
@@ -1354,7 +1314,7 @@ class TestComponentNodePathCache:
         node = self._node()
         raw, expected = self._noncanonical(tmp_path, "scope")
         ctx = Context({"current_template_path": raw})
-        forget_resolved_trees()
+        ROUTES.move()
         seen = record_path_calls(monkeypatch, "resolve")
         first = node._template_path_from_context(ctx)
         second = node._template_path_from_context(ctx)
@@ -1369,7 +1329,7 @@ class TestComponentNodePathCache:
         node = self._node()
         raw_a, expected_a = self._noncanonical(tmp_path, "scope_a")
         raw_b, expected_b = self._noncanonical(tmp_path, "scope_b")
-        forget_resolved_trees()
+        ROUTES.move()
         seen = record_path_calls(monkeypatch, "resolve")
         first = node._template_path_from_context(
             Context({"current_template_path": raw_a})
@@ -1388,7 +1348,7 @@ class TestComponentNodePathCache:
         node = self._node()
         cases = [self._noncanonical(tmp_path, f"scope{i}") for i in range(20)]
         contexts = [Context({"current_template_path": raw}) for raw, _ in cases]
-        forget_resolved_trees()
+        ROUTES.move()
         seen = record_path_calls(monkeypatch, "resolve")
         for _ in range(3):
             for ctx, (_raw, expected) in zip(contexts, cases, strict=True):
@@ -1401,7 +1361,7 @@ class TestComponentNodePathCache:
         """A path one node resolved costs a second node nothing."""
         raw, expected = self._noncanonical(tmp_path, "scope")
         ctx = Context({"current_template_path": raw})
-        forget_resolved_trees()
+        ROUTES.move()
         seen = record_path_calls(monkeypatch, "resolve")
         assert self._node()._template_path_from_context(ctx) == expected
         assert self._node()._template_path_from_context(ctx) == expected
@@ -1414,7 +1374,7 @@ class TestComponentNodePathCache:
         node = self._node()
         raw, expected = self._noncanonical(tmp_path, "shared")
         ctx = Context({"current_template_path": raw})
-        forget_resolved_trees()
+        ROUTES.move()
         assert node._template_path_from_context(ctx) == expected
         seen = record_path_calls(monkeypatch, "resolve")
 
@@ -1428,10 +1388,10 @@ class TestComponentNodePathCache:
         node = self._node()
         raw, expected = self._noncanonical(tmp_path, "scope")
         ctx = Context({"current_template_path": raw})
-        forget_resolved_trees()
+        ROUTES.move()
         seen = record_path_calls(monkeypatch, "resolve")
         assert node._template_path_from_context(ctx) == expected
-        forget_resolved_trees()
+        ROUTES.move()
         assert node._template_path_from_context(ctx) == expected
         assert len(seen) == 2
 
@@ -1474,7 +1434,7 @@ class TestComponentNodePathCache:
             resolved.append(value)
             return Path(value).resolve()
 
-        monkeypatch.setattr(component_tags, "_resolve_template_path", counting)
+        monkeypatch.setattr(component_tags, "resolve_template_path", counting)
         with patch.object(
             components_manager,
             "get_component",

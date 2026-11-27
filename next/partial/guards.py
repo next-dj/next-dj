@@ -71,7 +71,9 @@ class _Verdict:
     stamps: Stamps
 
 
-_verdicts: BoundedCache[tuple[Path, Path, str, str], _Verdict] = BoundedCache()
+_verdicts: BoundedCache[tuple[Path, Path, str, str], _Verdict] = BoundedCache(
+    depends=()
+)
 
 
 def _root(value: object) -> str | None:

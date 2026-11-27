@@ -56,6 +56,15 @@ The shape every one of them fits into is the request pipeline below.
 :doc:`seo-pipeline`
    Sitemap and robots discovery, the items registry, the URL slot, resets.
 
+:doc:`boundary-pipeline`
+   Deferred boundaries from the tag to the streamed fragment, the coordinator, lanes, tokens.
+
+:doc:`router-pipeline`
+   The client router, its navigation envelope, layout digests, active links, and the browser half.
+
+:doc:`client-runtime`
+   The client build, chunks, protocol constants, and golden fixtures.
+
 :doc:`autoreload`
    Watchers, route reload, signals.
 
@@ -79,6 +88,9 @@ The shape every one of them fits into is the request pipeline below.
    action-dispatch
    partial-pipeline
    seo-pipeline
+   boundary-pipeline
+   router-pipeline
+   client-runtime
    autoreload
    contributing-notes
    adding-an-area

@@ -72,6 +72,7 @@ The test helpers of ``next.testing`` need the ``testing`` extra, which a project
    uv add --dev "next.dj[testing]"
 
 A project that shares realtime topics across processes adds the ``broker`` extra with ``uv add "next.dj[broker]"``, see :doc:`/content/howto/fan-out-across-processes-with-redis`.
+The ``zstd`` codec needs ``uv add "next.dj[zstd]"`` below Python 3.14, which ships it in the standard library, and the ``brotli`` codec needs the ``brotli`` extra, while gzip always works, see :doc:`/content/topics/compression`.
 The WebSocket transport in development needs ``uv add "uvicorn[standard]"``, see :doc:`/content/howto/stream-over-websockets`.
 
 Create a Django project
@@ -135,7 +136,7 @@ The block below spells the defaults out and changes nothing.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
            }
@@ -153,6 +154,23 @@ Components are covered in :doc:`tutorial03` and both keys in :ref:`ref-settings`
 
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
+
+Compress every response
+-----------------------
+
+This step is optional.
+A streamed page compresses itself, and ``next.middleware.CompressionMiddleware`` compresses every other response as well, the buffered pages, the partial answers, and any other Django view.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   MIDDLEWARE = [
+       "django.middleware.security.SecurityMiddleware",
+       "next.middleware.CompressionMiddleware",
+       # the rest of the list startproject wrote
+   ]
+
+The middleware goes directly below ``SecurityMiddleware``, and :doc:`/content/howto/enable-response-compression` covers the codecs and the checks.
 
 Include the router
 ------------------
@@ -176,6 +194,7 @@ A project that already has routes keeps its ``urlpatterns`` and appends the ``in
    Every page returns a 404 until the line is in place.
 
 URLs declared above the ``include`` keep working.
+Links to them load as documents, as they did before, because the client router takes over only the links to pages of the file router.
 Anything not matched by Django falls through to the file router, which resolves it against your ``pages/`` tree.
 
 Create your first page
@@ -240,7 +259,7 @@ The command exits with status zero, and every message it does print names both t
 The partial asset version needs no settings of its own, because it is derived from the staticfiles manifest when the project has one and falls back to a stable string when it does not, see :doc:`/content/ref/settings`.
 
 Among its reports ``next.E017`` names a ``page.py`` that raises while importing, ``next.E084`` names the same for a ``component.py``, and ``next.E072`` names a composed page template that fails to compile.
-Eight framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
+Ten framework checks carry Django's ``deploy`` flag and stay silent until the deployment run asks for them.
 
 .. code-block:: bash
    :caption: shell

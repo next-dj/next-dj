@@ -1,11 +1,20 @@
-"""Sentinels, cycle error, and per-resolution cache used during DI resolution.
+"""Sentinels, the per-resolution cache and the request memo of DI resolution.
 
 `_IN_PROGRESS` and `_CACHE_MISS` keep a `None`-valued hit from reading as a miss.
 """
 
 from __future__ import annotations
 
-from typing import Any, Final
+from contextvars import ContextVar
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Final
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from .scope import RequestScope
 
 
 _IN_PROGRESS: object = object()
@@ -61,6 +70,10 @@ class DependencyCache:
         if self._in_progress is not None:
             self._in_progress.discard(key)
 
+    def finished(self) -> Mapping[str, Any]:
+        """Return a read-only view of the finished values, in-progress keys left out."""
+        return MappingProxyType(self._cache)
+
     def __len__(self) -> int:
         """Return the number of stored values."""
         return len(self._cache)
@@ -68,3 +81,30 @@ class DependencyCache:
     def __contains__(self, key: str) -> bool:
         """Return membership in the backing dict."""
         return key in self._cache
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class RequestMemo:
+    """The request scope the async path shares keyed values through, and its policy.
+
+    A key two consumers of one root name is shared, `shared` and `share_all` widen it.
+    """
+
+    scope: RequestScope
+    shared: frozenset[str] = frozenset()
+    share_all: bool = False
+    unit: RequestScope | None = None
+
+    def instance(self) -> RequestMemo:
+        """Return the memo of one component instance, a fresh layer of the unit scope.
+
+        Its props set it apart from siblings and parent, so neither reads its values.
+        """
+        unit = self.scope if self.unit is None else self.unit
+        return RequestMemo(unit.layer(), self.shared, self.share_all, unit)
+
+
+request_memo: ContextVar[RequestMemo | None] = ContextVar(
+    "next_deps_request_memo", default=None
+)
+"""The memo of the current request, set by the owner of its scope."""

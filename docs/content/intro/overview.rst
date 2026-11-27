@@ -21,7 +21,7 @@ The requirements in :doc:`install` stay Python, Django, and an ASGI or WSGI serv
 What next.dj adds
 -----------------
 
-next.dj layers eight things on top of a regular Django project.
+next.dj layers ten things on top of a regular Django project.
 Each one starts from work a Django team does by hand today and names the mechanism that removes it.
 
 File router.
@@ -64,6 +64,18 @@ Partial rendering.
    With JavaScript off the same markup is an ordinary form or anchor, so the page falls back to a full cycle.
    Zones can also update from a realtime topic, see :doc:`/content/topics/realtime`.
    See :doc:`/content/topics/partial-rendering/index`.
+
+Deferred boundaries.
+   A slow widget costs a second view and URL, a ``hx-trigger="load"`` placeholder, and hand-written error handling.
+   A ``loading.djx`` beside a component or a page turns it into a boundary the response fills in later, and an ``error.djx`` beside it contains its failure.
+   The page answers with a shell at once, and the slow part arrives in the same response or on a later request, with the access rules checked again.
+   See :doc:`/content/topics/boundaries/index`.
+
+Client router.
+   A full document load on every click costs the scroll position, the open menus, and the layouts the next page shares with the last.
+   A link to a page of the project is fetched and swapped in instead, keeping the shared layouts on screen, and it prefetches on intent.
+   With JavaScript off the same markup is an ordinary link.
+   See :doc:`/content/topics/router/index`.
 
 Co-located assets.
    A stylesheet or a script for one page or component costs a static file path, a tag repeated in every template that needs it, and the discipline to remove the tag when the markup goes.

@@ -5,18 +5,23 @@
 
 from __future__ import annotations
 
-import functools
 import logging
+import os
 import stat
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, Final, override
 
-from next.caches import PageCache
+from next.boundaries.markup import wrapper_tag
+from next.boundaries.options import DEFAULT_TAG
+from next.caches import FRAMEWORK, ROUTES, SETTINGS, PageCache, memo
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
-from next.introspect import refuse_async_render
+from next.conf.router import router_enabled
+from next.discovery import get_pages_directories_for_watch
+from next.errors import SettingError
+from next.introspect import is_coroutine_callable, refuse_async
 from next.pages.errors import PageModuleImportError
 from next.permissions.access import declarations
 from next.stamps import all_fresh, stamp_of, stat_mtime_ns, trusted
@@ -30,15 +35,29 @@ from next.utils import (
     template_edits_watched,
 )
 
+from .layouts import (
+    LayoutChain,
+    LayoutId,
+    forget_chains,
+    held_chain,
+    hold_chain,
+    layout_id,
+)
 from .paths import page_path_info
 from .placeholder import (
+    BOUNDARY_END_TAG,
+    BOUNDARY_TAG,
+    FAILED_TAG,
+    NO_WRAPPER,
     PLACEHOLDER_CLOSE,
     PLACEHOLDER_OPEN,
+    SLOT_END_TAG,
+    SLOT_TAG,
     RootScan,
     placeholder_spans,
+    quote_source,
     scan_root,
 )
-from .watch import get_pages_directories_for_watch
 
 
 if TYPE_CHECKING:
@@ -54,6 +73,11 @@ logger = logging.getLogger(__name__)
 _BODY_SLOT = "\x00next-page-body\x00"
 
 PAGE_MODULE: Final = "page.py"
+ERROR_TEMPLATE: Final = "error.djx"
+LOADING_TEMPLATE: Final = "loading.djx"
+
+_FAILED_BODY: Final = f"{{% {FAILED_TAG} %}}"
+_BOUNDARY_CLOSE: Final = f"{{% {BOUNDARY_END_TAG} %}}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +92,7 @@ class _PageLoad:
     error: Exception | None
 
 
-_MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
+_MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache(depends=())
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
@@ -88,6 +112,10 @@ _version = _Version()
 
 _generation = _Version()
 """Incremented by every load, forget and reset, after the stamps it covers change."""
+
+
+module_counters: Final = (_version, _generation)
+"""The version and the generation counter, for a memo that reads both without a call."""
 
 
 def module_version() -> int:
@@ -213,10 +241,12 @@ def load_page_module(
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
     """Execute `file_path` as a fresh page module, raising whatever its body raises.
 
-    An async `render` raises here too, so the refusal runs once per load.
+    An async generator `render` raises here too, so the refusal runs once per load.
     """
     module = exec_module_file(file_path, "page_module")
-    refuse_async_render(module, "page.py render")
+    render = getattr(module, "render", None)
+    if callable(render) and not is_coroutine_callable(render):
+        refuse_async(render, "page.py render")
     return module
 
 
@@ -274,6 +304,9 @@ def _page_load(file_path: Path) -> _PageLoad | None:
     try:
         with declarations.collecting(file_path):
             module = _load_python_module(file_path)
+    except SettingError:
+        # A misshapen setting is no broken page, so its check names it, not this memo.
+        raise
     except Exception as exc:
         if stat_mtime_ns(file_path) is None:
             # Removed between the stat and the execution, so absent rather than broken.
@@ -316,7 +349,7 @@ def _pages_dirs_for_config(config: dict) -> list[Path]:
     return list(path_roots)
 
 
-@functools.cache
+@memo(FRAMEWORK, ROUTES)
 def shared_layouts() -> tuple[Path, ...]:
     """Return the resolved root `layout.djx` of each page backend `DIRS`.
 
@@ -333,12 +366,7 @@ def shared_layouts() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(candidates))
 
 
-def forget_shared_layouts(**kwargs: object) -> None:
-    """Drop cached root-level `layout.djx` paths on settings reload."""
-    shared_layouts.cache_clear()
-
-
-@functools.cache
+@memo(SETTINGS, ROUTES)
 def _page_roots() -> tuple[Path, ...]:
     """Return the resolved page trees the routers report, memoised.
 
@@ -355,17 +383,12 @@ def forget_page_roots(**kwargs: object) -> None:
         _version.value += 1
 
 
-def forget_app_page_roots(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised page trees when the app list behind them moves.
-
-    `settings_reloaded` misses `INSTALLED_APPS`, which the `APP_DIRS` trees follow.
-    """
-    if setting == "INSTALLED_APPS":
-        forget_page_roots()
+SETTINGS.attach(forget_page_roots)
+ROUTES.attach(forget_page_roots)
 
 
 _TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], tuple[int, int] | None]] = (
-    PageCache()
+    PageCache(depends=())
 )
 
 
@@ -509,8 +532,10 @@ class DjxTemplateLoader(TemplateLoader):
         return djx_file if djx_file.exists() else None
 
 
-_ABOVE_TREE: PageCache[tuple[Path, int], tuple[tuple[Path, int], ...]] = PageCache()
-_RESOLVED: PageCache[Path, Path] = PageCache()
+_ABOVE_TREE: PageCache[tuple[Path, int], tuple[tuple[Path, int], ...]] = PageCache(
+    depends=(SETTINGS, ROUTES)
+)
+_RESOLVED: PageCache[Path, Path] = PageCache(depends=())
 
 
 def _resolved(path: Path) -> Path:
@@ -521,22 +546,109 @@ def _resolved(path: Path) -> Path:
     return held
 
 
-def _layout_at(directory: Path, *, linked: bool) -> tuple[Path, int] | None:
-    """Return the `layout.djx` of `directory` by its resolved name, with its mtime.
+def _layout_at(
+    directory: Path, *, linked: bool, name: str = LAYOUT_TEMPLATE
+) -> tuple[Path, int] | None:
+    """Return the file `name` of `directory` by its resolved name, with its mtime.
 
     Only a link is resolved, since a plain file under a real directory names itself.
+    A miss builds no `Path`, as a walk probes far more directories than hold a file.
     """
-    layout_file = directory / LAYOUT_TEMPLATE
     try:
-        status = layout_file.lstat()
+        status = os.lstat(f"{directory}{os.sep}{name}")
         if stat.S_ISLNK(status.st_mode):
             linked = True
-            status = layout_file.stat()
+            status = (directory / name).stat()
     except OSError:
         return None
     if not stat.S_ISREG(status.st_mode):
         return None
+    layout_file = directory / name
     return (_resolved(layout_file) if linked else layout_file), status.st_mtime_ns
+
+
+@dataclass(frozen=True, slots=True)
+class PageBoundary:
+    """The `error.djx` and the `loading.djx` one directory in the chain of a page holds.
+
+    `level` counts the directories from the page up to it, `slot` the layouts inside it.
+    """
+
+    level: int
+    slot: int
+    error: Path | None
+    loading: Path | None
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorBoundary:
+    """One `error.djx` in the chain of a page, placed as its `PageBoundary` is."""
+
+    level: int
+    slot: int
+    source: Path
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryChain:
+    """The boundary files a page composes through, nearest first, and its error ones.
+
+    `deferred` holds the directories with a `loading.djx`, each a deferred boundary.
+    """
+
+    boundaries: tuple[PageBoundary, ...] = ()
+    errors: tuple[ErrorBoundary, ...] = ()
+    deferred: tuple[PageBoundary, ...] = ()
+
+    @classmethod
+    def of(cls, boundaries: tuple[PageBoundary, ...]) -> BoundaryChain:
+        """Return the chain of `boundaries`, the shared empty one for none."""
+        if not boundaries:
+            return NO_BOUNDARIES
+        errors = tuple(
+            ErrorBoundary(found.level, found.slot, found.error)
+            for found in boundaries
+            if found.error is not None
+        )
+        deferred = tuple(found for found in boundaries if found.loading is not None)
+        return cls(boundaries, errors, deferred)
+
+    def guard_of(self, level: int) -> ErrorBoundary | None:
+        """Return the nearest error boundary at or above `level`, `None` for none."""
+        return next((guard for guard in self.errors if guard.level >= level), None)
+
+    @property
+    def loading(self) -> Path | None:
+        """Return the nearest `loading.djx`, `None` when the chain holds none."""
+        return next(
+            (found.loading for found in self.boundaries if found.loading is not None),
+            None,
+        )
+
+    @property
+    def error(self) -> Path | None:
+        """Return the nearest `error.djx`, `None` when the chain holds none."""
+        return self.errors[0].source if self.errors else None
+
+
+NO_BOUNDARIES: Final = BoundaryChain()
+"""The chain of a page whose directories hold no boundary file."""
+
+
+def _boundary_at(
+    directory: Path, level: int, slot: int, *, linked: bool
+) -> PageBoundary | None:
+    """Return the boundary files of `directory`, `None` when it holds neither."""
+    error = _layout_at(directory, linked=linked, name=ERROR_TEMPLATE)
+    loading = _layout_at(directory, linked=linked, name=LOADING_TEMPLATE)
+    if error is None and loading is None:
+        return None
+    return PageBoundary(
+        level,
+        slot,
+        None if error is None else error[0],
+        None if loading is None else loading[0],
+    )
 
 
 def _routed_root(start: Path) -> Path | None:
@@ -575,10 +687,12 @@ def _walk(
     cut: bool = True,
     resolved: bool = False,
     tree_root: Path | None = None,
+    boundaries: list[PageBoundary] | None = None,
 ) -> tuple[list[Path], list[Path], list[int | None]]:
     """Climb the ancestors of `file_path` for layouts, watched directories and mtimes.
 
     The climb follows the written path, so a symlinked folder keeps its tree's layouts.
+    A `boundaries` list collects the boundary files of each probed directory or layout.
     """
     layout_files: list[Path] = []
     watched_dirs: list[Path] = []
@@ -591,10 +705,15 @@ def _walk(
     elif tree_root is None:
         tree_root = _routed_root(start)
     ancestors, above, room = _split_ancestry(start, watched_depth, tree_root)
+    probed = ancestors[:MAX_ANCESTOR_WALK_DEPTH]
 
-    for depth, current_dir in enumerate(ancestors[:MAX_ANCESTOR_WALK_DEPTH]):
+    for depth, current_dir in enumerate(probed):
         if depth < watched_depth:
             watched_dirs.append(current_dir)
+        if boundaries is not None:
+            found = _boundary_at(current_dir, depth, len(layout_files), linked=linked)
+            if found is not None:
+                boundaries.append(found)
         layout = _layout_at(current_dir, linked=linked)
         if layout is not None:
             layout_file, mtime_ns = layout
@@ -603,27 +722,56 @@ def _walk(
             if cut and _is_root_layout(layout_file, mtime_ns):
                 return layout_files, watched_dirs, mtimes
 
-    if above is not None:
-        for layout_file, mtime_ns in _above_tree(above, room):
-            layout_files.append(layout_file)
-            mtimes.append(mtime_ns)
-            if cut and _is_root_layout(layout_file, mtime_ns):
-                return layout_files, watched_dirs, mtimes
+    outer = _Outer(layout_files, mtimes, boundaries, len(probed) - len(layout_files))
+    if above is not None and _append_above(above, room, outer, cut=cut):
+        return layout_files, watched_dirs, mtimes
 
-    _append_shared(layout_files, mtimes, cut=cut)
+    _append_shared(outer, cut=cut)
     return layout_files, watched_dirs, mtimes
 
 
-def _append_shared(
-    layout_files: list[Path], mtimes: list[int | None], *, cut: bool
-) -> None:
+@dataclass(frozen=True, slots=True)
+class _Outer:
+    """The chain a walk extends with the layouts outside the directories it probed.
+
+    The boundary files beside such a layout guard the page as the layout wraps it.
+    """
+
+    layout_files: list[Path]
+    mtimes: list[int | None]
+    boundaries: list[PageBoundary] | None
+    base: int
+
+    def append(self, layout_file: Path, mtime_ns: int | None) -> None:
+        """Append `layout_file` after the boundary files of its directory."""
+        boundaries = self.boundaries
+        if boundaries is not None:
+            slot = len(self.layout_files)
+            found = _boundary_at(
+                layout_file.parent, self.base + slot, slot, linked=False
+            )
+            if found is not None:
+                boundaries.append(found)
+        self.layout_files.append(layout_file)
+        self.mtimes.append(mtime_ns)
+
+
+def _append_above(above: Path, room: int, outer: _Outer, *, cut: bool) -> bool:
+    """Append the layouts above the tree root `above`, telling whether a root ends."""
+    for layout_file, mtime_ns in _above_tree(above, room):
+        outer.append(layout_file, mtime_ns)
+        if cut and _is_root_layout(layout_file, mtime_ns):
+            return True
+    return False
+
+
+def _append_shared(outer: _Outer, *, cut: bool) -> None:
     """Append the `DIRS` root layouts not yet in the chain, ending at a root one."""
     for shared in shared_layouts():
-        if shared in layout_files:
+        if shared in outer.layout_files:
             continue
         mtime_ns = stat_mtime_ns(shared)
-        layout_files.append(shared)
-        mtimes.append(mtime_ns)
+        outer.append(shared, mtime_ns)
         if cut and mtime_ns is not None and _is_root_layout(shared, mtime_ns):
             break
 
@@ -674,6 +822,38 @@ def layout_chain(
     return tuple(_climb(file_path, 0, cut=cut, resolved=resolved)[0])
 
 
+_BOUNDARIES: PageCache[Path, tuple[int, tuple[Path, ...], BoundaryChain]] = PageCache(
+    depends=()
+)
+
+
+def _discover(file_path: Path) -> tuple[tuple[Path, ...], BoundaryChain]:
+    """Walk the chain of `file_path` once for its layouts and its boundary files.
+
+    Both are held until the module memo version moves, unless edits are watched.
+    """
+    watched = template_edits_watched()
+    version = _version.value
+    if not watched:
+        held = _BOUNDARIES.get(file_path)
+        if held is not None and held[0] == version:
+            return held[1], held[2]
+    found: list[PageBoundary] = []
+    layouts = tuple(_walk(file_path, 0, boundaries=found)[0])
+    chain = BoundaryChain.of(tuple(found))
+    if not watched:
+        _BOUNDARIES[file_path] = (version, layouts, chain)
+    return layouts, chain
+
+
+def page_boundaries(file_path: Path) -> BoundaryChain:
+    """Return the boundary files the chain of `file_path` holds, nearest first.
+
+    A process watching template edits walks again, so a file added later shows.
+    """
+    return _discover(file_path)[1]
+
+
 def layout_stamps(
     file_path: Path, tree_root: Path | None = None
 ) -> tuple[tuple[Path, int | None], ...]:
@@ -684,6 +864,28 @@ def layout_stamps(
     layouts, _, mtimes = _walk(file_path, 0, tree_root=tree_root)
     stamps = (None if mtime_ns is None else stamp_of(mtime_ns) for mtime_ns in mtimes)
     return tuple(zip(layouts, stamps, strict=True))
+
+
+def _wrapper_of(layout_files: Sequence[Path], slot: int) -> str | None:
+    """Return the wrapper element the layout around `slot` leaves its placeholder."""
+    if slot >= len(layout_files):
+        return DEFAULT_TAG
+    text = template_source(layout_files[slot])
+    spans = None if text is None else placeholder_spans(text)
+    if text is None or not spans:
+        return DEFAULT_TAG
+    return wrapper_tag(text[: spans[0][0]])
+
+
+def _guarded(content: str, found: PageBoundary, wrapper: str | None) -> str:
+    """Return `content` inside the internal boundary tag of the files of `found`.
+
+    A `loading.djx` adds its source after the wrapper, an empty error source for none.
+    """
+    shown = wrapper or NO_WRAPPER
+    deferred = "" if found.loading is None else f" {quote_source(found.loading)}"
+    opening = f"{{% {BOUNDARY_TAG} {quote_source(found.error)} {shown}{deferred} %}}"
+    return f"{opening}{content}{_BOUNDARY_CLOSE}"
 
 
 def _as_placeholder_fallback(body: str) -> str:
@@ -705,8 +907,8 @@ class _Held[T]:
     value: T
 
 
-_LAYOUT_TEXTS: PageCache[Path, _Held[str]] = PageCache()
-_LAYOUT_ROOTS: PageCache[Path, _Held[RootScan]] = PageCache()
+_LAYOUT_TEXTS: PageCache[Path, _Held[str]] = PageCache(depends=())
+_LAYOUT_ROOTS: PageCache[Path, _Held[RootScan]] = PageCache(depends=())
 
 
 def template_source(source: Path) -> str | None:
@@ -744,6 +946,42 @@ def forget_layout_texts() -> None:
     _LAYOUT_ROOTS.clear()
     _ABOVE_TREE.clear()
     _RESOLVED.clear()
+    _BOUNDARIES.clear()
+    forget_chains()
+
+
+def _layout_roots() -> tuple[Path, ...]:
+    """Return the page trees and the `DIRS` roots a layout id names its path below."""
+    return (*_page_roots(), *(shared.parent for shared in shared_layouts()))
+
+
+def _slotted(content: str, ident: LayoutId) -> str:
+    """Return `content` inside the internal slot tag of the layout `ident`."""
+    return f"{{% {SLOT_TAG} {ident} %}}{content}{{% {SLOT_END_TAG} %}}"
+
+
+def layout_ids(file_path: Path) -> tuple[LayoutId, ...]:
+    """Return the ids of the layouts that wrap `file_path`, outer first.
+
+    The chain is held beside the skeleton until the module memo version moves.
+    """
+    version = _version.value
+    held = held_chain(file_path, version)
+    if held is not None:
+        return held.ids
+    layouts, _watched, mtimes = _walk(file_path, 0)
+    roots = _layout_roots()
+    ids: list[LayoutId] = []
+    stamps: list[tuple[Path, int | None]] = []
+    for layout_file, mtime_ns in zip(layouts, mtimes, strict=True):
+        text = template_source(layout_file)
+        if text is None or not placeholder_spans(text):
+            continue
+        ids.append(layout_id(layout_file, text, roots))
+        stamps.append((layout_file, None if mtime_ns is None else stamp_of(mtime_ns)))
+    chain = LayoutChain(tuple(reversed(ids)), tuple(stamps), version)
+    hold_chain(file_path, chain)
+    return chain.ids
 
 
 def layout_root_scan(layout_file: Path) -> RootScan | None:
@@ -793,6 +1031,10 @@ class LayoutTemplateLoader:
         """
         return self.compose_body(_BODY_SLOT, file_path)
 
+    def compose_slotted(self, file_path: Path) -> tuple[str, BoundaryChain]:
+        """Return what `compose_skeleton` returns with the chain the walk found."""
+        return self.compose_chained(_BODY_SLOT, file_path)
+
     def fill_skeleton(self, skeleton: str, body: str) -> str:
         """Return `skeleton` with `body` substituted into its body slot."""
         return skeleton.replace(_BODY_SLOT, body)
@@ -802,13 +1044,79 @@ class LayoutTemplateLoader:
 
         A sibling `layout.djx` substitutes `body`, else it is a placeholder fallback.
         """
-        layout_files = self._find_layout_files(file_path)
-        if not layout_files:
-            return body
+        return self.compose_chained(body, file_path)[0]
 
+    def compose_chained(self, body: str, file_path: Path) -> tuple[str, BoundaryChain]:
+        """Return what `compose_body` returns with the boundary chain the walk found."""
+        layout_files, chain = _discover(file_path)
         sibling = file_path.parent / LAYOUT_TEMPLATE
+        if chain.boundaries:
+            composed = self._compose_guarded(
+                body, layout_files, chain.boundaries, fallback=not sibling.is_file()
+            )
+            return composed, chain
+        if not layout_files:
+            return body, chain
+
         wrapped = body if sibling.is_file() else _as_placeholder_fallback(body)
-        return self._compose_layout_hierarchy(wrapped, layout_files)
+        return self._compose_layout_hierarchy(wrapped, layout_files), chain
+
+    def compose_failure(self, file_path: Path, caught: ErrorBoundary) -> str:
+        """Return the chain of `file_path` from `caught` out, around a failed body.
+
+        Layouts and boundaries below `caught` drop out, since the failure skipped them.
+        """
+        layout_files, chain = _discover(file_path)
+        guards = tuple(
+            replace(found, loading=None)
+            for found in chain.boundaries
+            if found.error is not None and found.level >= caught.level
+        )
+        sibling = (file_path.parent / LAYOUT_TEMPLATE).is_file()
+        return self._compose_guarded(
+            _FAILED_BODY, layout_files, guards, fallback=not sibling, start=caught.slot
+        )
+
+    def _compose_guarded(
+        self,
+        body: str,
+        layout_files: Sequence[Path],
+        guards: tuple[PageBoundary, ...],
+        *,
+        fallback: bool,
+        start: int = 0,
+    ) -> str:
+        """Wrap `body` in the layouts from `start` out, each boundary at its slot.
+
+        A boundary wraps the content before the layout of its own directory does.
+        """
+        content = body
+        done = start
+        for guard in guards:
+            content = self._layered(
+                content, layout_files, done, guard.slot, fallback=fallback
+            )
+            done = guard.slot
+            content = _guarded(content, guard, _wrapper_of(layout_files, done))
+        return self._layered(
+            content, layout_files, done, len(layout_files), fallback=fallback
+        )
+
+    def _layered(
+        self,
+        content: str,
+        layout_files: Sequence[Path],
+        start: int,
+        stop: int,
+        *,
+        fallback: bool,
+    ) -> str:
+        """Wrap `content` in the layouts from `start` to `stop`, nearest first."""
+        if start >= stop:
+            return content
+        if start == 0 and fallback:
+            content = _as_placeholder_fallback(content)
+        return self._compose_layout_hierarchy(content, layout_files[start:stop])
 
     def layout_sources(self, file_path: Path) -> tuple[list[Path], list[Path]]:
         """Return the layout files behind `file_path` and the directories watched.
@@ -828,13 +1136,15 @@ class LayoutTemplateLoader:
         return _pages_dirs_for_config(config)
 
     def _compose_layout_hierarchy(
-        self, template_content: str, layout_files: list[Path]
+        self, template_content: str, layout_files: Sequence[Path]
     ) -> str:
         """Wrap the content in each layout from the nearest to the outermost.
 
         Each layout gets the content in its first placeholder, see `next.W078`.
+        With the client router on, the content sits inside the slot tag of its layout.
         """
         result = template_content
+        roots = _layout_roots() if router_enabled() else None
 
         for layout_file in layout_files:
             layout_content = template_source(layout_file)
@@ -843,12 +1153,15 @@ class LayoutTemplateLoader:
             spans = placeholder_spans(layout_content)
             if spans:
                 start, end = spans[0]
+                if roots is not None:
+                    ident = layout_id(layout_file, layout_content, roots)
+                    result = _slotted(result, ident)
                 # Sliced, since a substitution would interpret escapes in the body.
                 result = layout_content[:start] + result + layout_content[end:]
         return result
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
@@ -878,11 +1191,6 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
         instances.append(cls())
 
     return tuple(instances)
-
-
-def forget_registered_loaders(**kwargs: object) -> None:
-    """Drop cached loader instances on settings reload."""
-    build_registered_loaders.cache_clear()
 
 
 def has_body(file_path: Path, module: types.ModuleType | None) -> bool:

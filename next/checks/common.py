@@ -1,6 +1,6 @@
 """Shared helpers used by per-subpackage system-check modules.
 
-It also re-exports the discovery helpers and the `next.conf` unknown-key check.
+It also re-exports the discovery helpers and the `next.conf` errors and path probes.
 """
 
 from __future__ import annotations
@@ -12,22 +12,23 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 
-from next.conf.checks import errors_for_unknown_keys
+from next.caches import IdentityMemo
+from next.conf.checks import error_for_wrong_shape, errors_for_unknown_keys
 from next.conf.defaults import USER_SETTING
-from next.conf.imports import import_class_cached
+from next.conf.imports import callable_problem, class_problem, import_backend_class
 from next.discovery import (
     PageRootsError,
     discover_page_registrations,
     first_visit,
     get_page_roots,
     get_pages_directories,
-    get_router_manager,
+    get_route_manager,
     iter_page_tree_component_folders,
     iter_scanned_page_pairs,
     iter_scanned_pages,
     page_tree_skip_names,
     read_page_roots,
-    reset_router_manager_cache,
+    reset_route_manager_cache,
 )
 from next.errors import AsyncCallableError
 
@@ -69,31 +70,15 @@ def takes_request(func: Callable[..., Any]) -> bool:
     return True
 
 
-class RunMemo[T]:
-    """Hold one value a check run builds once, kept while its key is the same object.
+class RunMemo[T](IdentityMemo[T]):
+    """Hold one value a check run builds once, dropped by `forget_run_memos`."""
 
-    The memo keeps a reference to the key, so a new object cannot reuse its `id`.
-    """
-
-    __slots__ = ("_held",)
+    __slots__ = ()
 
     def __init__(self) -> None:
         """Start empty and register with `forget_run_memos`."""
-        self._held: tuple[object, T] | None = None
+        super().__init__()
         _RUN_MEMOS.append(self)
-
-    def get(self, key: object, build: Callable[[], T]) -> T:
-        """Return the value held for `key`, building and keeping it on a miss."""
-        held = self._held
-        if held is not None and held[0] is key:
-            return held[1]
-        value = build()
-        self._held = (key, value)
-        return value
-
-    def forget(self) -> None:
-        """Drop the held value."""
-        self._held = None
 
 
 _RUN_MEMOS: list[RunMemo[Any]] = []
@@ -131,16 +116,37 @@ def registration_file_errors(
     return errors
 
 
-def import_backend_class(dotted_path: str) -> type[Any]:
-    """Import a dotted backend path, folding any import-time failure into ImportError.
+@dataclass(frozen=True, slots=True)
+class DeclaringCall:
+    """How the errors of one declaring call, as `page.router()`, read."""
 
-    A raising backend module would otherwise abort the whole check run.
+    call: str
+    code: str
+    module: str
+    owner: str
+    declares: str = "nothing"
+
+
+def misplaced_error(subject: DeclaringCall, file_path: Path) -> CheckMessage:
+    """Build the error of a call made outside the module kind it is for."""
+    return Error(
+        f"{subject.call} in {file_path} declares {subject.declares}, since the call "
+        f"sits outside a {subject.module} and so names no {subject.owner}.",
+        hint=f"Call {subject.call} at the top of the {subject.module} of the "
+        f"{subject.owner} it is for.",
+        obj=str(file_path),
+        id=subject.code,
+    )
+
+
+def misplaced_errors(
+    subject: DeclaringCall, outside: Iterable[Path]
+) -> list[CheckMessage]:
+    """Report each call made outside the module kind it is for.
+
+    A call off the top level or outside its shape raised already, so this is all left.
     """
-    try:
-        return import_class_cached(dotted_path)
-    except Exception as exc:
-        msg = f"{dotted_path} raised {type(exc).__name__}: {exc}"
-        raise ImportError(msg) from exc
+    return [misplaced_error(subject, file_path) for file_path in outside]
 
 
 def async_refusal(error: BaseException | None) -> AsyncCallableError | None:
@@ -223,26 +229,32 @@ def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
 
 __all__ = [
     "WALK_HINT",
+    "DeclaringCall",
     "PageRootsError",
     "RegistrationSubject",
     "RunMemo",
     "async_callable_error",
     "async_refusal",
+    "callable_problem",
+    "class_problem",
     "discover_page_registrations",
+    "error_for_wrong_shape",
     "errors_for_unknown_keys",
     "first_visit",
     "forget_run_memos",
     "get_page_roots",
     "get_pages_directories",
-    "get_router_manager",
+    "get_route_manager",
     "import_backend_class",
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
     "iter_scanned_pages",
+    "misplaced_error",
+    "misplaced_errors",
     "page_tree_skip_names",
     "raw_scope",
     "read_page_roots",
     "registration_file_errors",
-    "reset_router_manager_cache",
+    "reset_route_manager_cache",
     "takes_request",
 ]

@@ -4,7 +4,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
+from django.contrib.auth import login
+from django.contrib.auth.models import User
+from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpResponse
+from django.middleware.csrf import (
+    CSRF_SESSION_KEY,
+    CsrfViewMiddleware,
+    get_token,
+    rotate_token,
+)
 from django.test import Client, RequestFactory, override_settings
 from django.urls import (
     NoReverseMatch,
@@ -16,7 +26,6 @@ from django.urls import (
 
 from next.conf import next_framework_settings
 from next.csrf import (
-    _REQUEST_FLAG,
     CSRF_DEFERRED_ATTR,
     CsrfDelivery,
     csrf_delivery,
@@ -25,10 +34,10 @@ from next.csrf import (
     csrf_token_payload,
     csrf_view,
     defer_token,
+    secret_changed,
     token_deferred,
 )
 from next.forms.uid import ORIGIN_FIELD_NAME
-from next.partial.headers import REQUEST_FLAG
 from tests.support import FEED_URLCONF, routed, write_page
 from tests.support.sites import mine
 
@@ -50,6 +59,7 @@ FLAG = {"HTTP_X_NEXT_REQUEST": "1"}
 
 # A project view named `csrf`, which is not the token endpoint.
 urlpatterns = [path("account/csrf/", mine, name="csrf")]
+_BACKEND = "django.contrib.auth.backends.ModelBackend"
 NEVER_CACHED = "max-age=0, no-cache, no-store, must-revalidate, private"
 
 
@@ -67,6 +77,15 @@ def _action_and_origin(html: str) -> tuple[str, str]:
     assert action is not None
     assert origin is not None
     return action.group(1), origin.group(1)
+
+
+def _posts(secret: str, token: str) -> HttpResponse | None:
+    """Return what the CSRF middleware answers a POST carrying `token`, `None` a pass."""
+    request = RequestFactory().post("/", HTTP_X_CSRFTOKEN=token)
+    request.COOKIES[settings.CSRF_COOKIE_NAME] = secret
+    middleware = CsrfViewMiddleware(mine)
+    middleware.process_request(request)
+    return middleware.process_view(request, mine, (), {})
 
 
 pytestmark = pytest.mark.usefixtures("form_registries")
@@ -120,6 +139,49 @@ class TestPayload:
         assert payload["token"]
         assert request.META["CSRF_COOKIE_NEEDS_UPDATE"] is True
 
+    def test_one_request_masks_one_token(self) -> None:
+        request = RequestFactory().get("/")
+        first = csrf_payload(request)
+        with patch("next.csrf.get_token") as masked:
+            again = csrf_payload(request)
+        assert again is first
+        masked.assert_not_called()
+
+    def test_a_rotated_secret_masks_a_new_token(self) -> None:
+        request = RequestFactory().get("/")
+        first = csrf_payload(request)
+        rotate_token(request)
+        again = csrf_payload(request)
+        assert again["token"] != first["token"]
+        assert csrf_payload(request) is again
+
+    def test_a_token_read_after_a_rotation_shares_the_new_secret(self) -> None:
+        request = RequestFactory().get("/")
+        stale = csrf_payload(request)["token"]
+        rotate_token(request)
+        get_token(request)
+        fresh = csrf_payload(request)["token"]
+        secret = request.META["CSRF_COOKIE"]
+        assert _posts(secret, fresh) is None
+        assert _posts(secret, stale).status_code == 403
+
+    @pytest.mark.django_db()
+    def test_a_login_in_the_request_masks_a_new_token(self) -> None:
+        request = RequestFactory().get("/")
+        request.session = SessionStore()
+        first = csrf_payload(request)
+        login(request, User.objects.create_user("ada"), backend=_BACKEND)
+        again = csrf_payload(request)
+        assert again is not first
+        assert _posts(request.META["CSRF_COOKIE"], again["token"]) is None
+        assert _posts(request.META["CSRF_COOKIE"], first["token"]).status_code == 403
+
+    def test_two_requests_share_no_token(self) -> None:
+        first = RequestFactory().get("/")
+        second = RequestFactory().get("/")
+        second.META["CSRF_COOKIE"] = first.META["CSRF_COOKIE"] = "s" * 32
+        assert csrf_payload(first)["token"] != csrf_payload(second)["token"]
+
     def test_a_deferred_payload_names_the_endpoint_and_mints_nothing(
         self, tmp_path
     ) -> None:
@@ -127,8 +189,24 @@ class TestPayload:
         defer_token(request)
         with routed(_action_tree(tmp_path)):
             payload = csrf_payload(request)
-        assert payload == {"header": csrf_header_name(), "url": "/_next/csrf/"}
+        assert payload == {
+            "header": csrf_header_name(),
+            "url": "/_next/csrf/",
+            "cookie": "csrftoken",
+        }
         assert "CSRF_COOKIE_NEEDS_UPDATE" not in request.META
+
+    @pytest.mark.parametrize(
+        "setting", ["CSRF_COOKIE_HTTPONLY", "CSRF_USE_SESSIONS"], ids=str.lower
+    )
+    def test_a_cookie_scripts_cannot_read_goes_unnamed(
+        self, tmp_path, setting: str
+    ) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        with override_settings(**{setting: True}), routed(_action_tree(tmp_path)):
+            payload = csrf_payload(request)
+        assert "cookie" not in payload
 
     def test_the_endpoint_reverses_bare_under_a_root_mount(self) -> None:
         request = RequestFactory().get("/")
@@ -191,13 +269,58 @@ class TestPayload:
         assert plain == "/_next/csrf/"
         assert prefixed == "/app/_next/csrf/"
 
-    def test_the_request_flag_is_the_partial_header(self) -> None:
-        assert _REQUEST_FLAG == REQUEST_FLAG
-
     def test_the_token_payload_ignores_the_deferral(self) -> None:
         request = RequestFactory().get("/")
         defer_token(request)
         assert "token" in csrf_token_payload(request)
+
+
+SECRET = "s" * 32
+
+
+def _returning() -> RequestFactory:
+    factory = RequestFactory()
+    factory.cookies[settings.CSRF_COOKIE_NAME] = SECRET
+    return factory
+
+
+class TestSecretChanged:
+    """A response names a new secret only when it differs from the one brought."""
+
+    def _visit(self, factory: RequestFactory):
+        request = factory.get("/")
+        CsrfViewMiddleware(lambda _request: HttpResponse()).process_request(request)
+        return request
+
+    def test_an_unread_token_changes_nothing(self) -> None:
+        assert secret_changed(self._visit(_returning())) is False
+
+    def test_reading_the_token_of_the_cookie_changes_nothing(self) -> None:
+        request = self._visit(_returning())
+        get_token(request)
+        assert request.META["CSRF_COOKIE_NEEDS_UPDATE"] is True
+        assert secret_changed(request) is False
+
+    def test_a_rotation_is_a_change(self) -> None:
+        request = self._visit(_returning())
+        rotate_token(request)
+        assert secret_changed(request) is True
+
+    def test_the_first_token_of_a_visitor_is_a_change(self) -> None:
+        request = self._visit(RequestFactory())
+        get_token(request)
+        assert secret_changed(request) is True
+
+    @override_settings(CSRF_USE_SESSIONS=True)
+    def test_the_secret_of_a_session_is_compared_the_same_way(self) -> None:
+        request = RequestFactory().get("/")
+        request.session = SessionStore()
+        request.session[CSRF_SESSION_KEY] = SECRET
+        CsrfViewMiddleware(lambda _request: HttpResponse()).process_request(request)
+        get_token(request)
+        kept = secret_changed(request)
+        rotate_token(request)
+        assert (kept, secret_changed(request)) == (False, True)
 
 
 class TestEndpoint:
@@ -260,6 +383,13 @@ class TestEndpoint:
         assert response.status_code == 400
         assert not response.cookies
 
+    @pytest.mark.parametrize(("site", "status"), [("cross-site", 403), (None, 200)])
+    def test_the_gate_reads_meta_alone(self, site: str | None, status: int) -> None:
+        headers = FLAG if site is None else {**FLAG, "HTTP_SEC_FETCH_SITE": site}
+        request = RequestFactory().get("/_next/csrf/", **headers)
+        assert csrf_view(request).status_code == status
+        assert "headers" not in vars(request)
+
 
 class TestLazyRoundTrip:
     """A shared page sets no cookie, the runtime fetches a token and posts with it."""
@@ -268,6 +398,7 @@ class TestLazyRoundTrip:
         action, origin = _action_and_origin(html)
         return client.post(action, {ORIGIN_FIELD_NAME: origin}, **headers)
 
+    @pytest.mark.django_db()
     def test_a_shared_page_posts_after_fetching_its_token(self, tmp_path) -> None:
         client = Client(enforce_csrf_checks=True)
         with routed(_action_tree(tmp_path)):
@@ -284,6 +415,7 @@ class TestLazyRoundTrip:
         assert accepted.status_code == 200
         assert accepted.content == b"pong"
 
+    @pytest.mark.django_db()
     def test_eager_delivery_embeds_the_token_and_goes_private(self, tmp_path) -> None:
         client = Client(enforce_csrf_checks=True)
         with routed(_action_tree(tmp_path), CSRF_DELIVERY="eager"):

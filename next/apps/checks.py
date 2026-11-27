@@ -6,11 +6,11 @@ import pkgutil
 from importlib import import_module
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning
 from django.template import Library
 
 import next.templatetags
-from next.checks import NEXT
+from next.checks import NEXT, register
 
 from .templates import _BUILTIN_MODULES, _DJANGO_BACKEND
 

@@ -3,7 +3,6 @@
 The check returns a denial rather than a response, so each adapter answers in its form.
 """
 
-import functools
 from collections.abc import Callable, Iterable
 from enum import Enum, auto
 from pathlib import Path
@@ -20,7 +19,9 @@ from django.http.response import HttpResponseBase
 from django.shortcuts import resolve_url
 from django.utils.module_loading import import_string
 
+from next.caches import SETTINGS, memo
 from next.conf import next_framework_settings
+from next.introspect import DeclaringSite
 from next.utils import is_middleware, redirect_or_fallback
 
 from .errors import DeclarationOutsideModuleError
@@ -53,15 +54,14 @@ def _permissions(perm: object) -> tuple[str, ...]:
     return tuple(names)
 
 
-def declaring(site: tuple[Path, bool]) -> Path:
+def declaring(site: DeclaringSite) -> Path:
     """Return the file of a declaration site, refusing one off a module's top level.
 
     One made at request time would rewrite the rule of every user until a reload.
     """
-    source, top_level = site
-    if not top_level:
-        raise DeclarationOutsideModuleError(source)
-    return source
+    if not site.top_level:
+        raise DeclarationOutsideModuleError(site.path)
+    return site.path
 
 
 def require_login(source: Path, *, inherit: bool = False) -> None:
@@ -172,7 +172,7 @@ def login_middleware() -> str | None:
     )
 
 
-@functools.cache
+@memo(SETTINGS)
 def _listed_middleware() -> "LoginRequiredMiddleware | None":
     """Return the listed login middleware, built the way the request handler builds it.
 
@@ -185,7 +185,7 @@ def _listed_middleware() -> "LoginRequiredMiddleware | None":
     return cast("LoginRequiredMiddleware", built)
 
 
-@functools.cache
+@memo(SETTINGS)
 def login_by_default() -> bool:
     """Return whether an endpoint that declares nothing and is not public asks a login.
 
@@ -245,13 +245,6 @@ def open_view[V: Callable[..., HttpResponseBase]](view: V) -> V:
     return exempt
 
 
-def forget_login_default(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised answers once a setting the default login reads changes."""
-    if setting in {"NEXT_FRAMEWORK", "MIDDLEWARE", "INSTALLED_APPS"}:
-        login_by_default.cache_clear()
-        _listed_middleware.cache_clear()
-
-
 __all__ = [
     "Lookup",
     "answer",
@@ -262,7 +255,6 @@ __all__ = [
     "declared",
     "declared_files",
     "declaring",
-    "forget_login_default",
     "holds",
     "login_by_default",
     "login_middleware",

@@ -60,6 +60,13 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
 The worker count in the command is a placeholder.
 Set it from a load run against the target hardware and the measured concurrency and request duration, see `Estimate capacity and scale out`_.
 
+.. note::
+
+   The default ``sync`` worker serves one request at a time, so a page with deferred boundaries is assembled whole before the first byte and never streams.
+   For streamed boundaries run ``gthread`` with ``--threads`` above one, or serve the project from an ASGI server.
+   ``DEFER["DELIVERY"]["OPTIONS"]["SYNC_WORKERS"]`` set to ``"stream"`` streams from a single-request worker anyway and holds the worker for the whole stream.
+   See :doc:`/content/topics/boundaries/streaming` for what decides whether a response streams, and :doc:`boundaries` for the threads, connections, and limits of each server.
+
 ASGI configuration
 ------------------
 
@@ -102,7 +109,7 @@ The ``--workers`` value is a placeholder, see `Estimate capacity and scale out`_
 The socket closes an inbound frame larger than 64 KiB with ``1009`` anyway, and ``--ws-max-size 65536`` keeps uvicorn from buffering up to 16 MiB first.
 Uvicorn pings every 20 seconds by default, which the socket does not need, so ``--ws-ping-interval`` is a deployment decision and a server-level ping is only an extra layer.
 
-Behind gunicorn, use the uvicorn worker class from the ``uvicorn-worker`` package, ``gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker``, which replaces the deprecated ``uvicorn.workers`` module.
+Behind gunicorn, use the uvicorn worker class from the ``uvicorn-worker`` package, ``gunicorn config.asgi:application -k uvicorn_worker.UvicornWorker``.
 Every worker imports ``config/asgi.py`` itself, so each one mounts the socket and offers ``ws``.
 
 The development server needs no separate command.
@@ -148,6 +155,59 @@ Keep ``REALTIME['HEARTBEAT']`` and ``SSE.HEARTBEAT_SECONDS``, 25 seconds each by
 A WebSocket client closes a socket whose ``hello`` has not arrived within five seconds of opening, and the server sends ``hello`` only once the broker confirms the subscription, so a slow broker shows up as reconnects and then as SSE fallback.
 See :doc:`/content/topics/partial-rendering/sse` and :doc:`/content/howto/stream-over-websockets`.
 
+.. _deployment-slow-clients:
+
+Slow clients and streamed pages
+-------------------------------
+
+A streamed page sends ``X-Accel-Buffering: no``, so a client that reads slowly reaches the application through the proxy.
+Under ASGI each write waits on the server loop, and one the client has not taken after ``DEFER["WRITE_TIMEOUT"]`` seconds, ten by default, closes the stream, frees its slot of ``MAX_STREAMS`` and its jobs, and logs a warning to ``next.defer``.
+The socket itself stays with the server and the proxy.
+Under WSGI the server writes on the worker thread, which the application cannot interrupt, so a client that stops reading holds the thread, the stream slot, and the connections of the request for as long as the server waits on the socket.
+A client that left is noticed at the next write, which comes at the latest once the jobs settle or ``DEADLINE`` plus ``WRITE_GRACE`` cuts the stream.
+The proxy bounds both cases, and ``send_timeout`` of nginx, set a few seconds above ``DEADLINE``, closes a connection whose client takes nothing for that long.
+
+.. code-block:: nginx
+   :caption: nginx.conf
+
+   location / {
+       proxy_pass http://app;
+       proxy_read_timeout 30s;
+       send_timeout 15s;
+   }
+
+.. _deployment-compression:
+
+Compression behind a proxy
+--------------------------
+
+The application compresses its own responses when ``next.middleware.CompressionMiddleware`` is listed, and it sets ``Content-Encoding`` and ``Vary: Accept-Encoding`` itself.
+A proxy or a CDN that finds ``Content-Encoding`` on a response passes the body through, so the default needs no proxy setting.
+One layer compresses.
+Two layers repeat the work, and a layer that buffers a streamed page to compress it removes the early shell.
+
+When the proxy compresses everything it forwards, turn the application's compression off.
+
+.. code-block:: python
+   :caption: config/settings/prod.py
+
+   NEXT_FRAMEWORK = {"COMPRESSION": {"ENABLED": False}}
+
+``ENABLED`` set to ``False`` switches off the middleware and every self-compressing stream.
+A proxy that compresses must forward each write of a streamed page as it arrives, and one that buffers is stated through ``DEFER["SERVER"]["OPTIONS"]["INCREMENTAL"]``, see :doc:`platforms`.
+When the application compresses, the proxy keeps ``Accept-Encoding`` in the cache key through ``Vary``, forwards the header to the application, and does not strip ``Content-Encoding``.
+A page that sets ``Cache-Control: no-transform`` is left plain by the application while ``COMPRESSION["RESPECT_NO_TRANSFORM"]`` holds, and a proxy honours the same header.
+
+Check from outside the proxy, since only that request shows what the client receives.
+
+.. code-block:: bash
+   :caption: shell
+
+   curl -s -o /dev/null -D - -H "Accept-Encoding: gzip" https://example.com/ | grep -iE "content-encoding|vary"
+
+One ``Content-Encoding`` and a ``Vary`` that names ``Accept-Encoding`` mean one layer compressed.
+See :doc:`/content/topics/compression` and :doc:`/content/howto/enable-response-compression`.
+
 Health checks
 -------------
 
@@ -170,8 +230,8 @@ Concurrency notes
 Form dispatch reuses the request scoped dependency cache on the re-render that follows a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
 This is safe under both WSGI and ASGI because the cache lives on the request, not on the worker process.
 
-The router manager and the components registry are process scoped.
-Hot reload through ``router_manager.reload`` updates the running worker.
+The route manager and the components registry are process scoped.
+Hot reload through ``route_manager.reload`` updates the running worker.
 A multi worker deployment must trigger the reload from every worker or restart the process group.
 
 Realtime publication has the same process boundary.

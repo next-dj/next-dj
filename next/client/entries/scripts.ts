@@ -1,5 +1,5 @@
 // The entry point of next.scripts.min.js, consent and third-party scripts. The runtime
-// fetches it on demand, and on evaluation it registers its factory with Next._land.
+// fetches it on demand, and on evaluation it registers its factory with Next._extend.
 
 import type { ScriptsHost, ScriptsModule } from "../chunks";
 import { createConsent } from "../consent";
@@ -33,4 +33,4 @@ export function createScriptsChunk(host: ScriptsHost): ScriptsModule {
   };
 }
 
-window.Next._land("scripts", createScriptsChunk);
+window.Next._extend("scripts", () => createScriptsChunk, __BUILD__);

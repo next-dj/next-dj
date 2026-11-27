@@ -1,0 +1,293 @@
+{
+  "table": {
+    "base": "/app/",
+    "slash": true,
+    "routes": [
+      "-blog/feed/$",
+      "-(?:[a-z]{2})x/$",
+      "-news/rss$",
+      "+news/[-a-zA-Z0-9_]+/$",
+      "-feed$",
+      "+feed/$",
+      "+posts/(?:[a-z]+)/$",
+      "+shelf/[-a-zA-Z0-9_]+/$",
+      "-shelf/about$",
+      "+cal/(?:[0-9]{4})/$",
+      "+$",
+      "+pricing/$",
+      "+about/$",
+      "+items/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/$",
+      "+blog/[0-9]+/archive/$",
+      "+blog/[^/]+/$",
+      "+caf\u00e9/$",
+      "+docs/.+/$",
+      "+tags/[-a-zA-Z0-9_]+/$",
+      "+guessed/$",
+      "+(?=(de/|))\\1intl/$"
+    ]
+  },
+  "cases": [
+    {
+      "href": "/app/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/about/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/about",
+      "owns": true,
+      "page": false
+    },
+    {
+      "href": "/app/about/?q=1#top",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/blog/hello/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/blog/feed/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/blog/2024/archive/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/blog/x/archive/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/docs/a/b/c/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/items/0b5d6a2e-6c1f-4d55-9a47-3f1f2a1c9e10/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/items/not-a-uuid/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/tags/a-b_c/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/tags/a.b/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/pricing/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/caf%C3%A9/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/login/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/admin/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/admin/x/y",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/legacy/12/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/intl/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/de/intl/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/en/intl/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/fr/intl/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/guessed/",
+      "owns": true,
+      "page": false
+    },
+    {
+      "href": "/app/refused/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/about/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/blog/hello%2Fx/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/abx/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/_next/csrf/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/news/rss",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/news/rss/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/news/hello/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/feed",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/feed/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/posts/abc/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/posts/5/like/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/tenant/en/a/",
+      "owns": false,
+      "page": true,
+      "document": true
+    },
+    {
+      "href": "/app/tenant/en/logout/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/shelf/about",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/shelf/x/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/cal/2024/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/cal/logout/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/year/2024/",
+      "owns": false,
+      "page": true,
+      "document": true
+    },
+    {
+      "href": "/app/old/12/",
+      "owns": false,
+      "page": true,
+      "document": true
+    },
+    {
+      "href": "/app/files/a/b/view/",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/blog/a%0Ab/",
+      "owns": false,
+      "page": true,
+      "document": true
+    },
+    {
+      "href": "/app/about/%0A",
+      "owns": false,
+      "page": false
+    },
+    {
+      "href": "/app/blog/a%C2%85b/",
+      "owns": false,
+      "page": true,
+      "document": true
+    },
+    {
+      "href": "/app/blog/a%E2%80%A8b/",
+      "owns": false,
+      "page": true,
+      "document": true
+    },
+    {
+      "href": "/app/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+      "owns": true,
+      "page": true
+    },
+    {
+      "href": "/app/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+      "owns": false,
+      "page": true,
+      "document": true
+    }
+  ]
+}

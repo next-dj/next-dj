@@ -9,6 +9,19 @@ BUCKET_PREFIX = f"{PREFIX}bucket:"
 
 BUCKET_TTL_SECONDS = 3700
 
+RENDERED_KIND = "pages.rendered"
+DURATION_KIND = "pages.duration_ms_total"
+
+
+class CounterLostError(LookupError):
+    """A counter is gone from the store while the counter it pairs with survives."""
+
+    def __init__(self, kind: str, key: str) -> None:
+        """Name the counter the store lost."""
+        super().__init__(f"the {kind!r} counter of {key!r} is gone from the store")
+        self.kind = kind
+        self.key = key
+
 
 def _now() -> datetime:
     """Return the current UTC moment.
@@ -135,6 +148,24 @@ def top_by_kind(kind: str, *, limit: int | None = None) -> list[tuple[str, int]]
     if limit is None:
         return pairs
     return pairs[:limit]
+
+
+def latency_by_page(*, limit: int | None = None) -> list[tuple[str, float]]:
+    """Return the mean render milliseconds per page, slowest first.
+
+    A duration total with no render count left means the cache culled half the pair.
+    """
+    renders = read_kind(RENDERED_KIND)
+    rows: list[tuple[str, float]] = []
+    for page, total in read_kind(DURATION_KIND).items():
+        count = renders.get(page)
+        if count is None:
+            raise CounterLostError(RENDERED_KIND, page)
+        rows.append((page, round(total / count, 1)))
+    rows.sort(key=lambda row: -row[1])
+    if limit is None:
+        return rows
+    return rows[:limit]
 
 
 def top_by_window(

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from django.template import Context, Engine, TemplateSyntaxError
 from django.template.base import Template
@@ -5,16 +7,21 @@ from django.template.defaulttags import ForNode, IfNode
 from django.test import RequestFactory
 
 from next.partial.zone import (
-    LAZY_ATTR,
+    DELAY_ATTR,
     POLL_ATTR,
+    RELOAD_ATTR,
     ZONE_ATTR,
     ZoneNode,
     ZoneOptions,
     ZonePartial,
+    render_zone_body,
     render_zone_standalone,
     zones_under,
 )
 from next.permissions.nodes import HasPermNode
+from next.seeding import COLLECTOR_KEY, TEMPLATE_PATH_KEY
+from next.static import StaticCollector
+from next.static.runtime import BUNDLE_NOTE
 
 
 def _render(source: str, **ctx) -> str:
@@ -22,7 +29,7 @@ def _render(source: str, **ctx) -> str:
 
 
 class TestZoneTagFullRender:
-    """A non-lazy zone renders inline inside its marker wrapper."""
+    """A zone renders inline inside its marker wrapper."""
 
     def test_default_wrapper_is_div(self) -> None:
         out = _render('a {% zone "hi" %}<p>{{ msg }}</p>{% endzone %} b', msg="x")
@@ -32,22 +39,40 @@ class TestZoneTagFullRender:
         out = _render('{% zone "box" tag="tbody" %}<td>{{ n }}</td>{% endzone %}', n=7)
         assert out == f'<tbody {ZONE_ATTR}="box"><td>7</td></tbody>'
 
-    def test_lazy_renders_only_placeholder(self) -> None:
-        source = (
-            '{% zone "lz" lazy="revealed" %}'
-            "<table>{{ heavy }}</table>"
-            "{% placeholder %}<div>loading</div>{% endzone %}"
+    def test_a_loading_reload_is_written_on_the_wrapper(self) -> None:
+        out = _render('{% zone "r" reload="loading" %}<p>{{ n }}</p>{% endzone %}', n=1)
+        assert out == f'<div {ZONE_ATTR}="r" {RELOAD_ATTR}="loading"><p>1</p></div>'
+
+    def test_the_default_reload_writes_nothing(self) -> None:
+        out = _render('{% zone "r" reload="keep" %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="r">body</div>'
+
+    @pytest.mark.parametrize(
+        ("literal", "ms"),
+        [
+            pytest.param("400ms", "400", id="milliseconds"),
+            pytest.param("1s", "1000", id="seconds"),
+            pytest.param("0.25s", "250", id="fraction"),
+            pytest.param("0ms", "0", id="zero"),
+        ],
+    )
+    def test_a_delay_is_written_in_milliseconds(self, literal: str, ms: str) -> None:
+        out = _render(
+            '{% zone "r" reload="loading" delay="' + literal + '" %}b{% endzone %}'
         )
-        out = _render(source, heavy="MUST-NOT-APPEAR")
-        assert "MUST-NOT-APPEAR" not in out
         assert out == (
-            f'<div {ZONE_ATTR}="lz" {LAZY_ATTR}="revealed"><div>loading</div></div>'
+            f'<div {ZONE_ATTR}="r" {RELOAD_ATTR}="loading" {DELAY_ATTR}="{ms}">b</div>'
         )
 
-    def test_lazy_load_trigger(self) -> None:
-        source = '{% zone "lz" lazy="load" %}body{% placeholder %}ph{% endzone %}'
-        out = _render(source)
-        assert f'{LAZY_ATTR}="load"' in out
+    def test_the_default_delay_writes_nothing(self) -> None:
+        out = _render('{% zone "r" reload="loading" delay="150ms" %}b{% endzone %}')
+        assert DELAY_ATTR not in out
+
+    def test_poll_and_a_loading_reload_combine(self) -> None:
+        out = _render('{% zone "t" poll="5s" reload="loading" %}b{% endzone %}')
+        assert out == (
+            f'<div {ZONE_ATTR}="t" {POLL_ATTR}="5000" {RELOAD_ATTR}="loading">b</div>'
+        )
 
     def test_poll_seconds_renders_interval_inline(self) -> None:
         out = _render('{% zone "t" poll="5s" %}<p>{{ n }}</p>{% endzone %}', n=7)
@@ -69,6 +94,24 @@ class TestZoneTagFullRender:
         out = _render('{% zone "t" poll=" 5s " %}body{% endzone %}')
         assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="5000">body</div>'
 
+    def test_html_attributes_follow_the_framework_ones(self) -> None:
+        out = _render(
+            '{% zone "h" poll="5s" class="sticky top-0" aria-label="Cart" '
+            'data-role="bar" id="cart" %}b{% endzone %}'
+        )
+        assert out == (
+            f'<div {ZONE_ATTR}="h" {POLL_ATTR}="5000" class="sticky top-0" '
+            'aria-label="Cart" data-role="bar" id="cart">b</div>'
+        )
+
+    def test_an_html_attribute_value_is_escaped(self) -> None:
+        out = _render('{% zone "h" title="a&\\"b<" %}b{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="h" title="a&amp;&quot;b&lt;">b</div>'
+
+    def test_a_repeated_html_attribute_keeps_the_last_value(self) -> None:
+        out = _render('{% zone "h" class="a" class="b" %}b{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="h" class="b">b</div>'
+
     def test_full_render_is_byte_for_byte_outside_wrapper(self) -> None:
         plain = _render("before <p>{{ msg }}</p> after", msg="hi")
         zoned = _render(
@@ -89,9 +132,37 @@ class TestZoneTagSyntax:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "" %}body{% endzone %}')
 
-    def test_unknown_lazy_trigger(self) -> None:
-        with pytest.raises(TemplateSyntaxError):
-            Template('{% zone "z" lazy="whenever" %}b{% placeholder %}p{% endzone %}')
+    def test_lazy_is_an_unknown_option(self) -> None:
+        with pytest.raises(TemplateSyntaxError) as raised:
+            Template('{% zone "z" lazy="load" %}b{% endzone %}')
+        assert str(raised.value) == (
+            "{% zone %} got an unknown option 'lazy'. The valid options are tag, "
+            "poll, reload, and delay, plus the HTML global, aria-* and data-* "
+            "attributes of the wrapper."
+        )
+
+    def test_placeholder_is_an_unknown_tag(self) -> None:
+        with pytest.raises(TemplateSyntaxError) as raised:
+            Template('{% zone "z" %}b{% placeholder %}p{% endzone %}')
+        assert str(raised.value) == (
+            "Invalid block tag on line 1: 'placeholder', expected 'endzone'. "
+            "Did you forget to register or load this tag?"
+        )
+
+    def test_unknown_reload_mode(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="reload must be one of keep"):
+            Template('{% zone "z" reload="skeleton" %}b{% endzone %}')
+
+    @pytest.mark.parametrize("literal", ["300", "soon", "-1s", "2d", "86401s"])
+    def test_a_malformed_delay_raises(self, literal: str) -> None:
+        with pytest.raises(TemplateSyntaxError, match="delay= refuses its value"):
+            Template(
+                '{% zone "z" reload="loading" delay="' + literal + '" %}b{% endzone %}'
+            )
+
+    def test_a_delay_without_a_loading_reload_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match='reload="loading" only'):
+            Template('{% zone "z" delay="300ms" %}b{% endzone %}')
 
     def test_invalid_poll_literal_raises(self) -> None:
         with pytest.raises(TemplateSyntaxError):
@@ -113,18 +184,6 @@ class TestZoneTagSyntax:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "z" poll="2592000s" %}b{% endzone %}')
 
-    def test_placeholder_without_lazy_raises(self) -> None:
-        with pytest.raises(TemplateSyntaxError):
-            Template('{% zone "z" %}b{% placeholder %}p{% endzone %}')
-
-    def test_placeholder_with_poll_raises(self) -> None:
-        with pytest.raises(TemplateSyntaxError):
-            Template('{% zone "z" poll="5s" %}b{% placeholder %}p{% endzone %}')
-
-    def test_poll_and_lazy_are_exclusive(self) -> None:
-        with pytest.raises(TemplateSyntaxError):
-            Template('{% zone "z" lazy="load" poll="5s" %}b{% endzone %}')
-
     def test_empty_poll_raises(self) -> None:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "z" poll="" %}b{% endzone %}')
@@ -143,12 +202,73 @@ class TestZoneTagSyntax:
             Template('{% zone "z" pol="5s" %}body{% endzone %}')
 
     def test_unknown_option_error_lists_the_valid_keys(self) -> None:
-        with pytest.raises(TemplateSyntaxError, match="tag, lazy, and poll"):
+        with pytest.raises(TemplateSyntaxError, match="tag, poll, reload, and delay"):
             Template('{% zone "z" lzay="load" %}body{% endzone %}')
 
-    def test_placeholder_error_names_the_zone(self) -> None:
-        with pytest.raises(TemplateSyntaxError, match='zone "z"'):
-            Template('{% zone "z" %}b{% placeholder %}p{% endzone %}')
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "data-next-zone",
+            "data-next-poll",
+            "data-next-reload",
+            "data-next-delay",
+            "data-next-busy",
+            "data-next-keep",
+            "data-next-target",
+            "data-next-transition",
+            "data-next-boundary",
+            "data-next-scrolled",
+        ],
+    )
+    def test_a_runtime_attribute_is_refused(self, key: str) -> None:
+        with pytest.raises(TemplateSyntaxError) as raised:
+            Template('{% zone "z" ' + key + '="x" %}b{% endzone %}')
+        assert str(raised.value) == (
+            f"{{% zone %}} reserves the {key!r} attribute for the framework."
+        )
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "data-next-current",
+            "data-next-focus",
+            "data-next-match",
+            "data-next-nav",
+            "data-next-persist",
+            "data-next-prefetch",
+            "data-next-press",
+            "data-next-router",
+            "data-next-scroll",
+            "data-next-scroll-region",
+            "data-next-toasts",
+        ],
+    )
+    def test_an_author_attribute_reaches_the_wrapper(self, key: str) -> None:
+        out = _render('{% zone "z" ' + key + '="on" %}b{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="z" {key}="on">b</div>'
+
+    def test_reserve_off_reaches_the_wrapper(self) -> None:
+        out = _render(
+            '{% zone "z" reload="loading" data-next-reserve="off" %}b{% endzone %}'
+        )
+        assert 'data-next-reload="loading" data-next-reserve="off">b</div>' in out
+
+    @pytest.mark.parametrize("value", ["on", "", "OFF"])
+    def test_reserve_takes_off_alone(self, value: str) -> None:
+        with pytest.raises(TemplateSyntaxError) as raised:
+            Template('{% zone "z" data-next-reserve="' + value + '" %}b{% endzone %}')
+        assert str(raised.value) == (
+            f"{{% zone %}} data-next-reserve must be off, got {value!r}."
+        )
+
+    @pytest.mark.parametrize("key", ["onclick", "Class", "data-", "aria-X", "nonce"])
+    def test_a_name_outside_the_global_attributes_is_unknown(self, key: str) -> None:
+        with pytest.raises(TemplateSyntaxError, match=f"unknown option {key!r}"):
+            Template('{% zone "z" ' + key + '="x" %}b{% endzone %}')
+
+    def test_an_unquoted_html_attribute_is_refused(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="class= must be a quoted"):
+            Template('{% zone "z" class=css %}b{% endzone %}')
 
     def test_poll_grammar_error_says_literals_only(self) -> None:
         with pytest.raises(TemplateSyntaxError, match="Template variables"):
@@ -163,12 +283,105 @@ class TestZoneTagSyntax:
             Template("{% zone \"z' %}body{% endzone %}")
 
     def test_an_unquoted_option_value_is_refused(self) -> None:
-        with pytest.raises(TemplateSyntaxError, match="lazy= must be a quoted"):
-            Template('{% zone "z" lazy=load %}b{% placeholder %}p{% endzone %}')
+        with pytest.raises(TemplateSyntaxError, match="reload= must be a quoted"):
+            Template('{% zone "z" reload=loading %}b{% endzone %}')
 
     def test_an_escaped_quote_survives_the_name_literal(self) -> None:
         template = Template('{% zone "a\\"b" %}body{% endzone %}')
         assert template.nodelist.get_nodes_by_type(ZoneNode)[0].name == 'a"b'
+
+
+_LOADING_ZONE = '{% zone "rows" reload="loading" %}<p>{{ n }}</p>{% endzone %}'
+_LOADING_WRAPPER = f'<div {ZONE_ATTR}="rows" {RELOAD_ATTR}="loading"><p>1</p></div>'
+
+
+def _page_with_skeleton(directory: Path, body: str = _LOADING_ZONE) -> Path:
+    template = directory / "template.djx"
+    template.write_text(body)
+    (directory / "loading.rows.djx").write_text("<p>{{ who }} {{ n }}</p>")
+    return template
+
+
+class TestZoneSkeletonStash:
+    """A zone reloading to its loading UI stashes its `loading.<zone>.djx` after it."""
+
+    def test_the_skeleton_renders_with_the_call_site_context(
+        self, tmp_path: Path
+    ) -> None:
+        template = _page_with_skeleton(tmp_path)
+        out = _render(_LOADING_ZONE, n=1, who="<b>", **{TEMPLATE_PATH_KEY: template})
+        assert out == (
+            f"{_LOADING_WRAPPER}"
+            '<template data-next-loading="rows"><p>&lt;b&gt; 1</p></template>'
+        )
+
+    def test_a_string_template_path_finds_the_skeleton(self, tmp_path: Path) -> None:
+        template = _page_with_skeleton(tmp_path)
+        out = _render(_LOADING_ZONE, n=1, **{TEMPLATE_PATH_KEY: str(template)})
+        assert '<template data-next-loading="rows">' in out
+
+    def test_a_keep_zone_stashes_nothing(self, tmp_path: Path) -> None:
+        source = '{% zone "rows" %}<p>{{ n }}</p>{% endzone %}'
+        template = _page_with_skeleton(tmp_path, source)
+        out = _render(source, n=1, **{TEMPLATE_PATH_KEY: template})
+        assert out == f'<div {ZONE_ATTR}="rows"><p>1</p></div>'
+
+    def test_a_zone_without_a_skeleton_stays_busy_only(self, tmp_path: Path) -> None:
+        template = tmp_path / "template.djx"
+        template.write_text(_LOADING_ZONE)
+        assert _render(_LOADING_ZONE, n=1, **{TEMPLATE_PATH_KEY: template}) == (
+            _LOADING_WRAPPER
+        )
+
+    def test_a_render_without_a_template_path_stashes_nothing(self) -> None:
+        assert _render(_LOADING_ZONE, n=1) == _LOADING_WRAPPER
+
+    def test_a_skeleton_cannot_close_its_stash(self, tmp_path: Path) -> None:
+        template = tmp_path / "template.djx"
+        template.write_text(_LOADING_ZONE)
+        (tmp_path / "loading.rows.djx").write_text(
+            '<template id="row"><p>r</p></template>{{ who }}</template>'
+        )
+        out = _render(
+            _LOADING_ZONE,
+            n=1,
+            who="</template><script>alert(1)</script>",
+            **{TEMPLATE_PATH_KEY: template},
+        )
+        assert out == (
+            f"{_LOADING_WRAPPER}"
+            '<template data-next-loading="rows"><template id="row"><p>r</p></template>'
+            "&lt;/template&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;/template>"
+            "</template>"
+        )
+
+    def test_a_stashed_zone_carries_its_skeleton_inside(self, tmp_path: Path) -> None:
+        template = _page_with_skeleton(tmp_path)
+        node = Template(_LOADING_ZONE).nodelist.get_nodes_by_type(ZoneNode)[0]
+        context = Context({"n": 1, "who": "w", TEMPLATE_PATH_KEY: template})
+        body, wrapped = render_zone_body(
+            node.partial, node.name, node.options, context, stashed=True
+        )
+        assert body == "<p>1</p>"
+        assert wrapped == (
+            f'<div {ZONE_ATTR}="rows" {RELOAD_ATTR}="loading"><p>1</p>'
+            '<template data-next-loading="rows"><p>w 1</p></template></div>'
+        )
+
+    def test_a_zone_body_alone_carries_no_skeleton(self, tmp_path: Path) -> None:
+        template = _page_with_skeleton(tmp_path)
+        node = Template(_LOADING_ZONE).nodelist.get_nodes_by_type(ZoneNode)[0]
+        context = Context({"n": 1, TEMPLATE_PATH_KEY: template})
+        _body, wrapped = render_zone_body(
+            node.partial, node.name, node.options, context
+        )
+        assert wrapped == _LOADING_WRAPPER
+
+    def test_one_stash_per_zone_name_and_render(self, tmp_path: Path) -> None:
+        source = _LOADING_ZONE + _LOADING_ZONE
+        template = _page_with_skeleton(tmp_path, source)
+        out = _render(source, n=1, **{TEMPLATE_PATH_KEY: template})
+        assert out.count("<template data-next-loading=") == 1
 
 
 class TestZonePartialStandalone:
@@ -195,23 +408,28 @@ class TestZoneOptions:
     """`ZoneOptions` derives the wrapper attributes from the mode options."""
 
     def test_plain_options_have_no_attrs(self) -> None:
-        options = ZoneOptions()
-        assert options.full_attrs == ""
-        assert options.delivery_attrs == ""
+        assert ZoneOptions().attrs == ""
 
-    def test_poll_attr_appears_on_both_render_paths(self) -> None:
-        options = ZoneOptions(poll=5000)
-        assert options.full_attrs == f' {POLL_ATTR}="5000"'
-        assert options.delivery_attrs == options.full_attrs
+    def test_poll_attr(self) -> None:
+        assert ZoneOptions(poll=5000).attrs == f' {POLL_ATTR}="5000"'
 
-    def test_lazy_attr_is_dropped_from_delivery(self) -> None:
-        options = ZoneOptions(lazy="load")
-        assert options.full_attrs == f' {LAZY_ATTR}="load"'
-        assert options.delivery_attrs == ""
+    def test_reload_and_delay_attrs(self) -> None:
+        options = ZoneOptions(reload="loading", delay=400)
+        assert options.attrs == f' {RELOAD_ATTR}="loading" {DELAY_ATTR}="400"'
 
-    def test_lazy_and_poll_together_raise(self) -> None:
-        with pytest.raises(ValueError, match="the modes are exclusive"):
-            ZoneOptions(lazy="load", poll=5000)
+    def test_parsed_reload_options(self) -> None:
+        template = Template('{% zone "p" reload="loading" delay="1s" %}b{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        assert node.options == ZoneOptions(reload="loading", delay=1000)
+
+    def test_html_attributes_close_the_attrs(self) -> None:
+        options = ZoneOptions(poll=5000, html=' class="c"')
+        assert options.attrs == f' {POLL_ATTR}="5000" class="c"'
+
+    def test_parsed_html_attributes(self) -> None:
+        template = Template('{% zone "p" class="a b" %}b{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        assert node.options == ZoneOptions(html=' class="a b"')
 
     def test_parsed_node_carries_options(self) -> None:
         template = Template('{% zone "p" tag="ul" poll="5s" %}b{% endzone %}')
@@ -222,17 +440,19 @@ class TestZoneOptions:
 class TestRenderZoneStandalone:
     """`render_zone_standalone` wraps the body for a delivered partial."""
 
-    def test_wraps_body_without_lazy_hint(self) -> None:
-        template = Template(
-            '{% zone "lz" tag="section" lazy="load" %}'
-            "<b>{{ v }}</b>{% placeholder %}ph{% endzone %}"
-        )
+    def test_wraps_body_in_the_declared_tag(self) -> None:
+        template = Template('{% zone "lz" tag="section" %}<b>{{ v }}</b>{% endzone %}')
         node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
         out = render_zone_standalone(
             node.partial, node.name, node.options, Context({"v": "x"})
         )
         assert out == f'<section {ZONE_ATTR}="lz"><b>x</b></section>'
-        assert LAZY_ATTR not in out
+
+    def test_standalone_render_keeps_the_reload_mode(self) -> None:
+        template = Template('{% zone "r" reload="loading" %}b{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        out = render_zone_standalone(node.partial, node.name, node.options, Context())
+        assert out == f'<div {ZONE_ATTR}="r" {RELOAD_ATTR}="loading">b</div>'
 
     def test_standalone_render_carries_poll_interval(self) -> None:
         # The client re-reads the interval from the live element, so the zone keeps it.
@@ -242,6 +462,12 @@ class TestRenderZoneStandalone:
             node.partial, node.name, node.options, Context({"v": "x"})
         )
         assert out == f'<div {ZONE_ATTR}="p" {POLL_ATTR}="5000"><b>x</b></div>'
+
+    def test_standalone_render_carries_the_html_attributes(self) -> None:
+        template = Template('{% zone "c" tag="nav" class="flex" %}b{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        out = render_zone_standalone(node.partial, node.name, node.options, Context())
+        assert out == f'<nav {ZONE_ATTR}="c" class="flex">b</nav>'
 
     def test_standalone_render_without_poll_stays_plain(self) -> None:
         template = Template('{% zone "p" %}<b>{{ v }}</b>{% endzone %}')
@@ -314,3 +540,29 @@ class TestNodeWalks:
     def test_zones_under_nothing_without_the_ancestor(self) -> None:
         template = Template('{% zone "a" %}{% zone "b" %}{% endzone %}{% endzone %}')
         assert list(zones_under(template.nodelist, HasPermNode)) == []
+
+
+RELOAD_URL = "/static/next/next.reload.min.js"
+
+
+class TestReloadBundleNeed:
+    """Only a zone reloading to its loading UI needs the `reload` bundle."""
+
+    @pytest.mark.parametrize(
+        ("reload", "needs"),
+        [
+            pytest.param("loading", [RELOAD_URL], id="loading"),
+            pytest.param("keep", [], id="keep"),
+        ],
+    )
+    def test_a_page_render_records_the_need(
+        self, reload: str, needs: list[str]
+    ) -> None:
+        collector = StaticCollector(
+            bundle_url=lambda name: f"/static/next/next.{name}.min.js"
+        )
+        _render(
+            '{% zone "r" reload="' + reload + '" %}b{% endzone %}',
+            **{COLLECTOR_KEY: collector},
+        )
+        assert list(collector.notes(BUNDLE_NOTE)) == needs

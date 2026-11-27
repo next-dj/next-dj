@@ -3,8 +3,10 @@
 {% component "page_head" tailwind_plugins="typography" %}
 <body class="min-h-screen flex flex-col">
   {% #component "app_shell" brand="Wiki" brand_href="/" brand_icon="📚" %}
-    {% #slot "actions" %}
+    {% #slot "nav" %}
       {% component "nav_link" url_name="next:page_search" label="Search" variant="bar" %}
+    {% /slot %}
+    {% #slot "actions" %}
       {% component "button" href="/articles/new/" text="New article" variant="default" size="sm" %}
     {% /slot %}
     {% #slot "content" %}
@@ -12,7 +14,7 @@
     {% /slot %}
     {% #slot "page_footer" %}
       <footer class="border-t border-border bg-background py-4 text-center text-xs text-muted-foreground">
-        Built with next.dj. File routes plus a <code>HybridRouterBackend</code>.
+        Built with next.dj. File routes plus a <code>HybridPageBackend</code>.
       </footer>
     {% /slot %}
   {% /component %}

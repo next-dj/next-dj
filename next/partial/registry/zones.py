@@ -40,11 +40,6 @@ class ZoneInfo:
     standalone: bool = True
 
     @property
-    def lazy(self) -> str | None:
-        """Lazy trigger of the zone, read from its options."""
-        return self.options.lazy
-
-    @property
     def poll(self) -> int | None:
         """Poll interval of the zone in milliseconds, read from its options."""
         return self.options.poll
@@ -125,8 +120,8 @@ def zones_of(template: "Template", page_path: "Path") -> "Mapping[str, ZoneInfo]
             sender=sender,
             template=template,
             zone_name=info.name,
-            lazy=info.options.lazy,
             poll=info.options.poll,
+            reload=info.options.reload,
         )
     return zones
 

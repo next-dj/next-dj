@@ -69,18 +69,25 @@ class AuditEntryQuerySet(models.QuerySet):
             request__isnull=False,
         )
 
+    def of_kind(self, kind: str) -> Self:
+        """Narrow to the rows of `kind`, every row for a value that names no kind."""
+        return self.filter(kind=kind) if kind in AuditEntry.KINDS else self.all()
+
 
 class AuditEntry(models.Model):
     KIND_DISPATCHED = "dispatched"
     KIND_VALIDATION_FAILED = "validation_failed"
     KIND_REQUEST_STARTED = "request_started"
     KIND_ACCESS_DENIED = "access_denied"
+    KIND_RECEIPT_ISSUED = "receipt_issued"
     KIND_CHOICES: ClassVar = [
         (KIND_DISPATCHED, "dispatched"),
         (KIND_VALIDATION_FAILED, "validation_failed"),
         (KIND_REQUEST_STARTED, "request_started"),
         (KIND_ACCESS_DENIED, "access_denied"),
+        (KIND_RECEIPT_ISSUED, "receipt_issued"),
     ]
+    KINDS: ClassVar = frozenset(kind for kind, _label in KIND_CHOICES)
 
     SOURCE_BACKEND = "backend"
     SOURCE_SIGNAL = "signal"
@@ -110,6 +117,9 @@ class AuditEntry(models.Model):
 
     class Meta:
         ordering: ClassVar = ["-created_at"]
+        indexes: ClassVar = [
+            models.Index(fields=["-created_at", "-id"], name="audit_newest_idx")
+        ]
 
     def __str__(self) -> str:
         when = self.created_at.strftime("%Y-%m-%d %H:%M:%S")

@@ -4,12 +4,16 @@ Nothing here imports a model, so the area loads before the app registry is ready
 """
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from functools import partial
 from typing import Final
 
 from django.apps import apps
 from django.conf import settings
+from django.db.models import Model
 from django.utils.module_loading import import_string
+
+from next.caches import IdentityMemo
 
 from .access import auth_installed
 from .markers import Test
@@ -34,7 +38,7 @@ class PermissionManager:
     def __init__(self, registry: PermissionRegistry | None = None) -> None:
         """Start with a registry of its own unless given one."""
         self._registry = registry if registry is not None else PermissionRegistry()
-        self._models: tuple[object, frozenset[str]] | None = None
+        self._models: IdentityMemo[frozenset[str]] = IdentityMemo()
         self._objectless: set[str] = set()
 
     @property
@@ -118,28 +122,26 @@ class PermissionManager:
         if not auth_installed():
             return frozenset()
         models = apps.get_models()
-        held = self._models
-        if held is not None and held[0] is models:
-            return held[1]
-        found: set[str] = set()
-        for model in models:
-            opts = model._meta
-            found.update(
-                f"{opts.app_label}.{action}_{opts.model_name}"
-                for action in opts.default_permissions
-            )
-            found.update(
-                f"{opts.app_label}.{codename}" for codename, _ in opts.permissions
-            )
-        permissions = frozenset(found)
-        self._models = (models, permissions)
-        return permissions
+        return self._models.get(models, partial(_permissions_of, models))
 
     def reset(self) -> None:
         """Drop every registered permission and the model permission memo."""
         self._registry.reset()
-        self._models = None
+        self._models.forget()
         self._objectless.clear()
+
+
+def _permissions_of(models: Iterable[type[Model]]) -> frozenset[str]:
+    """Return the permissions Django creates for `models`."""
+    found: set[str] = set()
+    for model in models:
+        opts = model._meta
+        found.update(
+            f"{opts.app_label}.{action}_{opts.model_name}"
+            for action in opts.default_permissions
+        )
+        found.update(f"{opts.app_label}.{codename}" for codename, _ in opts.permissions)
+    return frozenset(found)
 
 
 def _class_paths(path: str) -> frozenset[str]:

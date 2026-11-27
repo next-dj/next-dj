@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -44,7 +45,7 @@ _FRAMINGS = {
 
 
 @pytest.fixture(params=list(_FRAMINGS))
-def site(tmp_path, request) -> Path:
+def site(tmp_path, request) -> Generator[Path]:
     root = tmp_path / "pages"
     write_page(
         root,

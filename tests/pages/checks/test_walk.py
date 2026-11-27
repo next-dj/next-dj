@@ -1,18 +1,10 @@
 from pathlib import Path
 
-import pytest
 from django.test import override_settings
 
 from next.pages.checks.walk import tree_walk
 from tests.support import file_router_config_entry, routed, write_page
 from tests.support.trees import NAMESPACED_URLCONF
-
-
-@pytest.fixture()
-def root(tmp_path: Path) -> Path:
-    directory = tmp_path / "pages"
-    directory.mkdir()
-    return directory
 
 
 def _targets(root: Path | None = None) -> list[tuple[str, str]]:
@@ -80,7 +72,7 @@ class TestRouterMirror:
 
         assert found == [("pages", "photo")]
 
-    def test_a_failed_router_manager_walks_nothing(self) -> None:
+    def test_a_failed_route_manager_walks_nothing(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "no.such.Router"}]}
         ):

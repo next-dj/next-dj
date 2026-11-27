@@ -9,9 +9,9 @@ from pathlib import Path
 
 from next.components import components_manager
 from next.discovery import (
-    get_router_manager,
+    get_route_manager,
     iter_page_tree_component_folders,
-    reset_router_manager_cache,
+    reset_route_manager_cache,
 )
 from next.pages.loaders import PAGE_MODULE, load_page_module, reset_module_memo
 
@@ -47,7 +47,7 @@ def clear_loaded_dirs() -> None:
     """
     _loaded_dirs.clear()
     reset_module_memo()
-    reset_router_manager_cache()
+    reset_route_manager_cache()
 
 
 def _register_page_tree_components() -> None:
@@ -55,10 +55,10 @@ def _register_page_tree_components() -> None:
 
     A live registry holds only what a request walked, so renders before one miss them.
     """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         for folder, tree_root, scope_trail in iter_page_tree_component_folders(router):
             components_manager.register_router_walk_folder(
                 folder, tree_root, scope_trail

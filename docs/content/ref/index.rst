@@ -76,6 +76,24 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`partial`
    ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
 
+:doc:`compression`
+   ``next.compression`` for the zstd, brotli and gzip codecs, the negotiation, the compression middleware, and the streams that compress themselves.
+
+:doc:`boundaries`
+   ``next.boundaries`` for the boundary unit, its options, error kinds, deferred calls and wire ids, and the inline error boundary.
+
+:doc:`transactions`
+   ``next.transactions`` for the transaction rule of next.dj views and the savepoint an error boundary takes.
+
+:doc:`defer`
+   ``next.defer`` for deferred boundaries, the delivery policy, the lanes, and the boundary tokens.
+
+:doc:`views`
+   ``next.views`` for the page view the router mounts, the route of one request, and the transaction it runs in.
+
+:doc:`router`
+   ``next.router`` for the client router, the cut and the chrome digest, active links, ``router_clear``, and the navigation wire.
+
 :doc:`realtime`
    ``next.realtime`` for topics and publishing, broker backends, topic streams, the WebSocket application, ticket bindings, presence, upstream handlers, the form tunnel, and the wire protocol.
 
@@ -96,6 +114,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 
 :doc:`deps`
    ``next.deps`` for the dependency resolver, providers, and ``DObject``.
+
+:doc:`bridge`
+   ``next.bridge`` for ``drive``, the async runtime that runs ``async def`` code from sync code, and the context snapshots of deferred work.
 
 :doc:`permissions`
    ``next.permissions`` for object permission predicates and the authentication backend that answers them.
@@ -164,6 +185,12 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    forms
    static
    partial
+   compression
+   boundaries
+   transactions
+   defer
+   views
+   router
    realtime
    metadata
    seo
@@ -171,6 +198,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    csrf
    scripts
    deps
+   bridge
    permissions
    conf
    server

@@ -154,7 +154,7 @@ const bugTable: BugCase[] = [
     },
   },
   {
-    name: "0.7.1 a boolean attribute is written as an empty string",
+    name: "a boolean attribute is written as an empty string",
     before: '<input id="i">',
     after: '<input id="i" disabled>',
     verify: (result) => {
@@ -163,7 +163,7 @@ const bugTable: BugCase[] = [
     },
   },
   {
-    name: "0.7.3 numeric ids do not break the id map",
+    name: "numeric ids do not break the id map",
     before: '<div id="r"><span id="123">a</span><span id="0">b</span></div>',
     after: '<div id="r"><span id="123">a2</span><span id="0">b2</span></div>',
     setup: (target) => {
@@ -182,7 +182,7 @@ const bugTable: BugCase[] = [
     },
   },
   {
-    name: "0.7.4 DOM clobbering does not blind the matcher",
+    name: "DOM clobbering does not blind the matcher",
     before: '<form id="real"><input name="id" value="42"></form>',
     after: '<form id="real"><input name="id" value="42"><span>extra</span></form>',
     setup: (target) => {
@@ -244,7 +244,7 @@ describe("idiomorph bug checklist", () => {
     expect(lifecycle.connected).toHaveBeenCalledTimes(1);
   });
 
-  it("0.7.2 does not re-fire focus or disturb the caret on a reused field", () => {
+  it("does not re-fire focus or disturb the caret on a reused field", () => {
     const target = mount('<form id="f"><input id="i" name="i" value="hello"></form>');
     const input = target.querySelector<HTMLInputElement>("#i")!;
     input.focus();
@@ -258,7 +258,7 @@ describe("idiomorph bug checklist", () => {
     expect(input.selectionEnd).toBe(4);
   });
 
-  it("0.7.3 outerHTML morph returns the inserted root on a tag change", () => {
+  it("outerHTML morph returns the inserted root on a tag change", () => {
     const target = mount('<div id="r">x</div>');
     const result = morph(target, '<section id="r">x</section>', { mode: "node" });
     expect(result.tagName).toBe("SECTION");
@@ -266,7 +266,7 @@ describe("idiomorph bug checklist", () => {
     expect(document.querySelector("div")).toBeNull();
   });
 
-  it("pantry legacy: a throwing beforeNode leaves no engine container behind", () => {
+  it("a throwing beforeNode leaves no engine container behind", () => {
     const target = mount(
       '<ul id="l"><li id="a">a</li><li id="b">b</li><li id="c">c</li></ul>',
     );

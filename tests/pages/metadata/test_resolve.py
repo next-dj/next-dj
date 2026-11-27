@@ -1,6 +1,6 @@
 import dataclasses
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime
 from typing import cast
 from unittest.mock import patch
@@ -15,7 +15,7 @@ from django.utils import translation
 from django.utils.functional import lazy
 
 import next.pages.metadata.hreflang as hreflang_module
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.pages import ld
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.pages.metadata import (
@@ -87,8 +87,8 @@ from tests.support import (
 QUERY = {"METADATA": {"CANONICAL_QUERY": ("q", "page")}}
 
 
-def _request(path: str = "/wallet/", **extra: str) -> HttpRequest:
-    return RequestFactory().get(path, **extra)
+def _request(rf: RequestFactory, path: str = "/wallet/", **extra: str) -> HttpRequest:
+    return rf.get(path, **extra)
 
 
 @pytest.fixture()
@@ -105,12 +105,15 @@ class TestAbsoluteUrl:
     )
     @override_settings(ALLOWED_HOSTS=["testserver"])
     def test_a_url_resolves_on_the_site_or_the_request(
-        self, case: AbsoluteUrlCase
+        self, case: AbsoluteUrlCase, rf: RequestFactory
     ) -> None:
-        request = None if case.path is None else _request(case.path)
+        request = None if case.path is None else _request(rf, case.path)
         with override_settings(NEXT_FRAMEWORK={"SITE": {"URL": case.site}}):
             if case.error is not None:
-                with pytest.raises(case.error):
+                with pytest.raises(
+                    case.error,
+                    match=r"needs a request or NEXT_FRAMEWORK\['SITE'\]\['URL'\] for its origin",
+                ):
                     absolute_url(case.url, request=request)
                 return
             assert absolute_url(case.url, request=request) == case.expected
@@ -132,9 +135,9 @@ class TestAbsoluteUrl:
     )
     @override_settings(ALLOWED_HOSTS=["testserver"])
     def test_a_protocol_relative_url_keeps_its_own_host(
-        self, site: str | None, scheme: str, expected: str
+        self, site: str | None, scheme: str, expected: str, rf: RequestFactory
     ) -> None:
-        request = RequestFactory().get("/p/", secure=scheme == "https")
+        request = rf.get("/p/", secure=scheme == "https")
         with override_settings(NEXT_FRAMEWORK={"SITE": {"URL": site}}):
             assert absolute_url("//cdn.example/x.png", request=request) == expected
 
@@ -164,21 +167,21 @@ class TestAbsoluteUrl:
             absolute_url("//cdn.example/x.png")
         assert info.value.url == "//cdn.example/x.png"
 
-    def test_a_callable_site_url_answers_per_request(self) -> None:
+    def test_a_callable_site_url_answers_per_request(self, rf: RequestFactory) -> None:
         def tenant(request: HttpRequest | None) -> str:
             return "https://tenant.example" if request is not None else ""
 
         with override_settings(NEXT_FRAMEWORK={"SITE": {"URL": tenant}}):
-            assert absolute_url("/a/", request=_request()) == (
+            assert absolute_url("/a/", request=_request(rf)) == (
                 "https://tenant.example/a/"
             )
 
     @override_settings(SITE_ID=1)
     def test_the_sites_row_names_the_host_the_sitemap_lists_on(
-        self, site_model
+        self, site_model, rf: RequestFactory
     ) -> None:
         site_model.objects.create(id=1, domain="sites.example", name="Sites")
-        request = _request()
+        request = _request(rf)
         assert absolute_url("/a/", request=request) == "http://sites.example/a/"
         assert request_origin(request).url("/a/") == "http://sites.example/a/"
 
@@ -195,9 +198,9 @@ class TestCanonical:
         assert info.value.key == "canonical"
 
     @override_next_settings(**WITH_BASE)
-    def test_true_is_the_request_path_without_a_query(self) -> None:
+    def test_true_is_the_request_path_without_a_query(self, rf: RequestFactory) -> None:
         resolved = resolve_metadata(
-            Metadata(canonical=True), request=_request("/wallet/?utm=1&page=2")
+            Metadata(canonical=True), request=_request(rf, "/wallet/?utm=1&page=2")
         )
         assert resolved.canonical == f"{BASE}/wallet/"
 
@@ -209,40 +212,42 @@ class TestCanonical:
         ],
         ids=["allowlist_order", "first_page_dropped"],
     )
-    def test_true_keeps_the_allowlisted_query(self, path: str, href: str) -> None:
+    def test_true_keeps_the_allowlisted_query(
+        self, path: str, href: str, rf: RequestFactory
+    ) -> None:
         with override_next_settings(**WITH_BASE, **QUERY):
             resolved = resolve_metadata(
-                Metadata(canonical=True), request=_request(path)
+                Metadata(canonical=True), request=_request(rf, path)
             )
         assert resolved.canonical == f"{BASE}{href}"
 
     @override_next_settings(**WITH_BASE)
-    def test_true_keeps_the_script_name(self) -> None:
-        request = RequestFactory().get("/wallet/", SCRIPT_NAME="/app")
+    def test_true_keeps_the_script_name(self, rf: RequestFactory) -> None:
+        request = rf.get("/wallet/", SCRIPT_NAME="/app")
         resolved = resolve_metadata(Metadata(canonical=True), request=request)
         assert resolved.canonical == f"{BASE}/app/wallet/"
 
     @pytest.mark.parametrize("site", [BASE, None], ids=["site_url", "request_host"])
     @override_settings(ALLOWED_HOSTS=["testserver"])
     def test_a_decoded_path_is_escaped_the_same_on_both_branches(
-        self, site: str | None
+        self, site: str | None, rf: RequestFactory
     ) -> None:
-        request = _request("/a%3Fb/100%25/%D0%BC%D0%B8%D1%80/")
+        request = _request(rf, "/a%3Fb/100%25/%D0%BC%D0%B8%D1%80/")
         with override_settings(NEXT_FRAMEWORK={"SITE": {"URL": site}}):
             resolved = resolve_metadata(Metadata(canonical=True), request=request)
         origin = site or "http://testserver"
         assert resolved.canonical == f"{origin}/a%3Fb/100%25/%D0%BC%D0%B8%D1%80/"
 
     @override_settings(NEXT_FRAMEWORK={"SITE": {"URL": f"{BASE}/"}})
-    def test_a_string_is_left_as_declared(self) -> None:
+    def test_a_string_is_left_as_declared(self, rf: RequestFactory) -> None:
         resolved = resolve_metadata(
-            Metadata(canonical="/other"), request=_request("/x/?q=1")
+            Metadata(canonical="/other"), request=_request(rf, "/x/?q=1")
         )
         assert resolved.canonical == f"{BASE}/other"
 
     @override_next_settings(**WITH_BASE)
-    def test_the_self_path_is_escaped(self) -> None:
-        assert self_path(_request("/%D0%BC%D0%B8%D1%80/")) == "/%D0%BC%D0%B8%D1%80/"
+    def test_the_self_path_is_escaped(self, rf: RequestFactory) -> None:
+        assert self_path(_request(rf, "/%D0%BC%D0%B8%D1%80/")) == "/%D0%BC%D0%B8%D1%80/"
 
 
 class TestRobots:
@@ -351,9 +356,11 @@ class TestAlternates:
 
     @override_settings(**I18N_ROUTED)
     @override_next_settings(**WITH_BASE)
-    def test_true_lists_every_language_and_the_default_as_x_default(self) -> None:
+    def test_true_lists_every_language_and_the_default_as_x_default(
+        self, rf: RequestFactory
+    ) -> None:
         meta = Metadata(alternates=Alternates(languages=True))
-        resolved = resolve_metadata(meta, request=_request("/headed/"))
+        resolved = resolve_metadata(meta, request=_request(rf, "/headed/"))
         assert resolved.alternates == (
             ("en", f"{BASE}/headed/"),
             ("de", f"{BASE}/de/headed/"),
@@ -362,9 +369,11 @@ class TestAlternates:
 
     @override_settings(**I18N, ROOT_URLCONF=I18N_PREFIXED_URLCONF)
     @override_next_settings(**WITH_BASE)
-    def test_a_prefixed_default_language_keeps_its_prefix_everywhere(self) -> None:
+    def test_a_prefixed_default_language_keeps_its_prefix_everywhere(
+        self, rf: RequestFactory
+    ) -> None:
         meta = Metadata(canonical=True, alternates=Alternates(languages=True))
-        resolved = resolve_metadata(meta, request=_request("/en/headed/"))
+        resolved = resolve_metadata(meta, request=_request(rf, "/en/headed/"))
         assert resolved.canonical == f"{BASE}/en/headed/"
         assert resolved.alternates == (
             ("en", f"{BASE}/en/headed/"),
@@ -378,10 +387,14 @@ class TestAlternates:
     @override_settings(**I18N_ROUTED)
     @override_next_settings(**WITH_BASE)
     def test_the_request_match_spares_the_resolve_of_its_own_path(
-        self, monkeypatch: pytest.MonkeyPatch, canonical: object, resolves: int
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        canonical: object,
+        resolves: int,
+        rf: RequestFactory,
     ) -> None:
         meta = Metadata(canonical=canonical, alternates=Alternates(languages=True))
-        request = _request("/headed/")
+        request = _request(rf, "/headed/")
         request.resolver_match = resolve("/headed/")
         calls = record_calls(monkeypatch, hreflang_module, "resolve")
         resolved = resolve_metadata(meta, request=request)
@@ -407,28 +420,30 @@ class TestAlternates:
 
     @override_settings(**I18N_ROUTED)
     @override_next_settings(**WITH_BASE)
-    def test_true_takes_the_given_x_default(self) -> None:
+    def test_true_takes_the_given_x_default(self, rf: RequestFactory) -> None:
         meta = Metadata(alternates=Alternates(languages=True, x_default="/all/"))
-        resolved = resolve_metadata(meta, request=_request("/headed/"))
+        resolved = resolve_metadata(meta, request=_request(rf, "/headed/"))
         assert resolved.alternates[-1] == ("x-default", f"{BASE}/all/")
 
     @override_settings(**I18N_ROUTED)
     @override_next_settings(**WITH_BASE, **QUERY)
-    def test_true_keeps_the_canonical_query(self) -> None:
+    def test_true_keeps_the_canonical_query(self, rf: RequestFactory) -> None:
         meta = Metadata(alternates=Alternates(languages=True))
-        resolved = resolve_metadata(meta, request=_request("/headed/?page=2&x=1"))
+        resolved = resolve_metadata(meta, request=_request(rf, "/headed/?page=2&x=1"))
         assert resolved.alternates[1] == ("de", f"{BASE}/de/headed/?page=2")
 
     @override_settings(**I18N_ROUTED)
     @override_next_settings(**WITH_BASE)
-    def test_an_unrouted_path_lists_no_alternates(self) -> None:
+    def test_an_unrouted_path_lists_no_alternates(self, rf: RequestFactory) -> None:
         meta = Metadata(alternates=Alternates(languages=True))
-        assert resolve_metadata(meta, request=_request("/nowhere/")).alternates == ()
+        assert (
+            resolve_metadata(meta, request=_request(rf, "/nowhere/")).alternates == ()
+        )
 
     @override_next_settings(**WITH_BASE)
-    def test_true_without_i18n_patterns_lists_none(self) -> None:
+    def test_true_without_i18n_patterns_lists_none(self, rf: RequestFactory) -> None:
         meta = Metadata(alternates=Alternates(languages=True))
-        assert resolve_metadata(meta, request=_request("/headed/")).alternates == ()
+        assert resolve_metadata(meta, request=_request(rf, "/headed/")).alternates == ()
 
 
 class TestOpenGraph:
@@ -441,13 +456,13 @@ class TestOpenGraph:
 
     @override_next_settings(**WITH_BASE)
     def test_an_empty_og_block_borrows_title_description_url_and_site_name(
-        self,
+        self, rf: RequestFactory
     ) -> None:
         meta = Metadata(
             title="T", description="D", site_name="S", canonical=True, og=OpenGraph()
         )
         with translation.override(None):
-            og = resolve_metadata(meta, request=_request()).og
+            og = resolve_metadata(meta, request=_request(rf)).og
         assert og == OpenGraph(
             title="T", description="D", url=f"{BASE}/wallet/", site_name="S"
         )
@@ -574,8 +589,8 @@ class TestTheRest:
 class TestPublishing:
     """A render publishes its resolve on the request for the response layer."""
 
-    def test_a_published_resolve_is_read_back(self) -> None:
-        request = _request()
+    def test_a_published_resolve_is_read_back(self, rf: RequestFactory) -> None:
+        request = _request(rf)
         assert published_metadata(request) is None
         resolved = resolve_metadata(Metadata(), request=request)
         publish_metadata(request, resolved)
@@ -797,10 +812,10 @@ class TestHeadSections:
         assert resolved.properties == (("fb:app_id", "1"),)
 
 
-def _resolved_raw(raw: object) -> object:
+def _resolved_raw(rf: RequestFactory, raw: object) -> object:
     """Resolve a raw dict with the fold left out, so lazy and plain inputs compare."""
     meta = normalize_metadata(raw, source="page.py").metadata
-    resolved = resolve_metadata(meta, request=_request())
+    resolved = resolve_metadata(meta, request=_request(rf))
     return dataclasses.replace(resolved, source=Metadata())
 
 
@@ -815,20 +830,24 @@ class TestLazyUrls:
     @pytest.mark.parametrize(
         "case", URL_SCHEME_CASES, ids=[case.id for case in URL_SCHEME_CASES]
     )
-    def test_a_lazy_url_resolves_like_the_plain_one(self, case: UrlSchemeCase) -> None:
+    def test_a_lazy_url_resolves_like_the_plain_one(
+        self, case: UrlSchemeCase, rf: RequestFactory
+    ) -> None:
         lazy_url = lazy(str, str)("/feed/")
-        assert _resolved_raw(case.build(lazy_url)) == _resolved_raw(
-            case.build("/feed/")
+        assert _resolved_raw(rf, case.build(lazy_url)) == _resolved_raw(
+            rf, case.build("/feed/")
         )
 
     @override_settings(ROOT_URLCONF=FEED_URLCONF)
-    def test_a_reverse_lazy_canonical_renders_the_reversed_url(self) -> None:
+    def test_a_reverse_lazy_canonical_renders_the_reversed_url(
+        self, rf: RequestFactory
+    ) -> None:
         raw = {"canonical": reverse_lazy("feed")}
         meta = normalize_metadata(raw, source="page.py").metadata
-        resolved = resolve_metadata(meta, request=_request())
+        resolved = resolve_metadata(meta, request=_request(rf))
         assert resolved.canonical == f"{BASE}/feed/"
 
-    def test_a_lazy_url_is_forced_on_every_resolve(self) -> None:
+    def test_a_lazy_url_is_forced_on_every_resolve(self, rf: RequestFactory) -> None:
         calls: list[str] = []
 
         def build() -> str:
@@ -838,7 +857,7 @@ class TestLazyUrls:
         raw = {"og": {"url": lazy(build, str)()}}
         meta = normalize_metadata(raw, source="page.py").metadata
         for _ in range(2):
-            og = resolve_metadata(meta, request=_request()).og
+            og = resolve_metadata(meta, request=_request(rf)).og
             assert og is not None
             assert og.url == f"{BASE}/feed/"
         assert calls == ["forced", "forced"]
@@ -847,24 +866,26 @@ class TestLazyUrls:
         "case", _FORCED_URL_CASES, ids=[case.id for case in _FORCED_URL_CASES]
     )
     def test_a_foreign_scheme_drops_its_tag_and_logs_once(
-        self, case: UrlSchemeCase, caplog: pytest.LogCaptureFixture
+        self, case: UrlSchemeCase, caplog: pytest.LogCaptureFixture, rf: RequestFactory
     ) -> None:
         _failures.clear()
         raw = case.build(lazy(str, str)("javascript:alert(1)"))
         with caplog.at_level("ERROR", logger="next.pages.metadata.resolve"):
-            first = HtmlMetadataRenderer().render(_resolved_raw(raw))
-            second = HtmlMetadataRenderer().render(_resolved_raw(raw))
+            first = HtmlMetadataRenderer().render(_resolved_raw(rf, raw))
+            second = HtmlMetadataRenderer().render(_resolved_raw(rf, raw))
         assert "javascript" not in first
         assert first == second
         assert len(caplog.records) == 1
         assert "so its tag is left out" in caplog.text
 
     @override_settings(DEBUG=True)
-    def test_a_foreign_scheme_fails_loudly_under_debug(self) -> None:
+    def test_a_foreign_scheme_fails_loudly_under_debug(
+        self, rf: RequestFactory
+    ) -> None:
         raw = {"canonical": lazy(str, str)("javascript:alert(1)")}
         meta = normalize_metadata(raw, source="page.py").metadata
         with pytest.raises(PageMetadataShapeError) as caught:
-            resolve_metadata(meta, request=_request())
+            resolve_metadata(meta, request=_request(rf))
         assert caught.value.source == "page.py"
         assert caught.value.detail == (
             "declares metadata key 'canonical' as the URL 'javascript:alert(1)', "
@@ -890,15 +911,15 @@ class TestGraph:
     """The JSON-LD nodes resolve into one graph, `@id` absolute on the site."""
 
     def test_a_node_json_cannot_hold_is_left_out_and_logged_once(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, rf: RequestFactory
     ) -> None:
         _failures.clear()
         bad = ld.Node(type="Offer", extra={"price": float("nan")})
         good = {"@type": "Thing", "tags": {"a"}}
         meta = Metadata(jsonld=(bad, good, ld.Node(id="#ok")))
         with caplog.at_level("ERROR", logger="next.pages.metadata.resolve"):
-            first = resolve_metadata(meta, request=_request()).jsonld
-            second = resolve_metadata(meta, request=_request()).jsonld
+            first = resolve_metadata(meta, request=_request(rf)).jsonld
+            second = resolve_metadata(meta, request=_request(rf)).jsonld
         assert first == second == ({"@type": "Thing", "@id": f"{BASE}/#ok"},)
         messages = [record.getMessage() for record in caplog.records]
         assert len(messages) == 2
@@ -906,18 +927,22 @@ class TestGraph:
         assert "The JSON-LD Thing node" in messages[1]
 
     @override_settings(DEBUG=True)
-    def test_a_node_json_cannot_hold_fails_loudly_under_debug(self) -> None:
+    def test_a_node_json_cannot_hold_fails_loudly_under_debug(
+        self, rf: RequestFactory
+    ) -> None:
         meta = Metadata(jsonld=(ld.Node(extra={"price": float("inf")}),))
         with pytest.raises(ValueError, match="a finite number") as caught:
-            resolve_metadata(meta, request=_request())
+            resolve_metadata(meta, request=_request(rf))
         assert "left out of the graph" in caught.value.__notes__[0]
 
-    def test_a_typed_node_resolves_its_fragment_id_on_the_site_root(self) -> None:
+    def test_a_typed_node_resolves_its_fragment_id_on_the_site_root(
+        self, rf: RequestFactory
+    ) -> None:
         trail = ld.BreadcrumbList(
             id="#trail", items=(ld.ListItem(name="Home", position=1, item="/"),)
         )
         meta = Metadata(jsonld=(trail,))
-        assert resolve_metadata(meta, request=_request("/deep/page/")).jsonld == (
+        assert resolve_metadata(meta, request=_request(rf, "/deep/page/")).jsonld == (
             {
                 "@type": "BreadcrumbList",
                 "@id": f"{BASE}/#trail",
@@ -997,7 +1022,7 @@ class TestBreadcrumbUrls:
     def test_a_settings_reload_forgets_the_crumb_routes(self) -> None:
         _crumb_route("blog/[slug]", "page_{name}")
         assert _crumb_route.cache_info().currsize > 0
-        settings_reloaded.send(sender=None)
+        next_framework_settings.reload()
         assert _crumb_route.cache_info().currsize == 0
 
     @override_settings(ROOT_URLCONF=NAMESPACED_URLCONF)
@@ -1008,16 +1033,18 @@ class TestBreadcrumbUrls:
         )
 
     @override_settings(ROOT_URLCONF=NAMESPACED_URLCONF)
-    def test_a_trail_the_match_has_no_kwargs_for_links_nothing(self) -> None:
-        request = _request("/")
+    def test_a_trail_the_match_has_no_kwargs_for_links_nothing(
+        self, rf: RequestFactory
+    ) -> None:
+        request = _request(rf, "/")
         request.resolver_match = ResolverMatch(
             handler_declared_here, (), {}, namespaces=["next"]
         )
         assert self._resolved(request)[1] == Breadcrumb("Post", None)
 
     @override_settings(ROOT_URLCONF=NAMESPACED_URLCONF)
-    def test_a_trail_no_route_answers_links_nothing(self) -> None:
-        request = _request("/blog/x/")
+    def test_a_trail_no_route_answers_links_nothing(self, rf: RequestFactory) -> None:
+        request = _request(rf, "/blog/x/")
         request.resolver_match = ResolverMatch(
             handler_declared_here, (), {"slug": "x"}, namespaces=["next"]
         )
@@ -1028,8 +1055,10 @@ class TestBreadcrumbUrls:
 
     @override_settings(ROOT_URLCONF=NAMESPACED_URLCONF)
     @override_next_settings(**WITH_BASE)
-    def test_an_unlinked_ancestor_keeps_the_trail_out_of_the_graph(self) -> None:
-        request = _request("/")
+    def test_an_unlinked_ancestor_keeps_the_trail_out_of_the_graph(
+        self, rf: RequestFactory
+    ) -> None:
+        request = _request(rf, "/")
         request.resolver_match = ResolverMatch(
             handler_declared_here, (), {}, namespaces=["next"]
         )
@@ -1042,8 +1071,10 @@ class TestBreadcrumbUrls:
         ).jsonld
         assert trail["@id"] == f"{BASE}/#breadcrumb"
 
-    def test_a_match_without_a_namespace_reverses_the_bare_name(self) -> None:
-        request = _request("/")
+    def test_a_match_without_a_namespace_reverses_the_bare_name(
+        self, rf: RequestFactory
+    ) -> None:
+        request = _request(rf, "/")
         request.resolver_match = ResolverMatch(handler_declared_here, (), {})
         with patch(
             "next.pages.metadata.resolve.reverse", return_value="/"
@@ -1054,14 +1085,56 @@ class TestBreadcrumbUrls:
         assert crumbs == (Breadcrumb("Home", "/", current=True),)
         reversed_.assert_called_once_with("page_", urlconf=None, kwargs=None)
 
+    @pytest.mark.parametrize(
+        ("path", "url"),
+        [
+            ("/a=b;c/", "/a=b;c/"),
+            ("/a%3Db/", "/a=b/"),
+            ("/blog/", "/blog"),
+            ("/blog/café/", "/blog/caf%C3%A9/"),
+        ],
+        ids=["sub_delims", "encoded_sub_delim", "trailing_slash", "non_ascii"],
+    )
+    def test_the_current_crumb_follows_the_link_rule(
+        self, path, url, rf: RequestFactory
+    ) -> None:
+        request = _request(rf, path)
+        request.resolver_match = ResolverMatch(handler_declared_here, (), {})
+        meta = Metadata(breadcrumbs=(Crumb("Here", "here"),))
+        with patch("next.pages.metadata.resolve.reverse", return_value=url):
+            crumbs = resolve_metadata(meta, request=request).breadcrumbs
+        assert crumbs == (Breadcrumb("Here", url, current=True),)
+
+    @override_settings(**I18N, ROOT_URLCONF=I18N_PREFIXED_URLCONF)
+    def test_an_ancestor_is_marked_unless_it_is_a_home(
+        self, rf: RequestFactory
+    ) -> None:
+        request = _request(rf, "/de/blog/post/")
+        request.resolver_match = ResolverMatch(handler_declared_here, (), {})
+        meta = Metadata(
+            breadcrumbs=(
+                Crumb("Home", ""),
+                Crumb("Blog", "blog"),
+                Crumb("Post", "blog/post"),
+            )
+        )
+        urls = ["/de/", "/de/blog/", "/de/blog/post/"]
+        with patch("next.pages.metadata.resolve.reverse", side_effect=urls):
+            crumbs = resolve_metadata(meta, request=request).breadcrumbs
+        assert crumbs == (
+            Breadcrumb("Home", "/de/"),
+            Breadcrumb("Blog", "/de/blog/", ancestor=True),
+            Breadcrumb("Post", "/de/blog/post/", current=True),
+        )
+
 
 class TestMountedTreeBreadcrumbs:
     """A crumb inside a `pages()` tree reverses under its prefix and its kwargs."""
 
     CRUMBS = (Crumb("Home", ""), Crumb("Ops", "ops"), Crumb("Op", "ops/[int:pk]"))
 
-    def _crumbs(self, path: str) -> tuple[Breadcrumb, ...]:
-        request = _request(path)
+    def _crumbs(self, rf: RequestFactory, path: str) -> tuple[Breadcrumb, ...]:
+        request = _request(rf, path)
         request.resolver_match = resolve(path)
         meta = Metadata(breadcrumbs=self.CRUMBS)
         return resolve_metadata(meta, request=request).breadcrumbs
@@ -1069,21 +1142,24 @@ class TestMountedTreeBreadcrumbs:
     def _app(self, root) -> None:
         write_app(root, "wallets", {"pages": ("", "ops", "ops/[int:pk]")})
 
-    def test_an_auto_assembled_tree(self, tmp_path) -> None:
+    def test_an_auto_assembled_tree(self, tmp_path, rf: RequestFactory) -> None:
         self._app(tmp_path)
 
         with installed_apps(tmp_path, "wallets", urlconf=NAMESPACED_URLCONF):
-            crumbs = self._crumbs("/ops/4/")
+            crumbs = self._crumbs(rf, "/ops/4/")
 
         assert [crumb.url for crumb in crumbs] == ["/", "/ops/", "/ops/4/"]
         assert [crumb.current for crumb in crumbs] == [False, False, True]
+        assert [crumb.ancestor for crumb in crumbs] == [False, True, False]
 
     @pytest.mark.parametrize(
         ("prefix", "head"),
         [("w/", "/w/"), ("org/<int:org>/w/", "/org/1/w/")],
         ids=["plain", "prefix_kwarg"],
     )
-    def test_a_pages_include_in_its_namespace(self, tmp_path, prefix, head) -> None:
+    def test_a_pages_include_in_its_namespace(
+        self, tmp_path, prefix, head, rf: RequestFactory
+    ) -> None:
         self._app(tmp_path)
         urlconf = write_urlconf(
             tmp_path,
@@ -1092,7 +1168,7 @@ class TestMountedTreeBreadcrumbs:
         )
 
         with installed_apps(tmp_path, "wallets", urlconf=urlconf):
-            crumbs = self._crumbs(f"{head}ops/4/")
+            crumbs = self._crumbs(rf, f"{head}ops/4/")
 
         assert [crumb.url for crumb in crumbs] == [head, f"{head}ops/", f"{head}ops/4/"]
         assert [crumb.current for crumb in crumbs] == [False, False, True]
@@ -1101,37 +1177,40 @@ class TestMountedTreeBreadcrumbs:
 class TestLazyBreadcrumbs:
     """A crumb reverses only once something reads it, under the state of its resolve."""
 
-    @staticmethod
-    def _matched(path: str = "/", **kwargs: str) -> HttpRequest:
-        request = _request(path)
-        request.resolver_match = ResolverMatch(
-            handler_declared_here, (), kwargs, namespaces=["next"]
-        )
-        return request
+    @pytest.fixture()
+    def matched(self, rf: RequestFactory) -> Callable[..., HttpRequest]:
+        def build(path: str = "/", **kwargs: str) -> HttpRequest:
+            request = _request(rf, path)
+            request.resolver_match = ResolverMatch(
+                handler_declared_here, (), kwargs, namespaces=["next"]
+            )
+            return request
 
-    def test_a_crumb_reverses_on_the_first_read_alone(self) -> None:
+        return build
+
+    def test_a_crumb_reverses_on_the_first_read_alone(self, matched) -> None:
         meta = Metadata(breadcrumbs=(Crumb("Home", ""),))
         with patch(
             "next.pages.metadata.resolve.reverse", return_value="/"
         ) as reversed_:
-            resolved = resolve_metadata(meta, request=self._matched())
+            resolved = resolve_metadata(meta, request=matched())
             assert reversed_.call_count == 0
             assert resolved.breadcrumbs == resolved.breadcrumbs
         assert resolved.breadcrumbs == (Breadcrumb("Home", "/", current=True),)
         assert reversed_.call_count == 1
 
     @override_next_settings(**WITH_BASE)
-    def test_a_declared_breadcrumb_list_reverses_nothing(self) -> None:
+    def test_a_declared_breadcrumb_list_reverses_nothing(self, matched) -> None:
         own = ld.BreadcrumbList(items=(ld.ListItem(name="X", position=1),))
         meta = Metadata(
             breadcrumbs=(Crumb("Home", ""), Crumb("Blog", "blog")), jsonld=(own,)
         )
         with patch("next.pages.metadata.resolve.reverse") as reversed_:
-            resolved = resolve_metadata(meta, request=self._matched())
+            resolved = resolve_metadata(meta, request=matched())
         assert len(resolved.jsonld) == 1
         reversed_.assert_not_called()
 
-    def test_the_route_of_a_trail_is_parsed_once(self) -> None:
+    def test_the_route_of_a_trail_is_parsed_once(self, matched) -> None:
         name = f"t{uuid4().hex}"
         meta = Metadata(breadcrumbs=(Crumb("Once", f"once/[{name}]"),))
         with (
@@ -1143,12 +1222,12 @@ class TestLazyBreadcrumbs:
             patch("next.pages.metadata.resolve.reverse", return_value="/once/"),
         ):
             for _ in range(2):
-                request = self._matched(**{name: "x"})
+                request = matched(**{name: "x"})
                 assert resolve_metadata(meta, request=request).breadcrumbs[0].url
         assert parsed.call_count == 1
 
-    def test_a_crumb_reverses_under_the_urlconf_of_its_request(self) -> None:
-        request = self._matched()
+    def test_a_crumb_reverses_under_the_urlconf_of_its_request(self, matched) -> None:
+        request = matched()
         request.urlconf = NAMESPACED_URLCONF
         resolved = resolve_metadata(
             Metadata(breadcrumbs=(Crumb("Home", ""),)), request=request

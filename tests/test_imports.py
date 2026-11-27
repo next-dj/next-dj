@@ -1,5 +1,4 @@
 import importlib
-import importlib.util
 import json
 import os
 import subprocess
@@ -11,6 +10,7 @@ from typing import TypeAliasType
 import pytest
 
 from tests.django_setup import PROJECT_ROOT
+from tests.support.imports import module_names
 
 
 _EARLY_APP_MODULE = textwrap.dedent(
@@ -30,22 +30,6 @@ _EARLY_APP_MODULE = textwrap.dedent(
 
 # The probe runs beside the xdist workers, so it takes a few cores rather than all.
 _IMPORT_WORKERS = min(4, os.cpu_count() or 1)
-
-
-def _next_module_names() -> list[str]:
-    """Name every module of the imported package, the installed wheel under CI.
-
-    The test matrix checks out no source tree, so the package itself is the list.
-    """
-    spec = importlib.util.find_spec("next")
-    assert spec is not None
-    assert spec.origin is not None
-    package = Path(spec.origin).parent
-    names = []
-    for path in sorted(package.rglob("*.py")):
-        parts = ("next", *path.relative_to(package).with_suffix("").parts)
-        names.append(".".join(parts[:-1] if parts[-1] == "__init__" else parts))
-    return names
 
 
 def _failure(completed: subprocess.CompletedProcess[str]) -> str | None:
@@ -255,13 +239,14 @@ class TestImportOrder:
     """Every framework module imports first in a fresh interpreter, whatever it is."""
 
     def test_every_module_imports_before_any_other(self) -> None:
-        assert _import_each_first(_next_module_names()) == {}
+        assert _import_each_first(module_names()) == {}
 
     def test_the_probe_reports_a_module_that_fails_to_import(self) -> None:
         names = ["next.pages", "next.pages.manager", "next.nowhere"]
-        assert _import_each_first(names) == {
-            "next.nowhere": "ModuleNotFoundError: No module named 'next.nowhere'"
-        }
+        failures = _import_each_first(names)
+        assert list(failures) == ["next.nowhere"]
+        missing = "ModuleNotFoundError: No module named 'next.nowhere'"
+        assert failures["next.nowhere"].startswith(missing)
 
     def test_an_app_listed_before_next_imports_its_areas(self, tmp_path: Path) -> None:
         package = tmp_path / "earlyapp"
@@ -290,6 +275,6 @@ class TestTypeAliases:
     """Every `type` alias evaluates at runtime, the way autodoc reads it."""
 
     def test_every_alias_value_resolves(self) -> None:
-        values, unresolved = _alias_values(_next_module_names())
+        values, unresolved = _alias_values(module_names())
         assert unresolved == {}
         assert "next.seo.registry.KwargsOf" in values

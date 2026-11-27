@@ -56,7 +56,7 @@ Wildcard segment.
    A directory wrapped in double brackets becomes a ``path`` converter that swallows multiple URL segments.
    ``pages/api/[[suffix]]/page.py`` answers ``/api/<path:suffix>/``.
    A route holds at most one wildcard segment.
-   A second ``[[name]]`` anywhere in the same trail leaves that page unrouted and reports :ref:`next.E028 <ref-system-checks>` at check time, whatever the two names are.
+   A second ``[[name]]`` anywhere in the same trail leaves that page unrouted and reports ``next.E028`` at check time, whatever the two names are.
 
 The following layout shows the four shapes together.
 
@@ -117,8 +117,8 @@ Hyphens in directory names are normalised to underscores in the generated URL pa
 A ``pages/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
 A directory name that is no Python identifier after that normalisation, such as ``[2fa]`` or ``[user.id]``, is refused with ``InvalidURLParameterError``.
-``manage.py check`` reports it twice, as :ref:`next.E008 <ref-system-checks>` from the structural walk that reads the directory name and as :ref:`next.E082 <ref-system-checks>` from the pattern walk that tries to turn the route into a Django path.
-A directory named after a name dependency injection reserves, such as ``[form]``, ``[request]`` or ``[self]``, is refused with ``ReservedURLParameterError`` and reported as :ref:`next.E217 <ref-system-checks>`.
+``manage.py check`` reports it twice, as ``next.E008`` from the structural walk that reads the directory name and as ``next.E082`` from the pattern walk that tries to turn the route into a Django path.
+A directory named after a name dependency injection reserves, such as ``[form]``, ``[request]`` or ``[self]``, is refused with ``ReservedURLParameterError`` and reported as ``next.E217``.
 
 The router does not abort on a refused route.
 It logs a warning through the ``next.urls.backends`` logger that names the route and the offending ``page.py``, leaves that one page unrouted so it answers 404, and routes every other page.
@@ -224,7 +224,7 @@ A third shape covers the project that has neither, and it is described last.
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
-   ``PAGES_DIR`` is required on every ``FileRouterBackend`` entry, and the ``next.E024`` system check fails when the key is missing.
+   ``PAGES_DIR`` is required on every ``FilePageBackend`` entry, and the ``next.E024`` system check fails when the key is missing.
    A backend that is not a file router carries only ``BACKEND``, and any other key on that entry reports ``next.E035``.
    In the tutorial it is set to ``pages``, so the router scans ``notes/pages/``.
    Applications are resolved through Django's application registry, so an ``INSTALLED_APPS`` entry written as an ``AppConfig`` path such as ``notes.apps.NotesConfig`` scans the same ``notes/pages/`` directory as the plain ``notes`` entry, and both are reported as ``App 'notes'``.
@@ -248,7 +248,7 @@ Fallback root.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": False,
                "DIRS": [],
                "PAGES_DIR": "pages",
@@ -273,7 +273,7 @@ The comparison is string equality after bracket conversion, so semantic overlap 
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
                "PAGES_DIR": "pages",
@@ -310,7 +310,7 @@ Segment entry.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "DIRS": ["drafts"],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
@@ -373,7 +373,7 @@ An unknown application raises ``LookupError``, and a subdirectory that is missin
        page.py                     /staff/history/
 
 A converter in the route above ``pages()`` reaches every page of the tree as a URL kwarg, as it does for any :func:`~django.urls.include`, through a plain parameter or ``DUrl``.
-A page directory that captures a name the route already captures, such as ``history/[int:wallet]/`` under ``path("w/<int:wallet>/", pages(...))``, makes one value overwrite the other, and the checks report :ref:`next.E152 <ref-system-checks>`, naming the page and the include.
+A page directory that captures a name the route already captures, such as ``history/[int:wallet]/`` under ``path("w/<int:wallet>/", pages(...))``, makes one value overwrite the other, and the checks report ``next.E152``, naming the page and the include.
 
 The pages of a ``pages()`` tree register in a namespace named after the application label, without the outer prefix.
 ``page_reverse("", namespace="audit")`` answers ``/staff/`` and ``{% url "audit:page_log" %}`` answers ``/staff/log/``.
@@ -418,7 +418,7 @@ Route groups
 A directory named with an identifier in parentheses is a route group.
 ``(auth)`` and ``(marketing-site)`` are groups.
 The name starts with a letter or an underscore and continues with letters, digits, underscores, or hyphens.
-Any other parenthesised name reports :ref:`next.E169 <ref-system-checks>`, and the router routes it literally, parentheses included, or skips it when it opens with ``(.`` like a malformed intercept.
+Any other parenthesised name reports ``next.E169``, and the router routes it literally, parentheses included, or skips it when it opens with ``(.`` like a malformed intercept.
 
 A group adds nothing to the URL and nothing to the URL name.
 ``pages/(auth)/login/page.py`` answers ``/login/`` and registers as ``next:page_login``, so moving a page into or out of a group changes neither.
@@ -445,7 +445,7 @@ The router flattens a group into the level that holds it.
 The pages of the directory come first, then the pages of its groups in name order with nested groups depth first, then the children.
 The groups share one level with their siblings, so ``(app)/page.py`` serves the URL of ``pages/`` itself.
 A group page with a body that sits beside a page of its parent serves the same URL, and two groups that route one trail do the same.
-Both report :ref:`next.E015 <ref-system-checks>`, whose hint explains that a group leaves the URL.
+Both report ``next.E015``, whose hint explains that a group leaves the URL.
 
 What a group scopes follows the file system and not the URL.
 
@@ -568,12 +568,12 @@ Each backend can read from a different directory, register a different ``PAGES_D
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
            },
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "admin_pages",
            }
@@ -632,10 +632,10 @@ Hot reload
 ----------
 
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
-``router_manager.reload()`` rebuilds every backend and clears the Django URL resolver cache, and the call is idempotent.
-The rebuild emits ``router_backend_loaded`` once per instantiated ``PAGE_BACKENDS`` entry, with the resolved router class as sender and the entry copy and the built instance as payload.
-Each invocation then emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
-A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
+``route_manager.reload()`` rebuilds every backend and clears the Django URL resolver cache, and the call is idempotent.
+The rebuild emits ``page_backend_loaded`` once per instantiated ``PAGE_BACKENDS`` entry, with the resolved router class as sender and the entry copy and the built instance as payload.
+Each invocation then emits a ``routes_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
+A receiver of that signal that rebuilds again calls ``route_manager.reload(notify=False)``, which skips ``page_backend_loaded``, the URL-cache clear, and ``routes_reloaded``, so the receiver does not re-enter itself.
 
 A reload also happens without an explicit call.
 The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` moves, because a file router caches its patterns per application name, reads its ``pages()`` includes from the root URLconf, and places its relative ``DIRS`` roots under ``BASE_DIR``.
@@ -654,16 +654,16 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a ``page.py`` has no render function, no template attribute, and no loader-backed source, declares no access, passes no ``inherit_context=True`` context down, and serves no action of its directory, a ``layout.djx`` beside or above it counting for none.
-- ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
+- ``check_page_functions`` reports ``next.E012`` when a ``page.py`` has no render function, no template attribute, and no loader-backed source, declares no access, passes no ``inherit_context=True`` context down, and serves no action of its directory, a ``layout.djx`` beside or above it counting for none.
+- ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (``next.E015``).
   It compares full routes, the prefixes of ``pages()`` includes too, so two trees placed onto the same URL are reported as well.
   The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
-  While collecting patterns it also reports a route that repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`), listing every conflicting name, so parameter duplicates surface from every scanned tree.
-  A page that repeats a name the ``pages()`` prefix of its tree captures reports :ref:`next.E152 <ref-system-checks>` instead.
-- ``check_reverse_name_collisions`` fails when two distinct routes collapse to the same reverse URL name after separator normalisation, such as ``foo-bar`` next to ``foo_bar`` (:ref:`next.E039 <ref-system-checks>`).
+  While collecting patterns it also reports a route that repeats a captured parameter name (``next.E028``), listing every conflicting name, so parameter duplicates surface from every scanned tree.
+  A page that repeats a name the ``pages()`` prefix of its tree captures reports ``next.E152`` instead.
+- ``check_reverse_name_collisions`` fails when two distinct routes collapse to the same reverse URL name after separator normalisation, such as ``foo-bar`` next to ``foo_bar`` (``next.E039``).
   Names collide only within one namespace, so the pages of a ``pages()`` tree are compared with each other and not with ``next``.
 
-- The group and intercept checks report an unreadable parenthesised name (:ref:`next.E169 <ref-system-checks>`), a pointless group (``next.W137``), and an intercept with no target, past the root, or nested (``next.E170``, ``next.E171``, ``next.E172``), see `Route groups`_ and `Intercepting routes`_.
+- The group and intercept checks report an unreadable parenthesised name (``next.E169``), a pointless group (``next.W137``), and an intercept with no target, past the root, or nested (``next.E170``, ``next.E171``, ``next.E172``), see `Route groups`_ and `Intercepting routes`_.
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.
@@ -673,23 +673,23 @@ Extension points
 
 Two surfaces let you replace or augment the router.
 
-- ``next.urls.RouterBackend`` is the abstract contract for any source of URL patterns.
-- ``next.urls.FileRouterBackend`` is the default file-based implementation.
+- ``next.urls.PageBackend`` is the abstract contract for any source of URL patterns.
+- ``next.urls.FilePageBackend`` is the default file-based implementation.
 
 A custom backend is named by its dotted path under ``PAGE_BACKENDS``, exactly as every other backend family is named, and it takes that entry as its single constructor argument.
 
-Subclass ``FileRouterBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
+Subclass ``FilePageBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
 See :doc:`extending` for a worked example.
 
 Database driven routes
 ----------------------
 
 A hybrid backend combines file routes with routes built from database rows.
-Subclass ``FileRouterBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
+Subclass ``FilePageBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
 The base method returns a fresh list on every call, so appending to it never mutates the cached file routes.
-Register the backend in ``PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
+Register the backend in ``PAGE_BACKENDS`` and call ``route_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
 
-See :doc:`/content/howto/write-a-router-backend` for the full worked recipe.
+See :doc:`/content/howto/write-a-page-backend` for the full worked recipe.
 
 See also
 --------

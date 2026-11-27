@@ -76,6 +76,10 @@ class TestDFormAndFormProvider:
         param = inspect_parameter("service", int)
         assert FormProvider().static_can_handle(param) is False
 
+    def test_form_provider_never_blocks(self) -> None:
+        """The form is read off the context, so the async resolver fills it inline."""
+        assert FormProvider().static_blocking(inspect_parameter("form")) is False
+
 
 class TestCleanedDataProvider:
     """CleanedDataProvider claims only the `cleaned_data` parameter."""
@@ -100,3 +104,8 @@ class TestCleanedDataProvider:
         context = make_resolution_context(cleaned_data={"name": "Ada"})
         param = inspect_parameter("cleaned_data")
         assert CleanedDataProvider().resolve(param, context) == {"name": "Ada"}
+
+    def test_never_blocks(self) -> None:
+        """The merged data is read off the context, so the resolver fills it inline."""
+        param = inspect_parameter("cleaned_data")
+        assert CleanedDataProvider().static_blocking(param) is False

@@ -54,6 +54,58 @@ The nested scopes ``METADATA``, ``REALTIME``, ``SITE``, ``SEO``, and ``CONSENT``
 .. automodule:: next.conf.scopes
    :members:
 
+Scope shapes and typed readers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``next.conf.shapes`` is the one machinery that describes the shape of a nested scope.
+A ``Shape`` holds the predicate a key must pass and the words an error names the key by, and a ``Section`` is a nested mapping of shapes.
+A section owned by a backend other than its default may hold keys of its own, so the walk names no unknown key there, and still checks every key the framework reads.
+``misfits(scope, section, defaults)`` walks a scope against its section and answers a ``Misfit`` for every value outside its shape and every key the section does not know, and ``pick(scope, key, usable, defaults)`` reads one value, its default when the predicate refuses it.
+The system checks ``next.E035`` and ``next.E076`` report the misfits, and the readers below read the same shapes, so a value a check refuses reads as its default at runtime.
+
+``next.conf.router`` reads the ``ROUTER`` scope once into ``RouterSettings``, ``next.conf.compression`` the ``COMPRESSION`` scope into ``CompressionSettings``, ``next.conf.boundaries`` the ``BOUNDARIES`` scope into ``BoundarySettings``, and ``next.conf.loader`` the ``LOADER`` scope into ``LoaderSettings``, each read again once the merged mapping moves.
+``next.conf.transactions`` holds the shape of ``TRANSACTIONS`` and the atomic modes ``TRANSACTIONS`` and ``BOUNDARIES`` share.
+``router_settings()`` and ``compression_settings()`` return them, and ``router_enabled()`` answers ``ROUTER["ENABLED"]``.
+``next.conf.defer`` reads ``DEFER`` one value at a time, ``defer_option(*path)`` answering the value at a path, and ``defer_count`` and ``defer_seconds`` the typed forms.
+A string choice of these scopes is a ``StrEnum`` that equals the string a project writes.
+
+.. autoclass:: next.conf.router.RouterScope
+   :no-special-members:
+
+.. autoclass:: next.conf.router.PrefetchMode
+   :no-special-members:
+
+.. autoclass:: next.conf.router.PressMode
+   :no-special-members:
+
+.. autoclass:: next.conf.router.ForeignMode
+   :no-special-members:
+
+.. autoclass:: next.conf.router.InterceptMode
+   :no-special-members:
+
+.. autoclass:: next.conf.router.LinkPass
+   :no-special-members:
+
+.. autoclass:: next.conf.router.Eagerness
+   :no-special-members:
+
+.. autoclass:: next.conf.compression.StreamOwner
+   :no-special-members:
+
+.. autoclass:: next.conf.compression.TopicMode
+   :no-special-members:
+
+.. autoclass:: next.conf.shapes.Shape
+
+.. autoclass:: next.conf.shapes.Section
+
+.. autoclass:: next.conf.shapes.Misfit
+
+.. autofunction:: next.conf.shapes.misfits
+
+.. autofunction:: next.conf.shapes.pick
+
 Helpers
 ~~~~~~~
 
@@ -68,6 +120,9 @@ Import utilities
 ``import_callable`` is the one reading of a dotted path that names a callable, such as a ``SITE["URL"]`` rule, and answers ``None`` for a path that does not import or names no callable, so the system checks report the value rather than the read raising.
 
 .. autofunction:: next.conf.imports.import_callable
+
+``import_target`` and ``import_backend_class`` import a dotted path with any failure of the module folded into ``ImportError``, so a raising module neither aborts a check run nor the request that loads it.
+``class_fault`` answers why an imported object is no concrete subclass of a base, and ``class_problem`` and ``callable_problem`` combine the import and the test into the reason a system check reports.
 
 ``next.conf.imports.clear_import_cache`` is framework-internal.
 The settings object invokes it from ``reload`` to drop cached imports when settings change.

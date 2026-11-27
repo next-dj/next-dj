@@ -122,7 +122,11 @@ def _rendered_form(mock_http_request, form_class: object) -> django_forms.Form:
 
 
 _BUILDERS = pytest.mark.parametrize(
-    "build", [_posted_form, _rendered_form], ids=("post", "render")
+    "build",
+    [
+        pytest.param(_posted_form, id="post", marks=pytest.mark.django_db),
+        pytest.param(_rendered_form, id="render"),
+    ],
 )
 
 
@@ -201,6 +205,26 @@ class TestDefaultGetFormKwargs:
             kwargs = TenantForm.get_form_kwargs(request)
         assert kwargs == {"initial": {"name": "cached"}}
 
+    def test_get_initial_reads_an_async_named_dependency(
+        self, mock_http_request
+    ) -> None:
+        async def tenant() -> str:
+            return "bridged"
+
+        class AsyncTenantForm(Form):
+            name = django_forms.CharField()
+
+            @classmethod
+            def get_initial(
+                cls, tenant: str = Depends("async_tenant")
+            ) -> dict[str, Any]:
+                return {"name": tenant}
+
+        request = mock_http_request(method="GET")
+        with bound_dependency("async_tenant", tenant):
+            kwargs = AsyncTenantForm.get_form_kwargs(request)
+        assert kwargs == {"initial": {"name": "bridged"}}
+
     @pytest.mark.django_db()
     def test_a_model_form_gets_the_url_instance(self, mock_http_request) -> None:
         group = Group.objects.create(name="editors")
@@ -230,6 +254,7 @@ class TestDefaultGetFormKwargs:
             InstanceForm.get_form_kwargs(mock_http_request(method="GET"))
 
 
+@pytest.mark.django_db()
 class TestOverrideOnPost:
     """The dispatcher builds the bound form from the overridden hook alone."""
 
@@ -339,7 +364,6 @@ class TestOverrideOnPost:
             "has_object_permission:g",
         ]
 
-    @pytest.mark.django_db()
     def test_super_on_a_model_form_keeps_the_url_instance(
         self, mock_http_request
     ) -> None:
@@ -483,8 +507,8 @@ class TestOverrideOnRender:
             _rendered_form(mock_http_request, _kwargs_form(result, []))
 
 
-class TestFactoryCompatibility:
-    """A form factory keeps its contract next to the kwargs hook."""
+class TestFactoryContract:
+    """A form factory answers beside the kwargs hook."""
 
     @_BUILDERS
     def test_a_non_empty_pair_bypasses_both_hooks(
@@ -637,6 +661,7 @@ def _shared_tenant_form() -> type[Form]:
     return SharedTenantForm
 
 
+@pytest.mark.django_db()
 class TestCallerCacheOnTheRequest:
     """`super().get_form_kwargs` resolves in the dependency cache of its caller."""
 

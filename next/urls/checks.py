@@ -7,16 +7,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 from django.urls import NoReverseMatch, Resolver404, resolve
 
-from next.checks import NEXT, SEO
+from next.caches import FRAMEWORK
+from next.checks import NEXT, SEO, register
 from next.checks.common import (
     WALK_HINT,
     discover_page_registrations,
     errors_for_unknown_keys,
     get_page_roots,
-    get_router_manager,
+    get_route_manager,
     page_tree_skip_names,
 )
 from next.conf import import_class_cached, next_framework_settings
@@ -26,7 +27,7 @@ from next.pages.access import routed_pages
 from next.ports import form_routes_slot
 from next.utils import UNMOUNTED, PageRoot, is_route_group
 
-from .backends import FILE_ROUTER_CONFIG_KEYS, FileRouterBackend, RouterBackend
+from .backends import FILE_ROUTER_CONFIG_KEYS, FilePageBackend, PageBackend
 from .dispatcher import scan_pages_tree
 from .errors import (
     DuplicateURLParameterError,
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
 
     from django.urls import ResolverMatch
 
-    from .manager import RouterManager
+    from .manager import RouteManager
 
 
 _PAGE_BACKEND_SETTINGS_KEY = "PAGE_BACKENDS"
@@ -88,7 +89,7 @@ type _TreeKey = tuple[Path, str, str]
 """A mounted tree by its path, the route it is included under and its namespace."""
 
 
-def _router_class(backend_path: str) -> type[RouterBackend] | None:
+def _backend_class(backend_path: str) -> type[PageBackend] | None:
     """Return the router class `backend_path` names, or None when it names none.
 
     One read answers both whether the entry is valid and whether it is a file router.
@@ -97,7 +98,7 @@ def _router_class(backend_path: str) -> type[RouterBackend] | None:
         resolved = import_class_cached(backend_path)
     except ImportError:
         return None
-    if isinstance(resolved, type) and issubclass(resolved, RouterBackend):
+    if isinstance(resolved, type) and issubclass(resolved, PageBackend):
         return resolved
     return None
 
@@ -130,7 +131,7 @@ def _validate_config_structure(config: object, index: int) -> list[CheckMessage]
     return errors
 
 
-def _validate_file_router_backend_fields(
+def _validate_file_page_backend_fields(
     config: dict[str, Any], index: int
 ) -> list[CheckMessage]:
     """Validate `DIRS`, `PAGES_DIR`, `APP_DIRS`, `OPTIONS` for the file router."""
@@ -172,7 +173,7 @@ def _validate_pages_dir_field(
     if "PAGES_DIR" not in config:
         return [
             Error(
-                f"{prefix} must specify PAGES_DIR when using FileRouterBackend.",
+                f"{prefix} must specify PAGES_DIR when using FilePageBackend.",
                 obj=settings,
                 id="next.E024",
             )
@@ -189,7 +190,7 @@ def _validate_app_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckM
     if "APP_DIRS" not in config:
         return [
             Error(
-                f"{prefix} must specify APP_DIRS when using FileRouterBackend.",
+                f"{prefix} must specify APP_DIRS when using FilePageBackend.",
                 obj=settings,
                 id="next.E025",
             )
@@ -267,8 +268,8 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
     if backend is None:
         return errors
 
-    router_class = _router_class(str(backend))
-    if router_class is None:
+    backend_class = _backend_class(str(backend))
+    if backend_class is None:
         errors.append(
             Error(
                 f'NEXT_FRAMEWORK["{_PAGE_BACKEND_SETTINGS_KEY}"][{index}] specifies '
@@ -279,8 +280,8 @@ def _validate_config_fields(config: dict[str, Any], index: int) -> list[CheckMes
         )
         return errors
 
-    if issubclass(router_class, FileRouterBackend):
-        errors.extend(_validate_file_router_backend_fields(config, index))
+    if issubclass(backend_class, FilePageBackend):
+        errors.extend(_validate_file_page_backend_fields(config, index))
     else:
         rf = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
         errors.extend(
@@ -321,23 +322,23 @@ def check_next_pages_configuration(
 
 
 @register(Tags.urls, Tags.templates, NEXT, SEO)
-def check_router_manager(*args: object, **kwargs: object) -> list[CheckMessage]:
+def check_route_manager(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report a router that fails to initialise (`next.E007`), once per check run.
 
     Router-walking checks skip the failure silently, so this carries every tag they use.
     """
-    _router_manager, init_errors = get_router_manager()
+    _route_manager, init_errors = get_route_manager()
     return init_errors
 
 
 @register(Tags.urls, NEXT)
 def check_url_patterns(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
 
-    collected = _collect_all_patterns(router_manager)
+    collected = _collect_all_patterns(route_manager)
     errors = list(collected.errors)
     _check_url_conflicts(collected.patterns, errors)
     return errors
@@ -348,10 +349,10 @@ def check_reserved_url_parameters(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
     """Report a bracket segment named after a reserved argument (`next.E217`)."""
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
-    return _collect_all_patterns(router_manager).reserved
+    return _collect_all_patterns(route_manager).reserved
 
 
 @register(Tags.urls, NEXT)
@@ -361,12 +362,12 @@ def check_reverse_name_collisions(
     """Fail when two distinct routes collapse to the same reverse URL name."""
     errors: list[CheckMessage] = []
 
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
 
     # Collection errors already surface through check_url_patterns.
-    all_patterns = _collect_all_patterns(router_manager).patterns
+    all_patterns = _collect_all_patterns(route_manager).patterns
 
     # reverse() picks by arguments, so a collision needs name and parameters both.
     grouped: dict[tuple[str, str, frozenset[str]], dict[str, list[str]]] = {}
@@ -406,7 +407,7 @@ class _CollectedPatternsMemo:
 
     def __init__(self) -> None:
         """Start with no walk on record."""
-        self.router_manager: RouterManager | None = None
+        self.route_manager: RouteManager | None = None
         self.patterns: list[_CollectedPattern] = []
         self.errors: list[CheckMessage] = []
         self.reserved: list[CheckMessage] = []
@@ -490,20 +491,20 @@ def check_framework_routes_reachable(
 
 def reset_collected_patterns_cache(**kwargs: object) -> None:
     """Drop memoised collected patterns so the next check run recollects."""
-    _collected_patterns.router_manager = None
+    _collected_patterns.route_manager = None
     _collected_patterns.patterns = []
     _collected_patterns.errors = []
     _collected_patterns.reserved = []
 
 
-def _collect_all_patterns(router_manager: RouterManager) -> _Collection:
+def _collect_all_patterns(route_manager: RouteManager) -> _Collection:
     """Return the per-run memoised collection, whose lists callers must not mutate."""
-    if _collected_patterns.router_manager is not router_manager:
-        collection = _collect_all_patterns_uncached(router_manager)
+    if _collected_patterns.route_manager is not route_manager:
+        collection = _collect_all_patterns_uncached(route_manager)
         _collected_patterns.patterns = collection.patterns
         _collected_patterns.errors = collection.errors
         _collected_patterns.reserved = collection.reserved
-        _collected_patterns.router_manager = router_manager
+        _collected_patterns.route_manager = route_manager
     return _Collection(
         _collected_patterns.patterns,
         _collected_patterns.errors,
@@ -511,14 +512,14 @@ def _collect_all_patterns(router_manager: RouterManager) -> _Collection:
     )
 
 
-def _collect_all_patterns_uncached(router_manager: RouterManager) -> _Collection:
-    """Collect one `_CollectedPattern` per route from every router backend."""
+def _collect_all_patterns_uncached(route_manager: RouteManager) -> _Collection:
+    """Collect one `_CollectedPattern` per route from every page backend."""
     all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
     reserved: list[CheckMessage] = []
     seen: set[_TreeKey] = set()
 
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         try:
             _collect_router_patterns(router, all_patterns, errors, reserved, seen)
         except (AttributeError, OSError) as e:
@@ -535,7 +536,7 @@ def _collect_all_patterns_uncached(router_manager: RouterManager) -> _Collection
 
 
 def _collect_router_patterns(
-    router: RouterBackend,
+    router: PageBackend,
     all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
     reserved: list[CheckMessage],
@@ -676,6 +677,9 @@ def _parameter_refusal_error(
             id=_RESERVED_SEGMENT_ID,
         )
     return Error(str(exc), obj=str(page_file), id="next.E082")
+
+
+FRAMEWORK.attach(reset_collected_patterns_cache)
 
 
 __all__ = [

@@ -203,8 +203,9 @@ Consume it with a delegated document listener or the ``Next.on`` bus.
      analytics.track("purchase", event.detail);
    });
 
-The ``toast`` verb is sugar over ``event`` with a built-in container, so a project that wants its own notification surface listens for ``next:toast`` and renders the toast itself.
-The item still lands in the built-in ``[data-next-toasts]`` tray, so such a project also hides the tray with CSS.
+The ``toast`` verb appends a text item to the first ``[data-next-toasts]`` tray the runtime finds top layer down, and the runtime builds a tray of its own only when the page renders none.
+A project that wants its own notification surface renders that tray where the toasts belong, in a layout or inside a modal.
+A project that renders notifications itself listens for ``next:toast``, which fires once the item is in its tray, and hides the tray with CSS.
 
 Replacing the wire format
 -------------------------

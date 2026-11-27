@@ -47,17 +47,9 @@ _step_section = _load(
     PAGES_ROOT / "request" / "[step]" / "_components" / "step_section" / "component.py",
     "audit_step_section",
 )
-_admin_audit = _load(PAGES_ROOT / "admin" / "audit" / "page.py", "audit_admin_audit")
-
-
-def _audit_request(*, zone: str | None, kind: str = "") -> HttpRequest:
-    request = HttpRequest()
-    request.method = "GET"
-    request.GET = QueryDict(f"kind={kind}" if kind else "")
-    if zone is not None:
-        request.META["HTTP_X_NEXT_REQUEST"] = "1"
-        request.META["HTTP_X_NEXT_ZONE"] = zone
-    return request
+_audit_totals = _load(
+    PAGES_ROOT / "_components" / "audit_totals" / "component.py", "audit_audit_totals"
+)
 
 
 def _wizard(step: str, stored: dict[str, dict[str, object]] | None = None):
@@ -567,33 +559,56 @@ class TestLandingPage:
 
 
 @pytest.mark.django_db()
-class TestLazyAuditEntries:
-    """The `entries` provider runs its query only for the lazy zone request."""
+class TestAuditEntriesOfKind:
+    """`of_kind` narrows the log to one kind and ignores a value that names none."""
 
-    def test_full_render_request_returns_none_without_querying(
-        self, create_audit_entry
-    ) -> None:
+    def test_an_empty_kind_keeps_every_row(self, create_audit_entry) -> None:
         create_audit_entry()
-        assert _admin_audit.entries(_audit_request(zone=None)) is None
+        assert AuditEntry.objects.of_kind("").count() == 1
 
-    def test_zone_request_loads_the_rows(self, create_audit_entry) -> None:
-        create_audit_entry()
-        rows = _admin_audit.entries(_audit_request(zone="audit-table"))
-        assert rows is not None
-        assert len(rows) == 1
-
-    def test_zone_request_applies_the_kind_filter(self, create_audit_entry) -> None:
+    def test_a_kind_narrows_the_rows(self, create_audit_entry) -> None:
         create_audit_entry()
         create_audit_entry(
             action_name="y",
             kind=AuditEntry.KIND_VALIDATION_FAILED,
             source=AuditEntry.SOURCE_SIGNAL,
         )
-        rows = _admin_audit.entries(
-            _audit_request(zone="audit-table", kind=AuditEntry.KIND_VALIDATION_FAILED)
-        )
-        assert rows is not None
+        rows = AuditEntry.objects.of_kind(AuditEntry.KIND_VALIDATION_FAILED)
         assert [r.kind for r in rows] == [AuditEntry.KIND_VALIDATION_FAILED]
+
+    def test_an_unknown_kind_is_ignored(self, create_audit_entry) -> None:
+        create_audit_entry()
+        assert AuditEntry.objects.of_kind("bogus").count() == 1
+
+    def test_the_log_ordering_reads_through_its_index(self) -> None:
+        newest = AuditEntry.objects.order_by("-created_at", "-pk")[:21]
+        assert "USING INDEX audit_newest_idx" in newest.explain()
+
+
+@pytest.mark.django_db()
+class TestAuditTotals:
+    """The `totals` of the deferred component count each channel of the kind given."""
+
+    def test_every_kind_is_counted_per_channel(self, create_audit_entry) -> None:
+        create_audit_entry()
+        create_audit_entry(source=AuditEntry.SOURCE_SIGNAL)
+        create_audit_entry(source=AuditEntry.SOURCE_SIGNAL)
+        assert _audit_totals.totals("") == {"backend": 1, "signal": 2}
+
+    def test_both_channels_are_counted_in_one_query(
+        self, create_audit_entry, django_assert_num_queries
+    ) -> None:
+        create_audit_entry()
+        with django_assert_num_queries(1):
+            _audit_totals.totals("")
+
+    def test_a_kind_narrows_the_counts(self, create_audit_entry) -> None:
+        create_audit_entry()
+        create_audit_entry(
+            kind=AuditEntry.KIND_ACCESS_DENIED, source=AuditEntry.SOURCE_SIGNAL
+        )
+        counts = _audit_totals.totals(AuditEntry.KIND_ACCESS_DENIED)
+        assert counts == {"backend": 0, "signal": 1}
 
 
 class TestReceipt:

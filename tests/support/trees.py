@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 
 from django.test import override_settings
 
-from tests.support.helpers import file_router_config_entry
+from tests.support.access import COMPONENTS
+from tests.support.helpers import ROUTER_OFF, file_router_config_entry
 from tests.support.pages import write_page
 from tests.support.sites import NAMESPACED_URLCONF
 
@@ -60,10 +61,30 @@ def write_metadata_tree(root: Path, *pages: tuple[str, str], sitemap: str = "") 
 def routed(
     *roots: Path, urlconf: str = NAMESPACED_URLCONF, **framework: object
 ) -> Generator[None, None, None]:
-    """Route `roots` through one file router mounted by `urlconf` for the block."""
+    """Route `roots` through one file router, the client router off unless asked."""
     first, *rest = roots
     entry = file_router_config_entry(pages_dir=first, dirs=list(rest))
-    with override_settings(
-        ROOT_URLCONF=urlconf, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], **framework}
-    ):
+    framework = {"PAGE_BACKENDS": [entry], "ROUTER": ROUTER_OFF, **framework}
+    with override_settings(ROOT_URLCONF=urlconf, NEXT_FRAMEWORK=framework):
         yield
+
+
+def templated_page(directory: Path, source: str, body: str | None = "<p>x</p>") -> Path:
+    """Write a `page.py` of `source` in `directory` beside a `body` template."""
+    return write_page(directory, source=source, body=body)
+
+
+def layout_root(tmp_path: Path) -> Path:
+    """Return a `pages` root in `tmp_path` with an `<html>` layout over every page."""
+    root = tmp_path / "pages"
+    root.mkdir()
+    (root / "layout.djx").write_text("<html>{% template %}</html>")
+    return root
+
+
+def framework(pages: Path) -> dict[str, object]:
+    """Return a `NEXT_FRAMEWORK` routing `pages` with file components enabled."""
+    return {
+        "PAGE_BACKENDS": [file_router_config_entry(pages_dir=pages)],
+        "COMPONENT_BACKENDS": COMPONENTS,
+    }

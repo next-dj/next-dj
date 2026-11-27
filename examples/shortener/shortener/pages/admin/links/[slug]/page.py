@@ -9,6 +9,7 @@ from next.partial import Patches
 
 
 page.public()
+page.compress(enabled=False)
 
 
 @page.metadata

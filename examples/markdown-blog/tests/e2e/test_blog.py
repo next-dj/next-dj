@@ -1,6 +1,6 @@
 import pytest
 from blog.posts import load_post
-from e2e_support.browser import PageProbe, wait_for_runtime
+from e2e_support.browser import PageProbe, mark_document, wait_for_runtime
 from playwright.sync_api import Page, expect
 
 
@@ -138,3 +138,17 @@ def test_the_post_page_opens_its_print_view_and_the_view_links_back(
     page.get_by_role("link", name="Back to the post").click()
     expect(page).to_have_url(f"{base_url}/posts/welcome/")
     expect(page.locator(SHARE)).to_have_count(1)
+
+
+def test_a_post_embedding_a_script_loads_whole_and_runs_it(
+    page: Page, base_url: str
+) -> None:
+    page.goto(base_url)
+    wait_for_runtime(page)
+    mark_document(page)
+
+    page.get_by_role("link", name="Welcome to the blog").click()
+
+    expect(page).to_have_url(f"{base_url}/posts/welcome/")
+    expect(page.locator("[data-embed]")).to_have_text("Embedded widget")
+    assert page.evaluate("() => window.__stillHere") is None

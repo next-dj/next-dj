@@ -1,3 +1,4 @@
+import itertools
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +7,7 @@ from django.middleware.http import ConditionalGetMiddleware
 from django.middleware.security import SecurityMiddleware
 from django.test import override_settings
 
+from next.compression.checks import check_compression_middleware
 from next.pages.checks import (
     check_conditional_get_order,
     check_csrf_delivery,
@@ -25,6 +27,7 @@ from tests.support import (
     routed,
     write_page,
 )
+from tests.support.checks import written
 
 
 LOCALE = {
@@ -89,7 +92,7 @@ class TestCsrfDelivery:
 
     @pytest.mark.parametrize("value", ["auto", "eager", "lazy", 3])
     def test_a_known_mode_or_another_type_is_silent(self, value) -> None:
-        with override_settings(NEXT_FRAMEWORK={"CSRF_DELIVERY": value}):
+        with written({"CSRF_DELIVERY": value}):
             assert check_csrf_delivery() == []
 
     def test_an_unknown_mode_is_e132(self) -> None:
@@ -152,7 +155,7 @@ class TestSharedPages:
         root = _tree(tmp_path, "template = 'x'\ncache = -1\n")
         manager = MagicMock()
         manager.backends = (RootPagesRouter([root]), RootPagesRouter([root]))
-        with patch.object(responses, "get_router_manager", return_value=(manager, [])):
+        with patch.object(responses, "get_route_manager", return_value=(manager, [])):
             assert check_ids(check_page_response_declarations()) == ["next.E131"]
 
 
@@ -211,6 +214,8 @@ SESSIONS = "django.contrib.sessions.middleware.SessionMiddleware"
 SECURITY = "django.middleware.security.SecurityMiddleware"
 GUARD = "next.middleware.SharedCacheGuardMiddleware"
 UPDATE_CACHE = "django.middleware.cache.UpdateCacheMiddleware"
+COMPRESSION = "next.middleware.CompressionMiddleware"
+COMMON = "django.middleware.common.CommonMiddleware"
 
 
 class QuietSecurity(SecurityMiddleware):
@@ -298,6 +303,27 @@ class TestConditionalGetOrder:
             override_settings(MIDDLEWARE=[SESSIONS, CONDITIONAL]),
         ):
             assert check_conditional_get_order() == []
+
+    @pytest.mark.parametrize(
+        "middleware",
+        [list(order) for order in itertools.permutations([COMPRESSION, CONDITIONAL])],
+        ids=["compression_first", "conditional_first"],
+    )
+    def test_compression_sets_no_cookie(self, tmp_path, middleware) -> None:
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=[SECURITY, *middleware, COMMON]),
+        ):
+            assert check_conditional_get_order() == []
+
+    def test_the_compression_order_satisfies_both_checks(self, tmp_path) -> None:
+        middleware = [SECURITY, COMPRESSION, COMMON, CONDITIONAL, SESSIONS]
+        with (
+            routed(_pages(tmp_path, "cache = 60\n")),
+            override_settings(MIDDLEWARE=middleware),
+        ):
+            assert check_conditional_get_order() == []
+            assert check_compression_middleware() == []
 
 
 class TestCsrfEndpoint:

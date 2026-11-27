@@ -1,5 +1,6 @@
 import pytest
 from e2e_support.browser import (
+    PageProbe,
     applied_count,
     assert_same_document,
     mark_document,
@@ -7,7 +8,7 @@ from e2e_support.browser import (
     wait_for_runtime,
 )
 from kanban.models import Board
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Locator, Page, Request, Route, expect
 
 
 pytestmark = pytest.mark.e2e
@@ -26,6 +27,18 @@ def open_index(page: Page, base_url: str) -> None:
     page.goto(base_url)
     wait_for_runtime(page)
     mark_document(page)
+
+
+def peek_link(page: Page, board: Board) -> Locator:
+    card = page.locator("li").filter(has_text=board.title)
+    return card.get_by_role("link", name="Peek at columns")
+
+
+def layer_prefetch(request: Request) -> bool:
+    return (
+        request.headers.get("x-next-zone") == "board-peek"
+        and request.headers.get("x-next-prefetch") == "full"
+    )
 
 
 def open_peek(page: Page, base_url: str, board: Board) -> Locator:
@@ -95,3 +108,52 @@ def test_the_board_title_link_still_navigates_without_a_modal(
 
     expect(page).to_have_url(f"{base_url}/board/{board.pk}/")
     expect(page.locator(DIALOG)).to_have_count(0)
+
+
+def test_the_peek_shows_its_loading_state_until_the_summary_arrives(
+    page: Page, base_url: str, board: Board
+) -> None:
+    open_index(page, base_url)
+    held: list[Route] = []
+
+    def hold(route: Route) -> None:
+        held.append(route)
+
+    page.route(f"{base_url}/board/{board.pk}/", hold)
+
+    peek_link(page, board).click()
+
+    dialog = page.locator(DIALOG)
+    expect(dialog.locator("[data-board-peek-loading]")).to_be_visible()
+    expect(dialog.locator("[data-next-zone=board-peek]")).to_have_attribute(
+        "aria-busy", "true"
+    )
+    expect(dialog.locator("[data-board-peek]")).to_have_count(0)
+
+    for route in held:
+        route.continue_()
+
+    expect(dialog.locator("[data-board-peek]")).to_be_visible()
+    expect(dialog.locator("[data-board-peek-loading]")).to_have_count(0)
+    expect(dialog.locator("[data-next-zone=board-peek]")).not_to_have_attribute(
+        "aria-busy", "true"
+    )
+
+
+def test_a_hovered_peek_opens_filled_with_the_prefetched_summary(
+    page: Page, base_url: str, board: Board, next_probe: PageProbe
+) -> None:
+    open_index(page, base_url)
+    link = peek_link(page, board)
+
+    with page.expect_response(lambda response: layer_prefetch(response.request)):
+        link.hover()
+    since = len(next_probe.responses)
+
+    link.click()
+
+    dialog = page.locator(DIALOG)
+    expect(dialog.locator("[data-board-peek]")).to_be_visible()
+    expect(dialog.locator("[data-peek-lane]")).to_have_count(4)
+    expect(page).to_have_url(f"{base_url}/board/{board.pk}/")
+    assert next_probe.partial_requests("board-peek", since=since) == []

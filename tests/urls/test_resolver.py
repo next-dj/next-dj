@@ -8,7 +8,7 @@ from django.urls.resolvers import RoutePattern
 
 from next.forms.uid import URL_NAME_FORM_ACTION
 from next.testing import override_form_action, override_next_settings
-from next.urls import TrieURLResolver, page_reverse, router_manager
+from next.urls import TrieURLResolver, page_reverse, route_manager
 from next.urls.manager import urlpatterns
 from tests.support import NAMESPACED_URLCONF, write_page
 
@@ -139,12 +139,12 @@ class TestResolveAgainstPageTree:
         assert trie_match.kwargs == linear_match.kwargs
 
     def test_index_rebuilt_after_router_reload(self, page_tree) -> None:
-        """A route added on disk resolves after router_manager.reload()."""
+        """A route added on disk resolves after route_manager.reload()."""
         resolver = urlpatterns[0]
         with pytest.raises(Resolver404):
             resolver.resolve("fresh/")
         write_page(page_tree, "fresh")
-        router_manager.reload()
+        route_manager.reload()
         assert resolver.resolve("fresh/").url_name == "page_fresh"
 
     def test_late_action_registration_resolves_without_restart(self, page_tree) -> None:

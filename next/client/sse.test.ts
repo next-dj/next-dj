@@ -110,6 +110,7 @@ describe("createSse", () => {
       now?: () => number;
       pageUrl?: (el: Element) => string;
       cancel?: (request: { url: string; zone: string }) => void;
+      release?: (current: boolean) => void;
     } = {},
   ) {
     return createSse({
@@ -128,6 +129,7 @@ describe("createSse", () => {
       visibility,
       ...(over.now !== undefined ? { now: over.now } : {}),
       ...(over.pageUrl !== undefined ? { pageUrl: over.pageUrl } : {}),
+      ...(over.release !== undefined ? { release: over.release } : {}),
     });
   }
 
@@ -261,7 +263,11 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ server_time: 1000, topics: { room: { epoch: "e", seq: 0 } } }),
+      JSON.stringify({
+        protocol: 2,
+        server_time: 1000,
+        topics: { room: { epoch: "e", seq: 0 } },
+      }),
     );
     sse.remember("own");
     opened[0]!.message(
@@ -283,7 +289,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 0 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 0 } } }),
     );
     opened[0]!.message(topicEnvelope([{ op: "refresh", zone: "poll" }], "room", 1));
     expect(fetched).toEqual([]);
@@ -298,7 +304,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 7 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 7 } } }),
     );
     expect(fetched).toEqual([{ url: "/", zone: "poll" }]);
     expect(dispatched.filter((event) => event.event === "next:stream-gap")).toEqual([
@@ -318,7 +324,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 1 } } }),
     );
     expect(fetched).toEqual([{ url: "/", zone: "main" }]);
   });
@@ -334,7 +340,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 1 } } }),
     );
     expect(fetched).toHaveLength(1);
     expect(fetched[0]!.zone.split(",")).toHaveLength(64);
@@ -349,6 +355,7 @@ describe("createSse", () => {
     opened[0]!.control(
       "next-hello",
       JSON.stringify({
+        protocol: 2,
         topics: { "room:1": { epoch: "e", seq: 3 }, "room:2": { epoch: "e", seq: 7 } },
       }),
     );
@@ -367,7 +374,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 0 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 0 } } }),
     );
     sse.remember("own");
     opened[0]!.message(
@@ -389,7 +396,11 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ server_time: 1000, topics: { room: { epoch: "e", seq: 4 } } }),
+      JSON.stringify({
+        protocol: 2,
+        server_time: 1000,
+        topics: { room: { epoch: "e", seq: 4 } },
+      }),
     );
     opened[0]!.message(topicEnvelope([{ op: "refresh", zone: "a" }], "room", 5));
     opened[0]!.message(topicEnvelope([{ op: "refresh", zone: "a" }], "room", 8));
@@ -457,7 +468,11 @@ describe("createSse", () => {
     visibility.setHidden(false);
     opened[1]!.control(
       "next-hello",
-      JSON.stringify({ server_time: 1200, topics: { room: { epoch: "e", seq: 9 } } }),
+      JSON.stringify({
+        protocol: 2,
+        server_time: 1200,
+        topics: { room: { epoch: "e", seq: 9 } },
+      }),
     );
     expect(fetched).toEqual([{ url: "/", zone: "a" }]);
     expect(
@@ -476,14 +491,14 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 12 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 12 } } }),
     );
     await Promise.resolve();
     visibility.setHidden(true);
     visibility.setHidden(false);
     opened[1]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "f", seq: 2 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "f", seq: 2 } } }),
     );
     opened[1]!.message(
       topicEnvelope([{ op: "refresh", zone: "results" }], "room", 3, 1000, "f"),
@@ -506,7 +521,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 0 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 0 } } }),
     );
     opened[0]!.control(
       "next-skip",
@@ -539,10 +554,10 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control("next-hello", "{");
     opened[0]!.control("next-hello", "null");
-    opened[0]!.control("next-hello", JSON.stringify({ topics: [] }));
+    opened[0]!.control("next-hello", JSON.stringify({ protocol: 2, topics: [] }));
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { negative: -1, decimal: 1.5, valid: 0 } }),
+      JSON.stringify({ protocol: 2, topics: { negative: -1, decimal: 1.5, valid: 0 } }),
     );
     opened[0]!.control("next-skip", "{");
     opened[0]!.control("next-skip", "null");
@@ -565,6 +580,46 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
+  it.each([[{ protocol: 3 }], [{}]])(
+    "closes a stream whose hello speaks another protocol %o and reloads once",
+    (hello) => {
+      document.body.innerHTML =
+        '<div data-next-stream="/stream/"></div><div data-next-zone="poll"></div>';
+      const { adapter, opened } = mockSource();
+      const releases: boolean[] = [];
+      const sse = makeSse(adapter, manualVisibility(), {
+        release: (current) => void releases.push(current),
+      });
+      sse.scan(document);
+      opened[0]!.control(
+        "next-hello",
+        JSON.stringify({ ...hello, topics: { room: { epoch: "e", seq: 4 } } }),
+      );
+      expect(releases).toEqual([false]);
+      expect(opened[0]!.closed).toBe(true);
+      expect(sse.size()).toBe(0);
+      expect(fetched).toEqual([]);
+      expect(dispatched.at(-1)).toEqual({
+        event: "next:stream-state",
+        detail: {
+          url: "/stream/",
+          transport: "sse",
+          state: "closed",
+          code: "protocol",
+        },
+      });
+    },
+  );
+
+  it("closes a foreign stream even when nothing listens for the release", () => {
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    sse.scan(document);
+    opened[0]!.control("next-hello", JSON.stringify({ protocol: 1, topics: {} }));
+    expect(sse.size()).toBe(0);
+  });
+
   it("does not resync a sequence jump when no zone has been bound yet", () => {
     document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
     const { adapter, opened } = mockSource();
@@ -572,15 +627,15 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 1 } } }),
     );
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 1 } } }),
     );
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 4 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 4 } } }),
     );
     expect(fetched).toEqual([]);
     expect(dispatched.filter((event) => event.event === "next:stream-gap")).toEqual([
@@ -891,7 +946,11 @@ describe("createSse", () => {
     );
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ server_time: 1250, topics: { room: { epoch: "e", seq: 0 } } }),
+      JSON.stringify({
+        protocol: 2,
+        server_time: 1250,
+        topics: { room: { epoch: "e", seq: 0 } },
+      }),
     );
     opened[0]!.message(
       topicEnvelope(
@@ -951,7 +1010,7 @@ describe("createSse", () => {
     for (let time = 100; time <= 700; time += 100) {
       opened[0]!.control(
         "next-hello",
-        JSON.stringify({ server_time: 1000 + time, topics: {} }),
+        JSON.stringify({ protocol: 2, server_time: 1000 + time, topics: {} }),
       );
     }
     opened[0]!.message(
@@ -1303,7 +1362,7 @@ describe("createSse", () => {
     opened[0]!.open();
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 2 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 2 } } }),
     );
     opened[0]!.control("next-skip", JSON.stringify({ topic: "room", seq: 3 }));
     opened[0]!.error(true);
@@ -1447,7 +1506,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 5 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 5 } } }),
     );
     fetched.length = 0;
     sse.remember("own");
@@ -1477,7 +1536,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 40 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 40 } } }),
     );
     fetched.length = 0;
     opened[0]!.message(topicEnvelope([], "room", 1, 1000, "f"));
@@ -1499,7 +1558,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "", seq: 0 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "", seq: 0 } } }),
     );
     return { sse, source: opened[0]! };
   }
@@ -1558,7 +1617,7 @@ describe("createSse", () => {
     sse.scan(document);
     opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 0 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 0 } } }),
     );
     opened[0]!.control(
       "next-skip",
@@ -1580,6 +1639,7 @@ describe("createSse", () => {
     opened[0]!.control(
       "next-hello",
       JSON.stringify({
+        protocol: 2,
         topics: {
           bare: 3,
           nested: null,

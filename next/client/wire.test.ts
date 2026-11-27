@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Wire } from "./wire";
+import { Wire, zoneKey } from "./wire";
 import { createCsrf } from "./csrf";
 import type { CsrfMint } from "./csrf";
 import { lazyChunk } from "./chunks";
-import type { CsrfPayload, CsrfSource, WireDeps, WireRequest } from "./wire";
+import type {
+  CsrfPayload,
+  CsrfSource,
+  EnvelopeOptions,
+  WireDeps,
+  WireRequest,
+} from "./wire";
 import type { SessionStore } from "./assets";
 import type { Envelope } from "./apply";
 import {
@@ -12,6 +18,7 @@ import {
   HEADER_REQUEST_ID,
   REQUEST_FLAG,
   currentUrl,
+  stamped,
 } from "./protocol";
 import { chunkModules } from "./test-doubles";
 
@@ -55,12 +62,14 @@ function makeWire(
     document?: Document;
     reload?: () => void;
     timeout?: number;
+    resolveZone?: WireDeps["resolveZone"];
   } = {},
 ) {
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const navigated: string[] = [];
   const envelopes: unknown[] = [];
   const pages: (string | undefined)[] = [];
+  const options: EnvelopeOptions[] = [];
   const calls: { url: string; init: RequestInit }[] = [];
   const session = opts.session ?? memorySession();
   const wire = new Wire({
@@ -71,22 +80,24 @@ function makeWire(
     navigate: (url) => navigated.push(url),
     session,
     dispatch: (event, detail) => dispatched.push({ event, detail }),
-    onEnvelope: async (raw, { page }) => {
+    onEnvelope: async (raw, seen) => {
       envelopes.push(raw);
-      pages.push(page);
+      pages.push(seen.page);
+      options.push(seen);
       return { envelope: raw as Envelope, ok: opts.applied ?? true };
     },
     ...(opts.tunnel === undefined ? {} : { tunnel: opts.tunnel }),
     ...(opts.document === undefined ? {} : { document: opts.document }),
     ...(opts.reload === undefined ? {} : { reload: opts.reload }),
     ...(opts.timeout === undefined ? {} : { timeout: () => opts.timeout! }),
+    ...(opts.resolveZone === undefined ? {} : { resolveZone: opts.resolveZone }),
     version: () => opts.version ?? "v1",
     csrf: opts.csrfSource ?? {
       current: () => opts.csrf,
       ensure: opts.ensure ?? (async () => opts.csrf),
     },
   });
-  return { wire, dispatched, navigated, envelopes, pages, calls, session };
+  return { wire, dispatched, navigated, envelopes, pages, options, calls, session };
 }
 
 const ENVELOPE = '{"version":"v1","ops":[],"assets":[],"form":null}';
@@ -99,14 +110,16 @@ describe("Wire headers", () => {
     expect(headers.get(REQUEST_FLAG)).toBe("1");
     expect(headers.get("Accept")).toBe(ACCEPT);
     expect(headers.get("X-Next-Version")).toBe("v1");
+    expect(headers.get("X-Next-Protocol")).toBe("2");
     expect(headers.get("X-Next-Zone")).toBe("request-list");
   });
 
-  it("omits the version header before the client has learned one", async () => {
+  it("omits the version header of a page whose payload names none", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE), { version: "" });
     await h.wire.fetch({ url: "/list/", zone: "request-list" });
     const headers = new Headers(h.calls[0]!.init.headers);
     expect(headers.has("X-Next-Version")).toBe(false);
+    expect(headers.get("X-Next-Protocol")).toBe("2");
   });
 
   it("adds the CSRF header from the payload on unsafe methods", async () => {
@@ -191,6 +204,19 @@ describe("Wire classification", () => {
     expect(h.navigated).toEqual(["/here/"]);
   });
 
+  it("navigates on a 409 once and errors on the next one before an envelope", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("", { status: 409, type: "text/plain", url: "/here/" }),
+    );
+    const first = await h.wire.fetch({ url: "/here/", zone: "z" });
+    expect(first.status).toBe("ok");
+    expect(h.session.get("next:partial:navigated")).toBe("1");
+    const second = await h.wire.fetch({ url: "/here/", zone: "z" });
+    expect(second.status).toBe("error");
+    expect(h.navigated).toEqual(["/here/"]);
+    expect(h.session.get("next:partial:navigated")).toBeNull();
+  });
+
   it("falls back to the request url on a 409 with an empty response url", async () => {
     const h = makeWire(async () =>
       envelopeResponse("", { status: 409, type: "text/plain", url: "" }),
@@ -198,6 +224,28 @@ describe("Wire classification", () => {
     await h.wire.fetch({ url: "/here/", zone: "z" });
     expect(h.navigated).toEqual([`${location.origin}/here/`]);
   });
+
+  it.each([409, 403])(
+    "leaves a %i to a boundary reload instead of navigating to its token url",
+    async (status) => {
+      document.body.innerHTML = '<div data-next-boundary="b1"></div>';
+      const h = makeWire(async () =>
+        envelopeResponse("", { status, type: "text/plain", url: "/here/?_nb=t" }),
+      );
+      const boundaries = [document.querySelector("[data-next-boundary]")!];
+      const outcome = await h.wire.fetch({
+        url: "/here/?_nb=t",
+        queue: "b1",
+        boundaries,
+      });
+      expect(outcome).toMatchObject({
+        status: "error",
+        error: { kind: "http", status },
+      });
+      expect(h.navigated).toEqual([]);
+      expect(h.session.get("next:partial:navigated")).toBeNull();
+    },
+  );
 
   it("falls back to the request url on a non-envelope with an empty response url", async () => {
     const h = makeWire(async () =>
@@ -314,7 +362,7 @@ describe("Wire classification", () => {
     });
     const errors = dispatched.filter((d) => d.event === "partial:error");
     expect(errors.map((d) => d.detail)).toEqual([
-      { kind: "parse", body: "{}", error: expect.any(TypeError) },
+      { kind: "parse", body: "{}", error: expect.any(TypeError), zones: ["z"] },
     ]);
   });
 
@@ -466,9 +514,18 @@ describe("Wire access refusals", () => {
       expect(log.slice(1)).toEqual([
         {
           event: "partial:error",
-          detail: { kind: "http", status, body: `<html>${status}</html>` },
+          detail: {
+            kind: "http",
+            status,
+            body: `<html>${status}</html>`,
+            zones: ["list"],
+          },
         },
         { navigate: "/orders/" },
+        {
+          event: "partial:settled",
+          detail: { zones: ["list"], boundaries: [], status: "error" },
+        },
       ]);
     },
   );
@@ -516,7 +573,7 @@ describe("Wire access refusals", () => {
       expect(h.navigated).toEqual([]);
       expect(h.envelopes).toEqual([]);
       expect(errors(h).map((d) => d.detail)).toEqual([
-        { kind: "http", status, body: `<html>${status}</html>` },
+        { kind: "http", status, body: `<html>${status}</html>`, zones: [] },
       ]);
       await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
       expect(h.calls).toHaveLength(2);
@@ -628,7 +685,7 @@ describe("Wire outcomes", () => {
     expect(outcome).toEqual({
       status: "error",
       applied: false,
-      error: { kind: "network", error: expect.any(TypeError) },
+      error: { kind: "network", error: expect.any(TypeError), zones: [] },
     });
     expect(h.dispatched.find((d) => d.event === "partial:error")!.detail).toBe(
       outcome.error,
@@ -854,6 +911,48 @@ describe("Wire safe-GET queue", () => {
   });
 });
 
+describe("Wire sweep", () => {
+  function hanging(signals: AbortSignal[]) {
+    return (_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal!;
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason as Error));
+      });
+  }
+
+  it("aborts a queued request once every element it fills left the document", async () => {
+    document.body.innerHTML =
+      '<div id="b" data-next-boundary="b"></div><div id="c" data-next-boundary="c"></div>';
+    const gone = document.getElementById("b")!;
+    const kept = document.getElementById("c")!;
+    const signals: AbortSignal[] = [];
+    const h = makeWire(hanging(signals));
+    const first = h.wire.fetch({ url: "/p/", queue: "b", boundaries: [gone] });
+    const second = h.wire.fetch({ url: "/p/", queue: "c", boundaries: [kept] });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    gone.remove();
+    h.wire.sweep();
+    await expect(first).resolves.toMatchObject({ status: "dropped" });
+    expect(signals[1]!.aborted).toBe(false);
+    kept.remove();
+    h.wire.sweep();
+    await expect(second).resolves.toMatchObject({ status: "dropped" });
+    document.body.innerHTML = "";
+  });
+
+  it("leaves a queued request with no element to fill running", async () => {
+    const signals: AbortSignal[] = [];
+    const h = makeWire(hanging(signals));
+    const pending = h.wire.fetch({ url: "/p/", zone: "missing" });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    h.wire.sweep();
+    expect(signals[0]!.aborted).toBe(false);
+    h.wire.abort(zoneKey("/p/", "missing"));
+    await pending;
+  });
+});
+
 describe("Wire page threading", () => {
   it("threads the fetched url as the page of a safe zone GET", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));
@@ -1002,7 +1101,12 @@ describe("Wire abortable validation", () => {
     document.head.querySelector("script")!.dispatchEvent(new Event("error"));
     await sent;
     expect(h.calls).toEqual([]);
-    expect(h.dispatched).toEqual([]);
+    expect(h.dispatched).toEqual([
+      {
+        event: "partial:settled",
+        detail: { zones: [], boundaries: [], status: "error" },
+      },
+    ]);
     expect(reported).toEqual([expect.objectContaining({ kind: "asset" })]);
     // The lock is released, so the next submit tries again.
     void h.wire.fetch({ url: "/f/", method: "POST", uid: "u" });
@@ -1460,7 +1564,7 @@ describe("Wire WebSocket tunnel", () => {
     expect(h.dispatched.filter((d) => d.event === "partial:error")).toEqual([
       {
         event: "partial:error",
-        detail: { kind: "undelivered", url: post.url, reason: "closed" },
+        detail: { kind: "undelivered", url: post.url, reason: "closed", zones: [] },
       },
     ]);
     await h.wire.fetch(post);
@@ -1497,7 +1601,12 @@ describe("Wire WebSocket tunnel", () => {
     expect(h.dispatched.filter((d) => d.event === "partial:error")).toEqual([
       {
         event: "partial:error",
-        detail: { kind: "undelivered", url: post.url, reason: "http_only" },
+        detail: {
+          kind: "undelivered",
+          url: post.url,
+          reason: "http_only",
+          zones: [],
+        },
       },
     ]);
     expect(seen).toEqual([["partial:before-request", "partial:error"]]);
@@ -1525,7 +1634,7 @@ describe("Wire WebSocket tunnel", () => {
     expect(h.dispatched.filter((d) => d.event === "partial:error")).toEqual([
       {
         event: "partial:error",
-        detail: { kind: "network", error: expect.any(TypeError) },
+        detail: { kind: "network", error: expect.any(TypeError), zones: [] },
       },
     ]);
   });
@@ -1581,7 +1690,7 @@ describe("Wire request deadline", () => {
     vi.useRealTimers();
   });
 
-  it("fails a stalled mutation as a network error after 30 seconds", async () => {
+  it("fails a stalled mutation as a timeout after 30 seconds", async () => {
     const h = makeWire(stalled);
     const sent = h.wire.fetch(mutation);
     await vi.advanceTimersByTimeAsync(29_999);
@@ -1590,7 +1699,7 @@ describe("Wire request deadline", () => {
     const outcome = await sent;
     expect(outcome).toMatchObject({
       status: "error",
-      error: { kind: "network", url: "/_next/form/u/" },
+      error: { kind: "timeout", url: "/_next/form/u/" },
     });
     expect((outcome.error as { error: Error }).error.name).toBe("TimeoutError");
     expect(errors(h)).toHaveLength(1);
@@ -1657,7 +1766,7 @@ describe("Wire request deadline", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await expect(sent).resolves.toMatchObject({
       status: "error",
-      error: { kind: "network", url: "/feed/" },
+      error: { kind: "timeout", url: "/feed/" },
     });
   });
 
@@ -1921,5 +2030,704 @@ describe("Wire race guards", () => {
     await expect(sent).resolves.toEqual({ status: "dropped", applied: false });
     expect(g.dispatched).not.toContain("partial:error");
     expect(g.envelopes).toHaveLength(0);
+  });
+});
+
+describe("Wire settled", () => {
+  const settled = (h: Harness) =>
+    h.dispatched.filter((d) => d.event === "partial:settled").map((d) => d.detail);
+
+  it("closes an applied request with its zones and status, after every other event", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/p/", zone: "a,b" });
+    expect(settled(h)).toEqual([{ zones: ["a", "b"], boundaries: [], status: "ok" }]);
+    expect(h.dispatched.at(-1)!.event).toBe("partial:settled");
+  });
+
+  it("closes a request that names no zone with an empty list", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(settled(h)).toEqual([{ zones: [], boundaries: [], status: "ok" }]);
+  });
+
+  it("closes a failed request once, after its error", async () => {
+    const h = makeWire(async () => {
+      throw new TypeError("offline");
+    });
+    await h.wire.fetch({ url: "/p/", zone: "a" });
+    expect(h.dispatched.slice(-2).map((d) => d.event)).toEqual([
+      "partial:error",
+      "partial:settled",
+    ]);
+    expect(settled(h)).toEqual([{ zones: ["a"], boundaries: [], status: "error" }]);
+  });
+
+  it("closes a superseded request as dropped and its successor as ok", async () => {
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)));
+    const first = h.wire.fetch({ url: "/p/", zone: "a" });
+    const second = h.wire.fetch({ url: "/p/", zone: "a" });
+    await first;
+    expect(settled(h)).toEqual([{ zones: ["a"], boundaries: [], status: "dropped" }]);
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await second;
+    expect(settled(h)).toEqual([
+      { zones: ["a"], boundaries: [], status: "dropped" },
+      { zones: ["a"], boundaries: [], status: "ok" },
+    ]);
+  });
+
+  it("closes an aborted request as dropped", async () => {
+    const h = makeWire(() => new Promise<Response>(() => undefined));
+    const sent = h.wire.fetch({ url: "/p/", zone: "a", queue: "q" });
+    h.wire.abort("q");
+    await sent;
+    expect(settled(h)).toEqual([{ zones: ["a"], boundaries: [], status: "dropped" }]);
+  });
+
+  it("closes a submit the lock dropped and one refused off the origin", async () => {
+    const h = makeWire(() => new Promise<Response>(() => undefined), { timeout: 0 });
+    void h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    await h.wire.fetch({ url: "https://attacker.example/x/", zone: "a" });
+    expect(settled(h)).toEqual([
+      { zones: [], boundaries: [], status: "dropped" },
+      { zones: ["a"], boundaries: [], status: "error" },
+    ]);
+  });
+
+  it("closes a request whose token fetch threw as an error before rejecting", async () => {
+    const failure = new Error("chunk exploded");
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: () => Promise.reject(failure),
+    });
+    await expect(
+      h.wire.fetch({ url: "/f/", method: "POST", uid: "u", zone: "a" }),
+    ).rejects.toBe(failure);
+    expect(settled(h)).toEqual([{ zones: ["a"], boundaries: [], status: "error" }]);
+  });
+});
+
+describe("Wire error zones", () => {
+  it("names the zones of the request on its error and its outcome", async () => {
+    const h = makeWire(async () => envelopeResponse("boom", { status: 500 }));
+    const outcome = await h.wire.fetch({ url: "/p/", zone: "a,b" });
+    const error = h.dispatched.find((d) => d.event === "partial:error")!.detail;
+    expect(error).toMatchObject({ kind: "http", status: 500, zones: ["a", "b"] });
+    expect(outcome.error).toBe(error);
+  });
+
+  it("names the zones on a csrf failure and a cross-origin refusal", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", url: "/csrf/" },
+      ensure: async () => ({ header: "X-CSRFToken", url: "/csrf/" }),
+    });
+    await h.wire.fetch({ url: "/f/", method: "POST", uid: "u", zone: "form" });
+    await h.wire.fetch({ url: "https://attacker.example/x/", zone: "list" });
+    const errors = h.dispatched.filter((d) => d.event === "partial:error");
+    expect(errors.map((d) => [d.detail.kind, d.detail.zones])).toEqual([
+      ["csrf", ["form"]],
+      ["network", ["list"]],
+    ]);
+  });
+
+  it("hands the zones of the request to the envelope handler", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/p/", zone: "a,b" });
+    await h.wire.fetch({ url: "/p/" });
+    expect(h.options.map((seen) => seen.zones)).toEqual([["a", "b"], []]);
+  });
+});
+
+describe("Wire busy zones", () => {
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<div data-next-zone="a"></div><div data-next-zone="b"></div>';
+  });
+
+  const zone = (name: string): Element =>
+    document.querySelector(`[data-next-zone="${name}"]`)!;
+  const busy = (name: string): boolean =>
+    zone(name).hasAttribute("data-next-busy") &&
+    zone(name).getAttribute("aria-busy") === "true";
+  const resolveZone: NonNullable<WireDeps["resolveZone"]> = (name, root) =>
+    root.querySelector(`[data-next-zone="${name}"]`);
+
+  function pendingWire() {
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)), {
+      resolveZone,
+      timeout: 0,
+    });
+    return { h, replies };
+  }
+
+  it("marks every zone of a request for its span and clears them on settle", async () => {
+    const { h, replies } = pendingWire();
+    const sent = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    expect(busy("a")).toBe(true);
+    expect(busy("b")).toBe(true);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await sent;
+    expect(zone("a").hasAttribute("data-next-busy")).toBe(false);
+    expect(zone("b").hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("is clear by the time partial:settled fires", async () => {
+    const seen: boolean[] = [];
+    const wire = new Wire({
+      fetch: async () => envelopeResponse(ENVELOPE),
+      session: memorySession(),
+      dispatch: (event) => event === "partial:settled" && seen.push(busy("a")),
+      onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
+      csrf: { current: () => undefined, ensure: async () => undefined },
+      resolveZone,
+    });
+    await wire.fetch({ url: "/p/", zone: "a" });
+    expect(seen).toEqual([false]);
+  });
+
+  it("resolves a GET's zones on the page it fetched and a mutation's top down", async () => {
+    const asked: (string | undefined)[] = [];
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      resolveZone: (name, root, page) => (asked.push(page), resolveZone(name, root)),
+    });
+    await h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      zone: "a",
+    });
+    expect(asked).toEqual(["/p/?q=1", undefined]);
+  });
+
+  it("leaves the mark to the request that superseded it", async () => {
+    const { h, replies } = pendingWire();
+    const first = h.wire.fetch({ url: "/p/", zone: "a" });
+    const second = h.wire.fetch({ url: "/p/", zone: "a" });
+    await expect(first).resolves.toMatchObject({ status: "dropped" });
+    expect(busy("a")).toBe(true);
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await second;
+    expect(busy("a")).toBe(false);
+  });
+
+  it("clears the mark of a request aborted with no successor", async () => {
+    const { h } = pendingWire();
+    const sent = h.wire.fetch({ url: "/p/", zone: "a", queue: "q" });
+    expect(busy("a")).toBe(true);
+    h.wire.abort("q");
+    await sent;
+    expect(busy("a")).toBe(false);
+  });
+
+  it("keeps the mark while an overlapping request on the zone is in flight", async () => {
+    const { h, replies } = pendingWire();
+    const read = h.wire.fetch({ url: "/p/", zone: "a" });
+    const write = h.wire.fetch({ url: "/f/", method: "POST", uid: "u", zone: "a" });
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await read;
+    expect(busy("a")).toBe(true);
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await write;
+    expect(busy("a")).toBe(false);
+  });
+
+  it("clears the mark of a zone a newer request took before the batch settles", async () => {
+    const { h, replies } = pendingWire();
+    const batch = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    const single = h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await single;
+    expect(busy("a")).toBe(false);
+    expect(busy("b")).toBe(true);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await batch;
+    expect(busy("b")).toBe(false);
+  });
+
+  it("frees the claim and the queue when a zone fails to resolve", async () => {
+    let broken = true;
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      resolveZone: (name, root) => {
+        if (broken && name === "b") {
+          broken = false;
+          throw new Error("resolve failed");
+        }
+        return resolveZone(name, root);
+      },
+    });
+    await expect(h.wire.fetch({ url: "/p/", zone: "a,b" })).rejects.toThrow(
+      "resolve failed",
+    );
+    expect(busy("a")).toBe(false);
+    await h.wire.fetch({ url: "/p/", zone: "a,b", background: true });
+    expect(h.calls).toHaveLength(1);
+    expect(h.options[0]!.isCurrent("a")).toBe(true);
+  });
+
+  it("marks nothing for a zone absent from the page", async () => {
+    const { h, replies } = pendingWire();
+    const sent = h.wire.fetch({ url: "/p/", zone: "gone" });
+    expect(document.querySelectorAll("[data-next-busy]")).toHaveLength(0);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await sent;
+  });
+});
+
+describe("Wire batch members", () => {
+  function pendingWire() {
+    const replies: ((r: Response) => void)[] = [];
+    const signals: AbortSignal[] = [];
+    const h = makeWire(
+      (_url, init) => {
+        signals.push(init.signal!);
+        return new Promise<Response>((r) => replies.push(r));
+      },
+      { timeout: 0 },
+    );
+    return { h, replies, signals };
+  }
+
+  it("takes one zone out of an in-flight batch without aborting the rest", async () => {
+    const { h, replies, signals } = pendingWire();
+    const batch = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    const single = h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    expect(signals[0]!.aborted).toBe(false);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await expect(batch).resolves.toMatchObject({ status: "ok", applied: true });
+    const current = h.options[0]!.isCurrent;
+    expect(current()).toBe(true);
+    expect(current("a")).toBe(false);
+    expect(current("b")).toBe(true);
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await single;
+    expect(h.options[1]!.isCurrent("a")).toBe(true);
+  });
+
+  it("aborts a batch once newer requests took every zone of it", async () => {
+    const { h, replies, signals } = pendingWire();
+    const batch = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    void h.wire.fetch({ url: "/p/", zone: "a" });
+    expect(signals[0]!.aborted).toBe(false);
+    void h.wire.fetch({ url: "/p/", zone: "b" });
+    expect(signals[0]!.aborted).toBe(true);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await expect(batch).resolves.toEqual({ status: "dropped", applied: false });
+  });
+
+  it("aborts a batch a reordered batch of the same zones supersedes", async () => {
+    const { h, signals } = pendingWire();
+    const older = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    void h.wire.fetch({ url: "/p/", zone: "b,a" });
+    expect(signals[0]!.aborted).toBe(true);
+    await expect(older).resolves.toMatchObject({ status: "dropped" });
+  });
+
+  it("counts a zone a batch names twice once", async () => {
+    const { h, signals } = pendingWire();
+    void h.wire.fetch({ url: "/p/", zone: "a,a" });
+    expect(signals[0]!.aborted).toBe(false);
+    void h.wire.fetch({ url: "/p/", zone: "a" });
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it("leaves a batch whole when the same zone is fetched for another page", async () => {
+    const { h, replies, signals } = pendingWire();
+    const batch = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    void h.wire.fetch({ url: "/other/", zone: "a" });
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await batch;
+    expect(signals[0]!.aborted).toBe(false);
+    expect(h.options[0]!.isCurrent("a")).toBe(true);
+  });
+
+  it("aborts a batch whose zones were taken one before the other settled", async () => {
+    const { h, replies, signals } = pendingWire();
+    void h.wire.fetch({ url: "/p/", zone: "a,b" });
+    const single = h.wire.fetch({ url: "/p/", zone: "a" });
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await single;
+    expect(signals[0]!.aborted).toBe(false);
+    void h.wire.fetch({ url: "/p/", zone: "b" });
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it("forgets the claims of a settled batch", async () => {
+    const { h, replies, signals } = pendingWire();
+    const batch = h.wire.fetch({ url: "/p/", zone: "a,b" });
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await batch;
+    void h.wire.fetch({ url: "/p/", zone: "a" });
+    void h.wire.fetch({ url: "/p/", zone: "b" });
+    expect(signals[0]!.aborted).toBe(false);
+  });
+
+  it("keeps a named queue out of the zone claims", async () => {
+    const { h, signals } = pendingWire();
+    void h.wire.fetch({ url: "/p/", zone: "a", queue: "layer:1" });
+    void h.wire.fetch({ url: "/p/", zone: "a" });
+    expect(signals[0]!.aborted).toBe(false);
+  });
+
+  it("still cancels a whole batch by its joined key", async () => {
+    const { h, signals } = pendingWire();
+    const batch = h.wire.fetch({ url: "/p/?q=1", zone: "a,b" });
+    h.wire.abort("/p/ a,b");
+    expect(signals[0]!.aborted).toBe(true);
+    await expect(batch).resolves.toMatchObject({ status: "dropped" });
+  });
+});
+
+describe("Wire background requests", () => {
+  function pendingWire() {
+    const replies: ((r: Response) => void)[] = [];
+    const signals: AbortSignal[] = [];
+    const h = makeWire(
+      (_url, init) => {
+        signals.push(init.signal!);
+        return new Promise<Response>((r) => replies.push(r));
+      },
+      { timeout: 0 },
+    );
+    return { h, replies, signals };
+  }
+
+  it("lets a poll tick claim only the zones no user request holds", async () => {
+    const { h, replies, signals } = pendingWire();
+    const user = h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    const tick = h.wire.fetch({ url: "/p/", zone: "a,b", background: true });
+    expect(signals).toHaveLength(2);
+    expect(signals[0]!.aborted).toBe(false);
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await tick;
+    const polled = h.options[0]!.isCurrent;
+    expect(polled("a")).toBe(false);
+    expect(polled("b")).toBe(true);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await expect(user).resolves.toMatchObject({ status: "ok" });
+    expect(h.options[1]!.isCurrent("a")).toBe(true);
+  });
+
+  it("drops a poll tick whose zones are all held without fetching", async () => {
+    const { h } = pendingWire();
+    void h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    void h.wire.fetch({ url: "/p/?q=1", zone: "b" });
+    const tick = await h.wire.fetch({ url: "/p/", zone: "a,b", background: true });
+    expect(tick).toEqual({ status: "dropped", applied: false });
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it("drops a poll tick on a queue a request already runs", async () => {
+    const { h, signals } = pendingWire();
+    void h.wire.fetch({ url: "/p/", zone: "a" });
+    const tick = await h.wire.fetch({ url: "/p/", zone: "a", background: true });
+    expect(tick.status).toBe("dropped");
+    expect(signals).toHaveLength(1);
+    expect(signals[0]!.aborted).toBe(false);
+  });
+
+  it("lets a user request take zones from a poll tick in flight", async () => {
+    const { h, signals } = pendingWire();
+    const tick = h.wire.fetch({ url: "/p/", zone: "a,b", background: true });
+    void h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    expect(signals[0]!.aborted).toBe(false);
+    void h.wire.fetch({ url: "/p/?q=1", zone: "b" });
+    expect(signals[0]!.aborted).toBe(true);
+    await expect(tick).resolves.toMatchObject({ status: "dropped" });
+  });
+
+  it("frees the zones of a cancelled request for the next background one", async () => {
+    const { h, signals } = pendingWire();
+    void h.wire.fetch({ url: "/p/", zone: "a,b" });
+    h.wire.abort("/p/ a,b");
+    void h.wire.fetch({ url: "/p/", zone: "a,b", background: true });
+    expect(signals).toHaveLength(2);
+    expect(signals[1]!.aborted).toBe(false);
+  });
+});
+
+describe("Wire zone names", () => {
+  it("trims each zone name and drops the empty ones", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/p/", zone: " a, ,b,a" });
+    expect(h.options[0]!.zones).toEqual(["a", "b"]);
+    expect(h.dispatched.at(-1)!.detail).toEqual({
+      zones: ["a", "b"],
+      boundaries: [],
+      status: "ok",
+    });
+  });
+
+  it("fires no partial:settled once the runtime is no longer active", async () => {
+    let active = true;
+    const dispatched: string[] = [];
+    const wire = new Wire({
+      fetch: async () => {
+        active = false;
+        return envelopeResponse(ENVELOPE);
+      },
+      session: memorySession(),
+      active: () => active,
+      dispatch: (event) => dispatched.push(event),
+      onEnvelope: async (raw) => ({ envelope: raw as Envelope, ok: true }),
+      csrf: { current: () => undefined, ensure: async () => undefined },
+    });
+    await expect(wire.fetch({ url: "/p/", zone: "a" })).resolves.toMatchObject({
+      status: "dropped",
+    });
+    expect(dispatched).toEqual(["partial:before-request"]);
+  });
+});
+
+describe("Wire state marking", () => {
+  const resolveZone: NonNullable<WireDeps["resolveZone"]> = (name, root) =>
+    root.querySelector(`[data-next-zone="${name}"]`);
+  const zone = (): Element => document.querySelector("[data-next-zone]")!;
+  const marks = (el: Element): (string | null)[] => [
+    el.getAttribute("data-next-state"),
+    el.getAttribute("data-next-error"),
+    el.getAttribute("aria-busy"),
+  ];
+
+  it.each([
+    {
+      name: "an idle zone loads, then turns ready",
+      attrs: 'data-next-state="idle"',
+      reply: async () => envelopeResponse(ENVELOPE),
+      during: ["loading", null, "true"],
+      after: ["ready", null, null],
+    },
+    {
+      name: "a zone the server left unmarked turns ready",
+      attrs: "",
+      reply: async () => envelopeResponse(ENVELOPE),
+      during: [null, null, "true"],
+      after: ["ready", null, null],
+    },
+    {
+      name: "a ready zone stays ready while busy on a reload",
+      attrs: 'data-next-state="ready"',
+      reply: async () => envelopeResponse(ENVELOPE),
+      during: ["ready", null, "true"],
+      after: ["ready", null, null],
+    },
+    {
+      name: "a failed zone retries through loading and drops its error kind",
+      attrs: 'data-next-state="error" data-next-error="network"',
+      reply: async () => envelopeResponse(ENVELOPE),
+      during: ["loading", null, "true"],
+      after: ["ready", null, null],
+    },
+    {
+      name: "a zone the server sent loading drops its aria-busy on settle",
+      attrs: 'data-next-state="loading" aria-busy="true"',
+      reply: async () => envelopeResponse(ENVELOPE),
+      during: ["loading", null, "true"],
+      after: ["ready", null, null],
+    },
+    {
+      name: "a failed fetch is a network error",
+      attrs: 'data-next-state="idle"',
+      reply: async (): Promise<Response> => {
+        throw new TypeError("offline");
+      },
+      during: ["loading", null, "true"],
+      after: ["error", "network", null],
+    },
+    {
+      name: "a crash is a plain error",
+      attrs: 'data-next-state="idle"',
+      reply: async () => envelopeResponse("boom", { status: 500 }),
+      during: ["loading", null, "true"],
+      after: ["error", "error", null],
+    },
+    {
+      name: "a page answered with a 404 is a plain error",
+      attrs: 'data-next-state="ready"',
+      reply: async () => envelopeResponse("", { status: 404, type: "text/html" }),
+      during: ["ready", null, "true"],
+      after: ["error", "error", null],
+    },
+    {
+      name: "an envelope answered with a 400 is a plain error",
+      attrs: 'data-next-state="idle"',
+      reply: async () => envelopeResponse(ENVELOPE, { status: 400 }),
+      during: ["loading", null, "true"],
+      after: ["error", "error", null],
+    },
+    {
+      name: "a body that does not parse is a plain error",
+      attrs: 'data-next-state="idle"',
+      reply: async () => envelopeResponse("not json"),
+      during: ["loading", null, "true"],
+      after: ["error", "error", null],
+    },
+  ])("$name", async ({ attrs, reply, during, after }) => {
+    document.body.innerHTML = `<div data-next-zone="a" ${attrs}></div>`;
+    const h = makeWire(reply, { resolveZone });
+    const sent = h.wire.fetch({ url: "/p/", zone: "a" });
+    expect(marks(zone())).toEqual(during);
+    await sent;
+    expect(marks(zone())).toEqual(after);
+    expect(zone().hasAttribute("data-next-busy")).toBe(false);
+  });
+
+  it("marks a background request busy without aria-busy", async () => {
+    document.body.innerHTML = '<div data-next-zone="a" data-next-state="ready"></div>';
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)), {
+      resolveZone,
+      timeout: 0,
+    });
+    const tick = h.wire.fetch({ url: "/p/", zone: "a", background: true });
+    expect(marks(zone())).toEqual(["ready", null, null]);
+    expect(zone().hasAttribute("data-next-busy")).toBe(true);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await tick;
+    expect(zone().hasAttribute("data-next-busy")).toBe(false);
+  });
+
+  it("stamps what a request claims at send and what its reply touched", async () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a"></div><div data-next-zone="b"></div>' +
+      '<div data-next-zone="c"></div><p id="touched"></p>';
+    const [a, b, c] = Array.from(document.querySelectorAll("[data-next-zone]"));
+    const touched = document.getElementById("touched")!;
+    const pending = makeWire(() => new Promise<Response>(() => undefined), {
+      resolveZone,
+      timeout: 0,
+    });
+    const poll = new Wire({
+      fetch: async () => envelopeResponse(ENVELOPE),
+      session: memorySession(),
+      dispatch: () => undefined,
+      onEnvelope: async (raw) => ({
+        envelope: raw as Envelope,
+        ok: true,
+        nodes: [touched],
+      }),
+      csrf: { current: () => undefined, ensure: async () => undefined },
+      resolveZone,
+    });
+    void pending.wire.fetch({ url: "/p/", zone: "a" });
+    void pending.wire.fetch({ url: "/p/", zone: "b", background: true });
+    await poll.fetch({ url: "/p/", zone: "c", background: true });
+    expect(stamped(a!)).toBeGreaterThan(0);
+    expect([stamped(b!), stamped(c!)]).toEqual([0, 0]);
+    expect(stamped(touched)).toBeGreaterThan(stamped(a!));
+  });
+
+  it("drops the reply of a boundary request a newer one claimed meanwhile", async () => {
+    document.body.innerHTML = '<div data-next-boundary="b1"></div>';
+    const boundary = document.querySelector("[data-next-boundary]")!;
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)), {
+      timeout: 0,
+    });
+    const older = h.wire.fetch({ url: "/p/", queue: "x", boundaries: [boundary] });
+    const newer = h.wire.fetch({ url: "/p/", queue: "y", boundaries: [boundary] });
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await expect(newer).resolves.toMatchObject({ status: "ok" });
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await expect(older).resolves.toEqual({ status: "dropped", applied: false });
+    expect(h.envelopes).toHaveLength(1);
+  });
+
+  it("applies a second reload of a boundary after the first settled", async () => {
+    document.body.innerHTML = '<div data-next-boundary="b1"></div>';
+    const boundary = document.querySelector("[data-next-boundary]")!;
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    const request = { url: "/p/", queue: "b1", boundaries: [boundary] };
+    await expect(h.wire.fetch(request)).resolves.toMatchObject({ status: "ok" });
+    await expect(h.wire.fetch(request)).resolves.toMatchObject({ status: "ok" });
+    expect(h.envelopes).toHaveLength(2);
+  });
+
+  it("leaves state and busy to the request that superseded it", async () => {
+    document.body.innerHTML = '<div data-next-zone="a" data-next-state="idle"></div>';
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)), {
+      resolveZone,
+      timeout: 0,
+    });
+    const first = h.wire.fetch({ url: "/p/", zone: "a" });
+    const second = h.wire.fetch({ url: "/p/?q=1", zone: "a" });
+    await expect(first).resolves.toMatchObject({ status: "dropped" });
+    expect(marks(zone())).toEqual(["loading", null, "true"]);
+    replies[1]!(envelopeResponse(ENVELOPE));
+    await second;
+    expect(marks(zone())).toEqual(["ready", null, null]);
+  });
+
+  it("restores the state an aborted request found when nothing replaced it", async () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a" data-next-state="error" data-next-error="network"></div>';
+    const h = makeWire(() => new Promise<Response>(() => undefined), {
+      resolveZone,
+      timeout: 0,
+    });
+    const sent = h.wire.fetch({ url: "/p/", zone: "a", queue: "q" });
+    expect(marks(zone())).toEqual(["loading", null, "true"]);
+    h.wire.abort("q");
+    await sent;
+    expect(marks(zone())).toEqual(["error", "network", null]);
+  });
+
+  it("keeps the error kind a reply wrote onto the zone", async () => {
+    document.body.innerHTML = '<div data-next-zone="a" data-next-state="idle"></div>';
+    const wire = new Wire({
+      fetch: async () => envelopeResponse(ENVELOPE),
+      session: memorySession(),
+      dispatch: () => undefined,
+      onEnvelope: async (raw) => {
+        zone().setAttribute("data-next-error", "forbidden");
+        return { envelope: raw as Envelope, ok: true };
+      },
+      csrf: { current: () => undefined, ensure: async () => undefined },
+      resolveZone,
+    });
+    await wire.fetch({ url: "/p/", zone: "a" });
+    expect(marks(zone())).toEqual(["error", "forbidden", null]);
+  });
+
+  it("marks the boundaries a request fills and names them on partial:settled", async () => {
+    document.body.innerHTML =
+      '<div data-next-boundary="b1" data-next-state="idle"></div><div id="bare"></div>';
+    const replies: ((r: Response) => void)[] = [];
+    const h = makeWire(() => new Promise<Response>((r) => replies.push(r)), {
+      timeout: 0,
+    });
+    const boundary = document.querySelector("[data-next-boundary]")!;
+    const bare = document.getElementById("bare")!;
+    const sent = h.wire.fetch({ url: "/p/", boundaries: [boundary, bare] });
+    expect(marks(boundary)).toEqual(["loading", null, "true"]);
+    replies[0]!(envelopeResponse(ENVELOPE));
+    await sent;
+    expect(marks(boundary)).toEqual(["ready", null, null]);
+    expect(marks(bare)).toEqual(["ready", null, null]);
+    expect(h.dispatched.at(-1)).toEqual({
+      event: "partial:settled",
+      detail: { zones: [], boundaries: ["b1"], status: "ok" },
+    });
+  });
+});
+
+describe("Wire send override", () => {
+  it("sends through the request's own seam with the headers it would fetch with", async () => {
+    const h = makeWire(() => Promise.resolve(envelopeResponse('{"ops":[]}')));
+    const sent: { url: string; init: RequestInit }[] = [];
+    const send = (url: string, init: RequestInit): Promise<Response> => {
+      sent.push({ url, init });
+      return Promise.resolve(envelopeResponse('{"ops":[]}'));
+    };
+    const outcome = await h.wire.fetch({ url: "/m/", zone: "sheet", send });
+    expect(outcome.status).toBe("ok");
+    expect(h.calls).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(new Headers(sent[0]!.init.headers).get("X-Next-Zone")).toBe("sheet");
+    expect(sent[0]!.init.signal).toBeInstanceOf(AbortSignal);
   });
 });

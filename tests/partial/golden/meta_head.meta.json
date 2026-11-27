@@ -7,7 +7,7 @@
     "Content-Type": "application/vnd.next.patches+json",
     "X-Next-Version": "9f3c2e1b",
     "Cache-Control": "private, no-store",
-    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version, X-Next-Boundary, X-Next-Navigate, X-Next-Layouts, X-Next-Prefetch"
   },
   "envelope_file": "meta_head.envelope.json"
 }

@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import fields, replace
 from datetime import date, datetime
-from functools import lru_cache, partial
+from functools import partial
 from typing import Final, cast
 from urllib.parse import urlencode, urljoin, urlsplit
 
@@ -21,10 +21,12 @@ from django.utils.functional import Promise
 from django.utils.timezone import get_current_timezone, is_naive, make_aware
 from django.utils.translation import get_language, to_locale
 
+from next.caches import FRAMEWORK, memo, pure_cache
 from next.conf import next_framework_settings
 from next.diagnostics import FailureLog, exception_text
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
-from next.ports import router_access_slot
+from next.paths import PAGE_MARK, Homes, normal_path, path_mark
+from next.ports import route_access_slot
 from next.site import SiteOriginError, site_indexable, site_origin
 from next.site.headers import CLOSED_ROBOTS
 
@@ -340,7 +342,7 @@ def _first(value: Text | None, fallback: Text | None) -> Text | None:
     return fallback if value is None else value
 
 
-@lru_cache(maxsize=_LOCALE_MEMO)
+@pure_cache(_LOCALE_MEMO)
 def og_locale(language: str | None) -> str | None:
     """Return the `ll_CC` Open Graph locale of a language code, `None` without one.
 
@@ -504,17 +506,12 @@ def _manifest(meta: Metadata, request: HttpRequest | None) -> str | None:
     return None if declared is None else _or_none(partial(_url_map(request), declared))
 
 
-@lru_cache(maxsize=_ROUTE_MEMO)
+@memo(FRAMEWORK, maxsize=_ROUTE_MEMO)
 def _crumb_route(trail: str, template: str) -> tuple[str, tuple[str, ...]]:
     """Return the URL name and the parameter names of the page at `trail`, read once."""
-    parser = router_access_slot.get().url_parser()
+    parser = route_access_slot.get().url_parser()
     _route, parameters = parser.parse_url_pattern(trail)
     return template.format(name=parser.prepare_url_name(trail)), tuple(parameters)
-
-
-def forget_crumb_routes(**kwargs: object) -> None:
-    """Drop the memoised crumb routes, so a reconfigured URL parser takes effect."""
-    _crumb_route.cache_clear()
 
 
 def _outer_kwargs(match: ResolverMatch, template: str) -> dict[str, object]:
@@ -555,17 +552,22 @@ def _linked_crumbs(
     path: str,
     urlconf: str | None,
 ) -> tuple[Breadcrumb, ...]:
-    """Reverse the crumbs against `match`, the one at the request `path` current."""
+    """Reverse the crumbs against `match`, each marked by the rule of the link pass."""
     if match is None:
         return tuple(Breadcrumb(crumb.label, None) for crumb in crumbs)
     template = next_framework_settings.URL_NAME_TEMPLATE
-    own = escape_uri_path(path)
+    own = normal_path(escape_uri_path(path))
     outer = _outer_kwargs(match, template)
+    homes = Homes()
     linked: list[Breadcrumb] = []
     for crumb in crumbs:
         url = _crumb_url(crumb.trail, match, template, urlconf, outer)
+        mark = "" if url is None else path_mark(normal_path(url), own, homes)
+        current = mark == PAGE_MARK
         linked.append(
-            Breadcrumb(crumb.label, url, current=url is not None and url == own)
+            Breadcrumb(
+                crumb.label, url, current=current, ancestor=bool(mark) and not current
+            )
         )
     return tuple(linked)
 

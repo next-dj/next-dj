@@ -29,3 +29,12 @@ The front matter feeds the head as well: the description, the keywords, the Open
 article dates and the `BlogPosting` structured data all come from those few lines.
 
 Read the second post for a shorter example.
+
+## Embeds
+
+A post may embed a widget the way a third-party snippet does, with a script tag of its
+own. The router cannot run such a script in a page it swaps in, so it loads this page
+whole and the widget below fills in.
+
+<div data-embed>The widget is loading.</div>
+<script src="/static/blog/embed.js"></script>

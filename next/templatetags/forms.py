@@ -8,7 +8,13 @@ from next.forms.errors import FormActionNotFoundError
 from next.forms.manager import form_action_manager
 from next.forms.nodes import FormNode, anchor_lookup_from_context
 from next.interpolation import Interpolation, interpolated
-from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
+from next.partial.keys import (
+    DEBOUNCE_ATTR,
+    KEY_ATTR,
+    TARGET_ATTR,
+    TRIGGER_ATTR,
+    VALIDATE_ATTR,
+)
 
 
 if TYPE_CHECKING:
@@ -20,11 +26,11 @@ _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
 _PARTIAL_FORM_PARAMS: dict[str, str] = {
-    "validate": "data-next-validate",
-    "trigger": "data-next-trigger",
-    "debounce": "data-next-debounce",
-    "zone": FORM_ZONE_ATTR,
-    "key": FORM_KEY_ATTR,
+    "validate": VALIDATE_ATTR,
+    "trigger": TRIGGER_ATTR,
+    "debounce": DEBOUNCE_ATTR,
+    "zone": TARGET_ATTR,
+    "key": KEY_ATTR,
 }
 
 

@@ -6,16 +6,10 @@ import re
 from typing import TYPE_CHECKING, Any, Final
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.urls import Resolver404, ResolverMatch, resolve
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.seo.routes import ROBOTS_ROUTE, SITEMAP_ROUTE
 from next.seo.views import robots_view, sitemap_view
 

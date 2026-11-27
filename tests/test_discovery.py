@@ -11,30 +11,30 @@ from django.core.checks import Error, run_checks
 from django.test import override_settings
 
 from next import discovery
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.diagnostics import degraded
 from next.discovery import (
     PageRootsError,
     discover_page_registrations,
     get_page_roots,
     get_pages_directories,
-    get_router_manager,
+    get_route_manager,
     iter_page_tree_component_folders,
     iter_scanned_intercepts,
     iter_scanned_page_pairs,
     iter_scanned_pages,
     page_tree_skip_names,
     read_page_roots,
-    reset_router_manager_cache,
+    reset_route_manager_cache,
     routed_page_trees,
 )
 from next.pages import page
 from next.pages.checks.modules import check_page_module_imports
 from next.pages.ports import PageScanImpl
 from next.ports import PortSlot
-from next.urls import FileRouterBackend, PageRoot, RouterBackend, RouterManager
+from next.urls import FilePageBackend, PageBackend, PageRoot, RouteManager
 from next.urls.dispatcher import scan_pages_tree
-from next.urls.ports import RouterAccessImpl
+from next.urls.ports import RouteAccessImpl
 from next.utils import walk_page_tree
 from tests.support import (
     MalformedRootsRouter,
@@ -51,14 +51,14 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 
 def _labelled_root(index: int, tree: Path) -> PageRoot:
     return PageRoot(path=tree, label="Root" if index == 0 else f"Root ({tree})")
 
 
-class _RootTreeRouter(RouterBackend):
+class _RootTreeRouter(PageBackend):
     """Third-party backend that reports root page trees and nothing else."""
 
     def __init__(self, root_trees: list[Path]) -> None:
@@ -73,7 +73,7 @@ class _RootTreeRouter(RouterBackend):
         ]
 
 
-class _CustomFolderRouter(FileRouterBackend):
+class _CustomFolderRouter(FilePageBackend):
     """File router subclass that registers components from another folder."""
 
     @staticmethod
@@ -81,7 +81,7 @@ class _CustomFolderRouter(FileRouterBackend):
         return "_widgets"
 
 
-class _WidgetsFolderRouter(FileRouterBackend):
+class _WidgetsFolderRouter(FilePageBackend):
     """File router subclass registering components from a `widgets` folder."""
 
     @staticmethod
@@ -90,7 +90,7 @@ class _WidgetsFolderRouter(FileRouterBackend):
 
 
 @dataclass
-class _UnhashableRouter(RouterBackend):
+class _UnhashableRouter(PageBackend):
     """Third-party router written as a plain dataclass, so `__hash__` is `None`."""
 
     tree: Path
@@ -102,7 +102,7 @@ class _UnhashableRouter(RouterBackend):
         return [PageRoot(path=self.tree, label="Root")]
 
 
-class _TwoLabelRouter(RouterBackend):
+class _TwoLabelRouter(PageBackend):
     """Router reporting one tree twice, as an app tree and as a configured root."""
 
     def __init__(self, tree: Path) -> None:
@@ -119,7 +119,7 @@ class _TwoLabelRouter(RouterBackend):
 
 
 @contextmanager
-def _walk_spy() -> Iterator[MagicMock]:
+def _walk_spy() -> Generator[MagicMock]:
     """Count the tree walks a check seam runs, keeping the real walk."""
     with patch("next.discovery.walk_page_tree", wraps=walk_page_tree) as spy:
         yield spy
@@ -130,7 +130,7 @@ def _walked_trees(spy: MagicMock) -> list[Path]:
     return [call.args[0] for call in spy.call_args_list]
 
 
-class _CountingRouterAccess(RouterAccessImpl):
+class _CountingRouteAccess(RouteAccessImpl):
     """Router port that counts the managers a check run asks it to build."""
 
     def __init__(self, failure: Exception | None = None) -> None:
@@ -145,41 +145,41 @@ class _CountingRouterAccess(RouterAccessImpl):
 
 
 @contextmanager
-def _counting_router_access(
+def _counting_route_access(
     failure: Exception | None = None,
-) -> Iterator[_CountingRouterAccess]:
+) -> Generator[_CountingRouteAccess]:
     """Bind a counting router port into the slot the discovery pass reads."""
-    access = _CountingRouterAccess(failure)
-    slot: PortSlot = PortSlot("router access port")
+    access = _CountingRouteAccess(failure)
+    slot: PortSlot = PortSlot("route access port")
     slot.set(access)
-    with patch("next.discovery.router_access_slot", slot):
+    with patch("next.discovery.route_access_slot", slot):
         yield access
 
 
-class TestRouterManagerCache:
-    """`get_router_manager` reuses one manager per check run."""
+class TestRouteManagerCache:
+    """`get_route_manager` reuses one manager per check run."""
 
     def test_built_once_across_repeated_calls(self) -> None:
-        with _counting_router_access() as access:
-            first = get_router_manager()
-            second = get_router_manager()
-            third = get_router_manager()
+        with _counting_route_access() as access:
+            first = get_route_manager()
+            second = get_route_manager()
+            third = get_route_manager()
         assert first is second is third
         assert access.built == 1
 
     def test_explicit_reset_forces_rebuild(self) -> None:
-        with _counting_router_access() as access:
-            first, _errors = get_router_manager()
-            reset_router_manager_cache()
-            second, _again = get_router_manager()
+        with _counting_route_access() as access:
+            first, _errors = get_route_manager()
+            reset_route_manager_cache()
+            second, _again = get_route_manager()
         assert access.built == 2
         assert first is not second
 
     def test_settings_reloaded_signal_resets_cache(self) -> None:
-        with _counting_router_access() as access:
-            get_router_manager()
-            settings_reloaded.send(sender=None)
-            get_router_manager()
+        with _counting_route_access() as access:
+            get_route_manager()
+            next_framework_settings.reload()
+            get_route_manager()
         assert access.built == 2
 
     def test_the_cached_manager_reports_the_routers_of_the_settings(
@@ -191,9 +191,9 @@ class TestRouterManagerCache:
 
         with (
             override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
-            _counting_router_access(),
+            _counting_route_access(),
         ):
-            manager, errors = get_router_manager()
+            manager, errors = get_route_manager()
 
         assert errors == []
         assert [
@@ -202,17 +202,17 @@ class TestRouterManagerCache:
 
     def test_an_unbound_port_is_reported_rather_than_raised(self) -> None:
         # `manage.py check` with an app that never started reports the misconfiguration.
-        with patch("next.discovery.router_access_slot", PortSlot("router access port")):
-            manager, errors = get_router_manager()
+        with patch("next.discovery.route_access_slot", PortSlot("route access port")):
+            manager, errors = get_route_manager()
 
         assert manager is None
         assert [error.id for error in errors] == ["next.E007"]
         assert "unbound" in errors[0].msg
 
     def test_init_error_result_is_cached(self) -> None:
-        with _counting_router_access(ImportError("boom")) as access:
-            manager, errors = get_router_manager()
-            second_manager, second_errors = get_router_manager()
+        with _counting_route_access(ImportError("boom")) as access:
+            manager, errors = get_route_manager()
+            second_manager, second_errors = get_route_manager()
         assert manager is None
         assert second_manager is None
         assert errors is second_errors
@@ -221,19 +221,19 @@ class TestRouterManagerCache:
 
     def test_a_full_check_run_reports_one_failure_once(self) -> None:
         # Router-walking checks skip on one failure, so a broken router is one message.
-        reset_router_manager_cache()
-        with _counting_router_access(ImportError("boom")):
+        reset_route_manager_cache()
+        with _counting_route_access(ImportError("boom")):
             messages = run_checks(include_deployment_checks=True)
 
         assert [m.id for m in messages].count("next.E007") == 1
 
 
 @contextmanager
-def _manager_over(routers: list[object]) -> Iterator[None]:
+def _manager_over(routers: list[object]) -> Generator[None]:
     """Point the discovery pass at exactly these routers."""
     manager = MagicMock()
     manager.backends = tuple(routers)
-    with patch("next.discovery.get_router_manager", return_value=(manager, [])):
+    with patch("next.discovery.get_route_manager", return_value=(manager, [])):
         yield
 
 
@@ -243,13 +243,13 @@ class _CountingPageScan(PageScanImpl):
     def __init__(self) -> None:
         self.managers: list[object] = []
 
-    def load_scanned_page_modules(self, router_manager):
-        self.managers.append(router_manager)
-        return super().load_scanned_page_modules(router_manager)
+    def load_scanned_page_modules(self, route_manager):
+        self.managers.append(route_manager)
+        return super().load_scanned_page_modules(route_manager)
 
 
 @contextmanager
-def _counting_page_scan() -> Iterator[_CountingPageScan]:
+def _counting_page_scan() -> Generator[_CountingPageScan]:
     """Bind a counting page-scan port into the slot the discovery pass reads."""
     scan = _CountingPageScan()
     slot: PortSlot = PortSlot("page scan port")
@@ -314,7 +314,7 @@ class TestPageRegistrationDiscovery:
             _counting_page_scan() as scan,
         ):
             discover_page_registrations()
-            reset_router_manager_cache()
+            reset_route_manager_cache()
             discover_page_registrations()
 
         assert len(scan.managers) == 2
@@ -329,7 +329,7 @@ class TestPageRegistrationDiscovery:
             first = discover_page_registrations()
             about = write_page(tmp_path, "about")
             frozen = discover_page_registrations()
-            reset_router_manager_cache()
+            reset_route_manager_cache()
             after = discover_page_registrations()
 
         assert first == frozen == [("blog", blog)]
@@ -341,7 +341,7 @@ class TestPageRegistrationDiscovery:
         manager = MagicMock()
         manager.backends = (_RootTreeRouter([tmp_path]),)
         with (
-            patch("next.discovery.get_router_manager") as resolve,
+            patch("next.discovery.get_route_manager") as resolve,
             _counting_page_scan() as scan,
         ):
             loaded = discover_page_registrations(manager)
@@ -352,7 +352,7 @@ class TestPageRegistrationDiscovery:
     def test_an_uninitialised_manager_imports_nothing(self) -> None:
         with (
             patch(
-                "next.discovery.get_router_manager",
+                "next.discovery.get_route_manager",
                 return_value=(None, [Error("boom", id="next.E007")]),
             ),
             _counting_page_scan() as scan,
@@ -409,7 +409,7 @@ class TestScannedPairsCache:
 
         with _walk_spy() as spy:
             list(iter_scanned_page_pairs(router))
-            reset_router_manager_cache()
+            reset_route_manager_cache()
             list(iter_scanned_page_pairs(router))
 
         assert spy.call_count == 2
@@ -420,7 +420,7 @@ class TestScannedPairsCache:
 
         with _walk_spy() as spy:
             list(iter_scanned_page_pairs(router))
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             list(iter_scanned_page_pairs(router))
 
         assert spy.call_count == 2
@@ -432,7 +432,7 @@ class TestScannedPairsCache:
         before = list(iter_scanned_page_pairs(router))
         write_page(tmp_path, "about")
         frozen = list(iter_scanned_page_pairs(router))
-        reset_router_manager_cache()
+        reset_route_manager_cache()
         after = list(iter_scanned_page_pairs(router))
 
         assert frozen == before
@@ -605,7 +605,7 @@ class TestRoutedPageTrees:
     def test_a_tree_two_routers_share_is_listed_once(self, tmp_path: Path) -> None:
         tree = tmp_path / "shell"
         tree.mkdir()
-        manager = MagicMock(spec=RouterManager)
+        manager = MagicMock(spec=RouteManager)
         manager.backends = (_RootTreeRouter([tree]), _RootTreeRouter([tree, tmp_path]))
         found = routed_page_trees(manager)
         assert [root.path for root, _skip in found] == [tree, tmp_path]
@@ -616,7 +616,7 @@ class TestRoutedPageTrees:
     ) -> None:
         """A request reads the trees, so the failure degrades the render it ran in."""
         settings.DEBUG = False
-        manager = MagicMock(spec=RouterManager)
+        manager = MagicMock(spec=RouteManager)
         manager.backends = (RaisingRootsRouter(), _RootTreeRouter([tmp_path]))
         with caplog.at_level("ERROR", logger="next.discovery"):
             found = routed_page_trees(manager)
@@ -628,7 +628,7 @@ class TestRoutedPageTrees:
 
     def test_a_failing_router_raises_under_debug(self, settings) -> None:
         settings.DEBUG = True
-        manager = MagicMock(spec=RouterManager)
+        manager = MagicMock(spec=RouteManager)
         manager.backends = (RaisingRootsRouter(),)
         with pytest.raises(PageRootsError) as caught:
             routed_page_trees(manager)
@@ -636,7 +636,7 @@ class TestRoutedPageTrees:
         assert "Make page_roots() return" in caught.value.__notes__[0]
 
     def test_the_contract_is_read_once_per_router_version(self, tmp_path: Path) -> None:
-        manager = MagicMock(spec=RouterManager)
+        manager = MagicMock(spec=RouteManager)
         manager.version = 1
         manager.backends = (SkippingRouter([tmp_path], frozenset({"api"})),)
         with patch.object(
@@ -655,7 +655,7 @@ class TestRoutedPageTrees:
         self, tmp_path: Path
     ) -> None:
         """Each reload builds new routers, and none of them stays in a check cache."""
-        manager = MagicMock(spec=RouterManager)
+        manager = MagicMock(spec=RouteManager)
         for version in range(3):
             manager.version = version
             manager.backends = (_RootTreeRouter([tmp_path]),)
@@ -695,7 +695,7 @@ class TestPageTreeSkipNames:
         ]
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": entries}):
-            router = RouterAccessImpl().create_backend(entries[1])
+            router = RouteAccessImpl().create_backend(entries[1])
             routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
             assert "blog" not in page_tree_skip_names(router)
@@ -798,7 +798,7 @@ class TestPageTreeComponentFolders:
         entry = file_router_config_entry(pages_dir=tree, dirs=["_drafts"])
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterAccessImpl().create_backend(entry)
+            router = RouteAccessImpl().create_backend(entry)
             assert list(iter_page_tree_component_folders(router)) == []
 
     def test_a_backend_naming_no_components_folder_reports_none(
@@ -879,7 +879,7 @@ class TestFileRouterWalkParity:
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterAccessImpl().create_backend(entry)
+            router = RouteAccessImpl().create_backend(entry)
             checked = list(iter_scanned_page_pairs(router))
             routed = [
                 pair
@@ -903,7 +903,7 @@ class TestFileRouterWalkParity:
         entry = file_router_config_entry(pages_dir=tree, dirs=dirs)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            router = RouterAccessImpl().create_backend(entry)
+            router = RouteAccessImpl().create_backend(entry)
 
             assert page_tree_skip_names(router) == router._skip_dir_names
 
@@ -919,13 +919,13 @@ class TestFileRouterWalkParity:
                 "COMPONENTS_DIR": "widgets",
             }
         ]
-        plain = RouterAccessImpl().create_backend(entry)
+        plain = RouteAccessImpl().create_backend(entry)
         plain_routes = [url for url, _page in iter_scanned_page_pairs(plain)]
 
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry], "COMPONENT_BACKENDS": components}
         ):
-            router = RouterAccessImpl().create_backend(entry)
+            router = RouteAccessImpl().create_backend(entry)
             routes = [url for url, _page in iter_scanned_page_pairs(router)]
 
             assert page_tree_skip_names(router) == router._skip_dir_names

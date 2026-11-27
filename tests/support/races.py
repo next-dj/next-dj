@@ -8,23 +8,24 @@ if TYPE_CHECKING:
 
 
 class LockWonByAnotherThread:
-    """Stand-in lock that flips a flag on `holder` the moment it is entered.
+    """Stand-in lock that sets an attribute of `holder` the moment it is entered.
 
-    Entering it puts the waiting thread in the test, so the re-check sees the flag.
+    Entering it puts the waiting thread in the test, so the re-check sees the value.
     """
 
-    __slots__ = ("_flag", "_holder", "entered")
+    __slots__ = ("_flag", "_holder", "_value", "entered")
 
-    def __init__(self, holder: object, flag: str) -> None:
+    def __init__(self, holder: object, flag: str, *, value: object = True) -> None:
         """Bind the stand-in to the attribute the winning thread would have set."""
         self._holder = holder
         self._flag = flag
+        self._value = value
         self.entered = 0
 
     def __enter__(self) -> Self:
         """Record the wait and hand over a holder another thread already loaded."""
         self.entered += 1
-        object.__setattr__(self._holder, self._flag, True)
+        object.__setattr__(self._holder, self._flag, self._value)
         return self
 
     def __exit__(

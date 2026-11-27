@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-_SSE_EVENT_NAME = "next-patches"
 _LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
 
@@ -75,7 +74,7 @@ class PartialProtocolBackend(ABC):
 
     def sse_stream_event(self, envelope: "Envelope", meta: StreamMeta) -> str:
         """Serialize one topic frame as the `next-patches` event of its stream data."""
-        return _sse_data_event(_SSE_EVENT_NAME, self.stream_data(envelope, meta))
+        return _sse_data_event(keys.SSE_PATCHES, self.stream_data(envelope, meta))
 
     def sse_hello(self, frame: "Mapping[str, object]") -> str:
         """Serialize a stream handshake control frame in the fixed JSON schema."""

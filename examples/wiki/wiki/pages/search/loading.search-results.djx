@@ -1,0 +1,7 @@
+<div class="space-y-3" data-search-skeleton>
+  <p class="sr-only">Loading results</p>
+  {% component "skeleton" height="1.25rem" extra="w-1/4" %}
+  {% for _ in "xxx" %}
+    {% component "skeleton" height="2.75rem" %}
+  {% endfor %}
+</div>

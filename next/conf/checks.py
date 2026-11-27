@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 
+from . import boundaries
 from .defaults import USER_SETTING
-from .merge import OPTIONAL_STR_KEYS, UNSET, accepted_value
+from .imports import callable_problem
+from .merge import OPTIONAL_STR_KEYS, UNSET, WARNED_KEYS, accepted_value
 from .settings import NextFrameworkSettings
+from .shapes import misfits, text
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from .shapes import Misfit
 
 
 def errors_for_unknown_keys(
@@ -21,15 +30,20 @@ def errors_for_unknown_keys(
     unknown = sorted(k for k in config if k not in allowed)
     if not unknown:
         return []
-    unknown_fmt = ", ".join(repr(k) for k in unknown)
-    allowed_fmt = ", ".join(sorted(allowed))
-    return [
-        Error(
-            f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
-            obj=settings,
-            id="next.E035",
-        )
-    ]
+    return [_unknown_keys_error(prefix, unknown, sorted(allowed))]
+
+
+def _unknown_keys_error(
+    prefix: str, unknown: Iterable[object], allowed: Iterable[str]
+) -> CheckMessage:
+    """Build the `next.E035` error naming the unknown keys and the allowed ones."""
+    unknown_fmt = ", ".join(repr(key) for key in unknown)
+    allowed_fmt = ", ".join(allowed)
+    return Error(
+        f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
+        obj=settings,
+        id="next.E035",
+    )
 
 
 @register(NEXT)
@@ -50,18 +64,24 @@ _TYPED_LIST_KEYS: frozenset[str] = NextFrameworkSettings.LIST_KEYS - {
     "FORM_ANCHOR_FILES",
     "PARTIAL_BACKENDS",
 }
-_TYPED_OPTIONAL_KEYS: frozenset[str] = OPTIONAL_STR_KEYS - {"JS_CONTEXT_SERIALIZER"}
+_TYPED_OPTIONAL_KEYS: frozenset[str] = OPTIONAL_STR_KEYS - WARNED_KEYS
 _KEY_TYPES: dict[str, type] = (
     dict.fromkeys(sorted(_TYPED_LIST_KEYS), list)
     | dict.fromkeys(sorted(NextFrameworkSettings.STR_KEYS), str)
     | dict.fromkeys(sorted(_TYPED_OPTIONAL_KEYS), str)
     | {
+        "BOUNDARIES": dict,
+        "COMPRESSION": dict,
         "CONSENT": dict,
+        "DEFER": dict,
+        "LOADER": dict,
         "METADATA": dict,
         "NEXT_JS_OPTIONS": dict,
         "REALTIME": dict,
+        "ROUTER": dict,
         "SEO": dict,
         "SITE": dict,
+        "TRANSACTIONS": dict,
     }
 )
 
@@ -75,7 +95,7 @@ _SILENCE_HINT = (
 def check_next_framework_value_types(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
-    """Report `NEXT_FRAMEWORK` values whose type the merge would silently drop.
+    """Report `NEXT_FRAMEWORK` values whose type the merge refuses.
 
     A non-dict `NEXT_FRAMEWORK` skips the per-key probes and carries its own id.
     """
@@ -99,15 +119,15 @@ def check_next_framework_value_types(
 
 
 def _wrong_type_errors(raw: dict[str, Any]) -> list[CheckMessage]:
-    """Report every key whose value type the settings merge would drop.
+    """Report every key whose value type the settings merge refuses.
 
     Asked of the merge itself, so the check and the merge cannot drift apart.
     """
     return [
         Error(
             f"NEXT_FRAMEWORK[{key!r}] must be a {expected.__name__}, "
-            f"got {type(raw[key]).__name__!r}. The settings merge "
-            "ignores this value and silently keeps the framework default.",
+            f"got {type(raw[key]).__name__!r}. The settings keep its default and "
+            "every request raises ImproperlyConfigured until it is fixed.",
             hint=_SILENCE_HINT,
             obj=settings,
             id="next.E076",
@@ -133,8 +153,72 @@ def _non_bool_warnings(raw: dict[str, Any]) -> list[CheckMessage]:
     ]
 
 
+def error_for_wrong_shape(prefix: str, expected: str, found: str) -> CheckMessage:
+    """Return the `next.E076` error for a nested settings value outside its shape."""
+    return Error(
+        f"{prefix} must be {expected}, got {found}. The first read of the scope "
+        "raises ImproperlyConfigured for it.",
+        hint="Write the value in the shape named, or drop the key for its default.",
+        obj=settings,
+        id="next.E076",
+    )
+
+
+def error_for_misfit(prefix: str, misfit: Misfit) -> CheckMessage:
+    """Return the `next.E035` or `next.E076` error for one misfit below `prefix`."""
+    where = prefix + "".join(f"[{key!r}]" for key in misfit.path)
+    if misfit.unknown:
+        return _unknown_keys_error(where, misfit.unknown, misfit.allowed)
+    return error_for_wrong_shape(where, misfit.expected, misfit.found)
+
+
+def error_for_unusable_path(
+    prefix: str, dotted: str, problem: str, consequence: str, hint: str
+) -> CheckMessage:
+    """Return the `next.E219` error for a settings path that names nothing usable."""
+    return Error(
+        f"{prefix} {dotted!r} {problem}, so {consequence}.",
+        hint=hint,
+        obj=settings,
+        id="next.E219",
+    )
+
+
+_BOUNDARIES: Final = f"NEXT_FRAMEWORK[{boundaries.SCOPE!r}]"
+
+
+@register(NEXT)
+def check_boundaries_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Validate the keys, the value shapes and the `REPORTER` path of `BOUNDARIES`."""
+    raw = getattr(settings, USER_SETTING, None)
+    scope = raw.get(boundaries.SCOPE) if isinstance(raw, dict) else None
+    if not isinstance(scope, dict):
+        return []
+    errors = [
+        error_for_misfit(_BOUNDARIES, misfit)
+        for misfit in misfits(scope, boundaries.SHAPE)
+    ]
+    reporter = scope.get("REPORTER")
+    problem = callable_problem(reporter) if text(reporter) else None
+    if problem is not None:
+        errors.append(
+            error_for_unusable_path(
+                f"{_BOUNDARIES}['REPORTER']",
+                str(reporter),
+                problem,
+                "the first failure a boundary contains raises ImproperlyConfigured",
+                "Name an importable callable.",
+            )
+        )
+    return errors
+
+
 __all__ = [
+    "check_boundaries_settings",
     "check_next_framework_unknown_top_level_keys",
     "check_next_framework_value_types",
+    "error_for_misfit",
+    "error_for_unusable_path",
+    "error_for_wrong_shape",
     "errors_for_unknown_keys",
 ]

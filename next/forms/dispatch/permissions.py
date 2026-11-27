@@ -8,13 +8,13 @@ from django.core.exceptions import PermissionDenied
 from django.forms import BaseModelForm
 from django.http import HttpResponse, HttpResponseRedirect
 
-from next.caches import PageCache
+from next.caches import BoundedCache, PageCache
 from next.forms.signals import form_access_denied
 from next.forms.uid import posted_origin_path
 from next.pages import page
 from next.pages.access import (
+    AccessGate,
     AccessStamp,
-    Gate,
     access_stamp,
     enforce,
     owner_access,
@@ -74,6 +74,10 @@ COMPONENT_MODULE: Final = "component.py"
 
 type _Branch = Literal["wizard", "handler", "form"]
 
+type DenialLayer = Literal["page", "view", "object"]
+type HookLayer = Literal["view", "object"]
+type DenialReason = Literal["raised", "denied", "response"]
+
 
 def _branch(meta: "ActionMeta") -> "_Branch | None":
     """Return the branch dispatch takes for an action, `None` when it declares none.
@@ -97,7 +101,9 @@ class _GuardRule:
     rule: AccessRule
 
 
-_guard_rules: dict[tuple["ActionGuard", str, bool], _GuardRule] = {}
+_guard_rules: BoundedCache[tuple["ActionGuard", str, bool], _GuardRule] = BoundedCache(
+    depends=()
+)
 
 
 def _build_guard_rule(
@@ -215,7 +221,7 @@ def _action_lookup(
     return lookup
 
 
-_ACTION_GATE: Final = Gate(_action_lookup, _origin_path)
+_ACTION_GATE: Final = AccessGate(_action_lookup, _origin_path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +237,7 @@ class _Tree:
     deferred: bool
 
 
-_trees: PageCache[tuple[str, Path | None], _Tree] = PageCache()
+_trees: PageCache[tuple[str, Path | None], _Tree] = PageCache(depends=())
 
 
 def _build_tree(
@@ -382,8 +388,8 @@ def _emit_form_access_denied(
     action_name: str,
     uid: str | None,
     *,
-    layer: Literal["page", "view", "object"],
-    reason: Literal["raised", "denied", "response"],
+    layer: DenialLayer,
+    reason: DenialReason,
     sender: type,
 ) -> None:
     """Send `form_access_denied` when a receiver listens for this sender."""
@@ -400,13 +406,12 @@ def _emit_form_access_denied(
 
 def _enforce_permission_hook(
     request: "HttpRequest",
-    action_name: str,
     state: "_DispatchState",
     *,
     hook: "Callable[..., Any] | None",
-    layer: Literal["view", "object"],
+    layer: HookLayer,
 ) -> "HttpResponse | None":
-    """Run a DI-resolved permission hook for one layer, emitting on a denial.
+    """Run a DI-resolved permission hook for one layer, recording a denial on `state`.
 
     A `None` hook means the layer is undeclared, so dispatch continues.
     """
@@ -417,57 +422,51 @@ def _enforce_permission_hook(
             hook, request, state.url_kwargs, deps=(state.dep_cache, state.dep_stack)
         )
     except PermissionDenied:
-        _emit_form_access_denied(
-            request,
-            action_name,
-            state.uid,
-            layer=layer,
-            reason="raised",
-            sender=state.signal_sender,
-        )
+        state.refuse(layer, "raised")
         raise
-    return _resolve_permission_outcome(
-        raw, request, action_name, state.uid, layer=layer, sender=state.signal_sender
-    )
+    return _resolve_permission_outcome(raw, state, layer=layer)
 
 
 def _resolve_permission_outcome(
-    raw: object,
-    request: "HttpRequest",
-    action_name: str,
-    uid: str | None,
-    *,
-    layer: Literal["view", "object"],
-    sender: type,
+    raw: object, state: "_DispatchState", *, layer: HookLayer
 ) -> "HttpResponse | None":
-    """Normalise a hook return, emitting the audit signal on a denial."""
+    """Normalise a hook return, recording a denial on `state`."""
     try:
         denial = _normalize_permission(raw)
     except PermissionDenied:
-        _emit_form_access_denied(
-            request, action_name, uid, layer=layer, reason="denied", sender=sender
-        )
+        state.refuse(layer, "denied")
         raise
     if denial is not None:
-        _emit_form_access_denied(
-            request, action_name, uid, layer=layer, reason="response", sender=sender
-        )
+        state.refuse(layer, "response")
     return denial
 
 
 def _enforce_view_permissions(
-    form_class: type, request: "HttpRequest", action_name: str, state: "_DispatchState"
+    form_class: type, request: "HttpRequest", state: "_DispatchState"
 ) -> "HttpResponse | None":
-    """Run the view-level check_permissions hook, emitting on a denial."""
+    """Run the view-level check_permissions hook, recording a denial on `state`."""
     present = getattr(form_class, "_has_check_permissions", False)
     hook = (
         cast("type[_ViewPermissionHook]", form_class).check_permissions
         if present
         else None
     )
-    return _enforce_permission_hook(
-        request, action_name, state, hook=hook, layer="view"
-    )
+    return _enforce_permission_hook(request, state, hook=hook, layer="view")
+
+
+def _declared_view_permissions(
+    meta: "ActionMeta", request: "HttpRequest", state: "_DispatchState"
+) -> "HttpResponse | None":
+    """Run the `check_permissions` of the wizard or the form class the action declares.
+
+    A `form_class` factory may load the row its form edits, so dispatch checks it later.
+    """
+    declared: object = meta.get("wizard_class")
+    if declared is None:
+        declared = meta.get("form_class")
+    if not isinstance(declared, type):
+        return None
+    return _enforce_view_permissions(declared, request, state)
 
 
 def _permission_object(form: "django_forms.Form") -> "Model | None":
@@ -481,7 +480,6 @@ def _permission_object(form: "django_forms.Form") -> "Model | None":
 def _enforce_registered_permissions(
     form: "django_forms.Form",
     request: "HttpRequest",
-    action_name: str,
     permissions: tuple[str, ...],
     state: "_DispatchState",
 ) -> None:
@@ -495,28 +493,16 @@ def _enforce_registered_permissions(
     user = cast("_PermissionHolder", request.user)
     for perm in permissions:
         if not user.has_perm(perm, obj):
-            _emit_form_access_denied(
-                request,
-                action_name,
-                state.uid,
-                layer="object",
-                reason="denied",
-                sender=state.signal_sender,
-            )
+            state.refuse("object", "denied")
             raise PermissionDenied
 
 
 def _enforce_object_permissions(
-    form: "django_forms.Form",
-    request: "HttpRequest",
-    action_name: str,
-    state: "_DispatchState",
+    form: "django_forms.Form", request: "HttpRequest", state: "_DispatchState"
 ) -> "HttpResponse | None":
     """Run the object-level has_object_permission hook after the form binds."""
     present = getattr(type(form), "_has_object_permission", False)
     hook = (
         cast("_ObjectPermissionHook", form).has_object_permission if present else None
     )
-    return _enforce_permission_hook(
-        request, action_name, state, hook=hook, layer="object"
-    )
+    return _enforce_permission_hook(request, state, hook=hook, layer="object")

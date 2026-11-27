@@ -54,13 +54,14 @@ class Patch:
 class Asset:
     """One co-located asset of a rendered target by kind, URL, and inline body.
 
-    `load` is the insertion verb from the kind registry, omitted when the kind has none.
+    `load` is the kind's insertion verb, `scope` the owner of a stylesheet, if set.
     """
 
     kind: str
     url: str
     inline: str | None = None
     load: str | None = None
+    scope: str | None = None
 
     def as_dict(self) -> dict[str, str]:
         """Return the wire form of the asset, carrying its inline body when set."""
@@ -69,6 +70,8 @@ class Asset:
             data[keys.INLINE] = self.inline
         if self.load is not None:
             data[keys.LOAD] = self.load
+        if self.scope is not None:
+            data[keys.SCOPE] = self.scope
         return data
 
     @classmethod
@@ -79,6 +82,7 @@ class Asset:
             url=data[keys.URL],
             inline=data.get(keys.INLINE),
             load=data.get(keys.LOAD),
+            scope=data.get(keys.SCOPE),
         )
 
 
@@ -108,7 +112,8 @@ class FormMeta:
 class Envelope:
     """A patch envelope carrying ordered ops and protocol meta.
 
-    `csrf` and `request_id` stamp only when set, so the wire shape stays stable.
+    `csrf`, `request_id` and the `navigation` fields stamp only when set, so the wire
+    shape of every other envelope stays stable.
     """
 
     version: str
@@ -117,6 +122,7 @@ class Envelope:
     form: "FormMeta | None" = None
     csrf: "Mapping[str, Any] | None" = None
     request_id: str | None = None
+    navigation: "Mapping[str, Any] | None" = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return the wire form of the envelope as an ordered mapping."""
@@ -130,6 +136,12 @@ class Envelope:
             data[keys.CSRF] = dict(self.csrf)
         if self.request_id is not None:
             data[keys.REQUEST_ID] = self.request_id
+        if self.navigation is not None:
+            data.update(
+                (key, self.navigation[key])
+                for key in keys.NAVIGATION_KEYS
+                if key in self.navigation
+            )
         return data
 
     @classmethod
@@ -139,6 +151,7 @@ class Envelope:
         Kept beside the writer so the serializer and the test client read one format.
         """
         form = data.get(keys.FORM)
+        navigation = {key: data[key] for key in keys.NAVIGATION_KEYS if key in data}
         return cls(
             version=data[keys.VERSION],
             ops=tuple(Patch.from_dict(op) for op in data.get(keys.OPS, ())),
@@ -146,6 +159,7 @@ class Envelope:
             form=None if form is None else FormMeta.from_dict(form),
             csrf=data.get(keys.CSRF),
             request_id=data.get(keys.REQUEST_ID),
+            navigation=navigation or None,
         )
 
 

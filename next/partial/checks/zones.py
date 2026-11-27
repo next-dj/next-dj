@@ -3,37 +3,38 @@
 import re
 from typing import TYPE_CHECKING, Final
 
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.template.base import Node
 from django.template.defaulttags import ForNode, IfNode
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
 from next.pages import page
 from next.pages.checks.composed import iter_composed_pages
+from next.pages.loaders import PAGE_MODULE, layout_chain
+from next.pages.paths import page_template_path
+from next.pages.skeletons import PAGE_BODY, SKELETON_GLOB, declared_zones, skeleton_zone
 from next.partial.guards import Components, guarded_zones, opaque_zones
-from next.partial.zone import zones_under
+from next.partial.headers import ZONE
+from next.partial.registry import zones_of
+from next.partial.zone import LOADING, zones_under
 from next.permissions.nodes import HasPermNode
+from next.utils import LAYOUT_TEMPLATE
 
 from .codes import (
     E_CONTEXT_ZONE_UNKNOWN,
     E_DUPLICATE_ZONE,
-    E_LAZY_WITHOUT_PLACEHOLDER,
     E_NON_ASCII_ZONE,
+    E_SKELETON_ZONE_UNKNOWN,
     E_ZONE_IN_COMPONENT,
     E_ZONE_IN_FOR,
     E_ZONE_IN_HAS_PERM,
     E_ZONE_IN_IF,
+    W_SKELETON_UNSHOWN,
     W_WITH_OVER_ZONE,
 )
-from .nodes import significant, zone_nodes, zones_directly_in_with
+from .nodes import zone_nodes, zones_directly_in_with
 
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ _CONDITION_REASON: Final = (
 )
 
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
+_ZONE_TAG = re.compile(r"\{%\s*(zone|more)(?=\s|%\})")
 
 _TAG_LABELS: Final[dict[type[Node], str]] = {
     ForNode: "{% for %}",
@@ -106,7 +108,7 @@ def check_zone_name_is_slug(*args: object, **kwargs: object) -> list[CheckMessag
             messages.append(
                 Error(
                     f'Zone name "{node.name}" in {page_path} is not an ASCII '
-                    "slug. Zone names travel in the X-Next-Zone header, which "
+                    f"slug. Zone names travel in the {ZONE} header, which "
                     "is latin-1. Use letters, digits, hyphens, or underscores.",
                     obj=str(page_path),
                     id=E_NON_ASCII_ZONE,
@@ -211,28 +213,6 @@ def _ancestor_check(
 
 
 @register(Tags.templates, NEXT)
-def check_lazy_zone_has_placeholder(
-    *args: object, **kwargs: object
-) -> list[CheckMessage]:
-    """Error when a lazy zone declares no `{% placeholder %}` (`next.E064`)."""
-    messages: list[CheckMessage] = []
-    for page_path, template in iter_composed_pages():
-        for node in zone_nodes(template):
-            if node.options.lazy is None or significant(node.placeholder):
-                continue
-            messages.append(
-                Error(
-                    f'Lazy zone "{node.name}" in {page_path} has no '
-                    "{% placeholder %} branch. A lazy zone shows its placeholder "
-                    "until the body arrives, so the branch is required.",
-                    obj=str(page_path),
-                    id=E_LAZY_WITHOUT_PLACEHOLDER,
-                )
-            )
-    return messages
-
-
-@register(Tags.templates, NEXT)
 def check_with_directly_over_zone(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
@@ -316,14 +296,19 @@ def _zone_bound_contexts(
 
 @register(Tags.templates, NEXT)
 def check_no_zone_in_component(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Error when a component template declares a zone (`next.E065`)."""
-    configs = next_framework_settings.COMPONENT_BACKENDS
-    if not configs:
-        return []
+    """Error when a component template declares a zone, by any tag (`next.E065`)."""
     messages: list[CheckMessage] = []
-    manager = get_components_manager()
+    for template_path in _component_templates():
+        messages.extend(_component_zone_errors(template_path))
+    return messages
+
+
+def _component_templates() -> "Iterator[Path]":
+    """Yield every component template file once, resolved, none without backends."""
+    if not next_framework_settings.COMPONENT_BACKENDS:
+        return
     seen: set[Path] = set()
-    for backend in manager.backends:
+    for backend in get_components_manager().backends:
         for info in backend.iter_components():
             template_path = info.template_path
             if template_path is None:
@@ -332,37 +317,131 @@ def check_no_zone_in_component(*args: object, **kwargs: object) -> list[CheckMes
             if resolved in seen or not resolved.exists():
                 continue
             seen.add(resolved)
-            messages.extend(_component_zone_errors(resolved))
-    return messages
+            yield resolved
+
+
+def _zone_tag(source: str) -> str | None:
+    """Return the first tag of `source` that declares a zone, `zone` or `more`."""
+    match = _ZONE_TAG.search(source)
+    return None if match is None else match[1]
 
 
 def _component_zone_errors(template_path: "Path") -> list[CheckMessage]:
-    """Return an error for each zone tag found in a component template file."""
+    """Return an error when a component template file holds a tag declaring a zone."""
     try:
         source = template_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
-    if "{% zone " not in source and "{%zone " not in source:
+    tag = _zone_tag(source)
+    if tag is None:
         return []
     return [
         Error(
-            f"Component template {template_path} declares a {{% zone %}} tag. "
-            "A zone belongs to a page, not a component. Move the zone into the "
-            "page or layout template.",
+            f"Component template {template_path} declares a zone through a "
+            f"{{% {tag} %}} tag. A zone is an inline region of a page, so move the tag "
+            "into the page or layout template around the component call. A component "
+            "that loads later or shows a loading UI is a boundary of its own, through "
+            "a loading.djx beside it.",
             obj=str(template_path),
             id=E_ZONE_IN_COMPONENT,
         )
     ]
 
 
+@register(Tags.templates, NEXT)
+def check_zone_skeletons_have_zones(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Error when a `loading.<zone>.djx` has no zone of that name (`next.E232`).
+
+    The file serves only the templates beside it, never a zone declared elsewhere.
+    """
+    templates: dict[Path, tuple[Path, ...]] = {}
+    for page_path, _template in iter_composed_pages():
+        body = page_template_path(page_path)
+        layouts = (layout.parent for layout in layout_chain(body))
+        for directory in (body.parent, *layouts):
+            templates[directory] = (
+                directory / PAGE_BODY,
+                directory / PAGE_MODULE,
+                directory / LAYOUT_TEMPLATE,
+            )
+    for template_path in _component_templates():
+        directory = template_path.parent
+        templates[directory] = (*templates.get(directory, ()), template_path)
+    messages: list[CheckMessage] = []
+    for directory, sources in templates.items():
+        messages.extend(_orphan_skeletons(directory, sources))
+    return messages
+
+
+def _orphan_skeletons(
+    directory: "Path", sources: "tuple[Path, ...]"
+) -> list[CheckMessage]:
+    """Return an error per skeleton file in `directory` whose zone `sources` lack."""
+    declared: set[str] = set()
+    for source in sources:
+        declared |= declared_zones(source)
+    return [
+        Error(
+            f'{skeleton} is the reload skeleton of the zone "{zone}", which no '
+            "template beside it declares, so the file never renders.",
+            hint="Name the file after a zone the template beside it declares.",
+            obj=str(skeleton),
+            id=E_SKELETON_ZONE_UNKNOWN,
+        )
+        for skeleton in sorted(directory.glob(SKELETON_GLOB))
+        if (zone := skeleton_zone(skeleton)) is not None and zone not in declared
+    ]
+
+
+@register(Tags.templates, NEXT)
+def check_zone_skeletons_shown(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Warn when no layer and no reload can show a `loading.<zone>.djx` (`next.W187`).
+
+    A layer opens only a zone a partial request renders alone.
+    """
+    shown: dict[Path, bool] = {}
+    found: dict[Path, tuple[Path, ...]] = {}
+    for page_path, template in iter_composed_pages():
+        zones = zones_of(template, page_path)
+        body = page_template_path(page_path)
+        for directory in (
+            body.parent,
+            *(layout.parent for layout in layout_chain(body)),
+        ):
+            if directory not in found:
+                found[directory] = tuple(sorted(directory.glob(SKELETON_GLOB)))
+            for skeleton in found[directory]:
+                info = zones.get(skeleton_zone(skeleton) or "")
+                if info is not None:
+                    showing = info.standalone or info.options.reload == LOADING
+                    shown[skeleton] = shown.get(skeleton, False) or showing
+    return [
+        DjangoWarning(
+            f"{skeleton} is the loading UI of a zone that neither opens in a layer "
+            'nor reloads with reload="loading", so the file never renders.',
+            hint=(
+                "Move the zone out of the tag that keeps a partial request from "
+                'rendering it alone, add reload="loading" to it, or delete the file.'
+            ),
+            obj=str(skeleton),
+            id=W_SKELETON_UNSHOWN,
+        )
+        for skeleton, showing in sorted(shown.items())
+        if not showing
+    ]
+
+
 __all__ = [
     "check_context_zone_names_exist",
     "check_duplicate_zone_names",
-    "check_lazy_zone_has_placeholder",
     "check_no_zone_in_component",
     "check_with_directly_over_zone",
     "check_zone_name_is_slug",
     "check_zone_not_in_has_perm",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
+    "check_zone_skeletons_have_zones",
+    "check_zone_skeletons_shown",
 ]

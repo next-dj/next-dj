@@ -1,0 +1,11 @@
+<section class="space-y-3 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground" data-rail-error>
+  <h2 class="text-lg font-semibold text-foreground">{{ title }}</h2>
+  {% if error.kind == "timeout" %}
+    <p>These picks took too long to find, so the page went on without them.</p>
+  {% else %}
+    <p>These picks could not be loaded.</p>
+  {% endif %}
+  {% if error.retry %}
+    <button type="button" data-next-retry class="rounded-md border border-border bg-background px-3 py-1 text-foreground hover:bg-accent">Try again</button>
+  {% endif %}
+</section>

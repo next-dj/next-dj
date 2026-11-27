@@ -15,7 +15,7 @@ from django.contrib.staticfiles.finders import AppDirectoriesFinder, get_finders
 from django.core.management import call_command
 from django.test import override_settings
 
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.stamps import RACY_MTIME_WINDOW_NS, trusted
 from next.static import (
     AssetDiscovery,
@@ -50,7 +50,7 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Generator, Iterable, Iterator
 
     from next.static import StaticBackend
 
@@ -175,11 +175,6 @@ class TestNextStaticFilesFinderFind:
 
     def test_find_all_returns_list(self, watched_tree: Path) -> None:
         found = NextStaticFilesFinder().find("next/site/about.css", find_all=True)
-
-        assert found == [str((watched_tree / "about" / "template.css").resolve())]
-
-    def test_find_honours_deprecated_all_keyword(self, watched_tree: Path) -> None:
-        found = NextStaticFilesFinder().find("next/site/about.css", all=True)
 
         assert found == [str((watched_tree / "about" / "template.css").resolve())]
 
@@ -309,7 +304,7 @@ class TestFinderFreshness:
     """The held answer is rebuilt when what it was read from moves, and not before."""
 
     @contextmanager
-    def _counted_scan(self) -> Iterator[mock.MagicMock]:
+    def _counted_scan(self) -> Generator[mock.MagicMock]:
         with mock.patch(
             "next.static.finders.discover_colocated_static_assets",
             wraps=discover_colocated_static_assets,
@@ -395,7 +390,7 @@ class TestFinderFreshness:
         finder.find("next/site/about.css")
 
         with self._counted_scan() as scan:
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             finder.find("next/site/about.css")
 
         assert scan.call_count == 1
@@ -508,13 +503,13 @@ class TestMalformedRouterSurvival:
     """
 
     @contextmanager
-    def _malformed_router(self, tree: Path) -> Iterator[None]:
+    def _malformed_router(self, tree: Path) -> Generator[None]:
         with (
             override_settings(
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
             ),
             mock.patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 return_value=MalformedRootsRouter([tree]),
             ),
         ):

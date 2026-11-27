@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from access.models import AccessRequest, AuditEntry
 from e2e_support.browser import (
@@ -6,6 +8,7 @@ from e2e_support.browser import (
     assert_same_document,
     mark_document,
     wait_for_apply,
+    wait_for_chunk,
     wait_for_runtime,
 )
 from playwright.sync_api import Locator, Page, expect
@@ -15,7 +18,9 @@ pytestmark = pytest.mark.e2e
 
 DIALOG = "dialog[data-next-dialog]"
 REQUEST_LIST = "[data-next-zone='request-list']"
-AUDIT_ZONE = "[data-next-zone='audit-table']"
+TOTALS_ZONE = "[data-next-zone='audit-totals']"
+TOTALS = "[data-audit-totals]"
+LOG_ROWS = "[data-next-zone='audit-rows'] tr"
 POLICY = "input[name='policy_acknowledged']"
 EMAIL_ERROR = "Enter a valid email address."
 REQUIRED_ERROR = "This field is required."
@@ -27,6 +32,7 @@ def open_wizard(page: Page) -> Locator:
     dialog = page.locator(DIALOG)
     expect(dialog).to_have_count(1)
     wait_for_apply(page, seen)
+    wait_for_chunk(page, "forms")
     expect(dialog.locator("#id_full_name")).to_be_visible()
     return dialog
 
@@ -238,7 +244,7 @@ def test_an_unacknowledged_step_is_denied_and_keeps_the_dialog_open(
     )
 
 
-def test_the_audit_table_stays_a_skeleton_until_its_zone_is_revealed(
+def test_the_totals_stay_a_skeleton_until_they_scroll_into_view(
     page: Page, base_url: str
 ) -> None:
     AuditEntry.objects.create(
@@ -252,12 +258,44 @@ def test_the_audit_table_stays_a_skeleton_until_its_zone_is_revealed(
     page.goto(f"{base_url}/admin/audit/")
     wait_for_runtime(page)
 
+    expect(page.locator(LOG_ROWS)).to_have_count(1)
     expect(page.locator("[data-audit-skeleton]")).to_be_visible()
-    expect(page.locator("[data-audit-table]")).to_have_count(0)
+    expect(page.locator(TOTALS)).to_have_count(0)
 
     seen = applied_count(page)
-    page.locator(AUDIT_ZONE).scroll_into_view_if_needed()
+    page.locator(TOTALS_ZONE).scroll_into_view_if_needed()
     wait_for_apply(page, seen)
 
-    expect(page.locator("[data-audit-table] tbody tr")).to_have_count(1)
+    expect(page.locator(TOTALS)).to_contain_text(re.compile(r"Backend rows\s+1\s"))
+    expect(page.locator(TOTALS)).to_contain_text(re.compile(r"Signal rows\s+0\s"))
     expect(page.locator("[data-audit-skeleton]")).to_have_count(0)
+
+
+def test_the_kind_filter_narrows_the_log_and_its_totals_in_place(
+    page: Page, base_url: str, next_probe: PageProbe
+) -> None:
+    for kind in (AuditEntry.KIND_DISPATCHED, AuditEntry.KIND_VALIDATION_FAILED):
+        AuditEntry.objects.create(
+            source=AuditEntry.SOURCE_BACKEND,
+            kind=kind,
+            action_name="access_request_wizard",
+            step="identity",
+            response_status=302,
+        )
+    page.goto(f"{base_url}/admin/audit/")
+    wait_for_runtime(page)
+    expect(page.locator(LOG_ROWS)).to_have_count(2)
+    expect(page.locator(TOTALS)).to_contain_text(re.compile(r"Backend rows\s+2\s"))
+    mark_document(page)
+
+    seen = applied_count(page)
+    page.locator("#kind-filter").select_option("validation_failed")
+    wait_for_apply(page, seen)
+
+    expect(page.locator(LOG_ROWS)).to_have_count(1)
+    expect(page.locator(LOG_ROWS)).to_have_attribute("data-kind", "validation_failed")
+    expect(page.locator(TOTALS)).to_contain_text(re.compile(r"Backend rows\s+1\s"))
+    expect(page).to_have_url(f"{base_url}/admin/audit/?kind=validation_failed")
+    filtered = next_probe.partial_requests(zone="audit-rows")[-1]
+    assert "kind=validation_failed" in filtered.url
+    assert_same_document(page)

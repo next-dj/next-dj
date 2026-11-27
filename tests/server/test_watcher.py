@@ -90,7 +90,7 @@ class TestServerAutoreloadWatchApi:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(custom.resolve()), str(pages_tree.resolve())],

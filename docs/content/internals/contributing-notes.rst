@@ -47,9 +47,9 @@ The recurring per-area module names are fixed, so a reader finds the same concer
 ``registry.py`` holds the ordered registrations, ``manager.py`` the façade over the backends, ``backends.py`` the settings-driven contract, ``markers.py`` the frozen dataclasses, ``providers.py`` the dependency providers, ``signals.py`` the area signals, ``checks.py`` the system checks, ``dispatch.py`` the action pipeline, ``ports.py`` the area's implementation of the cross-area protocols, and ``errors.py`` the area's public exceptions.
 
 Machinery shared across areas lives in a flat module at the root of ``next/`` rather than in a package, and never in a package whose name starts with an underscore.
-``backends.py``, ``caches.py``, ``csrf.py``, ``diagnostics.py``, ``discovery.py``, ``errors.py``, ``intercept.py``, ``interpolation.py``, ``introspect.py``, ``middleware.py``, ``ports.py``, ``seeding.py``, ``signals.py``, ``stamps.py``, and ``utils.py`` are those modules.
+``backends.py``, ``caches.py``, ``csrf.py``, ``diagnostics.py``, ``discovery.py``, ``errors.py``, ``intercept.py``, ``interpolation.py``, ``introspect.py``, ``middleware.py``, ``paths.py``, ``ports.py``, ``seeding.py``, ``signals.py``, ``stamps.py``, and ``utils.py`` are those modules.
 ``next/ports.py`` holds the narrow Protocol ports that let one area call another without importing it, each one reached through a slot that ``AppConfig.ready()`` binds once at startup.
-The protocol and the slot live there, the implementation lives in the ``ports.py`` of the area that owns it, so ``next/partial/ports.py`` supplies the partial shaper and ``next/urls/ports.py`` the router access.
+The protocol and the slot live there, the implementation lives in the ``ports.py`` of the area that owns it, so ``next/urls/ports.py`` supplies the route access and ``next/static/ports.py`` the static assets.
 
 Annotations
 ~~~~~~~~~~~
@@ -72,14 +72,14 @@ System checks
 Every check lives next to the subsystem it validates.
 The codes follow ``next.E<NNN>`` for errors and ``next.W<NNN>`` for warnings.
 A new check function lands in the area's checks and registers with ``@register`` when that module is imported.
-A new area's checks module joins the top-level imports and ``CHECK_MODULES`` in ``next/checks/catalog.py``, and ``tests/checks/test_catalog.py`` fails until it does.
+A new area's checks module is named by the ``checks`` field of the area manifest, and ``tests/checks/test_catalog.py`` fails until it is.
 The area's checks are one module while one file holds them, and a package of one-word submodules once it does not, as in ``next/forms/checks/``, ``next/partial/checks/``, ``next/seo/checks/``, and ``next/pages/checks/``, the largest of the four.
 Every checks module is held to the coverage gate like any other module, and a branch no configuration reaches is removed.
 
 The catalogue binds a core check alone.
 A third-party package registers its checks the ordinary Django way, by decorating them with ``django.core.checks.register`` from a module its ``AppConfig.ready`` imports, and the framework neither knows nor needs to know about them.
 Decorating with ``@register(NEXT)`` from ``next.checks`` puts a third-party check under the ``next`` tag, so ``manage.py check --tag next`` reaches it beside the framework ones, which is the only coupling on offer.
-The difference is a place in ``next.checks.catalog``, which a package outside ``next/`` neither gets nor needs.
+The difference is a place in the area manifests, which a package outside ``next/`` neither gets nor needs.
 
 Signals
 ~~~~~~~

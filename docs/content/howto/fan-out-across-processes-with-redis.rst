@@ -124,7 +124,7 @@ See :ref:`deployment-capacity` for the Redis pool and connection limits across p
 Check the deployment
 ~~~~~~~~~~~~~~~~~~~~
 
-``manage.py check --deploy`` reports ``next.W149`` while the configured broker is ``MemoryBroker`` or a subclass of it.
+``manage.py check --deploy`` reports ``next.W149`` while the configured broker is ``MemoryBroker`` or a subclass of it and the project uses realtime, through a ``REALTIME`` mapping, an ``@on`` handler, a routed ticket introspection view, or a ``TopicStream`` in a routed ``page.py``.
 A plain ``manage.py check`` stays quiet, because a development server runs one process.
 A deployment that truly runs one process silences the warning.
 

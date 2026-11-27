@@ -3,32 +3,50 @@
 from __future__ import annotations
 
 import ast
+import inspect
+import textwrap
 from dataclasses import dataclass
 from itertools import combinations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
+from django.template import Template, TemplateSyntaxError
 
-from next.checks import NEXT
+from next.boundaries.options import RESERVED_OPTIONS, DeferMode
+from next.checks import NEXT, register
 from next.checks.common import (
     RegistrationSubject,
     async_callable_error,
     async_refusal,
+    class_problem,
     errors_for_unknown_keys,
     import_backend_class,
     registration_file_errors,
 )
 from next.conf import next_framework_settings
+from next.conf.boundaries import boundary_settings
+from next.conf.checks import error_for_unusable_path
+from next.deps.introspect import cached_signature
+from next.introspect import callable_name
+from next.utils import MAX_DURATION
 
 from .backends import ComponentsBackend
 from .context import component
-from .loading import last_load_error
+from .defer import defer_declarations
+from .modules import last_load_error
+from .nodes import ComponentTagNode
+from .renderers import ComponentTemplateLoader
 from .sources import get_components_manager
+from .trip import token_overrides
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
     from pathlib import Path
+    from typing import Any
+
+    from .info import ComponentInfo
 
 
 _COMPONENT_BACKEND_SETTINGS_KEY = "COMPONENT_BACKENDS"
@@ -108,6 +126,27 @@ def _validate_single_component_backend(
         )
     )
     return errors
+
+
+@register(NEXT)
+def check_component_template_loader(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Report a `COMPONENT_TEMPLATE_LOADER` path that names no usable loader."""
+    dotted = next_framework_settings.COMPONENT_TEMPLATE_LOADER
+    problem = class_problem(dotted, ComponentTemplateLoader)
+    if problem is None:
+        return []
+    return [
+        error_for_unusable_path(
+            "NEXT_FRAMEWORK['COMPONENT_TEMPLATE_LOADER']",
+            dotted,
+            problem,
+            "the first component render raises ImproperlyConfigured",
+            "Name a concrete ComponentTemplateLoader subclass, such as "
+            "'next.components.CachedComponentTemplateLoader'.",
+        )
+    ]
 
 
 @register(NEXT)
@@ -387,11 +426,243 @@ def check_component_context_registration_files(
     )
 
 
+def _import_component_modules() -> None:
+    """Run every `component.py` the listed backends hold, registering its calls."""
+    if not next_framework_settings.COMPONENT_BACKENDS:
+        return
+    for backend in _checked_backends():
+        backend.import_component_modules()
+
+
+def _reserved_parameters(func: Callable[..., Any]) -> list[str]:
+    """Return the parameters of `func` named like a boundary option of the tag."""
+    try:
+        signature = cached_signature(func)
+    except (ValueError, TypeError):
+        return []
+    return [name for name in signature.parameters if name in RESERVED_OPTIONS]
+
+
+@register(NEXT)
+def check_component_context_reserved_parameters(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Warn about a `@component.context` parameter named like a boundary option."""
+    _import_component_modules()
+    reserved = ", ".join(sorted(RESERVED_OPTIONS))
+    return [
+        DjangoWarning(
+            f"@component.context {callable_name(entry.func)} in {file_path} takes "
+            f"the parameter {name!r}, which the component tag reserves for its "
+            "boundary options, so a call site cannot pass it as a prop.",
+            hint=f"Rename the parameter, the tag reserves {reserved}.",
+            obj=str(file_path),
+            id="next.W158",
+        )
+        for file_path, entries in component.registry.registered().items()
+        for entry in entries
+        for name in _reserved_parameters(entry.func)
+    ]
+
+
+def _self_calling_error(info: ComponentInfo) -> Path | None:
+    """Return the `error.djx` of `info` when one of its component tags names `info`."""
+    files = info.files
+    path = None if files is None else files.error
+    if path is None:
+        return None
+    try:
+        compiled = Template(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, TemplateSyntaxError):
+        return None
+    tags = cast(
+        "list[ComponentTagNode]", compiled.nodelist.get_nodes_by_type(ComponentTagNode)
+    )
+    return path if any(tag.name == info.name for tag in tags) else None
+
+
+@register(NEXT)
+def check_component_error_self_reference(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Refuse an `error.djx` that renders the component it is the error UI of."""
+    if not next_framework_settings.COMPONENT_BACKENDS:
+        return []
+    return [
+        Error(
+            f"The error.djx of component {info.name!r} renders {info.name!r} itself, "
+            "so a failure there is never caught by that component and reaches the "
+            "next error boundary up.",
+            hint="Render the error UI without the component, or move the shared "
+            "markup into a component of its own.",
+            obj=str(path),
+            id="next.E229",
+        )
+        for backend in _checked_backends()
+        for info in backend.iter_components()
+        if (path := _self_calling_error(info)) is not None
+    ]
+
+
+def _declared_mode(info: ComponentInfo) -> DeferMode | None:
+    """Return the mode the `component.defer` call of `info` declares, else `None`."""
+    options = defer_declarations.options(info.module_path)
+    return None if options is None else options.mode
+
+
+def _deferred(info: ComponentInfo) -> bool:
+    """Whether `info` defers, through a `component.defer` mode or a `loading.djx`."""
+    files = info.files
+    if files is not None and files.loading is not None:
+        return True
+    return _declared_mode(info) is not None
+
+
+def _deferred_components() -> list[ComponentInfo]:
+    """Return every component of the listed backends that defers its render."""
+    if not next_framework_settings.COMPONENT_BACKENDS:
+        return []
+    _import_component_modules()
+    return [
+        info
+        for backend in _checked_backends()
+        for info in backend.iter_components()
+        if _deferred(info)
+    ]
+
+
+def _site(info: ComponentInfo) -> str:
+    """Return the file a deferral warning points at, the module before the template."""
+    return str(info.module_path or info.template_path or "")
+
+
+@register(NEXT)
+def check_deferred_component_loading(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Warn about a deferred component with no loading UI of its own or by default.
+
+    An `inline` component renders in place on first paint, so it needs no loading UI.
+    """
+    if boundary_settings().loading_template is not None:
+        return []
+    return [
+        DjangoWarning(
+            f"Component {info.name!r} defers its render but has no loading.djx, and "
+            'BOUNDARIES["LOADING_TEMPLATE"] names no default, so its placeholder stays '
+            "empty until the content arrives.",
+            hint="Add a loading.djx beside the component or set "
+            'BOUNDARIES["LOADING_TEMPLATE"] to a template path.',
+            obj=_site(info),
+            id="next.W157",
+        )
+        for info in _deferred_components()
+        if (info.files is None or info.files.loading is None)
+        and _declared_mode(info) is not DeferMode.INLINE
+    ]
+
+
+def _long_token_age(info: ComponentInfo) -> int | None:
+    """Return the `tokens` `max_age` of `info` when it exceeds one day, else `None`."""
+    age = dict(token_overrides(info)).get("max_age")
+    return age if isinstance(age, int) and age > MAX_DURATION else None
+
+
+@register(NEXT)
+def check_component_token_age(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Warn about a deferred component whose token outlives one day (`next.W182`)."""
+    return [
+        DjangoWarning(
+            f"Component {info.name!r} declares a token max_age of {age} seconds, above "
+            "one day. A leaked reload token stays usable that long.",
+            hint="Keep tokens['max_age'] at 86400 or below.",
+            obj=_site(info),
+            id="next.W182",
+        )
+        for info in _deferred_components()
+        if (age := _long_token_age(info)) is not None
+    ]
+
+
+def _returned(node: ast.AST) -> Iterator[ast.expr]:
+    """Yield what the `return` statements of a body return, nested functions aside."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            continue
+        if isinstance(child, ast.Return) and child.value is not None:
+            yield child.value
+        yield from _returned(child)
+
+
+def _literal_keys(value: ast.expr) -> Iterator[str]:
+    """Yield the text keys a dict display or a `dict(...)` call spells out."""
+    if isinstance(value, ast.Dict):
+        for key in value.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                yield key.value
+    elif (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "dict"
+    ):
+        yield from (keyword.arg for keyword in value.keywords if keyword.arg)
+
+
+def _returned_keys(func: Callable[..., Any]) -> frozenset[str]:
+    """Return the keys a function visibly returns, none when its source is unread."""
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    except (OSError, TypeError, SyntaxError):
+        return frozenset()
+    return frozenset(
+        key for value in _returned(tree.body[0]) for key in _literal_keys(value)
+    )
+
+
+@register(NEXT)
+def check_keyless_context_props(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Warn about a keyless context that returns a declared prop (`next.W185`).
+
+    A call passing that prop always wins, so the render raises at every such call.
+    """
+    _import_component_modules()
+    messages: list[CheckMessage] = []
+    for file_path, entries in component.registry.registered().items():
+        options = defer_declarations.options(file_path)
+        props = frozenset(() if options is None else options.props)
+        for entry in entries:
+            if entry.key is not None or not props:
+                continue
+            clashing = sorted(props & _returned_keys(entry.func))
+            if not clashing:
+                continue
+            names = ", ".join(repr(name) for name in clashing)
+            messages.append(
+                DjangoWarning(
+                    f"The keyless @component.context {callable_name(entry.func)} in "
+                    f"{file_path} returns {names}, which the component declares as a "
+                    "prop, so every call that passes it raises "
+                    "ComponentContextConflictError.",
+                    hint="Register the value under @component.context(key), or drop "
+                    "it from the returned dict and let the call pass it.",
+                    obj=str(file_path),
+                    id="next.W185",
+                )
+            )
+    return messages
+
+
 __all__ = [
     "check_component_context_registration_files",
+    "check_component_context_reserved_parameters",
+    "check_component_error_self_reference",
     "check_component_module_imports",
     "check_component_py_no_pages_context",
+    "check_component_template_loader",
+    "check_component_token_age",
     "check_cross_root_component_name_conflicts",
+    "check_deferred_component_loading",
     "check_duplicate_component_names",
+    "check_keyless_context_props",
     "check_next_components_configuration",
 ]

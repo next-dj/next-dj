@@ -6,7 +6,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 from django.http import HttpRequest
@@ -15,7 +15,7 @@ from django.test import RequestFactory
 from next.conf import NextFrameworkSettings
 from next.deps import DependencyResolver
 from next.forms.markers import FormProvider
-from next.urls import FileRouterBackend, HttpRequestProvider, UrlKwargsProvider
+from next.urls import FilePageBackend, HttpRequestProvider, UrlKwargsProvider
 
 
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 def build_mock_http_request(*, path: str | None = "/test/", **attrs) -> MagicMock:
     """Return ``MagicMock(spec=HttpRequest)`` with optional ``path`` and attributes."""
     m = MagicMock(spec=HttpRequest)
+    m.META = {}
     if path is not None:
         m.path = path
     for key, val in attrs.items():
@@ -54,14 +55,6 @@ class SignalSender:
 
     A cached signal weak-references its sender, which a bare ``object()`` cannot be.
     """
-
-
-def typing_optional(cls: type) -> object:
-    """Return the `typing.Optional` spelling of `cls | None`, as user code may write it.
-
-    Subscripted, since the literal spelling is rewritten to PEP 604 on 3.12 and 3.13.
-    """
-    return Optional.__getitem__(cls)
 
 
 def next_framework_settings_stand_in(**overrides: object) -> SimpleNamespace:
@@ -133,6 +126,9 @@ def named_temp_py(content: str, *, suffix: str = ".py") -> Generator[Path, None,
         path.unlink(missing_ok=True)
 
 
+ROUTER_OFF = {"ENABLED": False}
+
+
 def file_router_config_entry(
     *,
     pages_dir: Path | str | None = None,
@@ -141,13 +137,13 @@ def file_router_config_entry(
     dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """One ``PAGE_BACKENDS`` entry for ``FileRouterBackend`` in page/layout tests."""
+    """One ``PAGE_BACKENDS`` entry for ``FilePageBackend`` in page/layout tests."""
     opts = dict(options or {})
     dirs_list: list[object] = list(dirs) if dirs is not None else []
     if pages_dir is not None and not app_dirs:
         dirs_list = [pages_dir, *dirs_list]
     return {
-        "BACKEND": "next.urls.FileRouterBackend",
+        "BACKEND": "next.urls.FilePageBackend",
         "PAGES_DIR": pages_dir_name,
         "APP_DIRS": app_dirs,
         "DIRS": dirs_list,
@@ -166,9 +162,9 @@ def file_router(
     app_dirs: bool = True,
     dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
-) -> FileRouterBackend:
-    """Build a ``FileRouterBackend`` from a complete ``PAGE_BACKENDS`` entry."""
-    return FileRouterBackend(
+) -> FilePageBackend:
+    """Build a ``FilePageBackend`` from a complete ``PAGE_BACKENDS`` entry."""
+    return FilePageBackend(
         file_router_config_entry(
             pages_dir_name=pages_dir, app_dirs=app_dirs, dirs=dirs, options=options
         )

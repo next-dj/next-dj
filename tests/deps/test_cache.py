@@ -2,7 +2,14 @@ import pytest
 from django.http import HttpRequest
 
 from next.deps import REQUEST_DEP_CACHE_ATTR, DependencyResolver, Depends, resolver
-from next.deps.cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, render_dep_cache
+from next.deps.cache import (
+    _CACHE_MISS,
+    _IN_PROGRESS,
+    DependencyCache,
+    RequestMemo,
+    render_dep_cache,
+)
+from next.deps.scope import RequestScope
 from tests.support import bound_dependency, build_mock_http_request
 
 
@@ -58,6 +65,16 @@ class TestDependencyCache:
         assert cache.get("dep") == "warm"
         cache.set("other", 1)
         assert backing["other"] == 1
+
+    def test_finished_is_a_read_only_view_without_in_progress_keys(self) -> None:
+        cache = DependencyCache({"dep": "warm"})
+        cache.mark_in_progress("pending")
+        finished = cache.finished()
+        assert dict(finished) == {"dep": "warm"}
+        cache.set("later", 2)
+        assert finished["later"] == 2
+        with pytest.raises(TypeError):
+            finished["dep"] = "cold"
 
 
 class TestCallableDependencyCache:
@@ -199,3 +216,25 @@ class TestRenderDepCache:
     def test_a_spec_mock_request_gets_a_fresh_dict(self) -> None:
         request = build_mock_http_request()
         assert render_dep_cache(request) is not render_dep_cache(request)
+
+
+class TestRequestMemoInstance:
+    """A component instance resolves in a layer of its render unit, never of a sibling."""
+
+    def test_an_instance_layers_the_scope_and_keeps_the_policy(self) -> None:
+        scope = RequestScope({"user": "ann"})
+        memo = RequestMemo(scope, frozenset({"user"}), share_all=True)
+        instance = memo.instance()
+        assert instance.scope._parent is scope
+        assert instance.unit is scope
+        assert instance.shared == memo.shared
+        assert instance.share_all
+        assert instance.scope.get("user") == "ann"
+
+    def test_a_nested_instance_layers_the_unit_and_not_its_parent(self) -> None:
+        scope = RequestScope()
+        outer = RequestMemo(scope).instance()
+        inner = outer.instance()
+        assert inner.scope._parent is scope
+        assert inner.scope is not outer.scope
+        assert inner.unit is scope

@@ -1,11 +1,50 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireRemoved, morph } from "./morph";
+import { between, fireRemoved, morph, morphRange } from "./morph";
+import type { Bounds } from "./morph";
 import { createDiagnostics } from "./diagnostics";
+import { markBusy } from "./protocol";
 
 function mount(html: string): Element {
   document.body.innerHTML = html;
   return document.body.firstElementChild!;
 }
+
+describe("morph pairing cost", () => {
+  // Each sibling the hard-match scan visits reads its tag, so the reads count the scan.
+  function tagReads(run: () => void): number {
+    const read = vi.spyOn(Element.prototype, "tagName", "get");
+    run();
+    const reads = read.mock.calls.length;
+    read.mockRestore();
+    return reads;
+  }
+
+  function rows(count: number, prefix = ""): string {
+    return Array.from({ length: count }, (_, index) =>
+      prefix ? `<li id="${prefix}${index}">${index}</li>` : `<li>${index}</li>`,
+    ).join("");
+  }
+
+  it("pairs a list of rows without ids in time linear in its length", () => {
+    const small = mount(`<ul>${rows(50)}</ul>`);
+    const fifty = tagReads(() => morph(small, `<ul>${rows(50)}</ul>`));
+    const large = mount(`<ul>${rows(500)}</ul>`);
+    const five = tagReads(() => morph(large, `<ul>${rows(500)}</ul>`));
+    expect(five).toBeLessThanOrEqual(fifty * 11);
+    expect(large.children).toHaveLength(500);
+  });
+
+  it("still finds a keyed row the server moved further down", () => {
+    const list = mount(
+      `<ul><li>x</li><li id="a">a</li><li id="b">b</li><li id="c">c</li></ul>`,
+    );
+    const c = list.querySelector("#c");
+    morph(list, `<ul><li id="c">c2</li><li id="a">a</li><li id="b">b</li></ul>`);
+    expect(list.firstElementChild).toBe(c);
+    expect(c!.textContent).toBe("c2");
+    expect(list.children).toHaveLength(3);
+  });
+});
 
 describe("morph node reuse", () => {
   beforeEach(() => {
@@ -144,7 +183,7 @@ describe("morph attribute sync", () => {
     target.addEventListener("next:morph-attribute", (e) => {
       if ((e as CustomEvent).detail.name === "open") e.preventDefault();
     });
-    morph(target, '<details id="d"></details>');
+    morph(target, '<details id="d"></details>', { events: true });
     expect(target.hasAttribute("open")).toBe(true);
   });
 
@@ -156,8 +195,27 @@ describe("morph attribute sync", () => {
         e.preventDefault();
       }
     });
-    morph(target, '<div id="x" class="new"></div>');
+    morph(target, '<div id="x" class="new"></div>', { events: true });
     expect(target.getAttribute("class")).toBe("old");
+  });
+
+  it("keeps the busy mark of an element a request still holds", () => {
+    const target = mount('<div id="x" data-next-zone="z"><p>old</p></div>');
+    const release = markBusy([target]);
+    morph(target, '<div id="x" data-next-zone="z" aria-busy="false"><p>new</p></div>');
+    expect(target.textContent).toBe("new");
+    expect(target.hasAttribute("data-next-busy")).toBe(true);
+    expect(target.getAttribute("aria-busy")).toBe("true");
+    release();
+    expect(target.hasAttribute("data-next-busy")).toBe(false);
+    expect(target.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("syncs busy attributes on an element no request holds", () => {
+    const target = mount('<div id="x" data-next-busy aria-busy="true"></div>');
+    morph(target, '<div id="x" aria-busy="false"></div>');
+    expect(target.hasAttribute("data-next-busy")).toBe(false);
+    expect(target.getAttribute("aria-busy")).toBe("false");
   });
 
   it("a cancelled remove keeps the stale attribute", () => {
@@ -165,7 +223,7 @@ describe("morph attribute sync", () => {
     target.addEventListener("next:morph-attribute", (e) => {
       if ((e as CustomEvent).detail.mutationType === "remove") e.preventDefault();
     });
-    morph(target, '<div id="x"></div>');
+    morph(target, '<div id="x"></div>', { events: true });
     expect(target.getAttribute("data-stale")).toBe("1");
   });
 });
@@ -346,12 +404,23 @@ describe("morph hooks and events", () => {
     document.body.innerHTML = "";
   });
 
+  it("fires no per-node event unless the caller asks for them", () => {
+    const target = mount('<div id="r" class="a"><span id="s">old</span></div>');
+    const seen = vi.fn();
+    target.addEventListener("next:morph-element", seen);
+    target.addEventListener("next:morph-attribute", seen);
+    morph(target, '<div id="r" class="b"><span id="s">new</span></div>');
+    expect(seen).not.toHaveBeenCalled();
+    expect(target.className).toBe("b");
+    expect(target.querySelector("#s")!.textContent).toBe("new");
+  });
+
   it("a cancelled next:morph-element skips the pair", () => {
     const target = mount('<div id="r"><span id="s">old</span></div>');
     target.addEventListener("next:morph-element", (e) => {
       if ((e.target as Element).id === "s") e.preventDefault();
     });
-    morph(target, '<div id="r"><span id="s">new</span></div>');
+    morph(target, '<div id="r"><span id="s">new</span></div>', { events: true });
     expect(target.querySelector("#s")!.textContent).toBe("old");
   });
 
@@ -536,5 +605,80 @@ describe("morph hooks and events", () => {
     expect(() => morph(target, '<ul id="l"><li id="dup">a2</li></ul>')).not.toThrow();
     expect(target.querySelector("#dup")).toBe(first);
     expect(target.querySelectorAll("li")).toHaveLength(1);
+  });
+});
+
+describe("morphRange", () => {
+  function range(): Bounds {
+    document.body.innerHTML =
+      '<header id="top">chrome</header><!--a--><main id="m"><input id="q">' +
+      '<iframe id="f"></iframe></main><p>gone</p><!--b--><footer id="end">x</footer>';
+    const [start, end] = [...document.body.childNodes].filter(
+      (node) => node.nodeType === Node.COMMENT_NODE,
+    );
+    return [document.body, start!, end!];
+  }
+
+  function fragment(html: string): DocumentFragment {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return template.content;
+  }
+
+  it("morphs a bounded run and keeps the chrome and reused nodes in place", () => {
+    const bounds = range();
+    const main = document.getElementById("m")!;
+    const frame = document.getElementById("f")!;
+    const input = document.getElementById("q") as HTMLInputElement;
+    input.focus();
+    const removed: string[] = [];
+    const record = (event: Event): number =>
+      removed.push((event.target as Element).tagName);
+    document.addEventListener("next:removed", record);
+    const moves = vi.fn();
+    morphRange(
+      bounds,
+      fragment('<main id="m"><input id="q"><iframe id="f"></iframe><b>new</b></main>'),
+      { move: moves },
+    );
+    document.removeEventListener("next:removed", record);
+    expect(document.getElementById("m")).toBe(main);
+    expect(document.getElementById("f")).toBe(frame);
+    expect(frame.parentNode).toBe(main);
+    expect(document.activeElement).toBe(input);
+    expect(moves).not.toHaveBeenCalled();
+    expect(main.querySelector("b")!.textContent).toBe("new");
+    expect(removed).toEqual(["P"]);
+    expect(document.getElementById("top")!.textContent).toBe("chrome");
+    expect(document.getElementById("end")!.textContent).toBe("x");
+    expect(between(bounds).map((el) => el.id)).toEqual(["m"]);
+  });
+
+  it("never matches a node past the end marker", () => {
+    const bounds = range();
+    const footer = document.getElementById("end")!;
+    morphRange(bounds, fragment('<footer id="end">inside</footer>'));
+    expect(document.body.lastElementChild).toBe(footer);
+    expect(footer.textContent).toBe("x");
+    const inside = between(bounds);
+    expect(inside).toHaveLength(1);
+    expect(inside[0]!.textContent).toBe("inside");
+  });
+
+  it("inserts before the end marker when the range is empty", () => {
+    document.body.innerHTML = "<!--a--><!--b--><p>after</p>";
+    const [start, end] = [...document.body.childNodes];
+    morphRange([document.body, start!, end!], fragment("<i>in</i>"));
+    expect(document.body.innerHTML).toBe("<!--a--><i>in</i><!--b--><p>after</p>");
+  });
+
+  it("covers every child of the parent when both edges are open", () => {
+    document.body.innerHTML = '<div id="keep">a</div><span>b</span>';
+    const keep = document.getElementById("keep");
+    const bounds: Bounds = [document.body, null, null];
+    morphRange(bounds, fragment('<div id="keep">c</div>'));
+    expect(document.getElementById("keep")).toBe(keep);
+    expect(document.body.innerHTML).toBe('<div id="keep">c</div>');
+    expect(between(bounds)).toEqual([keep]);
   });
 });

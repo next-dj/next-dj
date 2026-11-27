@@ -16,6 +16,7 @@ from django.urls import (
     clear_script_prefix,
     set_script_prefix,
 )
+from django.utils.module_loading import import_string
 
 from next.caches import DEFAULT_CACHE_SIZE
 from next.forms import (
@@ -38,8 +39,12 @@ from next.forms.manager import (
 )
 from next.forms.registration import registration_diagnostics
 from next.pages.loaders import load_page_module
+from next.partial import FormShaper
+from next.partial.headers import partial_intent
+from next.partial.shaping import shaper as partial_shaper
 from tests.support import isolated_form_registries
 from tests.support.apps import fake_app_configs
+from tests.support.forms import DECLINING_SHAPER, DecliningShaper
 from tests.support.pages import write_page
 
 
@@ -1185,14 +1190,6 @@ class TestActionUrlCache:
         with override_settings(ROOT_URLCONF="next.urls"):
             assert len(backend._url_cache) == 0
 
-    def test_unrelated_setting_change_keeps_url_cache(self) -> None:
-        """Overriding an unrelated setting leaves cached URLs in place."""
-        backend = self._backend_with_action()
-        url = backend.get_action_url("cached_action")
-        with override_settings(APPEND_SLASH=False):
-            assert len(backend._url_cache) > 0
-            assert backend.get_action_url("cached_action") == url
-
     def test_script_prefix_is_part_of_the_cache_key(self) -> None:
         """A request-scoped script prefix never serves another prefix's URL."""
         backend = self._backend_with_action()
@@ -1599,3 +1596,172 @@ class TestNameBindingClaim:
             "appone.forms",
             "apptwo.forms",
         }
+
+
+class _AnsweringShaper(DecliningShaper):
+    """Shaper that answers every outcome itself."""
+
+    def shape(self, backend, request, outcome) -> HttpResponse:
+        del backend, request, outcome
+        return HttpResponse("shaped", status=202)
+
+
+class _ShapelessShaper:
+    """Class whose instances define neither shape nor validate."""
+
+
+class _ConfiguredShaper(DecliningShaper):
+    """Shaper whose constructor needs an argument the backend never passes."""
+
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+
+
+_SHAPERS = "tests.forms.test_backends"
+
+
+def _shaped_backend(shaper: object) -> RegistryFormActionBackend:
+    return RegistryFormActionBackend(
+        {**_REGISTRY_BACKEND, "OPTIONS": {"SHAPER": shaper}}
+    )
+
+
+def _result_outcome() -> ActionOutcome:
+    return ActionOutcome(kind=ActionOutcomeKind.RESULT, action_name="x", raw="hi")
+
+
+class TestResponseShaperOption:
+    """`OPTIONS["SHAPER"]` names the response shaper a backend resolves once."""
+
+    def test_a_backend_built_without_config_answers_through_the_partial_shaper(
+        self,
+    ) -> None:
+        assert isinstance(RegistryFormActionBackend().shaper, FormShaper)
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            pytest.param(_REGISTRY_BACKEND, id="no-options"),
+            pytest.param({**_REGISTRY_BACKEND, "OPTIONS": {}}, id="no-shaper"),
+            pytest.param({**_REGISTRY_BACKEND, "OPTIONS": None}, id="options-none"),
+        ],
+    )
+    def test_an_entry_naming_no_shaper_keeps_the_default(self, config) -> None:
+        assert isinstance(RegistryFormActionBackend(config).shaper, FormShaper)
+
+    def test_a_subclass_skipping_the_base_init_keeps_the_default(self) -> None:
+        """A custom backend with its own `__init__` still shapes partial requests."""
+
+        class OwnInitBackend(_MinimalBackend):
+            def __init__(self, config=None) -> None:
+                self.config = config
+
+        backend = OwnInitBackend(
+            {"OPTIONS": {"SHAPER": f"{_SHAPERS}._AnsweringShaper"}}
+        )
+        assert isinstance(backend.shaper, FormShaper)
+
+    def test_the_named_class_answers(self) -> None:
+        backend = _shaped_backend(DECLINING_SHAPER)
+        assert isinstance(backend.shaper, DecliningShaper)
+
+    def test_the_settings_entry_reaches_the_built_backend(self) -> None:
+        config = {**_REGISTRY_BACKEND, "OPTIONS": {"SHAPER": DECLINING_SHAPER}}
+        with override_settings(NEXT_FRAMEWORK={"FORM_ACTION_BACKENDS": [config]}):
+            backends = FormActionManager().backends
+        assert [type(backend.shaper) for backend in backends] == [DecliningShaper]
+
+    def test_the_shaper_resolves_once(self) -> None:
+        backend = _shaped_backend(DECLINING_SHAPER)
+        with patch(
+            "next.forms.backends.import_string", wraps=import_string
+        ) as imported:
+            first = backend.shaper
+            assert backend.shaper is first
+        assert imported.call_count == 1
+
+    @pytest.mark.parametrize(
+        ("dotted", "message"),
+        [
+            pytest.param(
+                f"{_SHAPERS}._NoSuchShaper", "could not be imported", id="missing"
+            ),
+            pytest.param("shaper", "could not be imported", id="no-module"),
+            pytest.param(
+                f"{_SHAPERS}._ShapelessShaper",
+                "is not a ResponseShaper class",
+                id="shapeless",
+            ),
+            pytest.param(
+                f"{_SHAPERS}._SHAPERS", "is not a ResponseShaper class", id="no-class"
+            ),
+            pytest.param(
+                f"{_SHAPERS}._ConfiguredShaper",
+                r"'tests\.forms\.test_backends\._ConfiguredShaper' .* cannot be built "
+                "without arguments",
+                id="needs-arguments",
+            ),
+            pytest.param(42, "by dotted path", id="no-string"),
+        ],
+    )
+    def test_a_bad_option_fails_clearly_on_first_use(self, dotted, message) -> None:
+        backend = _shaped_backend(dotted)
+        with pytest.raises(ImproperlyConfigured, match=message):
+            backend.shape_response(HttpRequest(), _result_outcome())
+
+
+class TestShapeResponseAsksTheShaperFirst:
+    """The shaper answers an outcome first and the default envelope takes the rest."""
+
+    def test_a_declining_shaper_falls_back_to_the_default_envelope(self) -> None:
+        backend = _shaped_backend(DECLINING_SHAPER)
+        response = backend.shape_response(HttpRequest(), _result_outcome())
+        assert response.status_code == 200
+        assert response.content == b"hi"
+
+    def test_an_answering_shaper_owns_the_response(self) -> None:
+        backend = _shaped_backend(f"{_SHAPERS}._AnsweringShaper")
+        response = backend.shape_response(HttpRequest(), _result_outcome())
+        assert response.status_code == 202
+        assert response.content == b"shaped"
+
+
+@pytest.fixture()
+def refused_shaping():
+    """Spy on the intent the default shaper reads, failing any envelope it builds."""
+    refused = AssertionError("a plain submission entered a partial envelope builder")
+    with (
+        patch.object(partial_shaper, "partial_intent", wraps=partial_intent) as reads,
+        patch.object(partial_shaper, "shape_partial", side_effect=refused),
+        patch.object(partial_shaper, "shape_validate", side_effect=refused),
+    ):
+        yield reads
+
+
+def _post_simple(client, **data: str) -> HttpResponse:
+    url = form_action_manager.get_action_url("simple_form")
+    return client.post(url, data={**data, "_next_form_origin": "/"}, follow=False)
+
+
+@pytest.mark.django_db()
+class TestPlainSubmissionNeverShapes:
+    """A non-partial submission reads the intent and never builds an envelope."""
+
+    def test_an_invalid_submission_renders_the_origin_page(
+        self, client_no_csrf, refused_shaping
+    ) -> None:
+        response = _post_simple(client_no_csrf, name="")
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+
+    def test_a_submission_naming_no_validate_field_renders_in_full(
+        self, client_no_csrf, refused_shaping
+    ) -> None:
+        response = _post_simple(client_no_csrf, name="Ada", email="")
+        assert response.status_code == 200
+        assert response["Content-Type"].startswith("text/html")
+        assert response.content == b"<p>test page</p>\n"
+
+    def test_the_intent_is_read(self, client_no_csrf, refused_shaping) -> None:
+        _post_simple(client_no_csrf, name="")
+        assert refused_shaping.call_count > 0

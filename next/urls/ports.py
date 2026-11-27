@@ -1,4 +1,4 @@
-"""Router access implementation bound into the `next.ports` slot at app startup.
+"""Route access implementation bound into the `next.ports` slot at app startup.
 
 Importing `next.pages` here would loop, so the watcher and checks read this port.
 """
@@ -8,10 +8,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, override
 
 from next.backends import instantiate_backend, resolve_backend_class
-from next.ports import RouterAccess
+from next.ports import RouteAccess
 
-from .backends import RouterBackend
-from .manager import RouterManager
+from .backends import PageBackend
+from .manager import RouteManager
 from .parser import default_url_parser
 from .routes import page_route
 
@@ -22,20 +22,20 @@ if TYPE_CHECKING:
     from .parser import URLPatternParser
 
 
-class RouterAccessImpl(RouterAccess):
-    """Builds routers and router managers straight from the urls area."""
+class RouteAccessImpl(RouteAccess):
+    """Builds page backends and route managers straight from the urls area."""
 
     @override
-    def create_backend(self, config: dict[str, Any]) -> RouterBackend:
-        """Return the router one `PAGE_BACKENDS` entry names."""
+    def create_backend(self, config: dict[str, Any]) -> PageBackend:
+        """Return the page backend one `PAGE_BACKENDS` entry names."""
         return instantiate_backend(
-            resolve_backend_class(config, base=RouterBackend), config
+            resolve_backend_class(config, base=PageBackend), config
         )
 
     @override
-    def create_manager(self) -> RouterManager:
+    def create_manager(self) -> RouteManager:
         """Return a fresh manager over every configured router."""
-        return RouterManager()
+        return RouteManager()
 
     @override
     def url_parser(self) -> URLPatternParser:
@@ -49,4 +49,4 @@ class RouterAccessImpl(RouterAccess):
         return None if route is None else route.kwargs
 
 
-__all__ = ["RouterAccessImpl"]
+__all__ = ["RouteAccessImpl"]

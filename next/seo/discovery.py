@@ -16,7 +16,7 @@ from next.discovery import routed_page_trees
 from next.pages.access import routed_pages
 from next.pages.responses import cache_control
 from next.stamps import all_fresh, snapshot
-from next.urls.manager import router_manager, seo_routes_version
+from next.urls.manager import route_manager, seo_routes_version
 from next.utils import TreeSource, app_holding, load_tree_source, walk_page_tree
 
 from .errors import SeoSourceImportError
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from next.pages.responses import CacheControl
-    from next.urls import RouterManager
+    from next.urls import RouteManager
     from next.utils import PageRoot
 
     from .registry import SitemapItemsEntry
@@ -170,7 +170,7 @@ def _file(path: Path) -> Path | None:
     return path if path.is_file() else None
 
 
-def discover_seo_roots(manager: RouterManager) -> tuple[SeoRoot, ...]:
+def discover_seo_roots(manager: RouteManager) -> tuple[SeoRoot, ...]:
     """Return every page tree in router order, each with its SEO sources loaded.
 
     The trails are sorted, so their order never depends on the directory listing.
@@ -231,7 +231,7 @@ def page_tree_roots() -> tuple[SeoRoot, ...]:
         version = seo_routes_version.value
         roots = _roots_memo.current(version)
         if roots is None:
-            roots = discover_seo_roots(router_manager)
+            roots = discover_seo_roots(route_manager)
             _roots_memo.held = (version, roots)
         return roots
 

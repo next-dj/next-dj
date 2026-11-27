@@ -5,8 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from next.caches import PageCache
-from next.introspect import MisattributedContext, MisattributionLog, callable_name
+from next.introspect import (
+    MisattributedContext,
+    MisattributionLog,
+    callable_name,
+    is_coroutine_callable,
+    refuse_async,
+)
 from next.pages.errors import PageMetadataConflictError
+from next.pages.paths import page_path_info
 from next.pages.signals import metadata_registered
 
 
@@ -22,6 +29,7 @@ class PageMetadataEntry(NamedTuple):
 
     func: Callable[..., Any]
     inherit: bool
+    is_async: bool = False
 
 
 class MetadataRegistrations(NamedTuple):
@@ -50,8 +58,9 @@ class PageMetadataRegistry:
     A per-file stamp changes only when a registration changes the callable a chain runs.
     """
 
-    def __init__(self) -> None:
-        """Start with an empty registry and no memoised chain."""
+    def __init__(self, on_change: Callable[[], None] | None = None) -> None:
+        """Start with an empty registry, calling `on_change` after every write."""
+        self._on_change = on_change
         self._entries: dict[Path, PageMetadataEntry] = {}
         self._misattributions = MisattributionLog()
         self._version = 0
@@ -64,8 +73,10 @@ class PageMetadataRegistry:
         return self._version
 
     def _bump(self) -> None:
-        """Increment the version after a write."""
+        """Increment the version after a write, then report the write."""
         self._version += 1
+        if self._on_change is not None:
+            self._on_change()
 
     def _stamp(self, file_path: Path) -> None:
         """Set the stamp of `file_path` above every stamp issued so far."""
@@ -117,6 +128,22 @@ class PageMetadataRegistry:
         """Return the callable registered for `file_path`, if any."""
         return self._entries.get(file_path)
 
+    def awaits(self, file_path: Path) -> bool:
+        """Return whether the chain of `file_path` may run an async callable.
+
+        The page's own callable counts, and an ancestor's only under `inherit=True`.
+        """
+        entries = self._entries
+        for ancestor in page_path_info(file_path).ancestors:
+            entry = entries.get(ancestor)
+            if (
+                entry is not None
+                and entry.is_async
+                and (entry.inherit or ancestor == file_path)
+            ):
+                return True
+        return False
+
     def register(
         self, file_path: Path, func: Callable[..., Any], *, inherit: bool = False
     ) -> None:
@@ -124,6 +151,9 @@ class PageMetadataRegistry:
 
         A re-executed module registers the same name again, which keeps the stamp.
         """
+        is_async = is_coroutine_callable(func)
+        if not is_async:
+            refuse_async(func, "@page.metadata callable")
         existing = self._entries.get(file_path)
         if existing is not None and _one_run(existing.func, func):
             detail = (
@@ -131,7 +161,9 @@ class PageMetadataRegistry:
                 f"{callable_name(existing.func)!r} and {callable_name(func)!r}"
             )
             raise PageMetadataConflictError(file_path, detail)
-        self._entries[file_path] = PageMetadataEntry(func=func, inherit=inherit)
+        self._entries[file_path] = PageMetadataEntry(
+            func=func, inherit=inherit, is_async=is_async
+        )
         # A chain build reads the stamps before the entries, so the entry goes first.
         if (
             existing is None

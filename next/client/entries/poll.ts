@@ -2,4 +2,4 @@
 
 import { createPoller } from "../poll";
 
-window.Next._land("poll", createPoller);
+window.Next._extend("poll", () => createPoller, __BUILD__);

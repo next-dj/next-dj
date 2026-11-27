@@ -1,3 +1,6 @@
+import importlib
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -55,6 +58,34 @@ def counted_ping():
 """
 
 
+_PACKAGED_PAGE = """
+from next.forms import Form, action
+
+
+class ContactForm(Form):
+    pass
+
+
+@action("send")
+def send() -> None:
+    return None
+"""
+_PACKAGE = "collision_app"
+
+
+@pytest.fixture()
+def packaged_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Write a page tree inside an importable package and drop its modules after."""
+    package = tmp_path / _PACKAGE
+    _write_page(package / "__init__.py", "")
+    _write_page(package / "contact" / "__init__.py", "")
+    _write_page(package / "contact" / "page.py", _PACKAGED_PAGE)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    yield package
+    for name in [name for name in sys.modules if name.startswith(_PACKAGE)]:
+        del sys.modules[name]
+
+
 class TestEagerLoadPages:
     """eager_load_pages imports page.py modules under the directory."""
 
@@ -105,6 +136,18 @@ class TestEagerLoadPages:
         assert CONTEXT_CALLS == ["counted"]
         assert collisions == []
 
+    def test_a_page_imported_by_its_dotted_path_is_no_collision(
+        self, packaged_page: Path
+    ) -> None:
+        with (
+            override_settings(BASE_DIR=packaged_page.parent),
+            isolated_form_registries(),
+        ):
+            eager_load_pages(packaged_page)
+            importlib.import_module(f"{_PACKAGE}.contact.page")
+            collisions = check_form_action_collisions()
+        assert collisions == []
+
     def test_clear_loaded_dirs_allows_reload(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page.py", "VALUE = 7\n")
         eager_load_pages(tmp_path)
@@ -114,9 +157,9 @@ class TestEagerLoadPages:
 
 
 def test_clear_loaded_dirs_drops_the_page_scan(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(discovery._router_manager_cache, "pages", (object(), []))
+    monkeypatch.setattr(discovery._route_manager_cache, "pages", (object(), []))
     clear_loaded_dirs()
-    assert discovery._router_manager_cache.pages is None
+    assert discovery._route_manager_cache.pages is None
 
 
 class _RecordingBackend(DummyComponentsBackend):
@@ -206,11 +249,11 @@ class TestEagerLoadComponentsPageTrees:
     ) -> None:
         manager = _StubManager()
         folder = tmp_path / "panels" / "_components"
-        router_manager = MagicMock()
-        router_manager.backends = (object(),)
+        route_manager = MagicMock()
+        route_manager.backends = (object(),)
 
         monkeypatch.setattr(loaders, "components_manager", manager)
-        monkeypatch.setattr(loaders, "get_router_manager", lambda: (router_manager, []))
+        monkeypatch.setattr(loaders, "get_route_manager", lambda: (route_manager, []))
         monkeypatch.setattr(
             loaders,
             "iter_page_tree_component_folders",
@@ -220,11 +263,11 @@ class TestEagerLoadComponentsPageTrees:
 
         assert manager.walked == [(folder, tmp_path, "panels")]
 
-    def test_no_router_manager_registers_nothing(self, monkeypatch) -> None:
+    def test_no_route_manager_registers_nothing(self, monkeypatch) -> None:
         manager = _StubManager()
 
         monkeypatch.setattr(loaders, "components_manager", manager)
-        monkeypatch.setattr(loaders, "get_router_manager", lambda: (None, []))
+        monkeypatch.setattr(loaders, "get_route_manager", lambda: (None, []))
         eager_load_components()
 
         assert manager.walked == []

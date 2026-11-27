@@ -1,37 +1,53 @@
 from collections.abc import Mapping, Sequence
 
-from django.http import HttpRequest
 from django.urls import NoReverseMatch, reverse
 
 from next import component
 
 
 _HOVER_ACCENT = "hover:bg-accent hover:text-accent-foreground"
+_PAGE = "aria-[current=page]:"
+_ANCESTOR = "data-[next-current=ancestor]:"
 
-VARIANTS: dict[str, dict[str, str]] = {
-    "tabs": {
-        "base": (
-            "inline-flex items-center justify-center rounded-md px-3 py-1.5"
-            " text-sm transition-colors"
-        ),
-        "active": (
-            "bg-background text-foreground font-semibold shadow-sm border border-border"
-        ),
-        "inactive": f"font-medium text-muted-foreground {_HOVER_ACCENT}",
-    },
-    "pills": {
-        "base": (
-            "inline-flex items-center rounded-full px-3 py-1.5 text-sm"
-            " transition-colors"
-        ),
-        "active": "bg-primary text-primary-foreground font-semibold",
-        "inactive": f"font-medium text-muted-foreground {_HOVER_ACCENT}",
-    },
-    "bar": {
-        "base": "inline-flex items-center text-sm transition-colors",
-        "active": "font-semibold text-foreground",
-        "inactive": "font-medium text-muted-foreground hover:text-foreground",
-    },
+
+def _marked(prefix: str, *tokens: str) -> str:
+    """Return each token behind the variant that matches one mark of the router."""
+    return " ".join(prefix + token for token in tokens)
+
+
+VARIANTS: dict[str, str] = {
+    "tabs": " ".join(
+        (
+            "inline-flex items-center justify-center rounded-md border",
+            "border-transparent px-3 py-1.5 text-sm font-medium",
+            "text-muted-foreground transition-colors",
+            _HOVER_ACCENT,
+            _marked(
+                _PAGE,
+                "border-border",
+                "bg-background",
+                "font-semibold",
+                "text-foreground",
+                "shadow-sm",
+            ),
+        )
+    ),
+    "pills": " ".join(
+        (
+            "inline-flex items-center rounded-full px-3 py-1.5 text-sm font-medium",
+            "text-muted-foreground transition-colors",
+            _HOVER_ACCENT,
+            _marked(_PAGE, "bg-primary", "font-semibold", "text-primary-foreground"),
+        )
+    ),
+    "bar": " ".join(
+        (
+            "inline-flex items-center text-sm font-medium text-muted-foreground",
+            "transition-colors hover:text-foreground",
+            _marked(_PAGE, "font-semibold", "text-foreground"),
+            _marked(_ANCESTOR, "font-semibold", "text-foreground"),
+        )
+    ),
 }
 
 
@@ -57,22 +73,7 @@ def href(
         return "#"
 
 
-@component.context("is_active")
-def is_active(request: HttpRequest, url_name: str = "", active_when: str = "") -> bool:
-    match = getattr(request, "resolver_match", None)
-    if match is None:
-        return False
-    view_name = match.view_name
-    if active_when:
-        return active_when in view_name
-    return view_name == url_name
-
-
 @component.context("classes")
-def classes(*, is_active: bool, variant: str = "tabs", extra: str = "") -> str:
-    style = VARIANTS.get(variant, VARIANTS["tabs"])
-    state = style["active"] if is_active else style["inactive"]
-    parts = [style["base"], state]
-    if extra:
-        parts.append(extra)
-    return " ".join(parts)
+def classes(variant: str = "tabs", extra: str = "") -> str:
+    """Return the class string of `variant`, styled from the marks the router writes."""
+    return f"{VARIANTS.get(variant, VARIANTS['tabs'])} {extra}".rstrip()

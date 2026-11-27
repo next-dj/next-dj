@@ -140,7 +140,7 @@ The `notes` Django app does not own its HTML shell. The root template lives unde
 ```python
 "PAGE_BACKENDS": [
     {
-        "BACKEND": "next.urls.FileRouterBackend",
+        "BACKEND": "next.urls.FilePageBackend",
         "APP_DIRS": True,
         "DIRS": [BASE_DIR / "root_pages"],
         "PAGES_DIR": "pages",
@@ -266,7 +266,7 @@ def workspace_meta(tenant: Tenant = Depends("scope")) -> MetadataDict:
 
 - [`next/static/backends.py`](../../next/static/backends.py): the `StaticBackend` ABC with the `asset_url` hook and its `request=` kwarg, plus the `resolve_url` hook this example inherits.
 - [`next/static/manager.py`](../../next/static/manager.py): the `StaticManager.inject` call site that threads `request`.
-- [`next/urls/backends.py`](../../next/urls/backends.py): the `FileRouterBackend.DIRS` handling that makes `root_pages/` work.
+- [`next/urls/backends.py`](../../next/urls/backends.py): the `FilePageBackend.DIRS` handling that makes `root_pages/` work.
 - [`next/components/backends.py`](../../next/components/backends.py): the matching `FileComponentsBackend.DIRS` handling for `root_blocks/`.
 - [`next/deps/objects.py`](../../next/deps/objects.py): `DObject` and the provider that loads its row through `visible_to(scope)`.
 - [`next/pages/registry.py`](../../next/pages/registry.py): the `inherit_context` walk that lifts `tenant` to every descendant page.

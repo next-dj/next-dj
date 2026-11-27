@@ -3,6 +3,10 @@
 import copy
 from dataclasses import dataclass, field, fields
 
+from next.conf.transactions import atomic_choice
+from next.transactions import AtomicOverride
+from next.transactions.policy import override_of, override_problem
+
 
 @dataclass(slots=True)
 class RegistrationDiagnostics:
@@ -12,6 +16,7 @@ class RegistrationDiagnostics:
     invalid_meta_scope: list[tuple[str, str]] = field(default_factory=list)
     invalid_action_scope: list[tuple[str, str]] = field(default_factory=list)
     invalid_transport: list[tuple[str, str]] = field(default_factory=list)
+    invalid_atomic: list[tuple[str, str]] = field(default_factory=list)
     instance_from_url_unknown_field: list[tuple[str, str, str]] = field(
         default_factory=list
     )
@@ -51,4 +56,23 @@ _BUFFER_NAMES: tuple[str, ...] = tuple(
 registration_diagnostics = RegistrationDiagnostics()
 
 
-__all__ = ["RegistrationDiagnostics", "registration_diagnostics"]
+def checked_atomic(value: object, owner: str) -> AtomicOverride | None:
+    """Return the override an `atomic` declaration makes, recording an unusable one."""
+    if value is None:
+        return None
+    if atomic_choice(value):
+        return AtomicOverride(atomic=value)
+    if isinstance(value, AtomicOverride):
+        problem = override_problem(value.atomic, value.aliases)
+        if problem is None:
+            return override_of(value.atomic, value.aliases)
+    else:
+        problem = (
+            "atomic must be True, False, 'writes', None or an AtomicOverride, "
+            f"got {type(value).__name__!r}"
+        )
+    registration_diagnostics.invalid_atomic.append((owner, problem))
+    return None
+
+
+__all__ = ["RegistrationDiagnostics", "checked_atomic", "registration_diagnostics"]

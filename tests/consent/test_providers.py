@@ -22,7 +22,7 @@ class TestConsentProvider:
 
     def test_the_request_consent_is_injected_and_the_response_varies(self) -> None:
         request = RequestFactory().get("/")
-        request.COOKIES["next_consent"] = "1:analytics:1"
+        request.COOKIES["next_consent"] = "2:analytics:1"
         with override_next_settings(CONSENT=ANALYTICS):
             resolved = DependencyResolver().resolve_dependencies(
                 _handler, request=request
@@ -34,7 +34,7 @@ class TestConsentProvider:
 
     def test_a_shared_render_sees_an_undecided_visitor(self) -> None:
         request = RequestFactory().get("/")
-        request.COOKIES["next_consent"] = "1:analytics:1"
+        request.COOKIES["next_consent"] = "2:analytics:1"
         mark_shared_render(request)
         resolved = DependencyResolver().resolve_dependencies(_handler, request=request)
         assert resolved["consent"] == UNDECIDED
@@ -47,7 +47,7 @@ class TestConsentProvider:
 
     def test_a_server_kept_off_the_cookie_sees_an_undecided_visitor(self) -> None:
         request = RequestFactory().get("/")
-        request.COOKIES["next_consent"] = "1:analytics:1"
+        request.COOKIES["next_consent"] = "2:analytics:1"
         with override_next_settings(CONSENT={"SERVER_RENDER": False}):
             resolved = DependencyResolver().resolve_dependencies(
                 _handler, request=request

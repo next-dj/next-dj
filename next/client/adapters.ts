@@ -5,12 +5,13 @@
 import type { HistoryAdapter } from "./apply";
 import type { SessionStore } from "./assets";
 import type { PopStateAdapter } from "./layers";
+import type { RouterHost } from "./router";
 import type { Move } from "./morph";
 import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
 import type { WebSocketAdapter } from "./ws";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { Clock, FetchAdapter, Navigate } from "./wire";
-import { SSE_END, SSE_HELLO, SSE_SKIP, sameOrigin } from "./protocol";
+import { SSE_END, SSE_HELLO, SSE_PATCHES, SSE_SKIP, sameOrigin } from "./protocol";
 
 /** The fetch seam, a real fetch would hit the network in tests. */
 export function defaultFetch(): FetchAdapter {
@@ -40,10 +41,10 @@ export function defaultReload(): () => void {
 /** The history seam the navigation writes through, over the History global. */
 export function defaultHistory(): HistoryAdapter {
   return {
-    push: (href) =>
-      globalThis.history.pushState(null, "", sameOrigin(href, document) ?? href),
-    replace: (href) =>
-      globalThis.history.replaceState(null, "", sameOrigin(href, document) ?? href),
+    push: (href, state = null) =>
+      globalThis.history.pushState(state, "", sameOrigin(href, document) ?? href),
+    replace: (href, state = null) =>
+      globalThis.history.replaceState(state, "", sameOrigin(href, document) ?? href),
   };
 }
 
@@ -90,29 +91,35 @@ export function defaultSession(): SessionStore {
   };
 }
 
-/** The one-shot reveal geometry, jsdom fires no IntersectionObserver callbacks. */
+/** The reveal geometry, jsdom fires no IntersectionObserver callbacks. */
 export function defaultObserver(): IntersectionAdapter {
-  // One shared observer for every watched element. An infinite scroll arms a
-  // sentinel per page, and a per-element observer would outlive its target.
-  const callbacks = new WeakMap<Element, () => void>();
-  let shared: IntersectionObserver | undefined;
-  const observer = (): IntersectionObserver =>
-    (shared ??= new IntersectionObserver((entries, self) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        const onReveal = callbacks.get(entry.target);
-        callbacks.delete(entry.target);
-        self.unobserve(entry.target);
-        onReveal?.();
+  // One shared observer per distinct root margin. An infinite scroll arms a sentinel
+  // per page, and a per-element observer would outlive its target.
+  const callbacks = new WeakMap<Element, (visible: boolean) => void>();
+  const observers = new Map<string, IntersectionObserver>();
+  const report: IntersectionObserverCallback = (entries) => {
+    for (const entry of entries) callbacks.get(entry.target)?.(entry.isIntersecting);
+  };
+  const shared = (rootMargin: string): IntersectionObserver => {
+    let made = observers.get(rootMargin);
+    if (made === undefined) {
+      try {
+        made = new IntersectionObserver(report, { rootMargin });
+      } catch {
+        made = shared("");
       }
-    }));
+      observers.set(rootMargin, made);
+    }
+    return made;
+  };
   return {
-    observe(el, onReveal) {
-      callbacks.set(el, onReveal);
-      observer().observe(el);
+    observe(el, onView, margin) {
+      const joined = shared(margin);
+      callbacks.set(el, onView);
+      joined.observe(el);
       return () => {
         callbacks.delete(el);
-        shared?.unobserve(el);
+        joined.unobserve(el);
       };
     },
   };
@@ -145,7 +152,7 @@ export function defaultEventSource(): EventSourceAdapter {
     open(url, onMessage, onError, onControl, onOpen) {
       const es = new EventSource(url, { withCredentials: true });
       es.onopen = () => onOpen?.();
-      es.addEventListener("next-patches", (event) =>
+      es.addEventListener(SSE_PATCHES, (event) =>
         onMessage((event as MessageEvent<string>).data),
       );
       for (const name of [SSE_HELLO, SSE_SKIP, SSE_END]) {
@@ -184,5 +191,21 @@ export function defaultVisibility(): VisibilityAdapter {
       document.addEventListener("visibilitychange", listener);
       return () => document.removeEventListener("visibilitychange", listener);
     },
+  };
+}
+
+export function defaultRouterHost(): RouterHost {
+  return {
+    listen(on) {
+      const controller = new AbortController();
+      const { signal } = controller;
+      globalThis.history.scrollRestoration = "manual";
+      document.addEventListener("click", on, { signal });
+      document.addEventListener("submit", on, { signal });
+      return () => controller.abort();
+    },
+    state: () => globalThis.history.state as unknown,
+    replace: (state, href) => globalThis.history.replaceState(state, "", href),
+    assign: (href) => globalThis.location.assign(href),
   };
 }

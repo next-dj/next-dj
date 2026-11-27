@@ -3,12 +3,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from django.test import Client, override_settings
+from django.test import Client, RequestFactory, override_settings
 
 from next.errors import BackendImportError
-from next.pages.responses import cookie_varies
+from next.pages.responses import PrefetchDepth, Purpose, cookie_varies, mark_purpose
 from next.scripts.discovery import load_scripts
 from next.scripts.manager import ScriptsManager, scripts_manager
+from next.scripts.markers import Script, Strategy
 from next.scripts.registry import ScriptsRegistry
 from next.static import StaticCollector, StaticManager
 from next.static.errors import StaticAssetNotFoundError, StaticAssetTraversalError
@@ -21,7 +22,7 @@ from tests.support import routed, touch_later
 NEW_SCRIPTS = "from next.scripts import Script\nscripts = (Script('new', init='1'),)\n"
 
 
-MARKETING = "1:marketing:1700000000"
+MARKETING = "2:marketing:1700000000"
 CATEGORIES = {"CATEGORIES": ["marketing"]}
 SHARED = 'template = "<p>x</p>"\ncache = 60\n'
 LAZY_CHUNKS = {
@@ -29,6 +30,8 @@ LAZY_CHUNKS = {
     "stream": "/static/next/next.stream.min.js",
     "csrf": "/static/next/next.csrf.min.js",
     "poll": "/static/next/next.poll.min.js",
+    "forms": "/static/next/next.forms.min.js",
+    "layers": "/static/next/next.layers.min.js",
 }
 
 
@@ -514,6 +517,52 @@ class TestRenderWithoutPage:
         assert scripts_manager.render(
             StaticCollector(), page_path=None, request=None, nonce=None
         ) == ("", {})
+
+
+class TestEnvelopedRender:
+    """A navigation applies no head, so its head scripts travel as manifest entries."""
+
+    SCRIPTS = (
+        Script("early", src="https://cdn.example/e.js", strategy=Strategy.BLOCKING),
+        Script("late", src="https://cdn.example/l.js", strategy=Strategy.IDLE),
+    )
+
+    def _render(
+        self, purpose: Purpose, depth: PrefetchDepth | None = None
+    ) -> tuple[str, dict[str, object]]:
+        request = RequestFactory().get("/")
+        mark_purpose(request, purpose, depth)
+        manager = ScriptsManager()
+        with patch.object(manager, "tree", return_value=self.SCRIPTS):
+            head, data = manager.render(
+                StaticCollector(),
+                page_path=Path("page.py"),
+                request=request,
+                nonce=lambda: None,
+            )
+        return head, dict(data)
+
+    @pytest.mark.parametrize(
+        ("purpose", "depth"),
+        [
+            (Purpose.NAVIGATE, None),
+            (Purpose.PREFETCH, PrefetchDepth.SHELL),
+            (Purpose.PREFETCH, PrefetchDepth.FULL),
+        ],
+    )
+    def test_an_envelope_lists_every_script(
+        self, purpose: Purpose, depth: PrefetchDepth | None
+    ) -> None:
+        head, data = self._render(purpose, depth)
+        assert head == ""
+        assert names(data["$scripts"]) == ["early", "late"]
+        assert data["$scripts"][0]["strategy"] == "blocking"
+
+    @pytest.mark.parametrize("purpose", [Purpose.DOCUMENT, Purpose.SPECULATION])
+    def test_a_document_writes_its_head_scripts(self, purpose: Purpose) -> None:
+        head, data = self._render(purpose)
+        assert 'data-next-script="early"' in head
+        assert names(data["$scripts"]) == ["late"]
 
 
 HELD_PAGE = (

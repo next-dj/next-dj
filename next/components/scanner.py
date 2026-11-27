@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from next.utils import classify_dirs_entries, resolve_base_dir
 
-from .info import ComponentInfo
-from .loading import ModuleLoader
+from .info import ComponentInfo, boundary_files
+from .modules import ModuleLoader
 
 
 if TYPE_CHECKING:
@@ -81,6 +81,7 @@ class ComponentScanner:
             template_path=template_path,
             module_path=comp_py if comp_py.exists() else None,
             is_simple=False,
+            files=boundary_files(directory),
         )
 
 

@@ -53,19 +53,34 @@ A shared page renders nothing about the visitor.
 A layout that reads ``request.user``, a ``@context`` that reads the session, a template that sets a cookie, a CSP nonce, or consent rendered on the server makes the response personal, and the framework then sends it ``private`` and logs one warning per page.
 A request that carries an ``Authorization`` header is answered ``private`` as well.
 Only a ``GET`` or a ``HEAD`` carries the declared cache at all, so a ``POST`` the page answers is never shared.
-Move the account menu into a lazy zone, which the browser fetches with its own cookies after the cached page loads.
+Move the account menu into a component that loads on its own request, which the browser sends with its own cookies after the cached page loads.
 
 .. code-block:: jinja
    :caption: site/pages/layout.djx
 
    <header>
      <a href="/">Acme</a>
-     {% zone "account" lazy="load" %}
-       {% if request.user.is_authenticated %}<a href="/account/">{{ request.user }}</a>{% else %}<a href="/login/">Sign in</a>{% endif %}
-     {% placeholder %}
-       <span class="account-slot"></span>
-     {% endzone %}
+     {% component "account_menu" %}
    </header>
+
+.. code-block:: python
+   :caption: site/pages/_components/account_menu/component.py
+
+   from next import component
+
+   component.defer("load")
+
+.. code-block:: jinja
+   :caption: site/pages/_components/account_menu/component.djx
+
+   {% if request.user.is_authenticated %}<a href="/account/">{{ request.user }}</a>{% else %}<a href="/login/">Sign in</a>{% endif %}
+
+.. code-block:: jinja
+   :caption: site/pages/_components/account_menu/loading.djx
+
+   <span class="account-slot"></span>
+
+The shared page carries only the ``loading.djx``, and the menu renders on the request the browser makes for it.
 
 A ``Consent`` parameter reads an undecided visitor on a shared page, and gated scripts wait for the runtime, so consent never varies the cached HTML.
 ``CONSENT["SERVER_RENDER"] = True`` gives that up, and every shared page whose HTML then follows the consent cookie is sent with ``Cache-Control: private``.
@@ -83,7 +98,7 @@ Every zone response and every envelope carries ``Cache-Control: private, no-stor
    * - Rule
      - Why
    * - Bypass the cache when the request carries ``X-Next-Request``.
-     - Zone GETs, lazy zones, polls, and the token fetch send it.
+     - Zone GETs, deferred components, polls, and the token fetch send it.
    * - Bypass the cache for ``/_next/``.
      - The form dispatch and the token endpoint are never shared.
    * - Leave cookies out of the cache key and honour the origin ``Cache-Control``.
@@ -93,6 +108,26 @@ Every zone response and every envelope carries ``Cache-Control: private, no-stor
 
 A CSP nonce belongs to one response, so a response whose render writes a tag that carries one is sent with ``Cache-Control: private``, and ``manage.py check`` warns while a nonce is active beside shared pages.
 Set ``CSP_NONCE`` to ``False`` and allow the scripts by hash or by source on a site a CDN serves, see :doc:`/content/security/csp-and-nonce`.
+
+Keep client-trip tokens shared
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A shared page that carries a ``load``, ``visible``, or ``manual`` component mints a boundary token while it renders.
+The default ``DEFER["TOKENS"]["OPTIONS"]["BINDING"]`` is ``"auto"``, which binds the token to the user ``AuthenticationMiddleware`` put on the request.
+Reading that user reads the session, so the response gains ``Vary: Cookie``, the framework sends the page ``private``, and the CDN keeps no copy of it.
+A page whose boundaries are all ``stream`` or ``inline`` mints no token and stays shared.
+``"none"`` binds nobody, so the token and the shell stay shared.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFER": {"TOKENS": {"OPTIONS": {"BINDING": "none"}}},
+   }
+
+Every reload still runs the page refusal, the page guards, the access rule of the component, and the recorded permissions for the visitor who sends it, so a replayed token shows its holder only what the holder's own account may see.
+Within ``MAX_AGE`` it opens the boundary for whoever holds it, and the props and the URL it carries reach that holder, see :doc:`/content/security/overview`.
+``next.W186`` reports ``"none"`` in a project that runs ``AuthenticationMiddleware``, and a project that made this choice lists it in ``SILENCED_SYSTEM_CHECKS``.
 
 Verification
 ------------
@@ -104,7 +139,8 @@ Verification
    curl -sI -H "X-Next-Request: 1" -H "X-Next-Zone: account" https://acme.example/pricing/ | grep -i cache-control
    uv run python manage.py check
 
-The full page answers the declared ``Cache-Control``, no ``Set-Cookie``, and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, and the zone request answers ``private, no-store``.
+The full page answers the declared ``Cache-Control``, no ``Set-Cookie``, and ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version, X-Next-Boundary, X-Next-Navigate, X-Next-Layouts, X-Next-Prefetch``, and the zone request answers ``private, no-store``.
+The ``Vary`` of every other response kind is listed in :ref:`topics-partial-rendering-reference-vary`.
 Submit the form with the browser's network panel open, and one ``GET /_next/csrf/`` precedes the ``POST``.
 A shared page that is made private logs ``declares a shared cache, but its response follows the visitor through a cookie, the session, the CSRF token, the consent, a CSP nonce or the Authorization header, so it is sent with Cache-Control: private.``, naming the file.
 

@@ -1,0 +1,6 @@
+<div class="space-y-2" data-busiest-skeleton>
+  <p class="sr-only">Loading the busiest pages</p>
+  {% for _ in "xxxxx" %}
+    {% component "skeleton" height="1.5rem" %}
+  {% endfor %}
+</div>

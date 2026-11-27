@@ -3,10 +3,10 @@
 from pathlib import Path
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.forms import FileField
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import import_class_cached, next_framework_settings
 from next.forms.wizard import CacheFormWizardBackend, SessionFormWizardBackend
 

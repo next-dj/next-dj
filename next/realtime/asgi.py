@@ -1,6 +1,5 @@
 """The ASGI WebSocket endpoint that serves the realtime topic protocol."""
 
-import functools
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -27,6 +26,8 @@ from django.core.handlers.asgi import ASGIHandler, get_script_prefix
 from django.http import HttpRequest, parse_cookie
 from django.http.request import split_domain_port
 from django.utils.http import is_same_domain
+
+from next.caches import SETTINGS, memo
 
 from . import frames
 from .deployment import tunnel_origin_messages, websocket_deployment_messages
@@ -100,15 +101,10 @@ def _explicit_origins(origins: Sequence[str]) -> _Origins:
     return _Origins.parse(origins)
 
 
-@functools.cache
+@memo(SETTINGS)
 def _trusted_origins() -> _Origins:
     """Parse `CSRF_TRUSTED_ORIGINS` once per settings state."""
     return _Origins.parse(settings.CSRF_TRUSTED_ORIGINS)
-
-
-def forget_trusted_origins(**kwargs: object) -> None:
-    """Drop the parsed `CSRF_TRUSTED_ORIGINS` when settings change."""
-    _trusted_origins.cache_clear()
 
 
 class _SocketRequest(HttpRequest):
@@ -476,4 +472,4 @@ def application(
     return _Application(http_app, socket)
 
 
-__all__ = ["WebSocketApp", "application", "forget_trusted_origins"]
+__all__ = ["WebSocketApp", "application"]

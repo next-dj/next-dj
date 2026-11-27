@@ -5,22 +5,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     WALK_HINT,
     async_callable_error,
     async_refusal,
     first_visit,
     get_page_roots,
-    get_router_manager,
+    get_route_manager,
     page_tree_skip_names,
 )
 from next.pages.checks.access import declares_for_itself, passes_down
@@ -101,14 +95,14 @@ def check_page_functions(*args: object, **kwargs: object) -> list[CheckMessage]:
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
 
     # One `page.py` reached through several page trees is one page.
     seen: set[Path] = set()
     owners = action_owners_slot.get().page_files()
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         skip_dir_names = page_tree_skip_names(router)
         try:
             for root in get_page_roots(router):
@@ -244,11 +238,11 @@ def check_page_module_imports(*args: object, **kwargs: object) -> list[CheckMess
 
     An async callable refused at import reports as `next.E218`, which names it.
     """
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
     errors: list[CheckMessage] = []
-    for path in iter_existing_scanned_pages(router_manager, set()):
+    for path in iter_existing_scanned_pages(route_manager, set()):
         module, error = load_page_module(path)
         if module is not None:
             continue
