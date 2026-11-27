@@ -140,14 +140,14 @@ class TestContextProcessorsMemo:
             assert mock_import.call_count == 1
 
 
-_JINJA = {"BACKEND": "django.template.backends.jinja2.Jinja2", "OPTIONS": {}}
+_STRINGS = {"BACKEND": "django.template.backends.dummy.TemplateStrings"}
 
 
 class TestEngineProcessors:
     """The template processors come from the engine pages compile on."""
 
     def test_an_engine_ahead_of_django_templates_is_passed_over(self) -> None:
-        templates = [_JINJA, *_templates_with("app.processors.engine")]
+        templates = [_STRINGS, *_templates_with("app.processors.engine")]
         with (
             override_settings(TEMPLATES=templates),
             patch(
@@ -163,7 +163,7 @@ class TestEngineProcessors:
         _get_context_processors.cache_clear()
 
     def test_no_django_templates_engine_lends_no_processors(self) -> None:
-        with override_settings(TEMPLATES=[_JINJA], NEXT_FRAMEWORK={}):
+        with override_settings(TEMPLATES=[_STRINGS], NEXT_FRAMEWORK={}):
             _get_context_processors.cache_clear()
             assert context_processors() == []
         _get_context_processors.cache_clear()

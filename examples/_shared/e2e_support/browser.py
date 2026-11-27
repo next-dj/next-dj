@@ -68,6 +68,20 @@ EVENT_BRIDGE = """
   for (const name of %(dom)s) {
     document.addEventListener(name, () => record(name, "dom"));
   }
+  document.addEventListener(
+    "load",
+    (event) => {
+      if (event.target instanceof HTMLScriptElement) {
+        window.__nextEvents.push({
+          name: "script:loaded",
+          channel: "dom",
+          src: event.target.src,
+          at: Date.now(),
+        });
+      }
+    },
+    true,
+  );
   const subscribe = () => {
     if (!window.Next || typeof window.Next.on !== "function") {
       setTimeout(subscribe, 0);
@@ -309,6 +323,17 @@ def wait_for_apply(page: Page, since: int, timeout: int = 10_000) -> None:
         "(seen) => (window.__nextEvents ?? [])"
         ".filter((entry) => entry.name === 'partial:applied').length > seen",
         arg=since,
+        timeout=timeout,
+    )
+
+
+def wait_for_chunk(page: Page, name: str, timeout: int = 10_000) -> None:
+    """Block until the runtime chunk of that name has run and installed its module."""
+    page.wait_for_function(
+        "(name) => (window.__nextEvents ?? []).some((entry) =>"
+        " entry.name === 'script:loaded'"
+        " && new URL(entry.src).pathname.endsWith(`/next.${name}.min.js`))",
+        arg=name,
         timeout=timeout,
     )
 

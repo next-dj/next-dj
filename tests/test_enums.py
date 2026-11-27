@@ -1,9 +1,8 @@
 import ast
-from pathlib import Path
 from typing import NamedTuple
 
+from tests.support.imports import package_root
 
-ROOT = Path(__file__).resolve().parent.parent
 
 # Members whose value is not the lower-cased name, each with why. The list only shrinks.
 KNOWN: dict[tuple[str, str], str] = {}
@@ -34,9 +33,10 @@ def _is_str_enum(node: ast.ClassDef) -> bool:
 
 def members() -> list[Member]:
     """Return every member a `StrEnum` class body under `next/` assigns."""
+    root = package_root()
     found = []
-    for path in sorted((ROOT / "next").rglob("*.py")):
-        relative = path.relative_to(ROOT).as_posix()
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root.parent).as_posix()
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not (isinstance(node, ast.ClassDef) and _is_str_enum(node)):
                 continue

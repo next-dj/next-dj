@@ -8,6 +8,7 @@ from e2e_support.browser import (
     assert_same_document,
     mark_document,
     wait_for_apply,
+    wait_for_chunk,
     wait_for_runtime,
 )
 from playwright.sync_api import Locator, Page, expect
@@ -31,6 +32,7 @@ def open_wizard(page: Page) -> Locator:
     dialog = page.locator(DIALOG)
     expect(dialog).to_have_count(1)
     wait_for_apply(page, seen)
+    wait_for_chunk(page, "forms")
     expect(dialog.locator("#id_full_name")).to_be_visible()
     return dialog
 
