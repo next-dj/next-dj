@@ -1,14 +1,7 @@
 import json
-import re
-from pathlib import Path
-
-import pytest
 
 from next.conf.router import Eagerness, RouterScope
 from next.router.speculation import GUARDED, OFF, encoded_rules, rules
-
-
-CLIENT_ROUTER = Path(__file__).resolve().parents[2] / "next" / "client" / "router.ts"
 
 
 def _where(found: dict[str, object]) -> list[dict[str, object]]:
@@ -54,18 +47,14 @@ class TestRules:
         assert ">" not in text
         assert json.loads(text) == rules(Eagerness.EAGER, RouterScope.ALL, ("/a<b>/",))
 
+    def test_the_pages_scope_matches_the_pages_but_no_other_route(self) -> None:
+        found = rules(
+            Eagerness.MODERATE, RouterScope.PAGES, (), ["/a/", "/b/*"], ["/a/x/"]
+        )
+        pages, others, _, _ = _where(found)
+        assert pages == {"href_matches": ["/a/", "/b/*"]}
+        assert others == {"not": {"href_matches": ["/a/x/"]}}
 
-@pytest.mark.skipif(not CLIENT_ROUTER.exists(), reason="needs the source checkout")
-class TestClientAgreement:
-    """The links the client router leaves are those the rules guard, in its order."""
-
-    def test_the_client_selector_is_the_guarded_runtime_then_off(self) -> None:
-        source = CLIENT_ROUTER.read_text(encoding="utf-8")
-        found = re.search(r"^const OFF =(.*?);$", source, re.MULTILINE | re.DOTALL)
-        assert found is not None
-        client = "".join(re.findall(r'"([^"]*)"', found.group(1))).split(",")
-        off = OFF.split(",")
-        runtime = client[: len(client) - len(off)]
-        assert runtime
-        assert client[len(runtime) :] == off
-        assert GUARDED.split(",")[: len(runtime)] == runtime
+    def test_the_pages_scope_with_no_other_route_adds_no_refusal(self) -> None:
+        found = rules(Eagerness.MODERATE, RouterScope.PAGES, (), ["/a/"])
+        assert len(_where(found)) == 3

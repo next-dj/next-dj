@@ -1,16 +1,35 @@
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from unittest import mock
 
 import pytest
 from django.http import StreamingHttpResponse
+from django.test.client import RequestFactory
 
-from next.suspense import policy
-from next.suspense.assembly import jobs as assembly_jobs
-from next.suspense.policy import StreamSlots
+from next.defer import policy
+from next.defer.assembly import jobs as assembly_jobs
+from next.defer.policy import StreamSlots
 from next.testing import StreamedPage
 from next.testing.boundaries import ComponentGate
 
 
 type Opens = Callable[[list[bytes]], bool]
+
+_base_environ = RequestFactory._base_environ
+
+
+def _threaded(factory: RequestFactory, **request: object) -> dict[str, object]:
+    return _base_environ(factory, **{"wsgi.multithread": True, **request})
+
+
+@contextmanager
+def streaming() -> Generator[None]:
+    """Build every test request inside the block as a threaded WSGI worker serves it.
+
+    The test client reads as a single-threaded worker, which never streams a page.
+    """
+    with mock.patch.object(RequestFactory, "_base_environ", _threaded):
+        yield
 
 
 def isolated_slots(monkeypatch: pytest.MonkeyPatch) -> StreamSlots:

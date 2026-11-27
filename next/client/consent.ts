@@ -3,14 +3,14 @@
 // shared cache carries the undecided state. Only the visitor's choice grants more
 // than the necessary category.
 
-import { asString, fire, isRecord, matching } from "./protocol";
+import { ATTR_CONSENTED, asString, fire, isRecord, matching } from "./protocol";
 
 const NECESSARY = "necessary";
 const DEFAULT_COOKIE = "next_consent";
 // The server's default cookie age, used when the payload sets none, since a session
 // cookie would lose the choice when the browser closes.
 const DEFAULT_MAX_AGE = 15552000;
-const CONSENTED = "data-next-consented";
+const CONSENTED = ATTR_CONSENTED;
 const CONSENTED_TEMPLATES = `template[${CONSENTED}]`;
 // The comment that ends the else branch following a consented template.
 const CONSENTED_END = "/next-consented";
@@ -58,12 +58,12 @@ function strings(value: unknown): string[] {
 }
 
 // The categories a stored decision grants, undefined for a missing or unknown value.
-// Version 2 joins them with "|", and the legacy version 1 with ",".
+// The categories are joined with "|".
 function storedChoice(jar: string, name: string): string[] | undefined {
   const prefix = `${name}=`;
   const pair = jar.split("; ").find((entry) => entry.startsWith(prefix));
-  const match = /^([12]):([^:]*):[^:]*$/.exec(pair?.slice(prefix.length) ?? "");
-  return match?.[2]?.split(match[1] === "1" ? "," : "|");
+  const match = /^2:([^:]*):[^:]*$/.exec(pair?.slice(prefix.length) ?? "");
+  return match?.[1]?.split("|");
 }
 
 // The nodes after a consented template up to and including its end marker, skipping

@@ -20,7 +20,7 @@ With the router on, composition wraps the placeholder of each layout in two HTML
 The seal is minted per response, so a look-alike comment in page content never matches a marker.
 A placeholder inside a ``{% verbatim %}`` block, inside an HTML attribute, or inside a ``<title>`` cannot carry the comments, and ``next.E239`` reports it.
 
-Every routed document carries the chain it rendered in its ``$layouts`` payload entry, one ``[id, digest, seal]`` per layout, outer first.
+Every routed document carries the chain it rendered in its ``data-next-layouts`` JSON block, one ``[id, digest, seal]`` per layout, outer first.
 A navigation sends the chain the browser shows in the ``X-Next-Layouts`` header, one ``id.digest`` per layout, outer first, comma separated.
 
 The chrome digest
@@ -61,9 +61,9 @@ Hard load
    The root layout differs in its id, its head part differs, one side has layouts and the other has none, or the page renders no ``<body>``.
    The response carries a ``visit`` operation, and the browser loads the URL as a new document.
 
-A declaration past ``ROUTER["MAX_LAYOUTS"]`` entries or past 1 KB, or one that does not parse, counts as no declaration and lands on a body morph.
+A declaration past 32 entries or past 1 KB, or one that does not parse, counts as no declaration and lands on a body morph.
 
-Under ``DEBUG`` the response names its outcome in ``X-Next-Navigate``, such as ``kept 3f…,9a… slot 9a…``, ``body-morph, diverged 3f… digest``, or ``visit head``.
+Under ``DEBUG`` the response names its outcome in ``X-Next-Navigate``, such as ``kept 3f…,9a… slot 9a…``, ``body_morph, diverged 3f… digest``, or ``visit head``.
 The ``navigation_rendered`` signal reports the same facts to a receiver in every environment, see :doc:`/content/topics/signals`.
 
 What makes a layout diverge
@@ -101,7 +101,8 @@ A different ``<body>`` tag or document head.
 
 A value that changes on every render.
    The digest leaves out only the parts `The chrome digest`_ lists, so any other per-render value in the chrome differs on every response, even between two renders of the same page.
-   A CSRF token in a ``<meta>`` tag or a data attribute, such as ``<meta name="csrf-token" content="{{ csrf_token }}">``, is the common case, since Django masks the token afresh on each render, and so are a request id, a timestamp, a random id, and any attribute written anew per response.
+   A CSRF token in a ``<meta>`` tag or a data attribute, such as ``<meta name="csrf-token" content="{{ csrf_token }}">``, is the common case, since Django masks the token afresh on each render.
+   A request id, a timestamp, a random id, and any attribute written anew per response behave the same way.
    In the head part of the root layout such a value turns every navigation into a hard load, and in other chrome it keeps the layout from ever being kept.
    The pages still load correctly, but nothing persists across navigations.
    Move such a value out of the chrome, into a ``{% zone %}`` or the page, write the token through ``{% csrf_token %}`` inside a form, or strip the value in a ``ChromeDigest`` subclass, see `Replacing the cut and the digest`_.
@@ -135,7 +136,7 @@ Streamed navigations
 --------------------
 
 A page with ``stream`` boundaries streams a navigation the way it streams a document, when the router asks for ``text/event-stream`` and the delivery policy of :doc:`/content/topics/boundaries/streaming` lets the response stream.
-The router asks for it when the ``reader`` bundle is on the page or named in the ``$router`` payload entry, and loads the reader before it reads a streamed answer.
+The router asks for it when the ``boundaries`` bundle is on the page or named in the ``$router`` payload entry, and loads the reader before it reads a streamed answer.
 The envelope is the first frame, the browser commits the navigation on it, and each boundary arrives after it as its job settles.
 A shell prefetch and a hard load never stream, a full prefetch streams as a navigation does, and a navigation that does not stream renders its boundaries before the envelope leaves.
 

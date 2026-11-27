@@ -88,7 +88,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "pages",

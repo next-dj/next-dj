@@ -15,7 +15,9 @@ from django.test import override_settings
 from django.utils.encoding import iri_to_uri
 
 from next import stamps, utils
-from next.components import registry as registry_module
+from next.bridge.loop import BackgroundLoop, background_loop
+from next.components import registry as registry_module, tags as component_tags
+from next.components.context import component
 from next.components.registry import DeferredComponents
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.deps.objects import forget_object_rows
@@ -23,14 +25,13 @@ from next.diagnostics import reset_failure_logs, watch_degraded
 from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.intercept import intercepts
 from next.pages import Page, manager as manager_module
+from next.pages.declarations import page_declarations
 from next.pages.loaders import DjxTemplateLoader, PythonTemplateLoader
 from next.pages.metadata.hreflang import forget_translated_urls
 from next.pages.registry import PageContextRegistry
-from next.pages.transactions import atomic_store
 from next.permissions.access import _listed_middleware, login_by_default
 from next.permissions.manager import PermissionManager
 from next.server import NextStatReloader
-from next.templatetags import components as component_tags
 from next.testing import override_next_settings, reset_check_caches
 from next.urls import URLPatternParser
 from tests.support import (
@@ -45,6 +46,7 @@ from tests.support import (
     tick_scenario,
 )
 from tests.support.access import restored_declarations
+from tests.support.leaks import Snapshot, leaked, snapshot
 from tests.support.navigation import layout_tree
 
 
@@ -106,6 +108,61 @@ def mock_http_request():
 _SETTLED_LEAD_NS = 3600 * 10**9
 
 
+_BEFORE = pytest.StashKey[Snapshot]()
+_WIDER = pytest.StashKey[bool]()
+_SHIFTING = pytest.StashKey[set[int]]()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_fixture_setup(
+    fixturedef: pytest.FixtureDef[object], request: pytest.FixtureRequest
+) -> Generator[None, object, object]:
+    """Note a fixture wider than one test whose setup moves the state tests share."""
+    if fixturedef.scope == "function":
+        return (yield)
+    before = snapshot()
+    result = yield
+    if leaked(before, snapshot()):
+        request.config.stash[_WIDER] = True
+        request.config.stash.setdefault(_SHIFTING, set()).add(id(fixturedef))
+    return result
+
+
+def pytest_fixture_post_finalizer(
+    fixturedef: pytest.FixtureDef[object], request: pytest.FixtureRequest
+) -> None:
+    """Note the teardown of a wider fixture whose setup moved the shared state."""
+    if id(fixturedef) in request.config.stash.get(_SHIFTING, set()):
+        request.config.stash[_WIDER] = True
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_setup(item: pytest.Item) -> Generator[None, None, None]:
+    """Record the process state before the first fixture of the test sets up."""
+    item.config.stash[_WIDER] = False
+    before = snapshot()
+    result = yield
+    if not item.config.stash[_WIDER]:
+        item.stash[_BEFORE] = before
+    return result
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, None, None]:
+    """Fail the test that leaves a Django setting or a port binding changed behind it.
+
+    Under xdist the leak breaks an unrelated later test, so it is named at its source.
+    """
+    item.config.stash[_WIDER] = False
+    result = yield
+    before = item.stash.get(_BEFORE, None)
+    if before is not None and not item.config.stash[_WIDER]:
+        found = leaked(before, snapshot())
+        if found:
+            pytest.fail(f"The test left changed: {', '.join(found)}.")
+    return result
+
+
 @pytest.fixture(autouse=True)
 def _settled_mtimes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read the snapshot clock an hour ahead, so no mtime a test writes counts as racy.
@@ -128,6 +185,21 @@ def _reload_next_framework_settings_after_test() -> Generator[None, None, None]:
     """Reload the global ``next_framework_settings`` after each test (teardown only)."""
     yield
     next_framework_settings.reload()
+
+
+@pytest.fixture(autouse=True)
+def _drop_temporary_component_contexts(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Generator[None, None, None]:
+    """Drop the context functions a test registered from a tree under its temp root.
+
+    A leftover one is a callable every later check of the same worker still reads.
+    """
+    yield
+    root = tmp_path_factory.getbasetemp().resolve()
+    for registered in tuple(component.registry.registered()):
+        if registered.is_relative_to(root):
+            component.registry.unregister(registered)
 
 
 @pytest.fixture(autouse=True)
@@ -175,12 +247,17 @@ def _fresh_translation_memo() -> Generator[None, None, None]:
     forget_translated_urls()
 
 
+def _forget_app_holdings() -> None:
+    utils._app_holding_cache.clear()
+    utils._resolved_app_roots.cache_clear()
+
+
 @pytest.fixture(autouse=True)
 def _fresh_app_holdings() -> Generator[None, None, None]:
     """Drop the app-holding memo, since tests patch the installed app list."""
-    utils.forget_app_holdings(setting="INSTALLED_APPS")
+    _forget_app_holdings()
     yield
-    utils.forget_app_holdings(setting="INSTALLED_APPS")
+    _forget_app_holdings()
 
 
 @pytest.fixture(autouse=True)
@@ -376,14 +453,31 @@ def router_on() -> Generator[None, None, None]:
 
 
 @pytest.fixture()
-def fresh_atomic_declarations() -> Generator[None, None, None]:
-    """Start and end the test with no `page.atomic` declarations."""
-    atomic_store.reset()
+def fresh_transaction_declarations() -> Generator[None, None, None]:
+    """Start and end the test with no `page` declaration of any kind."""
+    page_declarations.reset()
     yield
-    atomic_store.reset()
+    page_declarations.reset()
 
 
 @pytest.fixture()
 def layout_pages(tmp_path: Path) -> dict[str, Path]:
     """Write a page tree under two layouts and return its `page.py` files by name."""
     return layout_tree(tmp_path / "pages")
+
+
+@pytest.fixture(autouse=True)
+def _stopped_background_loop() -> Iterator[None]:
+    """Join the process loop a test started, so the next test starts without it."""
+    before = background_loop.current()
+    yield
+    if background_loop.current() is not before:
+        background_loop.stop()
+
+
+@pytest.fixture()
+def loop_owner() -> Iterator[BackgroundLoop]:
+    """Return a loop owner of its own, stopped when the test ends."""
+    held = BackgroundLoop()
+    yield held
+    held.stop()

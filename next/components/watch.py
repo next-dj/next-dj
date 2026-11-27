@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from next.diagnostics import BackendReadLog
-from next.pages.watch import (
+from next.discovery import (
     components_folder_name_for_watch,
     iter_page_backends_for_watch,
     page_root_paths_for_watch,

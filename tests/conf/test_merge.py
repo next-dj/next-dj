@@ -22,8 +22,10 @@ from next.conf.merge import (
     OPTIONAL_STR_KEYS,
     STR_KEYS,
     UNSET,
+    WARNED_KEYS,
     accepted_value,
     merge_user_settings,
+    mistyped,
 )
 from next.conf.settings import NextFrameworkSettings
 from tests.django_setup import PROJECT_ROOT
@@ -133,10 +135,35 @@ class TestMergeUserSettings:
             settings_obj.reload()
             assert settings_obj.URL_NAME_TEMPLATE == "route_{name}"
 
-    def test_an_unusable_value_keeps_the_default(self, settings_obj) -> None:
-        with override_settings(NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": 42}):
-            settings_obj.reload()
-            assert DEFAULTS["URL_NAME_TEMPLATE"] == settings_obj.URL_NAME_TEMPLATE
+    def test_none_stands_where_the_default_is_none(self, settings_obj) -> None:
+        merged = merge_user_settings(settings_obj.DEFAULTS, {"FORM_ANCHOR_FILES": None})
+        assert merged["FORM_ANCHOR_FILES"] is None
+
+    @pytest.mark.parametrize(
+        ("key", "value", "expected"),
+        [
+            ("URL_NAME_TEMPLATE", 42, "a str, got 'int'"),
+            ("PAGE_BACKENDS", "x", "a list, got 'str'"),
+            ("DEFER", [], "a dict, got 'list'"),
+            ("STATIC_VERSION", 3, "a str or None, got 'int'"),
+        ],
+    )
+    def test_an_unusable_value_keeps_the_default_and_is_named_mistyped(
+        self, settings_obj, key: str, value: object, expected: str
+    ) -> None:
+        merged = merge_user_settings(settings_obj.DEFAULTS, {key: value})
+        assert merged[key] == FROZEN_DEFAULTS[key]
+        assert mistyped(settings_obj.DEFAULTS, {key: value}) == {
+            key: f"NEXT_FRAMEWORK[{key!r}] must be {expected}."
+        }
+
+    def test_a_warned_key_is_never_named_mistyped(self, settings_obj) -> None:
+        user = dict.fromkeys(WARNED_KEYS, 3)
+        assert mistyped(settings_obj.DEFAULTS, user) == {}
+
+    def test_usable_values_and_no_settings_name_nothing(self, settings_obj) -> None:
+        assert mistyped(settings_obj.DEFAULTS, None) == {}
+        assert mistyped(settings_obj.DEFAULTS, {"STATIC_VERSION": None}) == {}
 
     def test_a_reload_drops_the_merged_view_of_the_previous_settings(
         self, settings_obj

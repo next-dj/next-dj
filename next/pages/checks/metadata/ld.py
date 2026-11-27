@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.pages.metadata.backends import dump_jsonld
 from next.pages.metadata.ld import ID, TYPE, iter_json, node_id, to_json
 

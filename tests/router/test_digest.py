@@ -1,9 +1,8 @@
 import re
-from unittest import mock
 
 import pytest
 
-from next.pages.layouts import META, SLOT, ZONE, closing, opening, sealed
+from next.pages.layouts import META, SLOT, ZONE, closing, enclosed, opening
 from next.router.digest import (
     REGION_STANDIN,
     SLOT_STANDIN,
@@ -13,46 +12,47 @@ from next.router.digest import (
     chrome_zones,
     find_slot,
     fold,
-    moved_body,
     normalise,
     regions,
     split_head,
     zone_html,
     zone_name,
 )
-from next.static.runtime import ASSETS_MARK, RouterRender
+from next.router.render import ASSETS_MARK, RouterRender
 
 
-SEAL = "5ea1ed00"
+RESPONSE_ID = "5ea1ed00"
 OTHER = "0badc0de"
 IDENT = "0123456789abcdef"
 
 
-def _chrome_digest(text: str, seal: str = SEAL) -> str:
-    return chrome_digest(normalise(text, seal))
+def _chrome_digest(text: str, response_id: str = RESPONSE_ID) -> str:
+    return chrome_digest(normalise(text, response_id))
 
 
 class TestRegions:
-    """`regions` pairs the sealed comments of one kind, outermost first."""
+    """`regions` pairs the enclosing comments of one kind, outermost first."""
 
     def test_a_region_spans_both_comments(self) -> None:
-        html = f"a{sealed(ZONE, SEAL, 'z')}b"
-        ((start, end),) = regions(html, ZONE, SEAL)
-        assert html[start:end] == sealed(ZONE, SEAL, "z")
+        html = f"a{enclosed(ZONE, RESPONSE_ID, 'z')}b"
+        ((start, end),) = regions(html, ZONE, RESPONSE_ID)
+        assert html[start:end] == enclosed(ZONE, RESPONSE_ID, "z")
 
     def test_a_nested_region_belongs_to_its_parent(self) -> None:
-        inner = sealed(ZONE, SEAL, "i")
-        html = sealed(ZONE, SEAL, f"<p>{inner}</p>") + sealed(ZONE, SEAL, "x")
-        found = regions(html, ZONE, SEAL)
+        inner = enclosed(ZONE, RESPONSE_ID, "i")
+        html = enclosed(ZONE, RESPONSE_ID, f"<p>{inner}</p>") + enclosed(
+            ZONE, RESPONSE_ID, "x"
+        )
+        found = regions(html, ZONE, RESPONSE_ID)
         assert len(found) == 2
-        assert html[found[0][0] : found[0][1]].count(opening(ZONE, SEAL)) == 2
+        assert html[found[0][0] : found[0][1]].count(opening(ZONE, RESPONSE_ID)) == 2
 
     def test_another_seal_and_a_stray_closing_are_ignored(self) -> None:
-        html = closing(ZONE, SEAL) + sealed(ZONE, OTHER, "forged")
-        assert regions(html, ZONE, SEAL) == []
+        html = closing(ZONE, RESPONSE_ID) + enclosed(ZONE, OTHER, "forged")
+        assert regions(html, ZONE, RESPONSE_ID) == []
 
     def test_an_unclosed_region_is_ignored(self) -> None:
-        assert regions(opening(ZONE, SEAL) + "open", ZONE, SEAL) == []
+        assert regions(opening(ZONE, RESPONSE_ID) + "open", ZONE, RESPONSE_ID) == []
 
 
 class TestNormalise:
@@ -72,18 +72,18 @@ class TestNormalise:
                 id="csrf",
             ),
             pytest.param(
-                sealed(ZONE, SEAL, "<p>one</p>"),
-                sealed(ZONE, SEAL, "<p>two</p>"),
+                enclosed(ZONE, RESPONSE_ID, "<p>one</p>"),
+                enclosed(ZONE, RESPONSE_ID, "<p>two</p>"),
                 id="zone-body",
             ),
             pytest.param(
-                sealed(META, SEAL, "<title>A</title>"),
-                sealed(META, SEAL, "<title>B</title>"),
+                enclosed(META, RESPONSE_ID, "<title>A</title>"),
+                enclosed(META, RESPONSE_ID, "<title>B</title>"),
                 id="metadata",
             ),
             pytest.param(
-                sealed(ASSETS_MARK, SEAL, '<link href="/a.css">'),
-                sealed(ASSETS_MARK, SEAL, '<link href="/b.css">'),
+                enclosed(ASSETS_MARK, RESPONSE_ID, '<link href="/a.css">'),
+                enclosed(ASSETS_MARK, RESPONSE_ID, '<link href="/b.css">'),
                 id="injected-assets",
             ),
         ],
@@ -121,9 +121,9 @@ class TestNormalise:
                 id="active-state-rendered-before-the-pass",
             ),
             pytest.param(
-                sealed(ZONE, OTHER, "<p>one</p>"),
-                sealed(ZONE, OTHER, "<p>two</p>"),
-                id="zone-sealed-by-content",
+                enclosed(ZONE, OTHER, "<p>one</p>"),
+                enclosed(ZONE, OTHER, "<p>two</p>"),
+                id="zone-enclosed-by-content",
             ),
             pytest.param(
                 '<div data-next-token="t1"></div>',
@@ -145,18 +145,20 @@ class TestNormalise:
         )
 
     def test_a_zone_leaves_a_stand_in(self) -> None:
-        text = normalise(f"a{sealed(ZONE, SEAL, 'z')}b", SEAL)
+        text = normalise(f"a{enclosed(ZONE, RESPONSE_ID, 'z')}b", RESPONSE_ID)
         assert text == f"a{REGION_STANDIN}b"
 
     def test_overlapping_regions_count_once(self) -> None:
-        meta = sealed(META, SEAL, "<title>t</title>")
-        text = normalise(sealed(ZONE, SEAL, meta), SEAL)
+        meta = enclosed(META, RESPONSE_ID, "<title>t</title>")
+        text = normalise(enclosed(ZONE, RESPONSE_ID, meta), RESPONSE_ID)
         assert text == REGION_STANDIN
 
     def test_a_zone_around_the_slot_counts_as_chrome(self) -> None:
-        flash = sealed(ZONE, SEAL, "<p>flash</p>")
+        flash = enclosed(ZONE, RESPONSE_ID, "<p>flash</p>")
         wrapper = f"<main data-next-zone='main'><h2>T</h2>{flash}{SLOT_STANDIN}</main>"
-        text = normalise(f"<body>{sealed(ZONE, SEAL, wrapper)}</body>", SEAL)
+        text = normalise(
+            f"<body>{enclosed(ZONE, RESPONSE_ID, wrapper)}</body>", RESPONSE_ID
+        )
         assert text == (
             f"<body><main data-next-zone='main'><h2>T</h2>{REGION_STANDIN}"
             f"{SLOT_STANDIN}</main></body>"
@@ -164,7 +166,9 @@ class TestNormalise:
 
     def test_the_chrome_a_zone_around_the_slot_wraps_moves_the_digest(self) -> None:
         def chrome_of(title: str) -> str:
-            return sealed(ZONE, SEAL, f"<main><h2>{title}</h2>{SLOT_STANDIN}</main>")
+            return enclosed(
+                ZONE, RESPONSE_ID, f"<main><h2>{title}</h2>{SLOT_STANDIN}</main>"
+            )
 
         assert _chrome_digest(chrome_of("one")) != _chrome_digest(chrome_of("two"))
 
@@ -173,14 +177,14 @@ class TestNormalise:
             '<input name="csrfmiddlewaretoken" value="one"><b value="kept">'
             "<input name='csrfmiddlewaretoken' value='two'>"
         )
-        assert normalise(text, SEAL) == (
+        assert normalise(text, RESPONSE_ID) == (
             '<input name="csrfmiddlewaretoken" value=""><b value="kept">'
             "<input name='csrfmiddlewaretoken' value=\"\">"
         )
 
     def test_an_unclosed_csrf_tag_returns_the_text(self) -> None:
         text = 'name="csrfmiddlewaretoken" ' * 4000
-        assert normalise(text, SEAL) == text
+        assert normalise(text, RESPONSE_ID) == text
 
 
 class TestDigest:
@@ -194,28 +198,38 @@ class TestDigest:
 
 
 class TestSlots:
-    """`find_slot` finds a slot by its id and seal inside one region."""
+    """`find_slot` finds a slot by its id and response id inside one region."""
 
     def test_the_inner_and_outer_bounds(self) -> None:
-        html = f"<main>{sealed(SLOT, SEAL, '<p>x</p>', IDENT)}</main>"
-        inner, outer = find_slot(html, IDENT, SEAL, (0, len(html))) or ((0, 0), (0, 0))
+        html = f"<main>{enclosed(SLOT, RESPONSE_ID, '<p>x</p>', IDENT)}</main>"
+        inner, outer = find_slot(html, IDENT, RESPONSE_ID, (0, len(html))) or (
+            (0, 0),
+            (0, 0),
+        )
         assert html[inner[0] : inner[1]] == "<p>x</p>"
-        assert html[outer[0] : outer[1]] == sealed(SLOT, SEAL, "<p>x</p>", IDENT)
+        assert html[outer[0] : outer[1]] == enclosed(
+            SLOT, RESPONSE_ID, "<p>x</p>", IDENT
+        )
 
     @pytest.mark.parametrize(
         "html",
         [
-            pytest.param(sealed(SLOT, OTHER, "x", IDENT), id="look-alike-seal"),
-            pytest.param(opening(SLOT, SEAL, IDENT) + "x", id="unclosed"),
+            pytest.param(
+                enclosed(SLOT, OTHER, "x", IDENT), id="look-alike-response-id"
+            ),
+            pytest.param(opening(SLOT, RESPONSE_ID, IDENT) + "x", id="unclosed"),
             pytest.param("<p>no slot</p>", id="absent"),
         ],
     )
     def test_no_slot_without_both_sealed_comments(self, html: str) -> None:
-        assert find_slot(html, IDENT, SEAL, (0, len(html))) is None
+        assert find_slot(html, IDENT, RESPONSE_ID, (0, len(html))) is None
 
     def test_the_slot_leaves_a_stand_in_in_its_chrome(self) -> None:
-        html = f"<a>{sealed(SLOT, SEAL, 'x', IDENT)}<b>"
-        _inner, outer = find_slot(html, IDENT, SEAL, (0, len(html))) or ((0, 0), (0, 0))
+        html = f"<a>{enclosed(SLOT, RESPONSE_ID, 'x', IDENT)}<b>"
+        _inner, outer = find_slot(html, IDENT, RESPONSE_ID, (0, len(html))) or (
+            (0, 0),
+            (0, 0),
+        )
         assert chrome(html, (0, len(html)), outer) == f"<a>{SLOT_STANDIN}<b>"
 
     def test_the_position_of_the_slot_counts(self) -> None:
@@ -271,80 +285,38 @@ class TestHeadAndBody:
         assert html[start:end] == inner
 
 
-class TestMovedBody:
-    """An edit that keeps the head and the closed tail shifts the body bounds."""
-
-    BEFORE = '<html><body class="x"><p>in</p></body></html>'
-
-    def _moved(self, after: str) -> tuple[int, int] | None:
-        return moved_body(self.BEFORE, after, body_bounds(self.BEFORE))
-
-    @pytest.mark.parametrize(
-        "after",
-        [
-            '<html><body class="x"><p data-a>in</p></body></html>',
-            '<html><body class="x"></body></html>',
-            '<html><head></head><body class="x"><p>in</p></body></html>',
-            '<html><body class="x"><p>in</p></body><p>out</p></html>',
-            '<html><body class="x"><p>in</p></body >',
-        ],
-    )
-    def test_the_bounds_match_a_fresh_read(self, after: str) -> None:
-        assert self._moved(after) == body_bounds(after)
-
-    def test_a_kept_head_and_tail_read_nothing(self) -> None:
-        after = '<html><body class="x"><p data-a>in</p></body></html>'
-        bounds = body_bounds(self.BEFORE)
-        with mock.patch("next.router.digest.body_bounds") as read:
-            assert moved_body(self.BEFORE, after, bounds) == (22, 38)
-        read.assert_not_called()
-
-    def test_a_shell_without_a_body_reads_the_edit(self) -> None:
-        assert moved_body("<p>", "<body><p>", None) == (6, 9)
-
-    def test_an_unclosed_body_reads_the_edit(self) -> None:
-        before = "<body><p>"
-        assert moved_body(before, "<body><p></body>", body_bounds(before)) == (6, 9)
-
-    def test_a_head_and_tail_that_overlap_read_the_edit(self) -> None:
-        before = "<body </body>x</body>"
-        bounds = body_bounds(before)
-        assert bounds == (13, 14)
-        assert moved_body(before, "<body </body>", bounds) == (13, 13)
-
-
 class TestZones:
-    """A sealed zone region is named by its wrapper and morphed without its comments."""
+    """An enclosed zone region is named by its wrapper and morphed without its comments."""
 
     def test_the_name_and_the_html(self) -> None:
         wrapper = "<div data-next-zone='flash'><p>x</p></div>"
-        html = f"<header>{sealed(ZONE, SEAL, wrapper)}</header>"
-        ((name, bounds),) = chrome_zones(html, SEAL, None)
+        html = f"<header>{enclosed(ZONE, RESPONSE_ID, wrapper)}</header>"
+        ((name, bounds),) = chrome_zones(html, RESPONSE_ID, None)
         assert name == "flash"
-        assert zone_html(html, bounds, SEAL) == wrapper
+        assert zone_html(html, bounds, RESPONSE_ID) == wrapper
 
     def test_a_zone_inside_the_slot_is_left_out(self) -> None:
-        zone = sealed(ZONE, SEAL, '<div data-next-zone="in"></div>')
+        zone = enclosed(ZONE, RESPONSE_ID, '<div data-next-zone="in"></div>')
         html = f"<a>{zone}</a>"
-        assert list(chrome_zones(html, SEAL, (0, len(html)))) == []
+        assert list(chrome_zones(html, RESPONSE_ID, (0, len(html)))) == []
 
     def test_a_zone_around_the_slot_yields_the_zones_inside_it(self) -> None:
-        flash = sealed(ZONE, SEAL, '<p data-next-zone="flash"></p>')
-        slot = sealed(ZONE, SEAL, '<p data-next-zone="in"></p>')
+        flash = enclosed(ZONE, RESPONSE_ID, '<p data-next-zone="flash"></p>')
+        slot = enclosed(ZONE, RESPONSE_ID, '<p data-next-zone="in"></p>')
         before = f'<main data-next-zone="main">{flash}<div>'
-        html = sealed(ZONE, SEAL, f"{before}{slot}</div></main>")
-        start = len(opening(ZONE, SEAL)) + len(before)
-        found = list(chrome_zones(html, SEAL, (start, start + len(slot))))
+        html = enclosed(ZONE, RESPONSE_ID, f"{before}{slot}</div></main>")
+        start = len(opening(ZONE, RESPONSE_ID)) + len(before)
+        found = list(chrome_zones(html, RESPONSE_ID, (start, start + len(slot))))
         assert [name for name, _bounds in found] == ["flash"]
 
     def test_a_region_without_a_name_is_skipped(self) -> None:
-        html = sealed(ZONE, SEAL, "<div></div>")
-        assert zone_name(html, (0, len(html)), SEAL) is None
-        assert list(chrome_zones(html, SEAL, None)) == []
+        html = enclosed(ZONE, RESPONSE_ID, "<div></div>")
+        assert zone_name(html, (0, len(html)), RESPONSE_ID) is None
+        assert list(chrome_zones(html, RESPONSE_ID, None)) == []
 
     def test_the_injector_spells_the_same_comments(self) -> None:
-        render = RouterRender(SEAL, "{}")
-        assert render.sealed("x") == sealed(ASSETS_MARK, SEAL, "x")
+        render = RouterRender(RESPONSE_ID, "{}")
+        assert render.enclosed("x") == enclosed(ASSETS_MARK, RESPONSE_ID, "x")
 
 
 NONCE = re.compile(r"""\snonce=(?:"[^"]*"|'[^']*')""", re.IGNORECASE)
@@ -390,11 +362,11 @@ class TestMasks:
         ],
     )
     def test_the_masks_follow_their_patterns(self, text) -> None:
-        assert normalise(text, SEAL) == _masked(text)
+        assert normalise(text, RESPONSE_ID) == _masked(text)
 
     def test_text_with_neither_comes_back_as_the_object_passed(self) -> None:
         text = "<nav><a href='/docs/'>Docs</a></nav>"
-        assert normalise(text, SEAL) is text
+        assert normalise(text, RESPONSE_ID) is text
 
 
 class TestFold:

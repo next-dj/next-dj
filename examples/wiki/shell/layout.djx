@@ -14,7 +14,7 @@
     {% /slot %}
     {% #slot "page_footer" %}
       <footer class="border-t border-border bg-background py-4 text-center text-xs text-muted-foreground">
-        Built with next.dj. File routes plus a <code>HybridRouterBackend</code>.
+        Built with next.dj. File routes plus a <code>HybridPageBackend</code>.
       </footer>
     {% /slot %}
   {% /component %}

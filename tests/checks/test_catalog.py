@@ -9,8 +9,8 @@ from django.core.checks.registry import registry
 
 import next.checks as checks_package
 from next.apps import checks as apps_checks
+from next.apps.areas import CHECK_MODULES
 from next.checks import NEXT
-from next.checks.catalog import CHECK_MODULES
 
 
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent

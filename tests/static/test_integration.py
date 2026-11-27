@@ -151,7 +151,10 @@ class TestJsContextFlowsThroughInit:
             '"$chunks":{"scripts":"/static/next/next.scripts.min.js",'
             '"stream":"/static/next/next.stream.min.js",'
             '"csrf":"/static/next/next.csrf.min.js",'
-            '"poll":"/static/next/next.poll.min.js"}})'
+            '"poll":"/static/next/next.poll.min.js",'
+            '"forms":"/static/next/next.forms.min.js",'
+            '"layers":"/static/next/next.layers.min.js"},'
+            '"$version":"0","$protocol":2})'
         ) in out
 
 

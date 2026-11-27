@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Final
 
 from django.apps import apps
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.utils.functional import Promise
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.checks.common import errors_for_unknown_keys, raw_scope, takes_request
 from next.conf.defaults import AUTO
 from next.introspect import describe_callable

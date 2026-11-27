@@ -1,4 +1,12 @@
-import { createMore } from "../more";
-import { once } from "../protocol";
+// The entry point of next.more.min.js, the address sync and pruning of `{% more %}`.
 
-once("more", () => createMore(window.Next));
+import { createMore } from "../more";
+
+window.Next._extend(
+  "more",
+  (kernel) => {
+    createMore(kernel);
+    return true;
+  },
+  __BUILD__,
+);

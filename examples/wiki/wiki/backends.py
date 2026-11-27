@@ -7,7 +7,7 @@ from django.db.utils import DatabaseError
 from django.urls import URLPattern, path
 
 from next.conf import next_framework_settings
-from next.urls import FileRouterBackend
+from next.urls import FilePageBackend
 
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ CATCHALL_URL_PATH = "wiki/[slug]"
 PUBLIC_PREFIX = "wiki"
 
 
-class HybridRouterBackend(FileRouterBackend):
+class HybridPageBackend(FilePageBackend):
     """File router that also publishes one named URL per Article row.
 
     Each `wiki_article_<slug>` alias shares the catchall view and binds a fixed `slug`.

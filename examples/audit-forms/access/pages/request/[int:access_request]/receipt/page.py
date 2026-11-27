@@ -1,3 +1,4 @@
+from access import services
 from access.models import AccessRequest
 from django.http import Http404, HttpRequest, HttpResponse
 
@@ -5,6 +6,8 @@ from next import context, page
 from next.deps import DObject
 from next.pages import MetadataDict
 
+
+page.transaction(atomic="writes")
 
 RECEIPT = """
 <div class="mx-auto max-w-xl space-y-6" data-receipt>
@@ -27,11 +30,13 @@ def render(
 ) -> str | HttpResponse:
     """Serve the receipt of a filed request, as a text download on `?format=txt`.
 
+    The first opening writes one audit row, the transaction opens right before it.
     The string is template source, so request data reaches it through context only.
     """
     if not access_request.is_filed():
         msg = "No receipt before the backend records the filing."
         raise Http404(msg)
+    services.issue_receipt(access_request)
     if request.GET.get("format") != "txt":
         return RECEIPT
     response = HttpResponse(

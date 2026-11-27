@@ -1,7 +1,7 @@
 from pathlib import Path
 from urllib.parse import quote
 
-from next.pages.boundaries import ErrorShell
+from next.pages.boundaries import ErrorContext
 from next.pages.gating import ShellGate, plan_gating
 from next.pages.graph import Blame, Phase, merged, run_phase
 from next.pages.loaders import BoundaryChain, PageBoundary
@@ -33,10 +33,10 @@ def deferred_tag(
     return f"{opening}{body}{{% /next:boundary %}}"
 
 
-def error_shell(source: Path, **head: object) -> ErrorShell:
+def error_shell(source: Path, **head: object) -> ErrorContext:
     """Return the shell of one boundary at `source` over `head`."""
     chain = BoundaryChain.of((PageBoundary(0, 0, source, None),))
-    return ErrorShell(head, {}, (), Blame(), chain)
+    return ErrorContext(head, {}, (), Blame(), chain)
 
 
 def shell_gate(loading: Path, error: Path | None, *, level: int = 0) -> ShellGate:

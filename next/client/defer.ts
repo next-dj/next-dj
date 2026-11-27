@@ -1,32 +1,52 @@
+// The client trip of a deferred boundary: fetch its content once it loads or comes into
+// view, retry an incomplete one with jitter, and back off on overload.
+
 import { defaultReload } from "./adapters";
-import type { Envelope, InnerPatch, MorphPatch, ReplacePatch } from "./apply";
+import type {
+  Applied,
+  BeforeApply,
+  InnerPatch,
+  MorphPatch,
+  ReplacePatch,
+} from "./apply";
 import { focusable } from "./events";
-import type { PartialSurface } from "./partial";
+import type { Kernel } from "./kernel";
+import { ORDER_ADOPT, ORDER_STAMP } from "./kernel";
 import {
+  ATTR_ADOPTED,
   ATTR_BOUNDARY,
+  ATTR_BUSY,
+  ATTR_CARRIER,
+  ATTR_DEFER,
   ATTR_ERROR,
+  ATTR_FETCH,
+  ATTR_PREFIX,
+  ATTR_RETRY,
   ATTR_STATE,
-  ATTR_TRANSPORT,
+  ATTR_TOKEN,
   ATTR_ZONE,
+  CHUNK_KIND,
+  CHUNK_STATE,
+  HEADER_BOUNDARY,
   HEADER_ZONE,
   NAVIGATED_FLAG,
+  TOKEN_FIELD,
   matching,
   streaming,
 } from "./protocol";
-import type { DeferArm, Watch } from "./triggers";
 import type { Outcome, WireRequest } from "./wire";
 
-const TOKEN = "data-next-token";
-const WRAPPER = `[${ATTR_BOUNDARY}][${TOKEN}]`;
+const WRAPPER = `[${ATTR_BOUNDARY}][${ATTR_TOKEN}]`;
 const ZONE = `[${ATTR_ZONE}]`;
 
-export interface DeferHost {
-  partial: Pick<PartialSurface, "fetch" | "layers" | "onMount">;
-}
+export type DeferHost = Pick<
+  Kernel,
+  "partial" | "serve" | "hook" | "watch" | "diagnostics"
+>;
 
 type BoundaryOp = (InnerPatch | MorphPatch | ReplacePatch) & {
-  s?: string;
-  k?: string;
+  [CHUNK_STATE]?: string;
+  [CHUNK_KIND]?: string;
   token?: string;
 };
 
@@ -40,19 +60,18 @@ const rearm = ({ error }: Outcome): { status: string } => ({
 });
 
 export function createDefer(
-  next: DeferHost,
+  kernel: DeferHost,
   listening: AddEventListenerOptions = {},
   reload = defaultReload(),
-): DeferArm {
+): void {
   const doc = document;
-  const partial = next.partial;
-  const send = partial.fetch.bind(partial);
+  const { partial } = kernel;
+  const send = (request: WireRequest): Promise<Outcome> => partial.fetch(request);
   const seen = new WeakMap<Element, string | null>();
   const queued: Element[] = [];
-  let observe: Watch;
-  let armed = false;
   let halted = false;
 
+  // A 409 or an expired token needs a fresh page, reloaded once per session.
   function reloadOnce(): boolean {
     try {
       if (sessionStorage.getItem(NAVIGATED_FLAG) !== null) return false;
@@ -64,6 +83,7 @@ export function createDefer(
     return true;
   }
 
+  // Focus inside a boundary its content replaced goes back to the new boundary.
   async function settled(el: Element, sent: WireRequest): Promise<Outcome> {
     const active = doc.activeElement;
     const inside = el.contains(active) && active !== el ? active : null;
@@ -73,8 +93,11 @@ export function createDefer(
     return outcome;
   }
 
+  // The token travels where the boundary's carrier says: a header, the query or a body.
   async function boundary(el: Element, token: string, auto: boolean): Promise<Outcome> {
-    const [place, field = "_nb"] = (el.getAttribute(ATTR_TRANSPORT) ?? "").split(":");
+    const [place, field = TOKEN_FIELD] = (el.getAttribute(ATTR_CARRIER) ?? "").split(
+      ":",
+    );
     const url = new URL(partial.layers.urlFor(el), location.href);
     const headers: Record<string, string> = { [HEADER_ZONE]: el.id };
     const sent: WireRequest = { url: "", headers, queue: el.id, boundaries: [el] };
@@ -83,10 +106,14 @@ export function createDefer(
       sent.method = "POST";
       sent.abortable = true;
       sent.body = new URLSearchParams({ [field]: token });
-    } else headers["X-Next-Boundary"] = token;
+    } else headers[HEADER_BOUNDARY] = token;
     sent.url = url.pathname + url.search;
     const outcome = await settled(el, sent);
     const status = statusOf(outcome);
+    // Only a DEBUG server explains a refused token, and only to the dev diagnostics.
+    const { error } = outcome;
+    if ((status === 403 || status === 409) && error?.kind === "http" && error.body)
+      kernel.diagnostics()?.rejected(el, error.body.trim());
     if (status === 409) reloadOnce();
     if (status === 403 && !(auto && reloadOnce()))
       el.setAttribute(ATTR_ERROR, "forbidden");
@@ -94,7 +121,7 @@ export function createDefer(
   }
 
   function request(el: Element, auto = false): Promise<Outcome> {
-    const token = el.getAttribute(TOKEN);
+    const token = el.getAttribute(ATTR_TOKEN);
     const zone = el.getAttribute(ATTR_ZONE);
     if (token !== null) return boundary(el, token, auto);
     if (zone === null) return Promise.resolve(dropped());
@@ -103,11 +130,13 @@ export function createDefer(
 
   function retry(control: Element): void {
     const wrapper = control.closest(`[${ATTR_BOUNDARY}]`);
-    const owner = wrapper?.hasAttribute(TOKEN) ? wrapper : control.closest(ZONE);
+    const owner = wrapper?.hasAttribute(ATTR_TOKEN) ? wrapper : control.closest(ZONE);
     if (owner === null) reload();
     else void request(owner);
   }
 
+  // The load boundaries of one task share one flush, after the parse unless the page
+  // streams, where the document is still parsing as the boundaries arrive.
   function load(el: Element): void {
     if (queued.push(el) > 1) return;
     const flush = (): void =>
@@ -119,10 +148,12 @@ export function createDefer(
     else flush();
   }
 
+  // Each boundary a stream left incomplete is retried once with jitter, and a 429 or
+  // a 5xx stops the retries, so a struggling server is not stampeded.
   function incomplete(): void {
     if (halted) return;
     for (const el of matching(doc, `[${ATTR_ERROR}=incomplete]`)) {
-      const target = el.hasAttribute(TOKEN) ? el : el.closest(ZONE);
+      const target = el.hasAttribute(ATTR_TOKEN) ? el : el.closest(ZONE);
       if (target === null || seen.has(target)) continue;
       seen.set(target, null);
       setTimeout(() => {
@@ -138,58 +169,60 @@ export function createDefer(
   const later = (): void => void setTimeout(incomplete);
 
   function activate(el: Element): void {
-    const mode = el.getAttribute("data-next-defer");
-    const token = el.getAttribute(TOKEN);
+    const mode = el.getAttribute(ATTR_DEFER);
+    const token = el.getAttribute(ATTR_TOKEN);
     if (seen.get(el) === token) return;
     seen.set(el, token);
     if (mode === "load") load(el);
-    if (mode === "visible") observe(el, () => request(el, true).then(rearm));
+    if (mode === "visible") kernel.watch(el, () => request(el, true).then(rearm));
   }
 
   function eachBoundary(
-    event: Event,
+    { envelope }: BeforeApply | Applied,
     run: (op: BoundaryOp, el: Element) => void,
   ): void {
-    const { envelope } = (event as CustomEvent<{ envelope: Envelope }>).detail;
     for (const op of envelope.ops as readonly BoundaryOp[]) {
       const el = doc.getElementById(op.target?.boundary ?? "");
       if (el !== null) run(op, el);
     }
   }
 
+  // An adopted boundary is replaced by its content's root, so that root takes over the
+  // id and the data-next attributes the boundary carried.
   function carry(op: BoundaryOp, el: Element): void {
-    if (op.op !== "morph" || !el.hasAttribute("data-next-adopted")) return;
+    if (op.op !== "morph" || !el.hasAttribute(ATTR_ADOPTED)) return;
     const parsed = doc.createElement("template");
     parsed.innerHTML = op.html ?? "";
     const root = parsed.content.firstElementChild;
     if (root === null) return;
     for (const { name, value } of el.attributes) {
-      if (/^(id$|data-next-(?!busy))/.test(name) && !root.hasAttribute(name))
+      if (
+        (name === "id" ||
+          (name.startsWith(ATTR_PREFIX) && !name.startsWith(ATTR_BUSY))) &&
+        !root.hasAttribute(name)
+      )
         root.setAttribute(name, value);
     }
     op.html = parsed.innerHTML;
   }
 
   function stamp(op: BoundaryOp, el: Element): void {
-    if (op.s !== undefined)
-      el.setAttribute(ATTR_STATE, op.s === "error" ? "error" : "ready");
-    if (op.s === "error") el.setAttribute(ATTR_ERROR, op.k ?? "error");
+    if (op[CHUNK_STATE] !== undefined)
+      el.setAttribute(ATTR_STATE, op[CHUNK_STATE] === "error" ? "error" : "ready");
+    if (op[CHUNK_STATE] === "error")
+      el.setAttribute(ATTR_ERROR, op[CHUNK_KIND] ?? "error");
     if (op.token === undefined) return;
-    el.setAttribute(TOKEN, op.token);
+    el.setAttribute(ATTR_TOKEN, op.token);
   }
-
-  const onBefore = (event: Event): void => eachBoundary(event, carry);
-
-  const onApplied = (event: Event): void => eachBoundary(event, stamp);
 
   function onClick(event: Event): void {
     const target = event.target;
     const control =
       target instanceof Element
-        ? target.closest("[data-next-fetch],[data-next-retry]")
+        ? target.closest(`[${ATTR_FETCH}],[${ATTR_RETRY}]`)
         : null;
     if (control === null) return;
-    const wrapper = control.hasAttribute("data-next-fetch")
+    const wrapper = control.hasAttribute(ATTR_FETCH)
       ? control.closest(WRAPPER)
       : control;
     if (wrapper === null) return;
@@ -198,19 +231,14 @@ export function createDefer(
     else void request(wrapper);
   }
 
-  return (watch) => {
-    observe = watch;
-    if (armed) return;
-    armed = true;
-    listening.signal?.addEventListener("abort", () => (halted = true));
-    doc.addEventListener("click", onClick, listening);
-    doc.addEventListener("partial:before-apply", onBefore, listening);
-    doc.addEventListener("partial:applied", onApplied, listening);
-    doc.addEventListener("partial:settled", later, listening);
-    addEventListener("load", later, listening);
-    partial.fetch = (target) =>
-      target instanceof Element ? request(target) : send(target);
-    partial.onMount(`${WRAPPER}[${ATTR_STATE}=idle]`, activate);
-    incomplete();
-  };
+  // The harness tears the chunk down between cases, a page keeps it armed.
+  TEST: listening.signal?.addEventListener("abort", () => (halted = true));
+  doc.addEventListener("click", onClick, listening);
+  doc.addEventListener("partial:settled", later, listening);
+  addEventListener("load", later, listening);
+  kernel.hook("before", ORDER_ADOPT, (detail) => eachBoundary(detail, carry));
+  kernel.hook("applied", ORDER_STAMP, (applied) => eachBoundary(applied, stamp));
+  kernel.serve("fetch", (el) => request(el));
+  partial.onMount(`${WRAPPER}[${ATTR_STATE}=idle]`, activate);
+  incomplete();
 }

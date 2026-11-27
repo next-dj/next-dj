@@ -79,8 +79,14 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 :doc:`compression`
    ``next.compression`` for the zstd, brotli and gzip codecs, the negotiation, the compression middleware, and the streams that compress themselves.
 
+:doc:`boundaries`
+   ``next.boundaries`` for the boundary unit, its options, error kinds, deferred calls and wire ids, and the inline error boundary.
+
+:doc:`transactions`
+   ``next.transactions`` for the transaction rule of next.dj views and the savepoint an error boundary takes.
+
 :doc:`defer`
-   ``next.defer``, ``next.boundaries``, ``next.transactions``, and ``next.suspense`` for deferred boundaries, error boundaries, the transaction rule, the delivery policy, the lanes, and the boundary tokens.
+   ``next.defer`` for deferred boundaries, the delivery policy, the lanes, and the boundary tokens.
 
 :doc:`views`
    ``next.views`` for the page view the router mounts, the route of one request, and the transaction it runs in.
@@ -108,6 +114,9 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
 
 :doc:`deps`
    ``next.deps`` for the dependency resolver, providers, and ``DObject``.
+
+:doc:`bridge`
+   ``next.bridge`` for ``drive``, the async runtime that runs ``async def`` code from sync code, and the context snapshots of deferred work.
 
 :doc:`permissions`
    ``next.permissions`` for object permission predicates and the authentication backend that answers them.
@@ -177,6 +186,8 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    static
    partial
    compression
+   boundaries
+   transactions
    defer
    views
    router
@@ -187,6 +198,7 @@ Such a method is safe from removal without notice, but it carries no Stable-tier
    csrf
    scripts
    deps
+   bridge
    permissions
    conf
    server

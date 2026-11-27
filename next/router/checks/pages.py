@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from django.core.checks import CheckMessage, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Warning as DjangoWarning
 
-from next.checks import NEXT
-from next.checks.common import DeclaringCall, declaration_errors
+from next.checks import NEXT, register
+from next.checks.common import DeclaringCall, misplaced_errors
 from next.conf.router import router_enabled
+from next.discovery import get_pages_directories_for_watch
 from next.pages.loaders import PAGE_MODULE, load_python_module_memo
 from next.pages.responses import cache_control
-from next.pages.router import router_store
-from next.pages.watch import get_pages_directories_for_watch
+from next.router.declarations import router_declaration
 
 
 if TYPE_CHECKING:
@@ -54,14 +54,8 @@ _ROUTER_CALL: Final = DeclaringCall("page.router()", "next.E238", PAGE_MODULE, "
 
 @register(NEXT)
 def check_router_declarations(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Report a `page.router()` call that applies nothing (`next.E238`)."""
-    return declaration_errors(
-        _ROUTER_CALL,
-        router_store,
-        consequence="The page keeps the default router options.",
-        hint="Call page.router(navigate=..., prefetch=..., snapshot=...) with bools "
-        "at the top of the module.",
-    )
+    """Report a `page.router()` call made outside a `page.py` (`next.E238`)."""
+    return misplaced_errors(_ROUTER_CALL, router_declaration.outside())
 
 
 __all__ = ["check_no_store_pages", "check_router_declarations"]

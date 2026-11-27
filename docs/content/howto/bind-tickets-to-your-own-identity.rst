@@ -134,7 +134,7 @@ It does no database, cache, or network access, and the credential carries everyt
 ``issue`` may raise ``InvalidTicketError``, which answers the negotiation with ``503``, and the client then continues over SSE.
 ``subject`` returns ``None`` for a credential it does not recognise.
 
-A ticket stores a digest of the subject under ``SECRET_KEY`` and is accepted under any ``SECRET_KEY_FALLBACKS`` entry too, so rotating the key does not strand a ticket for its short lifetime.
+The subject salts the signature of a ticket, so a ticket opens only for the same subject, and a signature under any ``SECRET_KEY_FALLBACKS`` entry passes too, so rotating the key does not strand a ticket.
 Over SSE the default ``live_session`` hands the session key of the request to ``stored_session`` from ``next.identity``.
 A binding with no sessions overrides ``live_session`` to return ``None``, and one with its own SSE identity returns a ``LiveIdentity`` from it.
 

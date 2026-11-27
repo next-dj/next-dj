@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.discovery import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.discovery import first_visit, get_route_manager, iter_scanned_page_pairs
 
 from .loaders import load_python_module_memo
 from .manager import page
@@ -17,17 +17,17 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from next.urls import RouterManager
+    from next.urls import RouteManager
 
 
 def iter_existing_scanned_page_pairs(
-    router_manager: RouterManager, seen: set[Path]
+    route_manager: RouteManager, seen: set[Path]
 ) -> Iterator[tuple[str, Path]]:
     """Yield the routed URL trail and path of each existing `page.py`, once.
 
     Deduped by resolved path but yielded under the spelling the registry keys on.
     """
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         for url_path, page_path in iter_scanned_page_pairs(router):
             if not first_visit(page_path, seen):
                 continue
@@ -36,14 +36,14 @@ def iter_existing_scanned_page_pairs(
 
 
 def iter_existing_scanned_pages(
-    router_manager: RouterManager, seen: set[Path]
+    route_manager: RouteManager, seen: set[Path]
 ) -> Iterator[Path]:
     """Yield each existing `page.py` once across routers, de-duplicated by `seen`."""
-    for _url_path, page_path in iter_existing_scanned_page_pairs(router_manager, seen):
+    for _url_path, page_path in iter_existing_scanned_page_pairs(route_manager, seen):
         yield page_path
 
 
-def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, Path]]:
+def load_scanned_page_modules(route_manager: RouteManager) -> list[tuple[str, Path]]:
     """Execute every existing routed `page.py` and return the ones that loaded.
 
     A page-scoped registration exists only once its `page.py` has run.
@@ -51,7 +51,7 @@ def load_scanned_page_modules(router_manager: RouterManager) -> list[tuple[str, 
     return [
         (url_path, page_path)
         for url_path, page_path in iter_existing_scanned_page_pairs(
-            router_manager, set()
+            route_manager, set()
         )
         if load_python_module_memo(page_path) is not None
     ]
@@ -62,11 +62,11 @@ def iter_serialized_page_context_keys() -> Iterator[tuple[Path, str]]:
 
     A keyless callable yields keys only at render time, and a page yields its keys once.
     """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return
     # A page registers only once it runs, so the walk imports before the registry reads.
-    pages = load_scanned_page_modules(router_manager)
+    pages = load_scanned_page_modules(route_manager)
     serialized = page.contexts.serialized_keys()
     for _url_path, page_path in pages:
         for key in serialized.get(page_path, ()):

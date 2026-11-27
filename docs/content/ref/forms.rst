@@ -89,7 +89,7 @@ Decorator
 ``atomic=`` decides whether the action runs inside a request transaction and wins over ``TRANSACTIONS``, see :doc:`settings`.
 ``True`` and ``False`` turn the transaction on or off on ``TRANSACTIONS["ALIASES"]``, ``"writes"`` opens it right before the first write, and an ``AtomicOverride`` of ``next.transactions`` names its own ``aliases``, ``"all"`` or a list of database aliases.
 Without it a ``POST`` runs inside a transaction by the default rule, with or without ``ATOMIC_REQUESTS``.
-The dispatch view carries the ``_non_atomic_requests`` mark for every alias, runs the access checks of the action before it opens the transaction, and closes it once the response object exists, so a refused request opens none, an exception rolls back, and a returned response commits whatever its status.
+The dispatch view is marked with :func:`~django.db.transaction.non_atomic_requests` on every alias, runs the access checks of the action before it opens the transaction, and closes it once the response object exists, so a refused request opens none, an exception rolls back, and a returned response commits whatever its status.
 The checks on the bound row run inside the transaction, and their refusal sends ``form_access_denied`` once it has rolled back.
 A tunneled action refused for rotating the session rolls its transaction back.
 Any other ``atomic=`` value, or an ``AtomicOverride`` holding a value of the wrong shape, applies nothing and is reported as ``next.E240``.
@@ -97,7 +97,7 @@ A ``Form``, ``ModelForm``, or ``FormWizard`` registered through its own ``Meta``
 ``Meta.atomic`` is inherited like the other ``Meta`` options, and an ``@action(form_class=F)`` without ``atomic=`` takes ``F.Meta.atomic``, while an ``atomic=`` on the decorator wins over it.
 A :func:`~django.db.transaction.on_commit` hook registered inside the action fires when the action's transaction commits, not when it is registered.
 An action whose handler does slow work outside the database, such as a sleep, an outbound HTTP call, or sending mail, opts out with ``atomic=False`` or ``Meta.atomic = False``, so it holds no connection inside an open transaction while that work runs.
-``page.atomic()`` does not cover the actions its page declares, see :ref:`topics-forms-actions-transactions`.
+``page.transaction()`` does not cover the actions its page declares, see :ref:`topics-forms-actions-transactions`.
 
 Exceptions
 ~~~~~~~~~~

@@ -2,27 +2,24 @@
 
 from __future__ import annotations
 
-import functools
 from pathlib import Path
 
+from next.caches import ROUTES, SETTINGS, memo
 from next.conf import next_framework_settings
-from next.utils import app_holding, on_forget_resolved_trees, resolve_base_dir
+from next.utils import app_holding, resolve_base_dir
 
 
 # Distinct ``current_template_path`` strings memoised, matching the other path caches.
 _PATH_MEMO_MAX_ENTRIES = 2048
 
 
-@functools.lru_cache(maxsize=_PATH_MEMO_MAX_ENTRIES)
+@memo(SETTINGS, ROUTES, maxsize=_PATH_MEMO_MAX_ENTRIES)
 def resolve_template_path(raw: str) -> Path:
     """Return the resolved file for a raw ``current_template_path`` string.
 
     Memoised per raw string and dropped along with the shared page-tree resolutions.
     """
     return Path(raw).resolve()
-
-
-on_forget_resolved_trees(resolve_template_path.cache_clear)
 
 
 def _setting_roots() -> tuple[Path, ...]:
@@ -40,7 +37,7 @@ def _setting_roots() -> tuple[Path, ...]:
     return tuple(roots)
 
 
-@functools.lru_cache(maxsize=_PATH_MEMO_MAX_ENTRIES)
+@memo(SETTINGS, ROUTES, maxsize=_PATH_MEMO_MAX_ENTRIES)
 def anchored(name: str) -> str:
     """Return the template file `name` relative to the app or the root holding it.
 
@@ -60,9 +57,6 @@ def anchored(name: str) -> str:
     if base is not None and real.is_relative_to(base.resolve()):
         return real.relative_to(base.resolve()).as_posix()
     return name
-
-
-on_forget_resolved_trees(anchored.cache_clear)
 
 
 __all__ = ["anchored", "resolve_template_path"]

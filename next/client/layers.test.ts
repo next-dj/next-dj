@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryAdapter } from "./apply";
 import { createLayers, nativeDialog } from "./layers";
-import type { DialogAdapter, LayerDeps, LayerStack, PopStateAdapter } from "./layers";
+import type { DialogAdapter, LayerDeps, PopStateAdapter } from "./layers";
+import { createStack } from "./stack";
+import type { Stack } from "./stack";
+import { landed } from "./test-doubles";
 import { createNavigation } from "./navigation";
 import type { Navigation } from "./navigation";
-import { HEADER_ORIGIN, HEADER_ZONE, pageKey } from "./protocol";
+import { HEADER_ORIGIN, HEADER_ZONE, markBusy, pageKey } from "./protocol";
 
 interface Dispatched {
   event: string;
@@ -25,27 +28,34 @@ function mockDialog() {
 }
 
 // Every stack registers here so the afterEach resets them all, leaking no dialogs.
-const madeStacks: LayerStack[] = [];
+const madeStacks: Stack[] = [];
 
 // The runtime shares one navigation with the applier. A case that brings none gets
 // one over its history seam, or over window.history.
 function createTrackedLayers(
-  deps: Omit<LayerDeps, "navigation"> & {
+  deps: Omit<LayerDeps, "navigation" | "mark"> & {
     navigation?: Navigation;
     history?: HistoryAdapter;
+    popstate?: PopStateAdapter;
   },
-): LayerStack {
-  const { history, ...rest } = deps;
-  const layers = createLayers({
-    ...rest,
-    navigation:
-      deps.navigation ??
-      createNavigation({
-        dispatch: deps.dispatch,
-        ...(deps.document !== undefined ? { document: deps.document } : {}),
-        ...(history !== undefined ? { history } : {}),
-      }),
+): Stack {
+  const { history, popstate, ...rest } = deps;
+  const navigation =
+    deps.navigation ??
+    createNavigation({
+      dispatch: deps.dispatch,
+      ...(deps.document !== undefined ? { document: deps.document } : {}),
+      ...(history !== undefined ? { history } : {}),
+    });
+  const stack = createStack({
+    dispatch: deps.dispatch,
+    ...(deps.document !== undefined ? { document: deps.document } : {}),
+    chunk: landed(createLayers),
+    build: (factory) => factory({ ...rest, navigation, mark: markBusy }),
+    popped: () => navigation.popped(() => undefined),
+    navigate: () => undefined,
   });
+  const layers: Stack = { ...stack, install: (doc) => stack.install(doc, popstate) };
   madeStacks.push(layers);
   return layers;
 }
@@ -92,7 +102,7 @@ function makeStack() {
 }
 
 describe("layer stack", () => {
-  let layers: LayerStack;
+  let layers: Stack;
   let dispatched: Dispatched[];
   let fetched: { url: string; zone: string }[];
   let dismissed: ((reason: string) => void)[];
@@ -1058,7 +1068,7 @@ describe("a server-initiated open seeds a zone, an href, both, or neither", () =
 });
 
 describe("layer intercepting URL lifecycle", () => {
-  let layers: LayerStack;
+  let layers: Stack;
   let dispatched: Dispatched[];
   let fire: () => void;
 
@@ -1736,7 +1746,7 @@ describe("layer head scoping from the audit", () => {
 describe("a prefetched layer body", () => {
   const prefetched = vi.fn<(input: string, init: RequestInit) => Promise<Response>>();
 
-  type Taker = ReturnType<NonNullable<LayerDeps["take"]>>;
+  type Taker = NonNullable<LayerDeps["take"]>;
 
   function stack(taker?: Taker, loaded = true) {
     const sent: Parameters<LayerDeps["fetch"]>[0][] = [];
@@ -1747,7 +1757,7 @@ describe("a prefetched layer body", () => {
       document,
       dialog: mockDialog().adapter,
       history: { push: () => undefined, replace: () => undefined },
-      ...(loaded ? { take: () => taker } : {}),
+      ...(loaded ? { take: taker ?? (() => undefined) } : {}),
     });
     return { layers, sent, dispatched };
   }
@@ -1772,7 +1782,7 @@ describe("a prefetched layer body", () => {
       fetch: async () => undefined,
       document,
       dialog: mockDialog().adapter,
-      take: () => () => {
+      take: () => {
         seen.push(location.pathname);
         return undefined;
       },

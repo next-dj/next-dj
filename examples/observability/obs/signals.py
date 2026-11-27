@@ -3,6 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django.dispatch import receiver
 
+from next.boundaries.signals import boundary_failed
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
@@ -36,7 +37,7 @@ from next.static.signals import (
     html_injected,
     static_backend_loaded,
 )
-from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
+from next.urls.signals import page_backend_loaded, route_registered, routes_reloaded
 
 from .exporter import (
     MESSAGES_PUBLISHED,
@@ -54,8 +55,8 @@ from .metrics import incr
 BACKEND_LOADED_SIGNALS = (
     component_backend_loaded,
     form_backend_loaded,
+    page_backend_loaded,
     partial_backend_loaded,
-    router_backend_loaded,
     static_backend_loaded,
     wizard_backend_loaded,
 )
@@ -113,10 +114,10 @@ def on_route_registered(url_path: str | None = None, **kwargs: object) -> None:
     incr("urls.route", str(url_path))
 
 
-@receiver(router_reloaded)
-def on_router_reloaded(**kwargs: object) -> None:
+@receiver(routes_reloaded)
+def on_routes_reloaded(**kwargs: object) -> None:
     """Count the router rebuilds."""
-    incr("urls", "router_reloaded")
+    incr("urls", "routes_reloaded")
 
 
 @receiver(component_registered)
@@ -157,6 +158,12 @@ def on_action_dispatched(action_name: str | None = None, **kwargs: object) -> No
 def on_form_validation_failed(action_name: str | None = None, **kwargs: object) -> None:
     """Count the validation failures by action."""
     incr("forms.validation_failed", str(action_name))
+
+
+@receiver(boundary_failed)
+def on_boundary_failed(name: str, **kwargs: object) -> None:
+    """Count the failures a boundary contained, by boundary name."""
+    incr("boundaries.failed", name)
 
 
 @receiver(asset_registered)

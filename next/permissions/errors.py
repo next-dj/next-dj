@@ -15,14 +15,14 @@ class PermissionAlreadyRegisteredError(Exception):
 
 
 class DeclarationOutsideModuleError(RuntimeError):
-    """An access declaration runs off the top level of the module it binds to."""
+    """A page or component declaration runs off the top level of its module."""
 
     def __init__(self, source: Path) -> None:
         """Name the file the declaration bound to."""
         super().__init__(
-            f"An access declaration in {source} runs inside a function, so it would "
-            "change the rule whenever that function runs. Declare access at the top "
-            "level of the page.py or component.py it guards."
+            f"A declaration in {source} runs inside a function, so it would change "
+            "what the module declares whenever that function runs. Declare it at the "
+            "top level of the page.py or component.py it is for."
         )
         self.source = source
 

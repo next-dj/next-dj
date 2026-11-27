@@ -19,7 +19,7 @@ from next.components import (
     components_manager,
     refresh_component_files,
 )
-from next.components.loading import last_load_error
+from next.components.modules import last_load_error
 from tests.support import (
     DUMMY_COMPONENTS_BACKEND,
     DummyComponentsBackend,
@@ -100,6 +100,22 @@ class TestComponentInfoDunders:
         assert a == d
         assert hash(a) == hash(d)
         assert a != object()
+
+
+class TestBackendVersion:
+    """A plan reads how the components of each backend moved."""
+
+    def test_a_backend_of_fixed_components_answers_zero(self) -> None:
+        assert DummyComponentsBackend({}).version == 0
+
+    def test_a_file_backend_follows_its_registry(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        backend = FileComponentsBackend(dict(min_component_config))
+        before = backend.version
+        (tmp_path / "card.djx").write_text("<p>x</p>")
+        backend.register_walked_folder(tmp_path, tmp_path, "")
+        assert backend.version > before
 
 
 class TestFileComponentsBackend:

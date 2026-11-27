@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -6,13 +7,21 @@ from django.template import Context
 from django.template.base import NodeList
 from django.test import override_settings
 
+from next.boundaries.calls import DEFERRALS_KEY, stable_key
+from next.boundaries.options import BoundaryOptions, DeferMode
 from next.components import ComponentInfo
-from next.defer import DEFERRALS_KEY, BoundaryOptions, DeferMode, stable_key
-from next.suspense.assembly import finish
-from next.suspense.components import deferring
-from next.templatetags.components import ComponentNode
+from next.components.tags import ComponentNode
+from next.defer.assembly import finish
+from next.defer.components import deferring
 from tests.components.sites import FIRST_KEY, HEAD, ComponentSite
 from tests.support.boundaries import run_sequentially
+from tests.support.cases.components import MODE_CASES, ModeCase
+
+
+def _state_of(html: str) -> str | None:
+    """Return the `data-next-state` a render carries, `None` for a bare one."""
+    found = re.search(r'data-next-state="([a-z]+)"', html)
+    return None if found is None else found.group(1)
 
 
 def _declaring(**modes: str):
@@ -22,43 +31,22 @@ def _declaring(**modes: str):
         options=lambda path: None if path is None else declared.get(path.parent.name),
         version=0,
     )
-    return patch("next.templatetags.components.defer_declarations", store)
+    return patch("next.components.tags.defer_declarations", store)
 
 
 class TestModeDecision:
     """The call site wins over the module, which wins over a `loading.djx`."""
 
-    @pytest.mark.parametrize(
-        ("loading", "declared", "tag", "jobs", "state"),
-        [
-            pytest.param(None, None, "", None, None, id="plain"),
-            pytest.param("L", None, "", 1, "loading", id="loading-file"),
-            pytest.param("L", None, " defer='inline'", 0, "ready", id="call-inline"),
-            pytest.param(None, None, " defer='stream'", 1, "loading", id="call-stream"),
-            pytest.param("L", "inline", "", 0, "ready", id="module-inline"),
-            pytest.param(None, "visible", "", 1, "loading", id="client-trip"),
-            pytest.param(None, "stream", " defer='inline'", 0, "ready", id="wins"),
-        ],
-    )
-    def test_the_effective_mode(
-        self,
-        site: ComponentSite,
-        loading: str | None,
-        declared: str | None,
-        tag: str,
-        jobs: int | None,
-        state: str | None,
-    ) -> None:
-        site.add("card", "<c>C</c>", loading=loading, module=HEAD)
-        modes = {} if declared is None else {"card": declared}
+    @pytest.mark.parametrize("case", MODE_CASES, ids=lambda c: c.id)
+    def test_the_effective_mode(self, site: ComponentSite, case: ModeCase) -> None:
+        site.add("card", "<c>C</c>", loading=case.loading, module=HEAD)
+        modes = {} if case.declared is None else {"card": case.declared}
         with _declaring(**modes), deferring() as held:
-            html = site.render(f"{{% component 'card'{tag} %}}")
-        if state is None:
-            assert html == "<c>C</c>"
-        else:
-            assert f'data-next-state="{state}"' in html
+            html = site.render(f"{{% component 'card'{case.tag} %}}")
+        assert _state_of(html) == case.state
+        assert ("<c>C</c>" in html) is case.inline
         count = None if held.session is None else len(held.session.jobs)
-        assert count == jobs
+        assert count == case.jobs
 
     def test_a_client_trip_without_a_request_queues_a_stream_job(
         self, site: ComponentSite
@@ -77,7 +65,7 @@ class TestModeDecision:
         store = SimpleNamespace(
             options=lambda _path: BoundaryOptions.parse(timeout="5s"), version=0
         )
-        with patch("next.templatetags.components.defer_declarations", store):
+        with patch("next.components.tags.defer_declarations", store):
             _, session = site.deferred("{% component 'card' defer='stream' %}")
             _, timed = site.deferred(
                 "{% component 'card' defer='stream' timeout='1s' %}"
@@ -133,7 +121,7 @@ class TestHeldRoute:
         store = SimpleNamespace(
             options=lambda path: declared.get(path.parent.name), version=0
         )
-        with patch("next.templatetags.components.defer_declarations", store):
+        with patch("next.components.tags.defer_declarations", store):
             assert site.render("{% component 'card' %}") == "<c>C</c>"
             declared["card"] = BoundaryOptions.parse("stream")
             store.version = 1
@@ -147,8 +135,8 @@ class TestHeldRoute:
         access = SimpleNamespace(version=0)
         rules = [False]
         with (
-            patch("next.templatetags.components.declarations", access),
-            patch("next.templatetags.components.ruled", lambda _info: rules[-1]),
+            patch("next.components.tags.declarations", access),
+            patch("next.components.tags.ruled", lambda _info: rules[-1]),
         ):
             site.render("{% component 'card' %}")
             assert info.route is not None
@@ -214,7 +202,7 @@ class TestDeclaredWrapperTag:
         store = SimpleNamespace(
             options=lambda _path: BoundaryOptions.parse("stream", tag=tag), version=0
         )
-        with patch("next.templatetags.components.defer_declarations", store):
+        with patch("next.components.tags.defer_declarations", store):
             shell, _ = site.deferred("{% component 'card' %}")
         assert opening in shell
 

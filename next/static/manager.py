@@ -9,18 +9,21 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
 
 from next.backends import BackendListManager, backend_entries, load_backends
+from next.caches import FRAMEWORK, ROUTES, SETTINGS, instance_dict
 from next.conf import import_class_cached, next_framework_settings
 from next.diagnostics import Capture, FailureLog, isolated_build, mark_degraded
-from next.pages.watch import get_page_root_keys_for_watch
+from next.discovery import get_page_root_keys_for_watch
 
 from .assets import with_version
-from .backends import DEFAULT_STATIC_BACKEND, MANIFEST_SETTINGS, StaticBackend
+from .backends import DEFAULT_STATIC_BACKEND, StaticBackend
 from .collector import StaticCollector
 from .discovery import AssetDiscovery, PageRootKeys, PathResolver
 from .inject import PlaceholderInjector
 from .runtime import (
     CHUNK_STATIC_PATHS,
+    LISTED_CHUNK_KEYS,
     NEXT_JS_STATIC_PATH,
+    OPTIONAL_CHUNK_KEYS,
     NextScriptBuilder,
     ScriptInjectionPolicy,
 )
@@ -145,6 +148,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._cached_page_roots: PageRootKeys | None = None
         self._script_builder: tuple[NextScriptBuilder, bool] | None = None
         self._chunk_urls: dict[str, str | None] = {}
+        self._listed: dict[frozenset[str], tuple[tuple[str, str], ...]] = {}
         self._dedup_factory: Callable[[], DedupStrategy] | None = None
         self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
         self._rewrites_urls: bool = False
@@ -282,6 +286,26 @@ class StaticManager(BackendListManager[StaticBackend]):
             )
         return url
 
+    def listed_chunks(self, enabled: frozenset[str]) -> tuple[tuple[str, str], ...]:
+        """Return the name and storage URL of each chunk `$chunks` lists.
+
+        An optional chunk is listed once `enabled` names it. Held once every chunk
+        resolves, so a missing one still warns on each page.
+        """
+        listed = self._listed.get(enabled)
+        if listed is not None:
+            return listed
+        names = [
+            name
+            for name in LISTED_CHUNK_KEYS
+            if name in enabled or name not in OPTIONAL_CHUNK_KEYS
+        ]
+        found = [(name, self.chunk_url(name)) for name in names]
+        listed = tuple((name, url) for name, url in found if url is not None)
+        if len(listed) == len(found):
+            self._listed[enabled] = listed
+        return listed
+
     @override
     def reload(self) -> None:
         """Rebuild the backend list from merged framework settings.
@@ -292,6 +316,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         self._cached_page_roots = None
         self._script_builder = None
         self._chunk_urls = {}
+        self._listed = {}
         self._dedup_factory = None
         self._js_policy_factory = None
         self._backends, self._backends_degraded = _isolated(
@@ -337,6 +362,7 @@ class StaticManager(BackendListManager[StaticBackend]):
         """
         self._script_builder = None
         self._chunk_urls = {}
+        self._listed = {}
         self._discovery = None
         for backend in self._backends:
             backend.forget_urls()
@@ -368,14 +394,20 @@ class DefaultStaticManager(LazyObject):
 
 default_manager: DefaultStaticManager = DefaultStaticManager()
 
+_HANDLE: Final = instance_dict(default_manager)
+"""The instance dict the handle keeps `_wrapped` in, read without the proxy lookup.
+
+Every reset writes the same dict, so a read here sees it at no `LazyObject` cost.
+"""
+
 
 def get_static_manager() -> StaticManager:
     """Return the live `StaticManager` behind the lazy default handle."""
-    manager = default_manager._wrapped
+    manager = _HANDLE["_wrapped"]
     if manager is empty:
         default_manager._setup()
-        manager = default_manager._wrapped
-    return manager
+        manager = _HANDLE["_wrapped"]
+    return cast("StaticManager", manager)
 
 
 def collect_component_assets(
@@ -387,7 +419,7 @@ def collect_component_assets(
     """
     if collector is None or info.is_simple:
         return
-    default_manager.discover_component_assets(info, collector)
+    get_static_manager().discover_component_assets(info, collector)
 
 
 def reset_default_manager() -> None:
@@ -413,17 +445,7 @@ def forget_manager_backend_urls(**kwargs: object) -> None:
         default_manager.forget_backend_urls()
 
 
-def forget_static_manager(**kwargs: object) -> None:
-    """Reset the default static manager when framework settings reload."""
-    reset_default_manager()
-
-
-def forget_storage_state(*, setting: str, **kwargs: object) -> None:
-    """Drop the derived state that a changed Django setting invalidates.
-
-    `settings_reloaded` covers only `NEXT_FRAMEWORK`, not these Django settings.
-    """
-    if setting == "INSTALLED_APPS":
-        forget_manager_page_roots()
-    elif setting in MANIFEST_SETTINGS:
-        forget_manager_backend_urls()
+FRAMEWORK.attach(reset_default_manager)
+SETTINGS.attach(forget_manager_page_roots)
+SETTINGS.attach(forget_manager_backend_urls)
+ROUTES.attach(forget_manager_page_roots)

@@ -8,7 +8,7 @@ from django.core.exceptions import PermissionDenied
 from django.forms import BaseModelForm
 from django.http import HttpResponse, HttpResponseRedirect
 
-from next.caches import PageCache
+from next.caches import BoundedCache, PageCache
 from next.forms.signals import form_access_denied
 from next.forms.uid import posted_origin_path
 from next.pages import page
@@ -101,7 +101,9 @@ class _GuardRule:
     rule: AccessRule
 
 
-_guard_rules: dict[tuple["ActionGuard", str, bool], _GuardRule] = {}
+_guard_rules: BoundedCache[tuple["ActionGuard", str, bool], _GuardRule] = BoundedCache(
+    depends=()
+)
 
 
 def _build_guard_rule(
@@ -235,7 +237,7 @@ class _Tree:
     deferred: bool
 
 
-_trees: PageCache[tuple[str, Path | None], _Tree] = PageCache()
+_trees: PageCache[tuple[str, Path | None], _Tree] = PageCache(depends=())
 
 
 def _build_tree(

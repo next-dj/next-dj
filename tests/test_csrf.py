@@ -26,7 +26,6 @@ from django.urls import (
 
 from next.conf import next_framework_settings
 from next.csrf import (
-    _REQUEST_FLAG,
     CSRF_DEFERRED_ATTR,
     CsrfDelivery,
     csrf_delivery,
@@ -39,7 +38,6 @@ from next.csrf import (
     token_deferred,
 )
 from next.forms.uid import ORIGIN_FIELD_NAME
-from next.partial.headers import REQUEST_FLAG
 from tests.support import FEED_URLCONF, routed, write_page
 from tests.support.sites import mine
 
@@ -191,8 +189,24 @@ class TestPayload:
         defer_token(request)
         with routed(_action_tree(tmp_path)):
             payload = csrf_payload(request)
-        assert payload == {"header": csrf_header_name(), "url": "/_next/csrf/"}
+        assert payload == {
+            "header": csrf_header_name(),
+            "url": "/_next/csrf/",
+            "cookie": "csrftoken",
+        }
         assert "CSRF_COOKIE_NEEDS_UPDATE" not in request.META
+
+    @pytest.mark.parametrize(
+        "setting", ["CSRF_COOKIE_HTTPONLY", "CSRF_USE_SESSIONS"], ids=str.lower
+    )
+    def test_a_cookie_scripts_cannot_read_goes_unnamed(
+        self, tmp_path, setting: str
+    ) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        with override_settings(**{setting: True}), routed(_action_tree(tmp_path)):
+            payload = csrf_payload(request)
+        assert "cookie" not in payload
 
     def test_the_endpoint_reverses_bare_under_a_root_mount(self) -> None:
         request = RequestFactory().get("/")
@@ -254,9 +268,6 @@ class TestPayload:
                 set_script_prefix("/")
         assert plain == "/_next/csrf/"
         assert prefixed == "/app/_next/csrf/"
-
-    def test_the_request_flag_is_the_partial_header(self) -> None:
-        assert _REQUEST_FLAG == REQUEST_FLAG
 
     def test_the_token_payload_ignores_the_deferral(self) -> None:
         request = RequestFactory().get("/")

@@ -97,7 +97,7 @@ def render_with(
     """
     with (
         patch("next.components.renderers.component", manager),
-        patch("next.components.loading.component", manager),
+        patch("next.components.modules.component", manager),
     ):
         return render_component(info, context_data, request)
 

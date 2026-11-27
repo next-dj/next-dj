@@ -3,10 +3,10 @@
 from pathlib import Path
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Warning as DjangoWarning
 from django.forms import FileField, MultiValueField
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.components.facade import get_component
 from next.forms.widgets import ComponentWidget
 

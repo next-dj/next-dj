@@ -157,9 +157,9 @@ class TestEagerLoadPages:
 
 
 def test_clear_loaded_dirs_drops_the_page_scan(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(discovery._router_manager_cache, "pages", (object(), []))
+    monkeypatch.setattr(discovery._route_manager_cache, "pages", (object(), []))
     clear_loaded_dirs()
-    assert discovery._router_manager_cache.pages is None
+    assert discovery._route_manager_cache.pages is None
 
 
 class _RecordingBackend(DummyComponentsBackend):
@@ -249,11 +249,11 @@ class TestEagerLoadComponentsPageTrees:
     ) -> None:
         manager = _StubManager()
         folder = tmp_path / "panels" / "_components"
-        router_manager = MagicMock()
-        router_manager.backends = (object(),)
+        route_manager = MagicMock()
+        route_manager.backends = (object(),)
 
         monkeypatch.setattr(loaders, "components_manager", manager)
-        monkeypatch.setattr(loaders, "get_router_manager", lambda: (router_manager, []))
+        monkeypatch.setattr(loaders, "get_route_manager", lambda: (route_manager, []))
         monkeypatch.setattr(
             loaders,
             "iter_page_tree_component_folders",
@@ -263,11 +263,11 @@ class TestEagerLoadComponentsPageTrees:
 
         assert manager.walked == [(folder, tmp_path, "panels")]
 
-    def test_no_router_manager_registers_nothing(self, monkeypatch) -> None:
+    def test_no_route_manager_registers_nothing(self, monkeypatch) -> None:
         manager = _StubManager()
 
         monkeypatch.setattr(loaders, "components_manager", manager)
-        monkeypatch.setattr(loaders, "get_router_manager", lambda: (None, []))
+        monkeypatch.setattr(loaders, "get_route_manager", lambda: (None, []))
         eager_load_components()
 
         assert manager.walked == []

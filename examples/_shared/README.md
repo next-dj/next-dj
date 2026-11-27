@@ -97,7 +97,7 @@ To register the project-level root, list it in both backends' `DIRS` when you al
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "site")],   # owns layout.djx
             "PAGES_DIR": "pages",

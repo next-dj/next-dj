@@ -1,6 +1,9 @@
-import pytest
+import re
 
-from next.compression import OPT_OUT as COMPRESSION_OPT_OUT
+import pytest
+from django.core.exceptions import ImproperlyConfigured
+
+from next.compression.manager import OPT_OUT as COMPRESSION_OPT_OUT
 from next.conf.compression import OPT_OUT
 from next.conf.defaults import DEFAULTS
 from next.conf.router import (
@@ -8,6 +11,7 @@ from next.conf.router import (
     Eagerness,
     ForeignMode,
     InterceptMode,
+    LinkPass,
     PrefetchMode,
     PressMode,
     RouterScope,
@@ -29,9 +33,9 @@ class TestReadSettings:
         current = read_settings({})
         assert current.enabled is True
         assert (current.scope, current.foreign, current.intercept) == (
-            "all",
+            "pages",
             "hard",
-            "opt-in",
+            "opt_in",
         )
         assert (current.prefetch, current.prefetch_delay) == ("intent", 0.065)
         assert (current.prefetch_ttl, current.prefetch_entries) == (30.0, 16)
@@ -41,14 +45,13 @@ class TestReadSettings:
         assert current.progress is True
         assert current.transitions is False
         assert current.speculation is None
-        assert current.max_layouts == 32
         assert (current.cut, current.digest) == (
             "next.router.VerifiedCut",
             "next.router.ChromeDigest",
         )
-        assert current.current_enabled is True
-        assert current.current_backend == "next.router.CurrentLinks"
-        assert current.current_containers == (
+        assert current.links_enabled is True
+        assert current.links_pass is LinkPass.TEMPLATE
+        assert current.links_containers == (
             "nav",
             "[role=navigation]",
             "[data-next-nav]",
@@ -56,51 +59,65 @@ class TestReadSettings:
         assert current.exclude == ()
 
     def test_the_shapes_cover_every_default_key(self) -> None:
-        current = SHAPE.keys["CURRENT"]
+        current = SHAPE.keys["ACTIVE_LINKS"]
         assert isinstance(current, Section)
         assert set(SHAPE.keys) == set(DEFAULTS["ROUTER"])
-        assert set(current.keys) == set(DEFAULTS["ROUTER"]["CURRENT"])
+        assert set(current.keys) == set(DEFAULTS["ROUTER"]["ACTIVE_LINKS"])
 
     def test_the_modes_read_as_their_enums(self) -> None:
-        current = read_settings({"SCOPE": "opt-in", "INTERCEPT": "links"})
+        current = read_settings({"SCOPE": "opt_in", "INTERCEPT": "links"})
         assert current.scope is RouterScope.OPT_IN
         assert current.intercept is InterceptMode.LINKS
         assert current.foreign is ForeignMode.HARD
         assert current.prefetch is PrefetchMode.INTENT
         assert current.press is PressMode.MOUSE
 
-    def test_written_values_are_read_and_misfits_dropped(self) -> None:
+    def test_written_values_are_read(self) -> None:
         current = read_settings(
             {
                 "ENABLED": False,
                 "EXCLUDE": ["/files/"],
-                "MAX_LAYOUTS": 0,
                 "PROGRESS": False,
                 "PREFETCH_SHELL_TTL": 60,
-                "CURRENT": {"ENABLED": False},
+                "ACTIVE_LINKS": {"ENABLED": False, "PASS": "document"},
             }
         )
         assert current.enabled is False
         assert current.progress is False
         assert current.prefetch_shell_ttl == 60.0
         assert current.exclude == ("/files/",)
-        assert current.max_layouts == 32
-        assert current.current_enabled is False
-        assert current.current_containers[0] == "nav"
+        assert current.links_enabled is False
+        assert current.links_pass is LinkPass.DOCUMENT
+        assert current.links_containers[0] == "nav"
 
     @pytest.mark.parametrize("mode", ["mouse", "all", "off"])
     def test_every_press_mode_is_read(self, mode: str) -> None:
         assert read_settings({"PRESS": mode}).press == mode
 
     @pytest.mark.parametrize("value", ["touch", "", 1, None])
-    def test_a_misfit_press_falls_back_to_the_default(self, value) -> None:
-        assert read_settings({"PRESS": value}).press == "mouse"
+    def test_a_misfit_press_raises(self, value) -> None:
+        match = re.escape("NEXT_FRAMEWORK['ROUTER']['PRESS'] must be 'mouse'")
+        with pytest.raises(ImproperlyConfigured, match=match):
+            read_settings({"PRESS": value})
+
+    def test_a_pass_outside_its_modes_raises(self) -> None:
+        match = re.escape(
+            "NEXT_FRAMEWORK['ROUTER']['ACTIVE_LINKS']['PASS'] must be 'template' or "
+            "'document'"
+        )
+        with pytest.raises(ImproperlyConfigured, match=match):
+            read_settings({"ACTIVE_LINKS": {"PASS": "next.router.DocumentLinks"}})
+
+    def test_a_misfit_nested_in_current_raises(self) -> None:
+        match = re.escape("NEXT_FRAMEWORK['ROUTER']['ACTIVE_LINKS']['ENABLED'] must be")
+        with pytest.raises(ImproperlyConfigured, match=match):
+            read_settings({"ACTIVE_LINKS": {"ENABLED": 0}})
 
     @pytest.mark.parametrize("switch", [True, False])
     def test_a_bool_switches_the_pass(self, *, switch: bool) -> None:
-        current = read_settings({"CURRENT": switch})
-        assert current.current_enabled is switch
-        assert current.current_containers[0] == "nav"
+        current = read_settings({"ACTIVE_LINKS": switch})
+        assert current.links_enabled is switch
+        assert current.links_containers[0] == "nav"
 
     def test_the_merged_mapping_is_read_once_per_reload(self) -> None:
         with override_next_settings(ROUTER={"ENABLED": False}):
@@ -127,14 +144,14 @@ class TestMisfits:
                 "PREFETCH_SHELL_TTL": -1,
                 "EXCLUDE": ["files/"],
                 "SPECULATION": 3,
-                "CURRENT": {"CONTAINERS": ["nav a"], "EXTRA": True},
+                "ACTIVE_LINKS": {"CONTAINERS": ["nav a"], "EXTRA": True},
             },
             SHAPE,
         )
         assert (
             Misfit((), unknown=("BOGUS",), allowed=tuple(sorted(SHAPE.keys))) in found
         )
-        assert Misfit(("SCOPE",), "'all' or 'opt-in'", "'some'") in found
+        assert Misfit(("SCOPE",), "'pages', 'all' or 'opt_in'", "'some'") in found
         assert Misfit(("PREFETCH_DELAY",), "a number of seconds above 0", "0") in found
         assert Misfit(("PROGRESS",), "True or False", "'on'") in found
         assert Misfit(("PRESS",), "'mouse', 'all' or 'off'", "'touch'") in found
@@ -143,16 +160,16 @@ class TestMisfits:
             in found
         )
         paths = {misfit.path for misfit in found}
-        assert {("EXCLUDE",), ("SPECULATION",), ("CURRENT", "CONTAINERS")} <= paths
-        assert ("CURRENT",) in {m.path for m in found if m.unknown == ("EXTRA",)}
+        assert {("EXCLUDE",), ("SPECULATION",), ("ACTIVE_LINKS", "CONTAINERS")} <= paths
+        assert ("ACTIVE_LINKS",) in {m.path for m in found if m.unknown == ("EXTRA",)}
 
     def test_a_bool_current_fits(self) -> None:
-        assert misfits({"CURRENT": False}, SHAPE) == []
-        assert misfits({"CURRENT": True}, SHAPE) == []
+        assert misfits({"ACTIVE_LINKS": False}, SHAPE) == []
+        assert misfits({"ACTIVE_LINKS": True}, SHAPE) == []
 
     def test_a_current_that_is_no_mapping(self) -> None:
-        assert misfits({"CURRENT": "off"}, SHAPE) == [
-            Misfit(("CURRENT",), "True, False or a dict", "'off'")
+        assert misfits({"ACTIVE_LINKS": "off"}, SHAPE) == [
+            Misfit(("ACTIVE_LINKS",), "True, False or a dict", "'off'")
         ]
 
     @pytest.mark.parametrize(

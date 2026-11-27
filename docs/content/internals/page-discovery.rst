@@ -111,8 +111,8 @@ Modules
 ``next.pages.checks``.
    Registers the Django system checks for the pages subsystem, listed with their identifiers in :doc:`/content/ref/system-checks`.
 
-``next.pages.watch``.
-   Reports the page roots of each router backend and the components folder name each root carries, which ``next.server.watcher`` turns into the ``(path, glob)`` watch specs the autoreloader consumes.
+``next.discovery``.
+   Reports the page roots of each page backend and the components folder name each root carries, which ``next.server.watcher`` turns into the ``(path, glob)`` watch specs the autoreloader consumes.
 
 Groups and intercepts
 ---------------------

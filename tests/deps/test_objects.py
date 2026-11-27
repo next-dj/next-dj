@@ -17,6 +17,7 @@ from django.db.models import Model
 from django.http import Http404, HttpRequest
 from django.test import Client, override_settings
 
+from next.caches import ROUTES
 from next.deps import (
     DependencyResolver,
     Depends,
@@ -42,7 +43,6 @@ from next.pages.context import ContextByNameProvider
 from next.pages.loaders import _load_python_module
 from next.testing import make_resolution_context
 from next.urls import UrlKwargsProvider
-from next.urls.signals import router_reloaded
 from tests.support import (
     bound_dependency,
     inspect_parameter,
@@ -477,7 +477,7 @@ class TestRowsMemo:
 
     def test_a_router_reload_reads_it_again(self, reads) -> None:
         held = objects._rows(Group)
-        router_reloaded.send(sender=type(self))
+        ROUTES.move()
 
         assert objects._rows(Group) is not held
         assert reads == [Group, Group]
@@ -947,7 +947,7 @@ def _gathered(
         finally:
             await scope.close()
 
-    framework = {**settings.NEXT_FRAMEWORK, "DEFER": {"BATCH_WINDOW": _HELD}}
+    framework = {**settings.NEXT_FRAMEWORK, "LOADER": {"WINDOW": _HELD}}
     with override_settings(NEXT_FRAMEWORK=framework):
         return copy_context().run(async_to_sync(scenario))
 
@@ -1062,5 +1062,5 @@ class TestAsyncCompile:
     def test_a_router_reload_drops_the_row_loaders(self) -> None:
         held = visible_rows(Group)
         assert visible_rows(Group) is held
-        router_reloaded.send(sender=type(self))
+        ROUTES.move()
         assert visible_rows(Group) is not held

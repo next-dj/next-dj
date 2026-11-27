@@ -1140,7 +1140,7 @@ For a WebSocket the framework calls ``issue`` and ``respond`` at the negotiation
      - Returns a ``LiveIdentity`` for the session key of an SSE request, or ``None`` once the session is gone.
        It calls ``stored_session`` by default and serves SSE only.
 
-The ticket carries a digest of the subject under ``SECRET_KEY``, and ``verify_ticket`` accepts a digest made under any of ``SECRET_KEY_FALLBACKS`` as well.
+The subject salts the signature of the ticket, so a ticket verifies only for a credential that proves the same subject, and ``verify_ticket`` accepts a signature made under any of ``SECRET_KEY_FALLBACKS`` as well.
 ``Handshake.credential`` holds the credential of the binding and stays out of ``repr``.
 It is the session key only under ``SessionBinding``.
 A handler never sees it.

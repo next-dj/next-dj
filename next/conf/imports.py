@@ -5,18 +5,19 @@
 
 from __future__ import annotations
 
-import functools
 import inspect
 from typing import TYPE_CHECKING, Any, cast
 
 from django.utils.module_loading import import_string
+
+from next.caches import FRAMEWORK, memo
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def import_class_cached(dotted_path: str) -> type[Any]:
     """Import a class by dotted path and memoise it until the memo is cleared."""
     return cast("type[Any]", import_string(dotted_path))

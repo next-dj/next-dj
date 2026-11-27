@@ -253,7 +253,7 @@ Transactions
 
 Database transactions of next.dj views follow the HTTP method.
 A ``GET``, ``HEAD``, ``OPTIONS``, or ``TRACE`` request runs in autocommit and touches no connection before its first query, and any other method runs inside one transaction on each alias of ``TRANSACTIONS["ALIASES"]``, ``default`` alone unless the project names more.
-Page views, zone requests, and form action dispatch follow this rule in place of ``ATOMIC_REQUESTS``, which plain Django views keep, and ``manage.py check`` reports an ``ATOMIC_REQUESTS`` alias as ``next.W154``.
+Page views, zone requests, and form action dispatch follow this rule in place of the ``ATOMIC_REQUESTS`` wrapping, which plain Django views keep, and the default ``"auto"`` wraps every request on an ``ATOMIC_REQUESTS`` alias as Django would, while ``manage.py check`` reports such an alias under an explicit choice as ``next.W154``.
 The view settles the access check before it opens the transaction, so a refused request opens none, and closes the transaction once the response object exists, so an exception rolls the work back, a returned response commits it whatever its status, and a :func:`~django.db.transaction.on_commit` hook waits for that commit.
 A row the access rule loads from the URL kwargs is read before the transaction and reused by the render, so a render that locks it reloads it with ``select_for_update()``.
 
@@ -264,9 +264,9 @@ A ``page.py`` that writes on a ``GET``, or a page that must not hold a transacti
 
    from next import page
 
-   page.atomic(True, aliases=["default", "ledger"])
+   page.transaction(atomic=True, aliases=["default", "ledger"])
 
-``page.atomic()`` covers the full page, zone, boundary, and navigation requests of its page and none of the actions the page declares.
+``page.transaction()`` covers the full page, zone, boundary, and navigation requests of its page and none of the actions the page declares.
 A form action takes its own choice as ``@action(..., atomic=False)`` or ``Meta.atomic = False``, and ``TRANSACTIONS["RULE"]`` replaces the method table for the whole project, see ``TRANSACTIONS`` in :doc:`/content/ref/settings`.
 Inside an action an ``on_commit`` hook fires when the action's transaction commits, so a handler that sleeps, calls another service, or sends mail opts out to hold no connection in an open transaction, see :ref:`topics-forms-actions-transactions`.
 A streamed page writes its deferred boundaries after the view returned, so their jobs run outside this transaction, see :doc:`/content/topics/boundaries/async`.
@@ -409,10 +409,10 @@ The router registers no catch-all pattern, so a path that matches no page direct
        path("admin/", admin.site.urls),
        path("reports/export/", views.export_report, name="export-report"),
        path("", include("next.urls")),
-       path("legacy/<int:pk>/", views.legacy_detail, name="legacy-detail"),
+       path("archive/<int:pk>/", views.archive_detail, name="archive-detail"),
    ]
 
-Here ``/reports/export/`` reaches the hand-written view even when a ``pages/reports/export/`` directory exists, and ``/legacy/7/`` reaches its view because no page directory claims that path.
+Here ``/reports/export/`` reaches the hand-written view even when a ``pages/reports/export/`` directory exists, and ``/archive/7/`` reaches its view because no page directory claims that path.
 The form action endpoints at ``/_next/form/<uid>/`` are part of the same include, so they follow the same ordering rule.
 
 What a plain view does not get

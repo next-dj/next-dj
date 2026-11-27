@@ -526,19 +526,18 @@ class TestAuditTotals:
     def test_the_totals_arrive_on_their_own_request(
         self, next_client, demo_data
     ) -> None:
-        envelope = next_client.get_boundary(LOG_URL, "audit_totals", kind="")
-        [op] = envelope.ops
-        assert op["s"] == "ready"
+        totals = next_client.get_boundary(LOG_URL, "audit_totals", kind="")
+        assert totals.state == "ready"
         backend = AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count()
-        assert "data-audit-totals" in op["html"]
-        assert f">{backend}</p>" in op["html"]
-        assert f">{demo_data - backend}</p>" in op["html"]
+        assert "data-audit-totals" in totals.html
+        assert f">{backend}</p>" in totals.html
+        assert f">{demo_data - backend}</p>" in totals.html
 
     def test_the_kind_prop_narrows_the_totals(self, next_client, demo_data) -> None:
-        envelope = next_client.get_boundary(
+        totals = next_client.get_boundary(
             f"{LOG_URL}?kind=access_denied", "audit_totals", kind="access_denied"
         )
-        html = envelope.ops[0]["html"]
+        html = totals.html
         denied = AuditEntry.objects.filter(kind=AuditEntry.KIND_ACCESS_DENIED).count()
         assert denied
         assert ">0</p>" in html
@@ -551,11 +550,10 @@ class TestAuditTotals:
 
         monkeypatch.setattr(AuditEntryQuerySet, "of_kind", locked)
         with boundary_errors("render"):
-            envelope = next_client.get_boundary(LOG_URL, "audit_totals", kind="")
-        [op] = envelope.ops
-        assert op["s"] == "error"
-        assert "The totals could not be loaded." in op["html"]
-        assert "data-next-retry" in op["html"]
+            totals = next_client.get_boundary(LOG_URL, "audit_totals", kind="")
+        assert totals.state == "error"
+        assert "The totals could not be loaded." in totals.html
+        assert "data-next-retry" in totals.html
 
     def test_a_visitor_without_the_runtime_gets_the_totals_inline(
         self, next_client, demo_data
@@ -652,11 +650,13 @@ class TestAuditLogWindows:
             hrefs.append(_link(more, OLDER))
             more = _older(next_client, hrefs[-1]).html_for_zone("audit-rows-more")
 
-        shallow = next_client.get(f"{LOG_URL}{hrefs[0]}&restore=1").content.decode()
+        shallow = next_client.get(
+            f"{LOG_URL}{hrefs[0]}&_restore=cursor"
+        ).content.decode()
         assert _row_keys(shallow) == _log_order()[:40]
         assert " hidden>" in _sentinel(shallow, "less")
 
-        deep = next_client.get(f"{LOG_URL}{hrefs[2]}&restore=1").content.decode()
+        deep = next_client.get(f"{LOG_URL}{hrefs[2]}&_restore=cursor").content.decode()
         assert _row_keys(deep) == _log_order()[20:80]
         assert " hidden" not in _sentinel(deep, "less")
         backs = re.search(r'data-next-backs="([^"]+)"', _sentinel(deep, "more"))
@@ -699,8 +699,8 @@ class TestDemoData:
         assert f"Demo audit log seeded with {rows} rows." in out.getvalue()
         assert rows > REQUESTERS
         assert AccessRequest.objects.count() == REQUESTERS
-        assert set(AuditEntry.objects.values_list("kind", flat=True)) == set(
-            AuditEntry.KINDS
+        assert set(AuditEntry.objects.values_list("kind", flat=True)) == (
+            AuditEntry.KINDS - {AuditEntry.KIND_RECEIPT_ISSUED}
         )
 
     def test_seeding_twice_keeps_one_copy(self, demo_data) -> None:
@@ -1313,9 +1313,35 @@ class TestReceipt:
         )
         assert response.content.decode().startswith("ACCESS REQUEST RECEIPT")
 
+    def test_the_first_opening_writes_one_audit_row(
+        self, next_client, submitted_request: AccessRequest
+    ) -> None:
+        issued = submitted_request.audit_entries.filter(
+            kind=AuditEntry.KIND_RECEIPT_ISSUED
+        )
+        next_client.get(f"/request/{submitted_request.pk}/receipt/")
+        next_client.get(f"/request/{submitted_request.pk}/receipt/?format=txt")
+        assert issued.count() == 1
+
+    def test_a_failing_download_takes_the_audit_row_back(
+        self, next_client, submitted_request: AccessRequest, monkeypatch
+    ) -> None:
+        def broken(self: AccessRequest) -> str:
+            raise OperationalError
+
+        monkeypatch.setattr(AccessRequest, "receipt_text", broken)
+        with pytest.raises(OperationalError):
+            next_client.get(f"/request/{submitted_request.pk}/receipt/?format=txt")
+        assert not AuditEntry.objects.filter(
+            kind=AuditEntry.KIND_RECEIPT_ISSUED
+        ).exists()
+
     def test_an_unfiled_request_has_no_receipt(self, next_client) -> None:
         unfiled = _unfiled_request()
         assert next_client.get(f"/request/{unfiled.pk}/receipt/").status_code == 404
+        assert not AuditEntry.objects.filter(
+            kind=AuditEntry.KIND_RECEIPT_ISSUED
+        ).exists()
 
     def test_the_peek_zone_get_runs_render_once_then_serves_the_intercept(
         self, next_client, submitted_request: AccessRequest, monkeypatch

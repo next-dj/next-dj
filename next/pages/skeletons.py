@@ -8,8 +8,8 @@ from django.template import Context
 from django.template.base import Lexer, TokenType
 from django.utils.text import unescape_string_literal
 
+from next.boundaries.stash import loading_content
 from next.caches import PageCache
-from next.components.stash import loading_content
 from next.seeding import TEMPLATE_PATH_KEY
 from next.utils import template_edits_watched
 
@@ -37,8 +37,8 @@ _ZONE_TAG: Final = "zone"
 _COMMENT_TAG: Final = "comment"
 _END_COMMENT_TAG: Final = "endcomment"
 
-_DECLARED: PageCache[Path, tuple[str, frozenset[str]]] = PageCache()
-_SKELETONS: PageCache[Path, tuple[int, Mapping[str, Path]]] = PageCache()
+_DECLARED: PageCache[Path, tuple[str, frozenset[str]]] = PageCache(depends=())
+_SKELETONS: PageCache[Path, tuple[int, Mapping[str, Path]]] = PageCache(depends=())
 
 
 def skeleton_zone(path: Path) -> str | None:

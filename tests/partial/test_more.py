@@ -87,8 +87,9 @@ def _zone(source: str, name: str) -> ZoneNode:
     return node
 
 
-def _numbered(query: str) -> Window[int]:
-    return NumberPager(per_page=10).window(ROWS, factory.get(f"/?{query}"))
+def _numbered(query: str, *, max_restore: int = 10) -> Window[int]:
+    pager = NumberPager(per_page=10, max_restore=max_restore)
+    return pager.window(ROWS, factory.get(f"/?{query}"))
 
 
 class TestMoreMarkup:
@@ -164,7 +165,7 @@ class TestMoreMarkup:
         assert attribute in out
 
     def test_the_link_keeps_the_query_and_drops_the_restore_flag(self) -> None:
-        request = factory.get("/list/?q=a+b%26c&page=5&restore=1&tag=x&tag=y")
+        request = factory.get("/list/?q=a+b%26c&page=5&_restore=page&tag=x&tag=y")
         out = _render(DEFAULT_TAG, page_obj=_page(5, rows=100), request=request)
         assert 'href="?q=a+b%26c&amp;page=6&amp;tag=x&amp;tag=y"' in out
 
@@ -181,7 +182,7 @@ class TestMoreMarkup:
         assert "<b>&lt;more&gt;</b></a>" in out
 
     def test_page_href_without_a_token_names_the_first_window(self) -> None:
-        request = factory.get("/?q=x&cursor=abc&restore=1")
+        request = factory.get("/?q=x&cursor=abc&_restore=cursor")
         assert page_href(request, "cursor", None) == "?q=x"
         assert page_href(None, "page", None) == "?"
 
@@ -205,8 +206,8 @@ class TestNumberWindowLinks:
         )
 
     def test_a_restored_window(self) -> None:
-        request = factory.get("/?page=4&restore=1")
-        rows = _numbered("page=4&restore=1")
+        request = factory.get("/?page=4&_restore=page")
+        rows = _numbered("page=4&_restore=page")
         assert _render(WINDOW_TAG, rows=rows, request=request) == (
             FEED_HEAD.format(query="page=5")
             + ' data-next-prune="40" data-next-url="replace" data-next-back="4" '
@@ -221,7 +222,7 @@ class TestNumberWindowLinks:
 
     def test_a_tag_without_prune_or_url_writes_no_back(self) -> None:
         source = '{% more zone="feed" next=rows %}More{% endmore %}'
-        out = _render(source, rows=_numbered("page=4&restore=1"))
+        out = _render(source, rows=_numbered("page=4&_restore=page"))
         assert out == FEED_HEAD.format(query="page=5") + ">More</a></div>"
 
 
@@ -271,7 +272,7 @@ class TestKeysetWindowLinks:
         )
 
     def test_a_restored_window(self) -> None:
-        rows = _keyset(cursor=_after("g029"), restore=1)
+        rows = _keyset(cursor=_after("g029"), _restore="cursor")
         assert _names(rows) == NAMES[:40]
         backs = " ".join(_before(name) for name in ("g010", "g020", "g030"))
         out = _render(WINDOW_TAG, rows=rows)
@@ -300,7 +301,7 @@ class TestKeysetWindowLinks:
         source = (
             '{% more zone="feed" previous=rows %}Earlier{% empty %}Top{% endmore %}'
         )
-        request = factory.get("/?cursor=x&restore=1&q=a")
+        request = factory.get("/?cursor=x&_restore=cursor&q=a")
         out = _render(source, rows=_keyset(), request=request)
         assert out == (
             '<div data-next-zone="feed-less"><div data-next-key="feed-less">Top'
@@ -537,9 +538,8 @@ class TestPreviousLink:
     """A `previous=` tag above the list renders a visible link that prepends."""
 
     def test_a_restored_window_links_the_page_before_it(self) -> None:
-        request = factory.get("/list/?page=5&restore=1")
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"MAX_RESTORE": 3}}}):
-            rows = _numbered("page=5&restore=1")
+        request = factory.get("/list/?page=5&_restore=page")
+        rows = _numbered("page=5&_restore=page", max_restore=3)
         out = _render(
             PREVIOUS_TAG.replace("page_obj|previous_page", "rows"),
             rows=rows,
@@ -569,10 +569,10 @@ class TestPreviousLink:
 
     def test_a_window_from_page_one_renders_the_empty_branch(self) -> None:
         source = PREVIOUS_TAG.replace("page_obj|previous_page", "rows")
-        assert _render(source, rows=_numbered("page=3&restore=1")) == PREVIOUS_START
+        assert _render(source, rows=_numbered("page=3&_restore=page")) == PREVIOUS_START
 
     def test_the_hidden_link_keeps_the_query_and_drops_the_restore_flag(self) -> None:
-        request = factory.get("/list/?q=ban&page=3&restore=1")
+        request = factory.get("/list/?q=ban&page=3&_restore=page")
         out = _render(PREVIOUS_TAG, page_obj=_page(1), request=request)
         assert '<a href="?q=ban" data-next-key="catalog-results-less"' in out
         assert 'data-next-merge="prepend" hidden>Show earlier</a></div></div>' in out
@@ -592,8 +592,10 @@ class TestPreviousLink:
         assert 'data-next-merge="append">Newer</a>' in _render(source, p=4)
 
     def test_the_bottom_tag_renders_no_top_link(self) -> None:
-        request = factory.get("/list/?page=5&restore=1")
-        out = _render(WINDOW_TAG, rows=_numbered("page=5&restore=1"), request=request)
+        request = factory.get("/list/?page=5&_restore=page")
+        out = _render(
+            WINDOW_TAG, rows=_numbered("page=5&_restore=page"), request=request
+        )
         assert "-less" not in out
 
     def test_the_less_zone_renders_on_its_own(self) -> None:

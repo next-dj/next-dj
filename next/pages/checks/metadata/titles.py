@@ -5,16 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.utils import translation
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.pages.errors import PageMetadataTemplateError
 from next.pages.metadata.scope import SITE_SOURCE
 from next.pages.metadata.titles import template_has_title

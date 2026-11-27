@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   ATTR_BUSY,
   MAX_TIMEOUT_MS,
@@ -9,7 +9,6 @@ import {
   markBusy,
   mime,
   now,
-  once,
   requestTimeout,
   says,
   stamp,
@@ -219,22 +218,12 @@ describe("stamp", () => {
   });
 });
 
-describe("once", () => {
-  it("runs a flag once, whichever copy of the module asks", async () => {
-    const run = vi.fn();
-    once("probe", run);
-    vi.resetModules();
-    const copy = await import("./protocol");
-    copy.once("probe", run);
-    once("other", run);
-    expect(run).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe("the router headers", () => {
   it.each([
-    ["clear, no-snapshot", "clear", true],
-    ["no-snapshot", "clear", false],
+    ["clear, no_snapshot", "clear", true],
+    ["no_snapshot", "clear", false],
+    ["no_snapshot,clear", "clear", true],
+    ["unclear", "clear", false],
     [null, "clear", false],
   ])("reads %o for the word %s as %s", (value, word, expected) => {
     const headers = value === null ? {} : { "X-Next-Router": value };

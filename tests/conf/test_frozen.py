@@ -14,9 +14,7 @@ from next.conf.frozen import FrozenDict, FrozenList, _immutable, freeze
 
 def sample() -> list[dict[str, Any]]:
     """Build a fresh nested settings value, so no test hands another a used one."""
-    return [
-        {"BACKEND": "next.urls.FileRouterBackend", "OPTIONS": {"SSE": {"MS": 3000}}}
-    ]
+    return [{"BACKEND": "next.urls.FilePageBackend", "OPTIONS": {"SSE": {"MS": 3000}}}]
 
 
 def all_plain(value: object) -> bool:

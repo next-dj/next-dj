@@ -1,4 +1,5 @@
 import inspect
+from collections.abc import Iterator
 from operator import attrgetter
 from typing import Annotated, ClassVar
 from unittest.mock import MagicMock
@@ -8,11 +9,20 @@ from django.core.handlers.asgi import ASGIRequest
 from django.core.handlers.wsgi import WSGIRequest
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, ParameterProvider, resolver
+from next.consent.providers import ConsentProvider
+from next.deps import (
+    READS_EVERY,
+    READS_NOTHING,
+    DependencyResolver,
+    ParameterProvider,
+    RegisteredParameterProvider,
+    resolver,
+)
 from next.deps.markers import DependsProvider
+from next.deps.objects import UnservedObjectProvider
 from next.deps.providers import CompilingParameterProvider
 from next.forms import DForm
-from next.forms.markers import FormProvider
+from next.forms.markers import CleanedDataProvider, FormProvider
 from next.pages.context import Context, ContextByDefaultProvider, ContextByNameProvider
 from next.testing import make_resolution_context
 from next.urls import (
@@ -37,6 +47,7 @@ from tests.support import (
     _ctx,
     build_mock_http_request,
     inspect_parameter,
+    restored_provider_registry,
 )
 
 
@@ -433,3 +444,49 @@ class TestContextMarkerForms:
         assert fill is not None
         assert fill(make_resolution_context()) is None
         assert provider.resolve(param, make_resolution_context()) is None
+
+
+_PARAM = inspect.Parameter("value", inspect.Parameter.KEYWORD_ONLY)
+
+
+@pytest.fixture()
+def silent_provider() -> Iterator[type[RegisteredParameterProvider]]:
+    """Declare a provider that says nothing of what it reads, registered for the test."""
+    with restored_provider_registry():
+
+        class Silent(RegisteredParameterProvider):
+            def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+                return False
+
+            def resolve(self, param: inspect.Parameter, context: object) -> object:
+                return None
+
+        yield Silent
+
+
+class TestStaticReads:
+    """A provider tells the context graph what filling a parameter reads."""
+
+    @pytest.mark.parametrize(
+        "provider_class",
+        [
+            ConsentProvider,
+            UnservedObjectProvider,
+            CleanedDataProvider,
+            FormProvider,
+            HttpRequestProvider,
+            QueryParamProvider,
+            UrlByAnnotationProvider,
+            UrlKwargsProvider,
+        ],
+    )
+    def test_a_provider_filled_from_the_request_reads_nothing(
+        self, provider_class: type
+    ) -> None:
+        provider = provider_class.__new__(provider_class)
+        assert provider.static_reads(_PARAM) is READS_NOTHING
+
+    def test_a_registered_provider_may_read_every_key(
+        self, silent_provider: type[RegisteredParameterProvider]
+    ) -> None:
+        assert silent_provider().static_reads(_PARAM) is READS_EVERY

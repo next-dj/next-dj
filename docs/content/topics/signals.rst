@@ -77,12 +77,12 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``intercept_registered``
      - URLs
      - After the file router publishes an intercepting route over its target page.
-   * - ``router_reloaded``
+   * - ``routes_reloaded``
      - URLs
-     - After the router manager rebuilds its pattern set.
-   * - ``router_backend_loaded``
+     - After the route manager rebuilds its pattern set.
+   * - ``page_backend_loaded``
      - URLs
-     - After a router backend is created from its configuration entry.
+     - After a page backend is created from its configuration entry.
    * - ``action_registered``
      - Forms
      - After the backend stores an action target for a name.
@@ -146,10 +146,16 @@ Every signal the framework emits is listed below with the subsystem that emits i
    * - ``boundary_failed``
      - Boundaries
      - Once per failure an error boundary contained, before its ``error.djx`` renders.
-   * - ``boundary_rendered``
+   * - ``boundary_job_started``
+     - Boundaries
+     - Right before the body of a deferred job runs, on its thread and in its context, where a tracer opens a span.
+   * - ``boundary_job_finished``
+     - Boundaries
+     - Right after the body of a deferred job returned or raised, where a tracer closes the span it opened.
+   * - ``boundary_settled``
      - Boundaries
      - Once per deferred job of a response, as its outcome is spliced into the page.
-   * - ``boundary_side_effect``
+   * - ``boundary_state_written``
      - Boundaries
      - Once per kind of request state a deferred job wrote, a session, a session key, messages, or a CSRF secret.
    * - ``boundary_token_rejected``
@@ -213,8 +219,10 @@ The forms and static signals have dedicated topic pages with worked receiver exa
 The partial-rendering stream signals appear in context in :doc:`/content/topics/partial-rendering/sse`.
 The realtime stream signals and their payloads are covered in :ref:`ref-signals-stream-lifecycle`.
 
-The three router signals share the sender ``next.router.navigation.Routing``, and each carries the ``request``.
-``navigation_rendered`` adds ``page_path``, ``purpose``, ``depth``, ``cut``, ``kept``, ``diverged_at``, ``reason``, and ``streamed``, ``prefetch_shed`` adds ``page_path`` and ``waited_ms``, and ``router_cleared`` adds ``reason``.
+The three request signals of the router share the sender ``next.router.navigation.Routing``, and each carries the ``request``.
+``navigation_rendered`` adds ``page_path``, ``purpose``, ``depth``, ``cut``, ``kept``, ``diverged_at``, ``reason``, and ``streamed``.
+``prefetch_shed`` adds ``page_path`` and ``waited_ms``, and ``router_cleared`` adds ``reason``.
+``router_backend_loaded`` is a backend signal like the others above, sent with the backend class.
 A receiver of ``navigation_rendered`` that counts body morphs and hard loads finds the layouts that never persist, see :doc:`router/layouts`.
 
 .. code-block:: python

@@ -1,9 +1,20 @@
-import type { BeforeApply } from "./apply";
+// The loading UI of a reload: a zone marked reload="loading" shows its skeleton, or the
+// loading content of its boundaries, once the request outlives its delay, and a layer
+// shows its loading template until its answer fills it.
+
+import type { Kernel } from "./kernel";
+import { ORDER_CAPTURE } from "./kernel";
 import { fireRemoved } from "./morph";
-import type { PartialSurface } from "./partial";
 import {
+  ATTR_ADOPTED,
   ATTR_BOUNDARY,
+  ATTR_BOUNDARY_KEY,
   ATTR_BUSY,
+  ATTR_DELAY,
+  ATTR_LAYER,
+  ATTR_LOADING,
+  ATTR_RELOAD,
+  ATTR_RESERVE,
   ATTR_STATE,
   ATTR_ZONE,
   cssEscape,
@@ -13,16 +24,33 @@ import {
 import type { Settled } from "./wire";
 
 const PENDING = `[${ATTR_STATE}=idle],[${ATTR_STATE}=loading]`;
+const RESERVE_OFF = `[${ATTR_RESERVE}="off"]`;
+// The loading copies kept per boundary key, the oldest dropped past this many.
+const CAPTURED = 100;
 
-export interface ReloadHost {
-  partial: Pick<PartialSurface, "layers" | "onMount" | "_fallbacks">;
+export type ReloadHost = Pick<Kernel, "partial" | "fallbacks" | "hook">;
+
+// A loading UI shown in place of an element, what it replaced and what it showed.
+interface Swap {
+  el: HTMLElement;
+  kept: Node[];
+  shown: string;
+  height: string;
 }
 
-type Swap = [el: HTMLElement, kept: Node[], shown: string, height: string];
+// A zone reload whose loading UI waits for its delay, then for the answer.
+interface Reload {
+  zone: Element;
+  timer: ReturnType<typeof setTimeout>;
+  swaps: Swap[];
+}
 
-type Reload = [zone: Element, timer: ReturnType<typeof setTimeout>, swaps: Swap[]];
-
-type Opened = [root: Element, timer: ReturnType<typeof setTimeout>, shown?: string];
+// A layer root showing its loading template until the answer fills it.
+interface Opened {
+  root: Element;
+  timer: ReturnType<typeof setTimeout>;
+  shown?: string;
+}
 
 interface LayerOpened {
   opener: Element | null;
@@ -45,7 +73,7 @@ function discard(node: Node): void {
 }
 
 export function createReload(
-  { partial }: ReloadHost,
+  { partial, fallbacks, hook }: ReloadHost,
   listening: AddEventListenerOptions = {},
 ): void {
   const doc = document;
@@ -54,12 +82,11 @@ export function createReload(
   const named = new Set<string | null>();
   const opened = new Map<string, Opened>();
 
-  const keyOf = (el: Element): string =>
-    el.getAttribute("data-next-boundary-key") ?? el.id;
+  const keyOf = (el: Element): string => el.getAttribute(ATTR_BOUNDARY_KEY) ?? el.id;
 
   const stash = (name: string, adopted = false): string | undefined => {
     const template = doc.querySelector<HTMLTemplateElement>(
-      `template[data-next-loading="${cssEscape(name)}"]`,
+      `template[${ATTR_LOADING}="${cssEscape(name)}"]`,
     );
     return adopted
       ? template?.content.firstElementChild?.innerHTML
@@ -72,43 +99,54 @@ export function createReload(
 
   function capture(el: Element): void {
     const key = keyOf(el);
-    const live = partial._fallbacks?.get(el);
-    if (!captured.has(key) && (live !== undefined || el.matches(PENDING)))
-      captured.set(key, live ?? el.innerHTML);
+    const live = fallbacks.get(el);
+    if (captured.has(key) || (live === undefined && !el.matches(PENDING))) return;
+    captured.set(key, live ?? el.innerHTML);
+    for (const old of captured.keys())
+      if (captured.size > CAPTURED) captured.delete(old);
   }
 
-  function swap(swaps: Swap[], el: Element, html: string): void {
-    const target = el as HTMLElement;
-    const height = target.style.minHeight;
-    const kept = Array.from(el.childNodes);
-    if (el.closest('[data-next-reserve="off"]') === null)
-      target.style.minHeight = `${el.getBoundingClientRect().height}px`;
-    el.innerHTML = html;
-    swaps.push([target, kept, el.innerHTML, height]);
+  // Every height is read before the first loading UI goes in, so one layout serves the
+  // whole zone instead of one forced layout per boundary.
+  function swap(swaps: Swap[], shows: [el: Element, html: string][]): void {
+    const heights = shows.map(([el]) =>
+      el.closest(RESERVE_OFF) === null ? el.getBoundingClientRect().height : undefined,
+    );
+    shows.forEach(([el, html], index) => {
+      const target = el as HTMLElement;
+      const height = target.style.minHeight;
+      const kept = Array.from(el.childNodes);
+      const reserved = heights[index];
+      if (reserved !== undefined) target.style.minHeight = `${reserved}px`;
+      el.innerHTML = html;
+      swaps.push({ el: target, kept, shown: el.innerHTML, height });
+    });
   }
 
-  function show(name: string, [zone, , swaps]: Reload): void {
+  function show(name: string, { zone, swaps }: Reload): void {
     const skeleton = stash(name);
     if (skeleton !== undefined && !held(zone)) {
-      swap(swaps, zone, skeleton);
+      swap(swaps, [[zone, skeleton]]);
       return;
     }
+    const shows: [Element, string][] = [];
     for (const el of matching(zone, `[${ATTR_BOUNDARY}][${ATTR_STATE}=ready]`)) {
       const key = keyOf(el);
       const html =
         captured.get(key) ??
-        partial._fallbacks?.get(el) ??
-        stash(key, el.hasAttribute("data-next-adopted"));
-      if (html !== undefined && el.isConnected && !held(el)) swap(swaps, el, html);
+        fallbacks.get(el) ??
+        stash(key, el.hasAttribute(ATTR_ADOPTED));
+      if (html !== undefined && el.isConnected && !held(el)) shows.push([el, html]);
     }
+    swap(swaps, shows);
   }
 
   function finish(name: string): void {
     const entry = reloads.get(name);
-    if (entry === undefined || entry[0].hasAttribute(ATTR_BUSY)) return;
+    if (entry === undefined || entry.zone.hasAttribute(ATTR_BUSY)) return;
     reloads.delete(name);
-    clearTimeout(entry[1]);
-    for (const [el, kept, shown, height] of entry[2]) {
+    clearTimeout(entry.timer);
+    for (const { el, kept, shown, height } of entry.swaps) {
       el.style.minHeight = height;
       if (el.isConnected && el.innerHTML === shown) el.replaceChildren(...kept);
       else kept.forEach(discard);
@@ -122,20 +160,20 @@ export function createReload(
     const html =
       name &&
       doc.querySelector<HTMLTemplateElement>(
-        `template[data-next-layer="${cssEscape(name)}"]`,
+        `template[${ATTR_LAYER}="${cssEscape(name)}"]`,
       )?.innerHTML;
     if (!name || !html) return;
-    const entry: Opened = [
+    const entry: Opened = {
       root,
-      setTimeout(
+      timer: setTimeout(
         () => {
           if (!root.hasAttribute(ATTR_BUSY) || root.firstChild) return;
           root.innerHTML = html;
-          entry[2] = root.innerHTML;
+          entry.shown = root.innerHTML;
         },
-        duration(opener?.getAttribute("data-next-delay")) ?? 150,
+        duration(opener?.getAttribute(ATTR_DELAY)) ?? 150,
       ),
-    ];
+    };
     opened.set(name, entry);
   }
 
@@ -144,8 +182,8 @@ export function createReload(
     const entry = opened.get(name);
     if (entry === undefined) return;
     opened.delete(name);
-    clearTimeout(entry[1]);
-    if (entry[0].innerHTML === entry[2]) entry[0].replaceChildren();
+    clearTimeout(entry.timer);
+    if (entry.root.innerHTML === entry.shown) entry.root.replaceChildren();
   }
 
   function onRequest(event: Event): void {
@@ -154,30 +192,28 @@ export function createReload(
       const name = part.trim();
       if (!named.has(name) || reloads.has(name)) continue;
       const zone = partial.layers.resolveZone(name, doc);
-      if (zone?.getAttribute("data-next-reload") !== "loading") continue;
-      const delay = duration(zone.getAttribute("data-next-delay")) ?? 150;
-      const entry: Reload = [zone, setTimeout(() => show(name, entry), delay), []];
+      if (zone?.getAttribute(ATTR_RELOAD) !== "loading") continue;
+      const delay = duration(zone.getAttribute(ATTR_DELAY)) ?? 150;
+      const entry: Reload = {
+        zone,
+        timer: setTimeout(() => show(name, entry), delay),
+        swaps: [],
+      };
       reloads.set(name, entry);
     }
   }
 
-  partial.onMount(`[${ATTR_ZONE}][data-next-reload=loading]`, (zone) =>
+  partial.onMount(`[${ATTR_ZONE}][${ATTR_RELOAD}=loading]`, (zone) =>
     named.add(zone.getAttribute(ATTR_ZONE)),
   );
-  listening.signal?.addEventListener("abort", () => {
+  // The harness tears the chunk down between cases, a page keeps its timers.
+  TEST: listening.signal?.addEventListener("abort", () => {
     for (const entry of [...reloads.values(), ...opened.values()])
-      clearTimeout(entry[1]);
+      clearTimeout(entry.timer);
   });
   doc.addEventListener("partial:layer-opened", onOpened, listening);
   doc.addEventListener("partial:before-request", onRequest, listening);
-  doc.addEventListener(
-    "partial:before-apply",
-    (event) => {
-      for (const el of (event as CustomEvent<BeforeApply>).detail.boundaries)
-        capture(el);
-    },
-    listening,
-  );
+  hook("before", ORDER_CAPTURE, ({ boundaries }) => boundaries.forEach(capture));
   doc.addEventListener(
     "partial:settled",
     (event) => {

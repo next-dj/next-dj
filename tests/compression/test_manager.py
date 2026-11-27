@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import io
+import json
 import logging
 import os
 import zlib
@@ -12,23 +13,24 @@ from django.http.response import HttpResponseBase
 from django.test import RequestFactory, override_settings
 
 from next.compression import (
-    OPT_OUT,
     CompressionBackend,
     CompressionBackendError,
     GzipBackend,
-    acompress_response,
-    compress_response,
+    ZstdBackend,
     compression_backend_loaded,
-    compression_manager,
     decode_response,
     no_compress,
-    offloads,
-    prepare_stream,
 )
 from next.compression.manager import (
     GZIP_MIDDLEWARE,
     MIDDLEWARE,
+    OPT_OUT,
+    acompress_response,
+    compress_response,
+    compression_manager,
     forget_compression,
+    offloads,
+    prepare_stream,
     response_decoder,
 )
 from next.testing import capture_signals, override_next_settings
@@ -37,7 +39,8 @@ from tests.support.races import LockWonByAnotherThread
 
 
 BODY = "<html><body>" + "<p>row</p>" * 300 + "</body></html>"
-GZIP_ONLY = ["next.compression.GzipBackend"]
+GZIP_ONLY = [{"BACKEND": "next.compression.GzipBackend"}]
+BROTLI = "next.compression.BrotliBackend"
 
 
 def _request(accept: str = "gzip, br, zstd", method: str = "GET"):
@@ -70,12 +73,12 @@ class LevelLess(CompressionBackend):
     def available(self) -> bool:
         return True
 
-    def create(self, level, window):
+    def create(self, level, window, *, pad=0):
         self.created = (level, window)
-        return GzipBackend().create(level, window)
+        return GzipBackend().create(level, window, pad=pad)
 
-    def compress_once(self, data, level):
-        return GzipBackend().compress_once(data, level)
+    def compress_once(self, data, level, *, pad=0):
+        return GzipBackend().compress_once(data, level, pad=pad)
 
 
 class OtherGzip(GzipBackend):
@@ -98,7 +101,7 @@ class TestManager:
     """`CompressionManager` builds the backends on first use and offers by `ORDER`."""
 
     def test_the_first_backend_of_a_coding_wins(self) -> None:
-        with _compression(BACKENDS=[*GZIP_ONLY, f"{__name__}.OtherGzip"]):
+        with _compression(BACKENDS=[*GZIP_ONLY, {"BACKEND": f"{__name__}.OtherGzip"}]):
             assert type(compression_manager.backend("gzip")) is GzipBackend
             assert compression_manager.backend("br") is None
 
@@ -114,6 +117,19 @@ class TestManager:
             assert compression_manager.offered() == ("br", "gzip")
             assert compression_manager.backend("zstd") is not None
             assert compression_manager.backend("deflate") is None
+
+    def test_without_a_zstd_library_the_client_gets_gzip(self, monkeypatch) -> None:
+        install(monkeypatch, compression_zstd=fake_stdlib_zstd())
+        monkeypatch.setattr(ZstdBackend, "available", lambda _self: False)
+        assert compression_manager.offered() == ("gzip",)
+        response = compress_response(_request("zstd, gzip"), HttpResponse(BODY))
+        assert response["Content-Encoding"] == "gzip"
+
+    def test_with_a_zstd_library_the_client_gets_zstd(self, monkeypatch) -> None:
+        install(monkeypatch, compression_zstd=fake_stdlib_zstd())
+        assert compression_manager.offered() == ("zstd", "gzip")
+        response = compress_response(_request("zstd, gzip"), HttpResponse(BODY))
+        assert response["Content-Encoding"] == "zstd"
 
     def test_settings_expose_the_scope(self) -> None:
         with _compression(MIN_SIZE=10):
@@ -143,15 +159,16 @@ class TestManager:
         forget_compression(sender=None)
         assert compression_manager._state is None
 
-    def test_each_loaded_backend_is_announced(self) -> None:
+    def test_each_loaded_backend_is_announced_with_its_entry(self) -> None:
+        entry = {"BACKEND": "next.compression.GzipBackend", "OPTIONS": {"LEVEL": 6}}
         with (
             capture_signals(compression_backend_loaded) as recorder,
-            _compression(BACKENDS=GZIP_ONLY),
+            _compression(BACKENDS=[entry]),
         ):
             compression_manager.offered()
         event = recorder.first_for(compression_backend_loaded)
         assert event.sender is GzipBackend
-        assert event.kwargs["config"] == {"BACKEND": GZIP_ONLY[0]}
+        assert event.kwargs["config"] == entry
         assert isinstance(event.kwargs["instance"], GzipBackend)
 
     @pytest.mark.parametrize(
@@ -168,7 +185,7 @@ class TestManager:
     ) -> None:
         with (
             caplog.at_level(logging.WARNING, "next.compression.manager"),
-            _compression(BACKENDS=[dotted, *GZIP_ONLY]),
+            _compression(BACKENDS=[{"BACKEND": dotted}, *GZIP_ONLY]),
         ):
             assert compression_manager.offered() == ("gzip",)
         assert problem in caplog.text
@@ -177,7 +194,9 @@ class TestManager:
     def test_a_backend_that_raises_on_import_logs_its_traceback(self, caplog) -> None:
         with (
             caplog.at_level(logging.WARNING, "next.compression.manager"),
-            _compression(BACKENDS=["tests.support.broken.Backend", *GZIP_ONLY]),
+            _compression(
+                BACKENDS=[{"BACKEND": "tests.support.broken.Backend"}, *GZIP_ONLY]
+            ),
         ):
             compression_manager.offered()
         (record,) = caplog.records
@@ -187,20 +206,25 @@ class TestManager:
     def test_an_unusable_backend_raises_under_debug(self) -> None:
         with (
             override_settings(DEBUG=True),
-            _compression(BACKENDS=["next.compression.Missing"]),
+            _compression(BACKENDS=[{"BACKEND": "next.compression.Missing"}]),
             pytest.raises(CompressionBackendError, match="'BACKENDS'"),
         ):
             compression_manager.offered()
 
     @pytest.mark.parametrize(
-        ("levels", "windows", "expected"),
-        [({"br": 9}, {"br": 20}, (9, 20)), ({"br": 99}, {"br": 99}, (4, 18))],
+        ("options", "expected"),
+        [
+            ({"LEVEL": 9, "WINDOW": 20}, (9, 20)),
+            ({"LEVEL": 99, "WINDOW": 99}, (4, 18)),
+            ({}, (4, 18)),
+        ],
     )
     def test_levels_and_windows_fall_back_out_of_range(
-        self, monkeypatch, levels, windows, expected
+        self, monkeypatch, options, expected
     ) -> None:
         install(monkeypatch, brotli=fake_brotli())
-        with _compression(LEVELS=levels, WINDOWS=windows):
+        entry = {"BACKEND": BROTLI, "OPTIONS": options}
+        with _compression(BACKENDS=[entry, *GZIP_ONLY]):
             response = HttpResponse(BODY)
             response["Content-Type"] = "text/event-stream"
             encoding = prepare_stream(_request("br"), response)
@@ -209,7 +233,7 @@ class TestManager:
 
     def test_a_codec_without_levels_takes_its_own_default(self) -> None:
         dotted = f"{__name__}.LevelLess"
-        with _compression(BACKENDS=[dotted], ORDER=["custom"]):
+        with _compression(BACKENDS=[{"BACKEND": dotted}], ORDER=["custom"]):
             response = StreamingHttpResponse([b"x"], content_type="text/html")
             encoding = prepare_stream(_request("custom"), response)
             backend = compression_manager.backend("custom")
@@ -327,6 +351,36 @@ class TestEligibility:
             compress_response(_request(), response)
         assert ("Content-Encoding" in response) is encoded
 
+    @pytest.mark.parametrize(
+        ("content_type", "encoded"),
+        [
+            ("application/vnd.next.patches+json", True),
+            ("application/problem+json; charset=utf-8", True),
+            ("application/atom+xml", True),
+            ("text/vnd.a+json", True),
+            ("image/vnd.a+json", False),
+            ("application/json+zip", False),
+            ("application/+json", False),
+            ("application/zip", False),
+        ],
+    )
+    def test_a_structured_suffix_matches_by_default(
+        self, content_type, encoded
+    ) -> None:
+        response = HttpResponse(BODY, content_type=content_type)
+        compress_response(_request(), response)
+        assert ("Content-Encoding" in response) is encoded
+
+    def test_a_patch_envelope_stays_valid_json(self) -> None:
+        envelope = {"ops": [{"op": "html", "html": "<p>row</p>" * 2000}]}
+        response = HttpResponse(
+            json.dumps(envelope), content_type="application/vnd.next.patches+json"
+        )
+        with _compression(PADDING=64):
+            compress_response(_request(), response)
+        assert response["Content-Encoding"] == "gzip"
+        assert json.loads(decode_response(response)) == envelope
+
     def test_a_body_under_min_size_does_not_vary(self) -> None:
         response = compress_response(_request(), HttpResponse("<p>short</p>"))
         assert "Content-Encoding" not in response
@@ -340,10 +394,33 @@ class TestEligibility:
         assert response.content == noise
         assert "Content-Encoding" not in response
 
-    def test_head_varies_without_a_body(self) -> None:
-        response = compress_response(_request(method="HEAD"), HttpResponse(BODY))
+    @pytest.mark.parametrize("etag", ['"v1"', None])
+    def test_head_carries_the_headers_of_get(self, etag) -> None:
+        headers = {} if etag is None else {"ETag": etag}
+        get = compress_response(_request(), HttpResponse(BODY, headers=headers))
+        head = compress_response(
+            _request(method="HEAD"), HttpResponse(BODY, headers=headers)
+        )
+        assert head["Content-Encoding"] == get["Content-Encoding"] == "gzip"
+        assert head["Vary"] == get["Vary"]
+        assert head.get("ETag") == get.get("ETag")
+        assert "Content-Length" not in head
+        assert head.content == BODY.encode()
+
+    @pytest.mark.parametrize("is_async", [False, True])
+    def test_a_head_stream_keeps_its_body(self, *, is_async) -> None:
+        source = _aiter([b"<p>a</p>"]) if is_async else iter([b"<p>a</p>"])
+        response = StreamingHttpResponse(source, headers={"Content-Length": "8"})
+        compress_response(_request(method="HEAD"), response)
+        assert response["Content-Encoding"] == "gzip"
         assert response["Vary"] == "Accept-Encoding"
-        assert "Content-Encoding" not in response
+        assert "Content-Length" not in response
+
+        async def read() -> bytes:
+            return b"".join([part async for part in response])
+
+        body = asyncio.run(read()) if is_async else b"".join(response)
+        assert body == b"<p>a</p>"
 
     @pytest.mark.parametrize("accept", ["", "identity", "deflate", "gzip;q=0"])
     def test_no_acceptable_coding(self, accept: str) -> None:
@@ -430,6 +507,47 @@ class TestStreams:
         assert response.is_async
         assert zlib.decompress(asyncio.run(read()), 31) == b"<p>a</p><p>b</p>"
 
+    def test_a_foreign_sync_stream_flushes_every_chunk(self) -> None:
+        rows = [b"row,1\n"] * 50
+        response = StreamingHttpResponse(iter(rows), content_type="text/csv")
+        with _compression(COALESCE=60):
+            compress_response(_request(), response)
+        reader = zlib.decompressobj(31)
+        decoded = [reader.decompress(part) for part in response]
+        assert decoded == [*rows, b""]
+        assert reader.eof
+
+    def test_a_foreign_async_stream_coalesces_too(self) -> None:
+        response = StreamingHttpResponse(_aiter([b"a"] * 5), content_type="text/csv")
+        with _compression(COALESCE=60):
+            compress_response(_request(), response)
+
+        async def read() -> list[bytes]:
+            return [part async for part in response]
+
+        parts = asyncio.run(read())
+        assert len(parts) == 2
+        assert zlib.decompress(b"".join(parts), 31) == b"aaaaa"
+
+    @pytest.mark.parametrize("is_async", [False, True])
+    def test_a_foreign_event_stream_flushes_every_event(self, *, is_async) -> None:
+        events = [b"data: 1\n\n", b"data: 2\n\n"]
+        source = _aiter(events) if is_async else iter(events)
+        response = StreamingHttpResponse(source, content_type="text/event-stream")
+        with _compression(COALESCE=60):
+            compress_response(_request(), response)
+        reader = zlib.decompressobj(31)
+
+        async def read() -> list[bytes]:
+            return [reader.decompress(part) async for part in response]
+
+        decoded = (
+            asyncio.run(read())
+            if is_async
+            else [reader.decompress(part) for part in response]
+        )
+        assert decoded[:2] == events
+
     @pytest.mark.parametrize(("sse", "encoded"), [(True, True), (False, False)])
     def test_an_event_stream_follows_sse(self, sse, encoded) -> None:
         response = StreamingHttpResponse(
@@ -453,9 +571,9 @@ class TestAsyncBuffered:
             return await to_thread(func, *args)
 
         monkeypatch.setattr("next.compression.manager.asyncio.to_thread", spy)
-        with _compression(OFFLOAD_BYTES=limit):
-            response = asyncio.run(acompress_response(_request(), HttpResponse(BODY)))
-            assert offloads(b"x" * 17) is away
+        monkeypatch.setattr("next.compression.manager.OFFLOAD_BYTES", limit)
+        response = asyncio.run(acompress_response(_request(), HttpResponse(BODY)))
+        assert offloads(b"x" * 17) is away
         assert response["Content-Encoding"] == "gzip"
         assert bool(offloaded) is away
 
@@ -610,3 +728,8 @@ class TestNoCompress:
         assert inspect.iscoroutinefunction(view)
         response = asyncio.run(view(_request()))
         assert getattr(response, OPT_OUT) is False
+
+
+async def _aiter(items):
+    for item in items:
+        yield item

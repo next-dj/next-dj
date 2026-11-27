@@ -71,7 +71,7 @@ class TestExtendDefaultBackendStaysMutable:
 
     def test_result_can_be_edited_at_every_depth(self) -> None:
         patched = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="routes")
-        patched.append({"BACKEND": "next.urls.FileRouterBackend"})
+        patched.append({"BACKEND": "next.urls.FilePageBackend"})
         patched[0]["DIRS"].append("/tmp/x")
         patched[0]["OPTIONS"]["context_processors"].append("app.ctx")
         assert len(patched) == 2

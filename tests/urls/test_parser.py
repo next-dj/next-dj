@@ -350,7 +350,7 @@ class TestCreateUrlPatternFileContext:
 
 
 class TestGeneratePatternsFileContext:
-    """FileRouterBackend leaves a refused page unrouted and logs it with its file."""
+    """FilePageBackend leaves a refused page unrouted and logs it with its file."""
 
     def test_a_refused_page_is_logged_and_left_unrouted(
         self, router, tmp_path, caplog

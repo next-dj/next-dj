@@ -1,78 +1,26 @@
-"""The transaction a `page.py` declares for its own page through `page.atomic`."""
+"""The transaction a `page.py` declares for its own page through `page.transaction`."""
 
-import sys
-from dataclasses import dataclass
-from functools import partial
+from next.transactions import AtomicMode, AtomicOverride
+from next.transactions.policy import AliasChoice, override_of, override_problem
 
-from next.introspect import registering_site
-from next.transactions import AliasChoice, AtomicOverride, override_of, override_problem
-
-from .declarations import NESTED, DeclarationStore
+from .declarations import PageDeclaration
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class AtomicDeclaration:
-    """One `page.atomic` call as written, with the namespace of the run that made it.
-
-    A reload runs the module in a new namespace, so a removed call stops applying.
-    """
-
-    atomic: object
-    aliases: object
-    namespace: dict[str, object]
-    top_level: bool
-
-    def problem(self) -> str | None:
-        """Return why the call declares no override, `None` when it declares one."""
-        if not self.top_level:
-            return NESTED
-        return override_problem(self.atomic, self.aliases)
-
-    def override(self) -> AtomicOverride | None:
-        """Return the override the call declares, `None` for one E240 reports."""
-        if not self.top_level:
-            return None
-        return override_of(self.atomic, self.aliases)
+def _override(
+    *, atomic: AtomicMode, aliases: AliasChoice | list[str] = None
+) -> AtomicOverride | None:
+    """Return the override `atomic` and `aliases` make, `ValueError` for none."""
+    override = override_of(atomic, aliases)
+    if override is None:
+        raise ValueError(override_problem(atomic, aliases))
+    return override
 
 
-class AtomicStore(DeclarationStore[AtomicDeclaration, AtomicOverride | None]):
-    """Hold the latest `page.atomic` call of each `page.py`, the last call winning."""
+transaction_declaration = PageDeclaration("transaction", _override, None)
+"""The `page.transaction` call, which runs its page in a transaction or out of one."""
 
-    __slots__ = ()
-
-    def __init__(self) -> None:
-        """Start empty, a page without a valid call declaring no override."""
-        super().__init__(AtomicDeclaration.override, None)
-
-
-atomic_store = AtomicStore()
-
-
-class AtomicDeclaring:
-    """The `page.atomic` declaration of the `Page` manager."""
-
-    def atomic(
-        self, atomic: object, /, *, aliases: AliasChoice | list[str] = None
-    ) -> None:
-        """Run this page in a transaction, or out of one, whatever the request method.
-
-        `"writes"` opens it before the first write, `aliases` of `None` on `ALIASES`.
-        """
-        atomic_store.record(
-            registering_site(),
-            sys._getframe(1).f_globals,
-            partial(AtomicDeclaration, atomic, aliases),
-        )
-
-
-page_atomic = atomic_store.resolved
+page_transaction = transaction_declaration.of
 """Return the transaction override of the page at a `page.py` path, `None` for none."""
 
 
-__all__ = [
-    "AtomicDeclaration",
-    "AtomicDeclaring",
-    "AtomicStore",
-    "atomic_store",
-    "page_atomic",
-]
+__all__ = ["page_transaction", "transaction_declaration"]

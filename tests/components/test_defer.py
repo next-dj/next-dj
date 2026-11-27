@@ -3,10 +3,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
+from next.boundaries.options import BoundaryOptions, DeferMode
 from next.components.defer import DeferDeclarations, defer_declarations
-from next.components.loading import ModuleLoader
-from next.defer import BoundaryOptions, DeferMode
+from next.components.modules import ModuleLoader
+from next.introspect import DeclaringSite
+from next.permissions.errors import DeclarationOutsideModuleError
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +26,10 @@ def _module(directory: Path, body: str, name: str = "component.py") -> Path:
     module_path.write_text(f"from next.components import component\n\n{body}\n")
     ModuleLoader().load(module_path)
     return module_path
+
+
+def _site(path: Path) -> DeclaringSite:
+    return DeclaringSite(path, True, {})
 
 
 class TestComponentDefer:
@@ -59,7 +66,6 @@ class TestComponentDefer:
             ("component.defer('stream', props=('sku',))", True),
             ("component.defer('stream')", False),
             ("value = 1", False),
-            ("component.defer('lazy')\ncomponent.props()", False),
         ],
     )
     def test_naming_props_even_none_makes_a_component_addressable(
@@ -98,36 +104,43 @@ class TestComponentDefer:
         assert options is not None
         assert options.mode is DeferMode.MANUAL
 
-    @pytest.mark.parametrize(
-        ("source", "problem"),
-        [
-            pytest.param(
-                "component.defer(props=('a',))\ncomponent.props('b')",
-                "it names props through both component.defer(props=) and "
-                "component.props()",
-                id="props-named-twice",
-            ),
-            pytest.param(
-                "component.defer()\n\n\ndef late():\n    component.props('x')"
-                "\n\n\nlate()",
-                "it runs inside a function rather than at the top of the module",
-                id="call-inside-a-function",
-            ),
-        ],
-    )
-    def test_a_misplaced_declaration_declares_nothing(
-        self, tmp_path, source: str, problem: str
-    ) -> None:
-        module_path = _module(tmp_path / "card", source)
-        assert defer_declarations.options(module_path) is None
-        assert defer_declarations.problems() == ((module_path, problem),)
+    def test_props_named_twice_raise_at_the_second_call(self, tmp_path) -> None:
+        site = _site(tmp_path / "card" / "component.py")
+        defer_declarations.defer(site, {"mode": None, "props": ("a",)})
+        expected = (
+            f"component.props() in {site.path} declares nothing, since it names "
+            "props through both component.defer(props=) and component.props()."
+        )
+        with pytest.raises(ImproperlyConfigured) as raised:
+            defer_declarations.props(site, ("b",))
+        assert str(raised.value) == expected
+        assert defer_declarations.options(site.path) == BoundaryOptions(props=("a",))
 
-    def test_an_unusable_option_declares_nothing(self, tmp_path) -> None:
-        module_path = _module(tmp_path / "card", "component.defer('lazy')")
+    def test_a_call_inside_a_function_raises(self, tmp_path) -> None:
+        site = DeclaringSite(tmp_path / "card" / "component.py", False, {})
+        with pytest.raises(DeclarationOutsideModuleError, match="inside a function"):
+            defer_declarations.defer(site, {"mode": "load"})
+        with pytest.raises(DeclarationOutsideModuleError, match="inside a function"):
+            defer_declarations.props(site, ())
+        assert defer_declarations.options(site.path) is None
+
+    def test_an_unusable_option_raises_naming_the_file(self, tmp_path) -> None:
+        site = _site(tmp_path / "card" / "component.py")
+        with pytest.raises(ImproperlyConfigured, match="mode must be one of") as raised:
+            defer_declarations.defer(site, {"mode": "lazy"})
+        assert str(site.path) in str(raised.value)
+        assert defer_declarations.options(site.path) is None
+
+    def test_an_unusable_option_in_a_collected_run_keeps_the_earlier_options(
+        self, tmp_path
+    ) -> None:
+        module_path = _module(tmp_path / "card", "component.defer('load')")
+        with (
+            defer_declarations.collecting(module_path),
+            pytest.raises(ImproperlyConfigured),
+        ):
+            defer_declarations.defer(_site(module_path), {"mode": "lazy"})
         assert defer_declarations.options(module_path) is None
-        [(file_path, problem)] = defer_declarations.problems()
-        assert file_path == module_path
-        assert problem.startswith("mode must be one of")
 
     def test_a_removed_call_stops_applying_after_a_reload(self, tmp_path) -> None:
         module_path = _module(tmp_path / "card", "component.defer()")
@@ -135,12 +148,6 @@ class TestComponentDefer:
         _module(tmp_path / "card", "value = 1")
         assert defer_declarations.options(module_path) is None
         assert defer_declarations.version == version + 1
-
-    def test_a_fixed_call_clears_its_problem(self, tmp_path) -> None:
-        _module(tmp_path / "card", "component.defer('lazy')")
-        module_path = _module(tmp_path / "card", "component.defer('load')")
-        assert defer_declarations.problems() == ()
-        assert defer_declarations.options(module_path) is not None
 
     def test_an_unchanged_reload_keeps_the_version(self, tmp_path) -> None:
         _module(tmp_path / "card", "component.defer()")
@@ -153,7 +160,7 @@ class TestComponentDefer:
     ) -> None:
         module_path = _module(tmp_path / "card", "component.defer('load')")
         with defer_declarations.collecting(module_path):
-            defer_declarations.defer((module_path, True), {"mode": "manual"})
+            defer_declarations.defer(_site(module_path), {"mode": "manual"})
             options = defer_declarations.options(module_path)
             assert options is not None
             assert options.mode is DeferMode.LOAD
@@ -163,7 +170,7 @@ class TestComponentDefer:
 
     def test_a_call_outside_a_collected_run_applies_at_once(self, tmp_path) -> None:
         module_path = tmp_path / "card" / "component.py"
-        defer_declarations.props((module_path, True), ("sku",))
+        defer_declarations.props(_site(module_path), ("sku",))
         assert defer_declarations.options(module_path) == BoundaryOptions(
             props=("sku",)
         )
@@ -182,8 +189,8 @@ class TestComponentDefer:
 
     def test_calls_outside_a_collected_run_join_each_other(self, tmp_path) -> None:
         module_path = tmp_path / "card" / "component.py"
-        defer_declarations.defer((module_path, True), {"mode": "load"})
-        defer_declarations.props((module_path, True), ("sku",))
+        defer_declarations.defer(_site(module_path), {"mode": "load"})
+        defer_declarations.props(_site(module_path), ("sku",))
         assert defer_declarations.options(module_path) == BoundaryOptions(
             mode=DeferMode.LOAD, props=("sku",)
         )
@@ -192,7 +199,7 @@ class TestComponentDefer:
         module_path = _module(
             tmp_path / "card", "component.defer('load')\ncomponent.props('sku')"
         )
-        defer_declarations.props((module_path, True), ("sku",))
+        defer_declarations.props(_site(module_path), ("sku",))
         _module(tmp_path / "card", "component.props('sku')")
         assert defer_declarations.options(module_path) == BoundaryOptions(
             props=("sku",)
@@ -208,10 +215,8 @@ class TestComponentDefer:
 
     def test_a_reset_drops_every_declaration(self, tmp_path) -> None:
         _module(tmp_path / "a", "component.defer()")
-        _module(tmp_path / "b", "component.defer('lazy')")
         _module(tmp_path, "component.defer()", name="helpers.py")
         defer_declarations.reset()
-        assert defer_declarations.problems() == ()
         assert defer_declarations.outside() == ()
         assert defer_declarations.options(tmp_path / "a" / "component.py") is None
 
@@ -224,9 +229,9 @@ class TestOnDeferring:
         calls: list[str] = []
         store.on_deferring(lambda: calls.append("mode"))
         module_path = tmp_path / "card" / "component.py"
-        store.props((module_path, True), ("sku",))
+        store.props(_site(module_path), ("sku",))
         assert calls == []
-        store.defer((module_path, True), {"mode": "load"})
+        store.defer(_site(module_path), {"mode": "load"})
         assert calls == ["mode"]
 
 
@@ -237,15 +242,15 @@ class TestDeferringModules:
         store = DeferDeclarations()
         modules = store.deferring_modules()
         module_path = tmp_path / "card" / "component.py"
-        store.props((module_path, True), ("sku",))
+        store.props(_site(module_path), ("sku",))
         assert modules == set()
-        store.defer((module_path, True), {"mode": "load"})
+        store.defer(_site(module_path), {"mode": "load"})
         assert modules == {module_path}
-        store.defer((module_path, True), {"mode": None})
+        store.defer(_site(module_path), {"mode": None})
         assert modules == set()
 
     def test_a_reset_empties_them(self, tmp_path: Path) -> None:
         store = DeferDeclarations()
-        store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
+        store.defer(_site(tmp_path / "card" / "component.py"), {"mode": "load"})
         store.reset()
         assert store.deferring_modules() == set()

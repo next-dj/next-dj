@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final, override
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from next.defer import DeferMode
+    from next.boundaries.options import DeferMode
 
 
 LOADING_FILE: Final = "loading.djx"

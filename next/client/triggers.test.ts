@@ -1,23 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPoller } from "./poll";
 import type { PollFactory } from "./poll";
-import { CHUNK_TIMEOUT, lazyChunk } from "./chunks";
+import { CHUNK_TIMEOUT } from "./chunks";
 import {
   chunkModules,
-  landed,
   manualPollClock,
   manualVisibility,
   unloaded,
 } from "./test-doubles";
+import { createForms } from "./forms";
+import type { FormsFactory } from "./forms";
 import { createTriggers } from "./triggers";
 import { createDiagnostics } from "./diagnostics";
-import type {
-  DeferArm,
-  IntersectionAdapter,
-  TriggerDeps,
-  Triggers,
-  Watch,
-} from "./triggers";
+import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
 import type { Clock } from "./wire";
 
 // The captured request is exactly the shape the triggers hand their fetch seam.
@@ -107,7 +102,7 @@ function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}):
     observer: manualObserver(),
     confirm: () => true,
     poll: chunkModules.poll,
-    defer: chunkModules.defer,
+    forms: chunkModules.forms,
     ...over,
   });
   return { triggers, requests, aborted };
@@ -1145,7 +1140,6 @@ describe("default observer", () => {
       abort: () => undefined,
       document,
       poll: chunkModules.poll,
-      defer: chunkModules.defer,
     });
     triggers.scan(document.body);
     const [wide, plain] = FakeObserver.made;
@@ -1932,33 +1926,12 @@ describe("the defer chunk", () => {
     document.body.innerHTML = "";
   });
 
-  it("is never fetched by a scan and is armed once the chunk lands", () => {
-    const defer = lazyChunk<DeferArm>(
-      { dispatch: () => undefined, nonce: undefined, context: () => ({}) },
-      "defer",
-    );
-    const { triggers } = makeTriggers({ defer });
-    document.body.innerHTML =
-      `${WRAPPER}data-next-defer="load"></div>` +
-      '<div data-next-zone="z" data-next-reload="loading"></div>';
-    triggers.scan(document.body);
-    expect(document.head.querySelectorAll("script")).toHaveLength(0);
-    const arm = vi.fn<DeferArm>();
-    defer.land(arm);
-    expect(arm).toHaveBeenCalledTimes(1);
-    expect(arm).toHaveBeenCalledWith(expect.any(Function));
-  });
-
-  it("hands the chunk the observer and re-arm of the triggers", () => {
+  it("hands the boundaries chunk the observer and re-arm of the triggers", () => {
     const observer = manualObserver();
-    let watched: Watch | undefined;
-    makeTriggers({
-      observer,
-      defer: landed<DeferArm>((watch) => (watched = watch)),
-    });
+    const { triggers } = makeTriggers({ observer });
     document.body.innerHTML = `${WRAPPER}data-next-defer="visible"></div>`;
     const send = vi.fn(() => Promise.resolve({ status: "ok" }));
-    watched!(document.getElementById("b-1")!, send);
+    triggers.watch(document.getElementById("b-1")!, send);
     expect(send).not.toHaveBeenCalled();
     observer.reveal();
     expect(send).toHaveBeenCalledTimes(1);
@@ -1966,17 +1939,13 @@ describe("the defer chunk", () => {
 
   it("replaces the watch of an element still waiting, so one entry sends once", () => {
     const observer = viewObserver();
-    let watched: Watch | undefined;
-    makeTriggers({
-      observer,
-      defer: landed<DeferArm>((watch) => (watched = watch)),
-    });
+    const { triggers } = makeTriggers({ observer });
     document.body.innerHTML = `${WRAPPER}data-next-defer="visible"></div>`;
     const el = document.getElementById("b-1")!;
     const first = vi.fn(() => Promise.resolve({ status: "ok" }));
     const second = vi.fn(() => Promise.resolve({ status: "ok" }));
-    watched!(el, first);
-    watched!(el, second);
+    triggers.watch(el, first);
+    triggers.watch(el, second);
     expect(observer.margins).toHaveLength(2);
     observer.show();
     expect(first).not.toHaveBeenCalled();
@@ -1999,5 +1968,41 @@ describe("the observer sweep", () => {
     expect(stops).toEqual(["gone"]);
     triggers._reset();
     expect(stops).toEqual(["gone", "kept"]);
+  });
+});
+
+describe("the forms chunk", () => {
+  it("is fetched once a scan finds a trigger and listens once it lands", () => {
+    const forms = unloaded<FormsFactory>("forms");
+    const { triggers, requests } = makeTriggers({ forms, clock: manualPollClock() });
+    triggers.install(document);
+    document.body.innerHTML = "<p></p>";
+    triggers.scan(document.body);
+    expect(forms.tags()).toBe(0);
+    document.body.innerHTML =
+      '<form data-next-target="z"><input name="q" data-next-trigger="input"></form>';
+    triggers.scan(document.body);
+    expect(forms.tags()).toBe(1);
+    forms.land(createForms);
+    triggers.scan(document.body);
+    expect(forms.tags()).toBe(1);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toEqual([{ url: "/?q=", zone: "z" }]);
+    triggers._reset();
+  });
+
+  it("builds no forms for a triggers instance reset before the chunk lands", () => {
+    const forms = unloaded<FormsFactory>("forms");
+    const { triggers, requests } = makeTriggers({ forms });
+    document.body.innerHTML = '<form data-next-validate><input name="q"></form>';
+    triggers.scan(document.body);
+    triggers._reset();
+    forms.land(createForms);
+    triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new Event("blur"));
+    expect(requests).toEqual([]);
+    triggers._reset();
   });
 });

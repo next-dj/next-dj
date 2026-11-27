@@ -12,9 +12,9 @@ from next.intercept import intercepts
 from next.pages.loaders import PAGE_MODULE
 from next.utils import PageRoot, walk_page_tree
 
-from .backends import FileRouterBackend
+from .backends import FilePageBackend
 from .errors import URLParameterError
-from .manager import router_manager
+from .manager import route_manager
 from .mount import tree_router
 from .parser import default_url_parser
 from .urlconf import outer_kwargs, tree_route, urlconf_mounts
@@ -86,10 +86,10 @@ def _tree_routes(
         )
 
 
-def _routed_pages(first: FileRouterBackend, mounted: list[PageRoot]) -> frozenset[Path]:
+def _routed_pages(first: FilePageBackend, mounted: list[PageRoot]) -> frozenset[Path]:
     """Return the page files the built patterns route."""
     patterns = [
-        *router_manager,
+        *route_manager,
         *(
             pattern
             for root in mounted
@@ -118,8 +118,8 @@ def collect_routes() -> list[Route]:
         if base is None
         else [
             route
-            for router in router_manager.backends
-            if isinstance(router, FileRouterBackend)
+            for router in route_manager.backends
+            if isinstance(router, FilePageBackend)
             for root in router.page_roots()
             if root.prefix is None
             for route in _tree_routes(root, base, router.skip_dir_names(), routed)

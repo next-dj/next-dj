@@ -89,7 +89,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: ./.github/actions/setup-python-uv
     - name: Run the tests that read the source checkout
-      run: uv run pytest tests/static/test_chunk_sync.py tests/checks/test_init.py --no-cov -rs --junitxml=source.xml
+      run: uv run pytest tests/static/test_chunk_sync.py tests/static/test_protocol.py tests/checks/test_init.py --no-cov -rs --junitxml=source.xml
     - name: Fail on a skipped test
       run: |
         uv run --no-sync python - <<'EOF'
@@ -168,7 +168,7 @@ jobs:
     - name: Check the gzip budget of the runtime and each lazy chunk
       run: |
         status=0
-        for entry in next:18432 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048 next.defer:2048 next.reload:2048 next.more:2048 next.reader:2048 next.router:4608 next.history:4096 next.intent:5120; do
+        for entry in next:18368 next.scripts:3584 next.stream:4096 next.ws:4096 next.csrf:768 next.poll:1024 next.dev:2048 next.forms:1344 next.layers:2400 next.boundaries:3840 next.reload:2048 next.more:2048 next.router:8704 next.intent:5120; do
           name="${entry%%:*}.min.js"
           budget="${entry##*:}"
           bytes=$(gzip -nc "next/static/next/${name}" | wc -c)

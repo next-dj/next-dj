@@ -1,6 +1,6 @@
 import pytest
 
-from next.transactions import StatementKind, statement_kind
+from next.transactions.statements import StatementKind, statement_kind
 
 
 class TestStatementKind:
@@ -24,7 +24,13 @@ class TestStatementKind:
             ('SAVEPOINT "s1_x1"', StatementKind.SESSION),
             ("SET CONSTRAINTS ALL IMMEDIATE", StatementKind.SESSION),
             ("RESET ALL", StatementKind.SESSION),
+            ("SET LOCAL statement_timeout = 5000", StatementKind.SESSION),
+            ("SET sql_mode = CONCAT(@@sql_mode, ',STRICT')", StatementKind.SESSION),
+            ("SET @note = 'a call(' /* f( */", StatementKind.SESSION),
             ("PRAGMA foreign_keys = ON", StatementKind.SESSION),
+            ("PRAGMA main.foreign_keys = OFF", StatementKind.SESSION),
+            ("PRAGMA table_info(auth_group)", StatementKind.SESSION),
+            ("pragma /* note */ busy_timeout = 20", StatementKind.SESSION),
             ("DISCARD TEMP", StatementKind.SESSION),
             ('SELECT "auth_group"."name" FROM "auth_group"', StatementKind.READ),
             ("  (SELECT 1) UNION (SELECT 2)", StatementKind.READ),
@@ -51,6 +57,16 @@ class TestStatementKind:
             ('DELETE FROM "auth_group"', StatementKind.WRITE),
             ("CREATE TABLE t (id int)", StatementKind.WRITE),
             ("CALL refresh()", StatementKind.WRITE),
+            ("SET @done = purge_all()", StatementKind.WRITE),
+            ("SET @done = 'unclosed purge(", StatementKind.WRITE),
+            ("PRAGMA user_version = 5", StatementKind.WRITE),
+            ("PRAGMA main.application_id = 7", StatementKind.WRITE),
+            ("PRAGMA journal_mode = WAL", StatementKind.WRITE),
+            ("PRAGMA optimize", StatementKind.WRITE),
+            ("PRAGMA wal_checkpoint(TRUNCATE)", StatementKind.WRITE),
+            ('PRAGMA "main".foreign_keys = ON', StatementKind.WRITE),
+            ("PRAGMA", StatementKind.WRITE),
+            ("PRAGMA foreign_keys = ON; DELETE FROM t", StatementKind.WRITE),
             ("SELECT * FROM t FOR UPDATE", StatementKind.WRITE),
             ("SELECT * FROM t FOR NO KEY UPDATE SKIP LOCKED", StatementKind.WRITE),
             ("SELECT * FROM t FOR SHARE", StatementKind.WRITE),
@@ -95,4 +111,118 @@ class TestStatementKind:
         ],
     )
     def test_kind(self, sql: object, kind: StatementKind) -> None:
+        assert statement_kind(sql) is kind
+
+
+class TestCalls:
+    """A read that calls a function no read takes counts as a write."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            'SELECT COUNT(*) AS "__count" FROM "auth_group"',
+            'SELECT "a"."id" FROM "a" WHERE "a"."id" IN (SELECT U0."id" FROM "b" U0)',
+            'SELECT COALESCE(SUM("x"), 0), LOWER("name") FROM t',
+            'SELECT ("a"."x")::numeric(10, 2) FROM "a"',
+            "SELECT django_date_trunc('day', \"d\", NULL, NULL) FROM t",
+            'SELECT ROW_NUMBER() OVER (PARTITION BY "a") FROM t',
+            "SELECT 1 WHERE EXISTS(SELECT 1) AND ('a', 'b') IN (VALUES ('a', 'b'))",
+            'SELECT "a", ("b") FROM t',
+            "SELECT 'f(' FROM t",
+            "SELECT 1 /* refresh(1) */",
+            "SELECT $$ refresh() $$",
+            "WITH x AS (SELECT 1) SELECT * FROM x",
+        ],
+    )
+    def test_pure_calls_read(self, sql: str) -> None:
+        assert statement_kind(sql) is StatementKind.READ
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT refresh_totals()",
+            "SELECT ñpurge()",
+            "SELECT 1purge()",
+            "SELECT ñ()",
+            "SELECT $purge()",
+            "SELECT nextval('seq')",
+            "SELECT pg_advisory_lock(1)",
+            "SELECT app.archive(%s)",
+            'SELECT "Archive"(%s)',
+            "SELECT * FROM t WHERE id = set_flag (1)",
+            "SELECT refresh /* note */ (1)",
+            "WITH x AS (SELECT bump()) SELECT * FROM x",
+            "SELECT 'unclosed refresh(",
+            "SELECT myschema.lower(x) FROM t",
+            "SELECT myschema . /* x */ lower (x) FROM t",
+            'SELECT myschema."lower"(x) FROM t',
+            "SELECT myschema.lower(x) FROM t FOR UPDATE",
+        ],
+    )
+    def test_an_unknown_call_writes(self, sql: str) -> None:
+        assert statement_kind(sql) is StatementKind.WRITE
+
+
+class TestAmbiguousText:
+    """A statement the lexer cannot read as one sure read counts as a write."""
+
+    @pytest.mark.parametrize(
+        ("sql", "kind"),
+        [
+            ("SELECT 1; UPDATE t SET a = 1", StatementKind.WRITE),
+            ("SELECT 1; DROP TABLE t", StatementKind.WRITE),
+            ("SELECT 1 ;\n-- note\n TRUNCATE t", StatementKind.WRITE),
+            ("SET search_path = a; DELETE FROM t", StatementKind.WRITE),
+            ('SAVEPOINT "s1"; DELETE FROM t', StatementKind.WRITE),
+            ("COMMIT; DROP TABLE t", StatementKind.WRITE),
+            ("VACUUM; DROP TABLE t", StatementKind.WRITE),
+            ("BEGIN; DELETE FROM t", StatementKind.WRITE),
+            ("DISCARD ALL; DROP TABLE t", StatementKind.WRITE),
+            ("SELECT 1;", StatementKind.READ),
+            ("SELECT 1; -- done", StatementKind.READ),
+            ("SELECT 'a;b' FROM t", StatementKind.READ),
+            ("SET search_path = 'a;b'", StatementKind.SESSION),
+            ("SET x = 'a;b", StatementKind.WRITE),
+            ("DISCARD ALL; /* done */", StatementKind.STANDALONE),
+            ("SELECT E'\\'' ; DELETE FROM t; --'", StatementKind.WRITE),
+            ("SELECT '\\'' ; DROP TABLE t; --'", StatementKind.WRITE),
+            ("SELECT '\\' ; DROP TABLE t; --'", StatementKind.WRITE),
+            ("SET x = E'\\'' ; DELETE FROM t; --'", StatementKind.WRITE),
+            (
+                "CREATE INDEX CONCURRENTLY i ON t (a) WHERE b = '\\'",
+                StatementKind.STANDALONE,
+            ),
+            (
+                "CREATE INDEX CONCURRENTLY i ON t (a) WHERE b = E'\\'' ; DROP TABLE t --'",
+                StatementKind.WRITE,
+            ),
+            (
+                "SELECT * FROM t WHERE a LIKE %s ESCAPE '\\' AND b IN (SELECT 1)",
+                StatementKind.READ,
+            ),
+            ("SELECT COUNT(*) FROM t WHERE a LIKE %s ESCAPE '\\'", StatementKind.READ),
+            ("SELECT 'C:\\dir' FROM t WHERE a = 'x;y'", StatementKind.READ),
+            ("EXPLAIN ANALYZE CREATE TABLE t2 AS SELECT * FROM t", StatementKind.WRITE),
+            (
+                "EXPLAIN (ANALYZE) CREATE MATERIALIZED VIEW mv AS SELECT 1",
+                StatementKind.WRITE,
+            ),
+            ("EXPLAIN (ANALYZE, FORMAT JSON) EXECUTE stmt", StatementKind.WRITE),
+            ("EXPLAIN ANALYZE EXECUTE stmt", StatementKind.WRITE),
+            ("EXPLAIN ANALYSE DELETE FROM t", StatementKind.WRITE),
+            ("EXPLAIN ANALYZE 'x'", StatementKind.WRITE),
+            ("EXPLAIN ANALYZE", StatementKind.WRITE),
+            ("DESCRIBE ANALYZE INSERT INTO t VALUES (1)", StatementKind.WRITE),
+            ("EXPLAIN ANALYZE SELECT 1", StatementKind.READ),
+            ("EXPLAIN (ANALYZE true, FORMAT JSON) SELECT 1", StatementKind.READ),
+            ("EXPLAIN ANALYZE FORMAT=TREE SELECT 1", StatementKind.READ),
+            (
+                "EXPLAIN ANALYZE VERBOSE WITH x AS (SELECT 1) TABLE x",
+                StatementKind.READ,
+            ),
+            ("EXPLAIN QUERY PLAN SELECT 1", StatementKind.READ),
+            ("EXPLAIN EXECUTE stmt", StatementKind.READ),
+        ],
+    )
+    def test_kind(self, sql: str, kind: StatementKind) -> None:
         assert statement_kind(sql) is kind

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, override
 
 from next.conf import next_framework_settings
 
-from .loading import ModuleLoader
+from .modules import ModuleLoader
 from .registry import ComponentRegistry, ComponentVisibilityResolver, may_defer
 from .scanner import ComponentScanner, component_extra_roots_from_config
 
@@ -89,6 +89,14 @@ class ComponentsBackend(ABC):
         """
         return False
 
+    @property
+    def version(self) -> int:
+        """Return a counter that every change to the components of this backend moves.
+
+        A page plan reads it, and a backend whose components never change answers 0.
+        """
+        return 0
+
 
 class FileComponentsBackend(ComponentsBackend):
     """Load components from `DIRS` and from the filesystem walk in `next.urls`."""
@@ -105,6 +113,12 @@ class FileComponentsBackend(ComponentsBackend):
 
         self._loaded = False
         self._lock = threading.RLock()
+
+    @property
+    @override
+    def version(self) -> int:
+        """Return the mutation counter of the registry this backend fills."""
+        return self._registry.version
 
     @override
     def discover(self) -> None:

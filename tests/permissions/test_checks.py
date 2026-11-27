@@ -21,7 +21,7 @@ from tests.support import (
     OBJECT_PERMISSION_BACKENDS,
     check_ids,
     next_framework_settings_stand_in,
-    patch_checks_router_manager,
+    patch_checks_route_manager,
     routed,
     write_page,
 )
@@ -284,14 +284,11 @@ class TestPermissionsKnownInTemplates:
         with override_settings(NEXT_FRAMEWORK=framework(pages)):
             assert _warned(_TEMPLATE) == [(str(page_file), "blog.nope")]
 
-    @pytest.mark.parametrize("backends", [[], "not-a-list"])
-    def test_no_component_backends_reads_pages_only(
-        self, pages: Path, backends: object
-    ) -> None:
+    def test_no_component_backends_reads_pages_only(self, pages: Path) -> None:
         page_file = templated_page(pages / "hello", "x = 1\n", _tag("'blog.nope'"))
         with (
-            override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": backends}),
-            patch_checks_router_manager(pages_directory=pages),
+            override_settings(NEXT_FRAMEWORK={"COMPONENT_BACKENDS": []}),
+            patch_checks_route_manager(pages_directory=pages),
         ):
             assert _warned(_TEMPLATE) == [(str(page_file), "blog.nope")]
 

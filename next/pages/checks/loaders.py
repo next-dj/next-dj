@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import import_class_cached, next_framework_settings
 from next.pages.loaders import TemplateLoader
 

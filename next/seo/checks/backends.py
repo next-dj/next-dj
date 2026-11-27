@@ -6,11 +6,11 @@ from collections.abc import Mapping
 from typing import Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 
 from next.backends import resolve_backend_class
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.checks.common import errors_for_unknown_keys, raw_scope
 from next.seo.backends import SitemapBackend
 from next.seo.manager import SEO_KEYS, SEO_SCOPE, SITEMAP_BACKENDS

@@ -3,17 +3,11 @@
 import re
 from typing import TYPE_CHECKING, Final
 
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.template.base import Node
 from django.template.defaulttags import ForNode, IfNode
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.components.sources import get_components_manager
 from next.conf import next_framework_settings
 from next.pages import page
@@ -22,6 +16,7 @@ from next.pages.loaders import PAGE_MODULE, layout_chain
 from next.pages.paths import page_template_path
 from next.pages.skeletons import PAGE_BODY, SKELETON_GLOB, declared_zones, skeleton_zone
 from next.partial.guards import Components, guarded_zones, opaque_zones
+from next.partial.headers import ZONE
 from next.partial.registry import zones_of
 from next.partial.zone import LOADING, zones_under
 from next.permissions.nodes import HasPermNode
@@ -113,7 +108,7 @@ def check_zone_name_is_slug(*args: object, **kwargs: object) -> list[CheckMessag
             messages.append(
                 Error(
                     f'Zone name "{node.name}" in {page_path} is not an ASCII '
-                    "slug. Zone names travel in the X-Next-Zone header, which "
+                    f"slug. Zone names travel in the {ZONE} header, which "
                     "is latin-1. Use letters, digits, hyphens, or underscores.",
                     obj=str(page_path),
                     id=E_NON_ASCII_ZONE,

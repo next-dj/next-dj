@@ -1,8 +1,9 @@
 """The `Accept-Encoding` parse and the choice of a content coding in server order."""
 
-import functools
 import re
 from typing import Final
+
+from next.caches import pure_cache
 
 
 MAX_HEADER: Final = 256
@@ -35,7 +36,7 @@ def _weight(params: list[str]) -> float | None:
     return weight
 
 
-@functools.lru_cache(maxsize=256)
+@pure_cache(256)
 def _parse(header: str) -> tuple[tuple[str, float], ...]:
     """Return each coding `header` names with its weight, the first mention winning."""
     seen: dict[str, float] = {}
@@ -58,7 +59,7 @@ def parse_accept_encoding(header: str) -> tuple[tuple[str, float], ...]:
     return _parse(_trimmed(header))
 
 
-@functools.lru_cache(maxsize=512)
+@pure_cache(512)
 def _choose(header: str, offered: tuple[str, ...]) -> str | None:
     """Return the offered coding weighed highest, ties going to the earlier one."""
     weights = dict(_parse(header))

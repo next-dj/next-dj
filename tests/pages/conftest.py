@@ -4,17 +4,14 @@ from pathlib import Path
 import pytest
 
 from next.deps import provider_registry
-from next.pages.compression import compress_store
-from next.pages.defer import page_defer_store
+from next.pages.declarations import page_declarations
 from next.pages.loaders import forget_layout_texts
-from next.pages.router import router_store
 from next.pages.signals import (
     context_registered,
     metadata_registered,
     page_rendered,
     template_loaded,
 )
-from next.pages.transactions import atomic_store
 from next.testing import SignalRecorder, capture_signals
 from tests.support import restored_provider_registry, rewrite_in_tick
 from tests.support.pages import write_page
@@ -64,12 +61,9 @@ def framework_providers() -> Generator[None, None, None]:
 @pytest.fixture()
 def fresh_declarations() -> Generator[None, None, None]:
     """Start and end the test with no `page` declaration of any kind."""
-    stores = (compress_store, page_defer_store, router_store, atomic_store)
-    for store in stores:
-        store.reset()
+    page_declarations.reset()
     yield
-    for store in stores:
-        store.reset()
+    page_declarations.reset()
 
 
 @pytest.fixture()

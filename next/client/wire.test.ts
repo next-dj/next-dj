@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Wire } from "./wire";
+import { Wire, zoneKey } from "./wire";
 import { createCsrf } from "./csrf";
 import type { CsrfMint } from "./csrf";
 import { lazyChunk } from "./chunks";
@@ -110,14 +110,16 @@ describe("Wire headers", () => {
     expect(headers.get(REQUEST_FLAG)).toBe("1");
     expect(headers.get("Accept")).toBe(ACCEPT);
     expect(headers.get("X-Next-Version")).toBe("v1");
+    expect(headers.get("X-Next-Protocol")).toBe("2");
     expect(headers.get("X-Next-Zone")).toBe("request-list");
   });
 
-  it("omits the version header before the client has learned one", async () => {
+  it("omits the version header of a page whose payload names none", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE), { version: "" });
     await h.wire.fetch({ url: "/list/", zone: "request-list" });
     const headers = new Headers(h.calls[0]!.init.headers);
     expect(headers.has("X-Next-Version")).toBe(false);
+    expect(headers.get("X-Next-Protocol")).toBe("2");
   });
 
   it("adds the CSRF header from the payload on unsafe methods", async () => {
@@ -906,6 +908,48 @@ describe("Wire safe-GET queue", () => {
     const second = h.wire.fetch({ url: "/p/", zone: "list" });
     await Promise.all([first, second]);
     expect(h.dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+});
+
+describe("Wire sweep", () => {
+  function hanging(signals: AbortSignal[]) {
+    return (_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal!;
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason as Error));
+      });
+  }
+
+  it("aborts a queued request once every element it fills left the document", async () => {
+    document.body.innerHTML =
+      '<div id="b" data-next-boundary="b"></div><div id="c" data-next-boundary="c"></div>';
+    const gone = document.getElementById("b")!;
+    const kept = document.getElementById("c")!;
+    const signals: AbortSignal[] = [];
+    const h = makeWire(hanging(signals));
+    const first = h.wire.fetch({ url: "/p/", queue: "b", boundaries: [gone] });
+    const second = h.wire.fetch({ url: "/p/", queue: "c", boundaries: [kept] });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    gone.remove();
+    h.wire.sweep();
+    await expect(first).resolves.toMatchObject({ status: "dropped" });
+    expect(signals[1]!.aborted).toBe(false);
+    kept.remove();
+    h.wire.sweep();
+    await expect(second).resolves.toMatchObject({ status: "dropped" });
+    document.body.innerHTML = "";
+  });
+
+  it("leaves a queued request with no element to fill running", async () => {
+    const signals: AbortSignal[] = [];
+    const h = makeWire(hanging(signals));
+    const pending = h.wire.fetch({ url: "/p/", zone: "missing" });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    h.wire.sweep();
+    expect(signals[0]!.aborted).toBe(false);
+    h.wire.abort(zoneKey("/p/", "missing"));
+    await pending;
   });
 });
 

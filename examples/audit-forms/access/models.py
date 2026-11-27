@@ -79,11 +79,13 @@ class AuditEntry(models.Model):
     KIND_VALIDATION_FAILED = "validation_failed"
     KIND_REQUEST_STARTED = "request_started"
     KIND_ACCESS_DENIED = "access_denied"
+    KIND_RECEIPT_ISSUED = "receipt_issued"
     KIND_CHOICES: ClassVar = [
         (KIND_DISPATCHED, "dispatched"),
         (KIND_VALIDATION_FAILED, "validation_failed"),
         (KIND_REQUEST_STARTED, "request_started"),
         (KIND_ACCESS_DENIED, "access_denied"),
+        (KIND_RECEIPT_ISSUED, "receipt_issued"),
     ]
     KINDS: ClassVar = frozenset(kind for kind, _label in KIND_CHOICES)
 

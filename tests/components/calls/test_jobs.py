@@ -9,12 +9,14 @@ from django.http import Http404, HttpRequest
 from django.template import Context
 from django.test import RequestFactory, override_settings
 
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import ErrorKind
+from next.boundaries.options import DeferMode
 from next.components.registry import DeferredComponents
-from next.defer import Addressing, DeferMode, ErrorKind
+from next.defer import boundary_settled, boundary_state_written
+from next.defer.assembly import assembled
+from next.defer.components import Deferring, deferring
 from next.diagnostics import degraded, watch_degraded
-from next.suspense import boundary_rendered, boundary_side_effect
-from next.suspense.assembly import assembled
-from next.suspense.components import Deferring, deferring
 from next.testing import boundary_errors, capture_signals, parallel_boundaries
 from next.testing.boundaries import gated, in_document_order, recorded_failures
 from tests.components.sites import HEAD, ComponentSite, template_engine
@@ -64,26 +66,32 @@ class TestJob:
     ) -> None:
         site.add("bad", "{{ boom }}", loading="L")
         html = site.finished("{% component 'bad' %}")
-        assert html.endswith('data-next-state="error" data-next-error="error"></div>')
+        assert 'data-next-state="error" data-next-error="error"' in html
+        assert html.endswith("data-next-retry>Try again</button></div></div>")
+        assert '<div role="alert">' in html
 
-    def test_the_timeout_fallback_never_runs_the_component(
+    def test_the_timeout_error_ui_never_runs_the_component(
         self, site: ComponentSite
     ) -> None:
-        site.add(
-            "slow", "{{ boom }}", loading="L", error="{{ error.kind }}|{{ props.t }}"
-        )
+        site.add("slow", "{{ boom }}", loading="L", error="{{ error.kind }}|{{ t }}")
         _, session = site.deferred("{% component 'slow' t='T' %}")
-        rendered = session.jobs[0].fallback(ErrorKind.TIMEOUT)
+        rendered = session.jobs[0].error_ui(ErrorKind.TIMEOUT)
         assert rendered.html == "timeout|T"
         assert rendered.kind is ErrorKind.TIMEOUT
+
+    @pytest.mark.parametrize("kind", [ErrorKind.FORBIDDEN, ErrorKind.NOT_FOUND])
+    def test_a_refusal_keeps_the_props_out_of_the_error_ui(
+        self, site: ComponentSite, kind: ErrorKind
+    ) -> None:
+        site.add("slow", "C", loading="L", error="{{ error.kind }}|{{ t }}")
+        _, session = site.deferred("{% component 'slow' t='T' %}")
+        assert session.jobs[0].error_ui(kind).html == f"{kind}|"
 
     def test_an_opaque_overload_reads_as_an_error(self, site: ComponentSite) -> None:
         site.add("slow", "C", loading="L", error="{{ error.kind }}")
         _, session = site.deferred("{% component 'slow' %}")
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"ERRORS": {"KINDS": "opaque"}}}
-        ):
-            rendered = session.jobs[0].fallback(ErrorKind.OVERLOADED)
+        with override_settings(NEXT_FRAMEWORK={"BOUNDARIES": {"KINDS": "opaque"}}):
+            rendered = session.jobs[0].error_ui(ErrorKind.OVERLOADED)
         assert rendered.html == "error"
         assert rendered.kind is ErrorKind.ERROR
 
@@ -93,10 +101,12 @@ class TestJob:
         template = Mock()
         template.render.return_value = "OOPS"
         with (
-            override_settings(NEXT_FRAMEWORK={"DEFER": {"ERROR": "oops.html"}}),
+            override_settings(
+                NEXT_FRAMEWORK={"BOUNDARIES": {"ERROR_TEMPLATE": "oops.html"}}
+            ),
             patch("next.components.facade.get_template", return_value=template),
         ):
-            rendered = session.jobs[0].fallback(ErrorKind.TIMEOUT)
+            rendered = session.jobs[0].error_ui(ErrorKind.TIMEOUT)
         assert rendered.html == "OOPS"
 
 
@@ -119,7 +129,7 @@ class TestNested:
         site.add("outer", "<o>{% component 'inner' v=1 %}</o>", loading="lo")
         with override_settings(DEBUG=True, NEXT_FRAMEWORK={"DEFER": {"MAX_DEPTH": 1}}):
             _, session = site.deferred("{% component 'outer' %}")
-            with caplog.at_level("DEBUG", logger="next.suspense"):
+            with caplog.at_level("DEBUG", logger="next.defer"):
                 rendered = session.jobs[0].run()
                 session.jobs[0].run()
         assert rendered.nested == ()
@@ -236,9 +246,9 @@ class TestAssembled:
 
     def test_every_settled_job_is_announced(self, site: ComponentSite) -> None:
         site.add("card", "C", loading="L")
-        with capture_signals(boundary_rendered) as recorder:
+        with capture_signals(boundary_settled) as recorder:
             self._assembled(site, "{% component 'card' %}{% component 'card' %}")
-        events = recorder.events_for(boundary_rendered)
+        events = recorder.events_for(boundary_settled)
         assert [event.kwargs["name"] for event in events] == ["card", "card"]
         first = events[0].kwargs
         assert first["state"] == "ready"
@@ -257,15 +267,15 @@ class TestAssembled:
         site.add("card", "{{ write }}C", loading="L")
         request = rf.get("/")
         request.session = SessionStore()
-        with capture_signals(boundary_side_effect) as recorder:
+        with capture_signals(boundary_state_written) as recorder:
             self._assembled(
                 site,
                 "{% component 'card' %}",
                 request=request,
                 write=lambda: _write_session(request),
             )
-        [event] = recorder.events_for(boundary_side_effect)
-        assert event.kwargs["kind"] == "session"
+        [event] = recorder.events_for(boundary_state_written)
+        assert event.kwargs["written"] == "session"
         assert event.kwargs["request"] is request
 
     def test_a_failure_inside_a_job_is_re_raised_by_the_test_helpers(

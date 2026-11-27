@@ -22,7 +22,8 @@ from next.forms.origin import (
 )
 from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
 from next.pages.access import forget_page_access
-from next.transactions import WRITES, AtomicOverride
+from next.transactions import AtomicOverride
+from next.transactions.savepoints import WRITES
 from tests.benchmarks.factories import STAND_IN_PK
 from tests.support import PermissionHolder, QuietHolder, routed
 from tests.support.access import write_guard

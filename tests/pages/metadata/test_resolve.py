@@ -15,7 +15,7 @@ from django.utils import translation
 from django.utils.functional import lazy
 
 import next.pages.metadata.hreflang as hreflang_module
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.pages import ld
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.pages.metadata import (
@@ -1022,7 +1022,7 @@ class TestBreadcrumbUrls:
     def test_a_settings_reload_forgets_the_crumb_routes(self) -> None:
         _crumb_route("blog/[slug]", "page_{name}")
         assert _crumb_route.cache_info().currsize > 0
-        settings_reloaded.send(sender=None)
+        next_framework_settings.reload()
         assert _crumb_route.cache_info().currsize == 0
 
     @override_settings(ROOT_URLCONF=NAMESPACED_URLCONF)

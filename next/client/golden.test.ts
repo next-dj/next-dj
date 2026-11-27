@@ -3,9 +3,27 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
-import type { Envelope } from "./apply";
+import type { ApplyOptions, Envelope } from "./apply";
 import { createLayers } from "./layers";
 import { createNavigation } from "./navigation";
+import { createDrain, drain } from "./drain";
+import type { DrainHost, Fill } from "./drain";
+import { locate, markers } from "./layout";
+import {
+  ATTR_DIGEST,
+  ATTR_ERROR,
+  ATTR_STATE,
+  EVENT_END,
+  EVENT_HELLO,
+  EVENT_PATCH,
+  PROTOCOL,
+  isBusy,
+  markBusy,
+  stamped,
+} from "./protocol";
+import { frames } from "./reader";
+import { createStack } from "./stack";
+import { landed } from "./test-doubles";
 import type { DialogAdapter } from "./layers";
 
 const GOLDEN_DIR = join(
@@ -280,12 +298,22 @@ describe("layer golden fixtures apply through the layer stack", () => {
 
   function makeLayerApplier() {
     const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
-    const layers = createLayers({
-      dispatch: (event, detail) => dispatched.push({ event, detail }),
-      fetch: async () => undefined,
-      document,
-      dialog: noopDialog(),
-      navigation: createNavigation({ dispatch: () => undefined }),
+    const dispatch = (event: string, detail: Record<string, unknown>): number =>
+      dispatched.push({ event, detail });
+    const layers = createStack({
+      dispatch,
+      chunk: landed(createLayers),
+      build: (factory) =>
+        factory({
+          dispatch,
+          fetch: async () => undefined,
+          document,
+          dialog: noopDialog(),
+          navigation: createNavigation({ dispatch: () => undefined }),
+          mark: markBusy,
+        }),
+      popped: () => undefined,
+      navigate: () => undefined,
     });
     const applier = new Applier({
       dispatch: (event, detail) => dispatched.push({ event, detail }),
@@ -353,5 +381,185 @@ describe("head golden fixtures", () => {
     expect(tag('meta[name="description"]', "content")).toBe(meta.description);
     expect(tag('link[rel="canonical"]', "href")).toBe(meta.canonical);
     expect(tag('meta[name="robots"]', "content")).toBe(meta.robots);
+  });
+});
+
+function readFormat(family: string, name: string): string {
+  return readFileSync(join(GOLDEN_DIR, family, name), "utf-8");
+}
+
+// What each chunk script of a streamed document pushes, read without running it.
+function pushed(root: ParentNode): (Fill | 0)[] {
+  return [...root.querySelectorAll("script")].map((script) => {
+    const found = /\.push\((.*)\);document/s.exec(script.text);
+    script.remove();
+    return JSON.parse(found![1]!) as Fill | 0;
+  });
+}
+
+function drainHost(): DrainHost {
+  const applier = new Applier({
+    dispatch: () => undefined,
+    mergeContext: () => undefined,
+  });
+  return {
+    partial: {
+      apply: (raw: unknown, options?: ApplyOptions) => applier.apply(raw, options),
+    },
+    mark: markBusy,
+    busy: isBusy,
+    stamped,
+    fire: () => undefined,
+    fallbacks: new WeakMap(),
+  } as unknown as DrainHost;
+}
+
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
+}
+
+describe("golden document chunks apply as the stream reader lands them", () => {
+  beforeEach(() => {
+    vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    document.head.innerHTML = "";
+    delete window.$nx;
+  });
+
+  function land(name: string): void {
+    document.body.innerHTML = readFormat("chunk", `${name}.html`);
+    window.$nx = pushed(document.body);
+    drain(drainHost(), () => false, {});
+  }
+
+  const boundary = (): HTMLElement => document.getElementById("b-5ea1c0de-0")!;
+
+  it("ready fills the boundary from its template, the markup parsed once", async () => {
+    land("ready");
+    await settle();
+    expect(boundary().getAttribute(ATTR_STATE)).toBe("ready");
+    expect(boundary().querySelector("h2")!.textContent).toBe("Ready");
+    expect(boundary().querySelector("p")!.textContent).toBe("Привет & 1 < 2");
+    expect(document.querySelector("template")).toBeNull();
+  });
+
+  it("error settles the boundary with its kind and digest", async () => {
+    land("error");
+    await settle();
+    expect(boundary().getAttribute(ATTR_STATE)).toBe("error");
+    expect(boundary().getAttribute(ATTR_ERROR)).toBe("timeout");
+    expect(boundary().getAttribute(ATTR_DIGEST)).toBe("c0ffee");
+    expect(boundary().textContent).toBe("timed out");
+  });
+
+  it("nested fills a row boundary its parent's template brought in", async () => {
+    land("nested");
+    await settle();
+    await settle();
+    const row = document.getElementById("b-5ea1c0de-1")!;
+    expect(row.tagName).toBe("TR");
+    expect(row.textContent).toBe("cell");
+    expect(row.getAttribute(ATTR_STATE)).toBe("ready");
+    expect(document.querySelector("template")).toBeNull();
+  });
+
+  it("noindex settles a missing page body and marks the head", async () => {
+    land("noindex");
+    await settle();
+    expect(boundary().getAttribute(ATTR_ERROR)).toBe("not_found");
+    expect(
+      document.head.querySelector('meta[name="robots"]')!.getAttribute("content"),
+    ).toBe("noindex");
+  });
+});
+
+describe("the golden partial stream reads as the reader reads it", () => {
+  it("names the protocol, lands its envelope and fills its boundary", async () => {
+    const text = readFormat("stream", "boundary.sse");
+    const body = new Response(text).body!.getReader();
+    const read: [string, unknown][] = [];
+    for await (const [event, data] of frames(body))
+      read.push([event, JSON.parse(data)]);
+    expect(read.map(([event]) => event)).toEqual([
+      EVENT_HELLO,
+      EVENT_PATCH,
+      EVENT_PATCH,
+      EVENT_END,
+    ]);
+    expect(read[0]![1]).toEqual({ protocol: PROTOCOL, streamed: true });
+    document.body.innerHTML = '<div data-next-zone="results"></div>';
+    const { applier } = makeApplier();
+    applier.apply((read[1]![1] as Fill).e);
+    vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    const take = createDrain(drainHost(), { stale: () => false, scope: () => [] });
+    take(read[2]![1] as Fill, 0);
+    await settle();
+    const filled = document.getElementById("b-5ea1c0de-0")!;
+    expect(filled.textContent).toBe("filled");
+    expect(filled.getAttribute(ATTR_STATE)).toBe("ready");
+    expect(read[3]![1]).toEqual({ code: "complete" });
+  });
+});
+
+describe("golden navigation envelopes", () => {
+  interface Navigation {
+    ops: Record<string, unknown>[];
+    layouts: [string, string, string | null][];
+    root: string | null;
+    dropped?: { script: string; template: string | null };
+  }
+
+  const read = (name: string): Navigation =>
+    JSON.parse(readFormat("navigation", `${name}.json`)) as Navigation;
+
+  it("slot morphs the slot of the kept layout and keeps every response id", () => {
+    const envelope = read("slot");
+    const [, section] = envelope.layouts;
+    expect(envelope.layouts.every(([, , responseId]) => responseId === null)).toBe(
+      true,
+    );
+    document.body.innerHTML =
+      `<header>h</header><!--nx:s ${section![0]} S--><h1>A</h1>` +
+      `<!--/nx:s ${section![0]} S-->`;
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      slot: (target) => markers(document, target.slot ?? "", "S"),
+    });
+    applier.apply(envelope);
+    expect(document.querySelector("h1")!.textContent).toBe("B");
+    expect(document.querySelector("header")!.textContent).toBe("h");
+  });
+
+  it("body morphs the whole body and hands every layout a fresh response id", () => {
+    const envelope = read("body");
+    expect(envelope.ops[0]!.target).toEqual({ body: true });
+    expect(
+      envelope.layouts.every(([, , responseId]) => typeof responseId === "string"),
+    ).toBe(true);
+    document.body.innerHTML = "<h1>A</h1>";
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      slot: (target) => locate(document, [], target),
+    });
+    applier.apply(envelope);
+    expect(document.querySelector("h1")!.textContent).toBe("B");
+    expect(document.querySelector("script:not([type])")).toBeNull();
+  });
+
+  it("visit refuses the swap and names the script a DEBUG server dropped", () => {
+    const envelope = read("visit");
+    const navigate = vi.fn();
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      navigate: () => navigate,
+    });
+    applier.apply(envelope);
+    expect(navigate).toHaveBeenCalledWith("/sec/scripted/");
+    expect(envelope.dropped).toEqual({
+      script: '<script src="/w.js">',
+      template: "/pages/sec/scripted/template.djx",
+    });
   });
 });

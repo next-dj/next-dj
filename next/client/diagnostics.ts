@@ -2,10 +2,13 @@
 // stripped scripts, nodes with both a key and an id, and ignored trigger attributes.
 // They ship in next.dev.min.js, which the runtime fetches only for a $dev payload.
 
-import { assetLoad, isPatch, isWellFormedAsset } from "./apply";
+import { isAssetLoad, isPatch, isWellFormedAsset } from "./apply";
 import { readCsrf } from "./csrf";
 import {
+  ATTR_DEFER,
+  ATTR_DETAIL,
   ATTR_KEY,
+  ATTR_MERGE,
   ATTR_ZONE,
   MAX_POLL_MS,
   MIN_POLL_MS,
@@ -15,7 +18,7 @@ import {
   pollInterval,
 } from "./protocol";
 import type { Diagnostics } from "./protocol";
-import { DEFER_ATTR, MERGE_ATTR, POLL_ATTR } from "./triggers";
+import { POLL_ATTR } from "./triggers";
 
 // The accepted values of the checked attributes, so a typo is reported during
 // development instead of being ignored. The merge values match the server.
@@ -47,7 +50,7 @@ function reportDropped(wire: Record<string, unknown>): void {
   for (const entry of rawAssets) {
     if (!isWellFormedAsset(entry)) {
       malformedAssets += 1;
-    } else if (assetLoad(entry.kind, entry.load, entry.inline) === undefined) {
+    } else if (!isAssetLoad(entry.load)) {
       skipped += 1;
       kinds.add(entry.kind);
     }
@@ -139,13 +142,13 @@ function warnPollZone(value: string): void {
 
 // Warn on hand-written values the runtime ignores.
 function validateAttrs(root: ParentNode): void {
-  for (const el of matching(root, `[${DEFER_ATTR}]`)) {
-    const value = attrOf(el, DEFER_ATTR);
-    if (!DEFER_VALUES.has(value)) warnAttr(DEFER_ATTR, value, DEFER_VALUES);
+  for (const el of matching(root, `[${ATTR_DEFER}]`)) {
+    const value = attrOf(el, ATTR_DEFER);
+    if (!DEFER_VALUES.has(value)) warnAttr(ATTR_DEFER, value, DEFER_VALUES);
   }
-  for (const el of matching(root, `[${MERGE_ATTR}]`)) {
-    const value = attrOf(el, MERGE_ATTR);
-    if (!MERGE_VALUES.has(value)) warnAttr(MERGE_ATTR, value, MERGE_VALUES);
+  for (const el of matching(root, `[${ATTR_MERGE}]`)) {
+    const value = attrOf(el, ATTR_MERGE);
+    if (!MERGE_VALUES.has(value)) warnAttr(ATTR_MERGE, value, MERGE_VALUES);
   }
   for (const el of matching(root, `[${POLL_ATTR}]`)) {
     const value = attrOf(el, POLL_ATTR);
@@ -208,6 +211,17 @@ export function createDiagnostics(
     },
     keyed(el) {
       console.warn(`[next.morph] ${ATTR_KEY} and id on one node`, el);
+    },
+    unserved(el) {
+      console.warn(
+        "[next.partial] Next.partial.fetch(element) dropped the element, since the " +
+          "page loads the boundaries bundle only while it streams or defers.",
+        el,
+      );
+    },
+    rejected(el, detail) {
+      el.setAttribute(ATTR_DETAIL, detail);
+      console.warn(`[next.boundary] the server refused the token of #${el.id}`, detail);
     },
     attrs(root) {
       if (!checked) warnCsrf(context);

@@ -4,8 +4,8 @@ from django.http import HttpRequest
 from django.test import RequestFactory
 
 from next.conf.merge import FROZEN_DEFAULTS
-from next.suspense import BoundaryTokenError, TokenRejection
-from next.suspense.tokens import (
+from next.defer import BoundaryTokenError, TokenRejection
+from next.defer.tokens import (
     BoundaryClaims,
     BoundaryTarget,
     BoundaryTokenBackend,
@@ -25,24 +25,20 @@ URL_KWARGS = {"id": 5}
 STORED_BYTES = FROZEN_DEFAULTS["DEFER"]["TOKENS"]["OPTIONS"]["MAX_STORED_BYTES"]
 
 SEAL_PATHS = {
-    "signed": "next.suspense.SignedSeal",
-    "encrypted": "next.suspense.EncryptedSeal",
-    "none": "next.suspense.NoSeal",
+    "signed": "next.defer.SignedSeal",
+    "encrypted": "next.defer.EncryptedSeal",
+    "none": "next.testing.NoSeal",
 }
 STORAGE_PATHS = {
-    "inline": "next.suspense.InlineStorage",
-    "cache": "next.suspense.CacheStorage",
-    "spill": "next.suspense.SpillStorage",
-}
-CODEC_PATHS = {
-    "json": "next.suspense.JsonCodec",
-    "msgpack": "next.suspense.MsgpackCodec",
+    "inline": "next.defer.InlineStorage",
+    "cache": "next.defer.CacheStorage",
+    "spill": "next.defer.SpillStorage",
 }
 
 
 def stacked(**options: object) -> StackedTokenBackend:
-    """Return the shipped stack over the test key ring and `options`."""
-    return StackedTokenBackend({"OPTIONS": {"KEYS": [KEY], **options}})
+    """Return the shipped stack over `options`, signing with the test `SECRET_KEY`."""
+    return StackedTokenBackend({"OPTIONS": options})
 
 
 def request_for(path: str = URL_PATH) -> HttpRequest:
@@ -82,10 +78,10 @@ def b64encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
-def split(token: str) -> tuple[str, str, str]:
-    """Split a token into its version, epoch and sealed text."""
-    version, epoch, sealed = token.split(".", 2)
-    return version, epoch, sealed
+def split(token: str) -> tuple[str, str, str, str]:
+    """Split a token into its version, epoch, profile and sealed text."""
+    version, epoch, profile, sealed = token.split(".", 3)
+    return version, epoch, profile, sealed
 
 
 def flip(text: str, index: int) -> str:
@@ -102,10 +98,19 @@ def flip_bit(sealed: str, index: int) -> str:
 
 
 class MinimalTokenBackend(BoundaryTokenBackend):
-    """A backend that issues one fixed token and refuses every token it reads."""
+    """A backend that issues one fixed token and refuses every token it opens."""
 
     def issue(self, request, claims, *, tokens=()) -> str:
         return "token"
 
-    def redeem(self, request, token, target) -> BoundaryClaims:
+    def open(self, request, token, *, tokens=()) -> BoundaryClaims:
         raise BoundaryTokenError(TokenRejection.MALFORMED)
+
+    def settle(self, request, claims, target) -> BoundaryClaims:
+        return claims
+
+
+def fail_cache(*args: object, **kwargs: object) -> object:
+    """Stand in for a cache call whose server is down."""
+    msg = "the cache server is down"
+    raise ConnectionError(msg)

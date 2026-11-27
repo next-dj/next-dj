@@ -29,13 +29,14 @@ Client
 ~~~~~~
 
 ``NextClient`` extends Django's test client with form-action shortcuts and ``get_zones`` for end to end HTTP tests.
+``AsyncNextClient`` extends :class:`~django.test.AsyncClient` the same way, holding and re-raising contained failures, with awaitable ``post_action``, ``get_zones``, and ``get_stream``, the last reading through ``aread_stream``, and ``get_action_url``.
 The module also ships ``envelope_of`` and ``PartialEnvelope`` for decoding patch responses.
 
 ``NextClient.navigate(path, *, origin=None, layouts=None, prefetch=False, headers=None, **extra)`` sends the request the client router sends for a link from ``origin`` to ``path``, with ``X-Next-Request``, ``X-Next-Navigate``, ``X-Next-Layouts``, ``X-Next-Origin``, and ``Sec-Fetch-Site: same-origin``, and ``X-Next-Prefetch`` when ``prefetch`` is set.
 Without ``layouts`` it loads ``origin`` as a document first and declares the layouts that document shows, and without ``origin`` either it declares none.
 That first load is a real ``GET``, so it consumes one-shot state such as flash messages, and a test that already holds the origin response passes ``layouts=declared_layouts(document)`` instead.
-``declared_layouts(document)`` reads that declaration out of the ``$layouts`` entry of a rendered document, trimmed to ``ROUTER["MAX_LAYOUTS"]`` and to the size the client router sends, and raises ``LookupError`` for a document rendered with the router off.
-``headers`` and any other keyword pass through to the request, so ``headers={"X-Next-Prefetch": "full"}`` asks for the page a press asks for, ``request.next.depth`` then being ``Depth.FULL``, and an ``Accept`` header of ``next.partial.headers.STREAM_ACCEPT`` inside ``next.suspense.policy.streaming()`` asks for a streamed navigation.
+``declared_layouts(document)`` reads that declaration out of the layouts block of a rendered document, trimmed to the 32 layouts and the size the client router sends, and raises ``LookupError`` for a document rendered with the router off.
+``headers`` and any other keyword pass through to the request, so ``headers={"X-Next-Prefetch": "full"}`` asks for the page a press asks for, ``request.next.depth`` then being ``PrefetchDepth.FULL``, and an ``Accept`` header of ``next.partial.headers.STREAM_ACCEPT`` with ``wsgi.multithread=True``, as a threaded worker serves it, asks for a streamed navigation.
 
 ``navigate`` returns a ``Navigation``, which holds the ``response``, the parsed ``envelope``, and the cut the page view chose.
 ``kind`` is the ``CutKind``, ``slot``, ``body``, or ``visit``, ``kept`` the ids of the layouts the cut keeps on screen, and ``diverged`` and ``reason`` the first layout that did not match and why.
@@ -58,14 +59,15 @@ A streamed navigation also fills ``stream`` with the ``StreamedPage`` read to it
 
 ``NextClient.get_boundary(url, name, **props)`` mints a token for the component ``name`` with ``props`` and reloads it, so it reads the session and the user of the client inside the call.
 ``NextClient.follow_boundary(source, key)`` reloads a client-trip boundary the client already received instead, with the token that source rendered.
-The ``source`` is a document response, a zone-refresh response, or a ``PartialEnvelope``, whose ops are searched for the wrapper, so a boundary that a reload or a refresh brought in is followed the same way.
+The ``source`` is a document response, a zone-refresh response, a ``PartialEnvelope``, or a ``ReloadedBoundary``, whose ops are searched for the wrapper, so a boundary that a reload or a refresh brought in is followed the same way.
 It must come from a test client, since the reload reuses the URL of the request behind it, and any other value raises ``TypeError``.
 ``key`` is the wire id of the wrapper, its stable ``data-next-boundary-key``, or the component name, which is read from each token through the ``open`` of the token backend.
-The request is the one the runtime sends, the source URL with its query, ``X-Next-Request``, the wrapper id in ``X-Next-Zone``, and the token in the place the wrapper's ``data-next-transport`` names.
-Both return the ``PartialEnvelope`` of the reload, and a missing boundary raises ``LookupError``.
-``NextClient.reload_boundary(url, token)`` sends a token as the runtime does, through the configured transport, and returns the response as is, so a test sends a token another client minted and reads the refusal.
+The request is the one the runtime sends, the source URL with its query, ``X-Next-Request``, the wrapper id in ``X-Next-Zone``, and the token in the place the wrapper's ``data-next-carrier`` names.
+Both return a ``ReloadedBoundary``, the boundary as the reload settled it, and a missing boundary raises ``LookupError``.
+Its ``id`` is the wire id of the wrapper, ``state`` is ``ready`` or ``error``, ``kind`` the ``ErrorKind`` of a failure or ``None``, ``html`` the content that fills the wrapper, ``retry`` the token a failed reload offers to try again with or ``None``, and ``envelope`` and ``response`` what carried it.
+``NextClient.reload_boundary(url, token)`` sends a token as the runtime does, in the configured carrier, and returns the response as is, so a test sends a token another client minted and reads the refusal.
 A ``PartialEnvelope`` keeps the ``response`` that carried it, ``None`` for a view built by hand, so ``envelope_of``, ``get_boundary``, and ``follow_boundary`` answers chain into the next ``follow_boundary``.
-A lookup by id or key opens no token, and under the default ``NoBinding`` a lookup by name reads neither the session nor the user, so a ``django_assert_num_queries`` block around the call counts only what the reload does.
+A lookup by id or key opens no token, and a lookup by name opens one without settling its binding, so it reads neither the session nor the user, and a ``django_assert_num_queries`` block around the call counts only what the reload does.
 
 .. code-block:: python
    :caption: tests/test_shop.py
@@ -76,8 +78,8 @@ A lookup by id or key opens no token, and under the default ``NoBinding`` a look
        client = NextClient()
        document = client.get("/shop/")
        with django_assert_num_queries(2):
-           envelope = client.follow_boundary(document, "card")
-       assert envelope.ops[0]["s"] == "ready"
+           card = client.follow_boundary(document, "card")
+       assert card.state == "ready"
 
 A token bound to its user, under ``BINDING="user"``, is refused for any other account.
 
@@ -140,7 +142,7 @@ A relative ``page`` resolves against ``BASE_DIR``, or against the working direct
 
 .. _ref-testing-action-transactions:
 
-A form action answers ``POST``, which the default ``TRANSACTIONS["UNSAFE"] = True`` wraps in ``transaction.atomic`` from its first line, so an ``on_commit`` hook waits for the commit, see :doc:`settings`.
+A form action answers ``POST``, which the default ``TRANSACTIONS["UNSAFE"] = "auto"`` wraps in ``transaction.atomic`` from its first line, so an ``on_commit`` hook waits for the commit, see :doc:`settings`.
 A test that posts an action therefore needs database access even when the action touches no table, the ``db`` fixture or ``@pytest.mark.django_db`` under pytest-django, which otherwise refuses the ``BEGIN`` with ``Database access not allowed``.
 An action declared with ``@action(atomic="writes")`` or ``Meta.atomic = "writes"`` opens its transaction right before its first write, so a test of an action that touches no table needs no database.
 An action that never reaches the database also opts out with ``@action(atomic=False)`` or ``Meta.atomic = False`` on its form, and a test opts its whole block out through the scope, with ``False`` or ``"writes"``.
@@ -381,13 +383,16 @@ The ``rendered_boundary_errors`` fixture of the pytest plugin opens ``boundary_e
 ``boundary_gate(page=directory)`` holds the job of the page boundary whose ``loading.djx`` sits in ``directory``, an absolute path or one relative to ``BASE_DIR``, named as the page tree names it.
 Naming neither or both raises ``TypeError``, and a ``directory`` without a ``loading.djx`` or a component no component source holds raises ``LookupError``, so a gate that could hold nothing fails the test at once.
 ``wait(timeout=None)`` on the gate blocks until a job is held and answers ``False`` once the timeout passed, and a held job still settles at its deadline.
+The gate receives ``boundary_job_started`` on the thread of the job, so it holds a job of any thread, a live server's included.
 
 Streamed shells
 ^^^^^^^^^^^^^^^
 
-``NextClient.get_stream(url)`` and ``read_stream(client, url)`` read a streamed page whole into a ``StreamedPage``, and ``aread_stream`` does the same with an async client.
-A ``StreamedPage`` holds the ``shell``, the ``chunks`` as ``StreamedChunk`` values, and ``final_html()``, the shell with every chunk applied as a browser applies it, and ``boundary(key)`` returns the chunk of one boundary.
-``key`` is the wire id, the stable ``data-next-boundary-key``, or the name ``boundary_rendered`` gives the boundary, the component name or the path a page boundary is named by, which ``get_stream``, ``read_stream``, ``aread_stream``, and the ``stream`` of a ``Navigation`` record while they read.
+``NextClient.get_stream(url)`` and ``read_stream(client, url)`` read a streamed page whole into a ``StreamedPage``, sending the request as a threaded worker serves it, and ``aread_stream`` does the same with an async client.
+A ``StreamedPage`` holds the ``shell``, the ``chunks`` as ``StreamedChunk`` values, and ``final_html()``, the shell with every chunk applied as a browser applies it, and ``boundary(key)`` or ``boundary(page=directory)`` returns the chunk of one boundary.
+``key`` is the wire id, the stable ``data-next-boundary-key``, or the component name, and ``page`` names a page boundary by the directory of its ``loading.djx``, an absolute path or one relative to ``BASE_DIR``, as ``boundary_gate(page=...)`` does.
+The names come from ``boundary_settled``, which ``get_stream``, ``read_stream``, ``aread_stream``, and the ``stream`` of a ``Navigation`` record while they read.
+A ``StreamedChunk`` holds the ``id`` of the wrapper, the ``boundary`` it settles, its ``state``, ``ready`` or ``error``, the ``ErrorKind`` of a failure as ``kind``, the ``digest``, and the ``html`` that fills the wrapper.
 A name that two chunks share, as two calls of one component do, raises ``LookupError`` that lists each wire id with its key, and a boundary no chunk settles raises ``LookupError`` too.
 A streamed response writes its shell before any job runs, and a gate makes the order of the reads deterministic as well.
 ``boundary_gate(..., after_shell=True)`` lets ``get_stream`` and ``aread_stream`` release the gate once they hold the shell, so the boundary always shows its loading UI in ``shell`` and its content arrives in its chunk.
@@ -414,6 +419,7 @@ A test that checks state between the shell and the chunks reads ``streaming_cont
 ``issue_boundary_token(request, claims, *, tokens=(), at=None)`` mints the token the configured backend issues for ``claims``, at the Unix second ``at`` when one is given.
 ``expire_boundary_token(request, claims, *, tokens=())`` mints one whose lifetime ended a second before now, or at the epoch for a backend other than the shipped stack.
 ``freeze_token_clock(at)`` holds the clock every token reads at the Unix second ``at`` inside the block and yields the ``FrozenClock``.
+``NoSeal`` is a token seal that protects nothing, so a test that names ``"next.testing.NoSeal"`` in ``DEFER["TOKENS"]["OPTIONS"]["SEAL"]`` reads the claims of its tokens, and ``next.E221`` refuses it while ``DEBUG`` is off.
 ``reset_failure_logs``, under `Isolation`_, makes a repeated failure log again.
 
 ``gated(name)`` holds every job of the component ``name`` inside the block and yields the ``ComponentGate`` that ``boundary_gate(component=name)`` yields, with its ``wait()`` and ``release()``.

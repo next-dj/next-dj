@@ -530,10 +530,10 @@ class TestResponse:
         assert response["Location"] == "/"
 
 
-class TestVersionBuilderCompatibility:
-    """The bare-version builder stays a low-level assembler."""
+class TestVersionBuilder:
+    """The bare-version builder is a low-level assembler."""
 
-    def test_version_builder_keeps_positional_morph(self) -> None:
+    def test_version_builder_takes_positional_morph(self) -> None:
         envelope = (
             Patches.versioned("9f3c").morph({"zone": "x"}, "<div></div>").envelope()
         )

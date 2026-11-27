@@ -6,7 +6,7 @@ from next.router import ChromeDigest
 from next.router.digest import chrome_digest, normalise, split_head
 
 
-_SEAL = "5ea1ed00"
+_RESPONSE_ID = "5ea1ed00"
 _LINKS = "".join(f'<a href="/docs/topic-{i}/">Topic {i}</a>' for i in range(50))
 _CHROME = (
     '<!DOCTYPE html><html lang="en"><head><title>Docs</title>'
@@ -25,13 +25,13 @@ class TestBenchChromeDigest:
     @pytest.mark.benchmark(group="router.digest")
     def test_normalise(self, benchmark) -> None:
         """The nonce and the CSRF value masked out of a root layout of fifty links."""
-        normal = benchmark(normalise, _CHROME, _SEAL)
+        normal = benchmark(normalise, _CHROME, _RESPONSE_ID)
         assert "abc123" not in normal
         assert "GcEJTa8V" not in normal
 
     @pytest.mark.benchmark(group="router.digest")
     def test_chrome_digest(self, benchmark) -> None:
-        normal = normalise(_CHROME, _SEAL)
+        normal = normalise(_CHROME, _RESPONSE_ID)
         assert len(benchmark(chrome_digest, normal)) == 16
 
     @pytest.mark.benchmark(group="router.digest")
@@ -40,7 +40,7 @@ class TestBenchChromeDigest:
         backend = ChromeDigest()
 
         def stamp() -> str:
-            normal = backend.normalise(_CHROME, _SEAL)
+            normal = backend.normalise(_CHROME, _RESPONSE_ID)
             parts = split_head(normal)
             assert parts is not None
             return backend.digest(parts[0]) + backend.digest(parts[1])

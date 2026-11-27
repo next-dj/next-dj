@@ -393,7 +393,7 @@ class TestTemplateNodeState:
     @pytest.mark.parametrize(
         "name",
         [
-            "next.templatetags.components.ComponentNode",
+            "next.components.tags.ComponentNode",
             "next.templatetags.scripts.ConsentedNode",
             "next.forms.nodes.FormNode",
             "next.partial.zone.ZoneNode",

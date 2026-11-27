@@ -1,4 +1,4 @@
-"""Layout identity, the sealed markers of the client router and the per-page id chain.
+"""Layout identity, the region markers of the client router and the per-page id chain.
 
 The router reads a rendered page through these markers, so their grammar lives here.
 """
@@ -10,6 +10,7 @@ import secrets
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NewType
 
+from next.boundaries.ids import ID_BYTES
 from next.caches import PageCache
 from next.seeding import REQUEST_KEY
 from next.stamps import all_fresh
@@ -39,54 +40,63 @@ META: Final = "nx:m"
 ASSETS: Final = "nx:a"
 """The marker kind around the tags the static injector writes into a placeholder."""
 
-SEAL_ATTR: Final = "_next_router_seal"
-_SEAL_BYTES: Final = 4
-_ID_BYTES: Final = 8
+RESPONSE_ID_ATTR: Final = "_next_response_id"
+_DIGEST_BYTES: Final = 8
 
 
-def opening(kind: str, seal: str, ident: str = "") -> str:
-    """Return the comment that opens a sealed region of `kind`."""
-    return f"<!--{kind} {ident} {seal}-->" if ident else f"<!--{kind} {seal}-->"
+def opening(kind: str, response_id: str, ident: str = "") -> str:
+    """Return the comment that opens an enclosed region of `kind`."""
+    return (
+        f"<!--{kind} {ident} {response_id}-->"
+        if ident
+        else f"<!--{kind} {response_id}-->"
+    )
 
 
-def closing(kind: str, seal: str, ident: str = "") -> str:
-    """Return the comment that closes a sealed region of `kind`."""
-    return f"<!--/{kind} {ident} {seal}-->" if ident else f"<!--/{kind} {seal}-->"
+def closing(kind: str, response_id: str, ident: str = "") -> str:
+    """Return the comment that closes an enclosed region of `kind`."""
+    return (
+        f"<!--/{kind} {ident} {response_id}-->"
+        if ident
+        else f"<!--/{kind} {response_id}-->"
+    )
 
 
-def sealed(kind: str, seal: str, html: str, ident: str = "") -> str:
-    """Return `html` between the sealed comments of `kind`."""
-    return f"{opening(kind, seal, ident)}{html}{closing(kind, seal, ident)}"
+def enclosed(kind: str, response_id: str, html: str, ident: str = "") -> str:
+    """Return `html` between the enclosing comments of `kind`."""
+    return (
+        f"{opening(kind, response_id, ident)}{html}{closing(kind, response_id, ident)}"
+    )
 
 
-def mint_seal(request: HttpRequest) -> str:
-    """Return the router seal of `request`, minting it on the first call.
+def mint_response_id(request: HttpRequest) -> str:
+    """Return the response id of `request`, minting it on the first call.
 
     Only a view of a page with the router on mints one, so markers render nowhere else.
     """
-    held = getattr(request, SEAL_ATTR, None)
+    held = getattr(request, RESPONSE_ID_ATTR, None)
     if isinstance(held, str):
         return held
-    seal = secrets.token_hex(_SEAL_BYTES)
-    setattr(request, SEAL_ATTR, seal)
-    return seal
+    response_id = secrets.token_hex(ID_BYTES)
+    setattr(request, RESPONSE_ID_ATTR, response_id)
+    return response_id
 
 
-def request_seal(request: object) -> str | None:
-    """Return the router seal `request` carries, `None` for a render without one."""
-    held = getattr(request, SEAL_ATTR, None)
+def request_response_id(request: object) -> str | None:
+    """Return the response id `request` carries, `None` for a render without one."""
+    held = getattr(request, RESPONSE_ID_ATTR, None)
     return held if isinstance(held, str) else None
 
 
-def context_seal(context: Context) -> str | None:
-    """Return the router seal of the request a template `context` renders for."""
-    return request_seal(context.get(REQUEST_KEY))
+def context_response_id(context: Context) -> str | None:
+    """Return the response id of the request a template `context` renders for."""
+    return request_response_id(context.get(REQUEST_KEY))
 
 
-def seal_region(context: Context, kind: str, html: str) -> str:
-    """Return `html` sealed as a region of `kind` when the render carries a seal."""
-    seal = context_seal(context)
-    return html if seal is None else sealed(kind, seal, html)
+def enclose_region(context: Context, kind: str, html: str) -> str:
+    """Return `html` as an enclosed region of `kind` when a response id is minted."""
+    response_id = context_response_id(context)
+    return html if response_id is None else enclosed(kind, response_id, html)
 
 
 def _relative(layout_file: Path, roots: Iterable[Path]) -> str:
@@ -103,7 +113,7 @@ def layout_id(layout_file: Path, source: str, roots: Iterable[Path]) -> LayoutId
 
     An edit or a deploy that changes the source changes the id, so a stale tab diverges.
     """
-    digest = hashlib.blake2b(digest_size=_ID_BYTES)
+    digest = hashlib.blake2b(digest_size=_DIGEST_BYTES)
     digest.update(_relative(layout_file, roots).encode())
     digest.update(b"\x00")
     digest.update(source.encode())
@@ -122,7 +132,7 @@ class LayoutChain:
     version: int
 
 
-_CHAINS: PageCache[Path, LayoutChain] = PageCache()
+_CHAINS: PageCache[Path, LayoutChain] = PageCache(depends=())
 
 
 def held_chain(file_path: Path, version: int) -> LayoutChain | None:
@@ -151,20 +161,20 @@ def forget_chains() -> None:
 __all__ = [
     "ASSETS",
     "META",
-    "SEAL_ATTR",
+    "RESPONSE_ID_ATTR",
     "SLOT",
     "ZONE",
     "LayoutChain",
     "LayoutId",
     "closing",
-    "context_seal",
+    "context_response_id",
+    "enclose_region",
+    "enclosed",
     "forget_chains",
     "held_chain",
     "hold_chain",
     "layout_id",
-    "mint_seal",
+    "mint_response_id",
     "opening",
-    "request_seal",
-    "seal_region",
-    "sealed",
+    "request_response_id",
 ]

@@ -42,15 +42,18 @@ Under ``"off"`` the attribute turns nothing on.
    <a href="/invites/accept/" data-next-prefetch="off">Accept the invite</a>
 
 A link is prefetched only when the router would take it over, see :doc:`index`, when its ``target`` stays in the page, and when it carries no ``download`` and no ``rel="external"``.
+Under the default ``ROUTER["SCOPE"]`` of ``"pages"`` that rules out every route of the route table that is no page, so a hover never sends a request to a plain Django view.
 A link on or inside an element with ``data-next-prefetch="off"``, ``data-next-confirm``, or ``data-next-action`` is never prefetched.
 Nothing is prefetched while the tab is hidden, while the browser reports Save-Data, or on a connection the browser rates ``2g`` or ``slow-2g``.
 
 Prefetches wait in one queue, and at most three run at once.
 An intent prefetch goes ahead of every link in view, the latest intent first, and a link in view takes at most two of the three, so a hover never waits behind a page of links.
 A URL already queued or in flight is not asked again.
+
 A link that leaves the view, and an intent the pointer leaves, drop out of the queue unless their request has started.
 A link in view is prefetched once for the life of the page, whatever its answer, and after that only an intent asks for its URL again, so an expired answer is never refetched in a loop.
 A request a flush aborts leaves its link watched, and the link is prefetched again the next time it scrolls into view.
+
 A link in view waits while the kept answers and the prefetches in flight reach ``ROUTER["PREFETCH_ENTRIES"]``, so a long page of links never evicts fresh answers.
 When it needs room, the oldest kept shell older than ``ROUTER["PREFETCH_TTL"]`` gives way, except the answer for the link the pointer rests on, and a fresher answer never does.
 The link of an answer that gave way is prefetched again only on intent.
@@ -68,6 +71,7 @@ The first navigation to the URL takes the answer out of the cache and applies it
 An answer the server marked ``complete`` is the whole page, so the navigation stops there and sends no request.
 For any other answer the navigation asks for the page at the click, beside the prefetched shell it applies, and the fresh render morphs over the shell as it arrives, see :doc:`browser`.
 A navigation to a URL whose prefetch is still in flight waits for that prefetch and sends nothing beside it, so a quick click or a tap costs the server one render.
+
 A complete answer then lands with no request, a shell lands and the request for the page leaves at that moment, and an answer that never came, such as a refusal or a failure, leaves the navigation to its own request.
 A URL still waiting in the queue leaves it, and the navigation asks for the page alone.
 A URL the router is already navigating to is not prefetched.
@@ -127,7 +131,10 @@ That cost is why a touch keeps the shell depth by default, since a scroll that s
 When an answer lands, each stylesheet it lists that the document holds no ``<link>`` for is fetched ahead with a ``<link rel="preload" as="style">`` carrying the nonce of the router script, so the navigation does not wait on the stylesheet gate.
 An answer asked for by the viewport alone uses ``rel="prefetch"`` instead, since a link in view is a weaker hint than an intent.
 An answer for an asset version other than the one the page holds is dropped unused.
-The cache is emptied with the snapshots, after a non-``GET`` partial request, a clearing answer, a fresh CSRF token, a restore from the back-forward cache, and ``Next.router.flush()``, as :doc:`browser` lists, and all but the restore also abort a prefetch in flight.
+
+The cache is emptied with the snapshots, as :doc:`browser` lists.
+A non-``GET`` partial request, a clearing answer, a fresh CSRF token, a restore from the back-forward cache, and ``Next.router.flush()`` each empty it.
+All but the restore also abort a prefetch in flight.
 
 Layer links
 -----------
@@ -144,7 +151,7 @@ A layer that closes first stops the request of its press.
 The refusals, the pause, the asset version check, and the flushes of this page apply to the layer answers as well.
 
 Under ``ROUTER["PREFETCH"] = "viewport"`` a layer link is observed only when it or an element around it carries an explicit ``data-next-prefetch="viewport"``.
-A layer link is prefetched by its URL alone, so ``ROUTER["SCOPE"] = "opt-in"`` and ``data-next-router="off"`` around it do not turn it off.
+A layer link is prefetched by its URL alone, so ``ROUTER["SCOPE"] = "opt_in"`` and ``data-next-router="off"`` around it do not turn it off.
 ``data-next-prefetch="off"`` and ``data-next-press`` on the link or around it do.
 A link whose ``data-next-layer`` is empty opens no layer and is prefetched by neither path.
 The client router owns the prefetch, so a page without it opens each layer with its own request.
@@ -153,11 +160,12 @@ What a prefetch renders
 -----------------------
 
 A prefetch is a navigation request that also carries ``X-Next-Prefetch``.
+A script cannot set ``Sec-Purpose``, which the browser reserves for its own prefetches, so a proxy or a view tells a router prefetch apart by ``X-Next-Prefetch``.
 The server renders the page through the same view, with its access rules and context callables, and ``request.next.purpose`` is ``prefetch`` at both depths.
-``request.next.depth`` tells them apart, ``Depth.SHELL`` for ``X-Next-Prefetch: 1`` and ``Depth.FULL`` for ``X-Next-Prefetch: full``.
+``request.next.depth`` tells them apart, ``PrefetchDepth.SHELL`` for ``X-Next-Prefetch: 1`` and ``PrefetchDepth.FULL`` for ``X-Next-Prefetch: full``.
 It is ``None`` for a request that is no router prefetch.
 
-A zone prefetch of a layer reads every ``X-Next-Prefetch`` value as ``Depth.FULL`` and renders the zone exactly as the layer open does.
+A zone prefetch of a layer reads every ``X-Next-Prefetch`` value as ``PrefetchDepth.FULL`` and renders the zone exactly as the layer open does.
 The zone request keeps the purpose of any zone request, so ``request.next.depth`` stays ``None`` there as well.
 
 At the shell depth a deferred boundary renders its loading content and no deferred job runs, so the answer is the shell of the page, and it never streams.
@@ -202,7 +210,8 @@ Prefetching from code
 ---------------------
 
 ``Next.router.prefetch(url)`` loads the router bundles when they are not loaded yet and prefetches ``url``.
-It ignores ``ROUTER["PREFETCH"]``, the hidden tab, and the connection, and follows every other rule of this page, the cache, the refusals, the pause, and the queue, where it counts as an intent.
+It ignores ``ROUTER["PREFETCH"]``, the hidden tab, and the connection.
+It follows every other rule of this page, the cache, the refusals, the pause, and the queue, where it counts as an intent.
 A URL on another origin, under an excluded prefix, or remembered as an answer that is no envelope is not fetched.
 
 .. code-block:: javascript
@@ -226,12 +235,15 @@ An eagerness, ``"conservative"``, ``"moderate"``, or ``"eager"``, written as a s
    }
 
 The rules hold one ``prefetch`` rule at that eagerness and never a ``prerender`` one.
-It covers every same-origin link the router does not own.
+It covers every same-origin link the router does not own, and under the default ``"pages"`` scope only those that match a page route of the route table and no route that is no page, as URL patterns in the rule itself.
+A URL pattern is coarser than the route, so the routes the rule leaves out are every route whose literal start meets that of a page, and a path a redirect to the trailing slash would hand to one of them is left out too.
 
 - A link on or inside an element with ``data-next-router="off"``.
 - A link on or inside an element with ``data-next-reload`` that is no zone and no boundary wrapper.
 - A link whose path starts with an excluded prefix, the paths of ``STATIC_URL`` and ``MEDIA_URL``, the admin site, and every prefix of ``ROUTER["EXCLUDE"]``.
-- Under ``ROUTER["SCOPE"] = "opt-in"``, a link outside every element with ``data-next-router``.
+- Under ``ROUTER["SCOPE"] = "opt_in"``, a link outside every element with ``data-next-router``.
+
+Under ``"pages"`` the rule names each page route, so its size grows with the number of pages, and a URLconf without a page route emits no rule.
 
 A link on or inside an element with ``data-next-layer``, ``data-next-merge``, ``data-next-fetch``, ``data-next-retry``, ``data-next-confirm``, or ``data-next-prefetch="off"`` is left out.
 The links the router owns stay with the intent prefetch.

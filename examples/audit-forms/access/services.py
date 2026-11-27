@@ -39,3 +39,17 @@ def audit_totals(*, kind: str) -> dict[str, int]:
         backend=Count("pk", filter=Q(source=AuditEntry.SOURCE_BACKEND)),
         signal=Count("pk", filter=Q(source=AuditEntry.SOURCE_SIGNAL)),
     )
+
+
+def issue_receipt(access_request: AccessRequest) -> bool:
+    """Record the first opening of a receipt and report whether this call wrote it."""
+    issued = access_request.audit_entries.filter(kind=AuditEntry.KIND_RECEIPT_ISSUED)
+    if issued.exists():
+        return False
+    AuditEntry.objects.create(
+        action_name="receipt",
+        kind=AuditEntry.KIND_RECEIPT_ISSUED,
+        source=AuditEntry.SOURCE_BACKEND,
+        request=access_request,
+    )
+    return True

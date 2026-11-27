@@ -3,6 +3,7 @@ from django.test import Client
 
 from next.partial import Patches, ZoneRenderResult
 from next.partial.headers import CONTENT_TYPE, VARY_HEADERS, MergeMode
+from next.partial.stream import PROTOCOL
 from next.partial.view import _patch_zone
 from next.static.manager import default_manager
 from next.testing import NextClient, envelope_of, override_next_settings
@@ -58,7 +59,7 @@ class TestZoneGetEnvelope:
         assert varied == [*VARY_HEADERS, "Accept", "X-Next-Origin"]
 
     def test_an_unmarked_zone_does_not_vary_on_the_origin(self) -> None:
-        with override_next_settings(ROUTER={"CURRENT": {"ENABLED": False}}):
+        with override_next_settings(ROUTER={"ACTIVE_LINKS": {"ENABLED": False}}):
             response = NextClient().get_zones("/zoned/", "alpha")
         varied = [name.strip() for name in response["Vary"].split(",")]
         assert varied == [*VARY_HEADERS, "Accept"]
@@ -119,6 +120,26 @@ class TestZoneGetVersionConflict:
             HTTP_X_NEXT_REQUEST="1",
             HTTP_X_NEXT_ZONE="alpha",
             HTTP_X_NEXT_VERSION="",
+        )
+        assert response.status_code == 200
+        assert envelope_of(response).zone_targets() == ["alpha"]
+
+    def test_a_foreign_protocol_is_a_conflict(self) -> None:
+        response = NextClient().get(
+            "/zoned/",
+            HTTP_X_NEXT_REQUEST="1",
+            HTTP_X_NEXT_ZONE="alpha",
+            HTTP_X_NEXT_PROTOCOL=str(PROTOCOL + 1),
+        )
+        assert response.status_code == 409
+        assert response["Cache-Control"] == "private, no-store"
+
+    def test_the_server_protocol_renders(self) -> None:
+        response = NextClient().get(
+            "/zoned/",
+            HTTP_X_NEXT_REQUEST="1",
+            HTTP_X_NEXT_ZONE="alpha",
+            HTTP_X_NEXT_PROTOCOL=str(PROTOCOL),
         )
         assert response.status_code == 200
         assert envelope_of(response).zone_targets() == ["alpha"]

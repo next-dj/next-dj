@@ -44,9 +44,10 @@ def test_heartbeat_seconds_invalid_value_falls_back_to_default(
         assert heartbeat_seconds() == expected
 
 
-def test_heartbeat_seconds_non_mapping_setting_falls_back_to_default() -> None:
+def test_heartbeat_seconds_read_the_default_of_a_non_mapping_setting() -> None:
+    expected = heartbeat_seconds()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
-        assert heartbeat_seconds() == 25.0
+        assert heartbeat_seconds() == expected
 
 
 def test_access_check_throttles_the_authorizer_to_one_call_per_interval(

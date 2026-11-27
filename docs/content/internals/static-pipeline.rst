@@ -139,7 +139,9 @@ Modules
 
 ``next.static.inject``.
    ``PlaceholderInjector`` renders what a collector holds into the placeholder tokens of a finished page, and the manager delegates its ``inject`` to one.
-   It asks the ``page_scripts_slot`` port for the head scripts and the ``$scripts`` and ``$consent`` entries of the render, placing the head scripts at ``{% collect_head %}`` or before ``</head>``.
+   It runs every page script provider of ``next.ports.page_scripts`` in rank order and merges what each shares, the head tags placed at ``{% collect_head %}`` or before ``</head>``, the request entries after ``$csrf`` and ``$dev``, the shared entries after ``$chunks``, the needed bundles, the optional chunks, the enclosures, the stylesheet marks, and the passes over the finished HTML.
+   The providers that apply are read once per provider list and settings load, and the shared entries are escaped once per value, so a request pays only for the shares it asks for.
+   The injector names no feature, so with no provider registered a page still renders its runtime, the context, ``$csrf`` and ``$chunks``, and ``tests/static/test_bare.py`` holds that in an interpreter that never loads a feature area.
 
 ``next.static.runtime``.
    ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script, and the reserved init payload keys.
@@ -154,7 +156,7 @@ Modules
 ``next.static.finders``.
    ``NextStaticFilesFinder`` exposes co-located page and component assets to Django staticfiles, so ``collectstatic`` copies them into ``STATIC_ROOT``.
    The finder enumerates page-tree files through ``scan_page_tree_assets``, which visits sorted paths and resolves each name through the same ``PathResolver`` as discovery, with the key of the deepest page root containing the file.
-   The routers hand the resolver ``(root, key)`` pairs through ``next.pages.watch.get_page_root_keys_for_watch``, and a root with no key names nothing.
+   The routers hand the resolver ``(root, key)`` pairs through ``next.discovery.get_page_root_keys_for_watch``, and a root with no key names nothing.
    The finder holds the mapping it discovered and rebuilds it when the stem or kind registry moves, when the framework settings reload, when the reported page or component trees change, or, while ``DEBUG`` is true, when the mtime of any directory inside those trees moves.
    A directory scanned in the tick of its own mtime is held as unsettled, so the next lookup walks the trees again.
    :ref:`ref-static` covers the finder from the user side, and :doc:`/content/deployment/static-files` the ``collectstatic`` setup.
@@ -188,7 +190,7 @@ The pipeline fires four signals.
   Module-level ``styles`` and ``scripts`` lists, every ``{% use_style %}`` and ``{% use_script %}`` form, void or block, and the ``{% use_module %}`` tag call ``collector.add`` directly and do not emit it.
   Those paths still resolve their reference through the backend first, so the collector holds a public URL whichever door an asset came through.
 - ``collector_finalized`` once per request, as the first statement of ``inject`` and therefore before any slot is rendered.
-  Nothing seals the collector, so a receiver that calls ``add`` still reaches the rendered output.
+  Nothing freezes the collector, so a receiver that calls ``add`` still reaches the rendered output.
 - ``html_injected`` once per request after the manager replaces the placeholder slots.
 - ``static_backend_loaded`` once per backend instance when the manager builds it, including the staticfiles backend it seeds when no entry survives.
 

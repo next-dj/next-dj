@@ -300,7 +300,7 @@ Dedup by ``data-next-key`` replaces the old link with the new one and guards aga
 The response carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version`` so a shared cache never hands an append envelope to a client that asked for a morph.
 Changing the search query morphs both zones, which resets the accumulated list on its own.
 The runtime tells the two apart by the link alone, as a request counts as a page of the list only when its URL is the ``href`` of the link and its zones are exactly the ``catalog-results,catalog-results-more`` of its ``data-next-target``.
-The filter form may therefore list the same zones in any order beside others, and its request neither stamps rows nor prunes them nor writes ``restore=1`` into the address.
+The filter form may therefore list the same zones in any order beside others, and its request neither stamps rows nor prunes them nor writes ``_restore`` into the address.
 ``mode="manual"`` drops the ``data-next-defer="visible"`` attribute and leaves the same link click-driven, which gives button pagination from the same code.
 
 ``prune=`` and ``url=`` on the tag keep a long scroll bounded and its address shareable.
@@ -310,9 +310,9 @@ The filter form may therefore list the same zones in any order beside others, an
 
    {% more zone="catalog-results" next=products prune=40 url="replace" %}Show more{% empty %}End of results.{% endmore %}
 
-After each batch the runtime writes ``?page=N&restore=1`` into the address bar, and once the list holds more than 40 rows it drops whole batches from the top.
-A shared address ``?page=8&restore=1`` restores a scrolled list.
-The window then runs from page ``max(1, 8 - MAX_RESTORE + 1)`` to page 8, where ``MAX_RESTORE`` is ``DEFER["MORE"]["MAX_RESTORE"]``, ten by default, so a large page number costs ten pages at most.
+After each batch the runtime writes ``?page=N&_restore=page`` into the address bar, and once the list holds more than 40 rows it drops whole batches from the top.
+A shared address ``?page=8&_restore=page`` restores a scrolled list.
+The window then runs from page ``max(1, 8 - max_restore + 1)`` to page 8, where ``max_restore`` is the argument of the pager, ten by default, so a large page number costs ten pages at most.
 The pager reads the whole window in one slice that runs one row past it, which tells it whether a next batch follows without a count.
 A header that shows the total builds the pager with ``count=True`` and reads ``products.count``.
 The sentinel of a restored window carries the tokens of its batches as ``data-next-backs``, so the runtime knows which batch each restored row belongs to and the first prune drops the oldest batch alone.

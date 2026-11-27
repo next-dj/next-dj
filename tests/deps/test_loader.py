@@ -13,19 +13,21 @@ import pytest
 from asgiref.local import Local
 from asgiref.sync import ThreadSensitiveContext, async_to_sync, sync_to_async
 from django.contrib.auth.models import Group
+from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 from django.test import override_settings
 from django.utils import translation
 
+from next.bridge import context, drive
+from next.bridge.context import ContextSnapshot
+from next.bridge.hops import QuitParentExecutor
+from next.bridge.loop import background_loop
 from next.deps import DependencyCycleError, Loader, MissingKeyError, rows
 from next.deps.cache import RequestMemo, request_memo
 from next.deps.loader import _HUB, _hub, _loaders, drain_loaders, open_loaders
 from next.deps.objects import visible_rows
 from next.deps.runner import run_isolated, segment_runner
 from next.deps.scope import RequestScope
-from next.suspense import bridge, drive
-from next.suspense.executors import background_loop
-from next.tasks import ContextSnapshot
 from next.testing import make_resolution_context
 from tests.support.deps import counted
 from tests.support.errors import BackendDownError, HaltError
@@ -353,25 +355,28 @@ class TestBatching:
         assert asyncio.run(scenario()) == [10, 20, 30, 40]
         assert [sorted(keys) for keys in calls] == [[1, 2, 3, 4]]
 
-    def test_unset_limits_follow_the_defer_settings(self) -> None:
+    def test_unset_limits_follow_the_loader_settings(self) -> None:
         loader = Loader(recording([]))
         assert (loader.max_batch, loader.window) == (500, 0.001)
         with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"LOADER_MAX_BATCH": 3, "BATCH_WINDOW": "20ms"}}
+            NEXT_FRAMEWORK={"LOADER": {"MAX_BATCH": 3, "WINDOW": "20ms"}}
         ):
             assert (loader.max_batch, loader.window) == (3, 0.02)
         assert (loader.max_batch, loader.window) == (500, 0.001)
 
-    def test_a_misfit_defer_setting_keeps_its_default(self) -> None:
+    def test_a_misfit_loader_setting_raises(self) -> None:
         loader = Loader(recording([]))
-        with override_settings(
-            NEXT_FRAMEWORK={"DEFER": {"LOADER_MAX_BATCH": 0, "BATCH_WINDOW": "soon"}}
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"LOADER": {"MAX_BATCH": 0, "WINDOW": "soon"}}
+            ),
+            pytest.raises(ImproperlyConfigured, match=r"WINDOW.*MAX_BATCH"),
         ):
-            assert (loader.max_batch, loader.window) == (500, 0.001)
+            _ = loader.max_batch
 
-    def test_set_limits_win_over_the_defer_settings(self) -> None:
+    def test_set_limits_win_over_the_loader_settings(self) -> None:
         loader = Loader(recording([]), max_batch=2, window=5)
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"LOADER_MAX_BATCH": 3}}):
+        with override_settings(NEXT_FRAMEWORK={"LOADER": {"MAX_BATCH": 3}}):
             assert (loader.max_batch, loader.window) == (2, 5)
 
     def test_max_batch_takes_at_least_one_key(self) -> None:
@@ -1221,7 +1226,7 @@ class TestRequestThread:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         landings: list[int] = []
-        landed = bridge._landed
+        landed = context._landed
 
         async def counted() -> Context:
             landings.append(threading.get_ident())
@@ -1230,7 +1235,7 @@ class TestRequestThread:
         async def batch(keys: Sequence[int]) -> dict[int, object]:
             return dict.fromkeys(keys, getattr(request_local, "value", None))
 
-        monkeypatch.setattr(bridge, "_landed", counted)
+        monkeypatch.setattr(context, "_landed", counted)
         loader = Loader(batch)
         scope = RequestScope(loop=background_loop.get())
 
@@ -1296,7 +1301,7 @@ class TestRequestThread:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         begun: list[object] = []
-        begin = bridge._begin
+        begin = context._begin
 
         def counted_begin(*args) -> None:
             begun.append(args)
@@ -1306,7 +1311,7 @@ class TestRequestThread:
             seen = (getattr(request_local, "value", None), translation.get_language())
             return dict.fromkeys(keys, seen)
 
-        monkeypatch.setattr(bridge, "_begin", counted_begin)
+        monkeypatch.setattr(context, "_begin", counted_begin)
         loader = Loader(fetch)
 
         async def work() -> list[object]:
@@ -1688,11 +1693,7 @@ class TestAsyncBatches:
         async def fetch(keys):
             return dict.fromkeys(keys)
 
-        refusal = Loader(fetch).refusal
-        assert refusal is not None
-        with refusal._work_ready:
-            assert refusal._broken
-        assert refusal._old_executor is None
+        assert isinstance(Loader(fetch).refusal, QuitParentExecutor)
         assert Loader(recording([])).refusal is None
 
 

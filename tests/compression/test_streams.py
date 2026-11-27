@@ -1,11 +1,13 @@
 import asyncio
+import contextvars
+import json
 import re
 import zlib
 
 import pytest
 
-from next.compression import GzipBackend, StreamEncoding, padding
-from next.compression.streams import media_type
+from next.compression import GzipBackend
+from next.compression.streams import FLUSH_BYTES, StreamEncoding, media_type, padding
 
 
 _COMMENT = re.compile(rb"<!--[A-Za-z0-9._]*-->")
@@ -42,7 +44,40 @@ class TestPadding:
             assert pad.count(b"--") == 2
             assert b">" not in pad[:-1]
 
-    @pytest.mark.parametrize("content_type", ["application/json", "text/css", ""])
+    @pytest.mark.parametrize(
+        "content_type",
+        [
+            "application/json",
+            "application/vnd.next.patches+json; charset=utf-8",
+            "application/problem+json",
+        ],
+    )
+    def test_json_takes_blanks_it_parses_past(self, content_type: str) -> None:
+        for _ in range(100):
+            pad = padding(content_type, 16)
+            assert len(pad) <= 16
+            assert json.loads(b'{"a": 1}' + pad) == {"a": 1}
+        assert any(padding(content_type, 16) for _ in range(20))
+
+    @pytest.mark.parametrize(
+        ("content_type", "head", "tail"),
+        [
+            ("text/css", b"/*", b"*/"),
+            ("application/javascript", b"/*", b"*/"),
+            ("application/xml", b"<!--", b"-->"),
+            ("image/svg+xml", b"<!--", b"-->"),
+            ("application/atom+xml", b"<!--", b"-->"),
+        ],
+    )
+    def test_code_and_markup_take_a_comment(self, content_type, head, tail) -> None:
+        pad = padding(content_type, 8)
+        assert pad.startswith(head)
+        assert pad.endswith(tail)
+        assert re.fullmatch(rb"[A-Za-z0-9._]*", pad[len(head) : -len(tail)])
+
+    @pytest.mark.parametrize(
+        "content_type", ["text/plain", "application/x-ndjson", "text/csv", "plus+", ""]
+    )
     def test_other_types_get_nothing(self, content_type: str) -> None:
         assert padding(content_type, 32) == b""
 
@@ -185,7 +220,12 @@ class TestStreamEncoding:
         async def run() -> bytes:
             return b"".join([part async for part in _encoding().awrap(Source())])
 
+        async def coalesced() -> bytes:
+            parts = _encoding().acoalesce(Source(), 0.0)
+            return b"".join([part async for part in parts])
+
         assert zlib.decompress(asyncio.run(run()), 31) == b"ab"
+        assert zlib.decompress(asyncio.run(coalesced()), 31) == b"ab"
 
     def test_an_empty_end_is_not_yielded(self) -> None:
         class Silent:
@@ -203,10 +243,138 @@ class TestStreamEncoding:
         async def run() -> list[bytes]:
             return [part async for part in encoding.awrap(_aiter([b"a"]))]
 
+        async def coalesced() -> list[bytes]:
+            return [part async for part in encoding.acoalesce(_aiter([b"a"]), 0.0)]
+
         assert list(encoding.wrap([b"a"])) == [b"a"]
         assert asyncio.run(run()) == [b"a"]
+        assert asyncio.run(coalesced()) == [b"a"]
 
 
 async def _aiter(items):
     for item in items:
         yield item
+
+
+class _Counting:
+    """A gzip compressor that counts its flushes."""
+
+    def __init__(self) -> None:
+        """Open the stream."""
+        self.inner = GzipBackend().create(4, None)
+        self.flushes = 0
+
+    def compress(self, data: bytes) -> bytes:
+        return self.inner.compress(data)
+
+    def flush(self) -> bytes:
+        self.flushes += 1
+        return self.inner.flush()
+
+    def finish(self) -> bytes:
+        return self.inner.finish()
+
+
+def _counted() -> tuple[StreamEncoding, _Counting]:
+    compressor = _Counting()
+    return StreamEncoding("gzip", compressor), compressor
+
+
+class TestCoalesce:
+    """An async stream flushes by size or after a quiet pause, its first chunk at once."""
+
+    def test_an_async_first_chunk_decodes_at_once_and_a_pause_flushes(self) -> None:
+        reader = zlib.decompressobj(31)
+
+        async def run() -> list[bytes]:
+            gate = asyncio.Event()
+
+            async def source():
+                yield b"one"
+                yield b"two"
+                await gate.wait()
+                yield b"three"
+
+            stream = _encoding().acoalesce(source(), 0.01)
+            seen = [reader.decompress(await anext(stream))]
+            seen.append(reader.decompress(await anext(stream)))
+            assert b"".join(seen) == b"onetwo"
+            gate.set()
+            seen.extend([reader.decompress(part) async for part in stream])
+            return seen
+
+        assert b"".join(asyncio.run(run())) == b"onetwothree"
+        assert reader.eof
+
+    def test_async_chunks_flush_at_the_size(self) -> None:
+        encoding, compressor = _counted()
+        rows = [b"x" * 100] * (FLUSH_BYTES // 100 + 2)
+
+        async def run() -> bytes:
+            return b"".join(
+                [part async for part in encoding.acoalesce(_aiter(rows), 60)]
+            )
+
+        assert zlib.decompress(asyncio.run(run()), 31) == b"".join(rows)
+        assert compressor.flushes == 2
+
+    def test_async_empty_chunks_are_skipped_and_large_ones_offload(self) -> None:
+        encoding = StreamEncoding(
+            "gzip", GzipBackend().create(4, None), offload_bytes=2
+        )
+
+        async def run() -> bytes:
+            parts = encoding.acoalesce(_aiter([b"a", b"", b"long"]), 0.0)
+            return b"".join([part async for part in parts])
+
+        assert zlib.decompress(asyncio.run(run()), 31) == b"along"
+
+    def test_closing_a_waiting_stream_cancels_the_read_and_closes_the_source(
+        self,
+    ) -> None:
+        closed = []
+
+        async def run() -> None:
+            async def source():
+                try:
+                    yield b"one"
+                    yield b"two"
+                    await asyncio.Event().wait()
+                finally:
+                    closed.append(True)
+
+            stream = _encoding().acoalesce(source(), 60.0)
+            await anext(stream)
+            waiting = asyncio.ensure_future(anext(stream))
+            await asyncio.sleep(0.01)
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
+            await stream.aclose()
+
+        asyncio.run(run())
+        assert closed == [True]
+
+    def test_a_context_variable_set_across_a_quiet_flush_resets(self) -> None:
+        var: contextvars.ContextVar[str] = contextvars.ContextVar("var", default="")
+        seen = []
+
+        async def run() -> bytes:
+            gate = asyncio.Event()
+
+            async def source():
+                token = var.set("inside")
+                yield b"one"
+                yield b"two"
+                await gate.wait()
+                seen.append(var.get())
+                var.reset(token)
+                yield b"three"
+
+            stream = _encoding().acoalesce(source(), 0.01)
+            parts = [await anext(stream), await anext(stream)]
+            gate.set()
+            parts.extend([part async for part in stream])
+            return b"".join(parts)
+
+        assert zlib.decompress(asyncio.run(run()), 31) == b"onetwothree"
+        assert seen == ["inside"]

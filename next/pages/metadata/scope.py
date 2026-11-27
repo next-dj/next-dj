@@ -1,6 +1,5 @@
 """The memoised read of `NEXT_FRAMEWORK["METADATA"]`, its options and settings tier."""
 
-import functools
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -8,6 +7,7 @@ from typing import Final, NamedTuple
 
 from django.http import HttpRequest
 
+from next.caches import FRAMEWORK, memo
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
 from next.conf.settings import fail_loudly
@@ -45,7 +45,7 @@ def _str_tuple(value: object) -> tuple[str, ...]:
     return tuple(item for item in value if isinstance(item, str))
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def metadata_options() -> MetadataOptions:
     """Return the options read leniently from the metadata scope."""
     return MetadataOptions(
@@ -60,7 +60,7 @@ class SiteTier(NamedTuple):
     refusal: PageMetadataShapeError | None = None
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def site_tier() -> SiteTier:
     """Return the settings defaults as the outermost segment of every chain.
 

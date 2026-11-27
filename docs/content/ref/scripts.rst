@@ -26,13 +26,13 @@ A script runs in the order its ``scripts.py`` declares it, and ``ALLOWED_ATTRS``
 The manager
 ~~~~~~~~~~~
 
-``scripts_manager`` loads every tree's ``scripts.py`` once, walking the routed page trees of the router manager, and again when its mtime moves under ``DEBUG``, and ``render`` answers the head tags and the reserved payload entries of one render.
+``scripts_manager`` loads every tree's ``scripts.py`` once, walking the routed page trees of the route manager, and again when its mtime moves under ``DEBUG``, and ``render`` answers the head tags and the reserved payload entries of one render.
 The source loads through ``load_tree_source`` of ``next.utils``, the loader the SEO sources share.
 A ``ScriptsManager`` built without a registry keeps one of its own.
-``forget_scripts`` is the receiver ``settings_reloaded`` and ``router_reloaded`` drop every discovered tree through, and ``next.testing.reset_scripts`` calls it for a test.
+``forget_scripts`` drops every discovered tree, attached to the ``FRAMEWORK`` and ``ROUTES`` sources of ``next.caches``, and ``next.testing.reset_scripts`` calls it for a test.
 The next render walks the trees again and executes only the ``scripts.py`` files whose mtime moved, the rest kept as read.
 A client-rendered ``{% #consented %}`` body leaves a ``GatedNote`` for each script it holds back, and ``render`` turns them into manifest entries in the category of the block.
-The static injector reaches it through the ``PageScripts`` port of :doc:`ports`, so ``next.static`` never imports ``next.scripts``.
+The static injector reaches it as the ``scripts`` provider of ``next.ports.page_scripts``, see :doc:`ports`, so ``next.static`` never imports ``next.scripts``.
 
 .. automodule:: next.scripts.manager
    :members: ScriptsManager, GatedNote, scripts_manager, forget_scripts
@@ -45,6 +45,7 @@ Consent
 A template reads ``consent.marketing`` through ``__getitem__``, which answers the same.
 ``joint_category(*names)`` builds the space-separated name of a script that waits for several categories.
 ``get_consent(request)`` answers the consent of a request, read once and kept to the configured categories, and ``consent_categories()`` the configured list with ``necessary`` first.
+``NECESSARY`` names that category, and ``UNDECIDED`` is the ``Consent`` of a visitor who has not chosen yet.
 
 .. automodule:: next.consent.markers
    :members:

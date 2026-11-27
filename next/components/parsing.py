@@ -18,7 +18,8 @@ from django.template.base import (
     token_kwargs,
 )
 
-from next.defer import BoundaryOptionError, BoundaryOptions
+from next.boundaries.errors import BoundaryOptionError
+from next.boundaries.options import BoundaryOptions
 from next.interpolation import Interpolation, interpolated
 from next.permissions.nodes import granted_perms
 

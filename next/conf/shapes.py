@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Final, TypeGuard
 
+from next.errors import SettingShapeError
+
 
 type Usable = Callable[[object], bool]
 
@@ -145,6 +147,31 @@ def misfits(
     return _walk(scope, section, defaults, (), known=True)
 
 
+def misfit_text(prefix: str, misfit: Misfit) -> str:
+    """Return how a report names one misfit value below `prefix`, and what it wants."""
+    where = prefix + "".join(f"[{key!r}]" for key in misfit.path)
+    return f"{where} must be {misfit.expected}, got {misfit.found}."
+
+
+def enforce(
+    prefix: str,
+    scope: Mapping[str, object],
+    section: Section,
+    defaults: Mapping[str, object] = EMPTY,
+) -> None:
+    """Raise `SettingShapeError` naming every value of `scope` outside its shape.
+
+    A server runs no system checks, so the first read refuses what a check would report.
+    """
+    found = [
+        misfit_text(prefix, misfit)
+        for misfit in misfits(scope, section, defaults)
+        if not misfit.unknown
+    ]
+    if found:
+        raise SettingShapeError(found)
+
+
 def pick[T](
     scope: Mapping[str, object],
     key: str,
@@ -240,8 +267,10 @@ __all__ = [
     "alternatives",
     "choice",
     "count",
+    "enforce",
     "flag",
     "member",
+    "misfit_text",
     "misfits",
     "modes",
     "number",

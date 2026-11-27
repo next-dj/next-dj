@@ -13,7 +13,7 @@ from .statements import StatementKind, nests, statement_kind
 
 
 WRITES: Final = "writes"
-"""The `atomic` value that opens a transaction before the first write in autocommit."""
+"""The `atomic` value that opens a transaction before the first write or commit hook."""
 
 type AtomicMode = bool | Literal["writes"]
 
@@ -97,6 +97,21 @@ class _Guard:
             self._abandon(opening, exc)
             raise
         return result
+
+    def on_commit(self, func: Callable[[], object], *flags: bool) -> None:
+        """Take what the waiting subtrees need, as a write would, then register `func`.
+
+        A hook set before the first write then waits for the commit of what follows it.
+        `flags` carries the `robust` flag `transaction.on_commit` passes positionally.
+        """
+        if self.pending and not self.busy:
+            self.busy = True
+            try:
+                self._act(StatementKind.WRITE, None)
+            finally:
+                self.busy = False
+        connection = self.connection
+        type(connection).on_commit(connection, func, *flags)
 
     def push(self, frame: _Frame) -> None:
         """Start watching one more subtree, the innermost so far."""
@@ -285,6 +300,9 @@ class _Session:
         if guard is None:
             guard = self.guards[connection] = _Guard(connection)
             self.stack.enter_context(connection.execute_wrapper(guard))
+            shadows = vars(connection)
+            shadows["on_commit"] = guard.on_commit
+            self.stack.callback(shadows.pop, "on_commit", None)
         return guard
 
     def awaits(self, connection: BaseDatabaseWrapper) -> bool:

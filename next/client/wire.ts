@@ -7,10 +7,12 @@ import {
   CONTENT_TYPE,
   EVENT_STREAM,
   HEADER_ACCEPT,
+  HEADER_PROTOCOL,
   HEADER_REQUEST_ID,
   HEADER_VERSION,
   HEADER_ZONE,
   NAVIGATED_FLAG,
+  PROTOCOL,
   REFUSAL_HTTP_ONLY,
   REQUEST_FLAG,
   REQUEST_TIMEOUT_MS,
@@ -32,7 +34,7 @@ import {
   defaultReload,
   defaultSession,
 } from "./adapters";
-import type { Applied, Envelope } from "./apply";
+import type { Applied, BeforeApply, Envelope } from "./apply";
 import type { SessionStore } from "./assets";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
@@ -99,6 +101,8 @@ export interface CsrfPayload {
   header: string;
   token?: string;
   url?: string;
+  // The CSRF cookie of an endpoint payload, named only while scripts may read it.
+  cookie?: string;
 }
 
 /** The token a mutation stamps, ensure fetching a deferred one on first need. */
@@ -151,6 +155,7 @@ export interface EnvelopeOptions {
   owner: string | undefined;
   zones: string[];
   isCurrent: (zone?: string) => boolean;
+  inspect?: ((detail: BeforeApply) => void) | undefined;
 }
 
 export type EnvelopeHandler = (
@@ -161,7 +166,12 @@ export type EnvelopeHandler = (
 export interface StreamTake {
   signal: AbortSignal;
   open: () => void;
-  land: (body: string, parse: () => unknown) => Promise<Outcome>;
+  // inspect reads the before-apply detail of the envelope the body carries.
+  land: (
+    body: string,
+    parse: () => unknown,
+    inspect?: (detail: BeforeApply) => void,
+  ) => Promise<Outcome>;
 }
 
 export type StreamReader = (response: Response, take: StreamTake) => Promise<Outcome>;
@@ -236,6 +246,10 @@ export class Wire {
   readonly #claims = new Map<string, (zone: string) => void>();
   readonly #busy = new Map<string, ((go: boolean) => void)[]>();
   readonly #parseHooks = new Map<string, ParseHook>();
+  // The elements each queued request fills, so a sweep can stop the ones left orphaned.
+  readonly #fills = new WeakMap<AbortController, Element[]>();
+  /** Harness seam, absent from the shipped bundles: abort everything, drop all state. */
+  declare _reset: () => void;
 
   constructor(deps: WireDeps) {
     this.#fetch = deps.fetch ?? defaultFetch();
@@ -256,19 +270,14 @@ export class Wire {
     this.#tunnel = deps.tunnel ?? (() => undefined);
     this.#resolveZone = deps.resolveZone ?? (() => null);
     this.#reader = deps.reader ?? (() => undefined);
-  }
-
-  /** Abort every in-flight request and drop all state, for vitest isolation. */
-  _reset(): void {
-    for (const controller of this.#queues.values()) {
-      controller.abort();
-    }
-    this.#queues.clear();
-    for (const waiters of this.#busy.values()) {
-      for (const resume of waiters.splice(0)) resume(false);
-    }
-    this.#busy.clear();
-    this.#parseHooks.clear();
+    TEST: this._reset = () => {
+      for (const controller of this.#queues.values()) controller.abort();
+      this.#queues.clear();
+      for (const waiters of this.#busy.values())
+        for (const resume of waiters.splice(0)) resume(false);
+      this.#busy.clear();
+      this.#parseHooks.clear();
+    };
   }
 
   /**
@@ -294,6 +303,19 @@ export class Wire {
   abort(key: string): void {
     this.#queues.get(key)?.abort();
     this.#queues.delete(key);
+  }
+
+  /**
+   * Abort every queued request whose targets have all left the document.
+   *
+   * A navigation that replaced a zone or a boundary frees the server slot its still
+   * streaming answer holds, instead of reading it to the end for nothing.
+   */
+  sweep(): void {
+    for (const [key, controller] of this.#queues) {
+      const fills = this.#fills.get(controller);
+      if (fills?.length && fills.every((el) => !el.isConnected)) this.abort(key);
+    }
   }
 
   /** Shape, queue or lock, send, and classify a single request. */
@@ -395,6 +417,7 @@ export class Wire {
         if (claiming) this.#claims.set(key, lose);
       }
       if (held.size === 0 && zones.length > 0) return none("dropped");
+      if (entry) this.#fills.set(entry, targets);
       if (!background) targets.forEach(stamp);
       started = now();
       let csrf = this.#csrf.current();
@@ -438,7 +461,7 @@ export class Wire {
   // A missing token or the deadline answers the Error the csrf failure carries.
   async #ensureCsrf(): Promise<CsrfPayload | null | Error> {
     const controller = new AbortController();
-    const disarm = this.#arm(controller);
+    const disarm = this.arm(controller);
     try {
       const ensured = await bounded(
         this.#csrf.ensure(controller.signal),
@@ -455,8 +478,8 @@ export class Wire {
     }
   }
 
-  // Abort the controller with a TimeoutError once the deadline passes, zero never.
-  #arm(controller: AbortController): () => void {
+  /** Abort the controller with a TimeoutError once the deadline passes, zero never. */
+  arm(controller: AbortController): () => void {
     const ms = this.#timeout();
     const timer =
       ms > 0
@@ -550,7 +573,7 @@ export class Wire {
         if (tunneled === REFUSAL_HTTP_ONLY) this.#reload();
         return failed;
       }
-      disarm = this.#arm(deadline);
+      disarm = this.arm(deadline);
       const response =
         tunneled instanceof Response
           ? tunneled
@@ -569,7 +592,7 @@ export class Wire {
         deadline.signal,
         () => {
           disarm();
-          disarm = this.#arm(deadline);
+          disarm = this.arm(deadline);
         },
       );
     } catch (error) {
@@ -628,7 +651,7 @@ export class Wire {
         : this.#fallbackNavigate(zones, response.url || target);
     // A body the hook or JSON cannot parse, or an envelope apply rejects as malformed,
     // is a parse error rather than an unhandled rejection of a fire-and-forget fetch.
-    const land = async (body: string, parse: () => unknown): Promise<Outcome> => {
+    const land: StreamTake["land"] = async (body, parse, inspect) => {
       try {
         const raw = parse();
         // Cleared once the body parses, so a later non-envelope reply on this page
@@ -642,6 +665,7 @@ export class Wire {
           owner: request.owner,
           zones,
           isCurrent,
+          inspect,
         });
         if (stale === true) return none("dropped");
         nodes?.forEach(stamp);
@@ -694,10 +718,11 @@ export class Wire {
       [HEADER_ACCEPT]: method === "GET" && this.#reader() ? STREAM_ACCEPT : ACCEPT,
       ...request.headers,
     });
-    // The version is sent only after the client has read one from an envelope, so
-    // the first request of a page asserts no stale version.
+    // The version comes from the init payload, so even the first request after a
+    // deploy asserts the release the page was rendered by.
     const version = this.#version();
     if (version) headers.set(HEADER_VERSION, version);
+    headers.set(HEADER_PROTOCOL, `${PROTOCOL}`);
     if (request.zone !== undefined) headers.set(HEADER_ZONE, request.zone);
     if (!SAFE_METHODS.has(method) && csrf?.token !== undefined)
       headers.set(csrf.header, csrf.token);

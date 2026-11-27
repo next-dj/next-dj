@@ -4,11 +4,11 @@ import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.test import override_settings
 
+from next.defer.assembly import finish
+from next.defer.components import deferring
 from next.diagnostics import degraded, watch_degraded
 from next.static import StaticCollector
 from next.static.runtime import BUNDLE_NOTE
-from next.suspense.assembly import finish
-from next.suspense.components import deferring
 from tests.components.sites import FIRST_KEY, HEAD, TRIP, ComponentSite
 from tests.support.boundaries import run_sequentially
 
@@ -38,8 +38,8 @@ class TestWrapper:
         site.add("card", "C", loading="L")
         shell, session = site.deferred("{% component 'card' %}{% component 'card' %}")
         assert [job.id for job in session.jobs] == [
-            f"b-{session.seal}-0",
-            f"b-{session.seal}-1",
+            f"b-{session.response_id}-0",
+            f"b-{session.response_id}-1",
         ]
         assert "card" not in shell
 
@@ -116,7 +116,7 @@ class TestLoading:
     """The loading UI reads the call site and the props, a failure its error UI."""
 
     def test_the_call_site_and_the_props(self, site: ComponentSite) -> None:
-        site.add("card", "C", loading="{{ page }}|{{ props.title }}|{{ title }}")
+        site.add("card", "C", loading="{{ page }}|{{ title }}|{{ props }}")
         shell, _ = site.deferred("{% component 'card' title='T' %}", page="P")
         assert ">P|T|</div>" in shell
 
@@ -152,7 +152,9 @@ class TestLoading:
         template = Mock()
         template.render.return_value = "DEFAULT"
         with (
-            override_settings(NEXT_FRAMEWORK={"DEFER": {"LOADING": "skeleton.html"}}),
+            override_settings(
+                NEXT_FRAMEWORK={"BOUNDARIES": {"LOADING_TEMPLATE": "skeleton.html"}}
+            ),
             patch("next.components.facade.get_template", return_value=template) as get,
         ):
             shell, _ = site.deferred("{% component 'card' defer='stream' %}")

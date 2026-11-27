@@ -1,28 +1,18 @@
 import time
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
-from typing import Any, cast
 from unittest.mock import Mock
 
-from next.defer import (
-    Addressing,
-    BoundaryFailure,
-    BoundaryOptions,
-    CallRenderer,
-    DeferMode,
-    DeferredCall,
-    ErrorKind,
-    Site,
-)
-from next.ports import run_bridged
-from next.suspense.markers import Caps, Job, Outcome, Rendered
-from next.suspense.render import Delta
-from next.suspense.session import BoundarySession
+from next.boundaries.calls import Addressing, BoundarySite, CallRenderer, DeferredCall
+from next.boundaries.failures import BoundaryFailure, ErrorKind
+from next.boundaries.options import BoundaryOptions, DeferMode
+from next.defer.ledger import ResponseJobs
+from next.defer.markers import Caps, Delta, Job, Piece, Rendered
 from next.testing import override_next_settings
 
 
-class RecordingFallback:
-    """A fallback that records what it was asked and renders a fixed body."""
+class RecordingErrorUI:
+    """An error UI that records what it was asked and renders a fixed body."""
 
     def __init__(
         self,
@@ -65,7 +55,7 @@ def raising(exc: BaseException) -> Callable[[], str]:
 
 
 def defer_errors(**values: object) -> AbstractContextManager[None]:
-    return override_next_settings(DEFER={"ERRORS": values})
+    return override_next_settings(BOUNDARIES=values)
 
 
 def make_site(
@@ -75,21 +65,21 @@ def make_site(
     mode: DeferMode = DeferMode.STREAM,
     origin: str = "page.html",
     index: int = 0,
-) -> Site:
+) -> BoundarySite:
     """Return a call site, a streamed component `card` in `page.html` by default."""
-    return Site(addressing, name, mode, origin, index)
+    return BoundarySite(addressing, name, mode, origin, index)
 
 
 COMPONENT_SITE = make_site()
 
 
-def open_session(caps: Caps | None = None) -> BoundarySession[Delta]:
+def open_session(caps: Caps | None = None) -> ResponseJobs:
     """Open a session over `caps`, the settings' caps when none are given."""
-    return BoundarySession[Delta].open(Caps.from_settings() if caps is None else caps)
+    return ResponseJobs.open(Caps.from_settings() if caps is None else caps)
 
 
-def failed(kind: ErrorKind) -> Rendered[Delta]:
-    """Render the fallback of `kind` the way a settled error UI reads, as `F:<kind>`."""
+def failed(kind: ErrorKind) -> Rendered:
+    """Render the error UI of `kind` as a settled one reads, as `F:<kind>`."""
     return Rendered(
         f"F:{kind}",
         Delta(),
@@ -99,25 +89,24 @@ def failed(kind: ErrorKind) -> Rendered[Delta]:
 
 
 def make_job(
-    session: BoundarySession[Delta],
+    session: ResponseJobs,
     html: str = "R",
     *,
-    site: Site = COMPONENT_SITE,
+    site: BoundarySite = COMPONENT_SITE,
     key: str = "k",
     options: BoundaryOptions | None = None,
     deadline: float | None = None,
     parent: str | None = None,
     depth: int | None = None,
-    run: Callable[[], Rendered[Delta]] | None = None,
-    arun: Callable[[], Coroutine[Any, Any, Rendered[Delta]]] | None = None,
-    fallback: Callable[[ErrorKind], Rendered[Delta]] = failed,
-) -> Job[Delta]:
+    run: Callable[[], Rendered] | None = None,
+    error_ui: Callable[[ErrorKind], Rendered] = failed,
+) -> Job:
     """Build a job with the next id of `session`, rendering `html` unless a body is given.
 
     The deadline is the session's, and the depth follows whether a parent is named.
     """
 
-    def ready() -> Rendered[Delta]:
+    def ready() -> Rendered:
         return Rendered(html, Delta())
 
     return Job(
@@ -126,9 +115,8 @@ def make_job(
         site=site,
         options=BoundaryOptions() if options is None else options,
         deadline=session.deadline if deadline is None else deadline,
-        fallback=fallback,
-        run=ready if run is None and arun is None else run,
-        arun=arun,
+        error_ui=error_ui,
+        run=ready if run is None else run,
         parent=parent,
         depth=int(parent is not None) if depth is None else depth,
     )
@@ -138,7 +126,7 @@ def make_call(
     tag: str | None = "div",
     key: str = "k",
     *,
-    site: Site = COMPONENT_SITE,
+    site: BoundarySite = COMPONENT_SITE,
     options: BoundaryOptions | None = None,
     source: str | None = None,
     renderer: CallRenderer | None = None,
@@ -157,25 +145,34 @@ def make_call(
     )
 
 
-def _run_inline(job: Job[Delta], expired: frozenset[str]) -> Iterator[Outcome[Delta]]:
+def piece_at(ident: str, rendered: Rendered, *, parent: str | None = None) -> Piece:
+    """Return a piece of a bare job named `ident`, settled as `rendered`."""
+    job = Job(
+        id=ident,
+        key="k",
+        site=COMPONENT_SITE,
+        options=BoundaryOptions(),
+        deadline=float("inf"),
+        error_ui=failed,
+        run=lambda: rendered,
+        parent=parent,
+        depth=int(parent is not None),
+    )
+    return Piece(job, rendered)
+
+
+def _run_inline(job: Job, expired: frozenset[str]) -> Iterator[Piece]:
     """Run `job` here, then its nested jobs, a job out of time settling as `timeout`."""
     if job.id in expired or time.monotonic() >= job.deadline:
-        yield Outcome(job.id, job.fallback(ErrorKind.TIMEOUT))
+        yield Piece(job, job.error_ui(ErrorKind.TIMEOUT))
         return
-    body = job.run
-    if body is None:
-        arun = cast("Callable[[], Coroutine[Any, Any, Rendered[Delta]]]", job.arun)
-        rendered = run_bridged(arun)
-    else:
-        rendered = body()
-    yield Outcome(job.id, rendered)
+    rendered = job.run()
+    yield Piece(job, rendered)
     for nested in rendered.nested:
         yield from _run_inline(nested, expired)
 
 
-def run_sequentially(
-    session: BoundarySession[Delta],
-) -> Iterator[tuple[Outcome[Delta], ...]]:
+def run_sequentially(session: ResponseJobs) -> Iterator[tuple[Piece, ...]]:
     """Run every job on the calling thread in document order, one batch per job."""
     expired = frozenset(job.id for job in session.plan().expired)
     for job in session.jobs:
@@ -184,7 +181,7 @@ def run_sequentially(
 
 __all__ = [
     "COMPONENT_SITE",
-    "RecordingFallback",
+    "RecordingErrorUI",
     "defer_errors",
     "failed",
     "make_call",

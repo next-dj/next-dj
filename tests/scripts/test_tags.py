@@ -48,7 +48,7 @@ class TestConsentedTag:
 
     def test_a_granted_category_renders_the_body(self) -> None:
         with override_next_settings(CONSENT=MARKETING):
-            out, collector, request = _render(CONSENTED, cookie="1:marketing:1")
+            out, collector, request = _render(CONSENTED, cookie="2:marketing:1")
         assert out == "<video>"
         assert list(collector.notes(CONSENT_NOTE)) == ["marketing"]
         assert cookie_varies(request)
@@ -65,7 +65,7 @@ class TestConsentedTag:
 
     def test_a_shared_page_renders_both_the_body_inert(self) -> None:
         out, _collector, request = _render(
-            CONSENTED, cookie="1:marketing:1", shared=True
+            CONSENTED, cookie="2:marketing:1", shared=True
         )
         assert out == (
             '<template data-next-consented="marketing"><video></template><p>ask</p>'
@@ -97,7 +97,7 @@ class TestConsentedTag:
 
     def test_a_server_render_carries_no_marker(self) -> None:
         with override_next_settings(CONSENT=MARKETING):
-            granted, _collector, _request = _render(CONSENTED, cookie="1:marketing:1")
+            granted, _collector, _request = _render(CONSENTED, cookie="2:marketing:1")
             denied, _collector, _request = _render(CONSENTED)
         assert granted == "<video>"
         assert END not in granted + denied
@@ -206,7 +206,7 @@ class TestBlankCategory:
     ) -> None:
         source = "{% #consented category %}<video>{% else %}<p>ask</p>{% /consented %}"
         request = RequestFactory().get("/")
-        request.COOKIES["next_consent"] = "1:marketing:1"
+        request.COOKIES["next_consent"] = "2:marketing:1"
         if shared:
             mark_shared_render(request)
         collector = StaticCollector()

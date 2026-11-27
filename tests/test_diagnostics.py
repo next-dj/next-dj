@@ -1,14 +1,17 @@
 import logging
+import sys
+from collections.abc import Iterator
 
 import pytest
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
 from django.core.handlers.exception import response_for_exception
+from django.core.signals import got_request_exception
 from django.http import Http404
 from django.http.multipartparser import MultiPartParserError
 from django.test import RequestFactory
 
 from next.caches import DEFAULT_CACHE_SIZE
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.diagnostics import (
     INTENDED_EXCEPTIONS,
     QUIET_PERIOD,
@@ -19,6 +22,7 @@ from next.diagnostics import (
     degraded_status,
     exception_text,
     mark_degraded,
+    report_request_exception,
     reset_failure_logs,
     status_kept,
     watch_degraded,
@@ -149,7 +153,7 @@ class TestBackendReadLog:
     ) -> None:
         with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
             log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             log.read(_Backend(), "watched trees", _raise, valid=bool, default=[])
 
         assert caplog.text.count("failed to report its watched trees") == 2
@@ -224,7 +228,7 @@ class TestFailureLog:
         settings.DEBUG = False
         with caplog.at_level(logging.ERROR, logger="next.tests.diagnostics"):
             _contained(failures, "items")
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
             _contained(failures, "items")
 
         assert caplog.text.count("items() in sitemap.py raised") == 2
@@ -629,3 +633,79 @@ class TestStatusKept:
             pass
 
         assert degraded() is False
+
+
+@pytest.fixture()
+def handled() -> Iterator[list[BaseException | None]]:
+    """Record the exception being handled as each `got_request_exception` goes out."""
+    seen: list[BaseException | None] = []
+
+    def receiver(**kwargs: object) -> None:
+        seen.append(sys.exception())
+
+    got_request_exception.connect(receiver, weak=False)
+    try:
+        yield seen
+    finally:
+        got_request_exception.disconnect(receiver)
+
+
+def _settled() -> RuntimeError:
+    """Return an exception raised and caught, as a settled job hands one over."""
+    try:
+        _raise(RuntimeError("settled"))
+    except RuntimeError as error:
+        return error
+    raise AssertionError
+
+
+class TestReportRequestException:
+    """An exception a response survived is reported as Django reports an uncaught one."""
+
+    def test_a_settled_exception_is_the_one_handled_for_its_receivers(
+        self, handled: list[BaseException | None]
+    ) -> None:
+        error = _settled()
+        traceback, context = error.__traceback__, error.__context__
+        report_request_exception(error, None, ("k",), "failed", ())
+        assert handled == [error]
+        assert error.__traceback__ is traceback
+        assert error.__context__ is context
+
+    def test_another_exception_being_handled_leaves_no_context_behind(
+        self, handled: list[BaseException | None]
+    ) -> None:
+        error = _settled()
+        try:
+            _raise(KeyError("other"))
+        except KeyError:
+            report_request_exception(error, None, ("k",), "failed", ())
+        assert handled == [error]
+        assert error.__context__ is None
+
+    def test_the_exception_being_handled_is_sent_as_it_is(
+        self, handled: list[BaseException | None]
+    ) -> None:
+        held: list[RuntimeError] = []
+        try:
+            _raise()
+        except RuntimeError as error:
+            held.append(error)
+            traceback = error.__traceback__
+            report_request_exception(error, None, ("k",), "failed", ())
+        assert handled == held
+        assert held[0].__traceback__ is traceback
+
+    def test_the_record_keeps_a_bounded_rate_and_django_request_extras(
+        self, rf: RequestFactory, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        request = rf.get("/")
+        with caplog.at_level(logging.DEBUG, "django.request"):
+            for _ in range(2):
+                report_request_exception(
+                    _settled(), request, ("k",), "failed %s", ("x",)
+                )
+        records = [r for r in caplog.records if r.name == "django.request"]
+        assert [r.levelno for r in records] == [logging.ERROR, logging.DEBUG]
+        assert (records[0].request, records[0].status_code) == (request, 500)
+        assert records[0].getMessage() == "failed x"

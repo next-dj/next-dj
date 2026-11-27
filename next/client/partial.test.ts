@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPartial as buildPartial } from "./partial";
 import { createDiagnostics } from "./diagnostics";
-import type { PartialAdapters, PartialDeps, PartialSurface } from "./partial";
+import type { PartialAdapters, PartialDeps, PartialSurface, Runtime } from "./partial";
+import type { Stack } from "./stack";
 import type { DialogAdapter } from "./layers";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, SseFactory, StreamMeta } from "./sse";
@@ -16,11 +17,20 @@ import {
 
 // Every surface a test builds, reset after it so no stale listener takes its submit.
 const built: PartialSurface[] = [];
+const runtimes = new WeakMap<PartialSurface, Runtime>();
 function createPartial(deps: PartialDeps): PartialSurface {
-  const surface = buildPartial(deps);
-  built.push(surface);
-  return surface;
+  const runtime = buildPartial(deps);
+  built.push(runtime.partial);
+  runtimes.set(runtime.partial, runtime);
+  return runtime.partial;
 }
+
+// The kernel the chunks of a built surface install against.
+const kernelOf = (surface: PartialSurface) => runtimes.get(surface)!.kernel;
+
+// Close every layer of a surface, as a test ends with the address bar put back.
+const dropLayers = (surface: PartialSurface): void =>
+  (surface.layers as Stack)._reset();
 
 afterEach(() => {
   for (const surface of built.splice(0)) surface._reset();
@@ -462,10 +472,12 @@ describe("createPartial surface", () => {
 
   it("decodes a body through the parse hook its content type names", () => {
     partial.parseHook("application/x-custom", (_response, body) => ({ version: body }));
-    expect(partial._parse("application/x-custom; charset=utf-8", "v9")).toEqual({
+    expect(
+      kernelOf(partial).parse("application/x-custom; charset=utf-8", "v9"),
+    ).toEqual({
       version: "v9",
     });
-    expect(partial._parse("application/json", '{"a":1}')).toEqual({ a: 1 });
+    expect(kernelOf(partial).parse("application/json", '{"a":1}')).toEqual({ a: 1 });
   });
 
   it("a refresh op re-GETs the zone through the wire", async () => {
@@ -583,7 +595,7 @@ describe("createPartial surface", () => {
     clock.tick();
     await Promise.resolve();
     expect(calls).toEqual([`${location.origin}/host/`]);
-    partial.layers._reset();
+    dropLayers(partial);
     window.history.replaceState(null, "", "/");
   });
 
@@ -621,7 +633,7 @@ describe("createPartial surface", () => {
     }
     const origin = new Headers(calls[2]!.init.headers).get("X-Next-Origin");
     expect(origin).toBe("//attacker.example/x/");
-    partial.layers._reset();
+    dropLayers(partial);
     window.history.replaceState(null, "", "/");
   });
 
@@ -653,7 +665,7 @@ describe("createPartial surface", () => {
     await partial.fetch({ url: "/host/", zone: "dup" });
     expect(document.querySelector("#base")!.textContent).toBe("host");
     expect(layerZone.textContent).toBe("modal");
-    partial.layers._reset();
+    dropLayers(partial);
     window.history.replaceState(null, "", "/");
   });
 
@@ -1015,6 +1027,53 @@ describe("createPartial surface", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("live");
   });
 
+  it("asserts the payload version on the first request and reloads for a release", async () => {
+    const own = makeSurface({ $version: "v7" }).partial;
+    const navigated: string[] = [];
+    const calls: RequestInit[] = [];
+    own._configure({
+      document,
+      navigate: (url) => void navigated.push(url),
+      fetch: async (_url, init) => {
+        calls.push(init);
+        return patchesResponse('{"version":"v8","ops":[],"assets":[],"form":null}');
+      },
+    });
+    own.ready();
+    await own.fetch({ url: "/", zone: "z" });
+    expect(new Headers(calls[0]!.headers).get("X-Next-Version")).toBe("v7");
+    expect(navigated).toEqual([location.href]);
+    kernelOf(own).release(false);
+    expect(navigated).toHaveLength(2);
+    kernelOf(own).release(true);
+    own._reset();
+  });
+
+  it("reloads once when a live stream's server speaks another protocol", () => {
+    document.body.innerHTML = '<div data-next-stream="/stream/"></div>';
+    const source = mockSource();
+    const navigated: string[] = [];
+    const store = new Map<string, string>();
+    partial._configure({
+      document,
+      source: source.adapter,
+      visibility: manualVisibility(),
+      navigate: (url) => void navigated.push(url),
+      session: {
+        get: (key) => store.get(key) ?? null,
+        set: (key, value) => void store.set(key, value),
+        remove: (key) => void store.delete(key),
+      },
+    });
+    partial.stream.scan(document);
+    source.opened[0]!.control(
+      "next-hello",
+      JSON.stringify({ protocol: 9, topics: {} }),
+    );
+    expect(navigated).toEqual([location.href]);
+    expect(source.opened[0]!.closed).toBe(true);
+  });
+
   it("a completed stream resync does not abort a later GET on teardown", async () => {
     window.history.replaceState(null, "", "/");
     document.body.innerHTML =
@@ -1047,7 +1106,7 @@ describe("createPartial surface", () => {
     partial.stream.scan(document);
     source.opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 1 } } }),
     );
     await vi.waitFor(() => expect(signals).toHaveLength(1));
     await vi.waitFor(() =>
@@ -1088,7 +1147,7 @@ describe("createPartial surface", () => {
     partial.stream.scan(document);
     source.opened[0]!.control(
       "next-hello",
-      JSON.stringify({ topics: { room: { epoch: "e", seq: 1 } } }),
+      JSON.stringify({ protocol: 2, topics: { room: { epoch: "e", seq: 1 } } }),
     );
     await vi.waitFor(() => expect(signal).toBeDefined());
     document.querySelector('[data-next-stream="/stream/"]')!.remove();
@@ -1187,6 +1246,18 @@ describe("createPartial surface", () => {
     partial.apply(wire);
     expect(warn).not.toHaveBeenCalled();
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("warns in dev that an element fetch found no boundaries bundle to serve it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    document.body.innerHTML = '<div id="b" data-next-boundary="b"></div>';
+    const el = document.getElementById("b")!;
+    await expect(partial.fetch(el)).resolves.toMatchObject({ status: "dropped" });
+    expect(warn).not.toHaveBeenCalled();
+    partial._configure({ dev: true, diagnostics: createDiagnostics() });
+    await expect(partial.fetch(el)).resolves.toMatchObject({ status: "dropped" });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("boundaries bundle"), el);
+    partial._configure({ dev: false });
   });
 
   it("opening the dev channel keeps the ops registered before it", () => {
@@ -1659,7 +1730,7 @@ describe("Next.partial.submit", () => {
         return patchesResponse(
           JSON.stringify({
             version: "v1",
-            assets: [{ kind: "css", url: `/sheet-${sent}.css` }],
+            assets: [{ kind: "css", url: `/sheet-${sent}.css`, load: "link" }],
             ops: [
               { op: "inner", target: { zone: "z" }, html: '<p class="boom">n</p>' },
             ],
@@ -1790,7 +1861,7 @@ describe("Next.partial.submit", () => {
         return patchesResponse(
           JSON.stringify({
             version: "v1",
-            assets: [{ kind: "css", url: `/sheet-${sent}.css` }],
+            assets: [{ kind: "css", url: `/sheet-${sent}.css`, load: "link" }],
             ops: [
               {
                 op: "inner",
@@ -1989,7 +2060,7 @@ describe("createPartial over an open WebSocket", () => {
     const c = connected(["ws", "sse"], visibility);
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: {}, tunnel: {} });
+    c.message({ type: "hello", protocol: 2, topics: {}, tunnel: {} });
     const outcome = c.partial.submit(document.querySelector("form")!);
     await flush();
     const id = c.last().id;
@@ -2027,7 +2098,7 @@ describe("createPartial over an open WebSocket", () => {
     await expect(c.partial.stream.send("room", "typing", {})).resolves.toBe(false);
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } } });
+    c.message({ type: "hello", protocol: 2, topics: { room: { epoch: "e", seq: 0 } } });
     const sent = c.partial.stream.send("room", "typing", { user: 1 });
     expect(c.last()).toMatchObject({ type: "up", topic: "room", name: "typing" });
     c.message({ type: "ack", id: c.last().id, ok: true });
@@ -2039,7 +2110,7 @@ describe("createPartial over an open WebSocket", () => {
     const c = connected(["ws", "sse"]);
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } } });
+    c.message({ type: "hello", protocol: 2, topics: { room: { epoch: "e", seq: 0 } } });
     await expect(
       c.partial.stream.send("room", "typing", { user: 1 }, { ack: false }),
     ).resolves.toBe(true);
@@ -2062,7 +2133,12 @@ describe("createPartial over an open WebSocket", () => {
       c.fetch.mock.calls.filter(([url]) => url.endsWith("/stream/")).length;
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } }, tunnel: {} });
+    c.message({
+      type: "hello",
+      protocol: 2,
+      topics: { room: { epoch: "e", seq: 0 } },
+      tunnel: {},
+    });
     submit();
     await flush();
     c.message({
@@ -2079,7 +2155,7 @@ describe("createPartial over an open WebSocket", () => {
     await flush();
     expect(negotiations()).toBe(2);
     c.opens[1]!();
-    c.message({ type: "hello", topics: {} }, 1);
+    c.message({ type: "hello", protocol: 2, topics: {} }, 1);
     c.partial.setCsrf({ header: "X-CSRFToken", token: MASKED[1] });
     await flush();
     expect(negotiations()).toBe(2);
@@ -2087,7 +2163,7 @@ describe("createPartial over an open WebSocket", () => {
     await flush();
     expect(negotiations()).toBe(3);
     c.opens[2]!();
-    c.message({ type: "hello", topics: {} }, 2);
+    c.message({ type: "hello", protocol: 2, topics: {} }, 2);
     c.partial.setCsrf({ header: "X-CSRFToken", url: "/csrf/" });
     c.partial.setCsrf(undefined);
     await flush();
@@ -2100,7 +2176,7 @@ describe("createPartial over an open WebSocket", () => {
     c.partial.setCsrf({ header: "X-CSRFToken", token: MASKED[0] });
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: {}, tunnel: {} });
+    c.message({ type: "hello", protocol: 2, topics: {}, tunnel: {} });
     c.partial.setCsrf({ header: "X-CSRFToken", token: MASKED[1] });
     await flush();
     expect(c.fetch.mock.calls.filter(([url]) => url.endsWith("/stream/"))).toHaveLength(
@@ -2113,7 +2189,7 @@ describe("createPartial over an open WebSocket", () => {
     const c = connected(["ws", "sse"]);
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: {}, tunnel: {} });
+    c.message({ type: "hello", protocol: 2, topics: {}, tunnel: {} });
     const form = document.querySelector("form")!;
     const tunneled = c.partial.submit(form);
     await flush();
@@ -2147,7 +2223,7 @@ describe("createPartial over an open WebSocket", () => {
     const c = connected(["ws", "sse"]);
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: {}, tunnel: {} });
+    c.message({ type: "hello", protocol: 2, topics: {}, tunnel: {} });
     const created = c.partial.submit({
       action: "/_next/form/c/",
       transport: "any",
@@ -2179,6 +2255,7 @@ describe("createPartial over an open WebSocket", () => {
     c.opens[0]!();
     c.message({
       type: "hello",
+      protocol: 2,
       topics: { room: { epoch: "e", seq: 0 } },
       connection: "c-7",
     });
@@ -2201,7 +2278,12 @@ describe("createPartial over an open WebSocket", () => {
     const c = connected(["ws", "sse"]);
     await flush();
     c.opens[0]!();
-    c.message({ type: "hello", topics: { room: { epoch: "e", seq: 0 } }, tunnel: {} });
+    c.message({
+      type: "hello",
+      protocol: 2,
+      topics: { room: { epoch: "e", seq: 0 } },
+      tunnel: {},
+    });
     submit();
     await flush();
     expect(c.last()).toMatchObject({ type: "http", method: "POST", body: "t=x" });
@@ -2294,6 +2376,7 @@ describe("createPartial after a mutation that got no reply", () => {
     const hello = (seq: number): string =>
       JSON.stringify({
         type: "hello",
+        protocol: 2,
         topics: { room: { epoch: "e", seq } },
         tunnel: {},
       });
@@ -2506,7 +2589,7 @@ describe("the router seams of the surface", () => {
     window.history.replaceState(null, "", "/x/");
     window.dispatchEvent(new PopStateEvent("popstate"));
     const answer = vi.fn(() => "/x/");
-    partial._pop = answer;
+    kernelOf(partial).serve("pop", answer);
     window.dispatchEvent(new PopStateEvent("popstate"));
     expect(answer).toHaveBeenCalledTimes(1);
     expect(reload).not.toHaveBeenCalled();
@@ -2519,17 +2602,93 @@ describe("the router seams of the surface", () => {
     partial.apply({ version: "", ops: [morph] });
     expect(document.body.innerHTML).toBe("<!--a--><p>old</p><!--b-->");
     const [start, , end] = [...document.body.childNodes];
-    partial._slot = (target) =>
-      target.slot === "L1" ? [document.body, start!, end!] : undefined;
+    kernelOf(partial).serve("slot", (target) =>
+      target.slot === "L1" ? [document.body, start!, end!] : undefined,
+    );
     partial.apply({ version: "", ops: [morph] });
     expect(document.body.innerHTML).toBe("<!--a--><p>new</p><!--b-->");
   });
 
   it("stamps the runtime headers on a request the router sends", () => {
     const { partial } = makeSurface();
-    const headers = partial._headers({ "X-Next-Navigate": "1" });
+    const headers = kernelOf(partial).headers({ "X-Next-Navigate": "1" });
     expect(headers.get("X-Next-Request")).toBe("1");
     expect(headers.get("X-Next-Navigate")).toBe("1");
     expect(headers.has("Accept")).toBe(true);
+  });
+});
+
+describe("the kernel the chunks install against", () => {
+  function lazyLayers() {
+    const navigated: string[] = [];
+    const surface = createPartial({
+      ...chunkModules,
+      layers: unloaded("layers"),
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+    });
+    surface._configure({ navigate: (url) => void navigated.push(url) });
+    return { surface, navigated, kernel: kernelOf(surface) };
+  }
+
+  it("rejects the scripts chunk without a facade to fetch it", async () => {
+    const { kernel } = lazyLayers();
+    await expect(kernel.scripts()).rejects.toThrow("no scripts");
+    await expect(kernel.load("intent")).resolves.toBeUndefined();
+    expect(kernel.module("intent")).toBeUndefined();
+  });
+
+  it("watches an element into view through the triggers", () => {
+    const { surface, kernel } = lazyLayers();
+    surface._configure({
+      observer: { observe: (_el, onView) => (onView(true), () => undefined) },
+    });
+    document.body.innerHTML = '<div id="w"></div>';
+    const send = vi.fn();
+    kernel.watch(document.getElementById("w")!, send);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("visits a layer link in full once its chunk fails to load", async () => {
+    const { surface, navigated } = lazyLayers();
+    const opened = surface.layers.open(null, "/m/", "m");
+    document.head
+      .querySelector('script[src$="next.layers.min.js"]')!
+      .dispatchEvent(new Event("error"));
+    await opened;
+    expect(navigated).toEqual(["/m/"]);
+  });
+
+  it("answers a popstate before the layers chunk loads", () => {
+    const { surface } = lazyLayers();
+    const answer = vi.fn(() => undefined);
+    kernelOf(surface).serve("pop", answer);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(answer).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a ready listener at once on a mounted page and on every ready after", () => {
+    const { surface, kernel } = lazyLayers();
+    const listener = vi.fn();
+    kernel.onReady(listener);
+    expect(listener).not.toHaveBeenCalled();
+    surface.ready();
+    expect(listener).toHaveBeenCalledTimes(1);
+    kernel.onReady(listener);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the handler served first and runs the hooks in their order", () => {
+    const { surface, kernel } = lazyLayers();
+    const first = vi.fn(() => undefined);
+    kernel.serve("pop", first);
+    kernel.serve("pop", vi.fn());
+    expect(kernel.served("pop")).toBe(first);
+    const order: string[] = [];
+    kernel.hook("applied", 5, () => void order.push("late"));
+    kernel.hook("applied", 1, () => void order.push("early"));
+    kernel.hook("applied", 5, () => void order.push("later"));
+    surface.apply({ version: "", ops: [] });
+    expect(order).toEqual(["early", "late", "later"]);
   });
 });

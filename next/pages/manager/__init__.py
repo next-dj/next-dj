@@ -7,18 +7,17 @@ from __future__ import annotations
 
 import time
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
-from django.template import Context as DjangoTemplateContext, Origin, Template
+from django.template import Origin, Template
 
 from next.caches import PageCache
 from next.components.registry import deferred_components
 from next.deps.cache import render_dep_cache
 from next.pages.access import PageDeclarations
 from next.pages.boundaries import Caught, boundary_scope
-from next.pages.compression import CompressDeclaring, compress_store
-from next.pages.defer import PageDeferDeclaring, page_defer_store
-from next.pages.gating import GATE_KEY, Plan
+from next.pages.declarations import page_declarations
+from next.pages.gating import GATE_KEY, SplitPlan
 from next.pages.loaders import (
     BoundaryChain,
     LayoutTemplateLoader,
@@ -31,15 +30,15 @@ from next.pages.loaders import (
 from next.pages.metadata.registry import PageMetadataRegistry
 from next.pages.metadata.scope import forget_metadata_scope
 from next.pages.paths import clear_page_path_info, forget_page_path_info
+from next.pages.processors import page_context
 from next.pages.registry import PageContextRegistry
 from next.pages.responses import depth_of, purpose_of
-from next.pages.router import RouterDeclaring, router_store
 from next.pages.signals import page_rendered, template_loaded
-from next.pages.transactions import AtomicDeclaring, atomic_store
 from next.ports import render_deferred, static_assets_slot
 from next.seeding import seed_collector
 
 from .bodies import PageBodies
+from .declaring import DeclaringCalls
 from .gating import PageGating
 from .patterns import create_url_pattern
 from .registrations import PageRegistrations
@@ -54,10 +53,18 @@ if TYPE_CHECKING:
 
     from django.http import HttpRequest
     from django.http.response import HttpResponseBase
+    from django.template import Context
     from django.urls import URLPattern
 
     from next.static import StaticCollector
     from next.urls import URLPatternParser
+
+
+class Renderable(Protocol):
+    """A compiled page, or the part of one a render writes in its place."""
+
+    def render(self, context: Context) -> str:
+        """Return what the page or its part writes in `context`."""
 
 
 def defers(chain: BoundaryChain | None = None) -> bool:
@@ -68,16 +75,7 @@ def defers(chain: BoundaryChain | None = None) -> bool:
     return deferred_components.held or (chain is not None and bool(chain.deferred))
 
 
-class Page(
-    PageRegistrations,
-    PageGating,
-    PageBodies,
-    PageDeclarations,
-    AtomicDeclaring,
-    PageDeferDeclaring,
-    CompressDeclaring,
-    RouterDeclaring,
-):
+class Page(PageRegistrations, PageGating, PageBodies, PageDeclarations, DeclaringCalls):
     """Coordinate template loading, context, layouts, rendering, and URL wiring.
 
     Its access declarations bind its own page, and the pages below under `inherit=True`.
@@ -93,7 +91,9 @@ class Page(
         self.epoch = 0
         """The counter a write to the context or the metadata registry moves."""
         self._colours: PageCache[Path, tuple[int, bool, bool]] = PageCache()
-        self._plans: PageCache[Path, tuple[object, int, object, Plan]] = PageCache()
+        self._plans: PageCache[Path, tuple[object, int, object, SplitPlan]] = (
+            PageCache()
+        )
         self._context_manager = PageContextRegistry(on_change=self._recolour)
         self._metadata_registry = PageMetadataRegistry(on_change=self._recolour)
 
@@ -124,19 +124,19 @@ class Page(
     def render_with_static_assets(
         self,
         file_path: Path,
-        template: Template | str,
+        template: Renderable | str,
         context_data: dict[str, object],
         *,
         request: HttpRequest | None = None,
         deferred: bool = False,
     ) -> tuple[str, StaticCollector]:
-        """Render `template` and inject collected static assets.
+        """Render `template`, or the part of a page it stands for, and inject assets.
 
         Deferred calls settle first, so the assets their jobs add are injected too.
         """
         collector = seed_collector(file_path, context_data)
-        compiled = template if isinstance(template, Template) else Template(template)
-        context = DjangoTemplateContext(context_data)
+        compiled = Template(template) if isinstance(template, str) else template
+        context = page_context(context_data, request)
         if deferred or deferred_components.held:
             layer = context.update({})
             html = render_deferred(
@@ -154,7 +154,7 @@ class Page(
     def _render_template_str(
         self,
         file_path: Path,
-        template: Template | str,
+        template: Renderable | str,
         start: float,
         request: HttpRequest | None,
         url_kwargs: Mapping[str, object],
@@ -337,7 +337,7 @@ class Page(
     def render_plain(
         self,
         file_path: Path,
-        template: Template | str,
+        template: Renderable | str,
         request: HttpRequest,
         url_kwargs: Mapping[str, object],
         *,
@@ -346,8 +346,8 @@ class Page(
     ) -> str:
         """Render a page whose plan found no boundary, deferral or async callable.
 
-        `template` is the compiled page, or the layout skeleton a `render()` body fills.
-        Nothing in it can queue a deferred call, so the template renders straight.
+        `template` is the compiled page or a part of it, or the layout skeleton a
+        `render()` body fills. Nothing in it can defer, so it renders straight.
         """
         start = time.perf_counter()
         if isinstance(template, str):
@@ -356,7 +356,7 @@ class Page(
             file_path, request, url_kwargs, None, dep_cache
         )
         collector = seed_collector(file_path, context_data)
-        html = template.render(DjangoTemplateContext(context_data))
+        html = template.render(page_context(context_data, request))
         result = static_assets_slot.get().inject(
             html, collector, page_path=file_path, request=request
         )
@@ -371,11 +371,12 @@ class Page(
         url_kwargs: Mapping[str, object] | None = None,
         *,
         dep_cache: dict[str, Any] | None = None,
-        template: Template | None = None,
+        template: Renderable | None = None,
     ) -> str:
         """Render the page with Django `Template` and the static collector.
 
         The body comes from `template` or a loader, so `render()` is never invoked here.
+        A part of the page stands for its template, as a navigation keeping chrome asks.
         """
         start = time.perf_counter()
         if template is None:
@@ -436,15 +437,13 @@ def reset_page_registrations() -> None:
     reset_module_memo()
     reset_context_registry()
     reset_metadata_registry()
-    atomic_store.reset()
-    page_defer_store.reset()
-    compress_store.reset()
-    router_store.reset()
+    page_declarations.reset()
 
 
 __all__ = [
     "Built",
     "Page",
+    "Renderable",
     "context",
     "defers",
     "page",

@@ -64,6 +64,15 @@ The left column names the Django idiom, the middle column names the shape that t
    * - ``django.test.Client``
      - ``NextClient``, a subclass that adds action and zone helpers
      - :doc:`/content/topics/testing`
+   * - A second view and URL with ``hx-get`` and ``hx-trigger="load"`` for a slow widget
+     - A ``loading.djx`` beside the component, with no view and no URL
+     - :doc:`/content/topics/boundaries/index`
+   * - ``try`` and ``except`` in the view around a widget that can fail
+     - An ``error.djx`` beside the component
+     - :doc:`/content/topics/boundaries/errors`
+   * - ``hx-boost`` or Turbo Drive for navigation without a full reload
+     - The client router, on by default
+     - :doc:`/content/topics/router/index`
    * - A full page reload after every POST
      - A ``{% zone %}`` block the server re-renders on its own
      - :doc:`/content/topics/partial-rendering/index`
@@ -78,10 +87,10 @@ Every file-routed page also gets a generated ``next:page_...`` name that plain `
 What next.dj extends
 --------------------
 
-Two Django subsystems keep working exactly as before and gain an extra source.
+Two Django subsystems keep working exactly as in a stock Django project and gain an extra source.
 
 Template context processors.
-   The processors listed in the first ``TEMPLATES`` entry run for file-routed pages as well.
+   The processors listed in the first ``DjangoTemplates`` entry of ``TEMPLATES`` run for file-routed pages as well.
    Each page backend may add more under its ``OPTIONS.context_processors`` key, and the framework merges both lists with duplicates dropped.
    See :doc:`/content/topics/context` for the merge order.
 
@@ -104,13 +113,14 @@ next.dj adds no middleware to ``MIDDLEWARE`` on its own and no model layer, so t
 - Management commands, caching, signals, and internationalisation follow Django's documentation.
 - Ordinary ``.html`` templates rendered by hand-written views keep rendering.
 - Plain Django views coexist with file-routed pages, see *Coexisting with plain Django views* in :doc:`/content/topics/pages`.
+- A link to a plain Django view loads as a document, since the client router takes over only the links to pages, see :ref:`topics-router-scope`.
 
 Where to start
 --------------
 
 Install the package first, then build the Notes application to see each replacement in a running project.
 :doc:`install` covers the settings block and the single ``include`` line.
-:doc:`tutorial01` starts the six-part walkthrough.
+:doc:`tutorial01` starts the seven-part walkthrough.
 
 .. seealso::
 

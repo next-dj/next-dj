@@ -9,12 +9,12 @@ from django.dispatch import Signal
 import next.signals as framework_signals
 from next.conf import next_framework_settings
 from next.testing import SignalRecorder, capture_signals
-from next.urls import FileRouterBackend, RouterManager, router_manager
+from next.urls import FilePageBackend, RouteManager, route_manager
 from next.urls.signals import (
     intercept_registered,
+    page_backend_loaded,
     route_registered,
-    router_backend_loaded,
-    router_reloaded,
+    routes_reloaded,
 )
 from tests.support import SignalSender, file_router
 
@@ -34,16 +34,16 @@ def capture_intercept_registered() -> Generator[SignalRecorder, None, None]:
 
 
 @pytest.fixture()
-def capture_router_reloaded() -> Generator[SignalRecorder, None, None]:
-    """Record ``router_reloaded`` emissions."""
-    with capture_signals(router_reloaded) as recorder:
+def capture_routes_reloaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``routes_reloaded`` emissions."""
+    with capture_signals(routes_reloaded) as recorder:
         yield recorder
 
 
 @pytest.fixture()
-def capture_router_backend_loaded() -> Generator[SignalRecorder, None, None]:
-    """Record ``router_backend_loaded`` emissions."""
-    with capture_signals(router_backend_loaded) as recorder:
+def capture_page_backend_loaded() -> Generator[SignalRecorder, None, None]:
+    """Record ``page_backend_loaded`` emissions."""
+    with capture_signals(page_backend_loaded) as recorder:
         yield recorder
 
 
@@ -99,7 +99,7 @@ class TestRouteRegisteredSignal:
 
 
 class TestRouteRegisteredFromBackend:
-    """`FileRouterBackend` fires `route_registered` once per yielded pattern."""
+    """`FilePageBackend` fires `route_registered` once per yielded pattern."""
 
     def test_fires_per_yielded_pattern(
         self, capture_route_registered: SignalRecorder
@@ -118,7 +118,7 @@ class TestRouteRegisteredFromBackend:
             list(router._generate_patterns_from_directory(Mock()))
         assert len(capture_route_registered) == 2
         senders = {ev.sender for ev in capture_route_registered}
-        assert senders == {FileRouterBackend}
+        assert senders == {FilePageBackend}
         captured_urls = [ev.kwargs["url_path"] for ev in capture_route_registered]
         assert captured_urls == ["home/", "about/"]
         captured_files = [ev.kwargs["file_path"] for ev in capture_route_registered]
@@ -170,41 +170,41 @@ class TestInterceptRegisteredSignal:
 
 
 class TestRouterReloadedSignal:
-    """``router_reloaded`` signal can be connected to and receives kwargs."""
+    """``routes_reloaded`` signal can be connected to and receives kwargs."""
 
     def test_signal_is_importable(self) -> None:
-        """``router_reloaded`` is a Django Signal exported from ``next.urls.signals``."""
-        assert isinstance(router_reloaded, Signal)
+        """``routes_reloaded`` is a Django Signal exported from ``next.urls.signals``."""
+        assert isinstance(routes_reloaded, Signal)
 
     def test_listener_receives_sent_event(
-        self, capture_router_reloaded: SignalRecorder
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
-        """Manually sending ``router_reloaded`` notifies connected listeners."""
-        router_reloaded.send(sender=object)
-        assert len(capture_router_reloaded) == 1
+        """Manually sending ``routes_reloaded`` notifies connected listeners."""
+        routes_reloaded.send(sender=object)
+        assert len(capture_routes_reloaded) == 1
 
     def test_sender_is_passed_through(
-        self, capture_router_reloaded: SignalRecorder
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
         """The sender argument is preserved in the captured event."""
         sentinel = SignalSender()
-        router_reloaded.send(sender=sentinel)
-        assert capture_router_reloaded.events[0].sender is sentinel
+        routes_reloaded.send(sender=sentinel)
+        assert capture_routes_reloaded.events[0].sender is sentinel
 
     def test_kwargs_are_passed_through(
-        self, capture_router_reloaded: SignalRecorder
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
         """Extra keyword arguments sent with the signal appear in captured events."""
-        router_reloaded.send(sender=object, backend_count=3)
-        assert capture_router_reloaded.events[0].kwargs["backend_count"] == 3
+        routes_reloaded.send(sender=object, backend_count=3)
+        assert capture_routes_reloaded.events[0].kwargs["backend_count"] == 3
 
     def test_multiple_sends_accumulate(
-        self, capture_router_reloaded: SignalRecorder
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
         """Each send appends a new event to the captured list."""
-        router_reloaded.send(sender=object)
-        router_reloaded.send(sender=object)
-        assert len(capture_router_reloaded) == 2
+        routes_reloaded.send(sender=object)
+        routes_reloaded.send(sender=object)
+        assert len(capture_routes_reloaded) == 2
 
     def test_disconnected_after_fixture_teardown(self) -> None:
         """After the fixture tears down, the listener is no longer connected."""
@@ -213,84 +213,84 @@ class TestRouterReloadedSignal:
         def _listener(sender: object, **kwargs) -> None:
             events.append({"sender": sender})
 
-        router_reloaded.connect(_listener)
-        router_reloaded.disconnect(_listener)
-        router_reloaded.send(sender=object)
+        routes_reloaded.connect(_listener)
+        routes_reloaded.disconnect(_listener)
+        routes_reloaded.send(sender=object)
         assert len(events) == 0
 
 
-class TestRouterManagerReloadIntegration:
-    """`RouterManager.reload` emits `router_reloaded` and clears URL caches."""
+class TestRouteManagerReloadIntegration:
+    """`RouteManager.reload` emits `routes_reloaded` and clears URL caches."""
 
-    def test_reload_emits_router_reloaded_once(
-        self, capture_router_reloaded: SignalRecorder
+    def test_reload_emits_routes_reloaded_once(
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
-        """Each `reload` call publishes exactly one `router_reloaded` event."""
-        manager = RouterManager()
+        """Each `reload` call publishes exactly one `routes_reloaded` event."""
+        manager = RouteManager()
         manager.reload()
-        assert len(capture_router_reloaded) == 1
+        assert len(capture_routes_reloaded) == 1
 
-    def test_reload_sender_is_router_manager_class(
-        self, capture_router_reloaded: SignalRecorder
+    def test_reload_sender_is_route_manager_class(
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
-        """The `sender` of a manager-driven event is the `RouterManager` class."""
-        manager = RouterManager()
+        """The `sender` of a manager-driven event is the `RouteManager` class."""
+        manager = RouteManager()
         manager.reload()
-        assert capture_router_reloaded.events[0].sender is RouterManager
+        assert capture_routes_reloaded.events[0].sender is RouteManager
 
     def test_reload_clears_django_url_cache(self) -> None:
         """`reload` invalidates Django URL resolver caches for fresh dispatch."""
         with patch("next.urls.manager.clear_url_caches") as mock_clear:
-            RouterManager().reload()
+            RouteManager().reload()
             mock_clear.assert_called_once()
 
     def test_settings_reload_chain_publishes_event(
-        self, capture_router_reloaded: SignalRecorder
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
         """`next_framework_settings.reload` triggers exactly one router event."""
-        capture_router_reloaded.clear()
+        capture_routes_reloaded.clear()
         next_framework_settings.reload()
-        assert len(capture_router_reloaded) >= 1
-        senders = {event.sender for event in capture_router_reloaded}
-        assert RouterManager in senders
+        assert len(capture_routes_reloaded) >= 1
+        senders = {event.sender for event in capture_routes_reloaded}
+        assert RouteManager in senders
 
-    def test_global_router_manager_reload_is_idempotent(
-        self, capture_router_reloaded: SignalRecorder
+    def test_global_route_manager_reload_is_idempotent(
+        self, capture_routes_reloaded: SignalRecorder
     ) -> None:
         """Two consecutive `reload` calls publish two events with stable state."""
-        router_manager.reload()
-        router_manager.reload()
-        assert len(capture_router_reloaded) >= 2
+        route_manager.reload()
+        route_manager.reload()
+        assert len(capture_routes_reloaded) >= 2
 
 
-class TestRouterBackendLoadedSignal:
-    """`router_backend_loaded` announces each backend a loud reload builds."""
+class TestPageBackendLoadedSignal:
+    """`page_backend_loaded` announces each backend a loud reload builds."""
 
     def test_a_loud_reload_announces_every_configured_backend(
-        self, capture_router_backend_loaded: SignalRecorder
+        self, capture_page_backend_loaded: SignalRecorder
     ) -> None:
-        RouterManager().reload()
+        RouteManager().reload()
 
-        assert [event.sender for event in capture_router_backend_loaded] == [
-            FileRouterBackend
+        assert [event.sender for event in capture_page_backend_loaded] == [
+            FilePageBackend
         ]
 
     def test_the_event_carries_the_instance_and_its_entry(
-        self, capture_router_backend_loaded: SignalRecorder
+        self, capture_page_backend_loaded: SignalRecorder
     ) -> None:
-        manager = RouterManager()
+        manager = RouteManager()
         manager.reload()
 
-        event = capture_router_backend_loaded.events[0]
+        event = capture_page_backend_loaded.events[0]
         assert event.kwargs["instance"] is manager.backends[0]
-        assert event.kwargs["config"]["BACKEND"] == "next.urls.FileRouterBackend"
+        assert event.kwargs["config"]["BACKEND"] == "next.urls.FilePageBackend"
 
     def test_a_quiet_reload_announces_nothing(
-        self, capture_router_backend_loaded: SignalRecorder
+        self, capture_page_backend_loaded: SignalRecorder
     ) -> None:
         """`notify=False` withholds the per-backend announcement too."""
-        manager = RouterManager()
+        manager = RouteManager()
         manager.reload(notify=False)
 
-        assert list(capture_router_backend_loaded) == []
+        assert list(capture_page_backend_loaded) == []
         assert manager.backends

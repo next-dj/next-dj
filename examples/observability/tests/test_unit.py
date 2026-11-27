@@ -34,7 +34,7 @@ from obs.signals import (
     on_page_rendered,
     on_provider_registered,
     on_route_registered,
-    on_router_reloaded,
+    on_routes_reloaded,
     on_settings_reloaded,
     on_template_loaded,
     on_watch_specs_ready,
@@ -345,8 +345,8 @@ RECEIVER_CASES = (
         id="urls_route_registered",
     ),
     pytest.param(
-        ReceiverCase(on_router_reloaded, "urls", "router_reloaded"),
-        id="urls_router_reloaded",
+        ReceiverCase(on_routes_reloaded, "urls", "routes_reloaded"),
+        id="urls_routes_reloaded",
     ),
     pytest.param(
         ReceiverCase(
@@ -459,6 +459,7 @@ class TestContexts:
             "components_rendered": 1,
             "actions_dispatched": 1,
             "html_injections": 4,
+            "boundary_failures": 0,
         }
 
     def test_page_rows_carry_the_mean_beside_the_count_busiest_first(self) -> None:

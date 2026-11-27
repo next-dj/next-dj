@@ -1,21 +1,22 @@
 """The compression façade, backends built on first use, eligibility and negotiation."""
 
 import asyncio
-import functools
 import logging
 import re
 import threading
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Final, cast
+from typing import Final, TypeGuard, cast
 
 import django
 from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
 from django.http.response import HttpResponseBase
 from django.utils.cache import patch_vary_headers
 
+from next.caches import FRAMEWORK, pure_cache
 from next.conf.compression import (
     OPT_OUT,
+    CodecEntry,
     CompressionSettings,
     StreamOwner,
     TopicMode,
@@ -34,11 +35,13 @@ from .backends import CompressionBackend, Compressor, Decoder
 from .errors import CompressionBackendError
 from .negotiation import negotiate
 from .signals import compression_backend_loaded
-from .streams import EVENT_STREAM, StreamEncoding, media_type, padding
+from .streams import EVENT_STREAM, OFFLOAD_BYTES, StreamEncoding, media_type, padding
 
 
 MIDDLEWARE: Final = "next.middleware.CompressionMiddleware"
 GZIP_MIDDLEWARE: Final = "django.middleware.gzip.GZipMiddleware"
+FLUSHING_GZIP: Final = (6, 1)
+"""The Django version whose `GZipMiddleware` flushes each chunk of a stream."""
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +52,11 @@ _FILE: Final = "file_to_stream"
 _IDENTITY: Final = "identity"
 _ACCEPT: Final = "HTTP_ACCEPT_ENCODING"
 _HEAD: Final = "HEAD"
-_WILDCARD: Final = "/*"
+_ANY: Final = "*"
+_ANY_SUFFIXED: Final = "*+"
 _HTML: Final = "text/html"
 _GZIP: Final = "gzip"
 _ACCEPTS_GZIP: Final = re.compile(r"\bgzip\b")
-_FLUSHING_GZIP: Final = (6, 1)
 
 type Exclude = Callable[[HttpRequest, HttpResponseBase], object]
 
@@ -71,8 +74,9 @@ def _refused(
     logger.warning("%s The framework skips it.", error, exc_info=cause)
 
 
-def _load_backend(dotted: str) -> CompressionBackend | None:
-    """Build the backend `dotted` names, `None` for a path that names no backend."""
+def _load_backend(entry: CodecEntry) -> CompressionBackend | None:
+    """Build the backend `entry` names, `None` for a path that names no backend."""
+    dotted = entry.path
     try:
         klass: type[CompressionBackend] = import_backend_class(dotted)
     except ImportError as exc:
@@ -84,7 +88,7 @@ def _load_backend(dotted: str) -> CompressionBackend | None:
         return None
     backend = klass()
     compression_backend_loaded.send(
-        sender=klass, config={"BACKEND": dotted}, instance=backend
+        sender=klass, config=dict(entry.config), instance=backend
     )
     return backend
 
@@ -104,7 +108,7 @@ def _load_exclude(dotted: str | None) -> Exclude | None:
     return target
 
 
-def in_range(value: object, bounds: tuple[int, int] | None) -> bool:
+def in_range(value: object, bounds: tuple[int, int] | None) -> TypeGuard[int]:
     """Whether `value` is an integer within the inclusive `bounds`."""
     return (
         isinstance(value, int)
@@ -113,20 +117,16 @@ def in_range(value: object, bounds: tuple[int, int] | None) -> bool:
     )
 
 
-def _level(backend: CompressionBackend, levels: Mapping[str, int]) -> int:
-    """Return the `LEVELS` entry of the codec, its own default when out of range."""
-    level = levels.get(backend.coding)
-    if level is not None and in_range(level, backend.levels):
-        return level
-    return backend.level
+def _level(backend: CompressionBackend, entry: CodecEntry) -> int:
+    """Return the `LEVEL` option of the entry, the codec default when out of range."""
+    level = entry.level
+    return level if in_range(level, backend.levels) else backend.level
 
 
-def _window(backend: CompressionBackend, windows: Mapping[str, int]) -> int | None:
-    """Return the `WINDOWS` entry of the codec, its own default when out of range."""
-    window = windows.get(backend.coding)
-    if window is not None and in_range(window, backend.windows):
-        return window
-    return backend.window
+def _window(backend: CompressionBackend, entry: CodecEntry) -> int | None:
+    """Return the `WINDOW` option of the entry, the codec default when out of range."""
+    window = entry.window
+    return window if in_range(window, backend.windows) else backend.window
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,18 +142,24 @@ class _State:
     exclude: Exclude | None
 
     def create(self, backend: CompressionBackend) -> Compressor:
-        """Return a stream compressor of `backend` at its level and window."""
+        """Return a stream compressor of `backend` at its level, window and padding."""
         coding = backend.coding
-        return backend.create(self.levels[coding], self.windows[coding])
+        return backend.create(
+            self.levels[coding], self.windows[coding], pad=self.settings.padding
+        )
 
 
 def _build(settings: CompressionSettings) -> _State:
     """Load the `BACKENDS` and pick the available codings `ORDER` offers."""
     loaded: dict[str, CompressionBackend] = {}
-    for dotted in settings.backends:
-        backend = _load_backend(dotted)
-        if backend is not None:
-            loaded.setdefault(backend.coding, backend)
+    levels: dict[str, int] = {}
+    windows: dict[str, int | None] = {}
+    for entry in settings.backends:
+        backend = _load_backend(entry)
+        if backend is not None and backend.coding not in loaded:
+            loaded[backend.coding] = backend
+            levels[backend.coding] = _level(backend, entry)
+            windows[backend.coding] = _window(backend, entry)
     chosen = (loaded.get(coding) for coding in dict.fromkeys(settings.order))
     usable = [b for b in chosen if b is not None and b.available()]
     return _State(
@@ -161,25 +167,51 @@ def _build(settings: CompressionSettings) -> _State:
         loaded=loaded,
         offered=tuple(b.coding for b in usable),
         resetting=tuple(b.coding for b in usable if b.resets),
-        levels={b.coding: _level(b, settings.levels) for b in loaded.values()},
-        windows={b.coding: _window(b, settings.windows) for b in loaded.values()},
+        levels=levels,
+        windows=windows,
         exclude=_load_exclude(settings.exclude),
     )
 
 
-@functools.lru_cache(maxsize=8)
-def _media_sets(types: tuple[str, ...]) -> tuple[frozenset[str], frozenset[str]]:
-    """Split `CONTENT_TYPES` into exact media types and `type/*` families."""
-    cut = len(_WILDCARD)
-    families = frozenset(item[:-cut] for item in types if item.endswith(_WILDCARD))
-    exact = frozenset(item for item in types if not item.endswith(_WILDCARD))
-    return exact, families
+@dataclass(frozen=True, slots=True)
+class _MediaSets:
+    """`CONTENT_TYPES` split into exact types, `type/*` families and `type/*+suffix`."""
+
+    exact: frozenset[str]
+    families: frozenset[str]
+    suffixed: frozenset[tuple[str, str]]
+
+
+@pure_cache(8)
+def _media_sets(types: tuple[str, ...]) -> _MediaSets:
+    """Split `CONTENT_TYPES` by the way each entry matches a media type."""
+    exact: set[str] = set()
+    families: set[str] = set()
+    suffixed: set[tuple[str, str]] = set()
+    for item in types:
+        family, _, subtype = item.partition("/")
+        if subtype == _ANY:
+            families.add(family)
+        elif subtype.startswith(_ANY_SUFFIXED):
+            suffixed.add((family, subtype[len(_ANY) :]))
+        else:
+            exact.add(item)
+    return _MediaSets(frozenset(exact), frozenset(families), frozenset(suffixed))
 
 
 def compressible(media: str, settings: CompressionSettings) -> bool:
-    """Whether `CONTENT_TYPES` lists the media type, exactly or by its family."""
-    exact, families = _media_sets(settings.content_types)
-    return media in exact or media.partition("/")[0] in families
+    """Whether `CONTENT_TYPES` lists the media type, exactly, by family or by suffix.
+
+    `application/*+json` matches every subtype with the structured suffix `+json`.
+    """
+    sets = _media_sets(settings.content_types)
+    if media in sets.exact:
+        return True
+    family, _, subtype = media.partition("/")
+    if family in sets.families:
+        return True
+    plus = subtype.rfind("+")
+    return plus > 0 and (family, subtype[plus:]) in sets.suffixed
 
 
 def _no_transform(response: HttpResponseBase) -> bool:
@@ -217,6 +249,15 @@ def eligible(
         return False
     media = media_type(response.get("Content-Type", ""))
     return (media != EVENT_STREAM or events) and compressible(media, settings)
+
+
+def encodes_documents(settings: CompressionSettings) -> bool:
+    """Whether next.dj encodes a document stream, itself or through its middleware."""
+    return (
+        settings.enabled
+        and compressible(_HTML, settings)
+        and (settings.streams == StreamOwner.SELF or middleware_installed(MIDDLEWARE))
+    )
 
 
 class CompressionManager:
@@ -283,8 +324,6 @@ class CompressionManager:
         if state.exclude is not None and state.exclude(request, response):
             return None
         patch_vary_headers(response, ("Accept-Encoding",))
-        if request.method == _HEAD:
-            return None
         offered = state.resetting if resetting else state.offered
         coding = negotiate(request.META.get(_ACCEPT, ""), offered)
         if coding is None:
@@ -296,16 +335,13 @@ class CompressionManager:
 
         Django's `GZipMiddleware` buffers a stream below 6.1 unless it encodes itself.
         """
-        settings = compression_settings()
         accept = request.META.get(_ACCEPT, "")
-        if settings.enabled and compressible(_HTML, settings):
+        if encodes_documents(compression_settings()):
             coding = negotiate(accept, self._ensure_backends().offered)
-            if coding is not None and (
-                settings.streams == StreamOwner.SELF or middleware_installed(MIDDLEWARE)
-            ):
+            if coding is not None:
                 return coding, False
         if middleware_installed(GZIP_MIDDLEWARE) and _ACCEPTS_GZIP.search(accept):
-            return _GZIP, django.VERSION[:2] < _FLUSHING_GZIP
+            return _GZIP, django.VERSION[:2] < FLUSHING_GZIP
         return None, False
 
     def reset(self) -> None:
@@ -330,23 +366,37 @@ def _mark_encoded(response: HttpResponseBase, coding: str) -> None:
     response.headers["Content-Encoding"] = coding
 
 
+def _mark_unsized(response: HttpResponseBase, coding: str) -> None:
+    """Mark `response` encoded in `coding` and drop the length of the plain body."""
+    del response.headers["Content-Length"]
+    _mark_encoded(response, coding)
+
+
 def _stream_through(
-    response: StreamingHttpResponse, state: _State, backend: CompressionBackend
+    request: HttpRequest,
+    response: StreamingHttpResponse,
+    state: _State,
+    backend: CompressionBackend,
 ) -> None:
-    """Replace the stream of `response` with its encoding, flushed per chunk."""
-    encoding = StreamEncoding(
-        backend.coding,
-        state.create(backend),
-        offload_bytes=state.settings.offload_bytes,
-    )
+    """Replace the stream of `response` with its encoding, each sync chunk flushed.
+
+    An async stream coalesces writes within `COALESCE`, and HEAD keeps its body as is.
+    """
+    _mark_unsized(response, backend.coding)
+    if request.method == _HEAD:
+        return
+    encoding = StreamEncoding(backend.coding, state.create(backend))
     if response.is_async:
+        events = media_type(response.get("Content-Type", "")) == EVENT_STREAM
         source = cast("AsyncIterator[bytes]", response.streaming_content)
-        response.streaming_content = encoding.awrap(source)
+        response.streaming_content = (
+            encoding.awrap(source)
+            if events
+            else encoding.acoalesce(source, state.settings.coalesce)
+        )
     else:
         chunks = cast("Iterator[bytes]", response.streaming_content)
         response.streaming_content = encoding.wrap(chunks)
-    del response.headers["Content-Length"]
-    _mark_encoded(response, backend.coding)
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,10 +411,11 @@ class _Buffered:
     level: int
     body: bytes
     size: int
+    pad: int
 
     def compress(self) -> bytes:
         """Return the body compressed in one shot."""
-        return self.backend.compress_once(self.body, self.level)
+        return self.backend.compress_once(self.body, self.level, pad=self.pad)
 
     def apply(self, compressed: bytes) -> HttpResponse:
         """Keep the compressed body only when it is smaller than the original."""
@@ -389,7 +440,7 @@ def _plan(
             request, response, events=settings.sse
         )
         if streamed is not None:
-            _stream_through(response, *streamed)
+            _stream_through(request, response, *streamed)
         return response
     if not isinstance(response, HttpResponse) or not eligible(
         response, settings, events=settings.sse
@@ -403,8 +454,12 @@ def _plan(
     if found is None:
         return response
     state, backend = found
-    body = content + padding(response.get("Content-Type", ""), state.settings.padding)
-    return _Buffered(response, backend, state.levels[backend.coding], body, size)
+    if request.method == _HEAD:
+        _mark_unsized(response, backend.coding)
+        return response
+    pad = state.settings.padding
+    body = content + padding(response.get("Content-Type", ""), pad)
+    return _Buffered(response, backend, state.levels[backend.coding], body, size, pad)
 
 
 def compress_response(
@@ -419,7 +474,7 @@ def compress_response(
 
 def offloads(data: bytes) -> bool:
     """Whether `data` is above `OFFLOAD_BYTES`, so async code compresses it away."""
-    return len(data) > compression_settings().offload_bytes
+    return len(data) > OFFLOAD_BYTES
 
 
 async def acompress_response(
@@ -459,14 +514,12 @@ def prepare_stream(
         setattr(response, OPT_OUT, False)
         return None
     state, backend = found
-    del response.headers["Content-Length"]
-    _mark_encoded(response, backend.coding)
+    _mark_unsized(response, backend.coding)
     return StreamEncoding(
         backend.coding,
         state.create(backend),
         content_type=content_type,
         pad=settings.padding,
-        offload_bytes=settings.offload_bytes,
         reset=mode == TopicMode.RESET,
     )
 
@@ -496,7 +549,11 @@ def decode_response(response: HttpResponseBase) -> bytes:
     return b"".join(decode(part) for part in cast("Iterable[bytes]", response))
 
 
+FRAMEWORK.attach(forget_compression)
+
+
 __all__ = [
+    "FLUSHING_GZIP",
     "GZIP_MIDDLEWARE",
     "MIDDLEWARE",
     "OPT_OUT",
@@ -506,6 +563,7 @@ __all__ = [
     "compressible",
     "compression_manager",
     "decode_response",
+    "encodes_documents",
     "forget_compression",
     "in_range",
     "offloads",

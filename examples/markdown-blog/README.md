@@ -38,7 +38,7 @@ Nothing is stored in the database, so `migrate` only builds Django's own tables.
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "site")],
             "PAGES_DIR": "pages",

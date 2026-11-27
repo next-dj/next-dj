@@ -1,6 +1,5 @@
 """Interpolation of `{{ expr }}` inside the string a template tag argument holds."""
 
-import functools
 import re
 
 from django import template
@@ -11,6 +10,8 @@ from django.template.base import (
     render_value_in_context,
 )
 from django.template.defaultfilters import register as default_filters
+
+from next.caches import SETTINGS, memo, pure_cache
 
 
 _INTERPOLATION = re.compile(r"\{\{(.*?)\}\}")
@@ -78,9 +79,12 @@ def interpolated(parser: Parser, expr: FilterExpression) -> Interpolation | None
     return _compile(literal, parser)
 
 
-@functools.cache
+@memo(SETTINGS)
 def _blank_template() -> template.Template:
-    """Return the empty template a scope binds, so a missing name reads as invalid."""
+    """Return the empty template a scope binds, so a missing name reads as invalid.
+
+    It pins the default engine, so a `TEMPLATES` change builds it again.
+    """
     return template.Template("")
 
 
@@ -91,7 +95,7 @@ def scoped(data: dict[str, object]) -> template.Context:
     return context
 
 
-@functools.lru_cache(maxsize=_COMPILE_MEMO_MAX_ENTRIES)
+@pure_cache(_COMPILE_MEMO_MAX_ENTRIES)
 def interpolation_of(text: str) -> Interpolation | None:
     """Return the interpolation of a plain string outside any template, else None.
 

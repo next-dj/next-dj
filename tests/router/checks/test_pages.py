@@ -4,8 +4,8 @@ from unittest import mock
 
 import pytest
 
+from next.pages.declarations import page_declarations
 from next.pages.loaders import load_python_module_memo
-from next.pages.router import router_store
 from next.router.checks import (
     check_no_store_pages,
     check_router_declarations,
@@ -45,19 +45,19 @@ class TestNoStorePages:
 
 
 class TestDeclarations:
-    """`next.E238` names a `page.router()` call that applies nothing."""
+    """`next.E238` names a `page.router()` call made outside a `page.py`."""
 
     @pytest.fixture(autouse=True)
     def _fresh(self) -> Iterator[None]:
-        router_store.reset()
+        page_declarations.reset()
         yield
-        router_store.reset()
+        page_declarations.reset()
 
-    def test_a_bad_call_and_a_misplaced_one(self, tmp_path: Path) -> None:
+    def test_a_misplaced_call(self, tmp_path: Path) -> None:
         load_python_module_memo(
             write_file(
                 tmp_path / "a" / "page.py",
-                "from next.pages import page\npage.router(prefetch='no')\n",
+                "from next.pages import page\npage.router(prefetch=False)\n",
             )
         )
         load_python_module_memo(
@@ -65,7 +65,6 @@ class TestDeclarations:
                 tmp_path / "helpers.py", "from next.pages import page\npage.router()\n"
             )
         )
-        messages = check_router_declarations()
-        assert [message.id for message in messages] == ["next.E238", "next.E238"]
-        assert "prefetch='no' is no bool" in messages[0].msg
-        assert "outside a page.py" in messages[1].msg
+        (message,) = check_router_declarations()
+        assert message.id == "next.E238"
+        assert "outside a page.py" in message.msg

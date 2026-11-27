@@ -296,9 +296,13 @@ A target off that origin is refused before any request leaves, with a ``partial:
      - Pagination
      - ``append`` or ``prepend``, the merge intent.
    * - ``X-Next-Version``
-     - Every request once a version is learned
-     - The asset version the client holds.
-       The first request of a page asserts none.
+     - Every request of a page whose payload names a version
+     - The asset version the page was rendered with, read from ``$version`` of the init payload, so the first request after a deploy asserts it too.
+       A safe zone request naming another version answers an empty ``409``.
+   * - ``X-Next-Protocol``
+     - Every request
+     - The wire protocol the runtime speaks, ``PROTOCOL`` of ``next.partial.stream``.
+       A zone request naming another answers an empty ``409``, and a hello frame or a ``$protocol`` payload naming another makes the runtime reload the page once.
    * - ``X-Next-Request-Id``
      - Every non-abortable mutation
      - The ring id used to suppress an SSE echo.
@@ -371,7 +375,7 @@ The partial set is ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version, 
    * - Streamed document
      - The partial set, ``Accept``, and ``Accept-Encoding``.
    * - Zone response
-     - The partial set, ``Accept`` on a ``GET`` or ``HEAD`` because a zone read may answer a stream by it, and ``X-Next-Origin`` while the active-link pass of ``ROUTER["CURRENT"]`` marks the links against the origin.
+     - The partial set, ``Accept`` on a ``GET`` or ``HEAD`` because a zone read may answer a stream by it, and ``X-Next-Origin`` while the active-link pass of ``ROUTER["ACTIVE_LINKS"]`` marks the links against the origin.
        The 400 and 409 short-circuits and the refusal of an intercept carry the partial set, plus ``X-Next-Origin`` under the active-link pass.
    * - Streamed zone response
      - The partial set, ``Accept``, ``Accept-Encoding``, and ``X-Next-Origin`` under the active-link pass.
@@ -451,7 +455,7 @@ When the list has no next batch, the zone holds the ``{% empty %}`` branch in a 
 Both carry ``data-next-key="<zone>-more"``, so an ``append`` merge swaps one for the other.
 The ``<zone>-more`` zone is declared like any ``{% zone %}`` of the template, so a zone request names it beside the list zone.
 The runtime counts a zone request as a batch of the list only when its URL is the ``href`` of the link and its zones are exactly the ``data-next-target`` of the link.
-Any other request that names the same zones, a live filter among them, is an ordinary zone request that stamps no row, prunes nothing and writes no ``restore=1``, whatever order it lists the zones in.
+Any other request that names the same zones, a live filter among them, is an ordinary zone request that stamps no row, prunes nothing and writes no ``_restore``, whatever order it lists the zones in.
 
 ``{% more zone="<zone>" previous=<expr> %}label{% empty %}start{% endmore %}``, placed above the list, renders the zone ``<zone>-less`` the same way, with a visible link to the batch before the list.
 It defaults to ``merge="prepend"`` and ``mode="manual"``, so the earlier batch lands above the rows on a click and a page opened at the top never fetches on its own.
@@ -508,7 +512,7 @@ Any other value is a template bug, so the tag raises ``TemplateSyntaxError`` at 
    * - ``url``
      - None
      - ``replace`` or ``push``, written as ``data-next-url``.
-       After each fetched batch the runtime writes ``?<param>=<token>&restore=1`` into the address bar with ``replaceState`` or ``pushState``, so a reload or a shared link restores the window.
+       After each fetched batch the runtime writes ``?<param>=<token>&_restore=<param>`` into the address bar with ``replaceState`` or ``pushState``, so a reload or a shared link restores the window.
        The write does not count as a page view.
        Only a ``next=`` tag takes it.
 
@@ -564,10 +568,10 @@ The template loops over the window and passes it to both tags.
    * - Pager
      - Query
      - Rows
-   * - ``NumberPager(*, param="page", per_page=20, count=False)``
+   * - ``NumberPager(*, param="page", per_page=20, count=False, max_restore=10)``
      - ``?page=N``
      - A queryset or a sequence in its own order, read in one slice that runs one row past the window.
-   * - ``KeysetPager(ordering, *, param="cursor", per_page=20, count=False, max_token=512)``
+   * - ``KeysetPager(ordering, *, param="cursor", per_page=20, count=False, max_token=512, max_restore=10)``
      - ``?cursor=<token>``
      - A queryset, which the pager filters past the position of the token and orders itself, or a sequence of model instances already in the ordering, which it bisects without a query.
 
@@ -588,9 +592,9 @@ A ``NumberPager`` reads its page as follows.
    * - No page, or a value that is not ASCII digits naming a page from 1 that a database offset can address
      - Page 1.
    * - ``?page=N``
-     - Page ``N`` alone, and an empty window with no next and no previous batch when ``N`` lies past the last row.
-   * - ``?page=N&restore=1``
-     - Pages ``max(1, N - MAX_RESTORE + 1)`` to ``N``, ending on the last page that holds a row.
+     - Page ``N`` alone, and when ``N`` lies past the last row an empty window with no next batch whose previous batch is the last page, which one more query counts.
+   * - ``?page=N&_restore=page``
+     - Pages ``max(1, N - max_restore + 1)`` to ``N``, ending on the last page that holds a row, or the empty window above when none does.
 
 A ``KeysetPager`` pages by the position of a row under a total ordering.
 The ordering is a sequence of field names, a leading ``-`` for descending, as in ``("-created", "-pk")``.
@@ -612,8 +616,8 @@ A sequence whose rows are not model instances raises ``TypeError``.
      - The batch after the position of the token.
    * - ``?cursor=<token>`` from ``previous``
      - The batch before the position of the token.
-   * - ``?cursor=<token>&restore=1``
-     - The batch the token names with the whole batches before it, ``MAX_RESTORE`` batches at most.
+   * - ``?cursor=<token>&_restore=cursor``
+     - The batch the token names with the whole batches before it, ``max_restore`` batches at most.
 
 A token holds a direction and the values of the ordering columns of one row, written as unpadded base64url of compact JSON.
 It is neither signed nor encrypted, so a visitor can read those values and write a position of their own.
@@ -621,7 +625,7 @@ Such a position moves the window within the rows the queryset already serves and
 Each value is converted and validated by its model field before it reaches the query, and a datetime carries a time zone exactly when ``USE_TZ`` is on.
 A token that is malformed, longer than ``max_token`` characters, or holds a value its column refuses reads the first batch instead of raising.
 A row whose token would run past ``max_token`` raises ``ValueError`` when the window is built.
-``encode(values, *, reverse)`` and ``decode(token)`` are the two methods a subclass overrides to sign or shorten tokens, and a ``Pager`` subclass that implements ``plan`` and returns the ``Plan`` of its window pages by a scheme of its own, ``window`` and ``awindow`` running that plan, see :doc:`/content/ref/partial` and :doc:`/content/howto/page-a-list-by-cursor`.
+``encode(values, *, reverse)`` and ``decode(token)`` are the two methods a subclass overrides to sign or shorten tokens, and a ``Pager`` subclass that implements ``plan`` and returns the ``WindowPlan`` of its window pages by a scheme of its own, ``window`` and ``awindow`` running that plan, see :doc:`/content/ref/partial` and :ref:`topics-partial-rendering-reference-tokens`.
 
 Windows
 ~~~~~~~
@@ -660,9 +664,9 @@ A prune drops whole batches from the top, never the last one, and writes the tok
 Restored windows
 ~~~~~~~~~~~~~~~~
 
-``url=`` writes ``?<param>=<token>&restore=1`` after each fetched batch, with the token that fetched it.
-A request for that address renders the batch the token names together with the batches before it, ``DEFER["MORE"]["MAX_RESTORE"]`` batches at most, ten by default, so a long scroll costs a bounded read.
-Only the value ``1`` flags a restore, and both tags drop ``restore`` from the links they render.
+``url=`` writes ``?<param>=<token>&_restore=<param>`` after each fetched batch, with the token that fetched it.
+A request for that address renders the batch the token names together with the batches before it, ``max_restore`` batches of the pager at most, ten by default, so a long scroll costs a bounded read.
+Only a value naming the parameter of the pager flags a restore, so the flag of another list on the page reads one batch, and both tags drop ``_restore`` from the links they render.
 
 A ``NumberPager`` reads the restored pages in its one slice.
 A ``KeysetPager`` reads the batch after the position and the rows before it in two bounded queries.
@@ -672,6 +676,158 @@ A restored window that starts below the top of the list is grown back by the ``p
 
 ``next.E235`` reports a ``{% more %}`` with ``prune=`` or ``url=`` on a page where no context callable a render runs, its own or one it inherits, takes an ``Annotated[Paging, <pager>]``, since the written restore address would render a single batch.
 ``next.E236`` reports two distinct pagers of one page that read the same query parameter, since each list would page by the token of the other.
+
+.. _topics-partial-rendering-reference-tokens:
+
+Signed and shortened tokens
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A token is unpadded base64url of compact JSON that holds a direction and the values of the ordering columns of one row.
+It is neither signed nor encrypted.
+A visitor can therefore read those values and write a position of their own, which moves the window within the rows the queryset already serves and reaches no other row.
+Each value is converted and validated by its model field before it reaches the query, and a token the pager cannot read falls back to the first batch instead of raising.
+
+``encode()`` and ``decode()`` are the two methods to override when that default does not fit.
+``encode(values, *, reverse)`` receives the column values of a row and the direction, and returns the token.
+``decode(token)`` returns the direction and the raw values, or ``None`` for a token it refuses.
+A token contains no whitespace, since the tokens of a restored window travel space-separated in one attribute, and it stays within ``max_token`` characters, 512 unless the pager is built with another cap.
+
+Signing stops a visitor from writing positions, which matters when the ordering column is a value the page does not otherwise show.
+
+.. code-block:: python
+   :caption: feed/paging.py
+
+   from typing import override
+
+   from django.core import signing
+
+   from next.partial import KeysetPager
+
+   class SignedPager(KeysetPager):
+       signer = signing.Signer(salt="feed.cursor")
+
+       @override
+       def encode(self, values: tuple[object, ...], *, reverse: bool) -> str:
+           return self.signer.sign(super().encode(values, reverse=reverse))
+
+       @override
+       def decode(self, token: str) -> tuple[bool, tuple[object, ...]] | None:
+           try:
+               raw = self.signer.unsign(token)
+           except signing.BadSignature:
+               return None
+           return super().decode(raw)
+
+A signature hides nothing, so a column that must stay secret calls for encryption in the same two methods.
+A token signed under a key that has since left ``SECRET_KEY`` and ``SECRET_KEY_FALLBACKS`` reads the first batch, like any other token the pager refuses.
+
+A list ordered by one integer column fits a far shorter token.
+
+.. code-block:: python
+   :caption: feed/paging.py
+
+   class IdPager(KeysetPager):
+       def __init__(self, *, per_page: int = 20) -> None:
+           super().__init__(("pk",), per_page=per_page)
+
+       @override
+       def encode(self, values: tuple[object, ...], *, reverse: bool) -> str:
+           return f"{'b' if reverse else 'a'}{values[0]}"
+
+       @override
+       def decode(self, token: str) -> tuple[bool, tuple[object, ...]] | None:
+           head, digits = token[:1], token[1:]
+           if head not in {"a", "b"} or not (digits.isascii() and digits.isdecimal()):
+               return None
+           return head == "b", (int(digits),)
+
+The pager checks what ``decode()`` returns the same way it checks the default, one value per ordering column, each converted by its field, so a codec only has to parse.
+
+Pagers of another scheme
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+A list that pages by neither a number nor a position subclasses ``Pager``.
+The subclass implements ``plan(rows, request)``, which returns a ``WindowPlan``, and keeps no request state, since one instance serves every render.
+A plan holds the slices the window reads and a ``finish`` step that builds the ``Window`` from what they fetched, and it reads nothing itself.
+``window`` and ``awindow`` are the base class's own, one running the plan on the thread and the other awaiting it, so a pager written this way serves a sync and an async callable with the decision written once.
+A directory that loads one initial letter at a time is such a scheme.
+
+.. code-block:: python
+   :caption: people/paging.py
+
+   import string
+   from functools import partial
+   from typing import override
+
+   from django.db.models import QuerySet
+   from django.http import HttpRequest
+
+   from next.partial import PagedRows, Pager, Window, WindowPlan
+
+   LETTERS = string.ascii_lowercase
+
+   class LetterPager(Pager):
+       def __init__(self, field: str, *, param: str = "letter") -> None:
+           super().__init__(param=param, per_page=1, count=False)
+           self.field = field
+
+       def _letter(self, request: HttpRequest | None) -> str:
+           raw = "" if request is None else request.GET.get(self.param, "")
+           return raw if len(raw) == 1 and raw in LETTERS else LETTERS[0]
+
+       @override
+       def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> WindowPlan[T]:
+           if not isinstance(rows, QuerySet):
+               msg = "LetterPager pages a queryset."
+               raise TypeError(msg)
+           letter = self._letter(request)
+           lookup = {f"{self.field}__istartswith": letter}
+           section = rows.filter(**lookup).order_by(self.field, "pk")
+           return WindowPlan((section,), None, partial(self._finish, letter))
+
+       def _finish[T](
+           self, letter: str, fetched: list[list[T]], count: int | None
+       ) -> Window[T]:
+           [found] = fetched
+           at = LETTERS.index(letter)
+           following = LETTERS[at + 1] if at + 1 < len(LETTERS) else None
+           return Window(
+               rows=found,
+               param=self.param,
+               next=following,
+               previous=LETTERS[at - 1] if at else None,
+               back=letter if following else None,
+           )
+
+The base constructor checks ``param`` and ``per_page``, and a window of this pager is one section, so ``per_page`` is ``1``.
+The first field of the plan, ``slices``, holds one queryset here, the section of the letter, and the second, ``total``, holds the source to count or ``None`` for no count, which the pager here never asks.
+``finish`` receives the rows of each slice in order and the count, and returns the window.
+A query value the pager does not recognise reads the first window, as the shipped pagers do, and ``request`` is ``None`` for a render without a request.
+
+The fields of the ``Window`` are the contract with ``{% more %}``.
+``next`` and ``previous`` are the tokens of the batches around the rows, ``None`` where the list ends, and ``has_next()`` and ``has_previous()`` answer whether each is set.
+``back`` is the token of the batch right before the one ``next`` fetches, here the letter of the window itself, and ``prune=`` reads it to point the link above the list at the right batch once rows are dropped.
+A pager that also serves ``url=`` reads ``_restore=<param>`` from the query, renders the batches before the token up to its ``max_restore``, and fills ``backs`` with the same token for every batch after the first.
+``LetterPager`` leaves that out, so a reload of a restored address renders the one section its letter names and the link above it loads the earlier ones.
+
+The callable and the template use it like a shipped pager.
+
+.. code-block:: python
+   :caption: people/pages/people/page.py
+
+   from typing import Annotated
+
+   from people.models import Person
+   from people.paging import LetterPager
+
+   from next import context
+   from next.partial import Paging, Window
+
+   directory = LetterPager("name")
+
+   @context("people")
+   def people(page: Annotated[Paging, directory]) -> Window[Person]:
+       return page.paginate(Person.objects.all())
 
 Attributes
 ----------
@@ -762,7 +918,7 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from its par
      - The same token for every batch of a restored window after its first, space-separated, written by ``{% more %}`` from the ``backs`` of a ``Window``.
    * - ``data-next-url``
      - Pagination link
-     - ``replace`` or ``push``, how the runtime writes ``?<param>=<token>&restore=1`` after each fetched batch, written by ``{% more %}`` from its ``url=`` option.
+     - ``replace`` or ``push``, how the runtime writes ``?<param>=<token>&_restore=<param>`` after each fetched batch, written by ``{% more %}`` from its ``url=`` option.
    * - ``data-next-batch``
      - List rows
      - Written by the runtime on every row of a list whose link sets ``prune=`` or ``url=``, the batch the row arrived in, read back to drop whole batches.

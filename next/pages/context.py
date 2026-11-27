@@ -8,7 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, override
 
-from next.deps import RESERVED_KEYS, DependencyResolver, RegisteredParameterProvider
+from next.deps import (
+    READS_NOTHING,
+    RESERVED_KEYS,
+    ContextReads,
+    DependencyResolver,
+    RegisteredParameterProvider,
+)
 from next.deps.objects import names_object
 
 
@@ -16,7 +22,7 @@ if TYPE_CHECKING:
     import inspect
 
     from next.deps import ResolutionContext
-    from next.deps.plan import ParameterFiller
+    from next.deps.plan import ParameterFiller, Reach
     from next.static.serializers import JsContextSerializer
 
 
@@ -66,6 +72,20 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
         return isinstance(param.default, Context)
 
     @override
+    def static_reads(self, param: inspect.Parameter) -> ContextReads:
+        """Read the key the marker names, or what its callable source reads."""
+        marker: Context = param.default
+        source = marker.source
+        if source is None or isinstance(source, str):
+            key = param.name if source is None else source
+            if key in RESERVED_KEYS:
+                return READS_NOTHING
+            return ContextReads(keys=frozenset({key}))
+        if callable(source):
+            return ContextReads(calls=((None, source),))
+        return READS_NOTHING
+
+    @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Fill the parameter through the same filler the plan compiler builds for it.
 
@@ -80,6 +100,13 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
         """Block only for a callable source, as a key or a constant reads memory."""
         marker: Context = param.default
         return callable(marker.source)
+
+    @override
+    def static_reach(self, param: inspect.Parameter) -> tuple[Reach, ...]:
+        """Name a callable source, resolved inline and memoised under no key."""
+        marker: Context = param.default
+        source = marker.source
+        return ((None, source),) if callable(source) else ()
 
     @override
     def compile_resolve(self, param: inspect.Parameter) -> ParameterFiller:
@@ -146,6 +173,11 @@ class ContextByNameProvider(RegisteredParameterProvider):
         if param.name in RESERVED_KEYS or names_object(param.annotation):
             return False
         return None
+
+    @override
+    def static_reads(self, param: inspect.Parameter) -> ContextReads:
+        """Read the key the parameter is named after."""
+        return ContextReads(keys=frozenset({param.name}))
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

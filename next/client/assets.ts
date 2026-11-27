@@ -4,13 +4,15 @@
 // visit under a reload-once flag, so a stale CDN cannot loop the page.
 
 import { defaultClock, defaultNavigate, defaultSession } from "./adapters";
-import { assetLoad, isAsset } from "./apply";
+import { isAsset } from "./apply";
 import type { Asset, AssetLoad } from "./apply";
-import { sameOrigin, scriptNonce } from "./protocol";
+import { ATTR_STREAMED, sameOrigin, scriptNonce } from "./protocol";
 import type { PartialError } from "./protocol";
 import type { Clock, Navigate } from "./wire";
 
 const RELOAD_FLAG = "next:partial:reloaded";
+// Kept apart from RELOAD_FLAG, and held until a page boots on a matching release.
+const STALE_FLAG = "next:partial:stale";
 const CSS_TIMEOUT_MS = 3000;
 
 type Waiters = ((ok: boolean) => void)[];
@@ -71,14 +73,23 @@ export interface Assets {
   loadJs(manifest: readonly Asset[]): void;
   /** The current asset version known to the client, sent on every request. */
   version(): string;
+  /** Take the version the init payload names, the one the first request asserts. */
+  pin(version: string): void;
+  /**
+   * Record whether the server speaks this runtime's release, reloading once if not.
+   *
+   * A page that still mismatches after the reload reports it and stays put.
+   */
+  release(current: boolean): void;
   /**
    * Compare the envelope version against the known one, true meaning do not apply.
    *
    * A mismatch starts a full visit under the reload-once flag, or fires partial:error.
    */
   versionMismatch(envelopeVersion: string, url: string, zones?: string[]): boolean;
-  /** Record the version of an applied envelope and clear the reload-once flag. */
+  /** Clear the reload-once flag once a versioned envelope has applied. */
   acceptVersion(envelopeVersion: string): void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -121,6 +132,8 @@ export function createAssets(deps: AssetsDeps): Assets {
   // Whether this instance has taken its one baseline scan. A delta can arrive
   // before seed(), and an unseeded registry would re-insert the whole manifest.
   let seeded = false;
+  // Set from a catch-up scan until the task that took it ends.
+  let scanned = false;
 
   function seed(): void {
     seeded = true;
@@ -144,8 +157,11 @@ export function createAssets(deps: AssetsDeps): Assets {
       seed();
       return;
     }
-    if (unwatch === undefined) return;
+    if (unwatch === undefined || scanned) return;
     scan();
+    // The CSS and the JS phase of one apply share the scan the first one took.
+    scanned = true;
+    queueMicrotask(() => (scanned = false));
     if (doc.readyState !== "loading") unwatch();
   }
 
@@ -157,7 +173,7 @@ export function createAssets(deps: AssetsDeps): Assets {
       catchUp();
       run();
     };
-    if (doc.readyState !== "loading" || doc.querySelector("[data-next-streamed]")) {
+    if (doc.readyState !== "loading" || doc.querySelector(`[${ATTR_STREAMED}]`)) {
       parsed();
       return;
     }
@@ -202,7 +218,7 @@ export function createAssets(deps: AssetsDeps): Assets {
   // The verb an entry asks for, undefined when it is malformed or its kind has none.
   function verbOf(asset: Asset): AssetLoad | undefined {
     if (!isAsset(asset)) return undefined;
-    return assetLoad(asset.kind, asset.load, asset.inline);
+    return asset.load;
   }
 
   function insertStyle(body: string): void {
@@ -316,12 +332,13 @@ export function createAssets(deps: AssetsDeps): Assets {
     url: string,
     zones?: string[],
   ): boolean {
-    if (envelopeVersion === "" || envelopeVersion === knownVersion) return false;
-    if (knownVersion === "") {
-      // The first envelope teaches the live version, nothing to be out of sync yet.
-      knownVersion = envelopeVersion;
+    // A page whose payload names no version asserts none, as on the server.
+    if (
+      envelopeVersion === "" ||
+      knownVersion === "" ||
+      envelopeVersion === knownVersion
+    )
       return false;
-    }
     const target = sameOrigin(url, doc);
     if (target === undefined) {
       fail("cross-origin reload refused", zones, url);
@@ -339,10 +356,19 @@ export function createAssets(deps: AssetsDeps): Assets {
     return true;
   }
 
+  // The version is the payload's, never taught by a reply, so only the flag clears.
   function acceptVersion(envelopeVersion: string): void {
-    if (envelopeVersion === "") return;
-    knownVersion = envelopeVersion;
-    clearFlag();
+    if (envelopeVersion !== "") clearFlag();
+  }
+
+  function release(current: boolean): void {
+    if (current) session.remove(STALE_FLAG);
+    else if (session.get(STALE_FLAG) === "1")
+      fail("the runtime is from another release than the server");
+    else {
+      session.set(STALE_FLAG, "1");
+      navigate(doc.location.href);
+    }
   }
 
   function readFlag(): boolean {
@@ -357,14 +383,19 @@ export function createAssets(deps: AssetsDeps): Assets {
     session.remove(RELOAD_FLAG);
   }
 
-  return {
+  const exposed = {
     seed,
     loadCss,
     loadJs,
     version: () => knownVersion,
+    pin: (version) => void (knownVersion = version),
+    release,
     versionMismatch,
     acceptVersion,
-    _reset() {
+  } satisfies Omit<Assets, "_reset"> as Assets;
+
+  TEST: {
+    exposed._reset = () => {
       // A discarded instance must stop watching a document it no longer seeds.
       // seeded stays set, since a rescan here would read that same document.
       unwatch?.();
@@ -374,8 +405,10 @@ export function createAssets(deps: AssetsDeps): Assets {
       deferred.clear();
       loaded.clear();
       knownVersion = "";
-    },
-  };
+    };
+  }
+
+  return exposed;
 }
 
 // An empty url resolves to the document itself, so such an entry would fetch

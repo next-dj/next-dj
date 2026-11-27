@@ -1,34 +1,33 @@
 """Partial-request headers, intent parsing, and Vary stamping."""
 
 import enum
-import functools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
 
 from django.http import HttpResponse
 from django.utils.cache import patch_vary_headers
 
+from next.caches import pure_cache
 from next.conf.sentinels import UNSET
-from next.defer import Depth
+from next.requests import PrefetchDepth
 from next.utils import request_header
+from next.wire import REQUEST_FLAG
 
 
 if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponseBase
 
 
-REQUEST_FLAG = "X-Next-Request"
 ZONE = "X-Next-Zone"
 VALIDATE = "X-Next-Validate"
 MERGE = "X-Next-Merge"
 VERSION = "X-Next-Version"
+PROTOCOL = "X-Next-Protocol"
 REQUEST_ID = "X-Next-Request-Id"
 ORIGIN = "X-Next-Origin"
 
 # The response echoes the version under the same name the request asserts it.
 RESPONSE_VERSION = VERSION
-RESPONSE_FORM = "X-Next-Form"
-RESPONSE_ACTION = "X-Next-Action"
 
 CONTENT_TYPE = "application/vnd.next.patches+json"
 ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9"
@@ -36,6 +35,12 @@ STREAM_ACCEPT = "text/event-stream, application/json;q=0.9"
 EVENT_STREAM = "text/event-stream"
 
 BOUNDARY = "X-Next-Boundary"
+STREAM = "X-Next-Stream"
+"""The response header a `DEBUG` server names the delivery of a page by."""
+
+BOUNDARIES = "X-Next-Boundaries"
+"""The response header listing the boundaries a `DEBUG` page streams."""
+
 SEC_FETCH_SITE = "Sec-Fetch-Site"
 
 NAVIGATE = "X-Next-Navigate"
@@ -59,7 +64,16 @@ STREAM_VARY: tuple[str, ...] = ("Accept",)
 _INTENT_ATTR = "_next_partial_intent"
 _JSON = "application/json"
 _RANKED = frozenset({EVENT_STREAM, _JSON})
-_WIRE_DEPTHS: Final[dict[str, Depth]] = {"1": Depth.SHELL, "full": Depth.FULL}
+PREFETCH_SHELL: Final = "1"
+"""The `X-Next-Prefetch` value asking for the shell of a page, its jobs skipped."""
+
+PREFETCH_FULL: Final = "full"
+"""The `X-Next-Prefetch` value asking for the whole page, as a navigation would."""
+
+_WIRE_DEPTHS: Final[dict[str, PrefetchDepth]] = {
+    PREFETCH_SHELL: PrefetchDepth.SHELL,
+    PREFETCH_FULL: PrefetchDepth.FULL,
+}
 
 
 class MergeMode(enum.StrEnum):
@@ -73,9 +87,7 @@ class MergeMode(enum.StrEnum):
 class PartialIntent:
     """Parsed partial-request headers naming what the client asks for.
 
-    Without the `X-Next-Request` switch every derived field stays empty. `layouts` is
-    the raw declaration of a navigation, `prefetch` the depth a router prefetch wants,
-    always full for a zone, since a layer shows the answer as it arrives.
+    Without the `X-Next-Request` switch every derived field stays empty.
     """
 
     partial: bool = False
@@ -83,11 +95,12 @@ class PartialIntent:
     validate_fields: tuple[str, ...] = ()
     merge: "MergeMode | None" = None
     version: str | None = None
+    protocol: str | None = None
     request_id: str | None = None
     origin: str | None = None
     navigate: bool = False
     layouts: str | None = None
-    prefetch: Depth | None = None
+    prefetch: PrefetchDepth | None = None
 
 
 # Every field is immutable and empty, so non-partial requests share one instance.
@@ -125,11 +138,12 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
         validate_fields=_split_names(request_header(request, VALIDATE)),
         merge=_parse_merge(request_header(request, MERGE)),
         version=request_header(request, VERSION),
+        protocol=request_header(request, PROTOCOL),
         request_id=request_header(request, REQUEST_ID),
         origin=request_header(request, ORIGIN),
         navigate=navigate,
         layouts=request_header(request, LAYOUTS) if navigate else None,
-        prefetch=Depth.FULL if zones and depth is not None else depth,
+        prefetch=PrefetchDepth.FULL if zones and depth is not None else depth,
     )
 
 
@@ -148,7 +162,7 @@ def is_partial_request(request: "HttpRequest") -> bool:
     return partial_intent(request).partial
 
 
-@functools.lru_cache(maxsize=256)
+@pure_cache(256)
 def _varied(held: str | None, names: tuple[str, ...]) -> str:
     """Return the `Vary` value `patch_vary_headers` leaves a response holding `held`."""
     carrier = HttpResponse()

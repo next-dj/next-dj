@@ -6,9 +6,9 @@ import pytest
 from django.template import Context, Template, engines
 from django.template.engine import Engine
 
+from next.caches import ROUTES
 from next.components import components_manager
 from next.components.backends import FileComponentsBackend
-from next.utils import forget_resolved_trees
 
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ class TestBenchColdComponentTag:
 
         def setup() -> tuple[tuple[Context], dict[str, object]]:
             components_manager.clear_template_caches()
-            forget_resolved_trees()
+            ROUTES.move()
             return (context,), {}
 
         benchmark.pedantic(
@@ -106,7 +106,7 @@ class TestBenchColdComponentTag:
 
         def setup() -> tuple[tuple[Context], dict[str, object]]:
             components_manager.clear_template_caches()
-            forget_resolved_trees()
+            ROUTES.move()
             return (context,), {}
 
         benchmark.pedantic(

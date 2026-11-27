@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
-from next.ports import run_bridged
+from next.bridge import drive
+from next.bridge.loop import running_loop
 
 from .cache import _CACHE_MISS, RequestMemo, request_memo
 from .errors import DependencyCycleError
@@ -30,14 +31,6 @@ join_waits: ContextVar[
     Callable[[RequestScope], AbstractContextManager[None]] | None
 ] = ContextVar("next_deps_scope_join_waits", default=None)
 """What a wait on a key pending elsewhere runs inside, given the root scope."""
-
-
-def running_loop() -> asyncio.AbstractEventLoop | None:
-    """Return the event loop the calling thread runs, `None` on a thread without one."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
 
 
 def _throw(error: BaseException, traceback: TracebackType | None) -> NoReturn:
@@ -413,13 +406,7 @@ async def _scoped[T](seed: Mapping[str, object], work: Callable[[], Awaitable[T]
 
 def bridged_scope[T](seed: Mapping[str, object], work: Callable[[], Awaitable[T]]) -> T:
     """Await `work` through the bridge from sync code, in a render scope of its own."""
-    return run_bridged(partial(_scoped, seed, work))
+    return drive(partial(_scoped, seed, work))
 
 
-__all__ = [
-    "RequestScope",
-    "bridged_scope",
-    "join_waits",
-    "render_scope",
-    "running_loop",
-]
+__all__ = ["RequestScope", "bridged_scope", "join_waits", "render_scope"]

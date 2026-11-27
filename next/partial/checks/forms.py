@@ -5,13 +5,13 @@ import inspect
 import textwrap
 from typing import Final
 
-from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages.checks.composed import iter_composed_pages
-from next.partial.keys import FORM_KEY_ATTR, FORM_ZONE_ATTR
+from next.partial.keys import KEY_ATTR, TARGET_ATTR
 
 from .backends import partial_backends_active
 from .codes import W_FORM_BACKEND_NOT_AWARE, W_FORM_IN_FOR_NO_KEY
@@ -28,9 +28,9 @@ def check_repeated_form_has_key(*args: object, **kwargs: object) -> list[CheckMe
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():
         for node in forms_in_loop(template.nodelist):
-            if node.has_partial_attr(FORM_ZONE_ATTR):
+            if node.has_partial_attr(TARGET_ATTR):
                 continue
-            if node.has_partial_attr(FORM_KEY_ATTR):
+            if node.has_partial_attr(KEY_ATTR):
                 continue
             messages.append(
                 DjangoWarning(

@@ -9,15 +9,16 @@ from django.test import override_settings
 from next.conf.checks import check_next_framework_value_types
 from next.conf.defaults import DEFAULTS
 from next.forms.registration import registration_diagnostics
-from next.pages import declarations as page_declarations
+from next.pages import declarations as declarations_module
+from next.pages.declarations import page_declarations
 from next.pages.loaders import load_python_module_memo
-from next.pages.transactions import atomic_store
 from next.transactions.checks import (
     check_atomic_declarations,
     check_atomic_requests,
     check_transactions_aliases,
     check_transactions_settings,
 )
+from tests.support.checks import written
 
 
 def _transactions(**scope: object) -> override_settings:
@@ -32,7 +33,7 @@ class TestTransactionsSettings:
             assert check_transactions_settings() == []
 
     def test_a_non_dict_scope_is_left_to_the_type_check(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"TRANSACTIONS": "on"}):
+        with written({"TRANSACTIONS": "on"}):
             assert check_transactions_settings() == []
             assert [m.id for m in check_next_framework_value_types()] == ["next.E076"]
 
@@ -79,9 +80,9 @@ class TestTransactionsSettings:
         with _transactions(SAFE="yes"):
             (message,) = check_transactions_settings()
         assert message.msg == (
-            "NEXT_FRAMEWORK['TRANSACTIONS']['SAFE'] must be True, False or 'writes', "
-            "got 'yes'. The "
-            "framework ignores this value and keeps its default."
+            "NEXT_FRAMEWORK['TRANSACTIONS']['SAFE'] must be True, False, 'writes' or "
+            "'auto', got 'yes'. The first read of the scope raises "
+            "ImproperlyConfigured for it."
         )
         assert message.hint == (
             "Write the value in the shape named, or drop the key for its default."
@@ -127,7 +128,7 @@ class TestTransactionsAliases:
         ids=["no_scope", "no_dict", "all", "declared", "mistyped"],
     )
     def test_silent(self, next_framework: dict[str, object]) -> None:
-        with override_settings(NEXT_FRAMEWORK=next_framework):
+        with written(next_framework):
             assert check_transactions_aliases() == []
 
     def test_a_missing_alias_yields_w179_once(self) -> None:
@@ -156,49 +157,37 @@ def _atomic_page(directory: Path, declaration: str, name: str = "page.py") -> Pa
 
 
 class TestAtomicDeclarations:
-    """`check_atomic_declarations` reports a transaction choice that applies nothing."""
+    """`check_atomic_declarations` reports a misplaced or unusable transaction choice."""
 
     @pytest.fixture(autouse=True)
     def _isolate(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         monkeypatch.setattr(registration_diagnostics, "invalid_atomic", [])
-        atomic_store.reset()
+        page_declarations.reset()
         yield
-        atomic_store.reset()
+        page_declarations.reset()
 
     @pytest.mark.parametrize(
-        "call", ["page.atomic(True, aliases=['default'])", "page.atomic('writes')"]
+        "call",
+        [
+            "page.transaction(atomic=True, aliases=['default'])",
+            "page.transaction(atomic='writes')",
+        ],
     )
     def test_silent_on_usable_declarations(self, tmp_path: Path, call: str) -> None:
         _atomic_page(tmp_path, call)
         assert check_atomic_declarations() == []
 
-    def test_an_unusable_page_declaration_yields_e240(self, tmp_path: Path) -> None:
-        page_file = _atomic_page(tmp_path, "page.atomic('yes')")
-        (message,) = check_atomic_declarations()
-        assert message.id == "next.E240"
-        assert message.msg == (
-            f"page.atomic() in {page_file} declares no transaction, since atomic "
-            "must be True, False or 'writes', got 'yes'. The page follows the method "
-            "rule instead."
-        )
-
-    def test_a_call_inside_a_function_yields_e240(self, tmp_path: Path) -> None:
-        _atomic_page(tmp_path, "def declare():\n    page.atomic(True)\n\n\ndeclare()")
-        (message,) = check_atomic_declarations()
-        assert message.id == "next.E240"
-        assert "inside a function" in message.msg
-
     @pytest.mark.parametrize("name", ["component.py", "helpers.py"])
     def test_a_call_outside_a_page_module_yields_e240_unloaded(
         self, tmp_path: Path, name: str
     ) -> None:
-        source = _atomic_page(tmp_path, "page.atomic(True)", name=name)
-        with mock.patch.object(page_declarations, "load_page_module") as load:
+        source = _atomic_page(tmp_path, "page.transaction(atomic=True)", name=name)
+        with mock.patch.object(declarations_module, "load_python_module_memo") as load:
             (message,) = check_atomic_declarations()
         load.assert_not_called()
         assert message.id == "next.E240"
         assert message.msg == (
-            f"page.atomic() in {source} declares no transaction, since the call sits "
+            f"page.transaction() in {source} declares no transaction, since the call sits "
             "outside a page.py and so names no page."
         )
 
@@ -227,9 +216,8 @@ class TestAtomicRequests:
         monkeypatch.setitem(connections.settings["default"], "ATOMIC_REQUESTS", False)
         assert check_atomic_requests() == []
 
-    def test_atomic_requests_yields_w154_naming_the_aliases(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @pytest.fixture()
+    def flagged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             connections,
             "settings",
@@ -240,10 +228,36 @@ class TestAtomicRequests:
                 "bare": {},
             },
         )
-        (message,) = check_atomic_requests()
+
+    @pytest.mark.usefixtures("flagged")
+    @pytest.mark.parametrize(
+        "scope", [None, {}, {"SAFE": "auto", "ALIASES": ["default"]}]
+    )
+    def test_silent_while_the_table_follows_atomic_requests(
+        self, scope: dict[str, object] | None
+    ) -> None:
+        framework = {} if scope is None else {"TRANSACTIONS": scope}
+        with override_settings(NEXT_FRAMEWORK=framework):
+            assert check_atomic_requests() == []
+
+    @pytest.mark.usefixtures("flagged")
+    @pytest.mark.parametrize(
+        ("scope", "keys"),
+        [
+            ({"SAFE": False}, "SAFE"),
+            ({"UNSAFE": "writes"}, "UNSAFE"),
+            ({"SAFE": True, "RULE": "django.utils.timezone.now"}, "SAFE, RULE"),
+        ],
+    )
+    def test_an_explicit_choice_yields_w154_naming_aliases_and_keys(
+        self, scope: dict[str, object], keys: str
+    ) -> None:
+        with _transactions(**scope):
+            (message,) = check_atomic_requests()
         assert message.id == "next.W154"
         assert message.msg == (
-            "ATOMIC_REQUESTS is set on 'default', 'audit'. next.dj views ignore it "
-            "and open the transactions NEXT_FRAMEWORK['TRANSACTIONS'] asks for, "
-            "while other Django views keep it."
+            f"ATOMIC_REQUESTS is set on 'default', 'audit', but "
+            f"NEXT_FRAMEWORK['TRANSACTIONS'] sets {keys}, so next.dj views open the "
+            "transactions it asks for, while other Django views keep "
+            "ATOMIC_REQUESTS."
         )

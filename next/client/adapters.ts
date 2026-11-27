@@ -11,7 +11,7 @@ import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
 import type { WebSocketAdapter } from "./ws";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { Clock, FetchAdapter, Navigate } from "./wire";
-import { SSE_END, SSE_HELLO, SSE_SKIP, sameOrigin } from "./protocol";
+import { SSE_END, SSE_HELLO, SSE_PATCHES, SSE_SKIP, sameOrigin } from "./protocol";
 
 /** The fetch seam, a real fetch would hit the network in tests. */
 export function defaultFetch(): FetchAdapter {
@@ -152,7 +152,7 @@ export function defaultEventSource(): EventSourceAdapter {
     open(url, onMessage, onError, onControl, onOpen) {
       const es = new EventSource(url, { withCredentials: true });
       es.onopen = () => onOpen?.();
-      es.addEventListener("next-patches", (event) =>
+      es.addEventListener(SSE_PATCHES, (event) =>
         onMessage((event as MessageEvent<string>).data),
       );
       for (const name of [SSE_HELLO, SSE_SKIP, SSE_END]) {

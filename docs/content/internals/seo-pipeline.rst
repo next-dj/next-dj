@@ -135,7 +135,7 @@ Components
 .. mermaid::
 
    flowchart LR
-       Router["next.urls router_manager"] --> Discovery["discovery<br/>page_tree_roots"]
+       Router["next.urls route_manager"] --> Discovery["discovery<br/>page_tree_roots"]
        Discovery -- "load_tree_source" --> Registry["registry<br/>sitemap_items_registry"]
        Discovery --> Manager["manager<br/>seo_manager"]
        Manager --> Backends["backends<br/>PageTreeSitemapBackend and others"]
@@ -152,7 +152,7 @@ Components
 Discovery
 ~~~~~~~~~
 
-``page_tree_roots`` walks the backends of the router manager once per ``seo_routes_version``, under a lock so concurrent first requests discover once, and, for each page root a backend reports, probes the three source names at the top of the tree, ``sitemap.py``, ``robots.py``, and ``robots.txt``.
+``page_tree_roots`` walks the backends of the route manager once per ``seo_routes_version``, under a lock so concurrent first requests discover once, and, for each page root a backend reports, probes the three source names at the top of the tree, ``sitemap.py``, ``robots.py``, and ``robots.txt``.
 A root two backends report is visited once, and the roots keep router order, which is the order the source selection and the sitemap index follow.
 Each root becomes a ``SeoRoot`` carrying the page root, its label and section, its routed trails walked once, the two Python sources, the path of the static ``robots.txt``, and the stamps of all three.
 
@@ -204,7 +204,7 @@ The Django ``x_default`` derivation is switched off, and ``get_urls`` appends an
 The URL slot
 ~~~~~~~~~~~~
 
-``next.seo`` imports ``next.urls`` for the router manager and the reverse helper, so ``next.urls.manager`` cannot import the routes back.
+``next.seo`` imports ``next.urls`` for the route manager and the reverse helper, so ``next.urls.manager`` cannot import the routes back.
 ``SeoRoutes`` in ``next.ports`` declares ``patterns``, ``SeoRoutesImpl`` in ``next.seo.ports`` implements it over the manager, and ``NextFrameworkConfig.ready()`` binds the implementation into ``seo_routes_slot``.
 ``_LazyUrlPatterns`` concatenates the router patterns, the form-action patterns, the ``/_next/csrf/`` route, and the slot's patterns, and its ``version_token`` is the triple of the router version, the form-action version, and ``seo_routes_version``.
 ``seo_routes_version`` of ``next.urls.manager`` is moved by ``NextFrameworkConfig.ready()`` right after it binds the slot and by the seo manager on every reset, so a resolve reads the token as a plain attribute and the port carries no version.
@@ -232,8 +232,8 @@ Resets
 
 ``seo_manager.reset`` drops the backends, the discovered roots, the selected sources, and the fingerprint, moves the version, and clears Django's URL caches, since the route set may change with the sources.
 
-- ``forget_seo_sources``, the public receiver of ``next.seo.manager``, resets it on ``router_reloaded``, connected in ``ready()``, since a reload can change which roots exist.
-- The same receiver resets it on ``settings_reloaded``, since the backends, the site config, and the fingerprint read settings.
+- ``seo_manager.reset`` is attached to the ``ROUTES`` source of ``next.caches``, since a router reload can change which roots exist.
+- It is attached to ``FRAMEWORK`` too, since the backends, the site config, and the fingerprint read settings.
 - ``seo_manager.refresh()`` resets it while ``DEBUG`` watches template edits and a source file of any root appeared, went, or moved on disk, and every SEO view asks it first, so an edited source shows without a restart.
 - ``next.testing.reset_check_caches`` and ``next.testing.reset_seo`` call ``reset_seo_sources``, which also drops the items registry, so a check run or a test after an in-place edit executes the sources again.
 

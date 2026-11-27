@@ -1336,7 +1336,7 @@ class TestRequestMemo:
         )
         assert scope.calls == [("pair", False), ("x", True)]
 
-    def test_a_factory_goes_through_the_memo(self) -> None:
+    def test_a_factory_of_either_colour_goes_through_the_memo(self) -> None:
         instance = _depends_resolver(Claiming("p", blocking=False))
         scope = RecordingScope()
         context = make_resolution_context()
@@ -1345,8 +1345,11 @@ class TestRequestMemo:
             lambda: instance.aresolve(_factories, context),
             RequestMemo(scope, share_all=True),
         )
-        assert result["made"] == "made-P"
-        assert scope.calls == [(factory_key(_afactory), True)]
+        assert (result["made"], result["plain"]) == ("made-P", "plain")
+        assert scope.calls == [
+            (factory_key(_afactory), True),
+            (factory_key(_sfactory), True),
+        ]
 
     def test_a_shared_key_is_computed_once_for_concurrent_consumers(self) -> None:
         calls: list[int] = []

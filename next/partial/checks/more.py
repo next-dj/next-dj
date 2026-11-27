@@ -4,9 +4,9 @@ import inspect
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, cast
 
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.pages import page
 from next.pages.checks.composed import iter_composed_pages
 from next.partial.more import MoreNode
@@ -61,7 +61,7 @@ def _pagers(page_path: "Path") -> Iterator[Pager]:
 def check_more_has_page_window(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Error when `prune=` or `url=` sits on a page no pager serves (`next.E235`).
 
-    Both restore a window from `?<param>=<token>&restore=1`, which only a pager reads.
+    Both restore a window from `?<param>=<token>&_restore=<param>`, which a pager reads.
     """
     messages: list[CheckMessage] = []
     for page_path, template in iter_composed_pages():

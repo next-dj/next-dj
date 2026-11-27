@@ -66,7 +66,7 @@ def build_test_settings() -> dict[str, object]:
         "NEXT_FRAMEWORK": {
             "PAGE_BACKENDS": [
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "next.urls.FilePageBackend",
                     "PAGES_DIR": "pages",
                     "APP_DIRS": False,
                     "DIRS": [str(PROJECT_ROOT / "tests" / "site_pages")],

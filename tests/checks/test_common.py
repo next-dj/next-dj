@@ -22,14 +22,15 @@ from next.checks.common import (
 from next.deps import resolver
 from next.deps.introspect import introspect_key
 from next.deps.resolver import forget_dep_caches
+from next.discovery import _page_backends_for_watch, _state, forget_watch_state
 from next.pages.loaders import _page_roots, forget_page_roots
-from next.pages.watch import _page_backends_for_watch, _state, forget_watch_state
 from next.router import NavigationCut
 from next.static.manager import forget_manager_page_roots, get_static_manager
 from next.testing import reset_check_caches
-from next.urls import PageRoot, RouterBackend, checks as urls_checks
+from next.urls import PageBackend, PageRoot, checks as urls_checks
 from next.urls.checks import check_reverse_name_collisions, check_url_patterns
-from tests.support import patch_checks_router_manager_with_routers, write_page
+from tests.support import patch_checks_route_manager_with_routers, write_page
+from tests.support.checks import written
 
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ def _labelled_root(index: int, tree: Path) -> PageRoot:
     return PageRoot(path=tree, label="Root" if index == 0 else f"Root ({tree})")
 
 
-class _RootTreeRouter(RouterBackend):
+class _RootTreeRouter(PageBackend):
     """Third-party backend that reports root page trees and nothing else."""
 
     def __init__(self, root_trees: list[Path]) -> None:
@@ -69,7 +70,7 @@ class TestCollectAllPatternsDedup:
         router = _RootTreeRouter(root_trees=[tree_a, tree_b])
 
         with (
-            patch_checks_router_manager_with_routers(routers=[router]),
+            patch_checks_route_manager_with_routers(routers=[router]),
             patch(
                 "next.urls.checks._collect_all_patterns_uncached",
                 wraps=urls_checks._collect_all_patterns_uncached,
@@ -82,7 +83,7 @@ class TestCollectAllPatternsDedup:
         assert any(m.id == "next.E015" for m in memo_url)
 
         urls_checks.reset_collected_patterns_cache()
-        with patch_checks_router_manager_with_routers(routers=[router]):
+        with patch_checks_route_manager_with_routers(routers=[router]):
             control_url = check_url_patterns(None)
             urls_checks.reset_collected_patterns_cache()
             control_rev = check_reverse_name_collisions(None)
@@ -308,7 +309,7 @@ class TestRawScope:
         ids=["dict", "not_a_dict", "absent", "framework_not_a_dict"],
     )
     def test_the_scope_reads_as_written(self, framework, expected) -> None:
-        with override_settings(NEXT_FRAMEWORK=framework):
+        with written(framework):
             assert raw_scope("SITE") == expected
 
 

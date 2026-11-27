@@ -38,11 +38,12 @@ from tests.support import (
     AppFinderCase,
     RootPagesRouter,
     check_ids,
-    patch_checks_router_manager,
+    patch_checks_route_manager,
     patched_watch_sources,
     routed,
     write_page,
 )
+from tests.support.checks import written
 
 
 if TYPE_CHECKING:
@@ -56,11 +57,9 @@ class TestEmptyConfig:
         assert check_ids(messages) == ["next.W030"]
         assert isinstance(messages[0], DjangoWarning)
 
-    def test_non_list_falls_back_to_defaults(self) -> None:
-        """Conf coerces non-list to defaults, so checks treat it as valid."""
+    def test_a_non_list_yields_to_the_shape_check(self) -> None:
         with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": "not-a-list"}):
-            messages = check_static_backends(app_configs=None)
-        assert messages == []
+            assert check_static_backends(app_configs=None) == []
 
 
 class TestValidConfig:
@@ -254,7 +253,7 @@ class TestJsContextSerializerCheck:
 
     def test_warns_on_non_string_value(self) -> None:
 
-        with override_settings(NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": 42}):
+        with written({"JS_CONTEXT_SERIALIZER": 42}):
             messages = check_js_context_serializer()
         assert len(messages) == 1
         assert messages[0].id == "next.W042"
@@ -527,7 +526,7 @@ class TestReservedJsContextKeyCheck:
             "def unread():\n"
             "    return 3\n"
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert check_ids(messages) == ["next.W075"]
         assert "'$csrf'" in messages[0].msg
@@ -544,7 +543,7 @@ class TestReservedJsContextKeyCheck:
             "def provider():\n"
             "    return False\n"
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert check_ids(messages) == ["next.W075"]
         assert f"'{key}'" in messages[0].msg
@@ -587,7 +586,7 @@ class TestReservedJsContextKeyCheck:
             "def csrf_token():\n"
             '    return {"token": "app"}\n'
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_reserved_js_context_keys()
         assert messages == []
 
@@ -914,7 +913,7 @@ class TestPageRootsHaveKeysCheck:
                 NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "plugin.Backend"}]}
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 return_value=RootPagesRouter([tree]),
             ),
         ):
@@ -982,6 +981,6 @@ class TestLayoutAssetsAboveTreesCheck:
         with override_settings(BASE_DIR=tmp_path), routed(tree):
             assert check_layout_assets_above_trees() == []
 
-    def test_a_failing_router_manager_checks_nothing(self) -> None:
-        with patch("next.static.checks.get_router_manager", return_value=(None, [])):
+    def test_a_failing_route_manager_checks_nothing(self) -> None:
+        with patch("next.static.checks.get_route_manager", return_value=(None, [])):
             assert check_layout_assets_above_trees() == []

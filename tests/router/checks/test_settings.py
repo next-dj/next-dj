@@ -6,6 +6,7 @@ from next.router.checks import (
     check_speculation,
 )
 from next.testing import override_next_settings
+from tests.support.checks import written
 
 
 class TestSettings:
@@ -16,20 +17,23 @@ class TestSettings:
             assert check_router_settings() == []
 
     def test_a_bool_current_is_legal(self) -> None:
-        with override_next_settings(ROUTER={"CURRENT": False}):
+        with override_next_settings(ROUTER={"ACTIVE_LINKS": False}):
             assert check_router_settings() == []
 
     def test_no_scope(self) -> None:
-        with override_next_settings(ROUTER="on"):
+        with written({"ROUTER": "on"}):
             assert check_router_settings() == []
             assert check_router_seams() == []
 
     def test_misfits(self) -> None:
-        with override_next_settings(ROUTER={"BOGUS": 1, "SCOPE": "some"}):
+        with written({"ROUTER": {"BOGUS": 1, "SCOPE": "some"}}):
             messages = check_router_settings()
         assert [message.id for message in messages] == ["next.E035", "next.E076"]
         assert "'BOGUS'" in messages[0].msg
-        assert "['SCOPE'] must be 'all' or 'opt-in', got 'some'" in messages[1].msg
+        assert (
+            "['SCOPE'] must be 'pages', 'all' or 'opt_in', got 'some'"
+            in messages[1].msg
+        )
 
 
 class TestSeams:
@@ -43,10 +47,7 @@ class TestSeams:
             ({"CUT": "next.router.navigation.CLEAR"}, "names no class"),
             ({"DIGEST": "next.router.VerifiedCut"}, "is no subclass of ChromeDigest"),
             ({"CUT": "next.router.NavigationCut"}, "is an abstract class"),
-            (
-                {"CURRENT": {"BACKEND": "next.router.ChromeDigest"}},
-                "is no subclass of CurrentLinks",
-            ),
+            ({"SHED": "next.router.ChromeDigest"}, "is no subclass of PrefetchShed"),
         ],
     )
     def test_an_unusable_path(self, scope: dict[str, object], problem: str) -> None:
@@ -56,8 +57,8 @@ class TestSeams:
         assert problem in message.msg
 
     def test_usable_and_unset_paths(self) -> None:
-        scope = {"CUT": "next.router.VerifiedCut", "DIGEST": "", "CURRENT": {}}
-        with override_next_settings(ROUTER=scope):
+        scope = {"CUT": "next.router.VerifiedCut", "DIGEST": "", "ACTIVE_LINKS": {}}
+        with written({"ROUTER": scope}):
             assert check_router_seams() == []
 
 
@@ -69,11 +70,11 @@ class TestSpeculation:
         "value", [None, 3, "moderate", {"eagerness": "eager"}], ids=repr
     )
     def test_nothing_to_report(self, value: object) -> None:
-        with override_next_settings(ROUTER={"SPECULATION": value}):
+        with written({"ROUTER": {"SPECULATION": value}}):
             assert check_speculation() == []
 
     def test_no_scope(self) -> None:
-        with override_next_settings(ROUTER="on"):
+        with written({"ROUTER": "on"}):
             assert check_speculation() == []
 
     @pytest.mark.parametrize(

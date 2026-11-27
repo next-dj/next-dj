@@ -2,23 +2,21 @@
 
 from __future__ import annotations
 
-import secrets
 import threading
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Final, override
 
-from next.transactions import LazySavepoint, probe_atomic_aliases
+from next.conf.boundaries import BoundarySettings, boundary_settings
+from next.transactions.policy import probe_atomic_aliases
+from next.transactions.savepoints import LazySavepoint
 
-from .options import Errors, error_settings
+from .ids import current_deferral, new_response_id, wire_id
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Hashable
+    from collections.abc import Generator, Hashable
     from types import TracebackType
-
-
-_SEAL_BYTES: Final = 4
 
 
 class Render:
@@ -27,23 +25,31 @@ class Render:
     The first boundary probes the aliases and keeps the wrappers on for its siblings.
     """
 
-    __slots__ = ("aliases", "count", "errors", "failing", "holder", "seal", "thread")
+    __slots__ = (
+        "aliases",
+        "count",
+        "errors",
+        "failing",
+        "holder",
+        "response_id",
+        "thread",
+    )
 
     def __init__(self) -> None:
         """Start before any boundary of the render."""
         self.thread = threading.get_ident()
-        self.errors: Errors | None = None
+        self.errors: BoundarySettings | None = None
         self.aliases: tuple[str, ...] = ()
         self.holder: LazySavepoint | None = None
         self.failing: set[Hashable] = set()
-        self.seal = ""
+        self.response_id = ""
         self.count = 0
 
-    def settings(self) -> Errors:
+    def settings(self) -> BoundarySettings:
         """Return the `ERRORS` values of the render, read once with the alias probe."""
         errors = self.errors
         if errors is None:
-            errors = self.errors = error_settings()
+            errors = self.errors = boundary_settings()
             self.aliases = probe_atomic_aliases()
             holder = LazySavepoint(atomic=False)
             holder.__enter__()
@@ -51,15 +57,15 @@ class Render:
         return errors
 
     def next_id(self) -> str:
-        """Return a boundary id unique within the response, from a bound minter."""
-        minter = _minter.get()
-        minted = None if minter is None else minter()
+        """Return an id unique within the response, the render session minting first."""
+        held = current_deferral()
+        minted = None if held is None else held.minted()
         if minted is not None:
             return minted
-        if not self.seal:
-            self.seal = secrets.token_hex(_SEAL_BYTES)
+        if not self.response_id:
+            self.response_id = new_response_id()
         self.count += 1
-        return f"b-{self.seal}-{self.count}"
+        return wire_id(self.response_id, self.count)
 
     def close(self) -> None:
         """Release the handle the first boundary opened, removing the wrappers."""
@@ -70,9 +76,6 @@ class Render:
 
 
 _render: ContextVar[Render | None] = ContextVar("next_boundary_render", default=None)
-_minter: ContextVar[Callable[[], str | None] | None] = ContextVar(
-    "next_boundary_minter", default=None
-)
 _wrapper: ContextVar[str | None] = ContextVar("next_boundary_wrapper", default=None)
 
 
@@ -92,19 +95,6 @@ def claim_wrapper() -> str | None:
     if ident is not None:
         _wrapper.set(None)
     return ident
-
-
-@contextmanager
-def minting(minter: Callable[[], str | None]) -> Generator[None]:
-    """Take the id of every error wrapper inside the block from `minter`, if it has one.
-
-    A deferred render binds its session, so every wrapper shares one id scheme.
-    """
-    token = _minter.set(minter)
-    try:
-        yield
-    finally:
-        _minter.reset(token)
 
 
 class Scope(AbstractContextManager[None]):
@@ -159,7 +149,6 @@ __all__ = [
     "Scope",
     "claim_wrapper",
     "current",
-    "minting",
     "render_boundaries",
     "wrapping",
 ]

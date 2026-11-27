@@ -141,6 +141,7 @@ function harness(
   } = {},
 ) {
   const dispatched: Dispatched[] = [];
+  const releases: boolean[] = [];
   const record = (event: string, detail: Record<string, unknown>): void =>
     void dispatched.push({ event, detail });
   const applier = new Applier({
@@ -149,25 +150,21 @@ function harness(
     document,
     ...(options.assets === undefined ? {} : { assets: () => options.assets! }),
   });
-  const partial: ReaderHost["partial"] = {
-    apply: (raw, applying) => applier.apply(raw, applying),
-    _mark: markBusy,
-    _busy: isBusy,
-    _stamped: stamped,
-    _now: now,
-    _fire: record,
-  };
   const ready: (() => void)[] = [];
-  createReader(
-    {
-      partial,
-      on: (_event, listener) => {
-        ready.push(listener);
-        return () => undefined;
-      },
-    },
-    { signal: listening.signal },
-  );
+  let read: StreamReader | undefined;
+  const host = {
+    partial: { apply: (raw, applying) => applier.apply(raw, applying) },
+    mark: markBusy,
+    busy: isBusy,
+    stamped,
+    now,
+    fire: record,
+    fallbacks: new WeakMap(),
+    release: (current) => void releases.push(current),
+    serve: (_name, handler) => void (read = handler as StreamReader),
+    onReady: (listener) => void ready.push(listener),
+  } as ReaderHost;
+  createReader(host, { signal: listening.signal });
   const clock = manualPollClock();
   const responses: (() => Promise<Response>)[] = [];
   const calls: RequestInit[] = [];
@@ -192,7 +189,7 @@ function harness(
     timeout: () => options.timeout ?? 0,
     ...(options.active === undefined ? {} : { active: options.active }),
     resolveZone: (name, root) => root.querySelector(`[data-next-zone="${name}"]`),
-    reader: () => (options.stream === false ? undefined : partial._reader),
+    reader: () => (options.stream === false ? undefined : read),
   });
   const events = (name: string): Record<string, unknown>[] =>
     dispatched.filter((d) => d.event === name).map((d) => d.detail);
@@ -211,6 +208,7 @@ function harness(
     respond,
     load,
     accept,
+    releases,
     ready: () => ready.forEach((listener) => listener()),
   };
 }
@@ -268,6 +266,34 @@ describe("a streamed partial answer", () => {
     frame();
     await expect(sent).resolves.toMatchObject({ status: "ok" });
     expect(text("b-1")).toBe("one");
+  });
+
+  it("fails a stream whose first frame is an unreadable hello", async () => {
+    const h = harness();
+    const source = body();
+    h.respond(streamed(source));
+    const sent = h.load();
+    source.send("event: hello\ndata: not json\n\n" + opening("b-1") + end("complete"));
+    await flush();
+    await expect(sent).resolves.toMatchObject({ status: "error", applied: false });
+    expect(h.releases).toEqual([]);
+    expect(h.events("partial:error")).toMatchObject([{ kind: "parse" }]);
+  });
+
+  it.each([
+    ["another protocol", '{"protocol":1,"streamed":true}'],
+    ["no protocol", '{"streamed":true}'],
+  ])("refuses a stream whose hello names %s and reloads once", async (_name, data) => {
+    const h = harness();
+    const source = body();
+    h.respond(streamed(source));
+    const sent = h.load();
+    source.send(`event: hello\ndata: ${data}\n\n` + opening("b-1") + end("complete"));
+    await flush();
+    await expect(sent).resolves.toMatchObject({ status: "error", applied: false });
+    expect(h.releases).toEqual([false]);
+    expect(document.getElementById("b-1")).toBeNull();
+    expect(h.events("partial:error")).toMatchObject([{ kind: "network" }]);
   });
 
   it("reads a stream delivered one byte at a time", async () => {
@@ -564,7 +590,7 @@ describe("a streamed partial answer", () => {
       e: { ops: [{ op: "inner", target: { boundary: "b-1" }, html: "one" }] },
     };
     source.send(
-      "event: hello\ndata: not json\n\n" +
+      HELLO +
         "event: other\ndata: {oops\n\n" +
         "data: {oops\n\n" +
         "retry\n" +
@@ -931,7 +957,7 @@ describe("negotiation", () => {
     vi.spyOn(document, "readyState", "get").mockReturnValue("complete");
     let context: Record<string, unknown> = {};
     const accepts: (string | null)[] = [];
-    const surface = createPartial({
+    const { partial: surface, kernel } = createPartial({
       ...chunkModules,
       dispatch: () => undefined,
       mergeContext: () => undefined,
@@ -948,11 +974,11 @@ describe("negotiation", () => {
       },
     });
     await surface.fetch({ url: "/p/", zone: "z" });
-    surface._reader = vi.fn<StreamReader>();
-    await surface.fetch({ url: "/p/", zone: "z" });
     context = { $stream: true };
     await surface.fetch({ url: "/p/", zone: "z" });
-    surface._reader = undefined;
+    kernel.serve("read", vi.fn<StreamReader>());
+    await surface.fetch({ url: "/p/", zone: "z" });
+    context = {};
     await surface.fetch({ url: "/p/", zone: "z" });
     expect(accepts).toEqual([ACCEPT, ACCEPT, STREAM_ACCEPT, ACCEPT]);
     const done = vi.fn();

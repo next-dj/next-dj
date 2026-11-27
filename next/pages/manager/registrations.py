@@ -52,7 +52,7 @@ class PageRegistrations:
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
         zone: str | None = None,
-        guard: bool | None = None,
+        guard: bool = False,
     ) -> Callable[[C], C]: ...
     def context(
         self,
@@ -62,11 +62,11 @@ class PageRegistrations:
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
         zone: str | None = None,
-        guard: bool | None = None,
+        guard: bool = False,
     ) -> Callable[..., Any]:
         """Register a keyed or dict-merge `@context` for the file declaring `func`.
 
-        `serialize=True` publishes, `zone=` binds a zone, `guard=` runs before a shell.
+        `serialize=True` publishes, `zone=` binds, `guard=True` runs before a shell.
         """
         registered_from = registering_file()
 
@@ -84,7 +84,7 @@ class PageRegistrations:
                 serializer=serializer,
                 zone=zone,
             )
-            if guard is not None:
+            if guard:
                 self._context_manager.declare_guard(declared_in, key, guard=guard)
             return func
 

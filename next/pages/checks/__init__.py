@@ -13,7 +13,6 @@ from .contexts import (
     check_context_registration_files,
     check_single_keyless_context,
 )
-from .declarations import check_boundary_declarations
 from .gating import check_gated_reads, check_hidden_guards
 from .groups import check_parenthesised_directory_names, check_pointless_route_groups
 from .intercepts import (
@@ -66,7 +65,6 @@ from .zones import check_context_reads_foreign_zone
 __all__ = [
     "check_async_context_reads",
     "check_async_dependency_cycles",
-    "check_boundary_declarations",
     "check_conditional_get_order",
     "check_context_functions",
     "check_context_processor_signature",

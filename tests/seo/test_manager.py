@@ -28,7 +28,7 @@ from next.seo.manager import (
 )
 from next.seo.registry import sitemap_items_registry
 from next.seo.robots import DeclaredRobots, TextFile
-from next.urls import router_manager
+from next.urls import route_manager
 from next.urls.manager import seo_routes_version
 from tests.django_setup import PROJECT_ROOT
 from tests.support import CLOSED_SITE, POSTS_ITEMS, WITH_BASE, routed, write_tree
@@ -367,7 +367,7 @@ class TestReset:
         settings_reloaded.send(sender=None)
         assert seo_manager.version != version
         version = seo_manager.version
-        router_manager.reload()
+        route_manager.reload()
         assert seo_manager.version != version
 
     def test_every_manager_reads_the_routes_token(self) -> None:

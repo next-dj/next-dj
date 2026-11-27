@@ -33,7 +33,7 @@ Signals announce backends the framework builds from settings.
 The shared-loader signals send the resolved class as the sender and carry ``config``, a copy of the settings entry, and ``instance``, the object the loader built from it.
 ``broker_backend_loaded`` uses the same payload shape for the selected realtime broker.
 Each family owns its own signal rather than sharing one, so a receiver connected with ``sender=`` does not have to sort one family's classes out of another's.
-``router_backend_loaded`` and ``component_backend_loaded`` are skipped on a reload that asks not to notify, which is what a caller reloading from inside a receiver passes.
+``page_backend_loaded`` and ``component_backend_loaded`` are skipped on a reload that asks not to notify, which is what a caller reloading from inside a receiver passes.
 
 .. list-table::
    :header-rows: 1
@@ -63,31 +63,43 @@ Each family owns its own signal rather than sharing one, so a receiver connected
    * - ``boundary_failed``
      - The ``next.boundaries.contain`` function
      - ``id``, ``name``, ``addressing``, ``kind``, ``digest``, ``exception``, ``request``
-     - Once per failure an error boundary contained, after it was logged or handed to ``ERRORS["REPORTER"]`` and before its ``error.djx`` renders.
-       ``addressing`` is ``"component"`` for a component boundary and ``"page"`` for a page boundary, ``kind`` is the ``ErrorKind`` before ``ERRORS["KINDS"]`` hides it, and ``id`` is the boundary id its wrapper carries.
+     - Once per failure an error boundary contained, after it was logged or handed to ``BOUNDARIES["REPORTER"]`` and before its ``error.djx`` renders.
+       ``addressing`` is ``"component"`` for a component boundary and ``"page"`` for a page boundary, ``kind`` is the ``ErrorKind`` before ``BOUNDARIES["KINDS"]`` hides it, and ``id`` is the boundary id its wrapper carries.
        ``name`` is the name of the component for a component boundary.
-       A page boundary is named by the path of its ``loading.djx`` when it has one, streamed or rendered inline, and by the path of its ``error.djx`` otherwise, relative to ``BASE_DIR`` and absolute only for a file outside it, so ``boundary_rendered`` and ``boundary_gate(page=...)`` name it the same way.
+       A page boundary is named by the path of its ``loading.djx`` when it has one, streamed or rendered inline, and by the path of its ``error.djx`` otherwise, relative to ``BASE_DIR`` and absolute only for a file outside it, so ``boundary_settled`` and ``boundary_gate(page=...)`` name it the same way.
        ``request`` may be ``None`` outside a request.
        A deferred job that raised past its own boundary is announced the same way once its error UI renders, with the wire id of its wrapper.
-   * - ``boundary_rendered``
-     - ``next.suspense.Job``
-     - ``id``, ``name``, ``addressing``, ``mode``, ``state``, ``kind``, ``lane``, ``placement``, ``reason``, ``queue_ms``, ``run_ms``, ``request``
+   * - ``boundary_job_started``
+     - ``next.defer.Job``
+     - ``id``, ``name``, ``addressing``, ``mode``, ``lane``, ``reason``
+     - Right before the body of a deferred job runs, through ``send_robust``, on the thread and in the context of that body, under its deadline and the connection state a pool thread replayed.
+       A receiver that sets a context variable, such as the span of a tracer, leaves it set for the body and for ``boundary_job_finished`` of the same job.
+       ``lane`` is the ``Lane`` the body runs on and ``reason`` the rule or verdict that placed it.
+   * - ``boundary_job_finished``
+     - ``next.defer.Job``
+     - ``id``, ``name``, ``addressing``, ``mode``, ``lane``, ``reason``, ``error``, ``run_ms``
+     - Right after the body of a deferred job returned or raised, through ``send_robust``, on the same thread and in the same context as ``boundary_job_started``, once for every job that started.
+       ``error`` is what the body raised past its error boundary and ``None`` when it returned, its error UI rendered or not, and ``run_ms`` the time the body ran.
+   * - ``boundary_settled``
+     - ``next.defer.Job``
+     - ``id``, ``name``, ``addressing``, ``mode``, ``state``, ``kind``, ``lane``, ``reason``, ``queue_ms``, ``run_ms``, ``request``
      - Once per deferred job of a response, on the request thread, as its outcome is spliced into the page, a nested job after its parent.
        ``state`` is ``"ready"`` or ``"error"``, ``kind`` the ``ErrorKind`` of an error and ``None`` otherwise, ``lane`` the ``Lane`` the job ran on and ``None`` for one that never started.
-       ``placement`` is the ``Placement`` that chose the lane and ``reason`` its rule or verdict, such as ``atomic``, ``pool``, or ``foreground-full``.
+       ``reason`` is the rule or verdict that chose the lane, such as ``atomic``, ``pool``, or ``request_full``, both string enums that compare equal to their values.
        ``queue_ms`` is the time the job waited for its lane and ``run_ms`` the time its body ran.
        ``request`` may be ``None`` for a render outside a request.
-   * - ``boundary_side_effect``
-     - ``next.suspense.Job``
-     - ``id``, ``kind``, ``request``
-     - Once per kind of request state a deferred job wrote, beside a warning on the ``next.suspense`` logger.
-       ``kind`` is ``"session"`` for a session write, ``"session-key"`` for a new session key, ``"messages"`` for messages read and marked used, and ``"csrf"`` for a CSRF secret the job rotated, as ``rotate_token()`` does.
+   * - ``boundary_state_written``
+     - ``next.defer.Job``
+     - ``id``, ``written``, ``request``
+     - Once per kind of request state a deferred job wrote, beside a warning on the ``next.defer`` logger.
+       ``written`` is ``"session"`` for a session write, ``"session_key"`` for a new session key, ``"messages"`` for messages read and marked used, and ``"csrf"`` for a CSRF secret the job rotated, as ``rotate_token()`` does.
        Jobs share the request, so such writes are unsupported, and the signal names the job that made them.
    * - ``boundary_token_rejected``
      - The token backend class
      - ``reason``, ``request``, ``component``
-     - Once per refused request, garbage included, beside a log record on the ``next.suspense`` logger at a bounded rate, so a receiver must stay cheap or it amplifies a flood.
-       ``reason`` is a ``TokenRejection``, one of ``malformed``, ``signature``, ``expired``, ``version``, ``binding``, ``url_mismatch``, ``too_large``, and ``storage_miss``, and ``component`` the component the server resolved the request to.
+     - Once per refused request, garbage included, through ``send_robust`` beside a log record on the ``next.defer`` logger at a bounded rate, so a receiver must stay cheap or it amplifies a flood.
+       The record is an ``ERROR`` for a token storage that failed to answer and an ``INFO`` for an expired token, a version change, or claims the storage lost, while any other refusal logs a ``WARNING`` there and on ``django.security.BoundaryTokenError``.
+       ``reason`` is a ``TokenRejection``, one of ``malformed``, ``signature``, ``expired``, ``version``, ``binding``, ``url_mismatch``, ``too_large``, ``storage_miss``, and ``storage_down``, and ``component`` the component the server resolved the request to.
        The client is told only whether the token expired, so the reason reaches logs and receivers alone.
    * - ``collector_finalized``
      - The static collector
@@ -159,6 +171,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - The codec backend class
      - ``config``, ``instance``
      - After one ``COMPRESSION["BACKENDS"]`` entry is instantiated, when the compression manager first needs its codecs and again once the ``COMPRESSION`` mapping changes.
+       ``config`` is that entry as the project writes it, such as ``{"BACKEND": "next.compression.GzipBackend", "OPTIONS": {"LEVEL": 4}}``.
        A path that names no backend is skipped without it.
    * - ``consent_backend_loaded``
      - The consent backend class
@@ -168,6 +181,11 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``PageContextRegistry``
      - ``file_path``, ``key``
      - After a context function is attached to a page module.
+   * - ``defer_backend_loaded``
+     - The deferred-execution backend class
+     - ``config``, ``instance``
+     - After one ``DEFER`` backend is built from its ``EXECUTOR``, ``ADMISSION``, ``DELIVERY``, ``SERVER`` or ``TOKENS`` entry, on its first use and again after a settings reload drops it.
+       ``config`` is that entry with its defaults filled in, ``BACKEND`` and ``OPTIONS`` included.
    * - ``field_validated``
      - The active partial protocol backend class
      - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``
@@ -203,7 +221,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        ``status`` is the status code of the answer, and ``reason`` is ``"raised"`` for a ``PermissionDenied`` or an ``Http404`` the project handler rendered and ``"redirect"`` for a login redirect.
        A refusal on the form or action path raises ``PermissionDenied`` instead and sends nothing.
    * - ``intercept_registered``
-     - ``FileRouterBackend``
+     - ``FilePageBackend``
      - ``target_file``, ``file_path``, ``marker``
      - Once per intercept rule, after the file router publishes the rules of a page tree to the intercept table.
        ``target_file`` is the ``page.py`` of the routed page the rule sits over, ``file_path`` is the page of the intercept, and ``marker`` is the prefix of its directory name, ``(.)``, ``(..)`` repeated once per level, or ``(...)``.
@@ -217,7 +235,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - ``next.router.navigation.Routing``
      - ``page_path``, ``purpose``, ``depth``, ``cut``, ``kept``, ``diverged_at``, ``reason``, ``streamed``, ``request``
      - Once per client router navigation or prefetch the page view rendered and answered with an envelope, never for one refused or answered before any render.
-       ``purpose`` is ``navigation`` or ``prefetch``, ``depth`` is the ``Depth`` of the prefetch, ``shell`` or ``full``, and ``None`` for a navigation, and ``cut`` is ``slot``, ``body`` or ``visit``, and ``kept`` the ids of the layouts kept on screen, outer first.
+       ``purpose`` is ``navigate`` or ``prefetch``, ``depth`` is the ``PrefetchDepth`` of the prefetch, ``shell`` or ``full``, and ``None`` for a navigation, and ``cut`` is ``slot``, ``body`` or ``visit``, and ``kept`` the ids of the layouts kept on screen, outer first.
        ``diverged_at`` names the first layout that did not match, ``reason`` why, ``id``, ``digest``, ``head`` or ``declaration``, or ``clear`` for a response that clears the router and so keeps no layout, and both are ``None`` when every layout matched.
        ``streamed`` is ``True`` when deferred boundaries follow the envelope as an event stream.
    * - ``page_rendered``
@@ -226,19 +244,20 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After ``Page.render`` produces HTML and injects static assets.
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
-       ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigation``, ``prefetch`` or ``speculation``.
-       ``depth`` is the ``Depth`` of ``request.next``, ``shell`` or ``full`` for a router prefetch and ``None`` for any other request.
+       ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigate``, ``prefetch`` or ``speculation``.
+       ``depth`` is the ``PrefetchDepth`` of ``request.next``, ``shell`` or ``full`` for a router prefetch and ``None`` for any other request.
        ``depth`` does not count visits, so see :ref:`topics-router-prefetch-visits` for how to count them.
        Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.
    * - ``page_stream_declined``
-     - ``next.suspense.StreamPolicy``
-     - ``delivery``, ``reason``, ``transport_reason``, ``partial``, ``request``
-     - Once per page or partial response whose deferred jobs are assembled inline, as the first deferred call of the render is decided.
-       ``delivery`` is ``Delivery.INLINE``, ``reason`` the row of the delivery policy that held the stream back, such as ``buffered`` or ``sync-worker``, and ``transport_reason`` the fact behind the answer of the transport, such as ``wsgi.multithread`` or a buffering mark.
+     - ``next.defer.DeliveryPolicy``
+     - ``delivery``, ``reason``, ``server_reason``, ``partial``, ``request``
+     - Once per page or partial response whose deferred jobs are assembled inline, as the delivery is settled.
+       The delivery is decided once per response, so a response sends either this signal or ``page_stream_opened``, and a router navigation that streams as a partial response sends only the latter.
+       ``delivery`` is ``Delivery.INLINE``, ``reason`` the row of the delivery policy that held the stream back, such as ``buffered`` or ``sync_worker``, and ``server_reason`` the fact behind the answer of the server probe, such as ``wsgi.multithread`` or a buffering mark.
        A ``HEAD`` request, a shell prefetch, and a streamed response send nothing.
-       Fired only when a receiver for ``StreamPolicy`` is connected.
+       Fired only when a receiver for ``DeliveryPolicy`` is connected.
    * - ``page_stream_opened``
-     - ``next.suspense.StreamingPageResponse``, or ``next.suspense.PartialStream`` for a partial response
+     - ``next.defer.StreamingPageResponse``, or ``next.defer.PartialStream`` for a partial response
      - ``page_path``, ``delivery``, ``reason``, ``boundaries``, ``request_lane``, ``partial``, ``request``
      - Once per streamed page or streamed partial response, when the server starts reading its body and before the first byte is written.
        A response closed or dropped before its body starts sends neither this signal nor ``page_stream_closed``.
@@ -249,10 +268,12 @@ Each family owns its own signal rather than sharing one, so a receiver connected
        It is read as the body starts, once the transactions the view closed have committed, so it names the lane the jobs run on.
        Under ASGI it is sent through ``asend_robust`` from the server loop, so a synchronous receiver runs on the request thread and an async one on the loop.
    * - ``page_stream_closed``
-     - ``next.suspense.StreamingPageResponse``, or ``next.suspense.PartialStream`` for a partial response
-     - ``page_path``, ``sent``, ``failed``, ``late``, ``shed``, ``duration_ms``, ``aborted``, ``partial``, ``request``
+     - ``next.defer.StreamingPageResponse``, or ``next.defer.PartialStream`` for a partial response
+     - ``page_path``, ``sent``, ``failed``, ``late``, ``shed``, ``timeouts``, ``abandoned``, ``cancelled``, ``dropped``, ``cut``, ``duration_ms``, ``aborted``, ``partial``, ``request``
      - Once per streamed page or streamed partial response when its body ends, after the closing tags or the ``end`` event are written or when the reader left.
        ``sent`` counts the chunks or boundary frames written and ``failed`` those settled as an error, ``late`` and ``shed`` count the jobs that missed the deadline or were shed.
+       ``timeouts`` counts the jobs settled as ``timeout``, ``abandoned`` the running jobs left behind when the stream ended, ``cancelled`` the queued jobs that never started, and ``dropped`` the settled outcomes never written.
+       ``cut`` is ``True`` when the stream ran ``WRITE_GRACE`` past ``DEFER["DEADLINE"]`` and was ended, which also logs a ``WARNING`` on the ``next.defer`` logger.
        ``aborted`` is ``True`` when the reader left before the end or the jobs were cancelled.
        Under ASGI it is sent through ``asend_robust`` from the server loop, unless the server closed the response from a thread, which sends it there.
        The response owns the stream slot counted against ``MAX_STREAMS`` from the moment the view admits it, and releases it exactly once, as the body ends, as the response closes, or as a response never read is garbage collected.
@@ -267,30 +288,35 @@ Each family owns its own signal rather than sharing one, so a receiver connected
    * - ``prefetch_shed``
      - ``next.router.navigation.Routing``
      - ``page_path``, ``waited_ms``, ``request``
-     - Once per client router prefetch answered ``429`` before any render, because the oldest job in the pool queue waited past ``QUEUE_TIMEOUT``.
-       ``waited_ms`` is that wait.
+     - Once per client router prefetch answered ``429`` before any render, because ``ROUTER["SHED"]`` shed it, by default as the oldest job in the pool queue waited past ``QUEUE_TIMEOUT``.
+       ``waited_ms`` is the wait the shed reported.
    * - ``provider_registered``
      - The ``RegisteredParameterProvider`` subclass
      - none
      - When a ``RegisteredParameterProvider`` subclass is added to the auto-registry.
    * - ``route_registered``
-     - ``FileRouterBackend``
+     - ``FilePageBackend``
      - ``url_path``, ``file_path``
      - After a URL pattern is created for a discovered page.
-   * - ``router_backend_loaded``
-     - The router backend class
+   * - ``page_backend_loaded``
+     - The page backend class
      - ``config``, ``instance``
      - After one ``PAGE_BACKENDS`` entry is instantiated, once per entry on every manager reload.
        A ``reload(notify=False)`` builds the backends without sending it.
+   * - ``router_backend_loaded``
+     - The cut, digest or shed backend class
+     - ``config``, ``instance``
+     - After the ``ROUTER["CUT"]``, ``ROUTER["DIGEST"]`` and ``ROUTER["SHED"]`` backends are built, once each, on the first navigation or routed document and again after a settings or route reload drops them.
+       ``config`` holds the one ``ROUTER`` key the backend was built from, such as ``{"CUT": "next.router.VerifiedCut"}``.
    * - ``router_cleared``
      - ``next.router.navigation.Routing``
      - ``reason``, ``request``
      - Once per request whose response tells the client router to drop its snapshots and its prefetched answers with ``X-Next-Router: clear``, sent from ``router_clear`` even while the router is off.
        ``reason`` is ``login`` or ``logout`` from the auth signals, ``session`` for a session key that changed during the request, or what ``router_clear(request, reason)`` passed, ``policy`` by default.
-   * - ``router_reloaded``
-     - The router manager class
+   * - ``routes_reloaded``
+     - The route manager class
      - none
-     - After the router manager rebuilds its pattern set.
+     - After the route manager rebuilds its pattern set.
    * - ``scripts_registered``
      - ``ScriptsRegistry``
      - ``root``, ``source``, ``scripts``
@@ -367,6 +393,7 @@ A stream announces itself once it holds a broker subscription and again when it 
 The pair brackets the life of one ``TopicStream`` response or one ``TopicSocket``, so a receiver counts live streams, times their length, or tells how they ended.
 A stream sends ``stream_unsubscribed`` at most once, and only if it opened while a receiver listened to ``stream_subscribed`` or ``stream_unsubscribed``.
 A receiver of ``stream_unsubscribed`` alone therefore hears every stream that opened after it connected.
+
 A receiver connected while a stream is open never sees that stream close, and a counter it keeps never drops below zero when it listens to both signals from the start.
 A stream refused before it subscribes, by a failed ticket or a denied topic, sends neither signal.
 Nothing is sent or timed while no receiver listens.
@@ -526,7 +553,7 @@ Boundaries, deferred boundaries, and compression
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``boundary_failed`` is defined in ``next.boundaries.signals``.
-``boundary_rendered``, ``boundary_side_effect``, ``boundary_token_rejected``, ``page_stream_opened``, ``page_stream_closed``, and ``page_stream_declined`` are defined in ``next.suspense.signals``, and ``compression_backend_loaded`` in ``next.compression.signals``.
+``boundary_job_started``, ``boundary_job_finished``, ``boundary_settled``, ``boundary_state_written``, ``boundary_token_rejected``, ``page_stream_opened``, ``page_stream_closed``, ``page_stream_declined``, and ``defer_backend_loaded`` are defined in ``next.defer.signals``, and ``compression_backend_loaded`` in ``next.compression.signals``.
 
 See also
 --------

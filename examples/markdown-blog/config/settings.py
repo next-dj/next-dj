@@ -71,7 +71,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             # The project-level page root `site/` holds the envelope and `site_footer`.
             "DIRS": [str(BASE_DIR / "site")],

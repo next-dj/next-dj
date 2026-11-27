@@ -91,7 +91,7 @@ SILENCED_SYSTEM_CHECKS = ["next.W074"]
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             # `instrument/` owns the shared HTML envelope every dashboard renders into.
             "DIRS": [str(BASE_DIR / "instrument")],

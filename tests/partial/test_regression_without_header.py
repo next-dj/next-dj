@@ -47,10 +47,11 @@ class TestPageGetWithoutPartialSwitch:
         varied = {name.strip().lower() for name in response["Vary"].split(",")}
         assert {name.lower() for name in VARY_HEADERS} <= varied
 
-    def test_vary_still_names_cookie(self) -> None:
+    def test_a_page_without_a_scripts_slot_varies_on_no_cookie(self) -> None:
         response = Client().get("/")
         varied = {name.strip().lower() for name in response["Vary"].split(",")}
-        assert "cookie" in varied
+        assert "cookie" not in varied
+        assert "csrftoken" not in response.cookies
 
     def test_no_partial_response_headers_leak(self) -> None:
         response = Client().get("/")

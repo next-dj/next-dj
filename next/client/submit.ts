@@ -1,4 +1,7 @@
+// The URL a plain GET form navigates to, what the router follows instead of the submit.
+
 import { inPlace } from "./events";
+import { ATTR_PREFIX } from "./protocol";
 
 export function submitUrl(event: Event): URL | undefined {
   const form = event.target;
@@ -9,7 +12,7 @@ export function submitUrl(event: Event): URL | undefined {
   if (
     (pick("method") ?? "get").toLowerCase() !== "get" ||
     !inPlace(pick("target") ?? null) ||
-    form.getAttributeNames().some((name) => name.startsWith("data-next-"))
+    form.getAttributeNames().some((name) => name.startsWith(ATTR_PREFIX))
   )
     return undefined;
   const url = new URL(pick("action") ?? location.href, document.baseURI);

@@ -7,13 +7,14 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.template import Context, Engine, Template, TemplateSyntaxError
 from django.test import Client
 
+from next.boundaries.calls import DEFERRALS_KEY, DeferredCall
+from next.boundaries.options import DeferMode
+from next.components import tags as component_tags
+from next.components.tags import ComponentNode
 from next.components.trip import TripInput
-from next.defer import DEFERRALS_KEY, DeferMode, DeferredCall
+from next.defer.assembly import finish
+from next.defer.components import deferring
 from next.seeding import COLLECTOR_KEY
-from next.suspense.assembly import finish
-from next.suspense.components import deferring
-from next.templatetags import components as component_tags
-from next.templatetags.components import ComponentNode
 from tests.components.sites import (
     BOOM,
     LOGIN,
@@ -40,7 +41,7 @@ class TestAccess:
     def test_a_shell_rule_refuses_before_any_wrapper(
         self, site: ComponentSite, user: object, request_for, *, shown: bool
     ) -> None:
-        site.add("card", "<b>C</b>", loading="L{{ props.t }}", module=LOGIN)
+        site.add("card", "<b>C</b>", loading="L{{ t }}", module=LOGIN)
         with deferring() as held:
             shell = site.render(
                 "[{% component 'card' t='T' %}]", request=request_for(user)
@@ -52,11 +53,22 @@ class TestAccess:
             assert shell == "[]"
             assert held.session is None
 
+    def test_a_rule_reading_the_context_refuses_a_signed_out_visitor_in_the_shell(
+        self, site: ComponentSite, request_for
+    ) -> None:
+        site.add("card", "<b>{{ t }}</b>", loading="L", module=OBJECT)
+        with deferring() as held:
+            shell = site.render(
+                "[{% component 'card' t='T' %}]", request=request_for(AnonymousUser())
+            )
+        assert shell == "[]"
+        assert held.session is None
+
     @pytest.mark.parametrize(("allowed", "body"), [("acme", "<b>T</b>"), ("x", "")])
     def test_a_rule_reading_the_context_runs_in_the_job(
         self, site: ComponentSite, allowed: str, body: str, request_for
     ) -> None:
-        site.add("card", "<b>{{ t }}</b>", loading="L[{{ props.t }}]", module=OBJECT)
+        site.add("card", "<b>{{ t }}</b>", loading="L[{{ t }}]", module=OBJECT)
         shell, session = site.deferred(
             "{% component 'card' t='T' %}", request=request_for(Member(allowed))
         )

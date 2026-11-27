@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, override
 from django.utils.autoreload import StatReloader
 
 from next.components import component_watch_roots, refresh_component_files
+from next.discovery import get_pages_directories_for_watch
 from next.pages.loaders import has_body
-from next.pages.watch import get_pages_directories_for_watch
 from next.urls.dispatcher import scan_pages_tree
 
 

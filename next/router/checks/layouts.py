@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf.router import router_enabled
+from next.discovery import get_layout_djx_paths_for_watch
 from next.pages.checks.contexts import load_routed_pages
 from next.pages.checks.reads import chrome_names
 from next.pages.gating import step_levels
@@ -20,7 +21,6 @@ from next.pages.loaders import (
 )
 from next.pages.manager import page
 from next.pages.placeholder import placeholder_spans, slot_problem
-from next.pages.watch import get_layout_djx_paths_for_watch
 from next.utils import is_within
 
 

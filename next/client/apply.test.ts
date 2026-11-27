@@ -51,6 +51,53 @@ function spyConsole() {
   };
 }
 
+describe("morph events opt-in", () => {
+  it.each([
+    [
+      "the zone",
+      '<div data-next-zone="z" data-next-morph-events><p class="a">x</p></div>',
+    ],
+    [
+      "an ancestor",
+      '<main data-next-morph-events><div data-next-zone="z"><p class="a">x</p></div></main>',
+    ],
+  ])("fires the morph events under %s that opts in", (_where, html) => {
+    document.body.innerHTML = html;
+    const { applier } = makeApplier();
+    const seen: string[] = [];
+    document.addEventListener("next:morph-attribute", (e) => seen.push(e.type));
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><p class="b">x</p></div>',
+        },
+      ]),
+    );
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  it("fires none for a zone nothing opted in", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><p class="a">x</p></div>';
+    const { applier } = makeApplier();
+    const seen = vi.fn();
+    document.addEventListener("next:morph-attribute", seen);
+    document.addEventListener("next:morph-element", seen);
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><p class="b">x</p></div>',
+        },
+      ]),
+    );
+    expect(seen).not.toHaveBeenCalled();
+    expect(document.querySelector("p")!.className).toBe("b");
+  });
+});
+
 describe("parseEnvelope", () => {
   it("collapses absent meta to empty values", () => {
     const parsed = parseEnvelope({ version: "v1" });
@@ -141,17 +188,17 @@ describe("parseEnvelope", () => {
     const parsed = parseEnvelope({
       version: "v1",
       assets: [
-        { kind: "css", url: "/ok.css" },
+        { kind: "css", url: "/ok.css", load: "link" },
         null,
         { kind: "js" },
         { url: "/no-kind.js" },
         "nope",
-        { kind: "css", url: "/also-ok.css" },
+        { kind: "css", url: "/also-ok.css", load: "link" },
       ],
     });
     expect(parsed.assets).toEqual([
-      { kind: "css", url: "/ok.css" },
-      { kind: "css", url: "/also-ok.css" },
+      { kind: "css", url: "/ok.css", load: "link" },
+      { kind: "css", url: "/also-ok.css", load: "link" },
     ]);
   });
 
@@ -177,18 +224,18 @@ describe("parseEnvelope", () => {
       version: "v1",
       assets: [
         { kind: "module", url: "", inline: "mount()" },
-        { kind: "css", url: "/a.css" },
+        { kind: "css", url: "/a.css", load: "link" },
       ],
     });
-    expect(parsed.assets).toEqual([{ kind: "css", url: "/a.css" }]);
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/a.css", load: "link" }]);
   });
 
-  it("keeps the kind fallback for a url-form entry an older server sent", () => {
+  it("drops a url-form entry that carries no insertion verb", () => {
     const parsed = parseEnvelope({
       version: "v1",
       assets: [{ kind: "module", url: "/island.mjs" }],
     });
-    expect(parsed.assets).toEqual([{ kind: "module", url: "/island.mjs" }]);
+    expect(parsed.assets).toEqual([]);
   });
 
   it("drops an entry whose kind is not a string, the type it is read as", () => {
@@ -212,26 +259,14 @@ describe("parseEnvelope", () => {
       assets: [
         { kind: "styles", url: "/theme.css", load: "link" },
         { kind: "island", url: "/island.mjs", load: "module" },
-        { kind: "legacy", inline: "boot()", load: "script" },
+        { kind: "boot", inline: "boot()", load: "script" },
       ],
     });
     expect(parsed.assets).toEqual([
       { kind: "styles", url: "/theme.css", load: "link" },
       { kind: "island", url: "/island.mjs", load: "module" },
-      { kind: "legacy", inline: "boot()", load: "script" },
+      { kind: "boot", inline: "boot()", load: "script" },
     ]);
-  });
-
-  it("keeps the built-in kinds when the server sends no verb", () => {
-    const parsed = parseEnvelope({
-      version: "v1",
-      assets: [
-        { kind: "css", url: "/a.css" },
-        { kind: "js", url: "/a.js" },
-        { kind: "module", url: "/a.mjs" },
-      ],
-    });
-    expect(parsed.assets.map((asset) => asset.kind)).toEqual(["css", "js", "module"]);
   });
 
   it("drops an entry whose load is not one of the insertion verbs", () => {
@@ -243,9 +278,7 @@ describe("parseEnvelope", () => {
         { kind: "css", url: "/c.css" },
       ],
     });
-    // A load the client cannot act on is a broken entry, not a css asset that
-    // happens to carry one. An entry spelling no load keeps its kind's meaning.
-    expect(parsed.assets).toEqual([{ kind: "css", url: "/c.css" }]);
+    expect(parsed.assets).toEqual([]);
   });
 
   it("counts an entry with an unknown load among the malformed ones", () => {
@@ -261,7 +294,7 @@ describe("parseEnvelope", () => {
     logs.restore();
   });
 
-  it("keeps the server verb over the legacy meaning of the kind", () => {
+  it("takes the verb from the server, whatever the kind name says", () => {
     const parsed = parseEnvelope({
       version: "v1",
       assets: [{ kind: "css", url: "/island.mjs", load: "module" }],
@@ -312,7 +345,7 @@ describe("parseEnvelope", () => {
         version: "v1",
         ops: [{ op: "inner" }],
         assets: [
-          { kind: "css", url: "/ok.css" },
+          { kind: "css", url: "/ok.css", load: "link" },
           "nope",
           { url: "/no-kind.js" },
           { kind: "js" },
@@ -324,7 +357,7 @@ describe("parseEnvelope", () => {
       "[next] dropped malformed assets: 3",
     );
     expect(logs.debug).not.toHaveBeenCalled();
-    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css", load: "link" }]);
     logs.restore();
   });
 
@@ -334,7 +367,7 @@ describe("parseEnvelope", () => {
       {
         version: "v1",
         assets: [
-          { kind: "css", url: "/components/poll_chart.css" },
+          { kind: "css", url: "/components/poll_chart.css", load: "link" },
           { kind: "vue", url: "/dist/page-CBz.js" },
           { kind: "vue", url: "/dist/component-Dlb.js" },
         ],
@@ -345,7 +378,9 @@ describe("parseEnvelope", () => {
     expect(logs.debug).toHaveBeenCalledExactlyOnceWith(
       "[next] skipped assets of unsupported kind (2): vue",
     );
-    expect(parsed.assets).toEqual([{ kind: "css", url: "/components/poll_chart.css" }]);
+    expect(parsed.assets).toEqual([
+      { kind: "css", url: "/components/poll_chart.css", load: "link" },
+    ]);
     logs.restore();
   });
 
@@ -358,7 +393,7 @@ describe("parseEnvelope", () => {
           { kind: "vue", url: "/a.js" },
           { kind: "wasm", inline: "AGFzbQ==" },
           { kind: "vue", url: "/b.js" },
-          { kind: "js", url: "/c.js" },
+          { kind: "js", url: "/c.js", load: "script" },
         ],
       },
       createDiagnostics(),
@@ -377,7 +412,7 @@ describe("parseEnvelope", () => {
         version: "v1",
         ops: [null, "nope", { op: "inner" }],
         assets: [
-          { kind: "css", url: "/ok.css" },
+          { kind: "css", url: "/ok.css", load: "link" },
           { url: "/no-kind.js" },
           { kind: "vue", url: "/page.js" },
         ],
@@ -392,7 +427,7 @@ describe("parseEnvelope", () => {
       "[next] skipped assets of unsupported kind (1): vue",
     );
     expect(parsed.ops).toEqual([{ op: "inner" }]);
-    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css", load: "link" }]);
     logs.restore();
   });
 
@@ -402,7 +437,7 @@ describe("parseEnvelope", () => {
       version: "v1",
       ops: [null, { op: "inner" }],
       assets: [
-        { kind: "css", url: "/ok.css" },
+        { kind: "css", url: "/ok.css", load: "link" },
         { url: "/no-kind.js" },
         "nope",
         { kind: "vue", url: "/page.js" },
@@ -413,7 +448,7 @@ describe("parseEnvelope", () => {
     expect(logs.debug).not.toHaveBeenCalled();
     expect(parsed).toEqual(parseEnvelope(wire, undefined));
     expect(parsed.ops).toEqual([{ op: "inner" }]);
-    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css" }]);
+    expect(parsed.assets).toEqual([{ kind: "css", url: "/ok.css", load: "link" }]);
     logs.restore();
   });
 
@@ -424,7 +459,7 @@ describe("parseEnvelope", () => {
         version: "v1",
         ops: [{ op: "inner" }],
         assets: [
-          { kind: "css", url: "/ok.css" },
+          { kind: "css", url: "/ok.css", load: "link" },
           { kind: "js", inline: "console.log(1)", load: "script" },
         ],
       },
@@ -2502,7 +2537,7 @@ describe("Applier keeps overlapping applies apart across the CSS gate", () => {
             html: '<form data-next-action="u1" data-next-key="a" data-from="A"><input name="f" value="server-a-fresh"></form>',
           },
         ],
-        { assets: [{ kind: "css", url: "/a.css" }] },
+        { assets: [{ kind: "css", url: "/a.css", load: "link" }] },
       ),
       { snapshot: 1, key: "a" },
     );

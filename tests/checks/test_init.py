@@ -5,8 +5,13 @@ import pathlib
 import re
 
 import pytest
+from django.core import checks as django_checks
+from django.core.checks import CheckMessage
+from django.core.checks.registry import CheckRegistry
+from django.core.exceptions import ImproperlyConfigured
 
 import next.checks as checks_package
+from next.errors import SettingImportError, SettingNotSubclassError, SettingShapeError
 
 
 _NEXT_ROOT = pathlib.Path(inspect.getfile(checks_package)).parent.parent
@@ -102,7 +107,7 @@ _RETIRED_IDS = frozenset(
     | {"next.W044", "next.W045"}
     | {f"next.W{number:03d}" for number in range(47, 54)}
     | {f"next.W{number:03d}" for number in range(64, 67)}
-    | {"next.W073", "next.W161"}
+    | {"next.E237", "next.W073", "next.W161", "next.W164", "next.W170", "next.W174"}
 )
 
 _CHECKS_REFERENCE = (
@@ -124,25 +129,90 @@ def _named(module: str, cell: set[str]) -> bool:
 
 
 class TestLeafPackage:
-    """`next.checks` holds the shared tags and imports nothing of the framework."""
+    """`next.checks` holds the shared tags and the registration, over Django alone."""
 
-    def test_all_is_the_two_tags(self) -> None:
-        assert checks_package.__all__ == ["NEXT", "SEO"]
+    def test_all_is_the_two_tags_and_the_registration(self) -> None:
+        assert checks_package.__all__ == ["NEXT", "SEO", "register"]
 
     def test_tags_keep_their_values(self) -> None:
         assert (checks_package.NEXT, checks_package.SEO) == ("next", "seo")
 
-    def test_package_imports_no_framework_module(self) -> None:
+    def test_package_imports_no_area_of_the_framework(self) -> None:
         tree = ast.parse(pathlib.Path(inspect.getfile(checks_package)).read_text())
-        imported = [
-            node
+        framework = {
+            node.module
             for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-        ]
-        assert imported == []
+            if isinstance(node, ast.ImportFrom)
+            and (node.module or "").split(".")[0] == "next"
+        }
+        assert framework == {"next.errors"}
 
     def test_check_functions_no_longer_resolve_off_the_package(self) -> None:
         assert not hasattr(checks_package, "check_next_pages_configuration")
+
+
+@pytest.fixture()
+def local_registry(monkeypatch) -> CheckRegistry:
+    """Swap Django's registry for an empty one, so a test check never leaks."""
+    held = CheckRegistry()
+    monkeypatch.setattr(django_checks, "register", held.register)
+    return held
+
+
+class TestRegister:
+    """`register` hands Django a check that yields to the check of a bad setting."""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            SettingShapeError(["NEXT_FRAMEWORK['DEFER']['MAX_DEPTH'] must be 1."]),
+            SettingImportError("CUT", "nowhere.Cut", ImportError("no"), scope="ROUTER"),
+            SettingNotSubclassError("CUT", "builtins.object", "NavigationCut"),
+        ],
+        ids=["shape", "import", "subclass"],
+    )
+    def test_a_setting_error_yields_no_message(self, local_registry, error) -> None:
+        @checks_package.register(checks_package.NEXT)
+        def check(*args: object, **kwargs: object) -> list[CheckMessage]:
+            raise error
+
+        assert check() == []
+        assert local_registry.run_checks() == []
+
+    def test_any_other_error_still_raises(self, local_registry) -> None:
+        @checks_package.register(checks_package.NEXT)
+        def check(*args: object, **kwargs: object) -> list[CheckMessage]:
+            msg = "broken"
+            raise ImproperlyConfigured(msg)
+
+        with pytest.raises(ImproperlyConfigured, match="broken"):
+            check()
+
+    def test_the_check_runs_flagged_and_keeps_its_tags(self, local_registry) -> None:
+        seen: list[bool] = []
+
+        @checks_package.register(checks_package.NEXT, deploy=True)
+        def check(*args: object, **kwargs: object) -> list[CheckMessage]:
+            seen.append(checks_package.CHECKING.get())
+            return []
+
+        assert local_registry.run_checks(include_deployment_checks=True) == []
+        assert seen == [True]
+        assert checks_package.CHECKING.get() is False
+        assert check.tags == (checks_package.NEXT,)
+        assert local_registry.run_checks() == []
+        assert len(seen) == 1
+
+    def test_every_framework_check_registers_through_it(self) -> None:
+        direct = sorted(
+            str(path.relative_to(_NEXT_ROOT.parent))
+            for path in _NEXT_ROOT.rglob("*.py")
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.ImportFrom)
+            and node.module in {"django.core.checks", "django.core.checks.registry"}
+            and any(alias.name == "register" for alias in node.names)
+        )
+        assert direct == []
 
 
 class TestCheckIdAllocation:

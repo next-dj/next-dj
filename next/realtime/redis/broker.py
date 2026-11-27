@@ -35,6 +35,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.core.exceptions import ImproperlyConfigured
 
+from next.caches import FORK
 from next.conf.checks import errors_for_unknown_keys
 from next.partial.envelope import Envelope
 from next.realtime.backends import BROKER_OPTIONS, BrokerBackend
@@ -52,7 +53,7 @@ from next.realtime.roster import (
     presence_event,
     snapshot_message,
 )
-from next.utils import after_fork, is_int, non_negative_number
+from next.utils import is_int, non_negative_number
 
 from .pubsub import (
     AsyncPubSub,
@@ -908,7 +909,7 @@ def _forget_async_clients() -> None:
         broker.forget_clients()
 
 
-after_fork(_forget_async_clients)
+FORK.attach(_forget_async_clients)
 
 
 __all__ = [

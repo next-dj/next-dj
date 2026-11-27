@@ -13,14 +13,29 @@ from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.utils.text import unescape_string_literal
 
-from next.components.stash import stash_markup, stashing
-from next.defer import BoundaryOptionError, parse_duration
-from next.pages.layouts import ZONE, request_seal, sealed
+from next.boundaries.stash import stash_markup, stashing
+from next.errors import DurationError
+from next.pages.layouts import ZONE, enclosed, request_response_id
 from next.pages.skeletons import render_skeleton, zone_skeleton
 from next.seeding import REQUEST_KEY, TEMPLATE_PATH_KEY
 from next.static.collector import require_bundle
 from next.static.runtime import RELOAD_CHUNK_KEY
-from next.utils import child_nodelists
+from next.utils import child_nodelists, parse_duration
+from next.wire import CURRENT_ATTR
+
+from .keys import (
+    FOCUS_ATTR,
+    MATCH_ATTR,
+    NAV_ATTR,
+    PERSIST_ATTR,
+    PREFETCH_ATTR,
+    PRESS_ATTR,
+    RESERVE_ATTR,
+    ROUTER_ATTR,
+    SCROLL_ATTR,
+    SCROLL_REGION_ATTR,
+    TOASTS_ATTR,
+)
 
 
 if TYPE_CHECKING:
@@ -90,22 +105,21 @@ _GLOBAL_ATTRS: Final = frozenset(
 )
 _PREFIXED_ATTR = re.compile(r"(?:aria|data)-[a-z0-9][a-z0-9._-]*")
 _RESERVED_ATTR_PREFIX: Final = "data-next-"
-_RESERVE_ATTR: Final = "data-next-reserve"
 _OFF: Final = "off"
 _AUTHOR_ATTRS: Final = frozenset(
     {
-        "data-next-current",
-        "data-next-focus",
-        "data-next-match",
-        "data-next-nav",
-        "data-next-persist",
-        "data-next-prefetch",
-        "data-next-press",
-        _RESERVE_ATTR,
-        "data-next-router",
-        "data-next-scroll",
-        "data-next-scroll-region",
-        "data-next-toasts",
+        CURRENT_ATTR,
+        FOCUS_ATTR,
+        MATCH_ATTR,
+        NAV_ATTR,
+        PERSIST_ATTR,
+        PREFETCH_ATTR,
+        PRESS_ATTR,
+        RESERVE_ATTR,
+        ROUTER_ATTR,
+        SCROLL_ATTR,
+        SCROLL_REGION_ATTR,
+        TOASTS_ATTR,
     }
 )
 """The hand-written `data-next-*` names the runtime reads on any element.
@@ -291,15 +305,15 @@ class ZoneNode(Node):
     def render(self, context: "Context") -> SafeString:
         """Render the zone inline, its reload skeleton stashed after it once.
 
-        Under the client router the zone sits between sealed comments.
+        Under the client router the zone sits between enclosing comments.
         """
         wrapped = render_zone_standalone(self.partial, self.name, self.options, context)
         if self.options.reload == LOADING:
             wrapped = SafeString(wrapped + _skeleton_stash(self.name, context))
-        seal = request_seal(context.get(REQUEST_KEY))
-        if seal is None:
+        response_id = request_response_id(context.get(REQUEST_KEY))
+        if response_id is None:
             return wrapped
-        return SafeString(sealed(ZONE, seal, wrapped))
+        return SafeString(enclosed(ZONE, response_id, wrapped))
 
 
 type Ancestor = type[Node] | tuple[type[Node], ...]
@@ -386,8 +400,8 @@ def _attribute_name(key: str) -> str:
 def _attribute_value(key: str, raw: str) -> str:
     """Return the literal value of a wrapper attribute, reserve accepting off alone."""
     value = _literal(raw, f"{key}=")
-    if key == _RESERVE_ATTR and value != _OFF:
-        msg = f"{{% zone %}} {_RESERVE_ATTR} must be {_OFF}, got {value!r}."
+    if key == RESERVE_ATTR and value != _OFF:
+        msg = f"{{% zone %}} {RESERVE_ATTR} must be {_OFF}, got {value!r}."
         raise TemplateSyntaxError(msg)
     return value
 
@@ -405,7 +419,7 @@ def _validate_delay(value: str) -> int | None:
     """Return the delay in ms, `None` for the default one, from a duration literal."""
     try:
         seconds = parse_duration(value)
-    except BoundaryOptionError as error:
+    except DurationError as error:
         msg = f"{{% zone %}} delay= refuses its value, {error}."
         raise TemplateSyntaxError(msg) from error
     ms = round(seconds * _MS_PER_SECOND)

@@ -44,7 +44,7 @@ One module graph sits behind the package facade, and the table below names the p
    * - ``origin``
      - Resolution of the host page a partial request morphs out of band, with ``PartialOrigin`` and ``OriginSource``.
    * - ``paging``
-     - The pagers of a ``{% more %}`` list, ``NumberPager`` and ``KeysetPager`` on the ``Pager`` contract, the ``Plan`` a pager returns, the ``Window`` that plan builds, and the ``Paging`` a context callable receives.
+     - The pagers of a ``{% more %}`` list, ``NumberPager`` and ``KeysetPager`` on the ``Pager`` contract, the ``WindowPlan`` a pager returns, the ``Window`` that plan builds, and the ``Paging`` a context callable receives.
    * - ``patches``
      - The request-bound ``Patches`` builder and the ``PatchResponse`` it finalises.
    * - ``registry``
@@ -214,7 +214,9 @@ A pager cuts the rows of a ``{% more %}`` list into the ``Window`` the query str
 It is a stateless module-level object, a ``NumberPager`` that pages by ``?page=N`` or a ``KeysetPager`` that pages by an opaque ``?cursor=<token>``.
 A context callable takes ``Annotated[Paging, <pager>]`` and returns ``page.paginate(rows)`` or ``await page.apaginate(rows)``, and the template passes that ``Window`` to ``next=`` and ``previous=``.
 Both pagers read one row past the window instead of counting, while ``count=True`` reads the total into ``Window.count`` with one more query, see :ref:`topics-partial-rendering-reference-more`.
-``?<param>=<token>&restore=1`` reaches back ``NEXT_FRAMEWORK["DEFER"]["MORE"]["MAX_RESTORE"]`` batches at most, see :doc:`settings`.
+``?<param>=<token>&_restore=<param>`` reaches back ``max_restore`` batches at most, an integer from ``1`` that both pagers take, ``10`` by default.
+A ``NumberPager`` page past the last one renders no rows, counts the rows with one more query, and sets ``previous`` to the last page, so a stale ``?page=999`` leads back to the list, the way :meth:`~django.core.paginator.Paginator.get_page` falls back to the last page, without repeating rows a ``{% more %}`` list already holds.
+A ``Window`` iterates, measures, indexes, and reverses its rows, and ``has_next()`` and ``has_previous()`` answer what a :class:`~django.core.paginator.Page` answers, so ``{% if rows.has_next %}`` reads the same in a template.
 The ``{% more %}`` tag and its filters are listed in :doc:`template-tags`, and :doc:`/content/howto/page-a-list-by-cursor` walks through a keyset list, its token codec, and a pager of another scheme.
 
 .. autoclass:: next.partial.Window
@@ -231,15 +233,15 @@ The ``{% more %}`` tag and its filters are listed in :doc:`template-tags`, and :
 .. autoclass:: next.partial.Paging
    :members:
 
-``Pager`` has one abstract method, ``plan(rows, request)``, which returns the ``Plan`` of the window the request asks for.
-A ``Plan`` holds the bounded ``slices`` to read, the ``total`` to count when ``count=True`` asks for it, and the ``finish`` step that builds the ``Window`` from what was read.
-Planning reads nothing, so ``Plan.run()`` and ``await Plan.arun()`` share every decision, and ``window`` and ``awindow`` of ``Pager`` are the concrete methods that run the plan.
+``Pager`` has one abstract method, ``plan(rows, request)``, which returns the ``WindowPlan`` of the window the request asks for.
+A ``WindowPlan`` holds the bounded ``slices`` to read, the ``total`` to count when ``count=True`` asks for it, and the ``finish`` step that builds the ``Window`` from what was read, or answers the ``WindowPlan`` of one more read, which ``run`` and ``arun`` then carry out.
+Planning reads nothing, so ``WindowPlan.run()`` and ``await WindowPlan.arun()`` share every decision, and ``window`` and ``awindow`` of ``Pager`` are the concrete methods that run the plan.
 A pager of another scheme implements ``plan`` alone and is async-capable with no second code path, see :doc:`/content/howto/page-a-list-by-cursor`.
 
 .. autoclass:: next.partial.Pager
    :members:
 
-.. autoclass:: next.partial.Plan
+.. autoclass:: next.partial.WindowPlan
    :members:
 
 .. autoclass:: next.partial.NumberPager

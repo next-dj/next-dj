@@ -7,9 +7,11 @@ import pytest
 from django.http import HttpResponse, StreamingHttpResponse
 from django.test import AsyncClient, Client, override_settings
 
+from next.boundaries.failures import ErrorKind
 from next.compression import GzipBackend
 from next.partial.headers import STREAM_ACCEPT
 from next.testing import (
+    AsyncNextClient,
     NextClient,
     SseEvent,
     StreamedPage,
@@ -125,6 +127,21 @@ class TestStreamedPage:
         assert page.boundary("card").id == "b-1"
         assert page.boundary("pages/slow/loading.djx").id == "b-2"
 
+    @pytest.mark.parametrize(
+        "asked", [{}, {"key": "card", "page": "pages/slow"}], ids=["none", "both"]
+    )
+    def test_a_boundary_takes_one_way_of_naming_it(self, asked: dict[str, str]) -> None:
+        page = _page(_chunk("b-1", "inner", "<p>a</p>"))
+        with pytest.raises(TypeError, match="exactly one of a key or page="):
+            page.boundary(**asked)
+
+    def test_a_page_directory_without_a_loading_ui_names_no_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        page = _page(_chunk("b-1", "inner", "<p>a</p>"))
+        with pytest.raises(LookupError, match=r"holds no loading\.djx"):
+            page.boundary(page=tmp_path)
+
     def test_an_id_or_a_key_wins_over_a_name(self) -> None:
         page = _page(
             _chunk("b-1", "inner", "<p>a</p>"),
@@ -160,6 +177,40 @@ class TestStreamedPage:
         page = StreamedPage(writes, StreamingHttpResponse(iter(())))
         assert [chunk.id for chunk in page.chunks] == ["b-1"]
         assert (page.ended, page.end, page.cut) == (False, None, True)
+
+
+def _held(ident: str, html: str, **wrapper: object) -> bytes:
+    """Return a chunk whose boundary HTML rides in a template before its script."""
+    ops = [
+        {"op": "inner", "target": {"boundary": ident}},
+        {"op": "meta", "robots": "noindex"},
+    ]
+    envelope = {"version": "1", "ops": ops, "assets": [], "form": None}
+    chunk = {"z": ident, "s": "ready", **wrapper, "e": envelope, "t": f"nx-{ident}"}
+    return f'<template id="nx-{ident}">{html}</template>'.encode() + _script(chunk)
+
+
+class TestTemplateChunks:
+    """A chunk whose HTML rides in a template reads as one that carries it inline."""
+
+    def test_the_template_fills_the_boundary_op(self) -> None:
+        html = "<template><p>a</p></template><script>x()</script><p>b</p>"
+        writes = [_SHELL.encode(), _held("b-1", html), _script(0)]
+        page = StreamedPage(writes, HttpResponse())
+        (chunk,) = page.chunks
+        assert chunk.html == html
+        assert f'data-next-state="ready">{html}</div>' in page.final_html()
+
+    def test_a_template_named_inside_another_stays_part_of_it(self) -> None:
+        inner = '<template id="nx-b-2"><td>c</td></template>'
+        writes = [_SHELL.encode(), _held("b-1", inner), _script(0)]
+        (chunk,) = StreamedPage(writes, HttpResponse()).chunks
+        assert chunk.html == inner
+
+    def test_an_unbalanced_template_is_left_in_the_body(self) -> None:
+        writes = [_SHELL.encode(), b'<template id="nx-b-1"><p>cut']
+        page = StreamedPage(writes, HttpResponse())
+        assert (page.chunks, page.cut) == ([], True)
 
 
 class TestDecodedAndCustomStreams:
@@ -404,7 +455,8 @@ class TestGatedStream:
     ) -> None:
         with override_settings(BASE_DIR=gated_pages.parent):
             page, _entered = self._read(gated_pages, "/slow/", page="pages/slow")
-        assert page.boundary("pages/slow/loading.djx") is page.chunks[0]
+            assert page.boundary(page="pages/slow") is page.chunks[0]
+        assert page.chunks[0].boundary == "pages/slow/loading.djx"
 
     def test_the_async_reader_finds_a_chunk_by_name(self, gated_pages: Path) -> None:
         with routed(gated_pages, COMPONENT_BACKENDS=COMPONENTS):
@@ -522,10 +574,11 @@ def test_a_reloaded_failure_names_the_wrapper_it_morphs(tmp_path: Path) -> None:
         boundary_errors("render"),
         recorded_failures() as failures,
     ):
-        envelope = NextClient().get_boundary("/shop/", "card", sku="b")
+        reloaded = NextClient().get_boundary("/shop/", "card", sku="b")
     (failure,) = failures
-    (op,) = envelope.ops
-    assert op["target"] == {"boundary": failure.id}
+    assert reloaded.id == failure.id
+    assert (reloaded.state, reloaded.kind) == ("error", ErrorKind.ERROR)
+    assert reloaded.html == "<p>card failed</p>"
 
 
 def _down(tmp_path: Path) -> Path:
@@ -550,9 +603,15 @@ def _async(url: str) -> StreamedPage:
     return asyncio.run(aread_stream(AsyncClient(), url))
 
 
+def _async_next(url: str) -> StreamedPage:
+    return asyncio.run(AsyncNextClient().get_stream(url))
+
+
 @pytest.mark.django_db()
 @pytest.mark.parametrize(
-    "reader", [_plain, _next, _async], ids=["read_stream", "get_stream", "aread"]
+    "reader",
+    [_plain, _next, _async, _async_next],
+    ids=["read_stream", "get_stream", "aread", "async_get_stream"],
 )
 def test_a_chunk_failure_reaches_every_enclosing_block_once(
     tmp_path: Path, reader: Callable[[str], StreamedPage]

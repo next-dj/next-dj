@@ -82,7 +82,7 @@ Each project points at the shared directory through ``DIRS``.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "DIRS": [str(BASE_DIR / "chrome")],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
@@ -181,7 +181,7 @@ Every project then renders inside the same shell.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "DIRS": [str(SHARED_DIR / "chrome")],
                "APP_DIRS": True,
            }

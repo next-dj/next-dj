@@ -823,8 +823,8 @@ class TestCollectorRequire:
 
     def test_a_need_is_a_js_asset_noted_by_url(self) -> None:
         collector = StaticCollector(bundle_url=_bundle_url)
-        collector.require("defer")
-        url = "/static/next/next.defer.min.js"
+        collector.require("boundaries")
+        url = "/static/next/next.boundaries.min.js"
         assert list(collector.assets_in_slot("scripts")) == [
             StaticAsset(url=url, kind="js")
         ]
@@ -849,7 +849,7 @@ class TestCollectorRequire:
     def test_a_collector_without_a_resolver_records_no_bundle(
         self, collector: StaticCollector
     ) -> None:
-        collector.require("defer")
+        collector.require("boundaries")
         assert collector.bundle_url is None
         assert collector.assets_in_slot("scripts") == ()
         assert collector.notes(BUNDLE_NOTE) == ()
@@ -863,22 +863,22 @@ class TestCollectorRequire:
     def test_a_rollback_takes_the_need_and_its_urgency_back(self) -> None:
         collector = StaticCollector(bundle_url=_bundle_url)
         mark = collector.mark()
-        collector.require("defer", urgent=True)
+        collector.require("boundaries", urgent=True)
         collector.rollback(mark)
         assert collector.assets_in_slot("scripts") == ()
         assert collector.notes(BUNDLE_NOTE) == ()
         assert collector.notes(URGENT_NOTE) == ()
-        collector.require("defer")
-        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.defer.min.js"]
+        collector.require("boundaries")
+        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.boundaries.min.js"]
 
     def test_a_need_kept_outside_the_mark_survives_its_rollback(self) -> None:
         collector = StaticCollector(bundle_url=_bundle_url)
-        collector.require("defer")
+        collector.require("boundaries")
         mark = collector.mark()
-        collector.require("defer", urgent=True)
+        collector.require("boundaries", urgent=True)
         collector.require("reload")
         collector.rollback(mark)
-        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.defer.min.js"]
+        assert collector.notes(BUNDLE_NOTE) == ["/static/next/next.boundaries.min.js"]
         assert collector.notes(URGENT_NOTE) == ()
 
 
@@ -909,4 +909,4 @@ class TestRequireBundle:
         assert context.flatten() == before
 
     def test_no_target_records_nothing(self) -> None:
-        assert require_bundle(None, "defer") is None
+        assert require_bundle(None, "boundaries") is None

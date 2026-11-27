@@ -13,23 +13,18 @@ from django.http.response import HttpResponseBase
 from django.middleware.csrf import get_token, rotate_token
 from django.test import override_settings
 
+from next.caches import ROUTES
 from next.forms.dispatch import FormActionDispatch
 from next.intercept import Intercept, intercepts
+from next.marks import fragment_marks
 from next.pages import page
-from next.pages.layouts import SLOT, sealed
+from next.pages.layouts import SLOT, enclosed
 from next.pages.loaders import layout_ids
 from next.pages.responses import Purpose
-from next.pages.router import RouterOptions
 from next.partial.patches import Envelope
-from next.router import (
-    Cut,
-    CutKind,
-    Divergence,
-    navigation as navigation_module,
-    router_clear,
-    router_cleared,
-)
-from next.router.markers import Declaration, LayoutKey, ScannedLayout, ScannedShell
+from next.router import Cut, CutKind, Divergence, router_clear, router_cleared
+from next.router.declarations import RouterOptions
+from next.router.markers import ClientLayouts, LayoutKey, ScannedLayout, ScannedPage
 from next.router.navigation import (
     CLEAR,
     DECLARATION_BYTES,
@@ -51,19 +46,21 @@ from next.router.navigation import (
     parse_declaration,
     passed,
     read_shell,
+    reporting,
     routing,
     stale,
     stamp,
     visit_envelope,
     zone_marking,
 )
-from next.static.runtime import html_finish, router_render
+from next.router.render import router_render
+from next.static.runtime import html_finish
 from next.testing import capture_signals, override_next_settings
 from tests.support import unified_view
 from tests.support.navigation import NAVIGATION, declared_by, get_page, navigate, ops
 
 
-SEAL = "5ea1ed00"
+RESPONSE_ID = "5ea1ed00"
 IDENT = "0123456789abcdef"
 INNER = "fedcba9876543210"
 NAV = '<nav><a href="/docs/">Docs</a><a href="/photo/1/">Photo</a></nav>'
@@ -75,7 +72,7 @@ PHOTO_MARKED = (
     '<nav><a href="/docs/">Docs</a>'
     '<a href="/photo/1/" aria-current="page" data-next-current="page">Photo</a></nav>'
 )
-CURRENT_OFF = {"ENABLED": False, "CURRENT": {"ENABLED": False}}
+LINKS_OFF = {"ENABLED": False, "ACTIVE_LINKS": {"ENABLED": False}}
 UNPARSABLE = "http://[::1"
 
 
@@ -84,12 +81,12 @@ class TestParseDeclaration:
 
     def test_entries_outer_first(self) -> None:
         raw = f"{IDENT}.{'a' * 32}, {INNER}.{'b' * 16}"
-        assert parse_declaration(raw, 32) == Declaration(
+        assert parse_declaration(raw, 32) == ClientLayouts(
             (LayoutKey(IDENT, "a" * 32), LayoutKey(INNER, "b" * 16))
         )
 
     def test_an_empty_value_declares_no_layout(self) -> None:
-        assert parse_declaration(" ", 32) == Declaration(())
+        assert parse_declaration(" ", 32) == ClientLayouts(())
 
     @pytest.mark.parametrize(
         "raw",
@@ -107,16 +104,16 @@ class TestParseDeclaration:
 
 
 class TestReadShell:
-    """The scan finds nested slots by id and seal and stops at the first gap."""
+    """The scan finds nested slots by id and response id and stops at the first gap."""
 
     def _html(self) -> str:
-        inner = sealed(SLOT, SEAL, "<p>body</p>", INNER)
-        outer = sealed(SLOT, SEAL, f"<section>{inner}</section>", IDENT)
+        inner = enclosed(SLOT, RESPONSE_ID, "<p>body</p>", INNER)
+        outer = enclosed(SLOT, RESPONSE_ID, f"<section>{inner}</section>", IDENT)
         return f"<html><body><nav>x</nav>{outer}</body></html>"
 
     def test_nested_slots_without_digests(self) -> None:
         html = self._html()
-        shell = read_shell(html, SEAL, [IDENT, INNER])
+        shell = read_shell(html, RESPONSE_ID, [IDENT, INNER])
         assert [layout.ident for layout in shell.layouts] == [IDENT, INNER]
         start, end = shell.layouts[1].slot
         assert html[start:end] == "<p>body</p>"
@@ -124,23 +121,26 @@ class TestReadShell:
         assert shell.body is not None
 
     def test_a_missing_slot_ends_the_chain(self) -> None:
-        shell = read_shell(self._html(), SEAL, [IDENT, "9" * 16, INNER])
+        shell = read_shell(self._html(), RESPONSE_ID, [IDENT, "9" * 16, INNER])
         assert [layout.ident for layout in shell.layouts] == [IDENT]
 
     def test_another_seal_finds_nothing(self) -> None:
         assert read_shell(self._html(), "0badc0de", [IDENT]).layouts == ()
-        assert ScannedShell("", SEAL, ()).root is None
+        assert ScannedPage("", RESPONSE_ID, ()).root is None
 
     def test_payload_seals_only_the_layouts_below_the_cut(self) -> None:
-        shell = ScannedShell(
+        shell = ScannedPage(
             "",
-            SEAL,
+            RESPONSE_ID,
             (
                 ScannedLayout(IDENT, "d1", (0, 0), (0, 0)),
                 ScannedLayout(INNER, "d2", (0, 0), (0, 0)),
             ),
         )
-        assert layouts_payload(shell, 1) == [[IDENT, "d1", None], [INNER, "d2", SEAL]]
+        assert layouts_payload(shell, 1) == [
+            [IDENT, "d1", None],
+            [INNER, "d2", RESPONSE_ID],
+        ]
 
 
 class TestDescribe:
@@ -159,14 +159,14 @@ class TestDescribe:
                 f"kept {IDENT} slot {IDENT}, diverged {INNER} digest",
                 id="slot-diverged",
             ),
-            pytest.param(Cut(CutKind.BODY), "body-morph", id="body"),
+            pytest.param(Cut(CutKind.BODY), "body_morph", id="body"),
             pytest.param(
                 Cut(CutKind.VISIT, (), IDENT, Divergence.HEAD), "visit head", id="head"
             ),
             pytest.param(Cut(CutKind.VISIT), "visit id", id="visit"),
             pytest.param(
                 Cut(CutKind.BODY, (), IDENT, Divergence.CLEAR),
-                f"body-morph, diverged {IDENT} clear",
+                f"body_morph, diverged {IDENT} clear",
                 id="cleared",
             ),
         ],
@@ -180,7 +180,7 @@ class TestDescribe:
         assert not response.has_header("X-Next-Navigate")
         with override_settings(DEBUG=True):
             debug_cut(response, Cut(CutKind.BODY))
-        assert response["X-Next-Navigate"] == "body-morph"
+        assert response["X-Next-Navigate"] == "body_morph"
 
     def test_no_listener_no_signal(self) -> None:
         announce(HttpRequest(), Path("page.py"), Cut(CutKind.BODY), streamed=False)
@@ -190,8 +190,10 @@ class TestDivergenceLog:
     """Under DEBUG the first digest divergence of each layout is logged at INFO."""
 
     @pytest.fixture(autouse=True)
-    def _fresh(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(navigation_module, "_noted", set())
+    def _fresh(self) -> Iterator[None]:
+        reporting._noted.clear()
+        yield
+        reporting._noted.clear()
 
     @pytest.fixture()
     def page_file(self, tmp_path: Path) -> Path:
@@ -228,6 +230,15 @@ class TestDivergenceLog:
         assert f"layout {page_file.parents[1] / 'layout.djx'} differs" in message
         assert f"({describe(cut)})" in message
         assert "{% zone %}" in message
+
+    def test_a_route_reload_logs_it_again(
+        self, page_file: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cut = Cut(CutKind.BODY, (), IDENT, Divergence.DIGEST)
+        self._logged(caplog, page_file, cut)
+        ROUTES.move()
+
+        assert len(self._logged(caplog, page_file, cut)) == 2
 
     def test_an_id_outside_the_chain_is_named_as_it_is(
         self, page_file: Path, caplog: pytest.LogCaptureFixture
@@ -273,7 +284,7 @@ class TestRouting:
             assert held is None
             assert router_render.get() is None
 
-    def test_off_still_marks_the_current_links(self, rf) -> None:
+    def test_off_still_marks_the_active_links(self, rf) -> None:
         with (
             override_next_settings(ROUTER={"ENABLED": False}),
             routing(rf.get("/docs/"), Path("page.py"), Purpose.DOCUMENT),
@@ -293,40 +304,45 @@ class TestRouting:
 
     def test_off_with_the_pass_off_keeps_the_html(self, rf) -> None:
         with (
-            override_next_settings(ROUTER=CURRENT_OFF),
+            override_next_settings(ROUTER=LINKS_OFF),
             routing(rf.get("/docs/"), Path("page.py"), Purpose.DOCUMENT),
         ):
             finish = html_finish.get()
             assert finish is not None
             assert finish(NAV) is NAV
 
+    def test_a_page_of_compiled_containers_marks_no_document(
+        self, tmp_path: Path, rf
+    ) -> None:
+        with (
+            override_next_settings(ROUTER={"ENABLED": True}),
+            routing(
+                rf.get("/docs/"), tmp_path / "page.py", Purpose.DOCUMENT, fragments=True
+            ) as held,
+        ):
+            assert held is not None
+            marks = fragment_marks.get()
+            assert marks is not None
+            assert marks(NAV) == DOCS_MARKED
+            assert held.finish(NAV) is NAV
+        assert fragment_marks.get() is None
+
     def test_on_binds_the_render(self, tmp_path: Path, rf) -> None:
         with (
             override_next_settings(ROUTER={"ENABLED": True}),
-            routing(rf.get("/"), tmp_path / "page.py", Purpose.NAVIGATION) as held,
+            routing(rf.get("/"), tmp_path / "page.py", Purpose.NAVIGATE) as held,
         ):
             assert held is not None
             assert router_render.get() is held.render
             assert html_finish.get() is None
-            assert held.purpose is Purpose.NAVIGATION
+            assert held.purpose is Purpose.NAVIGATE
         assert router_render.get() is None
-
-    @pytest.mark.parametrize("progress", [True, False])
-    def test_the_render_asks_for_the_progress_bar_the_settings_name(
-        self, tmp_path: Path, rf, *, progress: bool
-    ) -> None:
-        with (
-            override_next_settings(ROUTER={"ENABLED": True, "PROGRESS": progress}),
-            routing(rf.get("/"), tmp_path / "page.py", Purpose.DOCUMENT) as held,
-        ):
-            assert held is not None
-            assert held.render.progress is progress
 
     def test_a_shell_is_read_when_the_injector_never_finished(
         self, tmp_path: Path, rf
     ) -> None:
         with override_next_settings(ROUTER={"ENABLED": True}):
-            held = Routing(rf.get("/"), tmp_path / "page.py", Purpose.NAVIGATION)
+            held = Routing(rf.get("/"), tmp_path / "page.py", Purpose.NAVIGATE)
             html = f"<p>{held.render.mark}</p>"
             shell = held.settled(html)
             assert shell.layouts == ()
@@ -371,7 +387,7 @@ class TestRouting:
         with (
             override_next_settings(ROUTER={"ENABLED": True}),
             mock.patch(
-                "next.router.navigation.page_router", return_value=options
+                "next.router.navigation.state.page_router", return_value=options
             ) as read,
         ):
             held = Routing(rf.get("/"), tmp_path / "page.py", Purpose.DOCUMENT)
@@ -407,7 +423,7 @@ class TestRouting:
     def test_an_envelope_without_a_collector(self, rf, body_envelope) -> None:
         body = body_envelope(
             rf.get("/x/"),
-            Purpose.NAVIGATION,
+            Purpose.NAVIGATE,
             "<p>no body</p>",
             shared=True,
             complete=True,
@@ -420,7 +436,7 @@ class TestRouting:
         rotate_token(request)
         envelope = body_envelope(
             request,
-            Purpose.NAVIGATION,
+            Purpose.NAVIGATE,
             "<body><p>x</p></body>",
             shared=True,
             complete=False,
@@ -446,7 +462,7 @@ class TestRouting:
         get_token(request)
         envelope = body_envelope(
             request,
-            Purpose.NAVIGATION,
+            Purpose.NAVIGATE,
             "<body><p>x</p></body>",
             shared=True,
             complete=False,
@@ -468,7 +484,7 @@ class TestRouting:
     def test_an_unrotated_token_sends_no_csrf(self, rf, body_envelope) -> None:
         envelope = body_envelope(
             rf.get("/x/"),
-            Purpose.NAVIGATION,
+            Purpose.NAVIGATE,
             "<body></body>",
             shared=False,
             complete=False,
@@ -483,7 +499,7 @@ class TestRouting:
             "/x/", headers={"X-Next-Request": "1", "X-Next-Origin": origin}
         )
         envelope = body_envelope(
-            request, Purpose.NAVIGATION, "<body></body>", shared=False, complete=False
+            request, Purpose.NAVIGATE, "<body></body>", shared=False, complete=False
         )
         url = [op.as_dict() for op in envelope.ops if op.op == "url"]
         assert url == [{"op": "url", "action": "push", "href": "/x/"}]
@@ -506,7 +522,7 @@ class TestRouting:
         assert marked_links(NAV, rf.get("/docs/")) == DOCS_MARKED
 
     def test_the_document_is_folded_once(self, rf) -> None:
-        with mock.patch("next.router.current.fold", side_effect=str.lower) as folded:
+        with mock.patch("next.router.links.fold", side_effect=str.lower) as folded:
             assert marked_links(NAV, rf.get("/docs/")) == DOCS_MARKED
         assert [call.args for call in folded.call_args_list].count((NAV,)) == 1
 
@@ -521,7 +537,7 @@ class TestZoneMarking:
         return marks
 
     def test_off_binds_no_pass(self, rf) -> None:
-        with override_next_settings(ROUTER=CURRENT_OFF):
+        with override_next_settings(ROUTER=LINKS_OFF):
             assert self._marks(rf.get("/docs/")) is None
 
     def test_a_zone_refresh_marks_its_own_page(self, rf) -> None:
@@ -563,7 +579,9 @@ class TestZoneMarking:
         path.assert_not_called()
         host.assert_not_called()
 
-    def test_the_path_and_the_host_are_read_once_for_every_zone(self, rf) -> None:
+    def test_the_path_is_read_once_and_rooted_links_never_read_the_host(
+        self, rf
+    ) -> None:
         request = rf.get("/docs/")
         marks = self._marks(request)
         assert marks is not None
@@ -574,11 +592,22 @@ class TestZoneMarking:
             assert marks(NAV) == DOCS_MARKED
             assert marks(NAV) == DOCS_MARKED
             assert request.get_full_path.call_count == 1
+            assert request.get_host.call_count == 0
+
+    def test_absolute_links_read_the_host_once_for_every_zone(self, rf) -> None:
+        request = rf.get("/docs/")
+        marks = self._marks(request)
+        assert marks is not None
+        html = '<nav><a href="http://testserver/docs/">Docs</a></nav>'
+        with mock.patch.object(request, "get_host", wraps=request.get_host):
+            first, second = marks(html), marks(html)
             assert request.get_host.call_count == 1
+        assert first == second
+        assert 'aria-current="page"' in first
 
     def test_a_marked_zone_varies_on_the_origin(self) -> None:
         assert origin_vary(HttpResponse())["Vary"] == "X-Next-Origin"
-        with override_next_settings(ROUTER=CURRENT_OFF):
+        with override_next_settings(ROUTER=LINKS_OFF):
             assert not origin_vary(HttpResponse()).has_header("Vary")
 
 
@@ -612,7 +641,7 @@ class TestActionMarking:
 
     def test_off_binds_no_pass(self, rf) -> None:
         request = rf.post("/_next/form/x/", {"_next_form_origin": "/docs/"})
-        with override_next_settings(ROUTER=CURRENT_OFF):
+        with override_next_settings(ROUTER=LINKS_OFF):
             assert self._marks(request) is None
 
     @pytest.mark.django_db()
@@ -687,7 +716,7 @@ class TestPassed:
 class TestCleared:
     """A response that clears the router keeps no layout of the old session."""
 
-    SHELL = ScannedShell("", SEAL, (ScannedLayout(IDENT, "d", (0, 0), (0, 0)),))
+    SHELL = ScannedPage("", RESPONSE_ID, (ScannedLayout(IDENT, "d", (0, 0), (0, 0)),))
 
     def test_a_clear_gives_up_the_kept_layouts(self) -> None:
         request = HttpRequest()
@@ -773,6 +802,12 @@ class TestDirectives:
     def test_no_stale_version_without_one(self, rf) -> None:
         request = rf.get("/", headers={"X-Next-Request": "1"})
         assert stale(request) is None
+
+    @pytest.mark.parametrize(("protocol", "status"), [("1", 409), ("2", None)])
+    def test_another_wire_protocol_conflicts(self, rf, protocol, status) -> None:
+        headers = {"X-Next-Request": "1", "X-Next-Protocol": protocol}
+        answer = stale(rf.get("/", headers=headers))
+        assert (answer and answer.status_code) == status
 
     @pytest.mark.django_db()
     def test_an_action_that_logs_in_clears(self, rf) -> None:

@@ -72,7 +72,7 @@ class TestRouterMirror:
 
         assert found == [("pages", "photo")]
 
-    def test_a_failed_router_manager_walks_nothing(self) -> None:
+    def test_a_failed_route_manager_walks_nothing(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "no.such.Router"}]}
         ):

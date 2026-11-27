@@ -112,6 +112,7 @@ No framework CSS is applied, so ``dialog[data-next-dialog] > [data-next-busy]:em
 
 A ``loading.<zone>.djx`` beside the template that declares the zone a layer opens is its loading UI, the same file a ``reload="loading"`` zone of that name shows.
 A page that holds a ``data-next-layer`` link carries it in a ``<template data-next-layer="<zone>">`` before the first link of each zone, whichever template wrote the link and whether its attributes are literals or variables.
+A link a variable writes as safe markup, such as ``{{ menu }}`` holding ready HTML, is invisible to the source, so a document ``GET`` carries no loading UI for it, the same contract :doc:`/content/topics/router/active-links` sets for a container written that way.
 The first link of a zone names the page whose file the template holds, and an intercept that serves the zone over that page wins over it.
 The file renders over the request alone, since the context of the page it belongs to is not built yet.
 A page, a zone answer, and an appended page of rows all carry it, and the reload bundle loads with it.

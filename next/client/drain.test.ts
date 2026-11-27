@@ -79,13 +79,14 @@ function harness(options: { assets?: AssetBridge } = {}) {
     document,
     ...(options.assets === undefined ? {} : { assets: () => options.assets! }),
   });
-  const host: DrainHost = {
-    apply: (raw, applying) => applier.apply(raw, applying),
-    _mark: markBusy,
-    _busy: isBusy,
-    _stamped: stamped,
-    _fire: dispatch,
-  };
+  const host = {
+    partial: { apply: (raw, applying) => applier.apply(raw, applying) },
+    mark: markBusy,
+    busy: isBusy,
+    stamped,
+    fire: dispatch,
+    fallbacks: new WeakMap(),
+  } as DrainHost;
   const boundaries = {
     drain: () => drain(host, () => open > 0, { signal: listening.signal }),
   };
@@ -172,10 +173,10 @@ describe("applying a chunk", () => {
     push(fill("b-1", "first"));
     frame();
     const wrapper = document.getElementById("b-1")!;
-    expect(host._fallbacks?.get(wrapper)).toBe("<p>loading b-1</p>");
+    expect(host.fallbacks.get(wrapper)).toBe("<p>loading b-1</p>");
     push(fill("b-1", "second"));
     frame();
-    expect(host._fallbacks?.get(wrapper)).toBe("<p>loading b-1</p>");
+    expect(host.fallbacks.get(wrapper)).toBe("<p>loading b-1</p>");
   });
 
   it("marks an error chunk with its kind", () => {
@@ -219,11 +220,11 @@ describe("applying a chunk", () => {
     shell("b-1");
     const wrapper = document.getElementById("b-1")!;
     const { boundaries, host } = harness();
-    host._fallbacks = new WeakMap([[wrapper, "<p>kept</p>"]]);
+    host.fallbacks.set(wrapper, "<p>kept</p>");
     boundaries.drain();
     push(fill("b-1", "first"));
     frame();
-    expect(host._fallbacks.get(wrapper)).toBe("<p>kept</p>");
+    expect(host.fallbacks.get(wrapper)).toBe("<p>kept</p>");
   });
 
   it("applies without waiting for a paint while the tab is hidden", async () => {
@@ -517,6 +518,36 @@ describe("frame batching", () => {
     expect(events("partial:settled")).toEqual([
       { zones: [], boundaries: ["b-1", "b-2", "b-3"], status: "ok" },
     ]);
+  });
+
+  it("sizes each batch to the time the last one took and yields past the budget", () => {
+    const ids = Array.from({ length: 20 }, (_, index) => `b-${index}`);
+    shell(...ids);
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const { boundaries, events } = harness();
+    // Each fill costs two milliseconds to apply.
+    document.addEventListener(
+      "partial:applied",
+      (event) =>
+        (now += 2 * (event as CustomEvent<{ nodes: Element[] }>).detail.nodes.length),
+      { signal: listening.signal },
+    );
+    boundaries.drain();
+    push(...ids.map((id) => fill(id, id)), 0);
+    const sizes: number[][] = [];
+    while (painter.queued.length > 0) {
+      const before = events("partial:settled").length;
+      frame();
+      sizes.push(
+        events("partial:settled")
+          .slice(before)
+          .map((detail) => (detail.boundaries as string[]).length),
+      );
+    }
+    expect(sizes).toEqual([[8], [4], [4], [4]]);
+    expect(ids.map(text)).toEqual(ids);
+    expect(ids.map(marks).every((mark) => mark[0] === "ready")).toBe(true);
   });
 
   it("holds the whole batch for a listener that calls hold", () => {
@@ -870,5 +901,167 @@ describe("nested boundaries", () => {
     expect(events("partial:settled")).toEqual([
       { zones: [], boundaries: ["b-1"], status: "dropped" },
     ]);
+  });
+});
+
+describe("yielding", () => {
+  it("applies several batches in one task while they fit the budget", () => {
+    const ids = Array.from({ length: 12 }, (_, index) => `b-${index}`);
+    shell(...ids);
+    const { boundaries, events } = harness();
+    boundaries.drain();
+    push(...ids.map((id) => fill(id, id)));
+    frame();
+    expect(
+      events("partial:settled").map((d) => (d.boundaries as string[]).length),
+    ).toEqual([8, 4]);
+    expect(painter.queued).toHaveLength(0);
+  });
+
+  it("resumes through scheduler.yield where the browser has it", async () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (now += 5));
+    vi.stubGlobal("scheduler", { yield: () => Promise.resolve() });
+    shell("b-1", "b-2");
+    const { boundaries } = harness();
+    boundaries.drain();
+    push(fill("b-1", "one"), fill("b-2", "two"));
+    expect(painter.queued).toHaveLength(0);
+    await vi.waitFor(() => expect([text("b-1"), text("b-2")]).toEqual(["one", "two"]));
+    expect(painter.queued).toHaveLength(0);
+  });
+
+  it("keeps its cost guess when a batch took no measurable time", () => {
+    shell("b-1", "b-2", "b-3");
+    vi.spyOn(performance, "now").mockReturnValue(1);
+    const { boundaries, events } = harness();
+    boundaries.drain();
+    push(fill("b-1", "one"), fill("b-2", "two"), fill("b-3", "three"));
+    frame();
+    expect(events("partial:settled")).toHaveLength(1);
+  });
+});
+
+describe("a chunk carried in a template", () => {
+  function held(id: string, html: string, op = "inner"): Fill {
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<template id="nx-${id}">${html}</template>`,
+    );
+    return {
+      z: id,
+      s: "ready",
+      t: `nx-${id}`,
+      e: { ops: [null, { op, target: { boundary: id } }, { op: "event" }] },
+    };
+  }
+
+  it("moves the parsed nodes into the boundary and drops the template", () => {
+    shell("b-1");
+    const { boundaries } = harness();
+    boundaries.drain();
+    const chunk = held("b-1", "<section>done</section>");
+    const parsed = (document.getElementById("nx-b-1") as HTMLTemplateElement).content
+      .firstChild;
+    push(chunk);
+    expect(document.getElementById("nx-b-1")).toBeNull();
+    frame();
+    expect(document.getElementById("b-1")!.firstChild).toBe(parsed);
+    expect(text("b-1")).toBe("done");
+    expect(marks("b-1")).toEqual(READY);
+  });
+
+  it.each([
+    ["a row", "<table><tbody>", "</tbody></table>", "tr", "<td>cell</td>"],
+    ["a cell", "<table><tbody><tr>", "</tr></tbody></table>", "td", "cell"],
+    ["an option", "<select>", "</select>", "option", "cell"],
+    ["an item", "<ul>", "</ul>", "li", "cell"],
+  ])("replaces %s its context alone admits", (_, open, close, tag, body) => {
+    const loading = `<${tag} id="b-1" data-next-state="loading" aria-busy="true">wait</${tag}>`;
+    document.body.innerHTML = `${open}${loading}${close}`;
+    const { boundaries } = harness();
+    boundaries.drain();
+    push(
+      held(
+        "b-1",
+        `<${tag} id="b-1" data-next-state="ready">${body}</${tag}>`,
+        "replace",
+      ),
+    );
+    frame();
+    const el = document.getElementById("b-1")!;
+    expect(el.tagName.toLowerCase()).toBe(tag);
+    expect(el.textContent).toBe("cell");
+    expect(el.getAttribute("data-next-state")).toBe("ready");
+  });
+
+  it("neutralises the scripts of the fragment and of its nested templates", () => {
+    shell("b-1");
+    const { boundaries } = harness();
+    boundaries.drain();
+    push(
+      held(
+        "b-1",
+        "<script>window.ran = 1</script><template><p>in</p><script>x()</script></template>" +
+          '<script type="application/json">{}</script><p>after</p>',
+      ),
+    );
+    frame();
+    const el = document.getElementById("b-1")!;
+    expect(el.querySelectorAll("script")).toHaveLength(1);
+    expect(el.querySelector("script")!.type).toBe("application/json");
+    const nested = el.querySelector("template")!;
+    expect(nested.content.querySelector("script")).toBeNull();
+    expect(nested.content.textContent).toBe("in");
+    expect(text("b-1")).toContain("after");
+  });
+
+  it("drops the template of a chunk whose boundary went stale", () => {
+    shell("b-1");
+    const { boundaries, events } = harness();
+    boundaries.drain();
+    markBusy([document.getElementById("b-1")!]);
+    push(held("b-1", "<p>late</p>"));
+    frame();
+    expect(document.querySelector("template")).toBeNull();
+    expect(events("partial:settled")).toEqual([
+      { zones: [], boundaries: ["b-1"], status: "dropped" },
+    ]);
+  });
+
+  it("takes the templates of the chunks queued before the bundle", () => {
+    shell("b-1");
+    push(held("b-1", "<p>early</p>"));
+    const { boundaries } = harness();
+    boundaries.drain();
+    expect(document.querySelector("template")).toBeNull();
+    frame();
+    expect(text("b-1")).toBe("early");
+  });
+
+  it("leaves the op as it came when the named template is missing or foreign", () => {
+    shell("b-1", "b-2");
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div id="nx-b-2">not a template</div><template id="nx-b-3">x</template>' +
+        '<template id="nx-b-4">x</template>',
+    );
+    const { boundaries } = harness();
+    boundaries.drain();
+    const ops = (id: string): unknown => [
+      null,
+      { op: "inner", target: { boundary: id }, html: "<p>inline</p>" },
+    ];
+    push(
+      { z: "b-1", s: "ready", t: "nx-b-1", e: { ops: ops("b-1") } },
+      { z: "b-2", s: "ready", t: "nx-b-2", e: { ops: ops("b-2") } },
+      { z: "b-3", t: "nx-b-3", e: {} },
+      { z: "b-4", t: "nx-b-4", e: { ops: [{ op: "event" }] } },
+    );
+    expect(document.getElementById("nx-b-2")).toBeNull();
+    expect(document.querySelector("template")).toBeNull();
+    frame();
+    expect(text("b-1")).toBe("inline");
+    expect(text("b-2")).toBe("inline");
   });
 });

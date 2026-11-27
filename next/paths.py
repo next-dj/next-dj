@@ -11,11 +11,14 @@ from django.conf.urls.i18n import is_language_prefix_patterns_used
 from django.urls import get_script_prefix, get_urlconf
 from django.utils.translation import to_language
 
+from next.caches import pure_cache
+from next.wire import CURRENT_ATTR
 
-PAGE_MARK: Final = ' aria-current="page" data-next-current="page"'
+
+PAGE_MARK: Final = f' aria-current="page" {CURRENT_ATTR}="page"'
 """The attributes a link to the current page carries."""
 
-ANCESTOR_MARK: Final = ' data-next-current="ancestor"'
+ANCESTOR_MARK: Final = f' {CURRENT_ATTR}="ancestor"'
 """The attributes a link to an ancestor of the current page carries."""
 
 _SEGMENT_SAFE: Final = "!$&'()*+,;=:@"
@@ -85,7 +88,7 @@ def path_mark(
     return "" if link in homes() else ANCESTOR_MARK
 
 
-@functools.lru_cache(maxsize=_HOME_MEMO)
+@pure_cache(_HOME_MEMO)
 def _homes(
     prefix: str, codes: tuple[str, ...], default: str, *, prefixed: bool
 ) -> frozenset[str]:

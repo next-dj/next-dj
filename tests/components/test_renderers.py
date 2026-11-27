@@ -11,6 +11,7 @@ from django.http import Http404
 from django.template import Context, Template
 from django.test import RequestFactory
 
+from next.bridge import drive
 from next.components import (
     ComponentContextConflictError,
     ComponentContextManager,
@@ -19,10 +20,12 @@ from next.components import (
     render_component,
 )
 from next.components.context import ContextFunction
-from next.components.loading import Loaded, ModuleLoader
+from next.components.modules import Loaded, ModuleLoader
 from next.components.renderers import (
     _RESERVED_CONTEXT_KEYS,
     COMPONENT_PROPS_CONTEXT_KEY,
+    ComponentRenderer,
+    ComponentScope,
     ComponentTemplateLoader,
     CompositeComponentRenderer,
     _BridgedContextRun,
@@ -37,10 +40,9 @@ from next.deps.cache import (
 from next.deps.markers import factory_key
 from next.deps.resolver import current_resolver
 from next.deps.scope import RequestScope
+from next.marks import fragment_marks
 from next.pages import page
-from next.ports import PortSlot
 from next.seeding import TEMPLATE_PATH_KEY
-from next.suspense import drive
 from tests.support import (
     bound_dependency,
     build_page_request,
@@ -489,21 +491,17 @@ class _CountingBridge:
 
 @pytest.fixture()
 def bridge_calls():
-    """Bind a counting bridge for the test, so each bridged render is counted."""
+    """Count each bridged render through a driver that wraps the real one."""
     counting = _CountingBridge()
-    slot: PortSlot[object] = PortSlot("async bridge port")
-    slot.set(counting)
-    with patch("next.ports.async_bridge_slot", slot):
+    with patch("next.deps.runner.drive", counting):
         yield counting
 
 
 @pytest.fixture()
 def refusing_bridge():
-    """Bind a bridge that fails on any call, so a sync render must not reach it."""
+    """Fail any bridged call, so a sync render must not reach the driver."""
     refusing = _CountingBridge(refuse=True)
-    slot: PortSlot[object] = PortSlot("async bridge port")
-    slot.set(refusing)
-    with patch("next.ports.async_bridge_slot", slot):
+    with patch("next.deps.runner.drive", refusing):
         yield refusing
 
 
@@ -628,17 +626,6 @@ class TestInlineAsyncComponents:
         mgr._registry.register(module_path, "title", title)
         with pytest.raises(Http404, match="no such card"):
             render_with(mgr, info, {})
-
-    def test_an_unbound_bridge_falls_back(self, tmp_path: Path) -> None:
-        """A custom `AppConfig` that skips composition still renders the component."""
-        mgr, info, module_path = build_composite_component(tmp_path)
-
-        async def title() -> str:
-            return "fallback"
-
-        mgr._registry.register(module_path, "title", title)
-        with patch("next.ports.async_bridge_slot", PortSlot("async bridge port")):
-            assert render_with(mgr, info, {}) == "<div>fallback</div>"
 
 
 class TestBridgedContextRun:
@@ -927,7 +914,7 @@ class TestInstancesUnderARequestScope:
         with (
             bound_dependency("shout", _shout),
             patch("next.components.renderers.component", mgr),
-            patch("next.components.loading.component", mgr),
+            patch("next.components.modules.component", mgr),
             patch.object(components_manager, "get_component", return_value=info),
             _page_scope("shout"),
         ):
@@ -964,3 +951,74 @@ class TestInstancesUnderARequestScope:
             assert render_with(mgr, info, {}) == "<b>SITE</b>"
             assert scope.get("site") == "SITE"
         assert calls == ["site"]
+
+
+class TestScope:
+    """A scope reads the call-site layers in place and writes its own keys alone."""
+
+    def test_reads_fall_through_and_writes_stay_own(self) -> None:
+        caller = {"title": "caller", "seen": 1}
+        scope = ComponentScope({"title": "own"}, [caller])
+        scope["extra"] = 2
+        del scope["extra"]
+        assert (scope["title"], scope["seen"], "seen" in scope) == ("own", 1, True)
+        assert (dict(scope), len(scope)) == ({"title": "own", "seen": 1}, 2)
+        assert caller == {"title": "caller", "seen": 1}
+        with pytest.raises(KeyError):
+            scope["missing"]
+
+    def test_a_derived_scope_leaves_its_base(self) -> None:
+        base = ComponentScope({"title": "own"}, [])
+        derived = base.derived()
+        derived["title"] = "derived"
+        assert (base["title"], derived["title"]) == ("own", "derived")
+
+    def test_a_cycle_variable_held_by_an_own_layer_is_set_there(self) -> None:
+        own = {"row": "prop"}
+        context = ComponentScope(own, [{"row": "caller"}]).context()
+        with context.push(row="pushed"):
+            Template('{% cycle "a" "b" as row silent %}').render(context)
+            assert context["row"] == "a"
+        assert own == {"row": "prop"}
+
+    def test_a_cycle_variable_held_nowhere_lands_on_top(self) -> None:
+        own: dict[str, object] = {}
+        context = ComponentScope(own, [{}]).context()
+        Template('{% cycle "a" "b" as row silent %}').render(context)
+        assert own == {"row": "a"}
+
+
+class _ProjectStrategy:
+    """A strategy of the project that writes a navigation the source never shows."""
+
+    def can_render(self, info: ComponentInfo) -> bool:
+        return True
+
+    def render(self, info: ComponentInfo, context_data: object, request: object) -> str:
+        return '<nav><a href="/">H</a></nav>'
+
+
+class TestProjectStrategies:
+    """A strategy of the project has its output marked whole and read as unseen."""
+
+    def test_its_output_runs_the_bound_pass(self, tmp_path: Path) -> None:
+        seen: list[str] = []
+
+        def marks(html: str) -> str:
+            seen.append(html)
+            return html
+
+        info = ComponentInfo("c", tmp_path, "", None, None, is_simple=True)
+        renderer = ComponentRenderer([_ProjectStrategy()])
+        token = fragment_marks.set(marks)
+        try:
+            html = renderer.render(info, {})
+        finally:
+            fragment_marks.reset(token)
+        assert seen == [html]
+        assert renderer.templated(info) is False
+
+    def test_no_strategy_renders_nothing_a_plan_can_read(self, tmp_path: Path) -> None:
+        info = ComponentInfo("c", tmp_path, "", None, None, is_simple=True)
+        renderer = ComponentRenderer([])
+        assert (renderer.render(info, {}), renderer.templated(info)) == ("", True)

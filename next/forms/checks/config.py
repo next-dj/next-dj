@@ -1,10 +1,10 @@
 """System checks for the `NEXT_FRAMEWORK` keys the forms subsystem reads."""
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import import_class_cached
 from next.forms.backends import FormActionBackend, ResponseShaper
 from next.forms.manager import form_action_manager

@@ -17,7 +17,6 @@ from typing import (
     override,
     runtime_checkable,
 )
-from weakref import WeakSet
 
 from django.contrib.auth.decorators import login_not_required
 from django.core.exceptions import ImproperlyConfigured
@@ -26,7 +25,7 @@ from django.urls import get_script_prefix, path
 from django.utils.module_loading import import_string
 from django.views.decorators.http import require_http_methods
 
-from next.caches import BoundedCache
+from next.caches import SETTINGS, BoundedCache
 from next.conf.merge import FROZEN_DEFAULTS
 from next.transactions import AtomicOverride, skip_atomic_requests
 from next.utils import app_holding, resolve_base_dir
@@ -54,8 +53,8 @@ if TYPE_CHECKING:
 
 
 # Memoised by raw path because both hit a syscall per registration and scoped lookup.
-_resolved_path_cache: BoundedCache[str, str] = BoundedCache()
-_dotted_module_cache: BoundedCache[str, str] = BoundedCache()
+_resolved_path_cache: BoundedCache[str, str] = BoundedCache(depends=())
+_dotted_module_cache: BoundedCache[str, str] = BoundedCache(depends=())
 
 
 def _resolved_path_str(file_path: str) -> str:
@@ -414,9 +413,6 @@ def _make_uid_for_action(scope_key: str, name: str) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
-_url_caching_backends: "WeakSet[RegistryFormActionBackend]" = WeakSet()
-
-
 def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
     """Return the registry entry of one registration, its unset keys omitted.
 
@@ -443,13 +439,6 @@ def _action_meta(registration: ActionRegistration, uid: str) -> ActionMeta:
     if registration.atomic is not None:
         meta["atomic"] = registration.atomic
     return meta
-
-
-def forget_action_urls(*, setting: str, **kwargs: object) -> None:
-    """Drop cached action URLs when the URLconf is swapped under override_settings."""
-    if setting == "ROOT_URLCONF":
-        for backend in _url_caching_backends:
-            backend.forget_urls()
 
 
 def declaring_files(
@@ -484,7 +473,9 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
-        self._url_cache: BoundedCache[tuple[str, str], str] = BoundedCache()
+        self._url_cache: BoundedCache[tuple[str, str], str] = BoundedCache(
+            depends=(SETTINGS,)
+        )
 
     @override
     def clear_registry(self) -> None:
@@ -495,11 +486,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry = {}
         self._uid_to_name = {}
         self._name_index = {}
-        self._url_cache = BoundedCache()
-
-    def forget_urls(self) -> None:
-        """Drop every memoised action URL, reversed again on the next lookup."""
-        self._url_cache.clear()
+        self._url_cache = BoundedCache(depends=(SETTINGS,))
 
     @override
     def snapshot(self) -> "RegistryBackendSnapshot":
@@ -528,7 +515,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry = dict(snapshot.registry)
         self._uid_to_name = dict(snapshot.uid_to_name)
         self._name_index = dict(snapshot.name_index)
-        self._url_cache = BoundedCache()
+        self._url_cache = BoundedCache(depends=(SETTINGS,))
 
     @override
     def register_action(self, registration: ActionRegistration) -> None:
@@ -622,9 +609,6 @@ class RegistryFormActionBackend(FormActionBackend):
             url = self._url_cache.get(cache_key)
             if url is None:
                 url = reverse_form_action(meta["uid"])
-                if not self._url_cache:
-                    # Only a backend that cached a URL needs the ROOT_URLCONF signal.
-                    _url_caching_backends.add(self)
                 self._url_cache[cache_key] = url
             return url
 

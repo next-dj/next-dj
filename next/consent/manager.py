@@ -1,6 +1,5 @@
 """The configured consent backend and the consent each request carries."""
 
-import functools
 import logging
 from collections.abc import Mapping
 from typing import Final
@@ -9,11 +8,13 @@ from django.conf import settings
 from django.http import HttpRequest
 
 from next.backends import SingleBackendManager
+from next.caches import FRAMEWORK, memo
 from next.conf.defaults import DEFAULTS, USER_SETTING
 from next.conf.scopes import scope_value
 from next.conf.settings import fail_loudly
 from next.diagnostics import FailureLog, mark_degraded
 from next.pages.responses import shared_render
+from next.static.runtime import CONSENT_PAYLOAD_KEY
 
 from .backends import ConsentBackend
 from .markers import NECESSARY, UNDECIDED, Consent
@@ -46,14 +47,14 @@ consent_backend_manager: SingleBackendManager[ConsentBackend] = SingleBackendMan
 )
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def consent_configured() -> bool:
     """Whether the project sets `CONSENT`, so every page sends `$consent`."""
     raw = getattr(settings, USER_SETTING, None)
     return isinstance(raw, dict) and "CONSENT" in raw
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def consent_categories() -> tuple[str, ...]:
     """Return the configured categories, `necessary` first whether listed or not."""
     raw = scope_value("CONSENT", "CATEGORIES")
@@ -65,21 +66,11 @@ def consent_categories() -> tuple[str, ...]:
     return tuple(dict.fromkeys((NECESSARY, *names)))
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def server_render() -> bool | None:
     """Return the `SERVER_RENDER` mode, `None` for `"auto"` and anything unusable."""
     value = scope_value("CONSENT", "SERVER_RENDER")
     return value if isinstance(value, bool) else None
-
-
-def forget_consent_settings(**kwargs: object) -> None:
-    """Drop the memoised backend and options, so a settings reload takes effect."""
-    consent_backend_manager.reset()
-    _built_backend.cache_clear()
-    _built_config.cache_clear()
-    consent_configured.cache_clear()
-    consent_categories.cache_clear()
-    server_render.cache_clear()
 
 
 def get_consent(request: HttpRequest | None) -> Consent:
@@ -115,7 +106,7 @@ def _backend() -> ConsentBackend | None:
     return backend
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def _built_backend() -> tuple[ConsentBackend | None, bool]:
     """Build the configured backend once, with whether the build failed."""
     guard = _failures.guard(
@@ -175,7 +166,7 @@ def _backend_config() -> Mapping[str, object]:
     return config
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def _built_config(backend: ConsentBackend) -> tuple[Mapping[str, object], bool]:
     """Read what `backend` adds to `$consent` once, with whether the call raised."""
     source = type(backend).__qualname__
@@ -199,11 +190,12 @@ def _client_config(source: str, config: object) -> Mapping[str, object]:
         return config
     _failures.warn(
         ("client_config", source),
-        "%s.client_config() of %s answered %r, not a mapping, so $consent carries "
+        "%s.client_config() of %s answered %r, not a mapping, so %s carries "
         "none of its entries.",
         source,
         _BACKEND,
         type(config).__name__,
+        CONSENT_PAYLOAD_KEY,
     )
     return {}
 
@@ -234,6 +226,9 @@ def consent_payload(consent: Consent) -> dict[str, object]:
     return payload
 
 
+FRAMEWORK.attach(consent_backend_manager.reset)
+
+
 __all__ = [
     "CONSENT_ATTR",
     "CONSENT_KEYS",
@@ -241,7 +236,6 @@ __all__ = [
     "consent_categories",
     "consent_configured",
     "consent_payload",
-    "forget_consent_settings",
     "get_consent",
     "server_mode",
     "server_render",

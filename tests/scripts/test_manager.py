@@ -6,7 +6,7 @@ import pytest
 from django.test import Client, RequestFactory, override_settings
 
 from next.errors import BackendImportError
-from next.pages.responses import Depth, Purpose, cookie_varies, mark_purpose
+from next.pages.responses import PrefetchDepth, Purpose, cookie_varies, mark_purpose
 from next.scripts.discovery import load_scripts
 from next.scripts.manager import ScriptsManager, scripts_manager
 from next.scripts.markers import Script, Strategy
@@ -22,7 +22,7 @@ from tests.support import routed, touch_later
 NEW_SCRIPTS = "from next.scripts import Script\nscripts = (Script('new', init='1'),)\n"
 
 
-MARKETING = "1:marketing:1700000000"
+MARKETING = "2:marketing:1700000000"
 CATEGORIES = {"CATEGORIES": ["marketing"]}
 SHARED = 'template = "<p>x</p>"\ncache = 60\n'
 LAZY_CHUNKS = {
@@ -30,6 +30,8 @@ LAZY_CHUNKS = {
     "stream": "/static/next/next.stream.min.js",
     "csrf": "/static/next/next.csrf.min.js",
     "poll": "/static/next/next.poll.min.js",
+    "forms": "/static/next/next.forms.min.js",
+    "layers": "/static/next/next.layers.min.js",
 }
 
 
@@ -526,7 +528,7 @@ class TestEnvelopedRender:
     )
 
     def _render(
-        self, purpose: Purpose, depth: Depth | None = None
+        self, purpose: Purpose, depth: PrefetchDepth | None = None
     ) -> tuple[str, dict[str, object]]:
         request = RequestFactory().get("/")
         mark_purpose(request, purpose, depth)
@@ -543,13 +545,13 @@ class TestEnvelopedRender:
     @pytest.mark.parametrize(
         ("purpose", "depth"),
         [
-            (Purpose.NAVIGATION, None),
-            (Purpose.PREFETCH, Depth.SHELL),
-            (Purpose.PREFETCH, Depth.FULL),
+            (Purpose.NAVIGATE, None),
+            (Purpose.PREFETCH, PrefetchDepth.SHELL),
+            (Purpose.PREFETCH, PrefetchDepth.FULL),
         ],
     )
     def test_an_envelope_lists_every_script(
-        self, purpose: Purpose, depth: Depth | None
+        self, purpose: Purpose, depth: PrefetchDepth | None
     ) -> None:
         head, data = self._render(purpose, depth)
         assert head == ""

@@ -3,11 +3,17 @@ import logging
 import pytest
 from django.test import override_settings
 
-from next.boundaries import (
+from next.boundaries import contain
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import (
     Boundary,
+    BoundaryFailure,
+    DebugBoundaryFailure,
+    ErrorKind,
     Trace,
+)
+from next.boundaries.markup import (
     adopt,
-    contain,
     debug_detail,
     failed,
     identity,
@@ -15,10 +21,9 @@ from next.boundaries import (
     wrapped,
     wrapper_tag,
 )
-from next.defer import Addressing, BoundaryFailure, DebugBoundaryFailure, ErrorKind
 from next.static import StaticCollector
 from next.static.runtime import BUNDLE_NOTE
-from tests.support.boundaries import RecordingFallback, defer_errors, raising
+from tests.support.boundaries import RecordingErrorUI, defer_errors, raising
 
 
 STAMP = 'id="b" data-next-boundary="b" data-next-state="error" data-next-error="error"'
@@ -103,13 +108,13 @@ class TestMarkup:
     def test_a_contained_failure_names_its_source_under_debug(self) -> None:
         boundary = Boundary("a", Addressing.PAGE, source="pages/error.djx")
         with override_settings(DEBUG=True):
-            html = contain(boundary, raising(ValueError()), RecordingFallback())
+            html = contain(boundary, raising(ValueError()), RecordingErrorUI())
         assert 'data-next-boundary-source="pages/error.djx"' in html
 
     def test_a_contained_failure_hides_its_source_outside_debug(self) -> None:
         boundary = Boundary("a", Addressing.PAGE, source="pages/error.djx")
         with override_settings(DEBUG=False):
-            html = contain(boundary, raising(ValueError()), RecordingFallback())
+            html = contain(boundary, raising(ValueError()), RecordingErrorUI())
         assert "data-next-boundary-source" not in html
 
     def test_debug_detail_escapes_the_exception_and_the_traceback(self) -> None:
@@ -173,7 +178,7 @@ class TestAdoptedRoot:
                     "row", Addressing.COMPONENT, site="the call in page.djx, line 3"
                 ),
                 raising(ValueError("x")),
-                RecordingFallback("<tr></tr><tr></tr>", tag=None),
+                RecordingErrorUI("<tr></tr><tr></tr>", tag=None),
             )
         assert html.startswith('<template id="b-')
         assert "data-next-error-digest=" in html
@@ -187,7 +192,7 @@ class TestAdoptedRoot:
             html = contain(
                 Boundary("row", Addressing.COMPONENT),
                 raising(ValueError("x")),
-                RecordingFallback("", tag=None),
+                RecordingErrorUI("", tag=None),
             )
         detail = html.split('data-next-error-detail="')[1]
         assert detail.startswith("The error UI of the component &#x27;row&#x27;")
@@ -198,7 +203,7 @@ class TestAdoptedRoot:
             html = contain(
                 Boundary("row", Addressing.COMPONENT),
                 raising(ValueError("<b>")),
-                RecordingFallback("<tr><td>E</td></tr>", tag=None),
+                RecordingErrorUI("<tr><td>E</td></tr>", tag=None),
             )
         assert html.startswith('<tr id="b-')
         assert html.endswith("><td>E</td></tr>")
@@ -209,7 +214,7 @@ class TestAdoptedRoot:
         html = contain(
             Boundary("row", Addressing.COMPONENT),
             raising(ValueError()),
-            RecordingFallback("", tag=None),
+            RecordingErrorUI("", tag=None),
         )
         assert html.startswith('<template id="b-')
         assert "data-next-error-detail" not in html
@@ -224,7 +229,7 @@ class TestDetailPlacement:
             html = contain(
                 Boundary("card", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(tag=tag),
+                RecordingErrorUI(tag=tag),
             )
         assert "<details open data-next-error-detail>" in html
 
@@ -234,7 +239,7 @@ class TestDetailPlacement:
             html = contain(
                 Boundary("card", Addressing.COMPONENT),
                 raising(ValueError("x")),
-                RecordingFallback("<td>E</td>", tag=tag),
+                RecordingErrorUI("<td>E</td>", tag=tag),
             )
         assert "<details" not in html
         assert html.startswith(f'<{tag} id="b-')
@@ -274,7 +279,7 @@ class TestSharedMarkup:
         assert "data-next-error-detail" not in html
 
 
-DEFER_URL = "/static/next/next.defer.min.js"
+DEFER_URL = "/static/next/next.boundaries.min.js"
 
 
 def _bundled() -> StaticCollector:
@@ -289,7 +294,7 @@ class TestRetryBundle:
         html = contain(
             Boundary("card", Addressing.COMPONENT, collector=collector),
             raising(ValueError()),
-            RecordingFallback("<b data-next-retry>again</b>"),
+            RecordingErrorUI("<b data-next-retry>again</b>"),
         )
         assert "data-next-retry" in html
         assert collector.notes(BUNDLE_NOTE) == [DEFER_URL]
@@ -299,7 +304,7 @@ class TestRetryBundle:
         html = contain(
             Boundary("card", Addressing.COMPONENT, collector=collector),
             raising(ValueError()),
-            RecordingFallback(token=' data-next-token="t"'),
+            RecordingErrorUI(token=' data-next-token="t"'),
         )
         assert ' data-next-token="t"' in html
         assert collector.notes(BUNDLE_NOTE) == [DEFER_URL]
@@ -309,7 +314,7 @@ class TestRetryBundle:
         contain(
             Boundary("card", Addressing.COMPONENT, collector=collector),
             raising(ValueError()),
-            RecordingFallback(),
+            RecordingErrorUI(),
         )
         assert collector.notes(BUNDLE_NOTE) == ()
 
@@ -317,13 +322,13 @@ class TestRetryBundle:
         collector = _bundled()
 
         def render() -> str:
-            collector.require("defer", urgent=True)
+            collector.require("boundaries", urgent=True)
             raise ValueError
 
         contain(
             Boundary("card", Addressing.COMPONENT, collector=collector),
             render,
-            RecordingFallback(),
+            RecordingErrorUI(),
         )
         assert collector.notes(BUNDLE_NOTE) == ()
         assert collector.assets_in_slot("scripts") == ()
@@ -335,14 +340,14 @@ class TestRetryBundle:
             contain(
                 Boundary("inner", Addressing.COMPONENT, collector=collector),
                 raising(ValueError()),
-                RecordingFallback("<b data-next-retry>again</b>"),
+                RecordingErrorUI("<b data-next-retry>again</b>"),
             )
             raise ValueError
 
         contain(
             Boundary("outer", Addressing.COMPONENT, collector=collector),
             outer,
-            RecordingFallback(),
+            RecordingErrorUI(),
         )
         assert collector.notes(BUNDLE_NOTE) == ()
 

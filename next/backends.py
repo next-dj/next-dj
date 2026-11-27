@@ -11,6 +11,7 @@ from typing import Any, Final, cast
 from django.core.exceptions import ImproperlyConfigured
 from django.dispatch import Signal
 
+from next.caches import FORK
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
@@ -22,7 +23,6 @@ from next.errors import (
     SettingImportError,
     SettingNotSubclassError,
 )
-from next.utils import after_fork
 
 
 logger = logging.getLogger(__name__)
@@ -251,7 +251,7 @@ def _forked() -> None:
         manager.forked()
 
 
-after_fork(_forked)
+FORK.attach(_forked)
 
 
 __all__ = [

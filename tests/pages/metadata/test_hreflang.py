@@ -14,11 +14,9 @@ from django.urls import (
 from django.utils import translation
 
 import next.pages.metadata.hreflang as hreflang_module
-from next.caches import LruCache
-from next.conf.signals import settings_reloaded
+from next.caches import ROUTES, LruCache
+from next.conf import next_framework_settings
 from next.pages.metadata.hreflang import hreflang_urls, translated_url, x_default_url
-from next.urls import RouterManager
-from next.urls.signals import router_reloaded
 from tests.support import (
     I18N,
     I18N_PREFIXED_URLCONF,
@@ -235,29 +233,29 @@ class TestWithoutLanguagePatterns:
 
 
 class TestInvalidation:
-    """The memo drops on a reload, a URLconf or language change and a router reload."""
+    """The memo drops on a reload, any setting change and a router reload."""
 
     @pytest.mark.parametrize(
         ("invalidate", "translations"),
         [
-            (lambda: settings_reloaded.send(sender=None), 4),
-            (lambda: router_reloaded.send(sender=RouterManager), 4),
+            (next_framework_settings.reload, 4),
+            (ROUTES.move, 4),
             (lambda: _changed("ROOT_URLCONF"), 4),
             (lambda: _changed("LANGUAGES"), 4),
             (lambda: _changed("LANGUAGE_CODE"), 4),
-            (lambda: _changed("DEBUG"), 2),
+            (lambda: _changed("DEBUG"), 4),
         ],
         ids=[
             "settings_reloaded",
-            "router_reloaded",
+            "routes_reloaded",
             "urlconf",
             "languages",
             "language_code",
-            "other_setting",
+            "any_setting",
         ],
     )
     @override_settings(**I18N_ROUTED)
-    def test_a_second_read_translates_again_only_after_a_drop(
+    def test_a_second_read_translates_again_after_a_drop(
         self,
         monkeypatch: pytest.MonkeyPatch,
         invalidate: Callable[[], object],

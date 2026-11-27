@@ -385,6 +385,22 @@ class TestResetClicksMorphsForeignBadge:
         assert cache.get(f"{CLICK_PREFIX}hot") is None
 
 
+class TestCompressionOptOut:
+    """The link page keeps its CSRF token beside a slug the visitor picks."""
+
+    def test_the_link_page_is_sent_plain(self, next_client, make_link) -> None:
+        make_link("peeked")
+        response = next_client.get(
+            "/admin/links/peeked/", headers={"Accept-Encoding": "gzip"}
+        )
+        assert response.status_code == 200
+        assert "Content-Encoding" not in response.headers
+
+    def test_a_page_without_the_declaration_is_compressed(self, next_client) -> None:
+        response = next_client.get("/admin/", headers={"Accept-Encoding": "gzip"})
+        assert response.headers["Content-Encoding"] == "gzip"
+
+
 class TestLinkPeek:
     """`admin/(.)links/[slug]/` serves the `link-peek` zone."""
 

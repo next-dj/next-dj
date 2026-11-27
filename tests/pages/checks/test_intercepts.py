@@ -37,9 +37,9 @@ def _intercept(root: Path, trail: str, source: str = PAGE_HEAD) -> Path:
 class TestRoutedTrails:
     """`routed_trails` reads nothing when the routers fail to build."""
 
-    def test_no_router_manager_routes_no_trail(self) -> None:
+    def test_no_route_manager_routes_no_trail(self) -> None:
         with patch(
-            "next.pages.checks.intercepts.get_router_manager", return_value=(None, [])
+            "next.pages.checks.intercepts.get_route_manager", return_value=(None, [])
         ):
             assert routed_trails() == {}
 

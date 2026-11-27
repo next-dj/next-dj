@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.http import Http404
 
-from next.caches import PageCache
+from next.caches import FRAMEWORK, PageCache
 from next.deps.objects import object_target, url_row
 from next.introspect import registering_site
 from next.permissions.access import (
@@ -121,7 +121,7 @@ class PageAccess:
     stamps: tuple[int | None, ...]
 
 
-_PAGES: PageCache[Path, PageAccess] = PageCache()
+_PAGES: PageCache[Path, PageAccess] = PageCache(depends=(FRAMEWORK,))
 
 type AccessStamp = tuple[int, int, int]
 
@@ -206,7 +206,9 @@ def _owner_page(file_path: str) -> Path | None:
     return owner if callable(getattr(module, "render", None)) else None
 
 
-_OWNER_PAGES: PageCache[str, tuple[AccessStamp, Path | None]] = PageCache()
+_OWNER_PAGES: PageCache[str, tuple[AccessStamp, Path | None]] = PageCache(
+    depends=(FRAMEWORK,)
+)
 
 
 def render_guard(file_path: str, scope: str) -> Path | None:

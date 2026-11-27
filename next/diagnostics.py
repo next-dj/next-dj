@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from collections.abc import Callable, Generator, Hashable, Mapping
 from contextlib import contextmanager
@@ -13,15 +14,18 @@ from typing import TYPE_CHECKING, Final, Self, override
 from weakref import WeakSet
 
 from django.core.exceptions import BadRequest, PermissionDenied, SuspiciousOperation
+from django.core.signals import got_request_exception
 from django.http import Http404
 from django.http.multipartparser import MultiPartParserError
 
-from next.caches import BoundedCache
+from next.caches import FRAMEWORK, BoundedCache
 from next.conf.settings import fail_loudly
 
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+    from django.http import HttpRequest
 
 
 # Django answers each of these with its own response and log entry, so let them out.
@@ -319,6 +323,63 @@ def reset_failure_logs(**kwargs: object) -> None:
         log.clear()
 
 
+FRAMEWORK.attach(reset_failure_logs)
+
+
+request_log: Final = FailureLog(logging.getLogger("django.request"))
+"""The record of an exception a response survived, where Django logs an uncaught one."""
+
+_SERVER_ERROR: Final = 500
+
+
+def _rethrow(error: BaseException) -> None:
+    raise error
+
+
+def _announce_exception(error: Exception, request: HttpRequest | None) -> None:
+    """Send `got_request_exception` while `error` is the exception being handled.
+
+    A receiver reads `sys.exc_info()`, so a settled exception is raised here once more.
+    """
+    if not got_request_exception.has_listeners():
+        return
+    if sys.exception() is error:
+        got_request_exception.send_robust(sender=None, request=request)
+        return
+    traceback, context = error.__traceback__, error.__context__
+    try:
+        _rethrow(error)
+    except type(error):
+        got_request_exception.send_robust(sender=None, request=request)
+    finally:
+        error.__traceback__, error.__context__ = traceback, context
+
+
+def report_request_exception(
+    error: Exception,
+    request: HttpRequest | None,
+    key: Hashable,
+    message: str,
+    args: tuple[object, ...],
+    *,
+    extra: Mapping[str, object] | None = None,
+) -> None:
+    """Report an exception a response survived as Django reports an uncaught one.
+
+    Every occurrence sends `got_request_exception`, the record keeps the bounded rate.
+    """
+    _announce_exception(error, request)
+    request_log.emit(
+        logging.ERROR,
+        key,
+        message,
+        args,
+        error,
+        extra={**(extra or {}), "status_code": _SERVER_ERROR, "request": request},
+        quiet=logging.DEBUG,
+    )
+
+
 class BackendReadLog(FailureLog):
     """Read a value from a backend, returning a default when the read fails.
 
@@ -363,6 +424,8 @@ __all__ = [
     "exception_text",
     "isolated_build",
     "mark_degraded",
+    "report_request_exception",
+    "request_log",
     "reset_failure_logs",
     "status_kept",
     "type_name",

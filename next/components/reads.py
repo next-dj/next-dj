@@ -47,6 +47,11 @@ def _names(value: object) -> Iterator[str]:
             pending.extend(item)
 
 
+def read_names(value: object) -> frozenset[str]:
+    """Return the first lookup of every variable `value` reads, a filter's included."""
+    return frozenset(_names(value))
+
+
 def _own(node: Node) -> Iterator[object]:
     """Yield every value `node` holds outside its child node lists."""
     lists = set(node.child_nodelists)
@@ -88,4 +93,4 @@ def reads(nodelist: NodeList) -> tuple[frozenset[str], frozenset[str]]:
     return frozenset(read), frozenset(assigned)
 
 
-__all__ = ["reads"]
+__all__ = ["read_names", "reads"]

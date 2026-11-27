@@ -9,6 +9,43 @@ function mount(html: string): Element {
   return document.body.firstElementChild!;
 }
 
+describe("morph pairing cost", () => {
+  // Each sibling the hard-match scan visits reads its tag, so the reads count the scan.
+  function tagReads(run: () => void): number {
+    const read = vi.spyOn(Element.prototype, "tagName", "get");
+    run();
+    const reads = read.mock.calls.length;
+    read.mockRestore();
+    return reads;
+  }
+
+  function rows(count: number, prefix = ""): string {
+    return Array.from({ length: count }, (_, index) =>
+      prefix ? `<li id="${prefix}${index}">${index}</li>` : `<li>${index}</li>`,
+    ).join("");
+  }
+
+  it("pairs a list of rows without ids in time linear in its length", () => {
+    const small = mount(`<ul>${rows(50)}</ul>`);
+    const fifty = tagReads(() => morph(small, `<ul>${rows(50)}</ul>`));
+    const large = mount(`<ul>${rows(500)}</ul>`);
+    const five = tagReads(() => morph(large, `<ul>${rows(500)}</ul>`));
+    expect(five).toBeLessThanOrEqual(fifty * 11);
+    expect(large.children).toHaveLength(500);
+  });
+
+  it("still finds a keyed row the server moved further down", () => {
+    const list = mount(
+      `<ul><li>x</li><li id="a">a</li><li id="b">b</li><li id="c">c</li></ul>`,
+    );
+    const c = list.querySelector("#c");
+    morph(list, `<ul><li id="c">c2</li><li id="a">a</li><li id="b">b</li></ul>`);
+    expect(list.firstElementChild).toBe(c);
+    expect(c!.textContent).toBe("c2");
+    expect(list.children).toHaveLength(3);
+  });
+});
+
 describe("morph node reuse", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -146,7 +183,7 @@ describe("morph attribute sync", () => {
     target.addEventListener("next:morph-attribute", (e) => {
       if ((e as CustomEvent).detail.name === "open") e.preventDefault();
     });
-    morph(target, '<details id="d"></details>');
+    morph(target, '<details id="d"></details>', { events: true });
     expect(target.hasAttribute("open")).toBe(true);
   });
 
@@ -158,7 +195,7 @@ describe("morph attribute sync", () => {
         e.preventDefault();
       }
     });
-    morph(target, '<div id="x" class="new"></div>');
+    morph(target, '<div id="x" class="new"></div>', { events: true });
     expect(target.getAttribute("class")).toBe("old");
   });
 
@@ -186,7 +223,7 @@ describe("morph attribute sync", () => {
     target.addEventListener("next:morph-attribute", (e) => {
       if ((e as CustomEvent).detail.mutationType === "remove") e.preventDefault();
     });
-    morph(target, '<div id="x"></div>');
+    morph(target, '<div id="x"></div>', { events: true });
     expect(target.getAttribute("data-stale")).toBe("1");
   });
 });
@@ -367,12 +404,23 @@ describe("morph hooks and events", () => {
     document.body.innerHTML = "";
   });
 
+  it("fires no per-node event unless the caller asks for them", () => {
+    const target = mount('<div id="r" class="a"><span id="s">old</span></div>');
+    const seen = vi.fn();
+    target.addEventListener("next:morph-element", seen);
+    target.addEventListener("next:morph-attribute", seen);
+    morph(target, '<div id="r" class="b"><span id="s">new</span></div>');
+    expect(seen).not.toHaveBeenCalled();
+    expect(target.className).toBe("b");
+    expect(target.querySelector("#s")!.textContent).toBe("new");
+  });
+
   it("a cancelled next:morph-element skips the pair", () => {
     const target = mount('<div id="r"><span id="s">old</span></div>');
     target.addEventListener("next:morph-element", (e) => {
       if ((e.target as Element).id === "s") e.preventDefault();
     });
-    morph(target, '<div id="r"><span id="s">new</span></div>');
+    morph(target, '<div id="r"><span id="s">new</span></div>', { events: true });
     expect(target.querySelector("#s")!.textContent).toBe("old");
   });
 

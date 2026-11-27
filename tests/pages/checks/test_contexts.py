@@ -14,7 +14,7 @@ from next.pages.checks.contexts import (
 from next.pages.loaders import load_python_module_memo
 from tests.support import (
     bound_dependency,
-    patch_checks_router_manager,
+    patch_checks_route_manager,
     routed,
     write_page,
 )
@@ -160,7 +160,7 @@ class TestAsyncContextReads:
     def test_a_sync_reader_of_an_async_key_is_flagged(self, tmp_path: Path) -> None:
         page_file = write_page(tmp_path, "", _SERIALISING)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_async_context_reads()
 
         assert [(m.id, m.obj) for m in messages] == [("next.W163", str(page_file))]
@@ -173,19 +173,19 @@ class TestAsyncContextReads:
     ) -> None:
         write_page(tmp_path, "", source)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_async_context_reads() == []
 
     def test_an_async_reader_is_not_flagged(self, tmp_path: Path) -> None:
         write_page(tmp_path, "", _ASYNC_ONLY)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_async_context_reads() == []
 
     def test_a_sync_page_is_not_flagged(self, tmp_path: Path) -> None:
         write_page(tmp_path, "", _ORG + "\ntemplate = 'ok'\n")
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_async_context_reads() == []
 
 
@@ -198,7 +198,7 @@ class TestAsyncDependencyCycles:
         with (
             bound_dependency("loop_a", _loop_a),
             bound_dependency("loop_b", _loop_b),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             messages = check_async_dependency_cycles()
 
@@ -210,6 +210,6 @@ class TestAsyncDependencyCycles:
 
         with (
             bound_dependency("loop_a", _leaf),
-            patch_checks_router_manager(pages_directory=tmp_path),
+            patch_checks_route_manager(pages_directory=tmp_path),
         ):
             assert check_async_dependency_cycles() == []

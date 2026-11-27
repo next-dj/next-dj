@@ -14,28 +14,31 @@ from functools import partial
 from itertools import count
 from typing import TYPE_CHECKING, Any, Final, cast, override
 
-from asgiref.sync import (
-    AsyncToSync,
-    SyncToAsync,
-    ThreadSensitiveContext,
-    async_to_sync,
-    sync_to_async,
-)
+from asgiref.sync import ThreadSensitiveContext, async_to_sync, sync_to_async
 
-from next.conf.defer import defer_count, defer_seconds
+from next.bridge.context import ContextSnapshot
+from next.bridge.hops import (
+    QuitParentExecutor,
+    current_executor,
+    enter_sensitive,
+    route_to,
+    sensitive_context,
+)
+from next.bridge.loop import running_loop
+from next.bridge.request import serve_until
+from next.bridge.tasks import StealableTask
+from next.conf.loader import loader_settings
 from next.introspect import (
     callable_name,
     describe_callable,
     is_async_callable,
     is_coroutine_callable,
 )
-from next.ports import context_propagator_slot, wait_served
-from next.tasks import ContextSnapshot, QuitParentExecutor, StealableTask
 
 from .cache import request_memo
 from .errors import DependencyCycleError, MissingKeyError
 from .runner import SegmentRunner, batch_scope, run_segment, segment_runner
-from .scope import _Failure, join_waits, running_loop
+from .scope import _Failure, join_waits
 
 
 if TYPE_CHECKING:
@@ -54,7 +57,7 @@ _CLOSED: Final[str] = "The request scope is closed, so no batch of it loads this
 
 _HALTED: Final[str] = "The batch function %s raised %s, kept as its keys' failure."
 
-type _Route = tuple[object, SegmentRunner, ThreadSensitiveContext | None]
+type _Route = tuple[Executor | None, SegmentRunner, ThreadSensitiveContext | None]
 
 _running: ContextVar[tuple[_Batch, ...]] = ContextVar(
     "next_deps_loader_running", default=()
@@ -65,35 +68,24 @@ _counted: ContextVar[CountedJob | None] = ContextVar(
 )
 
 
-def _current() -> object:
-    """Return the executor thread-sensitive calls of the current context go to."""
-    return getattr(AsyncToSync.executors, "current", None)
-
-
-def _route_to(executor: Executor | None) -> None:
-    """Send the thread-sensitive calls of the current context to `executor`."""
-    AsyncToSync.executors.current = executor
-
-
 def _route() -> _Route:
     """Return where the current context sends thread-sensitive calls and segments."""
-    sensitive = SyncToAsync.thread_sensitive_context.get(None)
-    return _current(), segment_runner.get(), sensitive
+    return current_executor(), segment_runner.get(), sensitive_context()
 
 
 def _take_route(route: _Route) -> None:
     """Send the thread-sensitive calls and segments of this context on `route`."""
     executor, runner, sensitive = route
-    AsyncToSync.executors.current = executor
+    route_to(executor)
     segment_runner.set(runner)
     if sensitive is not None:
-        SyncToAsync.thread_sensitive_context.set(sensitive)
+        enter_sensitive(sensitive)
 
 
 def _detached(context: Context) -> Context:
     """Return a copy of `context` with no route, running batch or counted job."""
     detached = context.copy()
-    detached.run(_route_to, None)
+    detached.run(route_to, None)
     detached.run(_running.set, ())
     detached.run(_counted.set, None)
     detached.run(join_waits.set, None)
@@ -495,7 +487,7 @@ class _Hub:
             batch.via, route = next(iter(batch.routes.items()))
             context.run(_take_route, route)
         else:
-            context.run(_route_to, refusal)
+            context.run(route_to, refusal)
             context.run(_running.set, (batch,))
         carrying = captured if restored is None and refusal is not None else None
         driver = self.loop.create_task(self._drive(batch, carrying), context=context)
@@ -537,7 +529,7 @@ class _Hub:
         if batch.carrier == threading.get_ident():
             context = copy_context()
         else:
-            context = _detached(context_propagator_slot.get().restore(self._captured))
+            context = _detached(self._captured.restore())
         context.run(_running.set, (*_running.get(), batch))
         held = _held.batches
         held.append(batch)
@@ -578,9 +570,9 @@ class _Hub:
 
     async def _carried(self, batch: _Batch, captured: ContextSnapshot) -> None:
         """Resolve an async `batch` in `captured` restored on this loop."""
-        context = await context_propagator_slot.get().arestore(captured)
+        context = await captured.arestore()
         refused = _detached(context)
-        refused.run(_route_to, batch.loader.refusal)
+        refused.run(route_to, batch.loader.refusal)
         refused.run(_running.set, (batch,))
         await self.loop.create_task(self._resolve(batch), context=refused)
 
@@ -698,7 +690,7 @@ class Loader[K: Hashable, V]:
         """Hold the batch function, sync or `async def`, and the limits of a batch.
 
         An `async def` one serves native async I/O, as it may not hop to a thread, so an
-        ORM batch function is a plain def. A `None` limit follows its `DEFER` setting.
+        ORM batch function is a plain def. A `None` limit follows its `LOADER` setting.
         """
         if max_batch is not None and max_batch < 1:
             msg = f"A loader takes a max_batch of at least 1, got {max_batch}."
@@ -720,14 +712,14 @@ class Loader[K: Hashable, V]:
     def max_batch(self) -> int:
         """Return the most keys one call of the batch function receives."""
         if self._max_batch is None:
-            return defer_count("LOADER_MAX_BATCH")
+            return loader_settings().max_batch
         return self._max_batch
 
     @property
     def window(self) -> float:
         """Return the seconds a batch stays open after its first key."""
         if self._window is None:
-            return defer_seconds("BATCH_WINDOW")
+            return loader_settings().window
         return self._window
 
     async def load(self, key: K) -> V:
@@ -772,7 +764,7 @@ class Loader[K: Hashable, V]:
         if hub is None:
             return self._alone_sync(key)
         entry = hub.cached(self, key)
-        waiting = _wait if _held.batches else wait_served
+        waiting = _wait if _held.batches else serve_until
         if entry is None:
             admitted = hub.admission(self, key)
             waiting(admitted)
@@ -793,7 +785,7 @@ class Loader[K: Hashable, V]:
 
     def _refuse_refused(self) -> None:
         """Raise when an async batch function waits on a sync batch to query for it."""
-        refusal = _current()
+        refusal = current_executor()
         if not self.awaits and isinstance(refusal, _Refusal):
             raise RuntimeError(refusal.message)
 
@@ -808,7 +800,7 @@ class Loader[K: Hashable, V]:
             return await run_segment(partial(self._alone_sync, key))
         keys = [key]
         context = copy_context()
-        context.run(_route_to, self.refusal)
+        context.run(route_to, self.refusal)
         fetch = asyncio.get_running_loop().create_task(
             self._fetch(keys), context=context
         )

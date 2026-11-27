@@ -5,6 +5,7 @@ from django.contrib.auth.models import Group
 from django.test import RequestFactory
 
 from next.partial import KeysetPager, NumberPager
+from next.partial.paging import RESTORE_PARAM
 
 
 _PER_PAGE = 20
@@ -30,7 +31,7 @@ class TestBenchNumberPagerOverList:
     @pytest.mark.benchmark(group="partial.more")
     def test_window_restored_run(self, benchmark) -> None:
         """Five pages at once, as a back navigation restores the list it left."""
-        request = _factory.get("/feed/", {"page": "5", "restore": "1"})
+        request = _factory.get("/feed/", {"page": "5", RESTORE_PARAM: "page"})
         window = benchmark(_NUMBERS.window, _ROWS, request)
         assert len(window) == 5 * _PER_PAGE
         assert window.backs == ("1", "2", "3", "4")
@@ -84,7 +85,7 @@ class TestBenchPagersOverQueryset:
     def test_keyset_restored_run(self, benchmark) -> None:
         """Five batches restored around a cursor, two bounded queries."""
         token = _KEYSET.encode(("g0079",), reverse=False)
-        request = _factory.get("/feed/", {"cursor": token, "restore": "1"})
+        request = _factory.get("/feed/", {"cursor": token, RESTORE_PARAM: "cursor"})
         window = benchmark(_KEYSET.window, Group.objects.all(), request)
         assert len(window) == 5 * _PER_PAGE
         assert len(window.backs) == 4

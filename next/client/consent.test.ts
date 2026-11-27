@@ -133,7 +133,7 @@ describe("consent updates", () => {
   });
 
   it("stays silent when a decided visitor's choice changes nothing", () => {
-    document.cookie = "next_consent=1:analytics:1600000000; path=/";
+    document.cookie = "next_consent=2:analytics:1600000000; path=/";
     const { consent, dispatched, onChange } = makeConsent();
     const writes = vi.spyOn(document, "cookie", "set");
     consent.update({ analytics: true, marketing: false });
@@ -243,15 +243,8 @@ describe("the stored decision", () => {
     expect(consent.get()).not.toHaveProperty("unknown");
   });
 
-  it("reads the first format, which joins the categories with commas", () => {
-    document.cookie = "next_consent=1:analytics,unknown:1700000000; path=/";
-    const { consent } = makeConsent();
-    expect(consent.decided()).toBe(true);
-    expect(consent.get()).toMatchObject({ analytics: true, marketing: false });
-  });
-
   it("reads the cookie the payload names", () => {
-    document.cookie = "choice=1::1700000000; path=/";
+    document.cookie = "choice=2::1700000000; path=/";
     const { consent } = makeConsent({
       ...CONFIG,
       decided: true,
@@ -261,7 +254,7 @@ describe("the stored decision", () => {
     expect(consent.get()).toMatchObject({ analytics: false });
   });
 
-  it.each(["3:analytics:1", "2:analytics", "1:analytics", "garbage", ""])(
+  it.each(["3:analytics:1", "2:analytics", "1:analytics:1700000000", "garbage", ""])(
     "falls back to the payload for a foreign value %j",
     (value) => {
       document.cookie = `next_consent=${value}; path=/`;
@@ -272,7 +265,7 @@ describe("the stored decision", () => {
   );
 
   it("announces the starting state once, with nothing changed", () => {
-    document.cookie = "next_consent=1:analytics:1700000000; path=/";
+    document.cookie = "next_consent=2:analytics:1700000000; path=/";
     const { consent, dispatched } = makeConsent();
     consent._announce();
     expect(dispatched).toEqual([
@@ -315,7 +308,7 @@ describe("consented markup", () => {
   });
 
   it("reveals at once for a visitor whose cookie already grants it", () => {
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     document.body.innerHTML = BLOCK;
     makeConsent();
     expect(document.querySelector("iframe")).not.toBeNull();
@@ -386,7 +379,7 @@ describe("consented markup", () => {
   });
 
   it("reads the cookie's own categories on a page whose payload has no $consent", () => {
-    document.cookie = "next_consent=1:marketing:1700000000; path=/";
+    document.cookie = "next_consent=2:marketing:1700000000; path=/";
     document.body.innerHTML = BLOCK;
     const { consent } = makeConsent(null);
     expect(consent.get()).toEqual({ necessary: true, marketing: true });
@@ -394,7 +387,7 @@ describe("consented markup", () => {
   });
 
   it("reads a cookie granting nothing past necessary without a payload", () => {
-    document.cookie = "next_consent=1::1700000000; path=/";
+    document.cookie = "next_consent=2::1700000000; path=/";
     const { consent } = makeConsent(null);
     expect(consent.get()).toEqual({ necessary: true });
     expect(consent.decided()).toBe(true);

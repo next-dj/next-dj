@@ -5,17 +5,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Final
 
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.urls import NoReverseMatch
 from django.urls.converters import get_converters
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.seo.robots import declared_rules, robots_candidates, rule_pattern
 from next.seo.sitemaps import SitemapOptions, listed_trails, static_trails
 from next.site.config import indexable_without_request

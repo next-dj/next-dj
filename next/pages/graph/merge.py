@@ -51,7 +51,7 @@ class Step(NamedTuple):
     serializer: JsContextSerializer | None
     zones: frozenset[str] | None
     group: int
-    guard: bool | None = None
+    guard: bool = False
     inherits: bool = False
 
 

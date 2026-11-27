@@ -725,36 +725,28 @@ def test_default_binding_is_built_once() -> None:
     assert binding_class(_SIGNED_BINDING) is SignedCookieBinding
 
 
-@pytest.mark.parametrize("digest", [None, 5, "0" * 64])
-def test_ticket_without_a_matching_digest_belongs_to_another_session(
-    digest: object, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    sign_object = signing.TimestampSigner.sign_object
-
-    def forged(
-        signer: signing.TimestampSigner, payload: dict[str, object], **options: bool
-    ) -> str:
-        payload = {key: value for key, value in payload.items() if key != "session"}
-        if digest is not None:
-            payload["session"] = digest
-        return sign_object(signer, payload, **options)
-
+def test_a_ticket_of_one_visitor_fails_for_another() -> None:
     with override_next_settings(REALTIME={"TICKET_BINDING": _SIGNED_BINDING}):
         request = RequestFactory().get("/")
-        monkeypatch.setattr(signing.TimestampSigner, "sign_object", forged)
         grant = issue_ticket(
             request, (_TOPIC,), transform_ref=None, authorizer_ref=ROOM_AUTHORIZER_REF
         )
-        monkeypatch.undo()
         response = HttpResponse()
         ticket_binding().respond(request, response)
         cookie = response.cookies["next_visitor"].value
         credential = ticket_binding().credential({"next_visitor": cookie})
         assert credential is not None
-        with pytest.raises(InvalidTicketError, match="another session"):
-            verify_ticket(grant.token, credential)
-        request.COOKIES["next_visitor"] = cookie
-        genuine = issue_ticket(
-            request, (_TOPIC,), transform_ref=None, authorizer_ref=ROOM_AUTHORIZER_REF
+        assert verify_ticket(grant.token, credential).topics == (_TOPIC,)
+        stranger = RequestFactory().get("/")
+        issue_ticket(
+            stranger, (_TOPIC,), transform_ref=None, authorizer_ref=ROOM_AUTHORIZER_REF
         )
-        assert verify_ticket(genuine.token, credential).topics == (_TOPIC,)
+        other = HttpResponse()
+        ticket_binding().respond(stranger, other)
+        foreign = ticket_binding().credential(
+            {"next_visitor": other.cookies["next_visitor"].value}
+        )
+        assert foreign is not None
+        assert foreign != credential
+        with pytest.raises(InvalidTicketError, match="of another session"):
+            verify_ticket(grant.token, foreign)

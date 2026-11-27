@@ -34,7 +34,7 @@ _LATIN = "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit sed do.</p>
 _CYRILLIC = "<p>Съешь же ещё этих мягких французских булок, да выпей чаю.</p>"
 _LARGE_BYTES = 60_000
 _DEFAULTS: dict[str, object] = {}
-_CURRENT_OFF = {"CURRENT": {"ENABLED": False}}
+_LINKS_OFF = {"ACTIVE_LINKS": {"ENABLED": False}}
 
 
 def _large(paragraph: str) -> str:
@@ -102,8 +102,8 @@ class TestBenchPageUnderDefaultRouter:
 
     @pytest.mark.benchmark(group="router.page")
     def test_large_page_current_off(self, tmp_path: Path, benchmark) -> None:
-        """The large nav page with `ROUTER.CURRENT` disabled, the reference row."""
-        with _served(tmp_path, _NAV_LAYOUT, _large(_LATIN), _CURRENT_OFF) as view:
+        """The large nav page with `ROUTER.ACTIVE_LINKS` disabled, the reference row."""
+        with _served(tmp_path, _NAV_LAYOUT, _large(_LATIN), _LINKS_OFF) as view:
             html = view(_page_get()).content.decode()
             assert "nx:s" in html
             assert PAGE_MARK not in html

@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Protocol
 from asgiref.sync import sync_to_async
 from django.conf import settings
 
+from next.bridge import drive
 from next.caches import BoundedCache
-from next.ports import run_bridged
 
 from .cache import _CACHE_MISS, DependencyCache, request_memo
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_adapted: BoundedCache[str, None] = BoundedCache()
+_adapted: BoundedCache[str, None] = BoundedCache(depends=())
 _adapted_lock = threading.Lock()
 
 
@@ -46,7 +46,7 @@ def run_on_request_thread[T](segment: Callable[[], T], /) -> Awaitable[T]:
 
 
 segment_runner: ContextVar[SegmentRunner] = ContextVar(
-    "segment_runner", default=run_on_request_thread
+    "next_deps_segment_runner", default=run_on_request_thread
 )
 """The runner every blocking segment goes through, swapped for a scope by setting it."""
 
@@ -100,15 +100,15 @@ async def run_isolated[T](
 
 
 def bridge[T](site: object, work: Callable[[], Awaitable[T]]) -> T:
-    """Run the async `work` a sync caller meets through the bridge port.
+    """Run the async `work` a sync caller meets through the async bridge.
 
     DEBUG logs each site once by its `str`, built only there, with the cost of the hop.
     """
     if not settings.DEBUG:
-        return run_bridged(work)
+        return drive(work)
     label = str(site)
     if label in _adapted:
-        return run_bridged(work)
+        return drive(work)
     marks: list[float] = []
 
     async def measured() -> T:
@@ -118,7 +118,7 @@ def bridge[T](site: object, work: Callable[[], Awaitable[T]]) -> T:
         return value
 
     started = perf_counter()
-    value = run_bridged(measured)
+    value = drive(measured)
     _note_adapted(label, perf_counter() - started - (marks[1] - marks[0]))
     return value
 

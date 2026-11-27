@@ -17,6 +17,7 @@ from .shapes import (
     Section,
     Shape,
     count,
+    enforce,
     flag,
     member,
     modes,
@@ -28,14 +29,15 @@ from .shapes import (
 
 
 SCOPE: Final = "ROUTER"
-CURRENT: Final = "CURRENT"
+ACTIVE_LINKS: Final = "ACTIVE_LINKS"
 
 
 class RouterScope(enum.StrEnum):
-    """Which links the client router owns, each one or those in `[data-next-router]`."""
+    """Which links the client router owns, the pages, all or those it is let to own."""
 
+    PAGES = "pages"
     ALL = "all"
-    OPT_IN = "opt-in"
+    OPT_IN = "opt_in"
 
 
 class PrefetchMode(enum.StrEnum):
@@ -64,8 +66,15 @@ class ForeignMode(enum.StrEnum):
 class InterceptMode(enum.StrEnum):
     """Whether a plain link to an intercepted page opens its layer."""
 
-    OPT_IN = "opt-in"
+    OPT_IN = "opt_in"
     LINKS = "links"
+
+
+class LinkPass(enum.StrEnum):
+    """Where the active-link pass marks links, compiled templates or whole documents."""
+
+    TEMPLATE = "template"
+    DOCUMENT = "document"
 
 
 class Eagerness(enum.StrEnum):
@@ -139,13 +148,13 @@ SHAPE: Final = Section(
         "TRANSITIONS": _FLAG,
         "INTERCEPT": modes(InterceptMode),
         "SPECULATION": Shape(_speculation, "None, an eagerness or a dict"),
-        "MAX_LAYOUTS": _COUNTED,
         "CUT": Shape(text, "the dotted path of a NavigationCut subclass"),
         "DIGEST": Shape(text, "the dotted path of a ChromeDigest subclass"),
-        CURRENT: Section(
+        "SHED": Shape(text, "the dotted path of a PrefetchShed subclass"),
+        ACTIVE_LINKS: Section(
             {
                 "ENABLED": _FLAG,
-                "BACKEND": Shape(text, "the dotted path of a CurrentLinks subclass"),
+                "PASS": modes(LinkPass),
                 "CONTAINERS": Shape(
                     _selectors,
                     "a list of selectors, each a tag name, [attr] or [attr=value]",
@@ -155,7 +164,7 @@ SHAPE: Final = Section(
         ),
     }
 )
-"""Every `ROUTER` key with what it accepts, `CURRENT` nested as its own section."""
+"""Every `ROUTER` key with what it accepts, `ACTIVE_LINKS` nested as its own section."""
 
 
 _EAGER: Final = member(Eagerness)
@@ -188,7 +197,7 @@ def speculation_eagerness(value: object) -> Eagerness | None:
 
 @dataclass(frozen=True, slots=True)
 class RouterSettings:
-    """The `ROUTER` scope read once, each omitted or misfit key at its default."""
+    """The `ROUTER` scope read once, each omitted key at its default."""
 
     enabled: bool
     scope: RouterScope
@@ -206,22 +215,23 @@ class RouterSettings:
     transitions: bool
     intercept: InterceptMode
     speculation: object
-    max_layouts: int
     cut: str
     digest: str
-    current_enabled: bool
-    current_backend: str
-    current_containers: tuple[str, ...]
+    shed: str
+    links_enabled: bool
+    links_pass: LinkPass
+    links_containers: tuple[str, ...]
 
 
 def read_settings(scope: Mapping[str, object]) -> RouterSettings:
-    """Return the settings `scope` asks for, the default replacing each misfit."""
+    """Return the settings `scope` asks for, refusing a value outside its shape."""
     defaults: Mapping[str, Any] = FROZEN_DEFAULTS[SCOPE]
-    switch = pick(scope, CURRENT, _switch, defaults)
+    enforce(f"NEXT_FRAMEWORK[{SCOPE!r}]", scope, SHAPE)
+    switch = pick(scope, ACTIVE_LINKS, _switch, defaults)
     current: Mapping[str, object] = (
         {"ENABLED": switch} if isinstance(switch, bool) else switch
     )
-    nested: Mapping[str, Any] = defaults[CURRENT]
+    nested: Mapping[str, Any] = defaults[ACTIVE_LINKS]
     return RouterSettings(
         enabled=pick(scope, "ENABLED", flag, defaults),
         scope=RouterScope(pick(scope, "SCOPE", member(RouterScope), defaults)),
@@ -241,12 +251,12 @@ def read_settings(scope: Mapping[str, object]) -> RouterSettings:
             pick(scope, "INTERCEPT", member(InterceptMode), defaults)
         ),
         speculation=pick(scope, "SPECULATION", _speculation, defaults),
-        max_layouts=pick(scope, "MAX_LAYOUTS", _COUNT, defaults),
         cut=pick(scope, "CUT", text, defaults),
         digest=pick(scope, "DIGEST", text, defaults),
-        current_enabled=pick(current, "ENABLED", flag, nested),
-        current_backend=pick(current, "BACKEND", text, nested),
-        current_containers=tuple(pick(current, "CONTAINERS", _selectors, nested)),
+        shed=pick(scope, "SHED", text, defaults),
+        links_enabled=pick(current, "ENABLED", flag, nested),
+        links_pass=LinkPass(pick(current, "PASS", member(LinkPass), nested)),
+        links_containers=tuple(pick(current, "CONTAINERS", _selectors, nested)),
     )
 
 
@@ -270,14 +280,15 @@ def router_enabled() -> bool:
 
 
 __all__ = [
+    "ACTIVE_LINKS",
     "CONTAINER_SELECTOR",
-    "CURRENT",
     "EAGERNESS_KEY",
     "SCOPE",
     "SHAPE",
     "Eagerness",
     "ForeignMode",
     "InterceptMode",
+    "LinkPass",
     "PrefetchMode",
     "PressMode",
     "RouterScope",

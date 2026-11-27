@@ -2,10 +2,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
-from next.defer import BoundaryOptions, DeferMode
-from next.pages.defer import PageDeferDeclaration, page_defer, page_defer_store
-from next.pages.loaders import load_python_module_memo
+from next.boundaries.options import BoundaryOptions, DeferMode
+from next.pages.defer import page_defer
+from next.pages.loaders import load_page_module, load_python_module_memo
 
 
 @pytest.mark.usefixtures("fresh_declarations")
@@ -19,21 +20,14 @@ class TestPageDefer:
             mode=DeferMode.STREAM, timeout=3.0, parallel=False
         )
 
-    def test_an_unusable_value_declares_nothing(
+    def test_an_unusable_value_raises_on_load(
         self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]
     ) -> None:
         page_file = page_declaring(tmp_path, "page.defer(parallel='yes')")
-        load_python_module_memo(page_file)
-        assert page_defer(page_file) is None
-        [(file_path, held)] = list(page_defer_store.loaded())
-        assert file_path == page_file
-        assert held.problem() == "parallel must be True or False, got 'str'"
-
-
-class TestPageDeferDeclaration:
-    def test_a_usable_call_has_no_problem(self) -> None:
-        declaration = PageDeferDeclaration(None, True, {}, top_level=True)
-        assert declaration.problem() is None
-        assert declaration.options() == BoundaryOptions(
-            mode=DeferMode.STREAM, parallel=True
+        module, error = load_page_module(page_file)
+        assert module is None
+        assert isinstance(error.__cause__, ImproperlyConfigured)
+        assert str(error.__cause__) == (
+            f"page.defer() in {page_file} declares nothing, since parallel must be True or False, got 'str'."
         )
+        assert page_defer(page_file) is None

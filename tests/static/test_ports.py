@@ -15,6 +15,7 @@ class TestStaticAssetsPort:
             "create_collector",
             "discover_page_assets",
             "inject",
+            "runtime_loads",
         ]
 
     @pytest.mark.parametrize(

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
+from typing import Final
+
+
+MAX_LAYOUTS: Final = 32
+"""The most layouts a declaration lists, past which the client declares none."""
 
 
 class CutKind(enum.StrEnum):
@@ -22,6 +27,7 @@ class Divergence(enum.StrEnum):
     HEAD = "head"
     DECLARATION = "declaration"
     CLEAR = "clear"
+    SCRIPT = "script"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +39,7 @@ class LayoutKey:
 
 
 @dataclass(frozen=True, slots=True)
-class Declaration:
+class ClientLayouts:
     """The layouts the client has on screen, outer first, parsed from its header."""
 
     keys: tuple[LayoutKey, ...]
@@ -41,7 +47,7 @@ class Declaration:
 
 @dataclass(frozen=True, slots=True)
 class ScannedLayout:
-    """One layout found in a rendered page by its sealed slot markers.
+    """One layout found in a rendered page by its enclosing slot markers.
 
     `slot` bounds the inner HTML of its slot, `outer` the slot with both markers, and
     `head` is the digest of the part before `<body` for a layout opening the document.
@@ -55,14 +61,14 @@ class ScannedLayout:
 
 
 @dataclass(frozen=True, slots=True)
-class ScannedShell:
+class ScannedPage:
     """A rendered page as the router reads it, its layouts outer first.
 
     `body` bounds the children of `<body>`, `None` when the page writes no body.
     """
 
     html: str
-    seal: str
+    response_id: str
     layouts: tuple[ScannedLayout, ...]
     body: tuple[int, int] | None = None
 
@@ -76,13 +82,15 @@ class ScannedShell:
 class Cut:
     """Where a navigation cuts the page, with the layouts it keeps on screen.
 
-    `diverged_at` names the first layout that did not match, with the `reason`.
+    `diverged_at` names the first layout that did not match, with the `reason`, and
+    `script` the tag a swap would have dropped when that is the reason.
     """
 
     kind: CutKind
     kept: tuple[str, ...] = ()
     diverged_at: str | None = None
     reason: Divergence | None = None
+    script: str | None = None
 
     @property
     def slot(self) -> str | None:
@@ -91,11 +99,12 @@ class Cut:
 
 
 __all__ = [
+    "MAX_LAYOUTS",
+    "ClientLayouts",
     "Cut",
     "CutKind",
-    "Declaration",
     "Divergence",
     "LayoutKey",
     "ScannedLayout",
-    "ScannedShell",
+    "ScannedPage",
 ]

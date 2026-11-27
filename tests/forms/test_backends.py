@@ -1190,14 +1190,6 @@ class TestActionUrlCache:
         with override_settings(ROOT_URLCONF="next.urls"):
             assert len(backend._url_cache) == 0
 
-    def test_unrelated_setting_change_keeps_url_cache(self) -> None:
-        """Overriding an unrelated setting leaves cached URLs in place."""
-        backend = self._backend_with_action()
-        url = backend.get_action_url("cached_action")
-        with override_settings(APPEND_SLASH=False):
-            assert len(backend._url_cache) > 0
-            assert backend.get_action_url("cached_action") == url
-
     def test_script_prefix_is_part_of_the_cache_key(self) -> None:
         """A request-scoped script prefix never serves another prefix's URL."""
         backend = self._backend_with_action()

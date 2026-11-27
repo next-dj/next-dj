@@ -1,15 +1,21 @@
-import pytest
+from pathlib import Path
+from unittest.mock import patch
 
+import pytest
+from django.http import HttpRequest
+
+from next.ports import PortSlot
 from next.router import (
     ChromeDigest,
+    ClientLayouts,
     Cut,
     CutKind,
-    Declaration,
     Divergence,
     LayoutKey,
+    LoadShed,
     VerifiedCut,
 )
-from next.router.markers import ScannedLayout, ScannedShell
+from next.router.markers import ScannedLayout, ScannedPage
 
 
 ROOT = "1" * 16
@@ -23,7 +29,7 @@ def _layout(ident: str, digest: str, head: str | None = None) -> ScannedLayout:
     return ScannedLayout(ident, digest, (0, 0), (0, 0), head)
 
 
-SHELL = ScannedShell(
+SHELL = ScannedPage(
     "",
     "5ea1",
     (
@@ -34,8 +40,8 @@ SHELL = ScannedShell(
 )
 
 
-def _declared(*pairs: tuple[str, str]) -> Declaration:
-    return Declaration(tuple(LayoutKey(ident, digest) for ident, digest in pairs))
+def _declared(*pairs: tuple[str, str]) -> ClientLayouts:
+    return ClientLayouts(tuple(LayoutKey(ident, digest) for ident, digest in pairs))
 
 
 class TestVerifiedCut:
@@ -67,7 +73,7 @@ class TestVerifiedCut:
             pytest.param(
                 _declared((ROOT, HEAD + "f" * 16)),
                 Cut(CutKind.BODY, (), ROOT, Divergence.DIGEST),
-                id="body-morph",
+                id="body_morph",
             ),
             pytest.param(
                 _declared((ROOT, "f" * 32)),
@@ -91,16 +97,16 @@ class TestVerifiedCut:
             ),
         ],
     )
-    def test_the_rung(self, declared: Declaration | None, expected: Cut) -> None:
+    def test_the_rung(self, declared: ClientLayouts | None, expected: Cut) -> None:
         assert VerifiedCut().cut(declared, SHELL) == expected
 
     def test_a_page_without_layouts_morphs_the_body(self) -> None:
-        bare = ScannedShell("", "5ea1", ())
+        bare = ScannedPage("", "5ea1", ())
         assert VerifiedCut().cut(_declared(), bare) == Cut(CutKind.BODY)
         assert VerifiedCut().cut(_declared((ROOT, BODY)), bare).kind is CutKind.VISIT
 
     def test_a_root_without_a_head_morphs_the_body(self) -> None:
-        shell = ScannedShell("", "5ea1", (_layout(ROOT, BODY),))
+        shell = ScannedPage("", "5ea1", (_layout(ROOT, BODY),))
         cut = VerifiedCut().cut(_declared((ROOT, "f" * 16)), shell)
         assert cut.kind is CutKind.BODY
 
@@ -117,3 +123,18 @@ class TestChromeDigest:
         text = digest.normalise('<p nonce="x">a</p>', "5ea1")
         assert text == "<p>a</p>"
         assert len(digest.digest(text)) == 16
+
+
+class TestLoadShed:
+    """The shipped shed reads the server load the boundary feature binds."""
+
+    def test_it_waits_as_long_as_the_bound_load_lags(self) -> None:
+        slot: PortSlot[object] = PortSlot("server load port")
+        slot.set(type("Lagging", (), {"backlog": lambda _self: 1.5})())
+        with patch("next.ports.server_load_slot", slot):
+            assert LoadShed().waited(HttpRequest(), Path("page.py")) == 1.5
+
+    def test_nothing_is_shed_without_a_bound_load(self) -> None:
+        slot: PortSlot[object] = PortSlot("server load port")
+        with patch("next.ports.server_load_slot", slot):
+            assert LoadShed().waited(HttpRequest(), Path("page.py")) is None

@@ -193,6 +193,27 @@ class TestResponses:
             html = NextClient().get("/home/").content.decode()
         assert _STASH + _LINK in html
 
+    def test_a_link_a_component_template_spells_carries_it(self, root: Path) -> None:
+        _site(root, '{% load components %}{% component "opener" %}')
+        folder = root / "home" / "_components" / "opener"
+        folder.mkdir(parents=True)
+        (folder / "component.djx").write_text(_LINK)
+        with routed(root):
+            html = NextClient().get("/home/").content.decode()
+        assert _STASH + _LINK in html
+
+    def test_a_link_a_variable_writes_is_left_to_the_client(self, root: Path) -> None:
+        _site(root, "{{ link }}")
+        source = (
+            "from django.utils.safestring import mark_safe\n\n"
+            f"page.context('link')(lambda: mark_safe({_LINK!r}))\n"
+        )
+        write_page(root, "home", PAGE_HEAD + source, body="{{ link }}")
+        with routed(root):
+            html = NextClient().get("/home/").content.decode()
+        assert _LINK in html
+        assert _STASH not in html
+
     def test_a_zone_answer_carries_it_with_the_reload_bundle(self, root: Path) -> None:
         _site(root, '{% zone "list" %}' + _LINK + "{% endzone %}")
         with routed(root):

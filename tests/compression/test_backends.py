@@ -1,3 +1,4 @@
+import gzip
 import zlib
 
 import pytest
@@ -68,6 +69,34 @@ class TestGzipBackend:
     def test_compress_once_is_one_member(self) -> None:
         body = b"<html>" + b"x" * 4000
         assert zlib.decompress(GzipBackend().compress_once(body, 4), 31) == body
+
+    def test_compress_once_pads_the_header_name(self) -> None:
+        body = b"{}" * 100
+        sizes = set()
+        for _ in range(60):
+            encoded = GzipBackend().compress_once(body, 4, pad=8)
+            assert gzip.decompress(encoded) == body
+            sizes.add(len(encoded))
+        assert len(sizes) > 1
+        assert max(sizes) - min(sizes) <= 9
+
+    def test_a_padded_name_sets_the_flag(self) -> None:
+        named = {GzipBackend().compress_once(b"x", 4, pad=4)[3] for _ in range(40)}
+        assert named == {0, gzip.FNAME}
+        assert GzipBackend().compress_once(b"x", 4)[3] == 0
+
+    def test_a_padded_stream_carries_its_name_once_and_checks_out(self) -> None:
+        compressor = GzipBackend().create(4, None, pad=16)
+        reader = _gzip_reader()
+        _round_trip(compressor, reader)
+        assert reader.eof
+        assert reader.unused_data == b""
+
+    def test_a_name_comes_first_even_when_the_first_output_is_a_flush(self) -> None:
+        compressor = GzipBackend().create(4, None, pad=4)
+        head = compressor.flush()
+        assert head.startswith(b"\x1f\x8b\x08")
+        assert gzip.decompress(head + compressor.finish()) == b""
 
     def test_the_contract_ranges(self) -> None:
         assert (GzipBackend.coding, GzipBackend.level) == ("gzip", 4)

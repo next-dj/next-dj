@@ -28,6 +28,7 @@ from next.forms.decorators import action
 from next.forms.manager import FormActionManager, form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.signals import action_registered
+from tests.support.checks import written
 from tests.support.forms import DECLINING_SHAPER, DecliningShaper
 
 
@@ -240,8 +241,8 @@ class TestFormActionBackendsConfigurationCheck:
 
     def test_non_list_setting_is_e044(self, settings) -> None:
         """Top-level value must be a list."""
-        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": "x"}
-        errors = check_form_action_backends_configuration()
+        with written({"FORM_ACTION_BACKENDS": "x"}):
+            errors = check_form_action_backends_configuration()
         assert len(errors) == 1
         assert errors[0].id == "next.E044"
 
@@ -520,10 +521,10 @@ class TestCheckFormWizardBackend:
         """The default cache backend config passes the check."""
         assert check_form_wizard_backend() == []
 
-    @override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": ["not", "a", "dict"]})
     def test_non_dict_config_is_e051(self) -> None:
         """A non-dict config triggers E051."""
-        errors = check_form_wizard_backend()
+        with written({"FORM_WIZARD_BACKEND": ["not", "a", "dict"]}):
+            errors = check_form_wizard_backend()
         assert len(errors) == 1
         assert errors[0].id == "next.E051"
 
@@ -1041,7 +1042,7 @@ class TestCheckFormAnchorFiles:
     )
     def test_non_list_value_is_e052(self, value: object) -> None:
         """Only a list round-trips the settings merge, anything else is rejected."""
-        with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": value}):
+        with written({"FORM_ANCHOR_FILES": value}):
             errors = check_form_anchor_files()
         assert len(errors) == 1
         assert errors[0].id == "next.E052"

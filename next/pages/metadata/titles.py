@@ -1,6 +1,5 @@
 """Safe named placeholders for the title template chain."""
 
-import functools
 import string
 from collections.abc import Mapping
 from typing import Final
@@ -9,6 +8,7 @@ from django.utils.functional import lazy
 from django.utils.html import conditional_escape, escape
 from django.utils.safestring import SafeData, SafeString, mark_safe
 
+from next.caches import pure_cache
 from next.pages.errors import PageMetadataTemplateError
 
 from .dicts import Text
@@ -22,7 +22,7 @@ type Part = tuple[str, str | None]
 _FORMATTER: Final = string.Formatter()
 
 
-@functools.lru_cache(maxsize=256)
+@pure_cache(256)
 def parse_template(text: str) -> tuple[Part, ...]:
     """Split an evaluated template into literal text and placeholder names.
 

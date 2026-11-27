@@ -7,12 +7,11 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseBase, HttpResponseRedirect
 
 from next.forms import Form
-from next.partial.headers import ORIGIN, REQUEST_FLAG, VARY_HEADERS, ZONE
-from next.suspense.policy import streaming
-from next.suspense.tokens.transport import HEADER
+from next.partial.headers import BOUNDARY, ORIGIN, REQUEST_FLAG, VARY_HEADERS, ZONE
 from next.testing import NextClient
 from tests.support import routed, write_page
 from tests.support.access import COMPONENTS
+from tests.support.streams import streaming
 
 
 pytestmark = pytest.mark.django_db
@@ -35,7 +34,7 @@ _STREAM = frozenset({"Accept-Encoding", "Accept"})
 _READ = frozenset({"Accept"})
 _ORIGIN = frozenset({ORIGIN})
 _ROUTER = {"ENABLED": True}
-_NO_LINKS = {"ENABLED": True, "CURRENT": False}
+_NO_LINKS = {"ENABLED": True, "ACTIVE_LINKS": False}
 
 
 class VaryProbeForm(Form):
@@ -49,7 +48,7 @@ class VaryProbeForm(Form):
 
 def _reload(client: NextClient) -> HttpResponseBase:
     token = client.boundary_token("/shop/", "card")
-    sent = {REQUEST_FLAG: "1", ZONE: _WIRE_ID, HEADER: token}
+    sent = {REQUEST_FLAG: "1", ZONE: _WIRE_ID, BOUNDARY: token}
     return client.get("/shop/", headers=sent)
 
 

@@ -7,7 +7,7 @@ import { createDiagnostics } from "./diagnostics";
 const win = globalThis as unknown as {
   Next: {
     _init(context: Record<string, unknown>): void;
-    _land(key: "dev", diagnostics: unknown): void;
+    _extend(name: "dev", install: () => unknown, build: string): void;
   };
 };
 
@@ -23,7 +23,7 @@ it("hands the dev channel to the runtime as it evaluates", async () => {
 it("keeps the first dev channel when a second copy of the chunk hands one over", async () => {
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const second = { attrs: vi.fn() };
-  win.Next._land("dev", second);
+  win.Next._extend("dev", () => second, "test");
   document.body.innerHTML = '<div data-next-zone="z" data-next-defer="soon"></div>';
   win.Next._init({ $dev: true });
   await Promise.resolve();
@@ -59,4 +59,16 @@ it("warns once when a stalled copy of the chunk evaluates after its retry", asyn
   await Promise.resolve();
   const csrf = warn.mock.calls.filter(([text]) => String(text).includes("$csrf"));
   expect(csrf).toHaveLength(1);
+});
+
+it("shows why a server refused a token on the wrapper and in the console", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const el = document.createElement("div");
+  el.id = "b-1";
+  createDiagnostics().rejected(el, "refused\nthe token expired");
+  expect(el.getAttribute("data-next-error-detail")).toBe("refused\nthe token expired");
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining("#b-1"),
+    "refused\nthe token expired",
+  );
 });

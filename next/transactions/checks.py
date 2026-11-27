@@ -2,30 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.db import connections
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     DeclaringCall,
     callable_problem,
-    declaration_errors,
+    misplaced_errors,
     raw_scope,
 )
 from next.conf.checks import error_for_misfit, error_for_unusable_path
+from next.conf.defaults import AUTO
 from next.conf.shapes import misfits
+from next.conf.transactions import SCOPE, SHAPE, alias_list
 from next.forms.checks.sources import diagnostics
 from next.pages.loaders import PAGE_MODULE
-from next.pages.transactions import atomic_store
+from next.pages.transactions import transaction_declaration
 
-from .policy import SHAPE, alias_list
+from .policy import atomic_requests
 
 
-_SCOPE: Final = "TRANSACTIONS"
-_PREFIX: Final = f"NEXT_FRAMEWORK[{_SCOPE!r}]"
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+
+_PREFIX: Final = f"NEXT_FRAMEWORK[{SCOPE!r}]"
 
 
 def _rule_errors(value: object) -> list[CheckMessage]:
@@ -51,7 +56,7 @@ def _rule_errors(value: object) -> list[CheckMessage]:
 @register(NEXT)
 def check_transactions_settings(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Validate the `TRANSACTIONS` keys, the value shapes and the `RULE` path."""
-    scope = raw_scope(_SCOPE)
+    scope = raw_scope(SCOPE)
     if scope is None:
         return []
     errors = [error_for_misfit(_PREFIX, misfit) for misfit in misfits(scope, SHAPE)]
@@ -62,7 +67,7 @@ def check_transactions_settings(*args: object, **kwargs: object) -> list[CheckMe
 @register(NEXT)
 def check_transactions_aliases(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Warn about `TRANSACTIONS["ALIASES"]` entries `DATABASES` does not declare."""
-    scope = raw_scope(_SCOPE)
+    scope = raw_scope(SCOPE)
     aliases = None if scope is None else scope.get("ALIASES")
     if not alias_list(aliases):
         return []
@@ -82,21 +87,15 @@ def check_transactions_aliases(*args: object, **kwargs: object) -> list[CheckMes
     ]
 
 
-_ATOMIC_CALL: Final = DeclaringCall(
-    "page.atomic()", "next.E240", PAGE_MODULE, "page", declares="no transaction"
+_TRANSACTION_CALL: Final = DeclaringCall(
+    "page.transaction()", "next.E240", PAGE_MODULE, "page", declares="no transaction"
 )
 
 
 @register(NEXT)
 def check_atomic_declarations(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Report a `page.atomic()` or an action `atomic` choice that applies nothing."""
-    errors = declaration_errors(
-        _ATOMIC_CALL,
-        atomic_store,
-        consequence="The page follows the method rule instead.",
-        hint="Call page.atomic() with True, False or 'writes' at the top of the "
-        "module, with aliases= None, 'all' or a list of database aliases.",
-    )
+    """Report a misplaced `page.transaction()` or a no-op action `atomic`."""
+    errors = misplaced_errors(_TRANSACTION_CALL, transaction_declaration.outside())
     errors.extend(
         Error(
             f"{owner} declares no transaction, since {problem}. The action follows "
@@ -111,24 +110,31 @@ def check_atomic_declarations(*args: object, **kwargs: object) -> list[CheckMess
     return errors
 
 
+def _replaced(scope: Mapping[str, object]) -> list[str]:
+    """Return the `TRANSACTIONS` keys that stop following `ATOMIC_REQUESTS`."""
+    replaced = [key for key in ("SAFE", "UNSAFE") if scope.get(key, AUTO) != AUTO]
+    if scope.get("RULE") is not None:
+        replaced.append("RULE")
+    return replaced
+
+
 @register(NEXT)
 def check_atomic_requests(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Warn that next.dj views ignore `ATOMIC_REQUESTS` and follow `TRANSACTIONS`."""
-    aliases = [
-        alias
-        for alias, database in connections.settings.items()
-        if database.get("ATOMIC_REQUESTS")
-    ]
-    if not aliases:
+    """Warn that a `TRANSACTIONS` choice replaces `ATOMIC_REQUESTS` in next.dj views."""
+    aliases = atomic_requests(connections.settings)
+    scope = raw_scope(SCOPE)
+    replaced = [] if scope is None else _replaced(scope)
+    if not aliases or not replaced:
         return []
     names = ", ".join(repr(alias) for alias in aliases)
+    keys = ", ".join(replaced)
     return [
         DjangoWarning(
-            f"ATOMIC_REQUESTS is set on {names}. next.dj views ignore it and open "
-            f"the transactions {_PREFIX} asks for, while other Django views keep it.",
-            hint="Drop ATOMIC_REQUESTS, or keep it for the other views and steer "
-            "next.dj views through TRANSACTIONS, page.atomic(), @action(atomic=) or "
-            "Meta.atomic.",
+            f"ATOMIC_REQUESTS is set on {names}, but {_PREFIX} sets {keys}, so next.dj "
+            "views open the transactions it asks for, while other Django views keep "
+            "ATOMIC_REQUESTS.",
+            hint="Leave SAFE and UNSAFE at 'auto' and RULE at None to follow "
+            "ATOMIC_REQUESTS, or drop ATOMIC_REQUESTS.",
             obj=settings,
             id="next.W154",
         )

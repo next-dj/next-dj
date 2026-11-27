@@ -17,6 +17,7 @@ A page ``render``, an ``@context`` callable, an ``@page.metadata`` callable, an 
 The view stays a sync Django view.
 It drives the async part on the event loop of the ASGI server, or on a background loop under WSGI, while the request thread waits and runs every thread-sensitive call that part makes.
 A ``sync_to_async`` call and the Django async ORM therefore run on the request thread, inside the transaction of the request when it holds one.
+The bridge is ``next.bridge``, the async runtime of the kernel, so an async page needs no deferred boundary and loads nothing of ``next.defer`` for it, see :doc:`/content/ref/bridge`.
 
 Within one render the callables form a graph by the keys they read.
 Async callables that do not read each other run concurrently, and a sync callable runs on the request thread when its inputs are ready.
@@ -74,8 +75,8 @@ A ``Loader`` gathers the keys one request scope asks for into a few calls of a b
 The ``cart`` callable is the source of the keys, and ``prices`` reads it by name, so the loader receives one key per line and the batch function runs once for the page.
 
 ``load(key)`` is awaited on the event loop, and ``load_sync(key)`` serves a sync callable on a thread and refuses to run on an event loop.
-A batch closes once every deferred job of the response that runs or is about to run waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default, both read from ``DEFER`` unless the loader is built with ``window=`` or ``max_batch=``.
-A job is about to run from the moment a free pool worker or the event loop is handed it, while a job queued behind a busy pool or behind another job on the request lane counts only once it starts.
+A batch closes once every deferred job of the response that runs or is about to run waits on a loader or has ended, at ``LOADER["MAX_BATCH"]`` keys, five hundred by default, or ``LOADER["WINDOW"]`` after its first key, one millisecond by default, both read from ``DEFER`` unless the loader is built with ``window=`` or ``max_batch=``.
+A job is about to run from the moment a free pool worker is handed it, while a job queued behind a busy pool or behind another job on the request lane counts only once it starts.
 The batch function returns a mapping by key or a sequence in key order.
 A key the mapping lacks raises ``MissingKeyError`` for that key alone, a short sequence and a raising batch fail every key of the batch, and a key loaded once in a request is answered from memory, its error included.
 
@@ -91,40 +92,52 @@ On the pool they share a batch, unless one of them asks for its first key more t
 Lanes and placement
 -------------------
 
-Work runs on one of three lanes.
-The pool lane is a bounded process-wide thread pool, ``EXECUTOR["OPTIONS"]["MAX_WORKERS"]`` threads started on demand, sixteen by default.
-The loop lane is the event loop that runs ``async def`` work, and the request lane is the thread that ran the view.
+A job runs on one of two lanes.
+The pool lane is the executor ``DEFER["EXECUTOR"]`` names, by default a bounded process-wide thread pool of up to ``EXECUTOR["OPTIONS"]["MAX_WORKERS"]`` threads started on demand, eight by default.
+The request lane is the thread that ran the view.
 
-The sync work of a job goes to the request lane when a request-lane rule holds, checked in this order.
+A job renders its component or page body as one sync render, so it runs on a lane as a whole.
+The async callables that render meets run through the same bridge as in a sync view, on the event loop of the ASGI server or on the background loop under WSGI, while the thread of the job waits and runs their thread-sensitive calls.
+A job whose callables await I/O therefore holds its thread for the wait, and jobs on the request lane run one after another, the ``async def`` callables of a job included.
+
+A job goes to the request lane when a request-lane rule holds, checked in this order.
 
 ``atomic``
    The view runs inside a transaction, as a ``POST`` does by default, or runs in ``"writes"`` mode and waits to open one at its first write, so every job shares its connection and sees its writes.
 ``sqlite``
-   A database alias is SQLite, unless ``EXECUTOR["OPTIONS"]["SQLITE"]`` is ``"parallel"``, and an in-memory SQLite alias always.
-``connection-state``
+   A database alias is SQLite, unless ``EXECUTOR["SQLITE"]`` is ``"parallel"``, and an in-memory SQLite alias always.
+   The rule holds for a job whose callables never touch the database too, so on SQLite the waits of ``async def`` callables in different jobs add up, and a file database set to ``"parallel"`` overlaps them on the pool.
+   Under ``DEBUG`` the first page whose boundaries this rule kept serial logs a warning to ``next.defer`` once per process, naming the setting and the lock a second write waits for.
+``connection_state``
    The framework detected per-connection state, such as a tenant middleware that sets a schema, that no ``ConnectionState`` backend of ``DEFER["CONNECTION_STATE"]`` replays, ``next.W155``.
-``thread-local``
-   The framework detected request state kept on the thread, such as django-crum or a middleware listed in ``EXECUTOR["OPTIONS"]["THREAD_LOCAL_MIDDLEWARE"]``, that no ``ThreadState`` backend of ``DEFER["THREAD_STATE"]`` replays, ``next.W171``.
-``opt-out``
-   ``EXECUTOR["OPTIONS"]["PARALLEL"]`` is ``False``, or the boundary declares ``parallel=False``.
+``thread_local``
+   The framework detected request state kept on the thread, such as django-crum or a middleware listed in ``EXECUTOR["THREAD_LOCAL_MIDDLEWARE"]``, that no ``ThreadState`` backend of ``DEFER["THREAD_STATE"]`` replays, ``next.W171``.
+``opt_out``
+   ``EXECUTOR["PARALLEL"]`` is ``False``, or the boundary declares ``parallel=False``.
 
-Without such a rule the job goes to the pool.
-A pool job that waits longer than ``QUEUE_TIMEOUT`` in the queue, or meets a full queue, runs on its request thread instead, and one neither can take settles as ``overloaded``.
-``boundary_rendered`` reports the lane and the reason for each job, and ``page_stream_opened`` names the request-lane rule that pinned a stream.
+Without such a rule the job goes to the pool, as far as the admission of ``DEFER["ADMISSION"]`` lets it.
+Under the default ``QueueDelay``, a pool job that waits longer than ``QUEUE_TIMEOUT`` in the queue, or meets a full queue, runs on its request thread instead, and one neither can take settles as ``overloaded``.
+Once the oldest job in the queue has waited ``SHED_DELAY``, one second by default, a new pool job settles as ``overloaded`` without running, so an overloaded process sheds boundaries rather than slowing every request.
+``boundary_settled`` reports the lane and the reason for each job, and ``page_stream_opened`` names the request-lane rule that pinned a stream.
 
 Thread and transaction rules
 ----------------------------
 
 A job on the pool runs on another thread with a copy of the context variables the view held, so a ``contextvars.ContextVar`` or an asgiref ``Local`` set in a middleware, the active language among them, reaches it and a ``threading.local`` does not.
 A ``Local`` of the project reaches a deferred job too, as the context snapshot is restored on the thread or the loop of the job by the hops asgiref moves a ``Local`` with, and a sync context callable of an overlapped layer gets it from the segment runner the same way.
-The same restore runs for a coroutine that ``drive`` runs and for a loader batch, see :doc:`/content/ref/ports`.
+The same restore runs for a coroutine that ``drive`` runs and for a loader batch, see :doc:`/content/ref/bridge`.
 A pool job whose snapshot cannot be restored on its thread before its deadline never starts, and its boundary settles as ``timeout``.
+
 When callables of one layer overlap, a ``Local`` value one of them sets returns to the caller with the whole ``Local`` of the last callable that wrote it, so a callable that only switched a value and switched it back writes back the value it saw.
 The language, the URLconf, and the script prefix keep what the last callable that changed them set, and ``next.pages.graph.register_local_accessor(accessor)`` gives a ``Local`` value of the project the same treatment, called once at startup with a ``LocalAccessor`` whose ``read()`` returns the value and ``write(value)`` sets it.
-A ``ThreadState`` backend captures such state on the request thread and applies it on the pool thread, and a ``ConnectionState`` backend replays per-connection state on the connection a pool thread opens, each naming the detected sources it ``covers``.
+A ``ThreadState`` backend captures such state on the request thread and applies it on the pool thread, and a ``ConnectionState`` backend replays per-connection state on the connection a pool thread opens, each naming the detected sources it ``covers``, see :doc:`/content/howto/replay-request-state-on-a-pool-thread`.
 
 A pool job uses a connection of its own in autocommit, so it reads committed rows only and never the uncommitted writes of its request, which is why the ``atomic`` rule keeps such a request on one thread.
-Under ``DEFER["DEADLINE_TO_DB"]`` a PostgreSQL connection of a pool job carries the remaining time of the job as its statement timeout, folded into the transaction a ``ConnectionState`` replay opens for ``"state"``, the default, opened for that alone for ``"always"``, and never for ``False``.
+Under ``DEFER["DEADLINE_TO_DB"]`` a PostgreSQL connection of a pool job carries the remaining time of the job as its statement timeout.
+The default ``"always"`` sets it in a transaction opened for it before the first query, ``"state"`` only inside the transaction a ``ConnectionState`` replay opens, and ``False`` never.
+A request-lane job gets the same timeout under ``"always"`` on a connection outside a transaction, while a connection inside the transaction of the request, or waiting for its first write to open one, stays untouched.
+
+The replay and the timeout wait for the first statement an execute wrapper sees, so ``cursor.callproc`` and the raw driver connection run without them, and a job reaches a stored procedure through ``cursor.execute("CALL ...")`` instead.
 A replay runs inside a transaction, so a ``durable=True`` atomic block in code a deferred job runs raises, ``next.W173``.
 A pool thread that leaves its connection inside a transaction has it rolled back and closed before its next job.
 

@@ -5,13 +5,17 @@ The merge runs on first access and caches until `reload()` emits `settings_reloa
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.conf import settings
 
+from next.caches import FRAMEWORK, SETTINGS
+from next.checks import CHECKING
+from next.errors import SettingShapeError
+
 from .defaults import DEFAULTS, USER_SETTING
-from .imports import clear_import_cache
-from .merge import BOOL_KEYS, LIST_KEYS, STR_KEYS, merge_user_settings
+from .merge import BOOL_KEYS, LIST_KEYS, STR_KEYS, merge_user_settings, mistyped
 from .signals import dispatch_settings_reloaded
 
 
@@ -20,7 +24,10 @@ if TYPE_CHECKING:
 
 
 class NextFrameworkSettings:
-    """Lazy merged view of top-level keys declared in `DEFAULTS`."""
+    """Lazy merged view of top-level keys declared in `DEFAULTS`.
+
+    A merge or a value a reload overtakes answers its caller and is not kept.
+    """
 
     DEFAULTS: ClassVar[Mapping[str, Any]] = DEFAULTS
     LIST_KEYS: ClassVar[frozenset[str]] = LIST_KEYS
@@ -30,16 +37,22 @@ class NextFrameworkSettings:
     def __init__(self) -> None:
         """Initialise empty merge and attribute caches."""
         self._merged_cache: dict[str, Any] | None = None
+        self._mistyped: dict[str, str] = {}
         self._attr_value_cache: dict[str, Any] = {}
+        self._epoch = 0
+        self._lock = threading.Lock()
 
     def reload(self) -> None:
-        """Drop merge and import caches and emit the reload signal.
+        """Drop the merge, move `SETTINGS` and `FRAMEWORK`, then emit the reload signal.
 
-        Package-level managers listen to `settings_reloaded` and reset their own state.
+        The memos drop before any receiver runs, so a receiver never reads a stale one.
         """
-        self._merged_cache = None
-        self._attr_value_cache.clear()
-        clear_import_cache()
+        with self._lock:
+            self._epoch += 1
+            self._merged_cache = None
+            self._attr_value_cache.clear()
+        SETTINGS.move()
+        FRAMEWORK.move()
         dispatch_settings_reloaded(type(self))
 
     def _raw_user(self) -> dict[str, Any] | None:
@@ -51,14 +64,26 @@ class NextFrameworkSettings:
         return raw if isinstance(raw, dict) else None
 
     def _merged(self) -> dict[str, Any]:
-        if self._merged_cache is None:
-            self._merged_cache = merge_user_settings(self.DEFAULTS, self._raw_user())
-        return self._merged_cache
+        merged = self._merged_cache
+        if merged is None:
+            epoch = self._epoch
+            raw = self._raw_user()
+            self._mistyped = mistyped(self.DEFAULTS, raw)
+            merged = merge_user_settings(self.DEFAULTS, raw)
+            with self._lock:
+                if epoch == self._epoch:
+                    self._merged_cache = merged
+        return merged
+
+    def mistyped(self) -> tuple[str, ...]:
+        """Return a sentence for each top-level value the merge kept the default of."""
+        self._merged()
+        return tuple(self._mistyped.values())
 
     def __getattr__(self, attr: str) -> Any:
         """Return merged values for keys declared in `DEFAULTS`.
 
-        The `DEFAULTS` keys are fixed at import and each holds its own type, so `Any`.
+        A mistyped key reads as its default, but raises inside a check for it to yield.
         """
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
@@ -66,14 +91,21 @@ class NextFrameworkSettings:
             allowed = ", ".join(sorted(self.DEFAULTS))
             msg = f"Invalid Next framework setting: {attr!r}. Allowed keys: {allowed}."
             raise AttributeError(msg)
+        epoch = self._epoch
         val = self._merged()[attr]
-        self._attr_value_cache[attr] = val
+        problem = self._mistyped.get(attr)
+        if problem is None:
+            with self._lock:
+                if epoch == self._epoch:
+                    self._attr_value_cache[attr] = val
+        elif CHECKING.get():
+            raise SettingShapeError((problem,))
         return val
 
     @override
     def __setattr__(self, name: str, value: object) -> None:
         """Allow only internal cache attributes and raise for declared keys."""
-        if name in {"_merged_cache", "_attr_value_cache"}:
+        if name in {"_merged_cache", "_mistyped", "_attr_value_cache"}:
             super().__setattr__(name, value)
             return
         if name in self.DEFAULTS:
@@ -96,7 +128,19 @@ def fail_loudly() -> bool:
     return bool(next_framework_settings.STRICT_LOADING or settings.DEBUG)
 
 
+def refuse_mistyped(**kwargs: object) -> None:
+    """Refuse each request while a top-level `NEXT_FRAMEWORK` value is mistyped.
+
+    Startup and the checks read the default in its place, so the checks name it first.
+    """
+    found = next_framework_settings.mistyped()
+    if found:
+        raise SettingShapeError(found)
+
+
 def reload_on_setting_changed(*, setting: str, **kwargs: object) -> None:
-    """Reload framework settings when Django reports a matching change."""
+    """Move `SETTINGS` on any change Django reports, reloading on a framework one."""
     if setting == USER_SETTING:
         next_framework_settings.reload()
+    else:
+        SETTINGS.move()

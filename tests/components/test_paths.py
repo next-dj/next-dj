@@ -18,7 +18,7 @@ class TestAnchored:
 
     def test_a_root_file_is_named_by_its_root(self, tmp_path: Path) -> None:
         pages = tmp_path / "pages"
-        entry = {"BACKEND": "next.urls.FileRouterBackend", "DIRS": [str(pages)]}
+        entry = {"BACKEND": "next.urls.FilePageBackend", "DIRS": [str(pages)]}
         with override_settings(
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [entry],
@@ -39,3 +39,10 @@ class TestAnchored:
     def test_a_file_outside_everything_keeps_its_path(self, tmp_path: Path) -> None:
         with override_settings(BASE_DIR=None):
             assert anchored(str(tmp_path / "far.djx")) == str(tmp_path / "far.djx")
+
+    def test_a_base_dir_change_names_the_file_again(self, tmp_path: Path) -> None:
+        name = str(tmp_path / "t" / "x.djx")
+        with override_settings(BASE_DIR=None):
+            assert anchored(name) == name
+        with override_settings(BASE_DIR=tmp_path):
+            assert anchored(name) == "t/x.djx"

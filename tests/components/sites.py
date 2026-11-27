@@ -7,16 +7,15 @@ from django.http import HttpRequest
 from django.template import Context, Engine, Template
 from django.template.base import UNKNOWN_SOURCE
 
+from next.boundaries.calls import stable_key
 from next.components import ComponentInfo, components_manager
-from next.components.loading import ModuleLoader
-from next.defer import stable_key
+from next.components.modules import ModuleLoader
+from next.defer.assembly import finish
+from next.defer.components import deferring
+from next.defer.ledger import ResponseJobs
 from next.seeding import COLLECTOR_KEY
 from next.static import StaticCollector
 from next.static.assets import StaticAsset
-from next.suspense.assembly import finish
-from next.suspense.components import deferring
-from next.suspense.render import Delta
-from next.suspense.session import BoundarySession
 from tests.support import component_info
 from tests.support.boundaries import run_sequentially
 
@@ -64,6 +63,7 @@ def template_engine(
 
 
 class Member:
+    pk = 1
     is_authenticated = True
     is_active = True
 
@@ -76,6 +76,7 @@ class Member:
 
 
 class Admin:
+    pk = 2
     is_authenticated = True
     is_active = True
 
@@ -171,9 +172,7 @@ class ComponentSite:
     def render(self, source: str, **values: object) -> str:
         return Template(source).render(Context(self.context(**values)))
 
-    def deferred(
-        self, source: str, **values: object
-    ) -> tuple[str, BoundarySession[Delta]]:
+    def deferred(self, source: str, **values: object) -> tuple[str, ResponseJobs]:
         with deferring() as held:
             shell = self.render(source, **values)
         assert held.session is not None

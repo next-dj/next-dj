@@ -6,9 +6,10 @@ import pytest
 
 from next.partial.headers import STREAM_ACCEPT
 from next.router import CutKind, Divergence
-from next.suspense.policy import streaming
+from next.router.markers import MAX_LAYOUTS
 from next.testing import NextClient, declared_layouts
 from tests.support import routed
+from tests.support.streams import streaming
 
 
 _IDENT = "a" * 16
@@ -16,7 +17,10 @@ _DIGEST = "b" * 16
 
 
 def _document(chain: object) -> str:
-    return f"<script>Next._init({json.dumps({'$layouts': chain})});</script>"
+    return (
+        '<script type="application/json" data-next-layouts>'
+        f"{json.dumps(chain)}</script>"
+    )
 
 
 @pytest.fixture()
@@ -43,7 +47,7 @@ class TestDeclaredLayouts:
     def test_a_document_without_the_router_raises(self, pages: Path) -> None:
         with routed(pages):
             html = NextClient().get("/sec/a/").content.decode()
-        with pytest.raises(LookupError, match="no \\$layouts"):
+        with pytest.raises(LookupError, match="no layouts block"):
             declared_layouts(html)
 
     def test_the_chain_is_trimmed_to_the_byte_bound(self) -> None:
@@ -51,10 +55,9 @@ class TestDeclaredLayouts:
         assert len(declared) <= 1024
         assert len(declared.split(",")) == 30
 
-    def test_the_chain_is_trimmed_to_max_layouts(self, pages: Path) -> None:
-        with routed(pages, ROUTER={"ENABLED": True, "MAX_LAYOUTS": 1}):
-            declared = declared_layouts(_document([[_IDENT, _DIGEST, None]] * 3))
-        assert declared == f"{_IDENT}.{_DIGEST}"
+    def test_the_chain_is_trimmed_to_max_layouts(self) -> None:
+        declared = declared_layouts(_document([["a", "b", None]] * (MAX_LAYOUTS + 3)))
+        assert declared.split(",") == ["a.b"] * MAX_LAYOUTS
 
 
 class TestNavigate:

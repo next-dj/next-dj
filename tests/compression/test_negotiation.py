@@ -1,7 +1,6 @@
 import pytest
 
-from next.compression import negotiate, parse_accept_encoding
-from next.compression.negotiation import MAX_HEADER
+from next.compression.negotiation import MAX_HEADER, negotiate, parse_accept_encoding
 
 
 SERVER = ("zstd", "br", "gzip")

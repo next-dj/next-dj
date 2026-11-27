@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -7,14 +7,16 @@ from django.contrib.auth.models import Group
 from django.http import Http404
 from django.test import override_settings
 
-from next.deps import DObject
+from next.deps import Depends, DObject
 from next.deps.objects import SCOPE_DEPENDENCY
+from next.deps.resolver import current_resolver
 from next.pages.gating import (
     GATE_KEY,
     SLOW_SHELL,
-    Plan,
     ShellGate,
     Split,
+    SplitPlan,
+    answers_by_contract,
     guard_steps,
     note_slow,
     plan_gating,
@@ -25,6 +27,7 @@ from next.pages.registry import PageContextRegistry
 from next.static.serializers import JsonJsContextSerializer
 from next.testing import NextClient
 from tests.support import bound_dependency, file_router_config_entry, routed, write_page
+from tests.support.streams import streaming
 
 
 ROOT = Path("/gating/page.py")
@@ -45,7 +48,7 @@ def _plan(
     layered_registry: PageContextRegistry,
     *boundaries: PageBoundary,
     metadata: frozenset[str] = frozenset(),
-) -> Plan:
+) -> SplitPlan:
     return plan_gating(
         layered_registry.graph(LEAF),
         layered_registry.inherited_levels(LEAF),
@@ -55,7 +58,7 @@ def _plan(
     )
 
 
-def _keys(plan: Plan, steps: frozenset[int]) -> set[str | None]:
+def _keys(plan: SplitPlan, steps: frozenset[int]) -> set[str | None]:
     return {plan.graph.steps[index].key for index in steps}
 
 
@@ -65,6 +68,13 @@ def _missing() -> str:
 
 def _row(group: DObject[Group]) -> str:
     return group.name
+
+
+def _guard(
+    registry: PageContextRegistry, key: str, func: Callable[..., object]
+) -> None:
+    registry.register_context(LEAF, key, func)
+    registry.declare_guard(LEAF, key, guard=True)
 
 
 @pytest.fixture()
@@ -139,7 +149,7 @@ class TestSplit:
 
 
 class TestGuards:
-    """A gated guard runs in the shell, with every callable it reads."""
+    """A declared guard or a status contract runs in the shell, with its reads."""
 
     def test_a_declared_guard_moves_with_what_it_reads(self, layered_registry) -> None:
         layered_registry.declare_guard(LEAF, "extra", guard=True)
@@ -149,8 +159,10 @@ class TestGuards:
         assert _keys(plan, plan.split.shell) == {"site", "section", "body", "extra"}
         assert plan.split.job(LEAF_LOADING) == frozenset()
 
-    def test_a_scanned_guard_moves_to_the_shell(self, layered_registry) -> None:
-        layered_registry.register_context(LEAF, "found", _missing)
+    def test_a_declared_raising_callable_moves_to_the_shell(
+        self, layered_registry
+    ) -> None:
+        _guard(layered_registry, "found", _missing)
 
         plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
@@ -168,7 +180,7 @@ class TestGuards:
     def test_a_guard_takes_every_callable_before_it_into_the_shell(
         self, layered_registry
     ) -> None:
-        layered_registry.register_context(LEAF, "zz_found", _missing)
+        _guard(layered_registry, "zz_found", _missing)
 
         plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
@@ -188,17 +200,16 @@ class TestGuards:
     def test_a_callable_after_the_last_guard_stays_in_the_job(
         self, layered_registry
     ) -> None:
-        layered_registry.register_context(LEAF, "aa_found", _missing)
+        _guard(layered_registry, "aa_found", _missing)
 
         plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         assert _keys(plan, plan.split.job(LEAF_LOADING)) == {"body", "extra"}
 
-    def test_guard_false_keeps_a_scanned_guard_in_the_job(
+    def test_an_undeclared_raising_callable_stays_in_the_job(
         self, layered_registry
     ) -> None:
         layered_registry.register_context(LEAF, "found", _missing)
-        layered_registry.declare_guard(LEAF, "found", guard=False)
 
         plan = _plan(layered_registry, _loading(0, LEAF_LOADING))
 
@@ -214,11 +225,11 @@ class TestGuards:
                 _loading(0, LEAF_LOADING),
                 metadata=frozenset({"body"}),
             )
-            layered_registry.register_context(LEAF, "found", _missing)
+            _guard(layered_registry, "found", _missing)
             _plan(layered_registry, _loading(0, LEAF_LOADING))
 
         messages = [record.getMessage() for record in caplog.records]
-        assert any("'_missing'" in message and "404" in message for message in messages)
+        assert any("'_missing'" in m and "guard=True" in m for m in messages)
         assert any("provides 'body'" in message for message in messages)
         assert any("gated @context callables" in message for message in messages)
 
@@ -235,6 +246,75 @@ class TestGuards:
         assert caplog.records == []
 
 
+class _Claiming:
+    """A stub provider with a fixed verdict, contract and reach."""
+
+    def __init__(self, verdict, *, answers=None, reach=()) -> None:
+        """Hold what the provider reports."""
+        self.verdict = verdict
+        self.reach = reach
+        if answers is not None:
+            self.static_answers = lambda _param: answers
+
+    def static_can_handle(self, _param) -> object:
+        return self.verdict
+
+    def static_reach(self, _param) -> tuple:
+        return self.reach
+
+
+class _Stub:
+    """A resolver stub holding providers and a skip rule."""
+
+    def __init__(self, *providers, skips=lambda _param: False) -> None:
+        """Hold the providers."""
+        self.providers = providers
+        self.skips = skips
+
+
+def _taking(value):
+    return value
+
+
+def _hinted(value):
+    return value
+
+
+_hinted.__annotations__ = {"value": "Unresolved"}
+
+
+class TestContract:
+    """A provider answering a status by contract makes its callable a guard."""
+
+    def test_a_dobject_behind_a_factory_answers(self) -> None:
+        def row(group: DObject[Group]) -> Group:
+            return group
+
+        def shown(found: Group = Depends(row)) -> str:
+            return found.name
+
+        assert answers_by_contract(shown, current_resolver()) is True
+        assert answers_by_contract(lambda: 1, current_resolver()) is False
+
+    def test_a_provider_without_the_hook_answers_nothing(self) -> None:
+        assert answers_by_contract(_taking, _Stub(_Claiming(True))) is False
+
+    def test_the_claiming_provider_ends_the_walk(self) -> None:
+        stub = _Stub(_Claiming(None), _Claiming(True), _Claiming(True, answers=True))
+        assert answers_by_contract(_taking, stub) is False
+        assert answers_by_contract(_taking, _Stub(_Claiming(None, answers=True)))
+
+    def test_a_reach_back_to_the_callable_stops(self) -> None:
+        stub = _Stub(_Claiming(True, reach=((None, _taking),)))
+        assert answers_by_contract(_taking, stub) is False
+
+    def test_a_callable_without_a_signature_or_hints_still_reads(self) -> None:
+        stub = _Stub(_Claiming(True, answers=True))
+        assert answers_by_contract(42, stub) is False
+        assert answers_by_contract(_hinted, stub) is True
+        assert answers_by_contract(_hinted, _Stub(skips=lambda _param: True)) is False
+
+
 class TestGuardSteps:
     """A reload runs every step up to the last guard, whatever the boundaries."""
 
@@ -242,7 +322,7 @@ class TestGuardSteps:
         assert guard_steps(layered_registry.graph(LEAF)) == frozenset()
 
     def test_every_step_up_to_the_last_guard_runs(self, layered_registry) -> None:
-        layered_registry.register_context(LEAF, "body_found", _missing)
+        _guard(layered_registry, "body_found", _missing)
         graph = layered_registry.graph(LEAF)
 
         steps = guard_steps(graph)
@@ -372,7 +452,7 @@ class TestNoteSlow:
     """A slow shell names its slowest callable under `DEBUG`."""
 
     @pytest.fixture()
-    def plan(self, layered_registry) -> Plan:
+    def plan(self, layered_registry) -> SplitPlan:
         return _plan(layered_registry, _loading(1, MID_LOADING))
 
     @pytest.mark.parametrize(
@@ -537,10 +617,15 @@ class TestStreamedRow:
     @pytest.mark.parametrize(
         "name", [pytest.param("other:x", id="hidden"), pytest.param(None, id="gone")]
     )
-    def test_a_row_the_scope_does_not_see_answers_404(self, name) -> None:
+    @pytest.mark.parametrize("streamed", [True, False], ids=["streamed", "inline"])
+    def test_a_row_the_scope_does_not_see_answers_404(self, name, *, streamed) -> None:
         pk = 999 if name is None else Group.objects.create(name=name).pk
 
-        response = NextClient().get(f"/shop/{pk}/")
+        if streamed:
+            with streaming():
+                response = NextClient().get(f"/shop/{pk}/")
+        else:
+            response = NextClient().get(f"/shop/{pk}/")
 
         assert response.status_code == 404
 
@@ -551,6 +636,88 @@ class TestStreamedRow:
 
         assert page.response.status_code == 200
         assert "<b>t:x</b>" in page.final_html()
+
+
+_HIDDEN_PAGE = """
+from django.http import Http404
+
+from next.pages import context
+
+
+class _Catalog:
+    def find(self, slug: str) -> str:
+        raise Http404(slug)
+
+
+catalog = _Catalog()
+
+
+@context("item")
+def item() -> str:
+    return catalog.find("gone")
+"""
+
+
+_BOT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+
+@pytest.fixture()
+def hidden_pages(tmp_path: Path) -> Path:
+    root = tmp_path / "pages"
+    root.mkdir()
+    (root / "layout.djx").write_text(_SHELL)
+    shop = root / "shop"
+    shop.mkdir()
+    (shop / "loading.djx").write_text("<p>loading</p>")
+    (shop / "error.djx").write_text("<p>{{ error.kind }}</p>")
+    write_page(shop, "item", _HIDDEN_PAGE, body="<b>{{ item }}</b>")
+    marked = _HIDDEN_PAGE.replace('@context("item")', '@context("item", guard=True)')
+    write_page(shop, "marked", marked, body="<b>{{ item }}</b>")
+    return root
+
+
+@pytest.mark.django_db()
+class TestLateStatus:
+    """Only a declared guard or a provider contract answers its status before a byte."""
+
+    def test_an_unmarked_404_streams_as_its_error_ui(
+        self, hidden_pages: Path, caplog
+    ) -> None:
+        with routed(hidden_pages), caplog.at_level(logging.WARNING, "next.defer"):
+            page = NextClient().get_stream("/shop/item/")
+
+        (chunk,) = page.chunks
+        assert page.response.status_code == 200
+        assert chunk.kind == "not_found"
+        assert '<meta name="robots" content="noindex">' in page.final_html()
+        (record,) = [r for r in caplog.records if "after the stream" in r.getMessage()]
+        assert record.status_code == 404
+        assert "guard=True" in record.getMessage()
+
+    def test_a_bot_is_assembled_inline_and_gets_the_404(
+        self, hidden_pages: Path
+    ) -> None:
+        with routed(hidden_pages), streaming():
+            response = NextClient().get("/shop/item/", headers={"User-Agent": _BOT})
+
+        assert response.status_code == 404
+
+    @pytest.mark.parametrize("streamed", [True, False], ids=["streamed", "inline"])
+    def test_a_marked_404_answers_404(self, hidden_pages: Path, *, streamed) -> None:
+        with routed(hidden_pages):
+            if streamed:
+                with streaming():
+                    response = NextClient().get("/shop/marked/")
+            else:
+                response = NextClient().get("/shop/marked/")
+
+        assert response.status_code == 404
+
+    def test_an_unmarked_404_answers_404_inline(self, hidden_pages: Path) -> None:
+        with routed(hidden_pages):
+            response = NextClient().get("/shop/item/")
+
+        assert response.status_code == 404
 
 
 _TITLED_PAGE = """

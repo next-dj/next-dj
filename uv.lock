@@ -1207,7 +1207,6 @@ source = { editable = "." }
 dependencies = [
     { name = "asgiref" },
     { name = "django" },
-    { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
 
 [package.optional-dependencies]
@@ -1223,9 +1222,13 @@ crypto = [
 testing = [
     { name = "defusedxml" },
 ]
+zstd = [
+    { name = "zstandard", marker = "python_full_version < '3.14'" },
+]
 
 [package.dev-dependencies]
 codspeed = [
+    { name = "brotli" },
     { name = "pytest-codspeed" },
     { name = "pytest-test-groups" },
 ]
@@ -1238,6 +1241,7 @@ compat = [
     { name = "rules" },
 ]
 dev = [
+    { name = "brotli" },
     { name = "build" },
     { name = "defusedxml" },
     { name = "django-stubs", extra = ["compatible-mypy"] },
@@ -1262,6 +1266,7 @@ dev = [
     { name = "uvicorn" },
     { name = "websockets" },
     { name = "wsproto" },
+    { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
 docs = [
     { name = "defusedxml" },
@@ -1286,18 +1291,19 @@ e2e = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asgiref", specifier = ">=3.12" },
+    { name = "asgiref", specifier = ">=3.12,<3.14" },
     { name = "brotli", marker = "extra == 'brotli'", specifier = ">=1.1" },
     { name = "cryptography", marker = "extra == 'crypto'", specifier = ">=44" },
     { name = "defusedxml", marker = "extra == 'testing'", specifier = ">=0.7" },
     { name = "django", specifier = ">=5.2,<6.2" },
     { name = "redis", marker = "extra == 'broker'", specifier = ">=8" },
-    { name = "zstandard", marker = "python_full_version < '3.14'", specifier = ">=0.23" },
+    { name = "zstandard", marker = "python_full_version < '3.14' and extra == 'zstd'", specifier = ">=0.23" },
 ]
-provides-extras = ["broker", "brotli", "crypto", "testing"]
+provides-extras = ["broker", "brotli", "crypto", "testing", "zstd"]
 
 [package.metadata.requires-dev]
 codspeed = [
+    { name = "brotli", specifier = ">=1.1" },
     { name = "pytest-codspeed", specifier = "==5.0.4" },
     { name = "pytest-test-groups", specifier = "==1.2.1" },
 ]
@@ -1310,6 +1316,7 @@ compat = [
     { name = "rules", specifier = ">=3.5" },
 ]
 dev = [
+    { name = "brotli", specifier = ">=1.1" },
     { name = "build", specifier = "==1.6.1" },
     { name = "defusedxml", specifier = "==0.7.1" },
     { name = "django-stubs", extras = ["compatible-mypy"], specifier = "==6.1.2" },
@@ -1334,6 +1341,7 @@ dev = [
     { name = "uvicorn", specifier = ">=0.38" },
     { name = "websockets", specifier = ">=16" },
     { name = "wsproto", specifier = ">=1.2" },
+    { name = "zstandard", marker = "python_full_version < '3.14'", specifier = ">=0.23" },
 ]
 docs = [
     { name = "defusedxml", specifier = "==0.7.1" },

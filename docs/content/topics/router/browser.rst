@@ -9,25 +9,25 @@ This page follows one navigation through the browser, from the click to the mome
    :local:
    :depth: 1
 
-The three bundles
------------------
+The two bundles
+---------------
 
-The router ships as three lazy bundles, so a page pays for the first click alone until it is idle.
+The router ships as two lazy bundles, so a page pays for the first click alone until it is idle.
 
 ``router``
-   The link and form takeover, the navigation request, the commit, the progress marks, the events, and ``Next.router``.
+   The link and form takeover, the navigation of a ``GET`` form, the navigation request, the commit, the progress marks and bar, the events, and ``Next.router``.
+   The history with the snapshots, the scroll restore, and the default focus move and announcement.
+   Persisted elements, view transitions, and the retirement of page stylesheets.
+   The inline scripts a navigation runs, and the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``.
    It loads as an ``async`` script right after the runtime on every routed document, and ``Next.router`` exists once it has evaluated.
 
-``history``
-   The snapshots, the scroll restore, the default focus move and announcement, persisted elements, view transitions, the retirement of page stylesheets, the inline scripts a navigation runs, and the reading of a ``text/html`` answer under ``ROUTER["FOREIGN"] = "extract"``.
-
 ``intent``
-   The intent, press, and viewport prefetch and the cache of prefetched answers, see :doc:`prefetch`, the client pass of :doc:`active-links`, and the navigation of a ``GET`` form.
+   The intent, press, and viewport prefetch and the cache of prefetched answers, see :doc:`prefetch`, and the client pass of :doc:`active-links`.
 
-The ``$router`` payload entry names the ``history`` and ``intent`` bundles and the stream ``reader`` by URL, and the router loads the three as scripts carrying its own nonce once the page is idle, or after two seconds at the latest where the browser has ``requestIdleCallback``.
-A browser without ``requestIdleCallback`` loads them right after the router starts.
-It loads them at once when the document opens on a history entry the router wrote before, such as after a reload of the tab, and every navigation and every ``Next.router.prefetch()`` waits for them, fifteen seconds at most, before it applies anything.
-A bundle that fails to load fires ``partial:error`` of kind ``asset`` and is requested again, three attempts for the router in all.
+The ``$router`` payload entry names the ``intent`` bundle and the stream reader by URL, and the router loads both through the runtime, with its nonce, once the page is idle, or after two seconds at the latest where the browser has ``requestIdleCallback``.
+A browser without ``requestIdleCallback`` loads them right after the router starts, and a document holding an active-link container no render marked fetches the ``intent`` bundle at once.
+A navigation never waits for the ``intent`` bundle, and ``Next.router.prefetch()`` loads it first.
+A bundle that fails to load fires ``partial:error`` of kind ``asset`` and is requested again on its next need, three attempts in all.
 
 One navigation
 --------------
@@ -62,7 +62,8 @@ Progress styling
 ----------------
 
 Every routed document carries a default progress bar, a thin line across the top of the window drawn from ``html[data-next-navigating]::before``.
-It sits in a ``<style>`` in the head with the CSP nonce of the response, so a policy whose ``style-src`` allows that nonce shows it, and a policy without a style nonce turns it off with ``ROUTER["PROGRESS"] = False``.
+The router puts it in a ``<style>`` in the head as it boots, with the CSP nonce of the runtime script, so a policy whose ``style-src`` allows that nonce shows it, and a policy without a style nonce turns it off with ``ROUTER["PROGRESS"] = False``.
+The document itself carries no style, so the bar costs a page the router does not serve nothing.
 Under ``prefers-reduced-motion: reduce`` the bar stands still across the full width.
 Three custom properties restyle it.
 
@@ -108,7 +109,6 @@ The router sets ``history.scrollRestoration`` to ``manual`` and places the scrol
 - Back and Forward restore the scroll of the window and of every element marked ``data-next-scroll-region``, in document order.
   The positions are saved per history entry in ``sessionStorage``, for as many recent entries as ``ROUTER["SNAPSHOTS"]`` allows, when the page is left and when the tab is hidden, so they survive a reload of the tab.
   A page that is still too short to reach the saved position is scrolled again once its fresh render lands.
-- A Back or Forward step taken before the ``history`` bundle has loaded waits for it like any navigation, and with no snapshot to show it waits for the fetch.
 
 .. code-block:: jinja
    :caption: layout.djx
@@ -133,7 +133,7 @@ Snapshots live in the memory of the tab and are never written to storage.
 
 Every snapshot and every prefetched answer is dropped at once in five cases.
 
-- A navigation answer, a prefetch answer, or a partial answer carries ``X-Next-Router: clear``, after a login, a logout, a changed session key, or a ``router_clear`` call, see :doc:`sessions`.
+- A navigation answer, a prefetch answer, or a partial answer carries ``X-Next-Router: clear`` after a login, a logout, a changed session key, or a ``router_clear`` call, see :doc:`sessions`.
   The page a clearing navigation leaves is not kept either.
 - A partial request other than a ``GET`` leaves, such as a form action, since a write can make every snapshot stale.
 - A navigation answer carries a fresh CSRF token.
@@ -205,14 +205,20 @@ Scripts after a navigation
 A navigation applies its markup as every patch does, with each ``<script>`` element removed before insertion.
 The one exception is an inline script in the swapped slot or body whose ``nonce`` equals the CSP nonce of the response, with no ``src`` and a JavaScript or module type.
 The router lifts such a script out before the swap and runs it after the swap as a fresh script carrying the nonce of the page.
-Every other inline script, every inline script in a zone of the kept chrome, and every inline script of a response without a CSP nonce never runs.
-``next.W177`` reports an inline script without a nonce in a page or layout template while the router is on.
+
+A swap would lose any other script a document load runs, an inline one without that nonce or a ``<script src>`` such as the one ``{{ form.media }}`` or a widget renders.
+The server finds such a script in the slot or body it is about to send, outside ``<template>`` and ``<noscript>`` and apart from the tags the injector writes, and answers with a ``visit`` instead, so the browser loads the page and every script runs as on a first load.
+The page renders once more for that load, and a script inside a zone of the kept chrome, which the document already ran, never sends the page to load.
+
+Under ``DEBUG`` the envelope names the script and the page or layout template whose source holds it in its ``dropped`` field, the router writes both to the console, and ``X-Next-Navigate`` reads ``visit script``.
+A plain ``text/html`` answer read under ``ROUTER["FOREIGN"] = "extract"`` loads as a page on the same rule, as it names no nonce.
+``next.W177`` reports an inline script without a nonce in a page or layout template while the router is on, a page the router then always loads whole.
 
 The scripts of the page arrive through the asset operations of the envelope instead, and code that should run on every page lives in a co-located script, whose mount hooks run for the inserted content, see :doc:`/content/topics/partial-rendering/co-located-js`.
 A script a ``{% use_script %}`` or ``{% use_module %}`` declares runs after the swap, once the new markup is in place, and the runtime inserts it with ``async`` off, so the scripts one navigation brings run in the order the server lists them.
 Each source runs once per page, so a script the document already ran, on its first load or on an earlier navigation, does not run again, and work it must repeat for each page belongs in a mount hook.
 The third-party scripts a ``scripts.py`` declares travel in the ``scripts`` field of a navigation envelope rather than as head tags, and after the swap the scripts chunk loads each one the page has not loaded yet, under the consent the envelope carries, see :doc:`/content/topics/scripts/index`.
-A page that depends on an inline script without a nonce opts out with ``page.router(navigate=False)``, or its links with ``data-next-router="off"``.
+A page that always holds such a script opts out with ``page.router(navigate=False)``, or its links with ``data-next-router="off"``, which spares the render a refused swap costs.
 
 Scripts that render once on load
 --------------------------------

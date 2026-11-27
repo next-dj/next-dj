@@ -6,15 +6,14 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, register
+from django.core.checks import CheckMessage, Error
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import class_problem, raw_scope
 from next.conf.checks import error_for_misfit, error_for_unusable_path
-from next.conf.router import CURRENT, SCOPE, SHAPE, Eagerness, speculation_problem
+from next.conf.router import SCOPE, SHAPE, Eagerness, speculation_problem
 from next.conf.shapes import alternatives, misfits
-from next.router.backends import ChromeDigest, NavigationCut
-from next.router.current import CurrentLinks
+from next.router.backends import ChromeDigest, NavigationCut, PrefetchShed
 
 
 if TYPE_CHECKING:
@@ -34,17 +33,14 @@ def check_router_settings(*args: object, **kwargs: object) -> list[CheckMessage]
 
 
 _NAVIGATION_FAILS: Final = "every navigation raises ImproperlyConfigured"
+_PREFETCH_FAILS: Final = "every prefetch raises ImproperlyConfigured"
 
 
 def _seams(scope: Mapping[str, object]) -> Iterator[tuple[str, object, type, str]]:
     """Yield the address, the written value, the base and the cost of each seam."""
     yield f"{PREFIX}['CUT']", scope.get("CUT"), NavigationCut, _NAVIGATION_FAILS
     yield f"{PREFIX}['DIGEST']", scope.get("DIGEST"), ChromeDigest, _NAVIGATION_FAILS
-    current = scope.get(CURRENT)
-    if isinstance(current, dict):
-        where = f"{PREFIX}[{CURRENT!r}]['BACKEND']"
-        cost = "the active-link pass raises ImproperlyConfigured"
-        yield where, current.get("BACKEND"), CurrentLinks, cost
+    yield f"{PREFIX}['SHED']", scope.get("SHED"), PrefetchShed, _PREFETCH_FAILS
 
 
 @register(NEXT)

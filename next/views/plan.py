@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from dataclasses import dataclass, replace
+from functools import partial
+from typing import TYPE_CHECKING, Final, cast
 
-from django.db import connections
-from django.template import Node, Template
+from django.template import Node, Template, TemplateSyntaxError
 from django.template.base import TextNode, VariableNode
 from django.template.defaultfilters import safe, safeseq
 from django.template.defaulttags import (
@@ -25,14 +25,24 @@ from django.template.defaulttags import (
 )
 from django.template.library import SimpleNode
 
-from next.components import registry
+from next.caches import SETTINGS
+from next.components import components_manager, registry
+from next.components.defer import defer_declarations
+from next.components.tags import ComponentNode, SetSlotNode, SlotNode
 from next.conf import next_framework_settings
-from next.conf.router import router_enabled
-from next.pages.loaders import module_counters
-from next.pages.transactions import atomic_store, page_atomic
+from next.lifecycle import PageFacts, lifecycle
+from next.marks import ContainerNode
+from next.pages.declarations import page_declarations
+from next.pages.loaders import layout_ids, module_counters
+from next.pages.metadata.nodes import MetadataNode
+from next.pages.nodes import LayoutSlotNode
+from next.pages.paths import page_template_path
+from next.pages.transactions import page_transaction
+from next.partial.layers import LAYER_ATTR
 from next.partial.zone import LOADING, ZoneNode
 from next.permissions.nodes import HasPermNode
-from next.router.current import current_links
+from next.requests import RequestKind
+from next.router.links import active_links
 from next.templatetags.next_static import (
     asset,
     collect_head,
@@ -43,15 +53,21 @@ from next.templatetags.next_static import (
     use_style,
 )
 from next.templatetags.pages import RootLayoutNode, TemplatePlaceholderNode
-from next.transactions import safe_aliases
+from next.utils import template_edits_watched
+
+from .containers import compile_containers
+from .fixed import fixed_digests, slot_view
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Set as AbstractSet
     from pathlib import Path
 
+    from next.components.info import ComponentInfo
+    from next.lifecycle import Points
     from next.pages.loaders import BoundaryChain
     from next.pages.manager import Page
-    from next.router.current import CurrentLinks
+    from next.router.links import TemplateLinks
 
 
 _INERT: Final = frozenset(
@@ -73,8 +89,11 @@ _INERT: Final = frozenset(
         RootLayoutNode,
         TemplatePlaceholderNode,
         ZoneNode,
+        ContainerNode,
+        LayoutSlotNode,
     }
 )
+_CALLING: Final = frozenset({ComponentNode, SlotNode, SetSlotNode, MetadataNode})
 _INERT_TAGS: Final = frozenset(
     {
         asset,
@@ -96,18 +115,25 @@ _UNSPELLED: Final = (VariableNode, NowNode)
 class PagePlan:
     """What one page uses of the features a request may need, decided ahead of it.
 
-    `plain` holds when a safe request needs no block beyond the link pass and `streams`.
+    `plain` holds when a safe request renders the template straight, nothing to gather,
+    guard or drive. `safe` and `unsafe` hold the points of each kind by method.
     """
 
-    router: bool
-    links: CurrentLinks | None
+    links: bool
     marks: bool
-    reads: tuple[str, ...] | None
+    fragments: bool
     defers: bool
     streams: bool
     guarded: bool
     awaits: bool
     plain: bool
+    layers: bool
+    safe: Mapping[RequestKind, Points]
+    unsafe: Mapping[RequestKind, Points]
+
+    def points(self, kind: RequestKind, *, safe: bool) -> Points:
+        """Return the points a request of `kind` takes, by the safety of its method."""
+        return (self.safe if safe else self.unsafe)[kind]
 
 
 def _open(node: Node) -> bool:
@@ -133,7 +159,7 @@ def _zone_openers(nodes: list[Node]) -> str:
     )
 
 
-def sealed(template: Template) -> bool:
+def inert_markup(template: Template) -> bool:
     """Whether `template` writes only what its source spells, every node inert.
 
     A component, an include or a tag of unknown output opens it to the whole project.
@@ -141,8 +167,8 @@ def sealed(template: Template) -> bool:
     return not any(map(_open, template.nodelist.get_nodes_by_type(Node)))
 
 
-def spells_container(template: Template, links: CurrentLinks) -> bool:
-    """Whether a sealed `template` can open a container `links` marks.
+def spells_container(template: Template, links: TemplateLinks) -> bool:
+    """Whether an inert `template` can open a container `links` marks.
 
     A variable may hold markup marked safe and `now` writes its format unescaped, so
     either one can. Without them the source spells every tag, a zone wrapper included.
@@ -155,74 +181,263 @@ def spells_container(template: Template, links: CurrentLinks) -> bool:
     return links.holds(f"{source}{literal}{_zone_openers(nodes)}")
 
 
+@dataclass(frozen=True, slots=True)
+class _Reach:
+    """What the component calls one template can make decide for its page.
+
+    `templates` holds each component template walked, which a development edit swaps.
+    """
+
+    defers: bool
+    guarded: bool
+    layers: bool
+    templates: tuple[Template, ...]
+    infos: tuple[ComponentInfo, ...]
+
+
+def _seen(node: Node) -> bool:
+    """Whether every component call `node` can render is a node of the walk."""
+    kind = type(node)
+    if kind is ZoneNode:
+        return cast("ZoneNode", node).options.reload != LOADING
+    if kind is SimpleNode:
+        return cast("SimpleNode", node).func in _INERT_TAGS
+    return kind in _INERT or kind in _CALLING
+
+
+def spells_layer(template: Template) -> bool:
+    """Whether the source of `template` spells the attribute of a layer link."""
+    return LAYER_ATTR in template.source.lower()
+
+
+def _held(info: ComponentInfo, deferring: AbstractSet[Path]) -> tuple[bool, bool]:
+    """Return whether calls of `info` may defer and whether it holds an error UI."""
+    files = info.files
+    defers = info.module_path in deferring or (
+        files is not None and files.loading is not None
+    )
+    return defers, files is not None and files.error is not None
+
+
+def reach(template: Template, page: Path) -> _Reach | None:
+    """Return what the components `template` calls can do, through their own calls.
+
+    A tag of unknown output, a `render()` function or lazily loaded modules may call
+    any component, so the walk answers `None` for them.
+    """
+    if next_framework_settings.LAZY_COMPONENT_MODULES:
+        return None
+    renderer = components_manager.component_renderer
+    loader = components_manager.template_loader
+    deferring = defer_declarations.deferring_modules()
+    found: dict[int, ComponentInfo] = {}
+    walked: list[Template] = []
+    pending = [template]
+    defers = guarded = layers = False
+    while pending:
+        current = pending.pop()
+        layers = layers or spells_layer(current)
+        for node in current.nodelist.get_nodes_by_type(Node):
+            if not _seen(node):
+                return None
+            if not isinstance(node, ComponentNode):
+                continue
+            options = node.options
+            defers = defers or (options is not None and options.mode is not None)
+            info = components_manager.get_component(node.name, page)
+            if info is None or id(info) in found:
+                continue
+            found[id(info)] = info
+            if not renderer.templated(info):
+                return None
+            may, failing = _held(info, deferring)
+            defers, guarded = defers or may, guarded or failing
+            try:
+                compiled = loader.load_template(info)
+            except TemplateSyntaxError:
+                # The render raises it where the call stands, the plan stays blind.
+                return None
+            if compiled is not None:
+                walked.append(compiled)
+                pending.append(compiled)
+    return _Reach(defers, guarded, layers, tuple(walked), tuple(found.values()))
+
+
+def _fresh(held: _Reach | None) -> bool:
+    """Whether the component templates a reach walked are still those the loader gives.
+
+    Only a process that watches template edits reads them again.
+    """
+    if held is None or not held.templates or not template_edits_watched():
+        return True
+    loader = components_manager.template_loader
+    try:
+        current = [loader.load_template(info) for info in held.infos]
+    except TemplateSyntaxError:
+        return False
+    walked = [compiled for compiled in current if compiled is not None]
+    return len(walked) == len(held.templates) and all(
+        a is b for a, b in zip(walked, held.templates, strict=True)
+    )
+
+
+def _components() -> tuple[int, ...]:
+    """Return the counters a component reach depends on."""
+    versions = (backend.version for backend in components_manager.backends)
+    return (defer_declarations.version, *versions)
+
+
+_KINDS: Final = (
+    RequestKind.PAGE,
+    RequestKind.ZONE,
+    RequestKind.BOUNDARY,
+    RequestKind.NAVIGATE,
+)
+
+
+def _fixed(page: Page, file_path: Path) -> Mapping[str, tuple[str, str | None]]:
+    """Return the digests the layouts of fixed chrome took from their source."""
+    skeleton = page.layout_skeleton(file_path)[0]
+    return fixed_digests(skeleton, layout_ids(file_path))
+
+
 class PagePlans:
     """Hold the plan of one page while everything it was decided from stays the same.
 
-    The stamp is each settings object, registry counter and template behind the plan.
+    One tuple holds the stamp of every counter and template, the plan and its reach.
     """
 
-    __slots__ = ("_file_path", "_held", "_page", "_stamp")
+    __slots__ = ("_blind", "_file_path", "_held", "_page")
 
     def __init__(self, page: Page, file_path: Path) -> None:
         """Start before the first request of the page."""
         self._page = page
         self._file_path = file_path
-        self._stamp: tuple[object, ...] | None = None
-        self._held: PagePlan | None = None
+        self._held: tuple[tuple[object, ...], PagePlan, _Reach | None] | None = None
+        self._blind: tuple[tuple[object, ...], PagePlan] | None = None
+
+    def _stamped(self, shape: object) -> tuple[object, ...]:
+        """Return what a plan of the page composed as `shape` was decided from."""
+        return (
+            shape,
+            SETTINGS.version,
+            _VERSION.value,
+            _GENERATION.value,
+            page_declarations.version,
+            self._page.epoch,
+            registry.deferred_components.held,
+            registry.error_files.held,
+            _components(),
+            lifecycle.version,
+        )
 
     def of(self, shape: Template | BoundaryChain) -> PagePlan:
         """Return the plan of the page composed as `shape`, built again once it moved.
 
         `shape` is the compiled template, or the boundary chain of a `render()` body.
         """
-        stamp = (
-            shape,
-            next_framework_settings.ROUTER,
-            next_framework_settings.TRANSACTIONS,
-            connections.settings,
-            _VERSION.value,
-            _GENERATION.value,
-            atomic_store.version,
-            self._page.epoch,
-            registry.deferred_components.held,
-            registry.error_files.held,
-        )
+        stamp = self._stamped(shape)
         held = self._held
-        if held is not None and stamp == self._stamp:
-            return held
-        held = self._held = self._build(shape)
-        self._stamp = stamp
-        return held
+        if held is not None and stamp == held[0] and _fresh(held[2]):
+            return held[1]
+        plan, reached = self._build(shape)
+        self._held = (stamp, plan, reached)
+        return plan
 
-    def _build(self, shape: Template | BoundaryChain) -> PagePlan:
-        """Decide the plan, a `render()` body open to whatever the project holds."""
+    def blind(self) -> PagePlan:
+        """Return the plan of the page read without its template, open to anything.
+
+        A reload, an async `render()` and a module broken at build are planned so.
+        """
+        stamp = self._stamped(None)
+        held = self._blind
+        if held is not None and stamp == held[0]:
+            return held[1]
+        plan = self._build(None)[0]
+        self._blind = (stamp, plan)
+        return plan
+
+    def _build(
+        self, shape: Template | BoundaryChain | None
+    ) -> tuple[PagePlan, _Reach | None]:
+        """Decide the plan and the reach it read, a `render()` body open to anything."""
         page, file_path = self._page, self._file_path
-        router = router_enabled()
-        links = current_links()
+        links = active_links()
+        fragments = False
+        reached = None
+        layers = True
+        template = None
+        chain: BoundaryChain | None
         if isinstance(shape, Template):
+            template = shape
             chain = page.composed_chain(file_path)
-            opened = not sealed(shape)
+            opened = not inert_markup(shape)
             marks = links is not None and (opened or spells_container(shape, links))
+            fragments = (
+                marks
+                and links is not None
+                and links.compiled
+                and compile_containers(shape, links)
+            )
+            if opened:
+                reached = reach(shape, page_template_path(file_path))
+                layers = reached is None or reached.layers
+            else:
+                layers = spells_layer(shape)
         else:
             chain = shape
             opened = True
             marks = links is not None
-        reads = safe_aliases(page_atomic(file_path))
-        streams = bool(chain.deferred) or registry.deferred_components.held
-        defers = bool(chain.deferred) or (opened and streams)
-        guarded = bool(chain.errors) or (opened and registry.error_files.held)
-        awaits = page.awaits(file_path)
-        return PagePlan(
-            router=router,
-            links=links,
+        deferring = reached is None or reached.defers
+        failing = reached is None or reached.guarded
+        deferred = chain is None or bool(chain.deferred)
+        streams = deferred or registry.deferred_components.held
+        defers = deferred or (opened and streams and deferring)
+        guarded = chain is None or bool(chain.errors)
+        guarded = guarded or (opened and registry.error_files.held and failing)
+        awaits = shape is None or page.awaits(file_path)
+        plain = not (defers or guarded or awaits)
+        facts = PageFacts(
+            file_path=file_path,
+            kind=RequestKind.PAGE,
+            safe=True,
+            template=template,
+            chain=chain,
+            defers=defers,
+            streams=streams,
+            guarded=guarded,
+            plain=plain,
+            atomic=page_transaction(file_path),
+            links=links is not None,
             marks=marks,
-            reads=reads,
+            fragments=fragments,
+            layers=layers,
+            fixed=partial(_fixed, page, file_path),
+            slot=None if template is None else partial(slot_view, template),
+            compiler=compile_containers,
+        )
+        unsafe = replace(facts, safe=False, plain=False)
+        plan = PagePlan(
+            links=links is not None,
+            marks=marks,
+            fragments=fragments,
             defers=defers,
             streams=streams,
             guarded=guarded,
             awaits=awaits,
-            plain=not (router or defers or guarded or awaits or reads != ()),
+            plain=plain,
+            layers=layers,
+            safe={k: lifecycle.points(replace(facts, kind=k)) for k in _KINDS},
+            unsafe={k: lifecycle.points(replace(unsafe, kind=k)) for k in _KINDS},
         )
+        return plan, reached
 
 
-__all__ = ["PagePlan", "PagePlans", "sealed", "spells_container"]
+__all__ = [
+    "PagePlan",
+    "PagePlans",
+    "inert_markup",
+    "reach",
+    "spells_container",
+    "spells_layer",
+]

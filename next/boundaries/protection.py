@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Concatenate
 
+from next.conf.boundaries import boundary_settings
 from next.deps.runner import run_on_request_thread
-from next.transactions import AtomicMode, LazySavepoint, probe_atomic_aliases
+from next.transactions.policy import probe_atomic_aliases
+from next.transactions.savepoints import LazySavepoint
 
-from .options import error_settings
 from .scope import current
 
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from next.static.collector import StaticCollector
+    from next.transactions import AtomicMode
 
 
 class Protection:
@@ -70,7 +72,7 @@ def protect(collector: StaticCollector | None = None) -> Protection:
     """
     state = current()
     if state is None:
-        errors = error_settings()
+        errors = boundary_settings()
         return Protection.open(probe_atomic_aliases(), errors.atomic, collector)
     atomic = state.settings().atomic
     aliases = probe_atomic_aliases() if atomic is False else state.aliases

@@ -13,6 +13,7 @@ from django.urls import clear_url_caches
 from django.utils.functional import Promise
 
 from next.backends import BackendListManager, load_backends
+from next.caches import FRAMEWORK, ROUTES
 from next.conf.defaults import DEFAULTS
 from next.conf.scopes import scope_value
 from next.conf.sentinels import UNSET, Unset
@@ -287,15 +288,14 @@ class SeoManager(BackendListManager[SitemapBackend]):
 seo_manager = SeoManager()
 
 
-def forget_seo_sources(**kwargs: object) -> None:
-    """Reset the SEO manager, as the receiver of the settings and router reloads."""
-    seo_manager.reset()
-
-
 def reset_seo_sources() -> None:
     """Clear the discovered SEO sources and every `@sitemap.items` registration."""
     seo_manager.reset()
     sitemap_items_registry.reset()
+
+
+FRAMEWORK.attach(seo_manager.reset)
+ROUTES.attach(seo_manager.reset)
 
 
 __all__ = [
@@ -303,7 +303,6 @@ __all__ = [
     "SEO_SCOPE",
     "SITEMAP_BACKENDS",
     "SeoManager",
-    "forget_seo_sources",
     "reset_seo_sources",
     "seo_manager",
     "sitemap_backend_entries",

@@ -39,7 +39,7 @@ _CURATED = frozenset(
         "PatchEventStream",
         "PatchResponse",
         "Patches",
-        "Plan",
+        "WindowPlan",
         "StreamMeta",
         "UnknownZoneError",
         "Window",

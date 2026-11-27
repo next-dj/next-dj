@@ -55,7 +55,7 @@ gate.save(update_fields=['enabled', 'updated_at'])
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "frame")],
             "PAGES_DIR": "pages",

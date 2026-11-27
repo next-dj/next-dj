@@ -63,9 +63,10 @@ A section owned by a backend other than its default may hold keys of its own, so
 ``misfits(scope, section, defaults)`` walks a scope against its section and answers a ``Misfit`` for every value outside its shape and every key the section does not know, and ``pick(scope, key, usable, defaults)`` reads one value, its default when the predicate refuses it.
 The system checks ``next.E035`` and ``next.E076`` report the misfits, and the readers below read the same shapes, so a value a check refuses reads as its default at runtime.
 
-``next.conf.router`` reads the ``ROUTER`` scope once into ``RouterSettings`` and ``next.conf.compression`` the ``COMPRESSION`` scope into ``CompressionSettings``, each read again once the merged mapping moves.
+``next.conf.router`` reads the ``ROUTER`` scope once into ``RouterSettings``, ``next.conf.compression`` the ``COMPRESSION`` scope into ``CompressionSettings``, ``next.conf.boundaries`` the ``BOUNDARIES`` scope into ``BoundarySettings``, and ``next.conf.loader`` the ``LOADER`` scope into ``LoaderSettings``, each read again once the merged mapping moves.
+``next.conf.transactions`` holds the shape of ``TRANSACTIONS`` and the atomic modes ``TRANSACTIONS`` and ``BOUNDARIES`` share.
 ``router_settings()`` and ``compression_settings()`` return them, and ``router_enabled()`` answers ``ROUTER["ENABLED"]``.
-``next.conf.defer`` reads ``DEFER`` one value at a time, ``defer_option(*path)`` answering the value at a path, and ``defer_count``, ``defer_seconds``, and ``defer_template`` the typed forms.
+``next.conf.defer`` reads ``DEFER`` one value at a time, ``defer_option(*path)`` answering the value at a path, and ``defer_count`` and ``defer_seconds`` the typed forms.
 A string choice of these scopes is a ``StrEnum`` that equals the string a project writes.
 
 .. autoclass:: next.conf.router.RouterScope
@@ -81,6 +82,9 @@ A string choice of these scopes is a ``StrEnum`` that equals the string a projec
    :no-special-members:
 
 .. autoclass:: next.conf.router.InterceptMode
+   :no-special-members:
+
+.. autoclass:: next.conf.router.LinkPass
    :no-special-members:
 
 .. autoclass:: next.conf.router.Eagerness

@@ -1,4 +1,4 @@
-"""The façade over the cut and digest backends and the `$router` payload entry."""
+"""The façade over the cut, digest and shed backends and the `$router` entry."""
 
 from __future__ import annotations
 
@@ -13,20 +13,24 @@ from django.conf import settings
 from django.urls import NoReverseMatch, get_script_prefix, get_urlconf, reverse
 
 from next.backends import BackendRoot, resolve_setting_class
+from next.caches import FORK, FRAMEWORK, ROUTES, SETTINGS
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.router import (
     SCOPE,
+    RouterScope,
     router_enabled,
     router_settings,
     speculation_eagerness,
 )
+from next.errors import SettingShapeError
 from next.pages.manager import page
 from next.partial.headers import CONTENT_TYPE
 from next.partial.manager import partial_backend_manager
 from next.paths import home_paths
-from next.utils import after_fork
+from next.urls.scope import route_scope, scope_url
 
-from .backends import ChromeDigest, NavigationCut, VerifiedCut
+from .backends import ChromeDigest, LoadShed, NavigationCut, PrefetchShed, VerifiedCut
+from .signals import router_backend_loaded
 from .speculation import encoded_rules
 
 
@@ -34,22 +38,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-type _Places = dict[tuple[str, str | None], str]
+type _Places = dict[tuple[str, str | None], tuple[str, str]]
 
 _ADMIN_APP: Final = "django.contrib.admin"
 _ADMIN_INDEX: Final = "admin:index"
-_ENTRY_SETTINGS: Final = frozenset(
-    {
-        "STATIC_URL",
-        "MEDIA_URL",
-        "ROOT_URLCONF",
-        "INSTALLED_APPS",
-        "LANGUAGES",
-        "LANGUAGE_CODE",
-        "FORCE_SCRIPT_NAME",
-    }
-)
 _PLACES: Final = 64
+_KEYS: Final = ("CUT", "DIGEST", "SHED")
 
 
 def _path_prefix(url: object) -> str | None:
@@ -77,37 +71,49 @@ def asset_prefixes() -> tuple[str, ...]:
 
 
 def exclude_prefixes() -> tuple[str, ...]:
-    """Return the path prefixes the client router never owns, derived ones first."""
+    """Return the path prefixes the client router never owns, derived ones first.
+
+    A prefix of the whole site is left out, as an unset `MEDIA_URL` reads as the root.
+    """
     derived = (*asset_prefixes(), _admin_prefix())
     written = router_settings().exclude
-    return tuple(dict.fromkeys(p for p in (*derived, *written) if p and p != "/"))
+    whole = {"/", get_script_prefix()}
+    return tuple(dict.fromkeys(p for p in (*derived, *written) if p and p not in whole))
+
+
+def _seconds(value: float) -> float | int:
+    """Return a whole number of seconds as an integer, which encodes shorter."""
+    return int(value) if value.is_integer() else value
 
 
 def router_entry() -> str:
     """Return the encoded `$router` entry the init payload carries.
 
-    `type` names the content type of a partial backend whose answers are not the stock.
+    `routes` stands in for `scope` under `pages`, `type` names a custom content type.
     """
     current = router_settings()
+    owned: dict[str, object] = (
+        {"routes": scope_url()}
+        if current.scope is RouterScope.PAGES
+        else {"scope": current.scope}
+    )
     entry: dict[str, object] = {
-        "scope": current.scope,
+        **owned,
         "exclude": list(exclude_prefixes()),
         "foreign": current.foreign,
         "prefetch": current.prefetch,
-        "prefetch_delay": current.prefetch_delay,
-        "prefetch_ttl": current.prefetch_ttl,
-        "prefetch_shell_ttl": current.prefetch_shell_ttl,
+        "prefetch_delay": _seconds(current.prefetch_delay),
+        "prefetch_ttl": _seconds(current.prefetch_ttl),
+        "prefetch_shell_ttl": _seconds(current.prefetch_shell_ttl),
         "prefetch_entries": current.prefetch_entries,
         "press": current.press,
         "snapshots": current.snapshots,
-        "progress_delay": current.progress_delay,
+        "progress": current.progress,
+        "progress_delay": _seconds(current.progress_delay),
         "transitions": current.transitions,
         "intercept": current.intercept,
-        "max_layouts": current.max_layouts,
-        "current": list(current.current_containers)
-        if current.current_enabled
-        else None,
-        "homes": sorted(home_paths()) if current.current_enabled else None,
+        "links": list(current.links_containers) if current.links_enabled else None,
+        "homes": sorted(home_paths()) if current.links_enabled else None,
     }
     content_type = partial_backend_manager.get().content_type
     if content_type != CONTENT_TYPE:
@@ -121,10 +127,22 @@ def speculation_rules() -> str:
     eagerness = speculation_eagerness(current.speculation)
     if eagerness is None:
         return ""
-    return encoded_rules(eagerness, current.scope, exclude_prefixes())
+    if current.scope is not RouterScope.PAGES:
+        return encoded_rules(eagerness, current.scope, exclude_prefixes())
+    table = route_scope()
+    pages = table.patterns(page=True)
+    if not pages:
+        return ""
+    others = table.patterns(page=False)
+    return encoded_rules(eagerness, current.scope, exclude_prefixes(), pages, others)
 
 
-def _placed(held: _Places, build: Callable[[], str]) -> str:
+def _document() -> tuple[str, str]:
+    """Return the `$router` entry and the speculation rules of a routed document."""
+    return router_entry(), speculation_rules()
+
+
+def _placed(held: _Places, build: Callable[[], tuple[str, str]]) -> tuple[str, str]:
     """Return what `build` gives under the script prefix and URLconf of this thread.
 
     The homes and the exclusions follow both, which a request may set for itself.
@@ -159,16 +177,27 @@ def _seam[T](
 
 @dataclass(frozen=True, slots=True)
 class _Seams:
-    """The cut and the digest one read of the `ROUTER` settings builds."""
+    """The cut, the digest and the shed one read of the `ROUTER` settings builds."""
 
     cut: NavigationCut
     digest: ChromeDigest
+    shed: PrefetchShed
+    paths: tuple[str, str, str]
+
+    def announce(self) -> None:
+        """Send `router_backend_loaded` per backend, its `ROUTER` entry as `config`."""
+        backends = (self.cut, self.digest, self.shed)
+        for key, dotted, backend in zip(_KEYS, self.paths, backends, strict=True):
+            router_backend_loaded.send(
+                sender=type(backend), config={key: dotted}, instance=backend
+            )
 
 
 def _seams() -> _Seams:
-    """Build the cut and the digest `ROUTER["CUT"]` and `ROUTER["DIGEST"]` name."""
+    """Build the cut, the digest and the shed their `ROUTER` keys name."""
     current = router_settings()
     return _Seams(
+        paths=(current.cut, current.digest, current.shed),
         cut=_seam(
             "CUT",
             current.cut,
@@ -183,13 +212,20 @@ def _seams() -> _Seams:
             shipped=ChromeDigest,
             base_path="next.router.ChromeDigest",
         ),
+        shed=_seam(
+            "SHED",
+            current.shed,
+            base=PrefetchShed,
+            shipped=LoadShed,
+            base_path="next.router.PrefetchShed",
+        ),
     )
 
 
 class ClientRouterManager:
-    """Hold the cut and digest backends, built once, and the `$router` entry.
+    """Hold the cut, digest and shed backends, built once, and the `$router` entry.
 
-    The backends are named by `ROUTER["CUT"]` and `ROUTER["DIGEST"]`.
+    The backends are named by `ROUTER["CUT"]`, `ROUTER["DIGEST"]` and `ROUTER["SHED"]`.
     """
 
     def __init__(self) -> None:
@@ -197,8 +233,7 @@ class ClientRouterManager:
         self.composed: bool | None = None
         self._lock = threading.Lock()
         self._seams: _Seams | None = None
-        self._entries: _Places = {}
-        self._speculations: _Places = {}
+        self._documents: _Places = {}
 
     def forget(self) -> None:
         """Drop the backends, the entry and the rules, so a next use reads settings.
@@ -207,8 +242,7 @@ class ClientRouterManager:
         """
         with self._lock:
             self._seams = None
-            self._entries = {}
-            self._speculations = {}
+            self._documents = {}
 
     def forked(self) -> None:
         """Start a forked child with a fresh lock and nothing built."""
@@ -216,11 +250,14 @@ class ClientRouterManager:
         self.forget()
 
     def _built(self) -> _Seams:
-        """Build the backends under the lock, unless a racing call already did."""
+        """Build the backends under the lock unless a racer did, then announce them."""
+        built = None
         with self._lock:
             seams = self._seams
             if seams is None:
-                seams = self._seams = _seams()
+                seams = self._seams = built = _seams()
+        if built is not None:
+            built.announce()
         return seams
 
     def cut(self) -> NavigationCut:
@@ -231,35 +268,48 @@ class ClientRouterManager:
         """Return the digest `ROUTER["DIGEST"]` names, built on the first call."""
         return (self._seams or self._built()).digest
 
+    def shed(self) -> PrefetchShed:
+        """Return the prefetch shed `ROUTER["SHED"]` names, built on the first call."""
+        return (self._seams or self._built()).shed
+
+    def document(self) -> tuple[str, str]:
+        """Return the `$router` entry and the rules, built once per prefix and URLconf.
+
+        A routed document reads both, so one lookup of its prefix and URLconf serves it.
+        """
+        return _placed(self._documents, _document)
+
     def entry(self) -> str:
         """Return the encoded `$router` entry, built once per prefix and URLconf."""
-        return _placed(self._entries, router_entry)
+        return self.document()[0]
 
     def speculation(self) -> str:
         """Return the encoded speculation rules, built once per prefix and URLconf."""
-        return _placed(self._speculations, speculation_rules)
+        return self.document()[1]
 
 
 client_router = ClientRouterManager()
-after_fork(client_router.forked)
+FORK.attach(client_router.forked)
 
 
 def forget_router(**kwargs: object) -> None:
     """Reset the router on a settings reload, recomposing pages once it switches.
 
-    Composition splices the slot tag only while the router is on.
+    Only an enabled router splices the slot tag, so a misshapen `ROUTER` recomposes too.
     """
     client_router.forget()
-    enabled = router_enabled()
+    try:
+        enabled: bool | None = router_enabled()
+    except SettingShapeError:
+        enabled = None
     if client_router.composed is not enabled:
         page.clear_template_caches()
     client_router.composed = enabled
 
 
-def forget_router_entry(*, setting: str, **kwargs: object) -> None:
-    """Drop the `$router` entry and the rules once a setting they read moves."""
-    if setting in _ENTRY_SETTINGS:
-        client_router.forget()
+SETTINGS.attach(client_router.forget)
+ROUTES.attach(client_router.forget)
+FRAMEWORK.attach(forget_router)
 
 
 __all__ = [
@@ -268,7 +318,6 @@ __all__ = [
     "client_router",
     "exclude_prefixes",
     "forget_router",
-    "forget_router_entry",
     "router_entry",
     "speculation_rules",
 ]

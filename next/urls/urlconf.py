@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
     from next.utils import PageRoot
 
+    from .backends import PageBackend
+
 
 @dataclass(frozen=True, slots=True)
 class Mount:
@@ -43,6 +45,11 @@ class MountedPatterns(Sequence["URLPattern | URLResolver"]):
     @abstractmethod
     def _patterns(self) -> Sequence[URLPattern | URLResolver]:
         """Return the patterns, building them on the first read."""
+
+    def owner(self, entry: URLPattern | URLResolver) -> PageBackend | None:
+        """Return the page backend that built `entry`, `None` for any other entry."""
+        del entry
+        return None
 
     @override
     def __iter__(self) -> Iterator[URLPattern | URLResolver]:

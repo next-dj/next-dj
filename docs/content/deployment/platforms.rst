@@ -14,23 +14,23 @@ This page explains what each fact means, how a deployment states it, and how to 
 The two facts
 -------------
 
-``DEFER["TRANSPORT"]`` names the backend that answers both facts once per request, see :doc:`/content/topics/boundaries/streaming`.
+``DEFER["SERVER"]`` names the backend that answers both facts once per request, see :doc:`/content/topics/boundaries/streaming`.
 
 ``incremental``
    Each write of the response leaves the process at once and reaches the client before the next one.
-   A transport that is not incremental collects the body first, so a stream would arrive in one piece after the slowest boundary anyway.
+   A server that is not incremental collects the body first, so a stream would arrive in one piece after the slowest boundary anyway.
    Such a response is assembled inline under the ``buffered`` reason, whatever ``SYNC_WORKERS`` says.
 ``concurrent``
    The server serves other requests while one response streams.
-   A transport that is not concurrent would hold its only worker while a slow client reads, so the response is assembled inline under the ``sync-worker`` reason, unless ``DEFER["POLICY"]["OPTIONS"]["SYNC_WORKERS"]`` is ``"stream"``.
+   A server that is not concurrent would hold its only worker while a slow client reads, so the response is assembled inline under the ``sync_worker`` reason, unless ``DEFER["DELIVERY"]["OPTIONS"]["SYNC_WORKERS"]`` is ``"stream"``.
 
-A page assembled inline loses the early shell and nothing else, see :ref:`topics-boundaries-streaming-transport`.
+A page assembled inline loses the early shell and nothing else, see :ref:`topics-boundaries-streaming-server`.
 
 Stating the truth
 -----------------
 
-The default transport trusts the server's claims, which can be wrong for a given host, see :ref:`topics-boundaries-streaming-transport`.
-``DEFER["TRANSPORT"]["OPTIONS"]`` states each fact explicitly, and a stated fact wins over every mark and every claim.
+The default probe trusts the server's claims, which can be wrong for a given host, see :ref:`topics-boundaries-streaming-server`.
+``DEFER["SERVER"]["OPTIONS"]`` states each fact explicitly, and a stated fact wins over every mark and every claim.
 
 .. list-table::
    :header-rows: 1
@@ -54,7 +54,7 @@ The default transport trusts the server's claims, which can be wrong for a given
 
    NEXT_FRAMEWORK = {
        "DEFER": {
-           "TRANSPORT": {
+           "SERVER": {
                "OPTIONS": {"INCREMENTAL": False},
            },
        },
@@ -71,7 +71,7 @@ The default is ``None``, which lists no mark.
 
    NEXT_FRAMEWORK = {
        "DEFER": {
-           "TRANSPORT": {
+           "SERVER": {
                "OPTIONS": {
                    "BUFFERED_MARKS": {
                        "WSGI": {"KEYS": ["adapter.event"], "PREFIXES": ["adapter."]},
@@ -82,13 +82,13 @@ The default is ``None``, which lists no mark.
        },
    }
 
-A host whose answer depends on more than a request key takes a ``StreamTransport`` subclass named in ``DEFER["TRANSPORT"]["BACKEND"]``, see :doc:`/content/topics/boundaries/streaming`.
+A host whose answer depends on more than a request key takes a ``ServerProbe`` subclass named in ``DEFER["SERVER"]["BACKEND"]``, see :doc:`/content/topics/boundaries/streaming`.
 
 Telling what a deployment got
 -----------------------------
 
-The ``X-Next-Stream`` header, the first ``INFO`` record of a process, and the ``page_stream_declined`` signal each name why a page did not stream, see :ref:`topics-boundaries-streaming-observing`.
-The log record needs no setup, so the platform logs already show the reason.
+The ``X-Next-Stream`` header, the first record of a process for each reason, and the ``page_stream_declined`` signal each name why a page did not stream, see :ref:`topics-boundaries-streaming-observing`.
+A reason of the deployment, such as ``buffered`` or ``sync_worker``, logs a ``WARNING``, which a stock logging configuration prints, so the platform logs show it with no setup.
 
 Verifying a stream end to end
 -----------------------------
@@ -107,13 +107,34 @@ A streamed page answers its first byte long before the total, close to the time 
 A first byte that arrives with the total means a layer between the process and the client buffered the body, and that layer is stated through ``"INCREMENTAL": False`` until its buffering is off.
 ``curl -N`` without ``-o`` prints the shell first and each boundary script as it arrives, which shows the order on a slow page.
 
+.. _deployment-pooler:
+
 Database connections behind a pooler
 ------------------------------------
 
 A response with deferred boundaries holds the connection of its request thread and one connection per pool thread that runs a job of it, up to ``DEFER["EXECUTOR"]["OPTIONS"]["MAX_WORKERS"]`` per process.
 A host that starts one process per request multiplies that by the instances it runs at once, so the connection count follows the instance count rather than the traffic of one instance.
-A transaction pooler in front of the database absorbs those connections, and its client limit is at least the instances times ``REQUEST_CONCURRENCY`` plus ``MAX_WORKERS``.
+Pool threads start on demand, so the connections open at the peak of load rather than at startup, and with ``CONN_MAX_AGE`` at ``0`` a pool thread opens a fresh one for each boundary it runs.
+
+Sizing the pooler
+~~~~~~~~~~~~~~~~~
+
+A transaction pooler in front of the database absorbs those connections.
+One instance may hold ``REQUEST_CONCURRENCY`` plus ``MAX_WORKERS`` connections, and the client limit of the pooler is at least that sum multiplied by the instance count.
 A smaller ``MAX_WORKERS`` keeps the count down on such a host, and ``PARALLEL`` set to ``False`` keeps every job on the request thread with a single connection.
 Under transaction pooling Django needs ``DISABLE_SERVER_SIDE_CURSORS`` set to ``True``, see :doc:`django:ref/databases`.
 A ``ConnectionState`` replays its state with transaction-local statements, which a transaction pooler keeps on the right server connection.
+
+Checks of the budget
+~~~~~~~~~~~~~~~~~~~~
+
 A pool configured in ``OPTIONS['pool']`` of the alias is checked against the same budget by ``next.W162`` and against the deadline by ``next.W172``.
+An alias without one gets the same budget under ``--deploy`` from ``next.W189``, which names the number per process.
+The framework cannot see how many processes run, so the multiplication is left to the operator.
+
+See also
+--------
+
+.. seealso::
+
+   :doc:`boundaries` for the connection budget across server topologies and the PgBouncer rules.

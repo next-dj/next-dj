@@ -4,6 +4,7 @@ A layer shows it before its answer arrives, so it rides the page that holds the 
 """
 
 import re
+from contextvars import ContextVar
 from html import unescape
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urljoin, urlsplit
@@ -11,8 +12,8 @@ from urllib.parse import urljoin, urlsplit
 from django.template import Context
 from django.urls import get_script_prefix
 
+from next.boundaries.stash import stash_markup
 from next.caches import BoundedCache
-from next.components.stash import stash_markup
 from next.forms.origin import resolve_url_to_page
 from next.pages.loaders import module_version
 from next.pages.paths import page_template_path
@@ -43,11 +44,14 @@ _SCAN: Final = re.compile(
 )
 """A comment, an inert element whole, or a start tag naming a layer zone."""
 
+layer_links: Final[ContextVar[bool]] = ContextVar("next_layer_links", default=True)
+"""Whether the page rendering may hold a layer link, which its plan decides."""
+
 _ATTR: Final = re.compile(
     r"""\s([^\s"'>/=]++)\s*+=\s*+(?:"([^"]*+)"|'([^']*+)'|([^\s"'>]++))"""
 )
 _SERVED: BoundedCache[tuple[str, str, object, str], tuple[int, "Path | None"]] = (
-    BoundedCache()
+    BoundedCache(depends=())
 )
 
 
@@ -98,7 +102,7 @@ def stash_layers(
 
     The first link of a zone names its page, and `shown` holds the zones seen before.
     """
-    if request is None or LAYER_ATTR not in html:
+    if request is None or not layer_links.get() or LAYER_ATTR not in html:
         return html
     stashed = set() if shown is None else shown
     parts: list[str] = []
@@ -127,4 +131,4 @@ def stash_layers(
     return "".join(parts)
 
 
-__all__ = ["LAYER_ATTR", "stash_layers"]
+__all__ = ["LAYER_ATTR", "layer_links", "stash_layers"]

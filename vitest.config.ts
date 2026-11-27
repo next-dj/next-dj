@@ -1,6 +1,8 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // The build id every shipped bundle carries, fixed for the unit build.
+  define: { __BUILD__: JSON.stringify("test") },
   test: {
     environment: "jsdom",
     include: ["next/client/**/*.test.ts"],

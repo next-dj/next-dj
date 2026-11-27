@@ -10,29 +10,33 @@ from itertools import combinations
 from typing import TYPE_CHECKING, cast
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 from django.template import Template, TemplateSyntaxError
 
-from next.checks import NEXT
+from next.boundaries.options import RESERVED_OPTIONS, DeferMode
+from next.checks import NEXT, register
 from next.checks.common import (
     RegistrationSubject,
     async_callable_error,
     async_refusal,
+    class_problem,
     errors_for_unknown_keys,
     import_backend_class,
     registration_file_errors,
 )
 from next.conf import next_framework_settings
-from next.conf.defer import defer_template
-from next.defer import MAX_DURATION, RESERVED_OPTIONS, DeferMode
+from next.conf.boundaries import boundary_settings
+from next.conf.checks import error_for_unusable_path
 from next.deps.introspect import cached_signature
 from next.introspect import callable_name
+from next.utils import MAX_DURATION
 
 from .backends import ComponentsBackend
 from .context import component
 from .defer import defer_declarations
-from .loading import last_load_error
+from .modules import last_load_error
 from .nodes import ComponentTagNode
+from .renderers import ComponentTemplateLoader
 from .sources import get_components_manager
 from .trip import token_overrides
 
@@ -122,6 +126,27 @@ def _validate_single_component_backend(
         )
     )
     return errors
+
+
+@register(NEXT)
+def check_component_template_loader(
+    *args: object, **kwargs: object
+) -> list[CheckMessage]:
+    """Report a `COMPONENT_TEMPLATE_LOADER` path that names no usable loader."""
+    dotted = next_framework_settings.COMPONENT_TEMPLATE_LOADER
+    problem = class_problem(dotted, ComponentTemplateLoader)
+    if problem is None:
+        return []
+    return [
+        error_for_unusable_path(
+            "NEXT_FRAMEWORK['COMPONENT_TEMPLATE_LOADER']",
+            dotted,
+            problem,
+            "the first component render raises ImproperlyConfigured",
+            "Name a concrete ComponentTemplateLoader subclass, such as "
+            "'next.components.CachedComponentTemplateLoader'.",
+        )
+    ]
 
 
 @register(NEXT)
@@ -519,43 +544,21 @@ def check_deferred_component_loading(
 
     An `inline` component renders in place on first paint, so it needs no loading UI.
     """
-    if defer_template("LOADING") is not None:
+    if boundary_settings().loading_template is not None:
         return []
     return [
         DjangoWarning(
             f"Component {info.name!r} defers its render but has no loading.djx, and "
-            'DEFER["LOADING"] names no default, so its placeholder stays empty until '
-            "the content arrives.",
-            hint='Add a loading.djx beside the component or set DEFER["LOADING"] to a '
-            "template path.",
+            'BOUNDARIES["LOADING_TEMPLATE"] names no default, so its placeholder stays '
+            "empty until the content arrives.",
+            hint="Add a loading.djx beside the component or set "
+            'BOUNDARIES["LOADING_TEMPLATE"] to a template path.',
             obj=_site(info),
             id="next.W157",
         )
         for info in _deferred_components()
         if (info.files is None or info.files.loading is None)
         and _declared_mode(info) is not DeferMode.INLINE
-    ]
-
-
-@register(NEXT)
-def check_deferred_component_error(
-    *args: object, **kwargs: object
-) -> list[CheckMessage]:
-    """Warn about a deferred component with no error UI of its own or by default."""
-    if defer_template("ERROR") is not None:
-        return []
-    return [
-        DjangoWarning(
-            f"Component {info.name!r} defers its render but has no error.djx, and "
-            'DEFER["ERROR"] names no default, so a failed render leaves an empty '
-            "error wrapper.",
-            hint='Add an error.djx beside the component or set DEFER["ERROR"] to a '
-            "template path.",
-            obj=_site(info),
-            id="next.W170",
-        )
-        for info in _deferred_components()
-        if info.files is None or info.files.error is None
     ]
 
 
@@ -655,9 +658,9 @@ __all__ = [
     "check_component_error_self_reference",
     "check_component_module_imports",
     "check_component_py_no_pages_context",
+    "check_component_template_loader",
     "check_component_token_age",
     "check_cross_root_component_name_conflicts",
-    "check_deferred_component_error",
     "check_deferred_component_loading",
     "check_duplicate_component_names",
     "check_keyless_context_props",

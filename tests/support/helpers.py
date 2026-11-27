@@ -15,7 +15,7 @@ from django.test import RequestFactory
 from next.conf import NextFrameworkSettings
 from next.deps import DependencyResolver
 from next.forms.markers import FormProvider
-from next.urls import FileRouterBackend, HttpRequestProvider, UrlKwargsProvider
+from next.urls import FilePageBackend, HttpRequestProvider, UrlKwargsProvider
 
 
 if TYPE_CHECKING:
@@ -137,13 +137,13 @@ def file_router_config_entry(
     dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """One ``PAGE_BACKENDS`` entry for ``FileRouterBackend`` in page/layout tests."""
+    """One ``PAGE_BACKENDS`` entry for ``FilePageBackend`` in page/layout tests."""
     opts = dict(options or {})
     dirs_list: list[object] = list(dirs) if dirs is not None else []
     if pages_dir is not None and not app_dirs:
         dirs_list = [pages_dir, *dirs_list]
     return {
-        "BACKEND": "next.urls.FileRouterBackend",
+        "BACKEND": "next.urls.FilePageBackend",
         "PAGES_DIR": pages_dir_name,
         "APP_DIRS": app_dirs,
         "DIRS": dirs_list,
@@ -162,9 +162,9 @@ def file_router(
     app_dirs: bool = True,
     dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
-) -> FileRouterBackend:
-    """Build a ``FileRouterBackend`` from a complete ``PAGE_BACKENDS`` entry."""
-    return FileRouterBackend(
+) -> FilePageBackend:
+    """Build a ``FilePageBackend`` from a complete ``PAGE_BACKENDS`` entry."""
+    return FilePageBackend(
         file_router_config_entry(
             pages_dir_name=pages_dir, app_dirs=app_dirs, dirs=dirs, options=options
         )

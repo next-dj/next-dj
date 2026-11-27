@@ -20,6 +20,7 @@ from next.static.collector import require_bundle
 from next.static.runtime import MORE_CHUNK_KEY
 
 from .headers import MergeMode
+from .keys import KEY_ATTR, TARGET_ATTR
 from .paging import (
     _DIGITS,
     _SLUG,
@@ -40,8 +41,6 @@ if TYPE_CHECKING:
 MORE_SUFFIX: Final = "-more"
 LESS_SUFFIX: Final = "-less"
 
-KEY_ATTR: Final = "data-next-key"
-TARGET_ATTR: Final = "data-next-target"
 MERGE_ATTR: Final = "data-next-merge"
 MARGIN_ATTR: Final = "data-next-margin"
 DEFER_ATTR: Final = "data-next-defer"

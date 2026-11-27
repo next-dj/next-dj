@@ -11,7 +11,7 @@ from tests.components.sites import ComponentSite
 @pytest.fixture()
 def site(site: ComponentSite) -> Generator[ComponentSite, None, None]:
     """Give each component the `/<name>.css` asset a real scan finds beside it."""
-    with patch("next.templatetags.components.collect_component_assets", site.collect):
+    with patch("next.static.ports.collect_component_assets", site.collect):
         yield site
 
 

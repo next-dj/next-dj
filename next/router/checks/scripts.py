@@ -5,12 +5,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Final
 
-from django.core.checks import CheckMessage, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf.router import router_enabled
+from next.discovery import get_template_djx_paths_for_watch
 from next.pages.loaders import template_source
-from next.pages.watch import get_template_djx_paths_for_watch
 
 from .layouts import layouts
 

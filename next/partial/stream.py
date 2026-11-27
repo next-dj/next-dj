@@ -188,6 +188,9 @@ class Deferred(Protocol):
     ) -> "HttpResponseBase":
         """Return the stream whose first frame is `envelope`, boundaries after it."""
 
+    def release(self) -> None:
+        """Give back the stream slot no stream response took."""
+
 
 @runtime_checkable
 class Discardable(Protocol):

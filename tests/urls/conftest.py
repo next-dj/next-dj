@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from next.testing import override_next_settings
-from next.urls import RouterBackend, RouterManager
+from next.urls import PageBackend, RouteManager
 from tests.support import (
     default_page_router_config,
     file_router,
@@ -43,7 +43,7 @@ def page_tree(tmp_path: Path):
 
 @pytest.fixture()
 def router():
-    """Fresh FileRouterBackend instance."""
+    """Fresh FilePageBackend instance."""
     return file_router()
 
 
@@ -68,9 +68,9 @@ def temp_file():
 
 @pytest.fixture()
 def custom_backend_class():
-    """Minimal concrete RouterBackend for registration tests."""
+    """Minimal concrete PageBackend for registration tests."""
 
-    class CustomBackend(RouterBackend):
+    class CustomBackend(PageBackend):
         def generate_urls(self):
             return []
 
@@ -79,5 +79,5 @@ def custom_backend_class():
 
 @pytest.fixture()
 def manager():
-    """Fresh RouterManager."""
-    return RouterManager()
+    """Fresh RouteManager."""
+    return RouteManager()

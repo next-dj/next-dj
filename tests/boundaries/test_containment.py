@@ -10,31 +10,32 @@ from django.core.exceptions import (
 from django.http import Http404
 from django.http.multipartparser import MultiPartParserError
 
-from next.boundaries import Boundary, contain, scope
-from next.defer import Addressing, BoundaryFailure, ErrorKind
+from next.boundaries import contain, scope
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import Boundary, BoundaryFailure, ErrorKind
 from next.diagnostics import degraded
 from next.static import StaticCollector
 from next.static.assets import StaticAsset
-from tests.support.boundaries import RecordingFallback, defer_errors, raising
+from tests.support.boundaries import RecordingErrorUI, defer_errors, raising
 
 
 class TestContain:
     """A guarded subtree renders, or its failure is contained behind the error UI."""
 
     def test_a_success_returns_the_render(self) -> None:
-        fallback = RecordingFallback()
+        error_ui = RecordingErrorUI()
         assert contain(
-            Boundary("card", Addressing.COMPONENT), lambda: "<b>ok</b>", fallback
+            Boundary("card", Addressing.COMPONENT), lambda: "<b>ok</b>", error_ui
         ) == ("<b>ok</b>")
-        assert fallback.calls == []
+        assert error_ui.calls == []
         assert degraded() is False
 
     def test_a_failure_renders_the_error_ui_in_its_wrapper(self) -> None:
-        fallback = RecordingFallback()
+        error_ui = RecordingErrorUI()
         html = contain(
-            Boundary("card", Addressing.COMPONENT), raising(ValueError("x")), fallback
+            Boundary("card", Addressing.COMPONENT), raising(ValueError("x")), error_ui
         )
-        ((error, kind),) = fallback.calls
+        ((error, kind),) = error_ui.calls
         assert kind is ErrorKind.ERROR
         assert type(error) is BoundaryFailure
         assert error.kind is ErrorKind.ERROR
@@ -49,10 +50,10 @@ class TestContain:
         assert "data-next-error-digest" not in html
         assert degraded() is True
 
-    def test_retry_follows_the_fallback(self) -> None:
-        fallback = RecordingFallback(retry=False)
-        contain(Boundary("card", Addressing.COMPONENT), raising(ValueError()), fallback)
-        assert fallback.calls[0][0].retry is False
+    def test_retry_follows_the_error_ui(self) -> None:
+        error_ui = RecordingErrorUI(retry=False)
+        contain(Boundary("card", Addressing.COMPONENT), raising(ValueError()), error_ui)
+        assert error_ui.calls[0][0].retry is False
 
     @pytest.mark.parametrize(
         "exc",
@@ -62,10 +63,10 @@ class TestContain:
     def test_an_intended_exception_passes_before_the_first_byte(
         self, exc: Exception
     ) -> None:
-        fallback = RecordingFallback()
+        error_ui = RecordingErrorUI()
         with pytest.raises(type(exc)):
-            contain(Boundary("card", Addressing.COMPONENT), raising(exc), fallback)
-        assert fallback.calls == []
+            contain(Boundary("card", Addressing.COMPONENT), raising(exc), error_ui)
+        assert error_ui.calls == []
         assert degraded() is False
 
     def test_a_base_exception_passes_and_undoes_the_journal(self) -> None:
@@ -79,30 +80,30 @@ class TestContain:
             contain(
                 Boundary("card", Addressing.COMPONENT, collector=collector),
                 render,
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         assert list(collector.assets_in_slot("styles")) == []
         assert collector._journal is None
 
     def test_an_intended_exception_after_the_first_byte_maps_to_its_kind(self) -> None:
-        fallback = RecordingFallback()
+        error_ui = RecordingErrorUI()
         boundary = Boundary("card", Addressing.COMPONENT, started=True)
-        html = contain(boundary, raising(Http404()), fallback)
-        error, kind = fallback.calls[0]
+        html = contain(boundary, raising(Http404()), error_ui)
+        error, kind = error_ui.calls[0]
         assert kind is ErrorKind.NOT_FOUND
         assert error.kind is ErrorKind.NOT_FOUND
         assert error.status == 404
         assert 'data-next-error="not_found"' in html
 
-    def test_opaque_kinds_hide_the_kind_but_the_fallback_reads_it(self) -> None:
-        fallback = RecordingFallback()
+    def test_opaque_kinds_hide_the_kind_but_the_error_ui_reads_it(self) -> None:
+        error_ui = RecordingErrorUI()
         with defer_errors(KINDS="opaque"):
             html = contain(
                 Boundary("card", Addressing.COMPONENT, started=True),
                 raising(PermissionDenied()),
-                fallback,
+                error_ui,
             )
-        error, kind = fallback.calls[0]
+        error, kind = error_ui.calls[0]
         assert kind is ErrorKind.FORBIDDEN
         assert error.kind is ErrorKind.ERROR
         assert error.status is None
@@ -119,7 +120,7 @@ class TestContain:
             contain(
                 Boundary("card", Addressing.COMPONENT, started=True),
                 raising(exc),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         records = [record for record in caplog.records if record.name == name]
         assert [record.getMessage() for record in records] == ["odd"]
@@ -132,7 +133,7 @@ class TestContain:
             contain(
                 Boundary("card", Addressing.COMPONENT, started=True),
                 raising(BadRequest("odd")),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         assert not any(r.name.startswith("django.security") for r in caplog.records)
 
@@ -140,7 +141,7 @@ class TestContain:
         html = contain(
             Boundary("row", Addressing.COMPONENT),
             raising(ValueError()),
-            RecordingFallback("<tr><td>x</td></tr>", tag=None),
+            RecordingErrorUI("<tr><td>x</td></tr>", tag=None),
         )
         assert html.startswith('<tr id="b-')
         assert html.endswith('data-next-error="error"><td>x</td></tr>')
@@ -151,9 +152,9 @@ class TestNesting:
 
     def test_the_innermost_boundary_catches_and_the_outer_one_renders(self) -> None:
         outer, middle, inner = (
-            RecordingFallback("O"),
-            RecordingFallback("M"),
-            RecordingFallback("I"),
+            RecordingErrorUI("O"),
+            RecordingErrorUI("M"),
+            RecordingErrorUI("I"),
         )
 
         leaf = raising(ValueError("leaf"))
@@ -182,10 +183,8 @@ class TestNesting:
         assert outer.calls == []
 
     def test_a_failing_error_ui_reaches_the_next_boundary_up(self) -> None:
-        outer = RecordingFallback("O")
-        inner = RecordingFallback(
-            render=lambda _error, _kind: raising(KeyError("ui"))()
-        )
+        outer = RecordingErrorUI("O")
+        inner = RecordingErrorUI(render=lambda _error, _kind: raising(KeyError("ui"))())
 
         def outer_render() -> str:
             return contain(
@@ -203,7 +202,7 @@ class TestNesting:
                 Boundary("card", Addressing.COMPONENT), raising(KeyError("again")), own
             )
 
-        own = RecordingFallback(render=own_error_ui)
+        own = RecordingErrorUI(render=own_error_ui)
         with pytest.raises(KeyError, match="again"):
             contain(Boundary("card", Addressing.COMPONENT), raising(ValueError()), own)
         assert len(own.calls) == 1
@@ -214,11 +213,11 @@ class TestNesting:
                 Boundary("other", Addressing.COMPONENT), raising(KeyError()), other
             )
 
-        other = RecordingFallback("X")
+        other = RecordingErrorUI("X")
         html = contain(
             Boundary("card", Addressing.COMPONENT),
             raising(ValueError()),
-            RecordingFallback(render=error_ui),
+            RecordingErrorUI(render=error_ui),
         )
         assert ">X</div></div>" in html
 
@@ -237,17 +236,17 @@ class TestNesting:
             first = contain(
                 Boundary("a", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
             second = contain(
                 Boundary("b", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
             return first + second
 
         html = contain(
-            Boundary("outer", Addressing.COMPONENT), outer_render, RecordingFallback()
+            Boundary("outer", Addressing.COMPONENT), outer_render, RecordingErrorUI()
         )
         ids = [part.split('"')[0] for part in html.split('data-next-boundary="')[1:]]
         assert len(probes) == 1
@@ -268,7 +267,7 @@ class TestOwners:
                 own,
             )
 
-        own = RecordingFallback(render=own_error_ui)
+        own = RecordingErrorUI(render=own_error_ui)
         with pytest.raises(KeyError):
             contain(
                 Boundary("card", Addressing.COMPONENT, owner=owner),
@@ -277,7 +276,7 @@ class TestOwners:
             )
 
     def test_a_same_named_component_of_another_scope_is_still_caught(self) -> None:
-        other = RecordingFallback("X")
+        other = RecordingErrorUI("X")
 
         def error_ui(error: BoundaryFailure, kind: ErrorKind) -> str:
             return contain(
@@ -289,6 +288,6 @@ class TestOwners:
         html = contain(
             Boundary("card", Addressing.COMPONENT, owner="shared"),
             raising(ValueError()),
-            RecordingFallback(render=error_ui),
+            RecordingErrorUI(render=error_ui),
         )
         assert ">X</div></div>" in html

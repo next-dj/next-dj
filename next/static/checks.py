@@ -9,22 +9,16 @@ from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.finders import AppDirectoriesFinder
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
-from next.checks.common import get_router_manager, import_backend_class
+from next.checks import NEXT, register
+from next.checks.common import get_route_manager, import_backend_class
 from next.components.sources import iter_serialized_component_context_keys
 from next.conf import import_class_cached, next_framework_settings
+from next.discovery import get_page_root_keys_for_watch
 from next.pages.checks.layouts import iter_layout_ancestry
 from next.pages.checks.responses import private_pages_warning
 from next.pages.scan import iter_serialized_page_context_keys
-from next.pages.watch import get_page_root_keys_for_watch
 
 from .assets import default_kinds
 from .backends import DEFAULT_STATIC_BACKEND, StaticBackend, StaticFilesBackend
@@ -512,13 +506,13 @@ def check_layout_assets_above_trees(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
     """Warn about co-located assets of a layout above every page tree (`next.W135`)."""
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
     page_roots = tuple(get_page_root_keys_for_watch())
     resolver = PathResolver(lambda: page_roots)
     warnings: list[CheckMessage] = []
-    for layout_file in iter_layout_ancestry(router_manager):
+    for layout_file in iter_layout_ancestry(route_manager):
         if resolver.find_page_root(layout_file) is not None:
             continue
         found = find_role_files(

@@ -3,7 +3,7 @@
 import inspect
 from typing import override
 
-from next.deps import RegisteredParameterProvider
+from next.deps import READS_NOTHING, ContextReads, RegisteredParameterProvider
 from next.deps.context import ResolutionContext
 from next.pages.responses import vary_on_cookie
 
@@ -28,6 +28,11 @@ class ConsentProvider(RegisteredParameterProvider):
     def static_can_handle(self, param: inspect.Parameter) -> bool:
         """Match on the annotation alone."""
         return param.annotation is Consent
+
+    @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

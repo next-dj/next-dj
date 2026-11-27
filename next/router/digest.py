@@ -1,6 +1,6 @@
 """The marker scan of a rendered page and the normalisation of layout chrome.
 
-Pure functions over one response's HTML and seal, so a test reproduces every case.
+Pure functions over one response's HTML and id, so a test reproduces every case.
 """
 
 from __future__ import annotations
@@ -12,7 +12,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from next.pages.layouts import META, SLOT, ZONE, closing, opening
-from next.static.runtime import ASSETS_MARK
+from next.partial.zone import ZONE_ATTR
+from next.paths import ANCESTOR_MARK, PAGE_MARK
+from next.wire import CURRENT_ATTR
+
+from .render import ASSETS_MARK
 
 
 if TYPE_CHECKING:
@@ -37,7 +41,7 @@ _CSRF_LEAD: Final = len("name='csrfmi")
 _CSRF_VALUE: Final = re.compile(r"""(\svalue=)(?:"[^"]*"|'[^']*')""", re.IGNORECASE)
 _BODY_OPEN: Final = re.compile(r"<body(?![\w:-])", re.IGNORECASE)
 _BODY_CLOSE: Final = re.compile(r"</body\s*>", re.IGNORECASE)
-_ZONE_NAME: Final = re.compile(r"""\sdata-next-zone=(?:"([^"]*)"|'([^']*)')""")
+_ZONE_NAME: Final = re.compile(rf"""\s{ZONE_ATTR}=(?:"([^"]*)"|'([^']*)')""")
 _TAIL_TAGS: Final = 8
 
 
@@ -57,21 +61,21 @@ def chrome_digest(text: str) -> str:
     return hashlib.blake2b(text.encode(), digest_size=DIGEST_BYTES).hexdigest()
 
 
-def regions(html: str, kind: str, seal: str) -> list[tuple[int, int]]:
-    """Return the outer bounds of the top-level sealed regions of `kind`.
+def regions(html: str, kind: str, response_id: str) -> list[tuple[int, int]]:
+    """Return the outer bounds of the top-level enclosed regions of `kind`.
 
     A region inside another region of the same kind belongs to it.
     """
-    return _outermost(_nested(html, kind, seal))
+    return _outermost(_nested(html, kind, response_id))
 
 
-def _nested(html: str, kind: str, seal: str) -> list[tuple[int, int]]:
-    """Return the outer bounds of every sealed region of `kind`, ordered by start."""
-    closer = closing(kind, seal)
+def _nested(html: str, kind: str, response_id: str) -> list[tuple[int, int]]:
+    """Return the outer bounds of every enclosed region of `kind`, ordered by start."""
+    closer = closing(kind, response_id)
     at_close = html.find(closer)
     if at_close < 0:
         return []
-    opener = opening(kind, seal)
+    opener = opening(kind, response_id)
     at_open = html.find(opener)
     found: list[tuple[int, int]] = []
     starts: list[int] = []
@@ -137,13 +141,13 @@ def _without(text: str, bounds: Iterable[tuple[int, int]], standin: str) -> str:
     return "".join(pieces)
 
 
-def _sealed_regions(text: str, seal: str) -> list[tuple[int, int]]:
+def _enclosed_regions(text: str, response_id: str) -> list[tuple[int, int]]:
     """Return the top-level zone, head and placeholder regions of `text`, in order.
 
     A zone around the slot is no region, so the chrome it wraps counts as chrome.
     """
     every = sorted(
-        bounds for kind in _REGION_KINDS for bounds in _nested(text, kind, seal)
+        bounds for kind in _REGION_KINDS for bounds in _nested(text, kind, response_id)
     )
     return _outermost(every, partial(_holds, _standins(text)))
 
@@ -197,17 +201,23 @@ def _masked_csrf(text: str, low: str) -> str:
     return "".join(pieces)
 
 
-def normalise(text: str, seal: str) -> str:
+def normalise(text: str, response_id: str) -> str:
     """Return chrome without what changes per response or is re-sent on its own.
 
-    Tokens and boundary ids keep the per-response seal, so deferred chrome never keeps.
+    The active-link marks go too, as a container marks its links while it renders.
+    Tokens and boundary ids keep the response id, so deferred chrome never keeps.
     """
-    if f" {seal}-->" in text:
-        text = _without(text, _sealed_regions(text, seal), REGION_STANDIN)
-        text = text.replace(opening(ZONE, seal), "").replace(closing(ZONE, seal), "")
+    if f" {response_id}-->" in text:
+        text = _without(text, _enclosed_regions(text, response_id), REGION_STANDIN)
+        text = text.replace(opening(ZONE, response_id), "").replace(
+            closing(ZONE, response_id), ""
+        )
     low = fold(text)
     cut = _without_nonces(text, low)
-    return _masked_csrf(cut, low if cut is text else fold(cut))
+    cut = _masked_csrf(cut, low if cut is text else fold(cut))
+    if CURRENT_ATTR in cut:
+        cut = cut.replace(PAGE_MARK, "").replace(ANCESTOR_MARK, "")
+    return cut
 
 
 def _body_start(text: str) -> int | None:
@@ -254,37 +264,15 @@ def body_bounds(html: str) -> tuple[int, int] | None:
     return start, _body_end(html, start)
 
 
-def moved_body(
-    before: str, after: str, bounds: tuple[int, int] | None
-) -> tuple[int, int] | None:
-    """Return the body bounds of `after` from the `bounds` of `before`, which it edits.
-
-    A head and a closed tail both left as they were keep the bounds without a scan.
-    """
-    if bounds is None:
-        return body_bounds(after)
-    start, end = bounds
-    tail = len(before) - end
-    end = len(after) - tail
-    if (
-        tail
-        and end >= start
-        and after.startswith(before[:start])
-        and after.endswith(before[-tail:])
-    ):
-        return start, end
-    return body_bounds(after)
-
-
 def find_slot(
-    html: str, ident: str, seal: str, within: tuple[int, int]
+    html: str, ident: str, response_id: str, within: tuple[int, int]
 ) -> tuple[tuple[int, int], tuple[int, int]] | None:
     """Return the inner and outer bounds of the slot of `ident` inside `within`.
 
-    The comments carry the response seal, so a look-alike in content never matches.
+    The comments carry the response id, so a look-alike in content never matches.
     """
-    opener = opening(SLOT, seal, ident)
-    closer = closing(SLOT, seal, ident)
+    opener = opening(SLOT, response_id, ident)
+    closer = closing(SLOT, response_id, ident)
     start, stop = within
     at = html.find(opener, start, stop)
     if at < 0:
@@ -302,9 +290,9 @@ def chrome(html: str, region: tuple[int, int], slot: tuple[int, int]) -> str:
     return html[start : slot[0]] + SLOT_STANDIN + html[slot[1] : end]
 
 
-def zone_name(html: str, bounds: tuple[int, int], seal: str) -> str | None:
-    """Return the name the first element of a sealed zone region carries."""
-    start = bounds[0] + len(opening(ZONE, seal))
+def zone_name(html: str, bounds: tuple[int, int], response_id: str) -> str | None:
+    """Return the name the first element of an enclosed zone region carries."""
+    start = bounds[0] + len(opening(ZONE, response_id))
     tag_end = html.find(">", start, bounds[1])
     found = _ZONE_NAME.search(html, start, tag_end if tag_end >= 0 else bounds[1])
     if found is None:
@@ -312,22 +300,24 @@ def zone_name(html: str, bounds: tuple[int, int], seal: str) -> str | None:
     return found.group(1) if found.group(1) is not None else found.group(2)
 
 
-def zone_html(html: str, bounds: tuple[int, int], seal: str) -> str:
-    """Return a sealed zone region without its two comments."""
-    start = bounds[0] + len(opening(ZONE, seal))
-    end = bounds[1] - len(closing(ZONE, seal))
+def zone_html(html: str, bounds: tuple[int, int], response_id: str) -> str:
+    """Return an enclosed zone region without its two comments."""
+    start = bounds[0] + len(opening(ZONE, response_id))
+    end = bounds[1] - len(closing(ZONE, response_id))
     return html[start:end]
 
 
 def chrome_zones(
-    html: str, seal: str, outside: tuple[int, int] | None
+    html: str, response_id: str, outside: tuple[int, int] | None
 ) -> Iterator[tuple[str, tuple[int, int]]]:
     """Yield the name and bounds of each top-level zone outside the bounds `outside`.
 
     A zone around `outside` is left out for the zones inside it, as its chrome is kept.
     """
-    for bounds in _outermost(_nested(html, ZONE, seal), partial(_overlaps, outside)):
-        name = zone_name(html, bounds, seal)
+    for bounds in _outermost(
+        _nested(html, ZONE, response_id), partial(_overlaps, outside)
+    ):
+        name = zone_name(html, bounds, response_id)
         if name is not None:
             yield name, bounds
 
@@ -342,7 +332,6 @@ __all__ = [
     "chrome_zones",
     "find_slot",
     "fold",
-    "moved_body",
     "normalise",
     "regions",
     "split_head",

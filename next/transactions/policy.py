@@ -1,20 +1,30 @@
 """The `TRANSACTIONS` rule that names the database aliases a next.dj view wraps."""
 
-import enum
 from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
-from typing import Final, Literal, TypeGuard, cast, override
+from typing import Final, Literal, cast
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections, transaction
 from django.http import HttpRequest
 from django.utils.module_loading import import_string
 
-from next.conf.defaults import DEFAULTS
-from next.conf.defer import atomic_choice
+from next.caches import SETTINGS, Memo
+from next.conf.defaults import AUTO, DEFAULTS
 from next.conf.settings import next_framework_settings
-from next.conf.shapes import EMPTY, Section, Shape, alternatives, pick, shown
+from next.conf.shapes import EMPTY, alternatives, enforce, pick, shown
+from next.conf.transactions import (
+    ALL_ALIASES,
+    SCOPE,
+    SHAPE,
+    alias_list,
+    aliases_usable,
+    atomic_choice,
+    method_choice,
+    rule_usable,
+)
+from next.requests import RequestKind
 
 from .savepoints import WRITES, AtomicMode, LazyAtomic, awaits_write
 
@@ -22,40 +32,30 @@ from .savepoints import WRITES, AtomicMode, LazyAtomic, awaits_write
 SAFE_METHODS: Final = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 """The methods that follow `TRANSACTIONS["SAFE"]`, every other one follows `UNSAFE`."""
 
-ALL_ALIASES: Final = "all"
-"""The `ALIASES` value that names every database alias Django holds a connection for."""
-
-_SCOPE: Final = "TRANSACTIONS"
-_RULE_SETTING: Final = f"NEXT_FRAMEWORK[{_SCOPE!r}]['RULE']"
-_EXEMPT_ATTR: Final = "_non_atomic_requests"
+_PREFIX: Final = f"NEXT_FRAMEWORK[{SCOPE!r}]"
+_RULE_SETTING: Final = f"{_PREFIX}['RULE']"
 _DUMMY: Final = "django.db.backends.dummy"
 
 
-class ViewKind(enum.StrEnum):
-    """The kind of next.dj view a request reached, as the transaction rule sees it."""
-
-    PAGE = "page"
-    ACTION = "action"
-    ZONE = "zone"
-    BOUNDARY = "boundary"
-    NAVIGATION = "navigation"
-
-
 type AliasChoice = tuple[str, ...] | Literal["all"] | None
+
+type MethodChoice = AtomicMode | Literal["auto"]
 
 
 @dataclass(frozen=True, slots=True)
 class AtomicOverride:
     """One view's own transaction choice, which wins over the method table and `RULE`.
 
-    `aliases` of `None` takes `TRANSACTIONS["ALIASES"]`, and `"all"` every alias.
+    `aliases=None` reads `TRANSACTIONS["ALIASES"]`, and `"all"` every alias.
     """
 
     atomic: AtomicMode
     aliases: AliasChoice = None
 
 
-type TransactionRule = Callable[[HttpRequest, ViewKind], Iterable[str] | AtomicOverride]
+type TransactionRule = Callable[
+    [HttpRequest, RequestKind], Iterable[str] | AtomicOverride
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,19 +87,8 @@ class _Policy:
     unsafe: AtomicScope
     aliases: tuple[str, ...]
     every: tuple[str, ...]
+    requested: tuple[str, ...]
     rule: TransactionRule | None
-
-
-def alias_list(value: object) -> TypeGuard[list[str] | tuple[str, ...]]:
-    """Whether `value` is a list or a tuple of alias names."""
-    return isinstance(value, list | tuple) and all(isinstance(n, str) for n in value)
-
-
-def aliases_usable(
-    value: object,
-) -> TypeGuard[Literal["all"] | list[str] | tuple[str, ...]]:
-    """Whether `value` is a usable `ALIASES` value."""
-    return value == ALL_ALIASES or alias_list(value)
 
 
 _MODES: Final = alternatives((True, False, WRITES))
@@ -131,22 +120,6 @@ def override_of(atomic: object, aliases: object) -> AtomicOverride | None:
     return AtomicOverride(atomic=atomic, aliases=_choice(aliases))
 
 
-def rule_usable(value: object) -> TypeGuard[str | None]:
-    """Whether `value` is a usable `RULE` value, before its path is imported."""
-    return value is None or isinstance(value, str)
-
-
-SHAPE: Final = Section(
-    {
-        "SAFE": Shape(atomic_choice, _MODES),
-        "UNSAFE": Shape(atomic_choice, _MODES),
-        "ALIASES": Shape(aliases_usable, "'all' or a list of database aliases"),
-        "RULE": Shape(rule_usable, "the dotted path of a callable or None"),
-    }
-)
-"""The shape of the `TRANSACTIONS` scope, which the checks and the policy read."""
-
-
 def import_rule(dotted: str) -> TransactionRule:
     """Import the `RULE` callable, raising `ImproperlyConfigured` for a broken path."""
     try:
@@ -165,52 +138,80 @@ def _present(names: Iterable[str], every: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(name for name in names if name in every))
 
 
-def _read_policy(scope: object, every: tuple[str, ...]) -> _Policy:
-    """Return the policy `scope` names, each unusable value read as its default."""
+def _method_scope(
+    mode: MethodChoice,
+    aliases: tuple[str, ...],
+    requested: tuple[str, ...],
+    *,
+    unsafe: bool,
+) -> AtomicScope:
+    """Return the scope one side of the method table opens.
+
+    `"auto"` wraps the `ATOMIC_REQUESTS` aliases, and on an unsafe method `ALIASES`.
+    """
+    if mode == AUTO:
+        names = (*aliases, *requested) if unsafe else requested
+        return _scope(tuple(dict.fromkeys(names)), atomic=True)
+    return _scope(aliases, mode)
+
+
+def _read_policy(
+    scope: object, every: tuple[str, ...], requested: tuple[str, ...]
+) -> _Policy:
+    """Return the policy `scope` names, refusing a value outside its shape."""
     held = scope if isinstance(scope, Mapping) else EMPTY
-    defaults = DEFAULTS[_SCOPE]
+    enforce(_PREFIX, held, SHAPE)
+    defaults = DEFAULTS[SCOPE]
     named = pick(held, "ALIASES", aliases_usable, defaults)
     aliases = every if named == ALL_ALIASES else _present(named, every)
     rule = pick(held, "RULE", rule_usable, defaults)
+    safe = pick(held, "SAFE", method_choice, defaults)
+    unsafe = pick(held, "UNSAFE", method_choice, defaults)
     return _Policy(
-        safe=_scope(aliases, pick(held, "SAFE", atomic_choice, defaults)),
-        unsafe=_scope(aliases, pick(held, "UNSAFE", atomic_choice, defaults)),
+        safe=_method_scope(safe, aliases, requested, unsafe=False),
+        unsafe=_method_scope(unsafe, aliases, requested, unsafe=True),
         aliases=aliases,
         every=every,
+        requested=requested,
         rule=None if rule is None else import_rule(rule),
     )
 
 
-class _PolicyMemo:
-    """Hold the policy while the merged scope and the connection settings stay the same.
+_HELD: Final[Memo[_Policy]] = Memo(depends=(SETTINGS,))
 
-    A settings reload or new connection settings replace either object, so no receiver.
+
+def _current() -> _Policy:
+    """Return the policy of the current settings, building it on a miss.
+
+    The `ATOMIC_REQUESTS` flags are read on every call, as Django reads them per view.
     """
+    databases = connections.settings
+    requested = atomic_requests(databases)
 
-    __slots__ = ("held",)
+    def build() -> _Policy:
+        return _read_policy(
+            next_framework_settings.TRANSACTIONS, _backed(databases), requested
+        )
 
-    def __init__(self) -> None:
-        """Start empty, the first read builds the policy."""
-        self.held: tuple[object, object, _Policy] | None = None
+    policy = _HELD.get(build)
+    if policy.requested != requested:
+        _HELD.forget()
+        policy = _HELD.get(build)
+    return policy
 
-    def get(self) -> _Policy:
-        """Return the policy of the current settings, building it on a miss."""
-        scope = next_framework_settings.TRANSACTIONS
-        databases = connections.settings
-        held = self.held
-        if held is not None and held[0] is scope and held[1] is databases:
-            return held[2]
-        policy = _read_policy(scope, _backed(databases))
-        self.held = (scope, databases, policy)
-        return policy
+
+def atomic_requests(databases: Mapping[str, Mapping[str, object]]) -> tuple[str, ...]:
+    """Return the aliases `ATOMIC_REQUESTS` wraps, in the order Django nests them."""
+    return tuple(
+        name
+        for name, db in databases.items()
+        if db.get("ATOMIC_REQUESTS") and db.get("ENGINE") != _DUMMY
+    )
 
 
 def _backed(databases: Mapping[str, Mapping[str, object]]) -> tuple[str, ...]:
     """Return the aliases with a real backend, not the dummy of an empty DATABASES."""
     return tuple(name for name, db in databases.items() if db["ENGINE"] != _DUMMY)
-
-
-_policy = _PolicyMemo()
 
 
 def _override_scope(override: AtomicOverride, policy: _Policy) -> AtomicScope:
@@ -236,13 +237,13 @@ def _rule_scope(answer: Iterable[str] | AtomicOverride, policy: _Policy) -> Atom
 
 
 def atomic_scope(
-    request: HttpRequest, kind: ViewKind, override: AtomicOverride | None = None
+    request: HttpRequest, kind: RequestKind, override: AtomicOverride | None = None
 ) -> AtomicScope:
     """Return the transaction this request runs in, its aliases in order.
 
     An alias Django holds no connection for is skipped, in what `RULE` answers too.
     """
-    policy = _policy.get()
+    policy = _current()
     if override is not None:
         return _override_scope(override, policy)
     if policy.rule is not None:
@@ -255,7 +256,7 @@ def safe_aliases(override: AtomicOverride | None = None) -> tuple[str, ...] | No
 
     `None` stands for a `RULE`, which answers per request and so cannot be held.
     """
-    policy = _policy.get()
+    policy = _current()
     if override is not None:
         return _override_scope(override, policy).aliases
     return None if policy.rule is not None else policy.safe.aliases
@@ -275,7 +276,7 @@ _NO_ATOMIC: Final[AbstractContextManager[object]] = nullcontext()
 def request_atomic(scope: AtomicScope) -> AbstractContextManager[object]:
     """Open the transaction of `scope`, the last alias outermost as Django nests them.
 
-    `True` opens on entry, so an `on_commit` hook set before any query awaits commit.
+    `True` opens on entry, `"writes"` before the first write or `on_commit` hook.
     """
     if not scope.aliases or scope.atomic is False:
         return _NO_ATOMIC
@@ -287,25 +288,13 @@ def request_atomic(scope: AtomicScope) -> AbstractContextManager[object]:
     return LazyAtomic(scope.aliases)
 
 
-class _EveryAlias(set[str]):
-    """An exemption that holds every alias, those Django connects to later included.
-
-    It stays a set, so `transaction.non_atomic_requests` applied afterwards still adds.
-    """
-
-    __slots__ = ()
-
-    @override
-    def __contains__(self, alias: object) -> bool:
-        return True
-
-
 def skip_atomic_requests[V: Callable[..., object]](view: V) -> V:
     """Mark `view` so Django's `ATOMIC_REQUESTS` wrapping skips it on every alias.
 
-    It marks the callable passed in, so apply it to the final view after any wrapping.
+    The next.dj policy owns each alias, so `non_atomic_requests` marks every one.
     """
-    vars(view)[_EXEMPT_ATTR] = _EveryAlias()
+    for alias in connections:
+        view = transaction.non_atomic_requests(using=alias)(view)
     return view
 
 
@@ -322,23 +311,19 @@ def probe_atomic_aliases() -> tuple[str, ...]:
 
 
 __all__ = [
-    "ALL_ALIASES",
     "SAFE_METHODS",
-    "SHAPE",
     "AliasChoice",
     "AtomicOverride",
     "AtomicScope",
+    "MethodChoice",
     "TransactionRule",
-    "ViewKind",
-    "alias_list",
-    "aliases_usable",
+    "atomic_requests",
     "atomic_scope",
     "import_rule",
     "override_of",
     "override_problem",
     "probe_atomic_aliases",
     "request_atomic",
-    "rule_usable",
     "safe_aliases",
     "skip_atomic_requests",
 ]

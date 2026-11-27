@@ -1,13 +1,30 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from django.contrib.auth.models import AnonymousUser
 from django.test import override_settings
 
-from next.components import ComponentInfo, ComponentModuleImportError
-from next.components.renderers import _granted
+from next.components import (
+    ComponentInfo,
+    ComponentModuleImportError,
+    access as component_access,
+)
+from next.components.access import (
+    GRANTED,
+    OPEN,
+    PENDING,
+    AccessDecision,
+    AccessVerdict,
+    decide,
+    passed,
+    ruled,
+)
+from next.components.calls import props_lookup
 from next.permissions import UnknownAccessObjectError, add_perm
+from next.permissions.markers import AccessRule, Denial, Requirement
 from next.static import StaticCollector
 from tests.support import routed
 from tests.support.access import COMPONENTS, client_as
@@ -305,4 +322,108 @@ def test_a_component_without_a_module_is_granted(tmp_path: Path) -> None:
         module_path=None,
         is_simple=True,
     )
-    assert _granted(info, {}, None) is True
+    assert decide(info, None) is OPEN
+
+
+_SOURCE = Path("/c/component.py")
+_SIGNED_IN = Requirement("login", _SOURCE)
+_MODEL = Requirement("permission", _SOURCE, ("notes.read",))
+_ROW = Requirement("permission", _SOURCE, ("notes.read",), "account")
+
+
+class _User:
+    is_authenticated = True
+
+    def __init__(self, *, model: bool, row: bool) -> None:
+        self.model = model
+        self.row = row
+
+    def has_perm(self, perm: str, obj: object = None) -> bool:
+        return self.row if obj is not None else self.model
+
+
+class TestDecide:
+    """`decide` is the one verdict every call path of a component reads."""
+
+    @pytest.fixture()
+    def info(self, tmp_path: Path) -> ComponentInfo:
+        return ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=_SOURCE,
+            is_simple=False,
+        )
+
+    def _decide(
+        self,
+        info: ComponentInfo,
+        monkeypatch: pytest.MonkeyPatch,
+        requirements: tuple[Requirement, ...],
+        user: object,
+        lookup: Callable[[object], object] | None = None,
+    ) -> AccessDecision:
+        rule = AccessRule(requirements)
+        monkeypatch.setattr(component_access, "declared", lambda _path: rule)
+        return decide(info, SimpleNamespace(user=user), lookup)
+
+    def test_no_rule_is_open(self, info, monkeypatch) -> None:
+        assert self._decide(info, monkeypatch, (), AnonymousUser()) is OPEN
+        assert OPEN.passed
+
+    def test_a_passed_rule_is_granted(self, info, monkeypatch) -> None:
+        user = _User(model=True, row=True)
+        decision = self._decide(info, monkeypatch, (_SIGNED_IN, _MODEL), user)
+        assert decision is GRANTED
+        assert decision.passed
+
+    def test_a_signed_out_visitor_is_denied_even_before_an_object(
+        self, info, monkeypatch
+    ) -> None:
+        decision = self._decide(info, monkeypatch, (_ROW,), AnonymousUser())
+        assert decision.verdict is AccessVerdict.DENIED
+        assert decision.denial == Denial("login", _ROW)
+        assert not decision.passed
+
+    def test_an_object_without_a_lookup_waits(self, info, monkeypatch) -> None:
+        user = _User(model=True, row=False)
+        decision = self._decide(info, monkeypatch, (_MODEL, _ROW), user)
+        assert decision is PENDING
+        assert not decision.passed
+
+    def test_a_missing_model_permission_denies_before_the_object(
+        self, info, monkeypatch
+    ) -> None:
+        user = _User(model=False, row=True)
+        decision = self._decide(info, monkeypatch, (_MODEL, _ROW), user)
+        assert decision.denial == Denial("permission", _MODEL)
+
+    @pytest.mark.parametrize(
+        ("row", "verdict"),
+        [(True, AccessVerdict.GRANTED), (False, AccessVerdict.DENIED)],
+    )
+    def test_an_object_with_a_lookup_decides(
+        self, info, monkeypatch, *, row: bool, verdict: AccessVerdict
+    ) -> None:
+        user = _User(model=True, row=row)
+        decision = self._decide(
+            info, monkeypatch, (_ROW,), user, props_lookup({"account": "acme"})
+        )
+        assert decision.verdict is verdict
+
+    def test_a_request_without_a_user_is_signed_out(self, info, monkeypatch) -> None:
+        monkeypatch.setattr(
+            component_access, "declared", lambda _path: AccessRule((_SIGNED_IN,))
+        )
+        assert decide(info, None).denial == Denial("login", _SIGNED_IN)
+
+    @pytest.mark.parametrize(("granted", "shown"), [(True, True), (False, False)])
+    def test_a_ruled_ui_shows_what_a_passed_rule_shows(
+        self, info, monkeypatch, *, granted: bool, shown: bool
+    ) -> None:
+        monkeypatch.setattr(
+            component_access, "declared", lambda _path: AccessRule((_SIGNED_IN,))
+        )
+        assert passed(info, granted=granted) is shown
+        assert ruled(info)

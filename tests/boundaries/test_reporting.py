@@ -2,14 +2,16 @@ import logging
 from unittest.mock import patch
 
 import pytest
+from django.core.signals import got_request_exception
 
-from next.boundaries import Boundary, boundary_failed, contain
-from next.defer import Addressing, ErrorKind
+from next.boundaries import boundary_failed, contain
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import Boundary, ErrorKind
 from next.diagnostics import QUIET_PERIOD
 from next.static import StaticCollector
 from next.testing import capture_signals
 from next.transactions import savepoints
-from tests.support.boundaries import RecordingFallback, raising
+from tests.support.boundaries import RecordingErrorUI, raising
 
 
 LOUD = "loud"
@@ -21,16 +23,16 @@ class TestReporting:
     def test_the_failure_is_logged_once_per_quiet_period_with_its_digest(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        fallback = RecordingFallback()
+        error_ui = RecordingErrorUI()
         with caplog.at_level(logging.ERROR, "next.boundaries"):
             for _ in range(2):
                 contain(
                     Boundary("card", Addressing.COMPONENT),
                     raising(ValueError()),
-                    fallback,
+                    error_ui,
                 )
         (record,) = [r for r in caplog.records if r.name == "next.boundaries"]
-        assert record.digest == fallback.calls[0][0].digest
+        assert record.digest == error_ui.calls[0][0].digest
         assert record.exc_info is not None
         assert record.exc_info[0] is ValueError
         assert "component 'card'" in record.getMessage()
@@ -40,20 +42,20 @@ class TestReporting:
     ) -> None:
         now = [1000.0]
         monkeypatch.setattr("next.diagnostics.monotonic", lambda: now[0])
-        fallback = RecordingFallback()
+        error_ui = RecordingErrorUI()
         with caplog.at_level(logging.DEBUG, "next.boundaries"):
             for _ in range(3):
                 contain(
                     Boundary("card", Addressing.COMPONENT),
                     raising(ValueError()),
-                    fallback,
+                    error_ui,
                 )
             now[0] += QUIET_PERIOD
             contain(
-                Boundary("card", Addressing.COMPONENT), raising(ValueError()), fallback
+                Boundary("card", Addressing.COMPONENT), raising(ValueError()), error_ui
             )
         records = [r for r in caplog.records if r.name == "next.boundaries"]
-        assert [r.digest for r in records] == [e.digest for e, _k in fallback.calls]
+        assert [r.digest for r in records] == [e.digest for e, _k in error_ui.calls]
         assert [r.levelno for r in records] == [
             logging.ERROR,
             logging.DEBUG,
@@ -68,13 +70,24 @@ class TestReporting:
             )
         )
 
+    def test_a_contained_failure_is_handled_so_django_hears_of_no_exception(
+        self,
+    ) -> None:
+        with capture_signals(got_request_exception) as recorder:
+            contain(
+                Boundary("card", Addressing.COMPONENT),
+                raising(ValueError()),
+                RecordingErrorUI(),
+            )
+        assert len(recorder) == 0
+
     def test_the_signal_carries_the_failure(self) -> None:
         request = object()
         with capture_signals(boundary_failed) as recorder:
             html = contain(
                 Boundary("card", Addressing.COMPONENT, request=request),
                 raising(ValueError("x")),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         event = recorder.first_for(boundary_failed)
         assert event.sender is contain
@@ -94,7 +107,7 @@ class TestReporting:
             contain(
                 Boundary("card", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         send.assert_not_called()
 
@@ -111,7 +124,7 @@ class TestReporting:
                 html = contain(
                     Boundary("card", Addressing.COMPONENT, collector=collector),
                     raising(ValueError()),
-                    RecordingFallback(),
+                    RecordingErrorUI(),
                 )
         finally:
             boundary_failed.disconnect(receiver, sender=contain)

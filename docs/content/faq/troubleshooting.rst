@@ -458,8 +458,8 @@ Verify that ``DIRS`` and ``APP_DIRS`` in your page backends do not overlap.
 Routes do not refresh
 ~~~~~~~~~~~~~~~~~~~~~
 
-The bundled ``FileRouterBackend`` refreshes automatically when the dev server detects a filesystem change.
-The manual ``router_manager.reload()`` call is only for a custom backend that reads routes from a non-filesystem source such as a database.
+The bundled ``FilePageBackend`` refreshes automatically when the dev server detects a filesystem change.
+The manual ``route_manager.reload()`` call is only for a custom backend that reads routes from a non-filesystem source such as a database.
 See :doc:`/content/howto/reload-routes-from-code`.
 
 Template tags look undefined

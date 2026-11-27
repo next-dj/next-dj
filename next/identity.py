@@ -1,10 +1,10 @@
 """The subject a request proves, and the read-only session reads that prove it."""
 
-import functools
+import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from importlib import import_module
-from typing import ClassVar, NamedTuple, cast, override
+from typing import ClassVar, Final, NamedTuple, cast, override
 
 from django.conf import settings
 from django.contrib import auth
@@ -14,6 +14,11 @@ from django.contrib.sessions.backends.db import SessionStore as DatabaseStore
 from django.http import HttpRequest
 from django.http.response import HttpResponseBase
 from django.utils.crypto import salted_hmac
+
+from next.caches import pure_cache
+
+
+_BOUND_LABEL: Final = b"next.bound.subject\x00"
 
 
 class LiveIdentity(NamedTuple):
@@ -26,10 +31,12 @@ class LiveIdentity(NamedTuple):
 class SubjectBinding(ABC):
     """Decide what a credential is bound to, and the subject a later request proves.
 
-    `needs_sessions` marks a binding that reads the session, which needs its app.
+    `binds` false marks one tying nothing, `shared` the subjects many visitors prove.
     """
 
     needs_sessions: ClassVar[bool] = False
+    binds: ClassVar[bool] = True
+    shared: ClassVar[frozenset[str]] = frozenset()
 
     @abstractmethod
     def issue(self, request: HttpRequest) -> str:
@@ -94,6 +101,17 @@ class TicketBinding(SubjectBinding):
 def subject_digest(subject: str, salt: str) -> str:
     """Return a keyed digest of `subject` under `salt`, which never yields it back."""
     return salted_hmac(salt, subject, algorithm="sha256").hexdigest()
+
+
+def bound_salt(purpose: str, subject: str) -> str:
+    """Return the signer salt of a credential bound to `subject`, `purpose` for none.
+
+    The salt never leaves the server, so a plain hash survives a `SECRET_KEY` rotation.
+    """
+    if not subject:
+        return purpose
+    digest = hashlib.sha256(_BOUND_LABEL + subject.encode()).hexdigest()
+    return f"{purpose}.{digest}"
 
 
 def request_subject(request: HttpRequest, binding: SubjectBinding, salt: str) -> str:
@@ -175,7 +193,7 @@ class _ReadOnlyStore(SessionBase):
         return
 
 
-@functools.cache
+@pure_cache()
 def read_only_store(engine: type[SessionBase]) -> type[SessionBase]:
     """Return the engine's store class with every write turned into a no-op.
 
@@ -243,6 +261,7 @@ __all__ = [
     "TicketBinding",
     "account_parts",
     "account_subject",
+    "bound_salt",
     "live_store",
     "read_only_store",
     "request_subject",

@@ -23,7 +23,7 @@ SENTINEL = "[data-next-key='audit-rows-more']"
 SHOW_OLDER = "a[data-next-key='audit-rows-more']"
 SHOW_NEWER = "a[data-next-key='audit-rows-less']:not([hidden])"
 END_MARKER = "[data-next-key='audit-rows-more'] [data-audit-end]"
-WINDOW_URL = re.compile(r"/admin/audit/\?cursor=[\w-]+&restore=1$")
+WINDOW_URL = re.compile(r"/admin/audit/\?cursor=[\w-]+&_restore=cursor$")
 
 
 def log_keys(**filters: str) -> list[str]:

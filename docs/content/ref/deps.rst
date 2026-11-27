@@ -53,6 +53,19 @@ A ``compile_resolve`` that is present but not callable is refused with a ``TypeE
 The async replay of a plan, the one an async page or component render runs, asks it once per parameter and awaits the ``AsyncParameterFiller`` it returns, and ``None`` keeps the parameter on the sync filler.
 ``RegisteredParameterProvider`` answers ``None`` and declares ``blocking``, ``True`` unless a provider that only reads memory sets it ``False``, which ``static_blocking`` reads to decide whether the async replay runs the filler as a blocking segment on the request thread.
 
+``static_reach`` is declared by ``ReachingParameterProvider`` and names each callable that filling a parameter calls, as a pair of the key it is memoised under and the callable, with ``None`` as the key of a callable resolved inline such as the source of ``Context(callable)``.
+The compiler reads it once per async plan, so a key two consumers of one render reach is shared through the request scope and runs once, whether the dependency is sync or async.
+``RegisteredParameterProvider`` answers an empty tuple, and a provider without the hook still resolves correctly while the keys it reaches are computed in its own segment.
+
+``static_answers`` is declared by ``AnsweringParameterProvider`` and tells whether filling a parameter raises ``Http404`` or ``PermissionDenied`` by contract, as ``ObjectProvider`` does for a ``DObject`` row the scope does not see.
+A ``@context`` callable with such a parameter, directly or through a callable ``static_reach`` names, runs before the shell of a deferred page boundary, see :ref:`topics-boundaries-loading`.
+``RegisteredParameterProvider`` answers ``False``, and a provider without the hook never makes a callable run before the shell.
+
+``static_reads`` is declared by ``ReadingParameterProvider`` and returns a ``ContextReads`` that tells the context graph of a page what filling a parameter reads, the context ``keys`` the parameter names itself, the ``nested`` keys it reads under another name, the named ``dependencies`` it resolves, and the ``calls`` it runs as ``static_reach`` pairs, whose own parameters the graph reads in turn.
+The graph orders the ``@context`` callables of a page by these reads, so two callables that read nothing of each other run side by side in an async render.
+``READS_NOTHING`` stands for a parameter filled from the request alone, as the URL kwargs, the query, the form, and the consent providers answer.
+``RegisteredParameterProvider`` answers ``READS_EVERY``, and so does a provider without the hook, which orders its callable after every one before it.
+
 .. automodule:: next.deps.providers
    :members:
 
@@ -119,6 +132,7 @@ Cache
 ~~~~~
 
 ``DependencyCache`` stores what a named ``Depends("name")`` and a ``Depends(factory)`` returned and the rows ``DObject`` loads, so each of them runs once per cache, within one render unit on a sync and an async render alike, see :ref:`topics-dependency-injection`.
+A form action dispatch publishes its cache on the request under the attribute ``REQUEST_DEP_CACHE_ATTR`` names, and ``render_dep_cache`` hands a render that cache, so a hook and the render it triggers share their providers.
 
 .. automodule:: next.deps.cache
    :members:
@@ -149,22 +163,7 @@ A context key cannot shadow a reserved resolver input.
 A context mapping reaches resolution as it is, on the page path and on the component path alike, and the reserved names are invisible to the name-based providers rather than stripped from a copy.
 See :doc:`/content/internals/di-resolver` for the resolution detail.
 
-Request scope
-~~~~~~~~~~~~~
-
-``RequestScope`` computes each shared dependency once per async render as a task the scope owns, and every later reader receives the same value or the same error.
-Only the loop thread that owns a scope computes into it, while ``get`` and ``layer()`` work from any thread.
-``layer()`` opens a child that keeps its own writes and reads its parent on a miss, and ``close()`` runs the close callbacks, fails the waiters, and cancels what is still running.
-Each async deferred job of a response resolves in a layer of the response scope, so it reads what the shell left and keeps its own values, while loader batches still span every job through the root.
-A component instance rendered under a request scope resolves in a layer of its render unit that ``RequestMemo.instance()`` opens, so it reads what the page resolved and never a value another instance computed from its own props.
-A value is therefore shared page-wide only when the page resolved it, since the page's providers read the request, the URL kwargs and the page context but no props or template context of a component.
-``request_memo`` is the context variable that holds the ``RequestMemo`` of the current render, its scope and the keys it shares, and a render with no async callable sets none.
-
-``render_scope(seed)`` opens the scope of one async render over the seed of the request, and ``bridged_scope(seed, work)`` awaits ``work`` in a scope of its own from sync code through the bridge.
-Both live in ``next.deps.scope`` beside ``RequestScope``.
-
-.. automodule:: next.deps.scope
-   :members: RequestScope, render_scope, bridged_scope
+The request scope an async render shares its dependencies through and the runner of its blocking steps are framework-internal, see :ref:`internals-di-request-scope`.
 
 Loader
 ~~~~~~
@@ -172,25 +171,13 @@ Loader
 ``Loader(batch, *, max_batch=None, window=None)`` gathers the keys one request scope loads into one call of ``batch`` per window.
 ``batch`` is a plain ``def`` or an ``async def`` that takes a sequence of keys and returns a mapping by key or a sequence in key order.
 ``await loader.load(key)`` loads on the event loop, and ``loader.load_sync(key)`` on a thread, refusing an event loop thread.
-A ``max_batch`` or ``window`` left at ``None`` follows ``DEFER["LOADER_MAX_BATCH"]`` and ``DEFER["BATCH_WINDOW"]``, see :doc:`settings`.
+A ``max_batch`` or ``window`` left at ``None`` follows ``LOADER["MAX_BATCH"]`` and ``LOADER["WINDOW"]``, see :doc:`settings`.
 An ``async def`` batch function runs on the event loop and may not reach the ORM or a thread-sensitive ``sync_to_async`` call, which raises ``RuntimeError``.
 ``rows(Model)`` returns the shared loader of ``Model`` rows by primary key, one ``pk__in`` query per batch through the default manager with no access scoping.
 See :doc:`/content/topics/boundaries/async` for the guide.
 
 .. automodule:: next.deps.loader
    :members: Loader, rows
-
-Segment runner
-~~~~~~~~~~~~~~
-
-The async replay of a plan hands each blocking step to ``segment_runner``, a context variable whose default ``run_on_request_thread`` runs the step through ``sync_to_async(thread_sensitive=True)``, on the thread Django gives the request.
-A scope swaps the runner by setting the variable, and a ``SegmentRunner`` is any callable that takes the step and returns an awaitable of its result.
-
-``bridge(site, work)`` runs the async ``work`` a sync caller meets through the bridge port, with ``site`` naming the dependency or the component the call is for.
-Under ``DEBUG`` it logs each site once with the cost of the bridge beyond the work, so a sync template that renders an async component or a sync resolve that meets an async dependency shows up in the log.
-
-.. automodule:: next.deps.runner
-   :members: SegmentRunner, run_on_request_thread, segment_runner, bridge
 
 Signals
 -------

@@ -325,7 +325,7 @@ A test that switches to a URLconf with ``pages()`` includes, or away from one, t
    def test_staff_log(next_client: NextClient) -> None:
        assert next_client.get("/staff/log/").status_code == 200
 
-Code that assigns ``ROOT_URLCONF`` directly calls ``router_manager.reload()`` from ``next.urls`` after each assignment, the one that restores the old value included.
+Code that assigns ``ROOT_URLCONF`` directly calls ``route_manager.reload()`` from ``next.urls`` after each assignment, the one that restores the old value included.
 
 NextClient
 ----------
@@ -899,7 +899,7 @@ A second call turns them on.
    def test_deploy_checks_pass() -> None:
        call_command("check", deploy=True, fail_level="WARNING", verbosity=0)
 
-That run adds ``next.E223``, ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, ``next.W149``, ``next.W151``, and ``next.W186``, see :doc:`/content/deployment/checklist` for what each one reports.
+That run adds ``next.E223``, ``next.W083``, ``next.W090``, ``next.W110``, ``next.W111``, ``next.W118``, ``next.W119``, ``next.W122``, ``next.W149``, and ``next.W151``, see :doc:`/content/deployment/checklist` for what each one reports.
 A suite that gates on ``fail_level="WARNING"`` runs against settings that name ``SITE["URL"]``, see :doc:`seo/auditing`.
 The same suite selects a shared realtime broker, or lists ``next.W149`` in ``SILENCED_SYSTEM_CHECKS`` for a single-process deployment, because the default ``MemoryBroker`` keeps topics inside one process.
 A suite on ``RedisBroker`` sets the connection limit ``next.W151`` asks for, or lists the code in ``SILENCED_SYSTEM_CHECKS``.

@@ -5,12 +5,13 @@ from unittest.mock import patch
 
 import pytest
 
+from next.boundaries.options import DeferMode
 from next.caches import BoundedCache
 from next.components import trip
 from next.components.context import ContextFunction
 from next.components.defer import DeferDeclarations
 from next.components.info import ComponentInfo
-from next.defer import DeferMode
+from next.introspect import DeclaringSite
 
 
 _resolve = Path.resolve
@@ -43,7 +44,7 @@ def declared(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     module = tmp_path / "card" / "component.py"
     held = DeferDeclarations()
     held.defer(
-        (module, True),
+        DeclaringSite(module, True, {}),
         {"mode": "load", "props": ("sku", "n", "untyped"), "tokens": {"max_age": 9}},
     )
     monkeypatch.setattr(trip, "defer_declarations", held)

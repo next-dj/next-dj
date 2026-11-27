@@ -1,6 +1,6 @@
-// The CSRF token a mutation sends. A page in a shared cache ships only the token
-// endpoint, so the token is fetched on first use and kept for the life of the page.
-// The fetch code ships in next.csrf.min.js, which only such a page loads.
+// The CSRF token a mutation sends. A page that minted no token ships only the endpoint,
+// so a mutation reads the CSRF cookie when scripts may, and otherwise fetches the token
+// once and keeps it for the life of the page. The fetch code ships in next.csrf.min.js.
 
 import { defaultFetch } from "./adapters";
 import type { LazyModule } from "./chunks";
@@ -27,6 +27,7 @@ export interface Csrf extends CsrfSource {
   cancelPending(): void;
   /** Prefetch the token on the first focus or press inside an action form. */
   install(doc: Document): () => void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -45,9 +46,11 @@ export function readCsrf(value: unknown): CsrfPayload | undefined {
   const header = asString(value.header);
   const token = asString(value.token);
   const url = asString(value.url);
+  const cookie = asString(value.cookie);
   if (header === undefined) return undefined;
   if (token !== undefined) return { header, token };
-  return url === undefined ? undefined : { header, url };
+  if (url === undefined) return undefined;
+  return cookie === undefined ? { header, url } : { header, url, cookie };
 }
 
 /** Fetch a token from a same-origin endpoint, the function the csrf chunk exports. */
@@ -108,10 +111,22 @@ export function createCsrf(deps: CsrfDeps): Csrf {
     return minted;
   }
 
+  // A cookie scripts may read holds the secret Django accepts in the header as well.
+  function readCookie(name: string | undefined): string | undefined {
+    const prefix = `${name}=`;
+    const found =
+      name && doc.cookie.split("; ").find((pair) => pair.startsWith(prefix));
+    return found ? found.slice(prefix.length) : undefined;
+  }
+
   function ensure(signal?: AbortSignal): Promise<CsrfPayload | undefined | null> {
-    const url = payload?.url;
-    if (payload?.token !== undefined || url === undefined)
-      return Promise.resolve(payload);
+    const held = payload;
+    if (held?.url === undefined || held.token !== undefined)
+      return Promise.resolve(held);
+    // Read per mutation, so a cookie a login rotated in another tab is the one sent.
+    const { header, cookie, url } = held;
+    const token = readCookie(cookie);
+    if (token) return Promise.resolve({ header, token });
     // An aborted caller starts no mint.
     if (signal?.aborted === true) return bounded(Promise.resolve(payload), signal);
     if (pending === undefined) {
@@ -145,7 +160,7 @@ export function createCsrf(deps: CsrfDeps): Csrf {
     cancelPending();
   }
 
-  return {
+  const exposed = {
     current: () => payload,
     ensure,
     cancelPending,
@@ -163,6 +178,9 @@ export function createCsrf(deps: CsrfDeps): Csrf {
       target.addEventListener("pointerdown", prefetch, options);
       return () => controller.abort();
     },
-    _reset: () => set(undefined),
-  };
+  } satisfies Omit<Csrf, "_reset"> as Csrf;
+
+  TEST: exposed._reset = () => set(undefined);
+
+  return exposed;
 }

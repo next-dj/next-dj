@@ -46,8 +46,10 @@ from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import FormWizard
 from next.pages import page
 from next.pages.registry import PageContextRegistry
+from next.requests import RequestKind
 from next.testing import capture_signals, override_dependency
-from next.transactions import WRITES, AtomicOverride, ViewKind
+from next.transactions import AtomicOverride
+from next.transactions.savepoints import WRITES
 from tests.support import DeferringProvider, bound_dependency
 
 
@@ -1645,10 +1647,10 @@ class TestWizardOutcomePayload:
 
 
 _ACTION_EVENTS: list[str] = []
-_ACTION_KINDS: list[ViewKind] = []
+_ACTION_KINDS: list[RequestKind] = []
 
 
-def record_action_kind(request: HttpRequest, kind: ViewKind) -> tuple[str, ...]:
+def record_action_kind(request: HttpRequest, kind: RequestKind) -> tuple[str, ...]:
     _ACTION_KINDS.append(kind)
     return ()
 
@@ -1740,7 +1742,7 @@ class TestActionTransaction:
                 "atomic_probe",
                 meta,
             )
-        assert _ACTION_KINDS == [ViewKind.ACTION]
+        assert _ACTION_KINDS == [RequestKind.ACTION]
         assert _ACTION_EVENTS == ["commit", "atomic=False"]
 
     def test_a_bad_request_leaves_no_transaction_open(self, mock_http_request) -> None:
@@ -1855,12 +1857,14 @@ class TestLazyActionTransaction:
     def _clear(self):
         _ACTION_EVENTS.clear()
 
-    def test_a_hook_before_the_write_runs_at_once(self, mock_http_request) -> None:
+    def test_a_hook_before_the_write_waits_for_the_commit(
+        self, mock_http_request
+    ) -> None:
         meta = _atomic_meta(_writing_handler(), atomic=_LAZY_ACTION)
         FormActionDispatch.dispatch(
             RegistryFormActionBackend(), _post(mock_http_request), "atomic_probe", meta
         )
-        assert _ACTION_EVENTS == ["commit", "atomic=False"]
+        assert _ACTION_EVENTS == ["atomic=True", "commit"]
         assert Group.objects.filter(name="from-action").exists()
 
     def test_a_failure_after_the_write_rolls_back(self, mock_http_request) -> None:
@@ -1934,9 +1938,9 @@ class TestActionTransactionWiring:
     def test_atomic_requests_on_two_aliases_leaves_the_action_view_unwrapped(
         self, monkeypatch
     ) -> None:
-        view = RegistryFormActionBackend()._action_view
         declared = {"ATOMIC_REQUESTS": True}
         monkeypatch.setattr(
             connections, "settings", {"default": declared, "replica": declared}
         )
+        view = RegistryFormActionBackend()._action_view
         assert BaseHandler().make_view_atomic(view) is view

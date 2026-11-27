@@ -27,6 +27,7 @@ from tests.support import (
     routed,
     write_page,
 )
+from tests.support.checks import written
 
 
 LOCALE = {
@@ -91,7 +92,7 @@ class TestCsrfDelivery:
 
     @pytest.mark.parametrize("value", ["auto", "eager", "lazy", 3])
     def test_a_known_mode_or_another_type_is_silent(self, value) -> None:
-        with override_settings(NEXT_FRAMEWORK={"CSRF_DELIVERY": value}):
+        with written({"CSRF_DELIVERY": value}):
             assert check_csrf_delivery() == []
 
     def test_an_unknown_mode_is_e132(self) -> None:
@@ -154,7 +155,7 @@ class TestSharedPages:
         root = _tree(tmp_path, "template = 'x'\ncache = -1\n")
         manager = MagicMock()
         manager.backends = (RootPagesRouter([root]), RootPagesRouter([root]))
-        with patch.object(responses, "get_router_manager", return_value=(manager, [])):
+        with patch.object(responses, "get_route_manager", return_value=(manager, [])):
             assert check_ids(check_page_response_declarations()) == ["next.E131"]
 
 

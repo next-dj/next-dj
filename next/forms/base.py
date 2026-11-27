@@ -56,7 +56,7 @@ _FOREIGN_ROOTS: Final[tuple[tuple[str, str], ...]] = (
 )
 
 # Both roots are constants, but settings repoint BASE_DIR so that stays uncached.
-_foreign_file_cache: BoundedCache[str, bool] = BoundedCache()
+_foreign_file_cache: BoundedCache[str, bool] = BoundedCache(depends=())
 
 # HttpResponseRedirect subclasses HttpResponse, so a login redirect needs no arm.
 type PermissionOutcome = bool | HttpResponse | None

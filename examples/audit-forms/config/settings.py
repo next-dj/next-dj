@@ -85,7 +85,7 @@ SILENCED_SYSTEM_CHECKS = ["next.W059"]
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             # Project-level page root carrying the shared HTML envelope.
             "DIRS": [str(BASE_DIR / "portal")],
@@ -105,7 +105,6 @@ NEXT_FRAMEWORK = {
         "BACKEND": "next.forms.CacheFormWizardBackend",
         "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
     },
-    "DEFER": {"MORE": {"MAX_RESTORE": 3}},
     "STATIC_VERSION": "v1",
     "SITE": {"URL": "https://access.example", "NAME": "next.dj audit"},
     "METADATA": {

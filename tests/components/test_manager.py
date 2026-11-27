@@ -9,7 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.template import Context, Template
 from django.test import RequestFactory, override_settings
 
-from next.caches import DEFAULT_CACHE_SIZE
+from next.caches import DEFAULT_CACHE_SIZE, FRAMEWORK
 from next.components import (
     CachedComponentTemplateLoader,
     ComponentInfo,
@@ -29,10 +29,7 @@ from next.components import (
     register_components_folder_from_router_walk,
     render_component,
 )
-from next.components.manager import (
-    _configured_template_loader_class,
-    forget_component_backends,
-)
+from next.components.manager import _configured_template_loader_class
 from next.components.renderers import (
     TemplateSource,
     _CompiledTemplate,
@@ -362,11 +359,11 @@ class TestSettingsReloadedIsLazy:
         assert list(recorder) == []
         assert isinstance(manager.backends[0], DummyComponentsBackend)
 
-    def test_receiver_invalidates_the_module_level_manager(self) -> None:
-        """The wired receiver drops the shared manager state without a rebuild."""
+    def test_a_settings_reload_invalidates_the_module_level_manager(self) -> None:
+        """The reload drops the shared manager state without a rebuild."""
         components_manager._ensure_backends()
         with patch("next.components.manager.load_backends") as load_backends_mock:
-            forget_component_backends()
+            FRAMEWORK.move()
         load_backends_mock.assert_not_called()
         assert components_manager._loaded is False
 
@@ -1373,7 +1370,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
@@ -1403,7 +1400,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
@@ -1435,7 +1432,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
@@ -1501,7 +1498,7 @@ class TestGetComponentPathsForWatch:
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
                         {
-                            "BACKEND": "next.urls.FileRouterBackend",
+                            "BACKEND": "next.urls.FilePageBackend",
                             "PAGES_DIR": "pages",
                             "APP_DIRS": False,
                             "DIRS": [str(pages_root)],
@@ -1512,7 +1509,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 side_effect=ValueError("bad config"),
             ),
         ):
@@ -1528,7 +1525,7 @@ class TestGetComponentPathsForWatch:
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
                         {
-                            "BACKEND": "next.urls.FileRouterBackend",
+                            "BACKEND": "next.urls.FilePageBackend",
                             "PAGES_DIR": "pages",
                             "APP_DIRS": False,
                             "DIRS": [str(pages_root)],
@@ -1560,7 +1557,7 @@ class TestGetComponentPathsForWatch:
                 NEXT_FRAMEWORK={
                     "PAGE_BACKENDS": [
                         {
-                            "BACKEND": "next.urls.FileRouterBackend",
+                            "BACKEND": "next.urls.FilePageBackend",
                             "PAGES_DIR": "pages",
                             "APP_DIRS": False,
                             "DIRS": [str(pages_root)],
@@ -1717,7 +1714,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 return_value=RaisingRootsRouter(),
             ),
         ):
@@ -1744,7 +1741,7 @@ class TestGetComponentPathsForWatch:
                 }
             ),
             patch(
-                "next.urls.ports.RouterAccessImpl.create_backend",
+                "next.urls.ports.RouteAccessImpl.create_backend",
                 return_value=RootPagesRouter([pages_root]),
             ),
         ):
@@ -1761,7 +1758,7 @@ class TestGetComponentPathsForWatch:
             NEXT_FRAMEWORK={
                 "PAGE_BACKENDS": [
                     {
-                        "BACKEND": "next.urls.FileRouterBackend",
+                        "BACKEND": "next.urls.FilePageBackend",
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],

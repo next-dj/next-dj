@@ -3,8 +3,9 @@
 import copy
 from dataclasses import dataclass, field, fields
 
-from next.conf.defer import atomic_choice
-from next.transactions import AtomicOverride, override_of, override_problem
+from next.conf.transactions import atomic_choice
+from next.transactions import AtomicOverride
+from next.transactions.policy import override_of, override_problem
 
 
 @dataclass(slots=True)

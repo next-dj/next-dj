@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
+import type { Applied } from "./apply";
+import type { Kernel } from "./kernel";
 import { createPrefetch } from "./prefetch";
 import { CONTENT_TYPE } from "./protocol";
 import type { Layout } from "./layout";
-import type { HistoryHost, Keeper, Prefetched, Settings } from "./router";
+import type { HistoryHost, Prefetched, Prefetcher, Settings } from "./router";
 import { chunkModules, historyHost } from "./test-doubles";
 import type { IntersectionAdapter } from "./triggers";
 
@@ -17,12 +19,14 @@ interface Asked {
 
 type Reply = Response | ((signal: AbortSignal) => Promise<Response>);
 
-type Prefetch = Pick<Keeper, "take" | "prefetch" | "drop">;
+type Prefetch = Prefetcher;
 
 const SHELL = { version: "v1", ops: [], layouts: [["L1", "D1", null]] };
 
 let listening: AbortController;
 let surface: PartialSurface;
+let kernel: Kernel;
+let applied: ((detail: Applied) => void)[];
 let asked: Asked[];
 let replies: Reply[];
 let chain: Layout[];
@@ -40,11 +44,12 @@ beforeEach(() => {
   chain = [["L1", "D1", "S1"]];
   settings = { prefetch: "intent", prefetch_delay: 0.02 };
   cleared = vi.fn<() => void>();
-  surface = createPartial({
+  applied = [];
+  ({ partial: surface, kernel } = createPartial({
     ...chunkModules,
     dispatch: () => undefined,
     mergeContext: () => undefined,
-  });
+  }));
 });
 
 afterEach(() => {
@@ -70,6 +75,13 @@ function shell(
 function host(): HistoryHost {
   return historyHost({
     partial: surface,
+    headers: (extra) => kernel.headers(extra),
+    parse: (type, body) => kernel.parse(type, body),
+    serve: (name, handler) => kernel.serve(name, handler),
+    hook: (phase, order, run) => {
+      if (phase === "applied") applied.push(run as (detail: Applied) => void);
+      kernel.hook(phase, order, run);
+    },
     settings: () => settings,
     chain: () => chain,
     ask: (href, signal, extra) => {
@@ -274,7 +286,7 @@ describe("intent", () => {
       configurable: true,
     });
     vi.spyOn(document, "hidden", "get").mockReturnValue(hidden);
-    settings = { prefetch: mode };
+    settings = { prefetch: mode as NonNullable<Settings["prefetch"]> };
     document.body.innerHTML = '<a id="l" href="/b/">B</a>';
     make();
     fire(document.getElementById("l")!, "pointerdown");
@@ -291,8 +303,7 @@ describe("intent", () => {
     document.body.innerHTML = '<a id="l" href="/b/">B</a>';
     make();
     fire(document.getElementById("l")!, "pointerover");
-    await wait(100);
-    expect(hrefs()).toEqual(["/b/"]);
+    await vi.waitFor(() => expect(hrefs()).toEqual(["/b/"]));
   });
 
   it("listens no more once its signal aborts", async () => {
@@ -459,6 +470,19 @@ describe("back-off and refusals", () => {
   });
 });
 
+describe("the refusals a page remembers", () => {
+  it("forgets the oldest refusal past two hundred and asks for it again", async () => {
+    const prefetch = make();
+    for (let page = 0; page <= 200; page += 1) {
+      replies = [new Response(null, { status: 204 })];
+      await prefetch.prefetch(at(`/p${page}/`));
+    }
+    await prefetch.prefetch(at("/p1/"));
+    await prefetch.prefetch(at("/p0/"));
+    expect(hrefs().slice(201)).toEqual(["/p0/"]);
+  });
+});
+
 describe("the cache", () => {
   it("hands a fresh answer to one visit only", async () => {
     const prefetch = make();
@@ -530,7 +554,7 @@ describe("the cache", () => {
     const prefetch = make();
     await prefetch.prefetch(at("/a/"));
     await prefetch.prefetch(at("/b/"));
-    const headers = vi.spyOn(surface, "_headers");
+    const headers = vi.spyOn(kernel, "headers");
     headers.mockReturnValue(new Headers({ "X-Next-Version": "v2" }));
     expect(prefetch.take(at("/a/"))).toBeUndefined();
     headers.mockReturnValue(new Headers({ "X-Next-Version": "v1" }));
@@ -891,10 +915,10 @@ describe("viewport", () => {
     const seen = observer();
     make(seen);
     byId("s").innerHTML = '<a id="b" href="/b/">b</a>';
-    document.dispatchEvent(
-      new CustomEvent("partial:applied", { detail: { nodes: [byId("s"), byId("a")] } }),
-    );
-    document.dispatchEvent(new CustomEvent("partial:applied", { detail: {} }));
+    for (const run of applied) {
+      run({ nodes: [byId("s"), byId("a")] } as unknown as Applied);
+      run({} as Applied);
+    }
     expect(seen.watched).toEqual([byId("a"), byId("b")]);
   });
 });
@@ -915,13 +939,13 @@ describe("stylesheets of a prefetched page", () => {
       shell({
         ...SHELL,
         assets: [
-          { kind: "css", url: "/site.css" },
-          { kind: "css", url: "/b.css" },
-          { kind: "css", url: "/b.css" },
+          { kind: "css", url: "/site.css", load: "link" },
+          { kind: "css", url: "/b.css", load: "link" },
+          { kind: "css", url: "/b.css", load: "link" },
           { kind: "x", url: "/c.css", load: "link" },
           { kind: "css", url: "", inline: "p{}" },
           { kind: "css", url: "/d.css", inline: "p{}" },
-          { kind: "js", url: "/b.js" },
+          { kind: "js", url: "/b.js", load: "script" },
           "junk",
         ],
       }),
@@ -941,7 +965,9 @@ describe("stylesheets of a prefetched page", () => {
   it("prefetches the stylesheets of a page asked for by the viewport alone", async () => {
     settings = { prefetch: "viewport" };
     document.body.innerHTML = '<a id="v" href="/v/">v</a>';
-    replies = [shell({ ...SHELL, assets: [{ kind: "css", url: "/v.css" }] })];
+    replies = [
+      shell({ ...SHELL, assets: [{ kind: "css", url: "/v.css", load: "link" }] }),
+    ];
     let show: (visible: boolean) => void = () => undefined;
     make({
       observe: (_el, onView) => {
@@ -1067,7 +1093,7 @@ describe("the press", () => {
   ])(
     "under %s answers a %s press with %o",
     async (_name, mode, markup, type, extra) => {
-      settings = { prefetch: "intent", ...mode };
+      settings = { prefetch: "intent", ...(mode as Pick<Settings, "press">) };
       const el = link(markup);
       make();
       press(el, { pointerType: type });
@@ -1109,7 +1135,7 @@ describe("the press", () => {
       configurable: true,
     });
     vi.spyOn(document, "hidden", "get").mockReturnValue(hidden);
-    settings = { prefetch: mode, press: "all" };
+    settings = { prefetch: mode as NonNullable<Settings["prefetch"]>, press: "all" };
     const el = link();
     make();
     press(el);
@@ -1242,7 +1268,11 @@ describe("the press", () => {
   });
 
   it("keeps the envelope a released press already received for the next visit", async () => {
-    const raw = { ...SHELL, complete: true, assets: [{ kind: "css", url: "/b.css" }] };
+    const raw = {
+      ...SHELL,
+      complete: true,
+      assets: [{ kind: "css", url: "/b.css", load: "link" }],
+    };
     const response = shell(raw);
     replies = [response];
     const el = link();
@@ -1319,7 +1349,7 @@ describe("the press", () => {
     const el = link();
     const prefetch = make();
     await prefetch.prefetch(at("/b/"));
-    vi.spyOn(surface, "_headers").mockReturnValue(
+    vi.spyOn(kernel, "headers").mockReturnValue(
       new Headers({ "X-Next-Version": "v2" }),
     );
     press(el);
@@ -1499,10 +1529,7 @@ describe("layer links", () => {
     return wait(40);
   }
 
-  const send = (
-    href = "/m/",
-    name = "sheet",
-  ): ReturnType<NonNullable<PartialSurface["_take"]>> => surface._take?.(href, name);
+  const send = (href = "/m/", name = "sheet") => kernel.served("take")?.(href, name);
 
   const request = (): [string, RequestInit] => [
     at("/m/"),
@@ -1593,7 +1620,7 @@ describe("layer links", () => {
   it("drops a kept layer answer of an asset version the page no longer runs", async () => {
     make();
     await hover(opener());
-    vi.spyOn(surface, "_headers").mockReturnValue(
+    vi.spyOn(kernel, "headers").mockReturnValue(
       new Headers({ "X-Next-Version": "v2" }),
     );
     expect(send()).toBeUndefined();
@@ -1678,7 +1705,7 @@ describe("layer links", () => {
     make();
     const el = opener();
     await hover(el);
-    const headers = vi.spyOn(surface, "_headers");
+    const headers = vi.spyOn(kernel, "headers");
     headers.mockReturnValue(new Headers({ "X-Next-Version": "v2" }));
     press(el);
     expect(sent).toHaveLength(2);
@@ -1742,7 +1769,7 @@ describe("layer links", () => {
     answers = [reply];
     make();
     await hover(opener());
-    vi.spyOn(surface, "_headers").mockReturnValue(
+    vi.spyOn(kernel, "headers").mockReturnValue(
       new Headers({ "X-Next-Version": "v2" }),
     );
     expect(send()).toBeUndefined();

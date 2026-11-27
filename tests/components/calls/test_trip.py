@@ -5,14 +5,13 @@ import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.template import Context, TemplateSyntaxError
 
-from next.components import ComponentContextConflictError
+from next.boundaries.options import DeferMode
+from next.components import ComponentContextConflictError, tags as component_tags
 from next.components.trip import TripInput, prop_types
-from next.defer import DeferMode
-from next.suspense.components import deferring
-from next.suspense.tokens import decode_props
-from next.suspense.tokens.props import DEFAULT_LIMIT
-from next.suspense.trip import claims_for
-from next.templatetags import components as component_tags
+from next.defer.components import deferring
+from next.defer.tokens import decode_props
+from next.defer.tokens.props import DEFAULT_LIMIT
+from next.defer.trip import claims_for
 from next.testing import boundary_errors
 from next.testing.boundaries import recorded_failures
 from tests.components.sites import HEAD, PROPS, TRIP, ComponentSite, Member

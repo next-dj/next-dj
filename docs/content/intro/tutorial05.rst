@@ -214,7 +214,7 @@ Open ``http://127.0.0.1:8000/about/`` and confirm that the new page is served wi
 .. note::
 
    The framework emits ``action_dispatched`` after a successful handler run, recorded above through ``SignalRecorder``.
-   The router manager emits a companion ``router_reloaded`` signal each time it rebuilds its backends, for example on a settings reload.
+   The route manager emits a companion ``routes_reloaded`` signal each time it rebuilds its backends, for example on a settings reload.
    A test that swaps ``NEXT_FRAMEWORK`` backends can subscribe to it the same way.
    See :doc:`/content/howto/observe-framework-signals` for the full subscriber pattern.
 

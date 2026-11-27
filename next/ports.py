@@ -2,25 +2,16 @@
 
 from __future__ import annotations
 
-from concurrent.futures import wait
 from contextlib import nullcontext
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
 
-from asgiref.sync import async_to_sync
 from django.core.exceptions import ImproperlyConfigured
 
 
 if TYPE_CHECKING:
-    import contextvars
-    from collections.abc import (
-        Awaitable,
-        Callable,
-        Collection,
-        Iterator,
-        Mapping,
-        MutableMapping,
-    )
-    from concurrent.futures import Future
+    from collections.abc import Callable, Collection, Iterator, Mapping, MutableMapping
     from contextlib import AbstractContextManager
     from pathlib import Path
 
@@ -29,12 +20,12 @@ if TYPE_CHECKING:
     from django.template import Context
     from django.urls import URLPattern
 
+    from next.boundaries.calls import DeferredCall
     from next.components.info import ComponentInfo
     from next.components.trip import TripInput
-    from next.defer import DeferredCall
+    from next.pages import Page
     from next.static import StaticCollector
-    from next.tasks import ContextSnapshot
-    from next.urls import RouterBackend, RouterManager, URLPatternParser
+    from next.urls import PageBackend, RouteManager, URLPatternParser
     from next.utils import PageRoot
 
 
@@ -87,28 +78,40 @@ class PageScan(Protocol):
     """
 
     def load_scanned_page_modules(
-        self, router_manager: RouterManager
+        self, route_manager: RouteManager
     ) -> list[tuple[str, Path]]:
         """Execute every routed `page.py`, answering the ones that loaded."""
 
 
-class RouterAccess(Protocol):
+class RouteAccess(Protocol):
     """The import seam `next.urls` opens for an area that cannot import it.
 
     `next.urls` imports `next.pages`, so the watcher and checks reach back through this.
     """
 
-    def create_backend(self, config: dict[str, Any]) -> RouterBackend:
-        """Return the router one `PAGE_BACKENDS` entry names."""
+    def create_backend(self, config: dict[str, Any]) -> PageBackend:
+        """Return the page backend one `PAGE_BACKENDS` entry names."""
 
-    def create_manager(self) -> RouterManager:
-        """Return a fresh manager over every configured router."""
+    def create_manager(self) -> RouteManager:
+        """Return a fresh manager over every configured page backend."""
 
     def url_parser(self) -> URLPatternParser:
         """Return the parser the file router routes bracket segments through."""
 
     def page_kwargs(self, root: PageRoot, trail: str) -> frozenset[str] | None:
         """Return the kwargs a page at `trail` of `root` answers, `None` if refused."""
+
+
+class PageViews(Protocol):
+    """Builds the view a routed page answers with.
+
+    `next.views` sits above `next.urls`, so the file router reaches the factory here.
+    """
+
+    def __call__(
+        self, page: Page, file_path: Path, /
+    ) -> Callable[..., HttpResponseBase] | None:
+        """Return the view of the page at `file_path`, `None` when it has no body."""
 
 
 class StaticAssets(Protocol):
@@ -138,6 +141,9 @@ class StaticAssets(Protocol):
     ) -> str:
         """Replace every placeholder token in `html` with rendered tags."""
 
+    def runtime_loads(self) -> bool:
+        """Return whether a page loads the runtime script, which every retry needs."""
+
 
 class SeoRoutes(Protocol):
     """The routes the seo area adds to the lazy urlpatterns.
@@ -159,53 +165,147 @@ class FormRoutes(Protocol):
         """Yield the URL patterns of every form backend."""
 
 
+class ScriptRender(Protocol):
+    """One page injection as the page script providers read it.
+
+    `entries` holds the request entries every provider added, once all of them ran.
+    """
+
+    @property
+    def request(self) -> HttpRequest | None:
+        """Return the request the page answers, `None` for a render without one."""
+
+    @property
+    def page_path(self) -> Path | None:
+        """Return the `page.py` the render belongs to, `None` outside a page."""
+
+    @property
+    def collector(self) -> StaticCollector:
+        """Return the collector holding the assets and notes of the render."""
+
+    @property
+    def runtime(self) -> bool:
+        """Return whether the page loads the runtime from its scripts placeholder."""
+
+    @property
+    def streams(self) -> bool:
+        """Return whether the page writes its deferred boundaries after the shell."""
+
+    @property
+    def entries(self) -> Mapping[str, object]:
+        """Return the request payload entries the providers added."""
+
+    def nonce(self) -> str | None:
+        """Return the request nonce, minted by the first call."""
+
+    def bundle_url(self, name: str) -> str | None:
+        """Return the URL of the declared bundle `name`, `None` if storage lacks it."""
+
+
+_NO_ENTRIES: Mapping[str, object] = MappingProxyType({})
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptShare:
+    """What one provider adds to the head, init payload and bundles of one render.
+
+    `shared` holds encoded entries every request of one configuration repeats, which
+    the injector escapes once, and `entries` the values of this request alone.
+    """
+
+    head: str = ""
+    entries: Mapping[str, object] = _NO_ENTRIES
+    shared: str = ""
+    after: Callable[[str | None], str] | None = None
+    eager: tuple[str, ...] = ()
+    bundles: tuple[str, ...] = ()
+    listed: frozenset[str] = frozenset()
+    enclose: Callable[[str], str] | None = None
+    finish: Callable[[str], str] | None = None
+    stylesheet: str = ""
+
+
 class PageScripts(Protocol):
-    """The third-party scripts one page render adds to its head and init payload.
+    """One area's part in the head, init payload and bundles of every page render.
 
-    `next.scripts` imports the static manager, so the injector reads it through this.
+    `next.static` sits below the features, so the injector reads them through this.
     """
 
-    def render(
-        self,
-        collector: StaticCollector,
-        *,
-        page_path: Path | None,
-        request: HttpRequest | None,
-        nonce: Callable[[], str | None],
-    ) -> tuple[str, Mapping[str, object]]:
-        """Return the head tags and the reserved payload entries of one render.
+    @property
+    def name(self) -> str:
+        """Return the name the list keys the provider by."""
 
-        `nonce` mints the request nonce, so it is called only when a tag is written.
-        """
+    @property
+    def priority(self) -> int:
+        """Return the rank the injector runs it by, the lowest first."""
+
+    @property
+    def keys(self) -> frozenset[str]:
+        """Return the init-payload keys it writes, which page context may not use."""
+
+    def applies(self) -> bool:
+        """Return whether it takes part in any render under the loaded settings."""
+
+    def share(self, render: ScriptRender, /) -> ScriptShare | None:
+        """Return what it adds to `render`, `None` for nothing."""
 
 
-class RealtimeNegotiation(Protocol):
-    """The transports and partial content types every page negotiates its stream on.
+class Ranked(Protocol):
+    """An implementation a `PortList` keys by name and orders by rank."""
 
-    `next.realtime` and `next.partial` import the static runtime, so it reads them here.
+    @property
+    def name(self) -> str:
+        """Return the name a later registration replaces it under."""
+
+    @property
+    def priority(self) -> int:
+        """Return the rank it runs by, the lowest first."""
+
+
+class PortList[T: Ranked]:
+    """Holds the ranked implementations `AppConfig.ready` registers, in run order.
+
+    Equal ranks keep their registration order, and `version` moves on every change.
     """
 
-    def transports(self) -> tuple[str, ...]:
-        """Return the enabled realtime transports in preference order."""
+    __slots__ = ("_items", "_version")
 
-    def content_types(self) -> tuple[str, str]:
-        """Return the content type of the active partial backend and the stock one."""
+    def __init__(self) -> None:
+        """Start empty, as a render before the app is ready takes no part from any."""
+        self._items: tuple[T, ...] = ()
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        """Return the counter every registration and reset moves."""
+        return self._version
+
+    def __iter__(self) -> Iterator[T]:
+        """Yield the implementations in run order."""
+        return iter(self._items)
+
+    def register(self, impl: T) -> None:
+        """Add `impl` in its rank, or put it in the place of the one of its name."""
+        kept = [item for item in self._items if item.name != impl.name]
+        kept.append(impl)
+        self._items = tuple(sorted(kept, key=_rank))
+        self._version += 1
+
+    def reset(self) -> None:
+        """Drop every implementation."""
+        self._items = ()
+        self._version += 1
 
 
-class AsyncBridge(Protocol):
-    """Runs async code to completion from sync code, on the thread that asks.
-
-    `next.suspense` sits above the areas that bridge, so they reach its driver here.
-    """
-
-    def __call__[T](self, work: Awaitable[T] | Callable[[], Awaitable[T]], /) -> T:
-        """Run `work`, an awaitable or a factory of one, and return its result."""
+def _rank(item: Ranked) -> int:
+    """Return the rank of one listed implementation."""
+    return item.priority
 
 
 class DeferralSink(Protocol):
     """Where a deferred component call goes, and how a render settles what it queued.
 
-    `next.suspense` sits above the tags and the render paths, so they reach it here.
+    `next.defer` sits above the tags and the render paths, so they reach it here.
     """
 
     def queue(self, context: Context, call: DeferredCall) -> str:
@@ -228,27 +328,14 @@ class DeferralSink(Protocol):
         """Return what `render` renders with every deferred call it queued settled."""
 
 
-class ThreadWait(Protocol):
-    """Blocks the calling thread on a future, serving the hops sent to that thread.
+class ServerLoad(Protocol):
+    """How far the deferred work of this process lags, which a prefetch shed reads.
 
-    `next.suspense` sits above `next.deps`, so a waiting loader reaches its server here.
+    `next.defer` sits beside `next.router`, so the router reads the pool here.
     """
 
-    def __call__(self, future: Future[Any], /) -> None:
-        """Return once `future` is done, running the hops queued for this thread."""
-
-
-class ContextPropagator(Protocol):
-    """Restores a context snapshot on the sync thread or the loop that runs its work.
-
-    `next.deps` sits below the default in `next.suspense`, and a project binds its own.
-    """
-
-    def restore(self, captured: ContextSnapshot, /) -> contextvars.Context:
-        """Return `captured` restored on this sync thread."""
-
-    async def arestore(self, captured: ContextSnapshot, /) -> contextvars.Context:
-        """Return `captured` restored on the running loop."""
+    def backlog(self) -> float | None:
+        """Return the wait of the oldest queued job, `None` while within its timeout."""
 
 
 class RouterStamp(Protocol):
@@ -286,36 +373,20 @@ class LayerLoading(Protocol):
 
 
 action_owners_slot = PortSlot["ActionOwners"]("action owners port")
-async_bridge_slot = PortSlot["AsyncBridge"]("async bridge port")
-context_propagator_slot = PortSlot["ContextPropagator"]("context propagator port")
 deferrals_slot = PortSlot["DeferralSink"]("deferrals port")
 form_routes_slot = PortSlot["FormRoutes"]("form routes port")
 layer_loading_slot = PortSlot["LayerLoading"]("layer loading port")
 page_scan_slot = PortSlot["PageScan"]("page scan port")
-router_access_slot = PortSlot["RouterAccess"]("router access port")
+page_views_slot = PortSlot["PageViews"]("page views port")
+route_access_slot = PortSlot["RouteAccess"]("route access port")
 router_stamp_slot = PortSlot["RouterStamp"]("router stamp port")
 zone_marking_slot = PortSlot["ZoneMarking"]("zone marking port")
-page_scripts_slot = PortSlot["PageScripts"]("page scripts port")
-realtime_negotiation_slot = PortSlot["RealtimeNegotiation"]("realtime negotiation port")
 seo_routes_slot = PortSlot["SeoRoutes"]("seo routes port")
+server_load_slot = PortSlot["ServerLoad"]("server load port")
 static_assets_slot = PortSlot["StaticAssets"]("static assets port")
-thread_wait_slot = PortSlot["ThreadWait"]("thread wait port")
 
-
-async def _completed[T](work: Awaitable[T] | Callable[[], Awaitable[T]]) -> T:
-    awaitable = work() if callable(work) else work
-    return await awaitable
-
-
-def run_bridged[T](work: Awaitable[T] | Callable[[], Awaitable[T]]) -> T:
-    """Run `work` through the bound bridge, or through `async_to_sync` when unbound.
-
-    The fallback is correct but slower, as outside a server it starts a loop per call.
-    """
-    bridge = async_bridge_slot.peek()
-    if bridge is None:
-        return async_to_sync(_completed)(work)
-    return bridge(work)
+page_scripts = PortList["PageScripts"]()
+"""The providers of every page head and init payload, ranked."""
 
 
 def render_deferred(
@@ -349,60 +420,53 @@ def stamp_router(response: HttpResponseBase, request: HttpRequest) -> HttpRespon
     return response if stamp is None else stamp(response, request)
 
 
+def server_backlog() -> float | None:
+    """Return the backlog the bound server load reports, `None` when none is bound."""
+    load = server_load_slot.peek()
+    return None if load is None else load.backlog()
+
+
 def marked_zones(request: HttpRequest) -> AbstractContextManager[None]:
     """Return the block the bound zone marking opens, a plain one when unbound."""
     marking = zone_marking_slot.peek()
     return nullcontext() if marking is None else marking(request)
 
 
-def wait_served(future: Future[Any]) -> None:
-    """Block until `future` is done through the bound wait, or plainly when unbound.
-
-    A thread that waits plainly serves no hop, so one queued for it waits as well.
-    """
-    serve = thread_wait_slot.peek()
-    if serve is None:
-        wait((future,))
-        return
-    serve(future)
-
-
 __all__ = [
     "ActionOwners",
-    "AsyncBridge",
-    "ContextPropagator",
     "DeferralSink",
     "FormRoutes",
     "LayerLoading",
     "PageScan",
     "PageScripts",
+    "PageViews",
+    "PortList",
     "PortSlot",
-    "RealtimeNegotiation",
-    "RouterAccess",
+    "Ranked",
+    "RouteAccess",
     "RouterStamp",
+    "ScriptRender",
+    "ScriptShare",
     "SeoRoutes",
+    "ServerLoad",
     "StaticAssets",
-    "ThreadWait",
     "ZoneMarking",
     "action_owners_slot",
-    "async_bridge_slot",
-    "context_propagator_slot",
     "deferrals_slot",
     "form_routes_slot",
     "layer_loading_slot",
     "marked_zones",
     "page_scan_slot",
-    "page_scripts_slot",
-    "realtime_negotiation_slot",
+    "page_scripts",
+    "page_views_slot",
     "render_deferred",
-    "router_access_slot",
+    "route_access_slot",
     "router_stamp_slot",
-    "run_bridged",
     "seo_routes_slot",
+    "server_backlog",
+    "server_load_slot",
     "stamp_router",
     "stash_layer_loading",
     "static_assets_slot",
-    "thread_wait_slot",
-    "wait_served",
     "zone_marking_slot",
 ]

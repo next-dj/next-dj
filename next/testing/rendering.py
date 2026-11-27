@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.test import RequestFactory
 
-from next.boundaries import render_boundaries
+from next.boundaries.scope import render_boundaries
 from next.components.facade import render_component
 from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY

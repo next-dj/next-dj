@@ -2,7 +2,7 @@ import pytest
 from django.template import Template, TemplateSyntaxError
 
 from next.components.registry import DeferredComponents
-from next.templatetags.components import ComponentNode
+from next.components.tags import ComponentNode
 
 
 class TestComponentArguments:

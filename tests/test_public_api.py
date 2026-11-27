@@ -1,3 +1,4 @@
+import ast
 import importlib
 import pkgutil
 import subprocess
@@ -12,13 +13,18 @@ from next.deps import Depends
 from next.forms import action
 from next.pages import context, page
 from next.testing import NextClient
+from tests.support.imports import package_root
 
 
 _CURATED = frozenset({"Depends", "action", "component", "context", "page"})
 
 AREA_EXPORTS: dict[str, frozenset[str]] = {
     "next.apps": frozenset({"NextFrameworkConfig", "checks"}),
-    "next.checks": frozenset({"NEXT", "SEO"}),
+    "next.boundaries": frozenset(
+        {"BoundaryOptionError", "ErrorKind", "boundary_failed", "contain"}
+    ),
+    "next.bridge": frozenset({"drive"}),
+    "next.checks": frozenset({"NEXT", "SEO", "register"}),
     "next.components": frozenset(
         {
             "CachedComponentTemplateLoader",
@@ -59,28 +65,16 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.compression": frozenset(
         {
-            "OPT_OUT",
             "BrotliBackend",
             "CodecUnavailableError",
             "CompressionBackend",
             "CompressionBackendError",
-            "CompressionManager",
             "Compressor",
             "GzipBackend",
-            "StreamEncoding",
             "ZstdBackend",
-            "acompress_response",
-            "checks",
-            "compress_response",
             "compression_backend_loaded",
-            "compression_manager",
             "decode_response",
-            "negotiate",
             "no_compress",
-            "offloads",
-            "padding",
-            "parse_accept_encoding",
-            "prepare_stream",
         }
     ),
     "next.consent": frozenset(
@@ -98,9 +92,11 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     ),
     "next.deps": frozenset(
         {
+            "AnsweringParameterProvider",
             "AsyncCompilingParameterProvider",
             "AsyncDependencyError",
             "AsyncParameterFiller",
+            "ContextReads",
             "DDependencyBase",
             "DObject",
             "DependencyCycleError",
@@ -111,22 +107,20 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "ParameterFiller",
             "ParameterProvider",
             "ProviderRegistry",
+            "READS_EVERY",
+            "READS_NOTHING",
             "REQUEST_DEP_CACHE_ATTR",
             "RESERVED_KEYS",
+            "ReachingParameterProvider",
+            "ReadingParameterProvider",
             "RegisteredParameterProvider",
-            "RequestMemo",
-            "RequestScope",
             "ResolutionContext",
-            "SegmentRunner",
             "UnboundObjectError",
             "UnknownDependencyError",
             "provider_registry",
             "render_dep_cache",
-            "request_memo",
             "resolver",
             "rows",
-            "run_on_request_thread",
-            "segment_runner",
             "signals",
         }
     ),
@@ -221,41 +215,40 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     "next.ports": frozenset(
         {
             "ActionOwners",
-            "AsyncBridge",
-            "ContextPropagator",
             "DeferralSink",
             "FormRoutes",
             "LayerLoading",
             "PageScan",
             "PageScripts",
+            "PageViews",
+            "PortList",
             "PortSlot",
-            "RealtimeNegotiation",
-            "RouterAccess",
+            "Ranked",
+            "RouteAccess",
             "RouterStamp",
+            "ScriptRender",
+            "ScriptShare",
             "SeoRoutes",
+            "ServerLoad",
             "StaticAssets",
-            "ThreadWait",
             "ZoneMarking",
             "action_owners_slot",
-            "async_bridge_slot",
-            "context_propagator_slot",
             "deferrals_slot",
             "form_routes_slot",
             "layer_loading_slot",
             "marked_zones",
             "page_scan_slot",
-            "page_scripts_slot",
-            "realtime_negotiation_slot",
+            "page_scripts",
+            "page_views_slot",
             "render_deferred",
-            "router_access_slot",
+            "route_access_slot",
             "router_stamp_slot",
-            "run_bridged",
             "seo_routes_slot",
+            "server_backlog",
+            "server_load_slot",
             "stamp_router",
             "stash_layer_loading",
             "static_assets_slot",
-            "thread_wait_slot",
-            "wait_served",
             "zone_marking_slot",
         }
     ),
@@ -302,18 +295,20 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
     "next.router": frozenset(
         {
             "ChromeDigest",
-            "CurrentLinks",
             "Cut",
             "CutKind",
-            "Declaration",
+            "ClientLayouts",
             "Divergence",
             "LayoutKey",
+            "LoadShed",
             "NavigationCut",
-            "ScannedShell",
+            "PrefetchShed",
+            "ScannedLayout",
+            "ScannedPage",
             "VerifiedCut",
-            "current_links",
             "navigation_rendered",
             "prefetch_shed",
+            "router_backend_loaded",
             "router_clear",
             "router_cleared",
         }
@@ -391,84 +386,74 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "static_name",
         }
     ),
-    "next.suspense": frozenset(
+    "next.defer": frozenset(
         {
             "Admission",
             "Admit",
-            "BodyTransport",
             "BoundaryBindingError",
             "BoundaryClaims",
-            "BoundaryDeadlineError",
+            "BoundaryError",
             "BoundaryExecutor",
-            "BoundaryOptionError",
+            "BoundaryMintError",
             "BoundaryPropsError",
-            "BoundaryRefusedError",
-            "BoundaryShedError",
             "BoundarySizeError",
+            "BoundaryStorageError",
             "BoundaryTarget",
             "BoundaryTokenBackend",
             "BoundaryTokenError",
             "BoundaryValueError",
             "CacheStorage",
-            "CallableBinding",
             "Capacity",
-            "DefaultStreamPolicy",
-            "DefaultStreamTransport",
-            "Delivered",
+            "ConnectionState",
+            "DefaultDeliveryPolicy",
+            "DefaultServerProbe",
+            "DeliveryDecision",
+            "Delivery",
             "DeliveryReason",
             "EncryptedSeal",
-            "ExecutorStoppedError",
-            "HeaderTransport",
             "InlineStorage",
             "Job",
-            "JsonCodec",
-            "Lane",
             "LaneExecutor",
-            "MsgpackCodec",
-            "NoBinding",
-            "NoSeal",
-            "PageFacts",
+            "DeliveryFacts",
             "PartialStream",
-            "Placement",
-            "QueryTransport",
             "QueueDelay",
-            "Rule",
-            "Server",
-            "SessionBinding",
+            "ServerKind",
             "SignedSeal",
             "SpillStorage",
             "StackedTokenBackend",
-            "State",
-            "StreamPolicy",
-            "StreamTransport",
+            "StorageTerms",
+            "DeliveryPolicy",
+            "ServerProbe",
             "StreamingPageResponse",
-            "TokenCodec",
+            "SubjectBinding",
+            "ThreadState",
             "TokenRejection",
             "TokenSeal",
             "TokenStorage",
-            "TokenTransport",
-            "TransportDescriptor",
-            "TransportFacts",
-            "UserBinding",
-            "Verdict",
-            "boundary_rendered",
-            "boundary_side_effect",
+            "ServerFacts",
+            "boundary_job_finished",
+            "boundary_job_started",
+            "boundary_settled",
+            "boundary_state_written",
             "boundary_token_rejected",
-            "drive",
+            "defer_backend_loaded",
             "page_stream_closed",
             "page_stream_declined",
             "page_stream_opened",
-            "serve_until",
+            "remaining",
         }
     ),
     "next.testing": frozenset(
         {
+            "AsyncNextClient",
             "FrozenClock",
             "MemoryPort",
             "Navigation",
             "NextClient",
+            "NoSeal",
             "PartialEnvelope",
             "PublishedMessages",
+            "ReloadedBoundary",
             "SignalEvent",
             "SignalRecorder",
             "SitemapUrl",
@@ -534,8 +519,65 @@ AREA_EXPORTS: dict[str, frozenset[str]] = {
             "sse_events",
         }
     ),
-    "next.views": frozenset({"RouteKind", "page_view"}),
+    "next.transactions": frozenset(
+        {
+            "AtomicMode",
+            "AtomicOverride",
+            "AtomicScope",
+            "TransactionRule",
+            "atomic_scope",
+            "request_atomic",
+            "skip_atomic_requests",
+        }
+    ),
+    "next.views": frozenset({"page_view"}),
 }
+
+# Class names two areas both export, each with why both stay. The list only shrinks.
+TWINS: dict[str, str] = {
+    "Position": "a realtime topic sequence and a component walk, both shipped before",
+    "Route": "a realtime handler binding and a routed page, both shipped before",
+    "Script": "a Redis broker script and a page script, both shipped before",
+}
+
+
+def _exported(tree: ast.Module) -> set[str]:
+    """Return the names a module lists in its literal `__all__`."""
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
+            and isinstance(node.value, ast.List | ast.Tuple)
+        ):
+            return {e.value for e in node.value.elts if isinstance(e, ast.Constant)}
+    return set()
+
+
+def exported_classes() -> dict[str, frozenset[str]]:
+    """Map each class a module of `next/` defines and exports to the areas doing so."""
+    root = package_root()
+    areas: dict[str, set[str]] = {}
+    for file in sorted(root.rglob("*.py")):
+        tree = ast.parse(file.read_text(encoding="utf-8"))
+        defined = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+        area = file.relative_to(root).with_suffix("").parts[0]
+        for name in defined & _exported(tree):
+            areas.setdefault(name, set()).add(area)
+    return {name: frozenset(found) for name, found in areas.items()}
+
+
+def twin_report(found: dict[str, frozenset[str]], known: dict[str, str]) -> list[str]:
+    """Name every class two areas export and every known twin that no longer is one."""
+    twins = {name for name, areas in found.items() if len(areas) > 1}
+    new = [
+        f"{name} is exported by {', '.join(sorted(found[name]))}, rename one of them."
+        for name in sorted(twins - known.keys())
+    ]
+    gone = [
+        f"{name} is no longer a twin, so delete it from TWINS in tests/test_public_api.py."
+        for name in sorted(known.keys() - twins)
+    ]
+    return [*new, *gone]
 
 
 class TestCuratedSurface:
@@ -640,3 +682,29 @@ class TestNextClientSurface:
     )
     def test_the_boundary_helpers_are_public(self, method: str) -> None:
         assert callable(getattr(NextClient, method))
+
+
+class TestExportedTwins:
+    """No class name is exported by two areas of `next/` outside the known twins."""
+
+    def test_the_scan_reads_the_exports(self) -> None:
+        found = exported_classes()
+        assert found["Route"] == {"realtime", "urls"}
+        assert found["Source"] == {"caches"}
+
+    def test_no_two_areas_export_one_class_name(self) -> None:
+        assert twin_report(exported_classes(), TWINS) == []
+
+    def test_a_new_twin_is_named(self) -> None:
+        found = {"Plan": frozenset({"defer", "partial"})}
+        assert twin_report(found, {}) == [
+            "Plan is exported by defer, partial, rename one of them."
+        ]
+
+    def test_a_known_twin_that_is_gone_is_named(self) -> None:
+        found = {"Plan": frozenset({"partial"})}
+        stale = (
+            "Plan is no longer a twin, so delete it from TWINS in "
+            "tests/test_public_api.py."
+        )
+        assert twin_report(found, {"Plan": "two plans"}) == [stale]

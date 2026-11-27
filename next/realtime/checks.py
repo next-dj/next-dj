@@ -3,18 +3,12 @@
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import URLPattern, URLResolver, get_resolver
 
-from next.checks import NEXT
-from next.checks.common import errors_for_unknown_keys, get_router_manager
+from next.checks import NEXT, register
+from next.checks.common import errors_for_unknown_keys, get_route_manager
 from next.conf.defaults import USER_SETTING
 from next.conf.scopes import scope_value
 from next.pages.loaders import load_python_module_memo
@@ -567,10 +561,10 @@ def _routes_tickets() -> bool:
 
 def _streams_topics() -> bool:
     """Whether a routed `page.py` holds `TopicStream` or a subclass of it."""
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return False
-    for page_path in iter_existing_scanned_pages(router_manager, set()):
+    for page_path in iter_existing_scanned_pages(route_manager, set()):
         module = load_python_module_memo(page_path)
         if module is not None and any(map(_topic_stream, vars(module).values())):
             return True

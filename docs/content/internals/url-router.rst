@@ -23,7 +23,7 @@ Pipeline
    flowchart TB
        Walk[Filesystem walk] --> Parser[Parser]
        Parser --> Patterns[URL patterns]
-       Patterns --> Manager[RouterManager]
+       Patterns --> Manager[RouteManager]
        Manager --> Trie[TrieURLResolver]
        Resolver[Django URL resolver] --> Trie
        Trie --> PageView[Page view]
@@ -34,10 +34,10 @@ Modules
 -------
 
 ``next.urls.backends``.
-   ``RouterBackend`` is the abstract contract.
+   ``PageBackend`` is the abstract contract.
    Its concrete ``page_roots``, ``components_folder_name``, and ``skip_dir_names`` methods form the route introspection contract described below.
-   ``FileRouterBackend`` implements file based routing.
-   A caller that builds one router at a time calls ``create_backend`` of the ``RouterAccess`` port, which resolves the entry through ``next.backends``.
+   ``FilePageBackend`` implements file based routing.
+   A caller that builds one router at a time calls ``create_backend`` of the ``RouteAccess`` port, which resolves the entry through ``next.backends``.
 
 ``next.urls.parser``.
    Turns directory names into URL patterns.
@@ -45,7 +45,7 @@ Modules
    The ``default_url_parser.parse_url_pattern`` method is the single source of bracket conversion, used by both the router and the system checks, so a route and its check always agree on the resulting Django path string.
 
 ``next.urls.manager``.
-   ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
+   ``RouteManager`` builds the active pattern list, exposes ``reload``, and emits the ``routes_reloaded`` signal.
    The module-level ``urlpatterns`` is a one-element sequence holding the resolver named by ``URL_RESOLVER``, which ships as ``TrieURLResolver`` and wraps the lazy sequence of CSRF, form-action, page, and SEO patterns.
    It is a ``Sequence`` rather than a ``list``, so a root URLconf hands it to ``include()`` and never concatenates or appends to it.
 
@@ -102,7 +102,7 @@ Resolution algorithm
 
 ``include("next.urls")`` hands Django a single ``TrieURLResolver`` that wraps the lazy sequence of CSRF, form-action, router, and SEO patterns, in that order.
 The SEO source is read through the ``SeoRoutes`` port, because ``next.seo`` imports ``next.urls`` and the manager cannot import it back, and it holds the sitemap routes only while the project serves a sitemap and the robots route only while its source exists at the top of a page root, see :doc:`seo-pipeline`.
-The sequence caches the concatenated pattern list against a three-part version token, one counter bumped by ``router_manager.reload()``, one bumped when form actions register or clear through the form-action manager, and ``seo_routes_version`` for the SEO routes.
+The sequence caches the concatenated pattern list against a three-part version token, one counter bumped by ``route_manager.reload()``, one bumped when form actions register or clear through the form-action manager, and ``seo_routes_version`` for the SEO routes.
 ``seo_routes_version`` lives in ``next.urls.manager``, ``NextFrameworkConfig.ready()`` moves it right after it binds the SEO port and the seo manager moves it on every reset of its sources, so the token is read as a plain attribute and never through the port.
 A sequence read before the port is bound leaves the seo routes out and caches nothing.
 The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.
@@ -145,7 +145,7 @@ Across trees the page routes list the application trees in ``INSTALLED_APPS`` or
 A ``pages()`` tree sits outside this list, where its URLconf includes it.
 
 A trail the parser refuses, such as a repeated parameter name, does not abort the build.
-``FileRouterBackend`` logs a warning naming the ``page.py``, leaves that page unrouted, and routes the rest, so ``manage.py check`` runs and reports it.
+``FilePageBackend`` logs a warning naming the ``page.py``, leaves that page unrouted, and routes the rest, so ``manage.py check`` runs and reports it.
 
 Route groups and intercepting routes
 ------------------------------------
@@ -181,7 +181,7 @@ The router imports the page module of each published intercept, as it does for a
 ``generation`` guards against a race with a reload.
 The walk reads the table's ``generation`` before it starts, a reload bumps it, and a walk that began before the reload is refused at publish, so its stale rules never overwrite the cleared table.
 ``intercepts.of(target_file)`` returns the rules over one routed page in file order with a single dictionary lookup, and ``all()`` returns every rule.
-``RouterManager.reload()`` clears the table right after it installs the new backends and before it sends ``router_reloaded``, so a build inside ``router_reloaded`` publishes into the fresh table and the rebuild publishes it again.
+``RouteManager.reload()`` clears the table right after it installs the new backends and before it sends ``routes_reloaded``, so a build inside ``routes_reloaded`` publishes into the fresh table and the rebuild publishes it again.
 
 Each published rule sends ``intercept_registered``, only when the publish was accepted.
 The table is read at request time to pick the intercepting page that serves a zone request over its target.
@@ -199,7 +199,7 @@ Both include targets are ``MountedPatterns`` sequences, and the walk notes them 
 
 The trees the walk finds through ``pages()`` drop out of the auto-assembly of ``next.urls``, and ``page_roots`` reports them beside the auto-assembled ones with their ``prefix`` set, so component registration, static discovery, and the checks see every tree the router serves.
 
-A ``pages()`` tree builds tree-relative patterns through the first ``FileRouterBackend``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves, while Django joins in the outer route.
+A ``pages()`` tree builds tree-relative patterns through the first ``FilePageBackend``, wraps them in the ``URL_RESOLVER`` class, and rebuilds them when the router version moves, while Django joins in the outer route.
 Every page view the file router builds, of ``next.urls`` and of a ``pages()`` tree alike, carries ``next_route_trail``, its route relative to its tree.
 The breadcrumb resolution reads it to pass on the kwargs the includes around the tree capture to every crumb, see :doc:`/content/topics/seo/breadcrumbs`.
 Layouts, contexts, access declarations, and breadcrumbs never cross that boundary.
@@ -208,17 +208,17 @@ The views also carry ``next_page_path`` and the ``login_required`` attribute ``L
 Reload mechanics
 ----------------
 
-``router_manager.reload()`` does six things in order.
+``route_manager.reload()`` does six things in order.
 
-1. Rebuilds the backend list from ``PAGE_BACKENDS``, sending ``router_backend_loaded`` once per entry the shared loader instantiates.
+1. Rebuilds the backend list from ``PAGE_BACKENDS``, sending ``page_backend_loaded`` once per entry the shared loader instantiates.
 2. Publishes the new list in one assignment, so a read racing the build never sees a partial one.
 3. Clears the intercept table, so the rebuild publishes it afresh.
 4. Bumps the version counter that invalidates the cached pattern concat and the resolver's route index.
 5. Clears the Django URL resolver cache.
-6. Emits the ``router_reloaded`` signal.
+6. Emits the ``routes_reloaded`` signal.
 
-``notify=False`` suppresses four of those effects, the per-entry ``router_backend_loaded``, the intercept clear, the URL-cache clear, and ``router_reloaded``.
-The version bump and the rebuild itself always happen, which is what lets a receiver of ``router_reloaded`` reload the backends without re-entering its own signal.
+``notify=False`` suppresses four of those effects, the per-entry ``page_backend_loaded``, the intercept clear, the URL-cache clear, and ``routes_reloaded``.
+The version bump and the rebuild itself always happen, which is what lets a receiver of ``routes_reloaded`` reload the backends without re-entering its own signal.
 The next request observes the new patterns without a process restart.
 Long lived processes such as websocket subscribers listen for the signal to refresh cached URL references.
 
@@ -226,7 +226,7 @@ The manager also reloads on two signals of its own accord.
 A ``settings_reloaded`` receiver rebuilds the routers and drops the built URL resolver, so a new ``URL_RESOLVER`` or a new ``PAGE_BACKENDS`` list takes effect without a restart.
 A :data:`~django.test.signals.setting_changed` receiver rebuilds them whenever ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` moves, because a file router memoises the pattern list of each application tree, reads its ``pages()`` includes from the root URLconf, and places its relative ``DIRS`` roots under ``BASE_DIR``, so it would otherwise serve the routes of the previous value.
 That second receiver is what makes :func:`~django.test.override_settings` over ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` produce the routes of the swapped value.
-Both receivers call the notifying form, so each of them fires ``router_backend_loaded`` and ``router_reloaded`` as an explicit ``reload()`` does.
+Both receivers call the notifying form, so each of them fires ``page_backend_loaded`` and ``routes_reloaded`` as an explicit ``reload()`` does.
 
 Multiple backends
 -----------------
@@ -244,16 +244,19 @@ The same collection pass owns the duplicate parameter report, failing with ``nex
 Route introspection
 -------------------
 
-Beside the abstract ``generate_urls``, ``RouterBackend`` carries three concrete introspection methods, ``page_roots``, ``components_folder_name``, and ``skip_dir_names``.
+Beside the abstract ``generate_urls``, ``PageBackend`` carries three concrete introspection methods, ``page_roots``, ``components_folder_name``, and ``skip_dir_names``.
 They are a public contract, the only thing the system checks and the development watcher read from a backend.
-:doc:`/content/howto/write-a-router-backend` shows a subclass of the file router.
+A fourth, ``serves_page(pattern)``, tells the route table of the client router whether a pattern the backend generated serves a page, see :ref:`topics-router-scope`.
+It answers ``True`` for a view the file router built and ``None`` for any other, which the router owns and probes with a request, and a backend that knows a route is no page returns ``False``.
+``next.urls.scope`` builds that table from the resolver tree, and ``next.urls.regex.translate`` carries a converter or ``re_path()`` regex into JavaScript only when both engines read it alike, refusing the rest so the route loads as a document.
+:doc:`/content/howto/write-a-page-backend` shows a subclass of the file router.
 
 ``page_roots`` reports the page trees the system checks walk as ``PageRoot`` entries, each pairing a directory with the label the reports name it by.
 Implement ``page_roots`` when the backend has page trees.
 Give each ``PageRoot`` a ``key``, because the co-located ``layout`` and ``template`` assets of a tree without one are not served and ``next.W132`` warns about it, see :ref:`topics-static-name-resolution-colocated`.
 The base returns an empty list, so a backend that does not implement it is not checked and not watched, which is the right answer for a backend routing from a database or another source that is no tree on disk.
 
-A subclass of ``FileRouterBackend`` inherits the file router's own implementation and is checked as it stands.
+A subclass of ``FilePageBackend`` inherits the file router's own implementation and is checked as it stands.
 Report only trees the backend actually serves from, because the same list is what the development watcher observes, and a tree missing from it is neither checked nor reloaded.
 ``components_folder_name`` completes that pair by naming the folder the backend registers components from while it walks, ``None`` for a backend that registers none.
 ``skip_dir_names`` names the directories the backend's own walk refuses to enter, an empty set for a backend that refuses none.
@@ -262,7 +265,7 @@ The checks walk the reported trees themselves rather than asking the backend to 
 A backend that reports a tree is reached by every page check, from the structural ones to the partial zone checks and ``next.E017``.
 The names that walk refuses to enter are the folder ``components_folder_name`` returns plus the names ``skip_dir_names`` returns.
 Both come from the backend under check rather than from the settings, so one entry's ``DIRS`` never blinds the checks to another entry's trees.
-``FileRouterBackend`` answers with the skip set it built from its own ``DIRS``, the entries that name no existing directory.
+``FilePageBackend`` answers with the skip set it built from its own ``DIRS``, the entries that name no existing directory.
 
 ``page_roots`` and ``components_folder_name`` are read on the ``runserver``, ``collectstatic``, and staticfiles paths.
 An override that reaches a database or a network is therefore called where an outage must not stop the process.
@@ -279,28 +282,28 @@ An override that can fail slowly is still worth a cache of its own, because noth
 
 The checks walk the reported trees themselves, refusing every directory whose name starts with an underscore, the names ``skip_dir_names`` returns, and the folder ``components_folder_name`` names, while the watcher derives its watch specs from ``page_roots`` and ``components_folder_name`` alone, as :doc:`autoreload` describes.
 
-``RouterManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
+``RouteManager.backends`` is the public read of the loaded backend list, a tuple in routing order.
 The first read loads the backends from ``PAGE_BACKENDS``, the same build the first iteration of the manager runs, so a caller that asks before the first resolve reads the configured set rather than an empty tuple.
 Later reads hand back a snapshot of the loaded list, and ``reload()`` rebuilds it.
-The ``repr`` of the manager reports the raw state instead of loading, so inspecting it under a debugger neither rebuilds the routes nor fires ``router_reloaded``.
+The ``repr`` of the manager reports the raw state instead of loading, so inspecting it under a debugger neither rebuilds the routes nor fires ``routes_reloaded``.
 
 Extension points
 ----------------
 
-- Subclass ``RouterBackend`` to feed the resolver from a different source, or subclass ``FileRouterBackend`` to add patterns or augment naming on the file-based backend.
+- Subclass ``PageBackend`` to feed the resolver from a different source, or subclass ``FilePageBackend`` to add patterns or augment naming on the file-based backend.
 - Reference a custom backend through its dotted path under ``PAGE_BACKENDS``, and take the entry as the single constructor argument.
 - Name a resolver class in ``NEXT_FRAMEWORK["URL_RESOLVER"]`` to replace the trie dispatch.
   The value is a dotted path to a Django ``URLResolver`` subclass, which the manager instantiates with an empty route pattern and the lazy pattern sequence.
   ``"django.urls.resolvers.URLResolver"`` restores the plain linear scan, and a subclass of ``TrieURLResolver`` keeps the index while changing the candidate order.
 - Subscribe to ``route_registered`` to observe each new pattern.
-  It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments, where ``url_path`` is the trail of the page relative to its tree.
-- Subscribe to ``router_backend_loaded`` to observe each backend the manager builds.
+  It fires once per discovered pattern with ``sender=FilePageBackend`` and the ``url_path`` and ``file_path`` keyword arguments, where ``url_path`` is the trail of the page relative to its tree.
+- Subscribe to ``page_backend_loaded`` to observe each backend the manager builds.
   It fires once per instantiated ``PAGE_BACKENDS`` entry with the resolved router class as sender and the ``config`` copy and the built ``instance`` as keyword arguments, so a receiver connected with ``sender=`` hears one backend family alone.
   ``reload(notify=False)`` builds the backends without sending it.
-- Subscribe to ``router_reloaded`` to observe the rebuild itself, sent by the ``RouterManager`` class with no keyword arguments.
+- Subscribe to ``routes_reloaded`` to observe the rebuild itself, sent by the ``RouteManager`` class with no keyword arguments.
 
 - Subscribe to ``intercept_registered`` to observe each intercept rule the file router publishes.
-  It fires once per rule with ``sender=FileRouterBackend`` and the ``target_file``, ``file_path``, and ``marker`` keyword arguments, and only after the table accepted the publish.
+  It fires once per rule with ``sender=FilePageBackend`` and the ``target_file``, ``file_path``, and ``marker`` keyword arguments, and only after the table accepted the publish.
 
 The four signals above are the whole signal surface of the URL area.
 See :doc:`/content/ref/signals` for their payloads and :doc:`/content/topics/signals` for the wider catalog.

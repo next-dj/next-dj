@@ -11,7 +11,7 @@ from next.conf import next_framework_settings
 from next.deps.cache import render_dep_cache
 from next.deps.runner import run_segment
 from next.deps.scope import bridged_scope
-from next.pages.boundaries import FAILURE_KEY, Caught, ErrorShell
+from next.pages.boundaries import FAILURE_KEY, Caught, ErrorContext
 from next.pages.graph import blaming
 from next.pages.loaders import BoundaryChain, page_boundaries
 from next.pages.metadata.chain import (
@@ -355,7 +355,7 @@ class ContextRender(PageContainment):
         blamed: Blame,
         *,
         caught: bool,
-    ) -> tuple[ErrorShell, MetadataThunk, ChainEntry | None]:
+    ) -> tuple[ErrorContext, MetadataThunk, ChainEntry | None]:
         """Return the shell of a settled async body, its processors run off the loop.
 
         The metadata chain comes back too when a body that was not caught folds one.
@@ -402,7 +402,7 @@ class ContextRender(PageContainment):
         url_kwargs: Mapping[str, object],
         tail: dict[str, object],
         blamed: Blame,
-    ) -> ErrorShell:
+    ) -> ErrorContext:
         """Return the shell of a page around `tail`, cut by what `blamed` kept."""
         info = page_path_info(file_path)
         head: dict[str, object] = {
@@ -411,7 +411,7 @@ class ContextRender(PageContainment):
         }
         head.update(url_kwargs)
         levels = self._context_manager.inherited_levels(file_path)
-        return ErrorShell(head, tail, levels, blamed, chain)
+        return ErrorContext(head, tail, levels, blamed, chain)
 
     def _cut_shell(
         self,
@@ -421,7 +421,7 @@ class ContextRender(PageContainment):
         url_kwargs: Mapping[str, object],
         dep_cache: dict[str, Any],
         level: int,
-    ) -> ErrorShell:
+    ) -> ErrorContext:
         """Return the shell of a page whose body failed before any callable ran.
 
         The inherited groups at or above `level` run for it, as their layouts render.

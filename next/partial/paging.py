@@ -33,7 +33,6 @@ from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 
-from next.conf.defer import defer_count
 from next.deps import RegisteredParameterProvider
 from next.deps.markers import unwrap_annotated
 
@@ -47,17 +46,19 @@ if TYPE_CHECKING:
 DEFAULT_PARAM: Final = "page"
 CURSOR_PARAM: Final = "cursor"
 DEFAULT_PER_PAGE: Final = 20
-RESTORE_PARAM: Final = "restore"
+RESTORE_PARAM: Final = "_restore"
+"""The query parameter a restored window carries, valued with the name of its pager."""
 MAX_TOKEN: Final = 512
+MAX_RESTORE: Final = 10
+"""The most windows a restored list renders back at once, unless its pager says."""
 
-_RESTORED: Final = "1"
 _SLUG: Final = re.compile(r"[A-Za-z0-9_-]+")
 _DIGITS: Final = re.compile(r"[0-9]+")
 _MAX_DIGITS: Final = 19
 _MAX_OFFSET: Final = 2**63 - 2
 
 type PagedRows[T] = QuerySet[Any, T] | Sequence[T]
-type _Finish[T] = Callable[[list[list[T]], int | None], Window[T]]
+type _Finish[T] = Callable[[list[list[T]], int | None], Window[T] | WindowPlan[T]]
 type _Order = tuple[tuple[str, bool], ...]
 
 
@@ -107,13 +108,24 @@ class Window[T]:
         """Iterate the rows backwards, so a template loops over them reversed."""
         return reversed(self.rows)
 
+    def has_next(self) -> bool:
+        """Return whether a window follows, as `Page.has_next` of Django answers."""
+        return self.next is not None
+
+    def has_previous(self) -> bool:
+        """Return whether a window comes before, as `Page.has_previous` answers."""
+        return self.previous is not None
+
 
 def _query(request: HttpRequest | None, param: str) -> tuple[str | None, bool]:
-    """Return the raw token the request names under `param` and its restore flag."""
+    """Return the raw token the request names under `param` and its restore flag.
+
+    The flag counts only when it names `param`, so another pager's flag reads one page.
+    """
     if request is None:
         return None, False
     query = request.GET
-    return query.get(param), query.get(RESTORE_PARAM) == _RESTORED
+    return query.get(param), query.get(RESTORE_PARAM) == param
 
 
 async def _alist[T](rows: PagedRows[T]) -> list[T]:
@@ -134,10 +146,10 @@ async def _acount[T](rows: PagedRows[T]) -> int:
 
 
 @dataclass(frozen=True, slots=True)
-class Plan[T]:
+class WindowPlan[T]:
     """The bounded slices one window reads and the step that builds it from them.
 
-    Planning reads nothing, so the sync and the async path share every decision.
+    Planning reads nothing, and a step that needs one more read answers its plan.
     """
 
     slices: tuple[PagedRows[T], ...]
@@ -146,15 +158,25 @@ class Plan[T]:
 
     def run(self) -> Window[T]:
         """Read the slices and the asked count, then build the window."""
-        fetched = [list(part) for part in self.slices]
-        count = None if self.total is None else _count(self.total)
-        return self.finish(fetched, count)
+        plan: WindowPlan[T] = self
+        while True:
+            fetched = [list(part) for part in plan.slices]
+            count = None if plan.total is None else _count(plan.total)
+            built = plan.finish(fetched, count)
+            if isinstance(built, Window):
+                return built
+            plan = built
 
     async def arun(self) -> Window[T]:
         """Read the slices and the asked count without blocking, then build it."""
-        fetched = [await _alist(part) for part in self.slices]
-        count = None if self.total is None else await _acount(self.total)
-        return self.finish(fetched, count)
+        plan: WindowPlan[T] = self
+        while True:
+            fetched = [await _alist(part) for part in plan.slices]
+            count = None if plan.total is None else await _acount(plan.total)
+            built = plan.finish(fetched, count)
+            if isinstance(built, Window):
+                return built
+            plan = built
 
 
 class Pager(ABC):
@@ -163,10 +185,12 @@ class Pager(ABC):
     A pager keeps no request state, so one module-level instance serves every render.
     """
 
-    __slots__ = ("count", "param", "per_page")
+    __slots__ = ("count", "max_restore", "param", "per_page")
 
-    def __init__(self, *, param: str, per_page: int, count: bool) -> None:
-        """Store the query parameter, the batch size and whether to count the rows."""
+    def __init__(
+        self, *, param: str, per_page: int, count: bool, max_restore: int = MAX_RESTORE
+    ) -> None:
+        """Store the options, refusing a reserved parameter or a bound below 1."""
         if not valid_param(param):
             msg = (
                 "A pager takes its query parameter as a slug other than "
@@ -176,12 +200,18 @@ class Pager(ABC):
         if isinstance(per_page, bool) or per_page < 1:
             msg = f"A pager takes per_page as an integer from 1, got {per_page!r}."
             raise ValueError(msg)
+        if isinstance(max_restore, bool) or max_restore < 1:
+            msg = (
+                f"A pager takes max_restore as an integer from 1, got {max_restore!r}."
+            )
+            raise ValueError(msg)
+        self.max_restore = max_restore
         self.param = param
         self.per_page = per_page
         self.count = count
 
     @abstractmethod
-    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
+    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> WindowPlan[T]:
         """Return the slices the window of `rows` the request asks for reads."""
 
     def window[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Window[T]:
@@ -196,7 +226,7 @@ class Pager(ABC):
 
 
 class NumberPager(Pager):
-    """Page by `?page=N`, a restore reaching back `MAX_RESTORE` pages from page N."""
+    """Page by `?page=N`, a restore reaching back `max_restore` pages from page N."""
 
     __slots__ = ("_ceiling",)
 
@@ -206,9 +236,12 @@ class NumberPager(Pager):
         param: str = DEFAULT_PARAM,
         per_page: int = DEFAULT_PER_PAGE,
         count: bool = False,
+        max_restore: int = MAX_RESTORE,
     ) -> None:
         """Store the options and the last page whose rows a database can address."""
-        super().__init__(param=param, per_page=per_page, count=count)
+        super().__init__(
+            param=param, per_page=per_page, count=count, max_restore=max_restore
+        )
         self._ceiling = _MAX_OFFSET // per_page
 
     def _number(self, raw: str | None) -> int:
@@ -219,24 +252,36 @@ class NumberPager(Pager):
         return number if 1 <= number <= self._ceiling else 1
 
     @override
-    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
+    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> WindowPlan[T]:
         """Return the one slice a run of pages reads, one row past its end."""
         raw, restore = _query(request, self.param)
         last = self._number(raw)
         first = last
         if restore:
-            first = max(1, last - defer_count("MORE", "MAX_RESTORE") + 1)
+            first = max(1, last - self.max_restore + 1)
         per_page = self.per_page
         part = rows[(first - 1) * per_page : last * per_page + 1]
         total = rows if self.count else None
-        finish: _Finish[T] = partial(self._finish, first, last)
-        return Plan((part,), total, finish)
+        finish: _Finish[T] = partial(self._finish, rows, first, last)
+        return WindowPlan((part,), total, finish)
 
     def _finish[T](
-        self, first: int, last: int, fetched: list[list[T]], count: int | None
-    ) -> Window[T]:
-        """Return the window of pages `first` to `last`, cut short at the end."""
+        self,
+        rows: PagedRows[T],
+        first: int,
+        last: int,
+        fetched: list[list[T]],
+        count: int | None,
+    ) -> Window[T] | WindowPlan[T]:
+        """Return the window of pages `first` to `last`, cut short at the end.
+
+        A run past the last page counts the rows, so its `previous` names the last one.
+        """
         [found] = fetched
+        if not found and first > 1:
+            if count is not None:
+                return self._beyond(first, [], count, counted=True)
+            return WindowPlan((), rows, partial(self._beyond, first, counted=False))
         per_page = self.per_page
         size = (last - first + 1) * per_page
         more = len(found) > size
@@ -250,6 +295,19 @@ class NumberPager(Pager):
             back=str(end) if more else None,
             backs=tuple(str(number) for number in range(first, end)),
             count=count,
+        )
+
+    def _beyond[T](
+        self, first: int, _fetched: list[list[T]], count: int | None, *, counted: bool
+    ) -> Window[T]:
+        """Return the empty window past the end, `previous` naming the last page."""
+        held = count or 0
+        last = min(first - 1, -(-held // self.per_page))
+        return Window(
+            rows=[],
+            param=self.param,
+            previous=str(last) if last >= 1 else None,
+            count=count if counted else None,
         )
 
 
@@ -526,9 +584,12 @@ class KeysetPager(Pager):
         per_page: int = DEFAULT_PER_PAGE,
         count: bool = False,
         max_token: int = MAX_TOKEN,
+        max_restore: int = MAX_RESTORE,
     ) -> None:
         """Store the ordering, refusing one that is empty or names a column twice."""
-        super().__init__(param=param, per_page=per_page, count=count)
+        super().__init__(
+            param=param, per_page=per_page, count=count, max_restore=max_restore
+        )
         self._order = _ordering(ordering)
         if isinstance(max_token, bool) or max_token < 1:
             msg = (
@@ -568,7 +629,7 @@ class KeysetPager(Pager):
             shape = self._shapes[model] = _settle(model, self._order)
         return shape
 
-    def _sealed(self, values: tuple[Any, ...], *, reverse: bool) -> str:
+    def _bounded(self, values: tuple[Any, ...], *, reverse: bool) -> str:
         """Return the token of a position, refusing one too long to be read back."""
         token = self.encode(values, reverse=reverse)
         if len(token) > self.max_token:
@@ -582,7 +643,7 @@ class KeysetPager(Pager):
 
     def _token(self, shape: _Shape, row: object, *, reverse: bool) -> str:
         """Return the token of the position of `row`."""
-        return self._sealed(shape.values(row), reverse=reverse)
+        return self._bounded(shape.values(row), reverse=reverse)
 
     def _position(
         self, raw: str, shape: _Shape, zone: tzinfo | None
@@ -597,7 +658,7 @@ class KeysetPager(Pager):
         return None if values is None else (decoded[0], values)
 
     @override
-    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> Plan[T]:
+    def plan[T](self, rows: PagedRows[T], request: HttpRequest | None) -> WindowPlan[T]:
         """Return the slices the batch the token names reads, or the first batch."""
         total = rows if self.count else None
         if isinstance(rows, QuerySet):
@@ -605,7 +666,7 @@ class KeysetPager(Pager):
         elif rows:
             model = _model_of(rows[0])
         else:
-            return Plan((), total, self._empty)
+            return WindowPlan((), total, self._empty)
         shape = self._shape(model)
         raw, restore = _query(request, self.param)
         position = None if raw is None else self._position(raw, shape, _zone(rows))
@@ -613,23 +674,23 @@ class KeysetPager(Pager):
         finish: _Finish[T]
         if position is None:
             finish = partial(self._first, shape)
-            return Plan((_head(rows, shape, per_page + 1),), total, finish)
+            return WindowPlan((_head(rows, shape, per_page + 1),), total, finish)
         reverse, values = position
-        reach = defer_count("MORE", "MAX_RESTORE") if restore else 1
+        reach = self.max_restore if restore else 1
         if reverse:
             limit = reach * per_page
             part = _seek(rows, shape, values, backward=True, limit=limit + 1)
             finish = partial(self._backward, shape, values, limit)
-            return Plan((part,), total, finish)
+            return WindowPlan((part,), total, finish)
         after = _seek(rows, shape, values, backward=False, limit=per_page + 1)
         if reach == 1:
-            return Plan((after,), total, partial(self._forward, shape))
+            return WindowPlan((after,), total, partial(self._forward, shape))
         limit = (reach - 1) * per_page
         before = _seek(
             rows, shape, values, backward=True, inclusive=True, limit=limit + 1
         )
         finish = partial(self._restored, shape, limit)
-        return Plan((after, before), total, finish)
+        return WindowPlan((after, before), total, finish)
 
     def _empty[T](self, _fetched: list[list[T]], count: int | None) -> Window[T]:
         """Return the window of a source with no row."""
@@ -737,7 +798,7 @@ class KeysetPager(Pager):
             previous=self._token(shape, shown[0], reverse=True)
             if len(before) > len(kept)
             else None,
-            back=self._sealed(values, reverse=True) if shown else None,
+            back=self._bounded(values, reverse=True) if shown else None,
             backs=self._backs(shape, shown),
             count=count,
         )
@@ -817,6 +878,7 @@ __all__ = [
     "CURSOR_PARAM",
     "DEFAULT_PARAM",
     "DEFAULT_PER_PAGE",
+    "MAX_RESTORE",
     "MAX_TOKEN",
     "RESTORE_PARAM",
     "KeysetPager",
@@ -825,8 +887,8 @@ __all__ = [
     "Pager",
     "Paging",
     "PagingProvider",
-    "Plan",
     "Window",
+    "WindowPlan",
     "pager_of",
     "valid_param",
 ]

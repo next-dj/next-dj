@@ -1,6 +1,5 @@
 """Swappable binding of a realtime ticket to the browser that negotiated it."""
 
-import functools
 import inspect
 import secrets
 from collections.abc import Mapping
@@ -15,6 +14,7 @@ from django.http import HttpRequest
 from django.http.response import HttpResponseBase
 from django.utils.module_loading import import_string
 
+from next.caches import pure_cache
 from next.conf.scopes import scope_value
 from next.identity import (
     LiveIdentity,
@@ -224,7 +224,7 @@ def binding_class(path: object) -> type[TicketBinding] | None:
     return None
 
 
-@functools.cache
+@pure_cache()
 def _binding(path: str) -> TicketBinding:
     """Build the binding a dotted path names, refusing any other value."""
     klass = binding_class(path)

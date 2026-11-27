@@ -224,7 +224,7 @@ A third shape covers the project that has neither, and it is described last.
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
-   ``PAGES_DIR`` is required on every ``FileRouterBackend`` entry, and the ``next.E024`` system check fails when the key is missing.
+   ``PAGES_DIR`` is required on every ``FilePageBackend`` entry, and the ``next.E024`` system check fails when the key is missing.
    A backend that is not a file router carries only ``BACKEND``, and any other key on that entry reports ``next.E035``.
    In the tutorial it is set to ``pages``, so the router scans ``notes/pages/``.
    Applications are resolved through Django's application registry, so an ``INSTALLED_APPS`` entry written as an ``AppConfig`` path such as ``notes.apps.NotesConfig`` scans the same ``notes/pages/`` directory as the plain ``notes`` entry, and both are reported as ``App 'notes'``.
@@ -248,7 +248,7 @@ Fallback root.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": False,
                "DIRS": [],
                "PAGES_DIR": "pages",
@@ -273,7 +273,7 @@ The comparison is string equality after bracket conversion, so semantic overlap 
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
                "PAGES_DIR": "pages",
@@ -310,7 +310,7 @@ Segment entry.
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "DIRS": ["drafts"],
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
@@ -568,12 +568,12 @@ Each backend can read from a different directory, register a different ``PAGES_D
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
            },
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "admin_pages",
            }
@@ -632,10 +632,10 @@ Hot reload
 ----------
 
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
-``router_manager.reload()`` rebuilds every backend and clears the Django URL resolver cache, and the call is idempotent.
-The rebuild emits ``router_backend_loaded`` once per instantiated ``PAGE_BACKENDS`` entry, with the resolved router class as sender and the entry copy and the built instance as payload.
-Each invocation then emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
-A receiver of that signal that rebuilds again calls ``router_manager.reload(notify=False)``, which skips ``router_backend_loaded``, the URL-cache clear, and ``router_reloaded``, so the receiver does not re-enter itself.
+``route_manager.reload()`` rebuilds every backend and clears the Django URL resolver cache, and the call is idempotent.
+The rebuild emits ``page_backend_loaded`` once per instantiated ``PAGE_BACKENDS`` entry, with the resolved router class as sender and the entry copy and the built instance as payload.
+Each invocation then emits a ``routes_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
+A receiver of that signal that rebuilds again calls ``route_manager.reload(notify=False)``, which skips ``page_backend_loaded``, the URL-cache clear, and ``routes_reloaded``, so the receiver does not re-enter itself.
 
 A reload also happens without an explicit call.
 The framework holds a :data:`~django.test.signals.setting_changed` receiver that reloads every router when ``INSTALLED_APPS``, ``ROOT_URLCONF``, or ``BASE_DIR`` moves, because a file router caches its patterns per application name, reads its ``pages()`` includes from the root URLconf, and places its relative ``DIRS`` roots under ``BASE_DIR``.
@@ -673,23 +673,23 @@ Extension points
 
 Two surfaces let you replace or augment the router.
 
-- ``next.urls.RouterBackend`` is the abstract contract for any source of URL patterns.
-- ``next.urls.FileRouterBackend`` is the default file-based implementation.
+- ``next.urls.PageBackend`` is the abstract contract for any source of URL patterns.
+- ``next.urls.FilePageBackend`` is the default file-based implementation.
 
 A custom backend is named by its dotted path under ``PAGE_BACKENDS``, exactly as every other backend family is named, and it takes that entry as its single constructor argument.
 
-Subclass ``FileRouterBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
+Subclass ``FilePageBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
 See :doc:`extending` for a worked example.
 
 Database driven routes
 ----------------------
 
 A hybrid backend combines file routes with routes built from database rows.
-Subclass ``FileRouterBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
+Subclass ``FilePageBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
 The base method returns a fresh list on every call, so appending to it never mutates the cached file routes.
-Register the backend in ``PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
+Register the backend in ``PAGE_BACKENDS`` and call ``route_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
 
-See :doc:`/content/howto/write-a-router-backend` for the full worked recipe.
+See :doc:`/content/howto/write-a-page-backend` for the full worked recipe.
 
 See also
 --------

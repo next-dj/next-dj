@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django.core.checks import CheckMessage, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.pages.loaders import in_page_tree
 from next.utils import is_route_group
 

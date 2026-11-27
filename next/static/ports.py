@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, override
 from next.ports import StaticAssets
 
 from .manager import collect_component_assets, get_static_manager
+from .runtime import ScriptInjectionPolicy
 
 
 if TYPE_CHECKING:
@@ -52,6 +53,12 @@ class StaticAssetsImpl(StaticAssets):
         return get_static_manager().inject(
             html, collector, page_path=page_path, request=request
         )
+
+    @override
+    def runtime_loads(self) -> bool:
+        """Return whether a page loads the runtime script, which every retry needs."""
+        policy = get_static_manager().script_builder().policy
+        return policy is not ScriptInjectionPolicy.DISABLED
 
 
 __all__ = ["StaticAssetsImpl"]

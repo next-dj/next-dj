@@ -68,7 +68,7 @@ class Scan:
 
 
 _NO_GUARD: Final = Scan(guards=False)
-_SCANNED: BoundedCache[object, Scan] = BoundedCache()
+_SCANNED: BoundedCache[object, Scan] = BoundedCache(depends=())
 
 
 def _layers(func: object) -> Iterator[FunctionType]:

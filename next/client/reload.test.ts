@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LayerStack } from "./layers";
+import type { BeforeApply } from "./apply";
 import { createReload } from "./reload";
+import type { ReloadHost } from "./reload";
 
 let controller: AbortController;
 let fallbacks: WeakMap<Element, string>;
@@ -76,11 +78,20 @@ function harness() {
     for (const el of document.querySelectorAll(selector)) callback(el);
     return () => undefined;
   };
+  const before: ((detail: BeforeApply) => void)[] = [];
   createReload(
-    { partial: { layers, onMount, _fallbacks: fallbacks } },
+    {
+      partial: { layers, onMount } as unknown as ReloadHost["partial"],
+      fallbacks,
+      hook: (_phase, _order, run) =>
+        void before.push(run as (detail: BeforeApply) => void),
+    },
     { signal: controller.signal },
   );
-  return { resolveZone };
+  const capture = (boundaries: Element[]): void => {
+    for (const run of before) run({ boundaries } as unknown as BeforeApply);
+  };
+  return { resolveZone, capture };
 }
 
 describe("a zone reload showing loading content", () => {
@@ -106,6 +117,34 @@ describe("a zone reload showing loading content", () => {
     vi.advanceTimersByTime(1);
     expect(byId("b-1").innerHTML).toBe("<i>wait</i>");
     expect(byId("b-1").style.minHeight).toBe("40px");
+  });
+
+  it("reads every height before it swaps the first boundary", () => {
+    reloading(ready("b-1") + ready("b-2") + ready("b-3"));
+    const order: string[] = [];
+    for (const id of ["b-1", "b-2", "b-3"]) {
+      live(id);
+      const el = byId(id);
+      vi.spyOn(el, "getBoundingClientRect").mockImplementation(() => {
+        order.push(`read ${id}`);
+        return rect(10);
+      });
+      const style = el.style;
+      vi.spyOn(style, "minHeight", "set").mockImplementation(() => {
+        order.push(`write ${id}`);
+      });
+    }
+    harness();
+    requested("/list/", "z");
+    vi.advanceTimersByTime(150);
+    expect(order).toEqual([
+      "read b-1",
+      "read b-2",
+      "read b-3",
+      "write b-1",
+      "write b-2",
+      "write b-3",
+    ]);
   });
 
   it("puts the content back when the reload fails", () => {
@@ -270,8 +309,7 @@ describe("a zone reload showing loading content", () => {
         "<i>stream</i></div>",
     );
     document.head.innerHTML = stashed("k-b-stash", "<i>stash</i>");
-    harness();
-    emit("partial:before-apply", { boundaries: [byId("b-trip"), byId("b-keyless")] });
+    harness().capture([byId("b-trip"), byId("b-keyless")]);
     for (const id of ["b-trip", "b-keyless"]) {
       byId(id).setAttribute("data-next-state", "ready");
       byId(id).innerHTML = "<p>done</p>";
@@ -293,11 +331,11 @@ describe("a zone reload showing loading content", () => {
         ready("b-4"),
     );
     live("b-4", "<i>streamed</i>");
-    harness();
+    const { capture } = harness();
     const boundaries = ["b-1", "b-2", "b-3", "b-4"].map(byId);
-    emit("partial:before-apply", { boundaries });
+    capture(boundaries);
     byId("b-1").innerHTML = "<i>second</i>";
-    emit("partial:before-apply", { boundaries });
+    capture(boundaries);
     byId("b-1").setAttribute("data-next-state", "ready");
     byId("b-1").innerHTML = "<p>done</p>";
     fallbacks.delete(byId("b-4"));
@@ -309,6 +347,21 @@ describe("a zone reload showing loading content", () => {
       "<p>content</p> tail",
       "<i>streamed</i>",
     ]);
+  });
+
+  it("keeps the loading copies of the latest hundred boundaries", () => {
+    const ids = Array.from({ length: 101 }, (_, index) => `b-${index}`);
+    reloading(ids.map((id) => wrapper(id, `<i>${id}</i>`, "loading")).join(""));
+    harness().capture(ids.map(byId));
+    for (const id of ids) {
+      byId(id).setAttribute("data-next-state", "ready");
+      byId(id).innerHTML = "<p>done</p>";
+    }
+    requested("/list/", "z");
+    vi.advanceTimersByTime(150);
+    expect(byId("b-0").innerHTML).toBe("<p>done</p>");
+    expect(byId("b-1").innerHTML).toBe("<i>b-1</i>");
+    expect(byId("b-100").innerHTML).toBe("<i>b-100</i>");
   });
 
   it("reads the zone names of a request trimmed", () => {

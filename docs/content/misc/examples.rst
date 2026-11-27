@@ -73,7 +73,7 @@ The table runs roughly in order of how much it assumes.
        Titles and describes each article through a ``@page.metadata`` callable that reuses the row its context resolved, marks the editing pages ``noindex``, lists the articles through a lazy ``QuerySet`` sitemap dated per row, and keeps crawlers out of the search pages through a ``robots.py``.
        Previews an article over the search results through a ``(..)wiki`` intercept.
        Its search zone declares ``reload="loading"``, so a slow search shows its ``loading.search-results.djx`` in place of the results while it reloads.
-     - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/robots`, :ref:`topics-file-router-intercepts`
+     - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-page-backend`, :doc:`/content/topics/partial-rendering/index`, :doc:`/content/topics/seo/metadata`, :doc:`/content/topics/seo/robots`, :ref:`topics-file-router-intercepts`
    * - :repo:`multi-tenant <tree/main/examples/multi-tenant>`
      - Resolves a tenant from a request header in middleware, rewrites every co-located asset URL per tenant on top of the staticfiles names it inherits, stamps a deploy build id into those URLs, and shares a header and footer across page roots.
        Makes the tenant the ``site_name`` and the default title of every workspace page through ``@page.metadata(inherit=True)``, which keeps each workspace ``noindex`` as well.

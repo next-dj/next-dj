@@ -22,7 +22,7 @@ NAVIGATION = {
     "X-Next-Origin": "/sec/a/",
     "Sec-Fetch-Site": "same-origin",
 }
-_LAYOUTS = re.compile(r'"\$layouts":(\[.*?\]\])')
+_LAYOUTS = re.compile(r"<script[^>]*\sdata-next-layouts[^>]*>(.*?)</script>")
 _THEMED = "@context('theme')\ndef theme():\n    return 'dark'\n"
 _FACTORY = RequestFactory()
 
@@ -85,15 +85,15 @@ def navigate(
 
 
 def layouts_of(response: HttpResponseBase) -> list[list[str]]:
-    """Return the `$layouts` chain of a document, outer first."""
+    """Return the layouts block of a document, outer first."""
     found = _LAYOUTS.search(response.content.decode())
     assert found is not None
     return json.loads(found.group(1))
 
 
 def declare(layouts: list[list[str]]) -> str:
-    """Spell a `$layouts` chain as the `X-Next-Layouts` header the client sends."""
-    return ",".join(f"{ident}.{digest}" for ident, digest, _seal in layouts)
+    """Spell a layouts chain as the `X-Next-Layouts` header the client sends."""
+    return ",".join(f"{ident}.{digest}" for ident, digest, _response_id in layouts)
 
 
 def declared_by(page_file: Path, path: str = "/sec/a/") -> str:

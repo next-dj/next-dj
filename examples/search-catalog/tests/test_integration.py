@@ -329,6 +329,15 @@ class TestProductRails:
         assert "data-next-retry" in final
         assert "data-product-card" not in final
 
+    def test_the_error_ui_of_a_rail_names_its_title(
+        self, next_client, demo_data
+    ) -> None:
+        with boundary_errors("render"), boundary_gate(component="rail"):
+            streamed = next_client.get_stream(PRODUCT_URL)
+        final = streamed.final_html()
+        assert ">More in this category</h2>" in final
+        assert ">At a similar price</h2>" in final
+
     def test_a_rail_with_nothing_in_stock_says_so(self, next_client, demo_data) -> None:
         Product.objects.exclude(slug="item-07").update(in_stock=False)
         body = next_client.get(PRODUCT_URL).content.decode()
@@ -338,10 +347,7 @@ class TestProductRails:
     def test_the_rails_on_the_pool_share_one_batch(
         self, next_client, demo_data, batches
     ) -> None:
-        with (
-            parallel_boundaries(),
-            override_next_settings(DEFER={"BATCH_WINDOW": "1s"}),
-        ):
+        with parallel_boundaries(), override_next_settings(LOADER={"WINDOW": "1s"}):
             next_client.get_stream(PRODUCT_URL)
         assert batches == [sorted(set(_picks("price")) | set(_picks("category")))]
 
@@ -387,7 +393,13 @@ class TestCacheHit:
         self, next_client, demo_data
     ) -> None:
         """Count a search once for each page, each restored window and each sort."""
-        for query in ("", "?page=2", "?page=3&restore=1", "?page=999", "?sort=name"):
+        for query in (
+            "",
+            "?page=2",
+            "?page=3&_restore=page",
+            "?page=999",
+            "?sort=name",
+        ):
             next_client.get(f"/catalog/{query}")
         assert len(_cache_keys()) == 1
 
@@ -755,7 +767,7 @@ class TestWindowedListing:
     def test_a_restored_window_renders_every_page_up_to_it(
         self, next_client, demo_data
     ) -> None:
-        restored = next_client.get("/catalog/?page=3&restore=1").content.decode()
+        restored = next_client.get("/catalog/?page=3&_restore=page").content.decode()
         alone = next_client.get("/catalog/?page=3").content.decode()
         assert len(_slug_set(restored)) == 18
         assert _slug_set(alone) < _slug_set(restored)
@@ -765,7 +777,7 @@ class TestWindowedListing:
         self, next_client, demo_data
     ) -> None:
         restored = _more_zone(
-            next_client.get("/catalog/?page=3&restore=1").content.decode()
+            next_client.get("/catalog/?page=3&_restore=page").content.decode()
         )
         assert 'data-next-back="3"' in restored
         assert 'data-next-backs="1 2"' in restored
@@ -776,7 +788,7 @@ class TestWindowedListing:
     def test_the_first_page_holds_the_earlier_link_hidden(
         self, next_client, demo_data
     ) -> None:
-        for url in ("/catalog/", "/catalog/?page=3&restore=1"):
+        for url in ("/catalog/", "/catalog/?page=3&_restore=page"):
             less = _less_zone(next_client.get(url).content.decode())
             assert less.count("<a") == 1
             assert " hidden" in less
@@ -1076,6 +1088,7 @@ class TestLanding:
         assert init_payload(response.content.decode())["$csrf"] == {
             "header": "X-Csrftoken",
             "url": "/_next/csrf/",
+            "cookie": "csrftoken",
         }
 
 

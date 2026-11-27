@@ -262,7 +262,7 @@ The framework computes the template scope in this order.
 4. Context processors run after every ``@context`` callable.
    A processor is called with the request, and the callable must declare a parameter named ``request``.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
-   The second source is the ``OPTIONS.context_processors`` list on the first ``TEMPLATES`` entry in Django settings.
+   The second source is the ``OPTIONS.context_processors`` list on the first ``DjangoTemplates`` entry of ``TEMPLATES``, the engine every page compiles on, in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update``, so a processor key overwrites a page or inherited value.

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from next.deps.cache import request_memo
 from next.deps.context import ResolutionContext
-from next.deps.resolver import current_resolver
+from next.deps.resolver import current_resolver, sharing
 from next.deps.runner import run_isolated
 
 from .blame import blame, blame_watch
@@ -339,13 +339,38 @@ class _Run:
         """Await one async step, failing at once on a keyless step's wrong shape."""
         return self._shaped(index, await self.acall(index, view))
 
-    def _lane(self, lane: _Lane, context: ResolutionContext) -> None:
+    async def _seeded_lane(self, lane: _Lane) -> None:
+        """Resolve the shared keys of the sync steps on the loop, then run the steps.
+
+        Keys failing for one step still let the steps before it run, as in a serial run.
+        """
+        base = self.base
+        seeded = 0
+        try:
+            for index, view in lane.steps:
+                context = ResolutionContext(
+                    base.request, None, base.url_kwargs, view, base.cache
+                )
+                await self.resolver.aseed(self.steps[index].func, context)
+                seeded += 1
+        except Exception:
+            if seeded:
+                await run_isolated(partial(self._lane, lane, lane.steps[:seeded]), base)
+            raise
+        await run_isolated(partial(self._lane, lane, lane.steps), base)
+
+    def _lane(
+        self,
+        lane: _Lane,
+        steps: tuple[tuple[int, dict[str, object]], ...],
+        context: ResolutionContext,
+    ) -> None:
         """Run the sync steps of a layer in order, each in a context copy of its own.
 
         Writes go to the segment context, and it stops past `lane.stop` on a failure.
         """
         start = contextvars.copy_context()
-        for index, view in lane.steps:
+        for index, view in steps:
             if index > lane.stop:
                 return
             scope = start.copy()
@@ -384,7 +409,9 @@ class _Run:
         tasks = [task for _index, task, _scope in owned]
         if lane.steps:
             lane.task = asyncio.create_task(
-                run_isolated(partial(self._lane, lane), self.base)
+                self._seeded_lane(lane)
+                if sharing()
+                else run_isolated(partial(self._lane, lane, lane.steps), self.base)
             )
             lane.task.add_done_callback(_retrieved)
             tasks.append(lane.task)

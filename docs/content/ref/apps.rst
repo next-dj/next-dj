@@ -8,29 +8,23 @@ Module summary
 
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
-Importing ``next.apps`` registers the framework system checks, because the package imports its own ``checks`` and ``config.py`` imports ``next.checks.catalog``, which imports the ``checks`` of every other area.
-``NextFrameworkConfig.check_modules`` holds that catalogue, ``CHECK_MODULES``, and ``ready()`` leaves the checks alone.
-``NextFrameworkConfig.ready()`` runs its startup steps in a fixed order, the signal receivers first, then the resolver, then the port slots, and the installers last.
+Importing ``next.apps`` registers the framework system checks, because the package imports its own ``checks`` and ``config.py`` imports ``next.apps.areas``, whose area manifests import the ``checks`` of every other area.
+``NextFrameworkConfig.check_modules`` holds that catalogue, ``CHECK_MODULES`` of ``next.apps.areas``, and ``ready()`` leaves the checks alone.
+``NextFrameworkConfig.ready()`` walks ``MANIFESTS``, the ordered manifest of every area, connecting every signal receiver first, then binding the port slots, running the startup steps such as the resolver setting, and registering the page declarations, the lifecycle participants, and the page script providers of each area, and runs the installers last, see :ref:`internals-adding-an-area-manifest`.
 
 #. ``setting_changed`` receivers connected
 #. ``settings_reloaded`` receivers connected
-#. ``router_reloaded`` receivers connected
 #. ``user_logged_in`` receiver ``clear_on_login`` connected
 #. ``user_logged_out`` receiver ``clear_on_logout`` connected
 #. ``connection_created`` receiver ``cover_new_connection`` connected
 #. ``apply_resolver_setting()``
-#. ``async_bridge_slot.set(drive)``
-#. ``context_propagator_slot.set(BridgePropagator())``
-#. ``thread_wait_slot.set(serve_until)``
 #. ``deferrals_slot.set(inline_sink)``
 #. ``action_owners_slot.set(ActionOwnersImpl())``
 #. ``form_routes_slot.set(form_action_manager)``
 #. ``page_scan_slot.set(PageScanImpl())``
-#. ``realtime_negotiation_slot.set(RealtimeNegotiationImpl())``
-#. ``router_access_slot.set(RouterAccessImpl())``
+#. ``route_access_slot.set(RouteAccessImpl())``
 #. ``router_stamp_slot.set(stamp)``
 #. ``zone_marking_slot.set(action_marking)``
-#. ``page_scripts_slot.set(PageScriptsImpl())``
 #. ``seo_routes_slot.set(SeoRoutesImpl())``
 #. ``seo_routes_version.move()``
 #. ``static_assets_slot.set(StaticAssetsImpl())``
@@ -40,15 +34,16 @@ Importing ``next.apps`` registers the framework system checks, because the packa
 #. ``autodiscover.install()``
 #. ``components.install()``
 
-Every framework receiver of ``setting_changed``, ``settings_reloaded``, ``router_reloaded``, ``user_logged_in``, ``user_logged_out``, and ``connection_created`` is connected in the connect steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
+Every framework receiver of ``setting_changed``, ``settings_reloaded``, ``user_logged_in``, ``user_logged_out``, and ``connection_created`` is connected in the connect steps and none at import time, and the one other receiver, the ``autoreload_started`` watcher, is connected by ``autoreload.install()``.
 Each signal below lists its receivers in the order they run, and each is connected with ``dispatch_uid`` set to its module and qualified name, so a second ``ready`` call connects nothing twice.
 
-- ``setting_changed`` runs ``reload_on_setting_changed`` of ``next.conf.settings`` first, which rebuilds the merged ``NEXT_FRAMEWORK`` and sends ``settings_reloaded``, then the receivers that read Django settings directly, among them ``forget_app_page_roots``, ``reload_app_routers``, ``staticfiles.reinstall_finders``, and ``templates.reinstall_builtins``.
-- ``settings_reloaded`` runs ``reset_failure_logs`` first, so every failure logs again under the new configuration, then every receiver that forgets a memo derived from the settings, among them ``reapply_resolver_setting``, ``forget_site_config``, ``forget_metadata_renderer``, ``forget_serializer``, ``forget_static_manager``, ``forget_seo_sources``, ``forget_scripts``, and ``forget_consent_settings``.
-- ``router_reloaded`` runs ``forget_watch_state``, ``forget_shared_layouts``, ``forget_page_roots``, ``forget_manager_page_roots``, ``forget_dep_caches``, ``forget_object_rows``, ``forget_seo_sources``, ``forget_translated_urls``, and ``forget_scripts``.
-  A reload that replaces the routers from code changes what they report without touching settings, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
+- ``setting_changed`` runs ``reload_on_setting_changed`` of ``next.conf.settings`` first, which moves the ``SETTINGS`` source of ``next.caches`` or, for ``NEXT_FRAMEWORK``, rebuilds the merged mapping, moves ``SETTINGS`` and ``FRAMEWORK`` and sends ``settings_reloaded``, then the receivers that act on Django settings, ``forget_render_pipeline``, ``reload_app_routers``, ``staticfiles.reinstall_finders``, and ``templates.reinstall_builtins``.
+- ``settings_reloaded`` runs ``reapply_resolver_setting`` and ``reload_router_settings``, which rebuild the resolver and the routers.
+- No receiver drops a memo.
+  Each memo attaches to the source it follows, so a move drops every one before either signal reaches its receivers, see :ref:`internals-process-state`.
+  ``route_manager.reload`` moves ``ROUTES`` before it sends ``routes_reloaded``, so every memo derived from the old routers goes with them, see :doc:`/content/howto/reload-routes-from-code`.
 - ``user_logged_in`` and ``user_logged_out`` run ``clear_on_login`` and ``clear_on_logout`` of ``next.router.navigation``, which mark the request so its response tells the client router to drop what it cached for the previous identity, see :doc:`router`.
-- ``connection_created`` runs ``cover_new_connection`` of ``next.transactions``, which puts a connection the thread opens while a lazy savepoint watches every connection under that savepoint, as the connections already open are, see :doc:`defer`.
+- ``connection_created`` runs ``cover_new_connection`` of ``next.transactions.savepoints``, which puts a connection the thread opens while a lazy savepoint watches every connection under that savepoint, as the connections already open are, see :doc:`defer`.
 
 ``apply_resolver_setting()`` points the dependency-injection singleton at the class named by ``DEPENDENCY_RESOLVER``, see :doc:`settings`.
 It runs ahead of every install because the two discovery steps import user modules, and a ``component.py``, a ``deps.py``, a ``permissions.py``, a ``forms.py``, or a ``signals.py`` that resolves at import time has to see the configured resolver rather than the base one.
@@ -61,7 +56,6 @@ The ``realtime`` sweep imports the modules that ``REALTIME["HANDLERS"]`` selects
 The ``set`` steps bind every :doc:`next.ports <ports>` slot, ahead of every step that imports user code so that a module touching a framework path at import time never reads an unbound slot.
 They also run ahead of the discovery steps so a discovery failure leaves no process behind with a slot still empty.
 Each implementation resolves its manager when a method is called rather than when the slot is bound, so the static manager is still built on first use.
-The ``context_propagator_slot`` binding takes the default propagator that moves a ``Local`` value through the hops of asgiref, see :doc:`ports`.
 The ``seo_routes_version.move()`` step right after the ``seo_routes_slot`` binding moves the counter of ``next.urls.manager`` the lazy urlpatterns key their cache on, so they rebuild their pattern list with the routes of the port just bound.
 
 Public API

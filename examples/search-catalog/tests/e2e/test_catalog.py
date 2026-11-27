@@ -213,7 +213,7 @@ def test_scrolling_records_the_window_and_a_reload_restores_it(
 
     page.locator(SENTINEL).scroll_into_view_if_needed()
     expect(page.locator(RESULTS)).to_have_count(12)
-    expect(page).to_have_url(f"{base_url}/catalog/?page=2&restore=1")
+    expect(page).to_have_url(f"{base_url}/catalog/?page=2&_restore=page")
 
     page.reload()
     wait_for_runtime(page)

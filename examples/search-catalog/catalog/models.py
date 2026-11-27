@@ -115,7 +115,7 @@ class Product(models.Model):
                 fields=["category", "slug"], name="uniq_product_per_cat"
             )
         ]
-        # Django's index-name cap moved, so an unnamed index drifts in `makemigrations`.
+        # Named indexes keep `makemigrations` stable across Django versions.
         indexes: ClassVar = [
             models.Index(fields=["category", "in_stock"], name="product_cat_stock_idx"),
             models.Index(fields=["price"], name="product_price_idx"),

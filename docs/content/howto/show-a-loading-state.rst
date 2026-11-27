@@ -14,7 +14,7 @@ Solution
 
 Put a ``loading.djx`` beside the component.
 The response then sends the page with the loading UI in the component's place and fills the component in the same response as soon as it is ready.
-Nothing else in the component or the page changes.
+The component and the page keep their code, and an ``error.djx`` beside the loading UI covers a failed render, see `Add the error UI`_.
 
 Walkthrough
 -----------
@@ -35,6 +35,7 @@ The page lives at ``/product/<pk>/`` and its component sits in the ``_components
            component.py
            component.djx
            loading.djx
+           error.djx
 
 The page module loads the product, and the page template calls the component with the ordinary tag.
 
@@ -86,11 +87,23 @@ The slow work stays where it was.
 The presence of ``loading.djx`` turns each call of the component into a ``stream`` boundary.
 The shell carries the loading UI inside a wrapper element, the component's job runs while the response is written, and a chunk replaces the loading UI with the component when the job settles.
 The component reads the context of the call site, so ``product`` comes from the page as it does for an inline call.
+A reader without scripts is sent to the same page assembled whole, see :doc:`/content/topics/boundaries/streaming`.
+
+Add the error UI
+~~~~~~~~~~~~~~~~
+
+A deferred component with no ``error.djx`` and no ``BOUNDARIES["ERROR_TEMPLATE"]`` default shows the built-in error UI when its job fails, one neutral sentence and a button that tries again.
+The file beside the component replaces it with words of the page.
+
+.. code-block:: jinja
+   :caption: shop/pages/product/_components/recommendations/error.djx
+
+   <p data-recommendations-error>Related products are unavailable right now.</p>
 
 Show a loading UI that tells what is coming
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The loading UI renders over the context of the call site and reads ``props``, the props of the call.
+The loading UI renders over the context of the call site, and the props of the call sit at its top level, so it reads a prop by the same name as ``component.djx`` does.
 A skeleton keeps the layout from shifting when the content arrives, and a visually hidden label tells a screen reader what is loading.
 
 .. code-block:: jinja
@@ -102,13 +115,7 @@ A skeleton keeps the layout from shifting when the content arrives, and a visual
      <div class="h-24 animate-pulse rounded bg-muted"></div>
    </section>
 
-The wrapper carries ``data-next-state``, ``loading`` until the job settles, then ``ready``, so a stylesheet styles the wait without touching the markup.
-The wrapper also carries ``aria-busy="true"`` while the state is ``loading``.
-
-.. code-block:: css
-   :caption: shop/pages/product/[int:pk]/template.css
-
-   [data-next-state="loading"] { opacity: 0.7; }
+The wrapper carries ``data-next-state`` and ``aria-busy`` while the job runs, so a stylesheet styles the wait without touching the markup, see :doc:`/content/topics/boundaries/loading`.
 
 Cap the wait
 ~~~~~~~~~~~~
@@ -131,18 +138,7 @@ The call without a mode keeps the default, ``stream``.
        return recommend(product)
 
 A job past its timeout settles as ``timeout``, and the visitor sees the ``error.djx`` beside the component in place of the loading UI.
-The error UI reads ``error``, and ``error.retry`` tells whether the page loads the client runtime a retry control needs.
-
-.. code-block:: jinja
-   :caption: shop/pages/product/_components/recommendations/error.djx
-
-   <div data-recommendations-error>
-     <p>Related products are unavailable right now.</p>
-     {% if error.retry %}<button type="button" data-next-retry>Try again</button>{% endif %}
-   </div>
-
-Without an ``error.djx`` a deferred component renders an empty wrapper marked as an error, which ``manage.py check`` reports as ``next.W170``.
-:doc:`contain-a-failure-with-an-error-boundary` covers the error UI in full.
+The error UI reads ``error``, and :doc:`contain-a-failure-with-an-error-boundary` covers it in full, including a retry control.
 
 Load on sight instead
 ~~~~~~~~~~~~~~~~~~~~~
@@ -198,7 +194,7 @@ The observability example does this for its ``/stats/pages/`` table.
 
    page.defer(timeout="3s")
 
-A page whose body can answer 404 or 403 keeps that status, because the callables that can refuse the request run in the shell, see :doc:`/content/topics/boundaries/loading`.
+A ``@context`` callable that answers 404 or 403 for the page, such as one calling ``get_object_or_404``, is declared ``@context(..., guard=True)`` so it runs in the shell and keeps that status, see :doc:`/content/topics/boundaries/loading`.
 
 Verification
 ------------
@@ -233,7 +229,7 @@ The tests run under pytest-django, set up as :doc:`test-a-page-with-actions` sho
 ``uv run pytest tests/test_product_page.py`` passes.
 In a browser, open the page with the network throttled.
 The page appears at once with the placeholder, and the list replaces it without a reload.
-``manage.py check`` reports no ``next.W157`` or ``next.W170`` for the component.
+``manage.py check`` reports no ``next.W157`` for the component.
 
 See also
 --------

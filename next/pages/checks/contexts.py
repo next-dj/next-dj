@@ -6,19 +6,13 @@ import inspect
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple, get_origin
 
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     RegistrationSubject,
     discover_page_registrations,
-    get_router_manager,
+    get_route_manager,
     registration_file_errors,
 )
 from next.deps.errors import DependencyCycleError
@@ -57,10 +51,10 @@ def load_routed_pages() -> list[tuple[str, Path]] | None:
 
     `None` means the routers failed to load, which `next.E007` reports.
     """
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return None
-    return discover_page_registrations(router_manager)
+    return discover_page_registrations(route_manager)
 
 
 def loaded_page_contexts() -> list[PageContexts]:

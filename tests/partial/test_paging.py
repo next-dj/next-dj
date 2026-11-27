@@ -30,8 +30,8 @@ from next.partial import (
     NumberPager,
     Pager,
     Paging,
-    Plan,
     Window,
+    WindowPlan,
     paging as paging_module,
 )
 from next.partial.paging import PagingProvider, _Column, pager_of, valid_param
@@ -156,6 +156,16 @@ class TestWindow:
         window = Window(rows=[1, 2, 3], param="page")
         assert Template(source).render(Context({"window": window})) == rendered
 
+    def test_it_answers_the_questions_a_page_template_asks(self) -> None:
+        window = Window(rows=[1], param="page", next="3", previous=None)
+        rendered = Template(
+            "{% if window.has_next %}n{% endif %}{% if window.has_previous %}p{% endif %}"
+            "{{ window|length }}"
+        ).render(Context({"window": window}))
+        assert rendered == "n1"
+        assert window.has_next() is True
+        assert window.has_previous() is False
+
     def test_it_indexes_slices_and_reverses_its_rows(self) -> None:
         window = Window(rows=[1, 2, 3], param="page")
         assert (window[0], window[-1], window[1:]) == (1, 3, [2, 3])
@@ -166,7 +176,7 @@ class TestPagerOptions:
     """Both pagers refuse a parameter or a batch size they could not serve."""
 
     @pytest.mark.parametrize(
-        "param", ["p q", "restore", "", 5], ids=["space", "restore", "empty", "int"]
+        "param", ["p q", "_restore", "", 5], ids=["space", "restore", "empty", "int"]
     )
     def test_a_bad_param_is_refused(self, param: object) -> None:
         with pytest.raises(ValueError, match="query parameter"):
@@ -177,10 +187,15 @@ class TestPagerOptions:
         with pytest.raises(ValueError, match="per_page"):
             KeysetPager(("pk",), per_page=per_page)
 
+    @pytest.mark.parametrize("reach", [0, -1, True], ids=["zero", "neg", "bool"])
+    def test_a_bad_restore_reach_is_refused(self, reach: int) -> None:
+        with pytest.raises(ValueError, match="max_restore"):
+            NumberPager(max_restore=reach)
+
     def test_a_pager_that_plans_serves_both_paths(self) -> None:
         class TailPager(Pager):
             def plan(self, rows, request):
-                return Plan((rows[-2:],), rows, self.finish)
+                return WindowPlan((rows[-2:],), rows, self.finish)
 
             def finish(self, fetched, count):
                 return Window(fetched[0], self.param, count=count)
@@ -193,7 +208,7 @@ class TestPagerOptions:
 
     def test_valid_param(self) -> None:
         assert valid_param("cursor") is True
-        assert valid_param("restore") is False
+        assert valid_param("_restore") is False
         assert valid_param(None) is False
 
 
@@ -218,12 +233,20 @@ class TestNumberPager:
         assert list(window) == list(range(15, 20))
         assert window.param == "p"
 
-    def test_the_restore_reach_follows_the_setting(self) -> None:
-        pager = NumberPager(per_page=10)
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"MAX_RESTORE": 3}}}):
-            window = pager.window(ROWS, _get(page=6, restore=1))
+    def test_the_restore_reach_follows_the_pager(self) -> None:
+        pager = NumberPager(per_page=10, max_restore=3)
+        window = pager.window(ROWS, _get(page=6, _restore="page"))
         assert list(window) == list(range(30, 60))
         assert (window.previous, window.backs, window.back) == ("3", ("4", "5"), "6")
+
+    @pytest.mark.parametrize(
+        "query", [{"_restore": "other"}, {"restore": "1"}], ids=["foreign", "bare"]
+    )
+    def test_a_restore_flag_of_another_pager_reads_one_page(
+        self, query: dict[str, str]
+    ) -> None:
+        window = NumberPager(per_page=10).window(ROWS, _get(page=6, **query))
+        assert list(window) == list(range(50, 60))
 
     def test_an_exact_multiple_ends_on_a_full_page(self) -> None:
         window = NumberPager(per_page=10).window(list(range(100)), _get(page=10))
@@ -233,6 +256,38 @@ class TestNumberPager:
     def test_an_empty_list_is_one_empty_window(self) -> None:
         window = NumberPager().window([], None)
         assert (list(window), window.next, window.previous) == ([], None, None)
+
+    def test_an_empty_list_past_page_one_leads_nowhere(self) -> None:
+        window = NumberPager().window([], _get(page=4))
+        assert (list(window), window.next, window.previous) == ([], None, None)
+
+    @pytest.mark.django_db()
+    def test_a_page_past_the_end_counts_once_to_lead_back(
+        self, groups: None, django_assert_num_queries
+    ) -> None:
+        rows = Group.objects.order_by("name")
+        with django_assert_num_queries(2) as captured:
+            window = NumberPager(per_page=10).window(rows, _get(page=999))
+        assert "COUNT" in captured.captured_queries[1]["sql"].upper()
+        assert (list(window), window.previous, window.count) == ([], "10", None)
+        assert window.has_previous() is True
+        assert window.has_next() is False
+
+    @pytest.mark.django_db()
+    def test_a_counted_page_past_the_end_reads_no_more(
+        self, groups: None, django_assert_num_queries
+    ) -> None:
+        pager = NumberPager(per_page=10, count=True)
+        rows = Group.objects.order_by("name")
+        with django_assert_num_queries(2):
+            window = pager.window(rows, _get(page=999))
+        assert (window.previous, window.count) == ("10", 95)
+
+    @pytest.mark.django_db()
+    def test_the_async_window_past_the_end_leads_back(self, groups: None) -> None:
+        rows = Group.objects.order_by("name")
+        window = async_to_sync(NumberPager(per_page=10).awindow)(rows, _get(page=50))
+        assert (list(window), window.previous) == ([], "10")
 
     def test_count_is_read_only_when_asked(self) -> None:
         window = NumberPager(per_page=10, count=True).window(ROWS, None)
@@ -244,7 +299,9 @@ class TestNumberPager:
     ) -> None:
         rows = Group.objects.order_by("name")
         with django_assert_num_queries(1) as captured:
-            window = NumberPager(per_page=5).window(rows, _get(page=12, restore=1))
+            window = NumberPager(per_page=5).window(
+                rows, _get(page=12, _restore="page")
+            )
         sql = captured.captured_queries[0]["sql"].upper()
         assert "LIMIT 51 OFFSET 10" in sql
         assert "COUNT" not in sql
@@ -267,7 +324,7 @@ class TestNumberPager:
         pager = NumberPager(per_page=10, count=True)
         rows = Group.objects.order_by("name")
         with django_assert_num_queries(2):
-            window = async_to_sync(pager.awindow)(rows, _get(page=3, restore=1))
+            window = async_to_sync(pager.awindow)(rows, _get(page=3, _restore="page"))
         assert _names(window) == NAMES[:30]
         assert (window.next, window.back, window.backs) == ("4", "3", ("1", "2"))
         assert window.count == 95
@@ -340,7 +397,9 @@ class TestKeysetTraversal:
         pager = KeysetPager(("-name", "pk"), per_page=10)
         first = pager.window(Group.objects.all(), None)
         with django_assert_num_queries(2) as captured:
-            pager.window(Group.objects.all(), _get(cursor=first.next, restore=1))
+            pager.window(
+                Group.objects.all(), _get(cursor=first.next, _restore="cursor")
+            )
         for query in captured.captured_queries:
             sql = query["sql"].upper()
             assert "LIMIT" in sql
@@ -377,7 +436,9 @@ class TestKeysetRestore:
     def test_a_restore_reaches_back_to_the_start(self) -> None:
         pager = KeysetPager(("name",), per_page=10)
         token = self._token_after(pager, "g039")
-        window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         assert _names(window) == NAMES[:50]
         assert window.previous is None
         assert window.next == self._token_after(pager, "g049")
@@ -390,7 +451,9 @@ class TestKeysetRestore:
     def test_each_back_token_fetches_the_batch_before_it(self) -> None:
         pager = KeysetPager(("name",), per_page=10)
         token = self._token_after(pager, "g039")
-        window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         for index, back in enumerate(window.backs):
             batch = pager.window(Group.objects.all(), _get(cursor=back))
             assert _names(batch) == NAMES[index * 10 : index * 10 + 10]
@@ -398,7 +461,9 @@ class TestKeysetRestore:
     def test_a_partial_batch_on_top_is_left_to_previous(self) -> None:
         pager = KeysetPager(("name",), per_page=25)
         token = self._token_after(pager, "g059")
-        window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         assert _names(window) == NAMES[10:85]
         assert window.backs == (
             pager.encode(("g035",), reverse=True),
@@ -408,42 +473,47 @@ class TestKeysetRestore:
         assert _names(top) == NAMES[:10]
         assert top.previous is None
 
-    def test_the_reach_follows_the_setting(self) -> None:
-        pager = KeysetPager(("name",), per_page=10)
+    def test_the_reach_follows_the_pager(self) -> None:
+        pager = KeysetPager(("name",), per_page=10, max_restore=3)
         token = self._token_after(pager, "g059")
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"MAX_RESTORE": 3}}}):
-            window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         assert _names(window) == NAMES[40:70]
         assert window.previous == pager.encode(("g040",), reverse=True)
 
     def test_a_restore_of_one_batch_reads_one_query(
         self, django_assert_num_queries
     ) -> None:
-        pager = KeysetPager(("name",), per_page=10)
+        pager = KeysetPager(("name",), per_page=10, max_restore=1)
         token = self._token_after(pager, "g059")
-        with (
-            override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"MAX_RESTORE": 1}}}),
-            django_assert_num_queries(1),
-        ):
-            window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        with django_assert_num_queries(1):
+            window = pager.window(
+                Group.objects.all(), _get(cursor=token, _restore="cursor")
+            )
         assert _names(window) == NAMES[60:70]
         assert window.backs == ()
 
     def test_a_restore_at_the_end_keeps_every_row(self) -> None:
         pager = KeysetPager(("name",), per_page=10)
         token = self._token_after(pager, "g089")
-        window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         assert _names(window) == NAMES
         assert (window.next, window.back, window.backs) == (None, None, ())
-        with override_settings(NEXT_FRAMEWORK={"DEFER": {"MORE": {"MAX_RESTORE": 3}}}):
-            short = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        short = KeysetPager(("name",), per_page=10, max_restore=3).window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         assert _names(short) == NAMES[70:]
         assert short.previous == pager.encode(("g070",), reverse=True)
 
     def test_a_reverse_restore_holds_whole_batches(self) -> None:
         pager = KeysetPager(("name",), per_page=10)
         token = pager.encode(("g025",), reverse=True)
-        window = pager.window(Group.objects.all(), _get(cursor=token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=token, _restore="cursor")
+        )
         assert _names(window) == NAMES[5:25]
         assert window.previous == pager.encode(("g005",), reverse=True)
         assert window.next == self._token_after(pager, "g024")
@@ -480,7 +550,9 @@ class TestKeysetTokens:
         self, groups: None, case: TokenCase
     ) -> None:
         pager = KeysetPager(("name", "pk"), per_page=10)
-        window = pager.window(Group.objects.all(), _get(cursor=case.token, restore=1))
+        window = pager.window(
+            Group.objects.all(), _get(cursor=case.token, _restore="cursor")
+        )
         assert _names(window) == NAMES[:10]
         assert window.previous is None
 
@@ -718,7 +790,7 @@ class TestKeysetSequence:
     def test_a_restore_matches_the_queryset(self, groups: None) -> None:
         pager = KeysetPager(("name",), per_page=25)
         token = pager.encode(("g059",), reverse=False)
-        request = _get(cursor=token, restore=1)
+        request = _get(cursor=token, _restore="cursor")
         listed = pager.window(list(Group.objects.order_by("name")), request)
         queried = pager.window(Group.objects.all(), request)
         assert _names(listed) == _names(queried)
@@ -752,7 +824,7 @@ class TestKeysetAsync:
 
     def test_a_restore(self) -> None:
         pager = KeysetPager(("name",), per_page=25)
-        request = _get(cursor=pager.encode(("g059",), reverse=False), restore=1)
+        request = _get(cursor=pager.encode(("g059",), reverse=False), _restore="cursor")
         window = async_to_sync(pager.awindow)(Group.objects.all(), request)
         assert window == pager.window(Group.objects.all(), request)
 

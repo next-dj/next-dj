@@ -13,17 +13,13 @@ from django.template.loader_tags import BlockNode
 from django.test import override_settings
 
 from next.boundaries import boundary_failed, contain
+from next.boundaries.calls import DEFERRALS_KEY, Addressing, stable_key
+from next.boundaries.failures import ErrorKind, shown_source
+from next.boundaries.options import BoundaryOptions, DeferMode
 from next.components import boundaries as component_boundaries
 from next.components.registry import ErrorFiles
-from next.defer import (
-    DEFERRALS_KEY,
-    Addressing,
-    BoundaryOptions,
-    DeferMode,
-    ErrorKind,
-    stable_key,
-)
 from next.diagnostics import degraded, degraded_status, watch_degraded
+from next.pages import nodes as boundary_nodes
 from next.pages.boundaries import (
     _NO_SCOPE,
     CAUGHT_KEY,
@@ -31,22 +27,20 @@ from next.pages.boundaries import (
     FAILURE_KEY,
     SHELL_KEY,
     Caught,
-    ErrorShell,
+    ErrorContext,
     boundary_scope,
     boundary_template,
     catching,
     mark_failed,
-    shown_source,
 )
 from next.pages.context import ContextResult
 from next.pages.gating import GATE_KEY
 from next.pages.graph import Blame
 from next.pages.loaders import NO_BOUNDARIES, ErrorBoundary, forget_layout_texts
+from next.pages.nodes import PageBoundaryNode, contained_by, enclosing
 from next.ports import PortSlot, render_deferred
 from next.seeding import JS_CONTEXT_KEY, JS_SERIALIZERS_KEY, TEMPLATE_PATH_KEY
 from next.static import ScriptInjectionPolicy
-from next.templatetags import boundaries as boundary_tags
-from next.templatetags.boundaries import PageBoundaryNode, contained_by, enclosing
 from next.testing import capture_signals
 from tests.pages.shells import boom, boundary_tag, deferred_tag, error_shell, shell_gate
 from tests.support import touch_later
@@ -110,7 +104,7 @@ class TestShell:
 
     def test_a_cut_keeps_the_groups_at_or_above_the_boundary(self) -> None:
         chain = boundary_chain(1, 2)
-        shell = ErrorShell({"head": 1}, {"tail": 2}, (2, 1), self._blame(), chain)
+        shell = ErrorContext({"head": 1}, {"tail": 2}, (2, 1), self._blame(), chain)
 
         assert shell.at(2) == {
             "head": 1,
@@ -125,13 +119,13 @@ class TestShell:
 
     def test_a_source_reads_the_cut_of_its_boundary(self) -> None:
         chain = boundary_chain(1, 2)
-        shell = ErrorShell({}, {}, (2, 1), self._blame(), chain)
+        shell = ErrorContext({}, {}, (2, 1), self._blame(), chain)
 
         assert "side" not in shell.of(Path("/site/2/error.djx"))
         assert shell.of(Path("/site/1/error.djx"))["side"] == "SIDE"
 
     def test_an_unknown_source_gets_no_inherited_group(self) -> None:
-        shell = ErrorShell({"head": 1}, {}, (2,), self._blame(), boundary_chain(2))
+        shell = ErrorContext({"head": 1}, {}, (2,), self._blame(), boundary_chain(2))
 
         context = shell.of(Path("/elsewhere/error.djx"))
 
@@ -139,7 +133,7 @@ class TestShell:
         assert context["head"] == 1
 
     def test_the_full_context_sets_the_results_before_the_tail(self) -> None:
-        shell = ErrorShell({"head": 1}, {"p": "P"}, (), Blame(), NO_BOUNDARIES)
+        shell = ErrorContext({"head": 1}, {"p": "P"}, (), Blame(), NO_BOUNDARIES)
         result = ContextResult({"own": 1, "p": "own"}, {"js": 1}, {})
 
         context = shell.around(result)
@@ -193,18 +187,16 @@ class TestErrorTemplate:
         with pytest.raises(TemplateDoesNotExist, match=r"error\.djx"):
             boundary_template(tmp_path / "error.djx")
 
-
-class TestShownSource:
-    """DEBUG names the file that caught relative to the project where it can."""
-
-    def test_a_file_inside_the_project_is_relative(self, tmp_path) -> None:
-        with override_settings(BASE_DIR=tmp_path):
-            assert shown_source(tmp_path / "pages" / "error.djx") == "pages/error.djx"
-
-    def test_a_file_outside_the_project_stays_absolute(self, tmp_path) -> None:
-        source = tmp_path / "error.djx"
-        with override_settings(BASE_DIR=tmp_path / "project"):
-            assert shown_source(source) == str(source)
+    def test_a_templates_change_compiles_with_the_new_engine(
+        self, error_file, settings
+    ) -> None:
+        first = boundary_template(error_file)
+        engine = {**settings.TEMPLATES[0]}
+        engine["OPTIONS"] = {**engine.get("OPTIONS", {}), "string_if_invalid": "?"}
+        with override_settings(TEMPLATES=[engine]):
+            second = boundary_template(error_file)
+        assert second is not first
+        assert second.engine.string_if_invalid == "?"
 
 
 class TestBoundaryScope:
@@ -367,7 +359,7 @@ class TestPageBoundaryNode:
     ) -> None:
         builder = SimpleNamespace(policy=ScriptInjectionPolicy.DISABLED)
         monkeypatch.setattr(
-            "next.components.fallback.get_static_manager",
+            "next.static.ports.get_static_manager",
             lambda: SimpleNamespace(script_builder=lambda: builder),
         )
         error_file.write_text("{{ error.retry }}")
@@ -640,7 +632,7 @@ class TestDeferredTag:
         declared = BoundaryOptions.parse(timeout=3)
         gate = shell_gate(loading_file, None)
 
-        with mock.patch.object(boundary_tags, "page_defer", return_value=declared):
+        with mock.patch.object(boundary_nodes, "page_defer", return_value=declared):
             Template(deferred_tag(loading_file, "b")).render(
                 Context({DEFERRALS_KEY: sink, GATE_KEY: gate})
             )
@@ -653,7 +645,7 @@ class TestDeferredTag:
         sink = mock.Mock(**{"queue.return_value": ""})
         gate = shell_gate(loading_file, None)
 
-        with mock.patch.object(boundary_tags, "page_defer", return_value=None):
+        with mock.patch.object(boundary_nodes, "page_defer", return_value=None):
             Template(deferred_tag(loading_file, "b")).render(
                 Context({DEFERRALS_KEY: sink, GATE_KEY: gate})
             )

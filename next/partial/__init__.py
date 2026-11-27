@@ -11,7 +11,15 @@ from .errors import (
 )
 from .headers import is_partial_request, partial_intent
 from .origin import resolve_partial_origin
-from .paging import KeysetPager, NumberPager, PagedRows, Pager, Paging, Plan, Window
+from .paging import (
+    KeysetPager,
+    NumberPager,
+    PagedRows,
+    Pager,
+    Paging,
+    Window,
+    WindowPlan,
+)
 from .patches import Patches, PatchResponse
 from .registry import register_patch_op, zone_requested
 from .render import ZoneRenderResult, render_zone
@@ -40,10 +48,10 @@ __all__ = [
     "PatchEventStream",
     "PatchResponse",
     "Patches",
-    "Plan",
     "StreamMeta",
     "UnknownZoneError",
     "Window",
+    "WindowPlan",
     "ZoneRenderResult",
     "checks",
     "is_partial_request",

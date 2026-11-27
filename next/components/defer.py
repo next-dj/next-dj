@@ -7,17 +7,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
-from next.defer import BoundaryOptionError, BoundaryOptions
+from next.boundaries.errors import BoundaryOptionError
+from next.boundaries.options import BoundaryOptions
+from next.introspect import refused_declaration
+from next.permissions.access import declaring
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Set as AbstractSet
     from pathlib import Path
 
+    from next.introspect import DeclaringSite
+
 
 COMPONENT_MODULE: Final = "component.py"
 
-_NESTED: Final = "it runs inside a function rather than at the top of the module"
 _TWICE: Final = (
     "it names props through both component.defer(props=) and component.props()"
 )
@@ -29,7 +33,6 @@ class _Written:
 
     defer: dict[str, object] | None = None
     props: tuple[object, ...] | None = None
-    nested: bool = False
 
 
 class _Collecting(threading.local):
@@ -42,8 +45,6 @@ class _Collecting(threading.local):
 
 def _settle(written: _Written) -> tuple[BoundaryOptions | None, str | None]:
     """Return the options the calls declare, or why they declare none."""
-    if written.nested:
-        return None, _NESTED
     options: dict[str, object] = dict(written.defer or {"mode": None})
     if written.props is not None:
         if options.get("props"):
@@ -55,20 +56,13 @@ def _settle(written: _Written) -> tuple[BoundaryOptions | None, str | None]:
         return None, str(error)
 
 
-def _write(
-    written: _Written,
-    defer: dict[str, object] | None,
-    props: tuple[object, ...] | None,
-    *,
-    top_level: bool,
-) -> None:
-    """Note one call on `written`, a call outside the top level spoiling it all."""
-    if not top_level:
-        written.nested = True
-    elif defer is not None:
-        written.defer = defer
-    else:
-        written.props = props
+def _written(
+    written: _Written, defer: dict[str, object] | None, props: tuple[object, ...] | None
+) -> _Written:
+    """Return `written` with one more call, the last of each kind winning."""
+    if defer is not None:
+        return replace(written, defer=defer)
+    return replace(written, props=props)
 
 
 def _place[V](
@@ -79,6 +73,14 @@ def _place[V](
         held.pop(key, None)
     else:
         held[key] = value
+
+
+def _checked(site: DeclaringSite, call: str, written: _Written) -> _Written:
+    """Return `written` once its calls declare options, raising for any that do not."""
+    problem = _settle(written)[1]
+    if problem is not None:
+        raise refused_declaration(call, site, problem)
+    return written
 
 
 class DeferDeclarations:
@@ -96,7 +98,6 @@ class DeferDeclarations:
         "_modules",
         "_options",
         "_outside",
-        "_problems",
         "_version",
     )
 
@@ -106,7 +107,6 @@ class DeferDeclarations:
         self._options: dict[Path | None, BoundaryOptions] = {}
         self._modules: set[Path] = set()
         self._addressable: set[Path] = set()
-        self._problems: dict[Path, str] = {}
         self._outside: dict[Path, str] = {}
         self._collecting = _Collecting()
         self._lock = threading.Lock()
@@ -140,44 +140,41 @@ class DeferDeclarations:
         """
         return module_path in self._addressable
 
-    def problems(self) -> tuple[tuple[Path, str], ...]:
-        """Return each `component.py` whose calls declare nothing, with the reason."""
-        with self._lock:
-            return tuple(self._problems.items())
-
     def outside(self) -> tuple[tuple[Path, str], ...]:
         """Return each module other than a `component.py` that called one, and which."""
         with self._lock:
             return tuple(self._outside.items())
 
-    def defer(self, site: tuple[Path, bool], options: dict[str, object]) -> None:
-        """Record one `component.defer` call made at `site`."""
+    def defer(self, site: DeclaringSite, options: dict[str, object]) -> None:
+        """Record one `component.defer` call made at `site`, raising on a misfit."""
         self._record(site, "component.defer()", defer=options)
 
-    def props(self, site: tuple[Path, bool], names: tuple[object, ...]) -> None:
-        """Record one `component.props` call made at `site`."""
+    def props(self, site: DeclaringSite, names: tuple[object, ...]) -> None:
+        """Record one `component.props` call made at `site`, raising on a misfit."""
         self._record(site, "component.props()", props=names)
 
     def _record(
         self,
-        site: tuple[Path, bool],
+        site: DeclaringSite,
         call: str,
         *,
         defer: dict[str, object] | None = None,
         props: tuple[object, ...] | None = None,
     ) -> None:
-        file_path, top_level = site
+        file_path = declaring(site)
         if file_path.name != COMPONENT_MODULE:
             with self._lock:
                 self._outside[file_path] = call
             return
-        pending = self._collecting.written.get(file_path)
-        if pending is not None:
-            _write(pending, defer, props, top_level=top_level)
+        pending = self._collecting.written
+        if file_path in pending:
+            pending[file_path] = _checked(
+                site, call, _written(pending[file_path], defer, props)
+            )
             return
         with self._lock:
-            written = replace(self._held.get(file_path, _Written()))
-            _write(written, defer, props, top_level=top_level)
+            held = self._held.get(file_path, _Written())
+            written = _checked(site, call, _written(held, defer, props))
             deferring = self._commit(file_path, written)
         if deferring:
             self._announce()
@@ -211,23 +208,18 @@ class DeferDeclarations:
 
         The caller holds the lock and announces a delivery mode once it is released.
         """
-        held = (
-            self._options.get(file_path),
-            self._problems.get(file_path),
-            file_path in self._addressable,
-        )
-        options, problem = (None, None) if written is None else _settle(written)
+        held = (self._options.get(file_path), file_path in self._addressable)
+        options = None if written is None else _settle(written)[0]
         named = options is not None and (
             bool(options.props) or (written is not None and written.props is not None)
         )
         _place(self._held, file_path, written)
         _place(self._options, file_path, options)
-        _place(self._problems, file_path, problem)
         if named:
             self._addressable.add(file_path)
         else:
             self._addressable.discard(file_path)
-        if (options, problem, named) != held:
+        if (options, named) != held:
             self._version += 1
         if options is not None and options.mode is not None:
             self._modules.add(file_path)
@@ -242,7 +234,6 @@ class DeferDeclarations:
             self._options.clear()
             self._modules.clear()
             self._addressable.clear()
-            self._problems.clear()
             self._outside.clear()
             self._version += 1
 

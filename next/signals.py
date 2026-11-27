@@ -13,6 +13,17 @@ from next.components.signals import (
 from next.compression.signals import compression_backend_loaded
 from next.conf.signals import settings_reloaded
 from next.consent.signals import consent_backend_loaded
+from next.defer.signals import (
+    boundary_job_finished,
+    boundary_job_started,
+    boundary_settled,
+    boundary_state_written,
+    boundary_token_rejected,
+    defer_backend_loaded,
+    page_stream_closed,
+    page_stream_declined,
+    page_stream_opened,
+)
 from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
@@ -48,7 +59,12 @@ from next.realtime.signals import (
     upstream_received,
     upstream_rejected,
 )
-from next.router.signals import navigation_rendered, prefetch_shed, router_cleared
+from next.router.signals import (
+    navigation_rendered,
+    prefetch_shed,
+    router_backend_loaded,
+    router_cleared,
+)
 from next.scripts.signals import scripts_registered
 from next.seo.signals import sitemap_backend_loaded
 from next.server.signals import watch_specs_ready
@@ -58,19 +74,11 @@ from next.static.signals import (
     html_injected,
     static_backend_loaded,
 )
-from next.suspense.signals import (
-    boundary_rendered,
-    boundary_side_effect,
-    boundary_token_rejected,
-    page_stream_closed,
-    page_stream_declined,
-    page_stream_opened,
-)
 from next.urls.signals import (
     intercept_registered,
+    page_backend_loaded,
     route_registered,
-    router_backend_loaded,
-    router_reloaded,
+    routes_reloaded,
 )
 
 
@@ -79,8 +87,10 @@ __all__ = [
     "action_registered",
     "asset_registered",
     "boundary_failed",
-    "boundary_rendered",
-    "boundary_side_effect",
+    "boundary_job_finished",
+    "boundary_job_started",
+    "boundary_settled",
+    "boundary_state_written",
     "boundary_token_rejected",
     "broker_backend_loaded",
     "collector_finalized",
@@ -91,6 +101,7 @@ __all__ = [
     "compression_backend_loaded",
     "consent_backend_loaded",
     "context_registered",
+    "defer_backend_loaded",
     "field_validated",
     "form_access_denied",
     "form_backend_loaded",
@@ -101,6 +112,7 @@ __all__ = [
     "message_published",
     "metadata_registered",
     "navigation_rendered",
+    "page_backend_loaded",
     "page_rendered",
     "page_stream_closed",
     "page_stream_declined",
@@ -112,7 +124,7 @@ __all__ = [
     "route_registered",
     "router_backend_loaded",
     "router_cleared",
-    "router_reloaded",
+    "routes_reloaded",
     "scripts_registered",
     "settings_reloaded",
     "sitemap_backend_loaded",

@@ -4,7 +4,7 @@ What to read next
 =================
 
 The tutorial covers the core flow.
-After :doc:`tutorial06`, read the topics, then the how-to guides, then the reference, then the internals when you need depth beyond the Notes walkthrough.
+After :doc:`tutorial07`, read the topics, then the how-to guides, then the reference, then the internals when you need depth beyond the Notes walkthrough.
 
 - :doc:`/content/topics/index` explains each subsystem.
 - :doc:`/content/howto/index` answers task-shaped questions.
@@ -20,17 +20,18 @@ First full-stack app
 ~~~~~~~~~~~~~~~~~~~~
 
 1. :doc:`install`
-2. :doc:`tutorial01` through :doc:`tutorial06`
+2. :doc:`tutorial01` through :doc:`tutorial07`
 3. :doc:`/content/topics/file-router`
 4. :doc:`/content/topics/context` and :doc:`/content/topics/dependency-injection`
 5. :doc:`/content/topics/forms/index`
 6. :doc:`/content/topics/partial-rendering/index`
-7. :doc:`/content/topics/static-assets/index`
-8. :doc:`/content/topics/access` and :doc:`/content/topics/permissions`
-9. :doc:`/content/topics/seo/index`
-10. :doc:`/content/topics/realtime`
-11. :doc:`/content/topics/caching`
-12. :doc:`/content/deployment/checklist`
+7. :doc:`/content/topics/boundaries/index` and :doc:`/content/topics/router/index`
+8. :doc:`/content/topics/static-assets/index`
+9. :doc:`/content/topics/access` and :doc:`/content/topics/permissions`
+10. :doc:`/content/topics/seo/index`
+11. :doc:`/content/topics/realtime`
+12. :doc:`/content/topics/caching`
+13. :doc:`/content/deployment/checklist`
 
 Customize the pipeline
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -17,8 +17,8 @@ from asgiref.sync import sync_to_async
 from django.db import close_old_connections
 from django.dispatch import Signal
 
-from next.tasks import contextless
-from next.utils import after_fork
+from next.bridge.tasks import contextless
+from next.caches import FORK
 
 from .errors import PoolFullError
 
@@ -221,7 +221,7 @@ class HandlerPool:
 
 
 handler_pool = HandlerPool()
-after_fork(handler_pool.reset)
+FORK.attach(handler_pool.reset)
 
 
 def _fresh_links[**P, R](

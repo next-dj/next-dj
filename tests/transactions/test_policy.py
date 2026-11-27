@@ -14,21 +14,24 @@ from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, override_settings
 from django.utils.module_loading import import_string
 
+from next.caches import SETTINGS
+from next.requests import RequestKind
 from next.transactions import (
-    SAFE_METHODS,
-    WRITES,
     AtomicOverride,
     AtomicScope,
-    ViewKind,
     atomic_scope,
-    override_of,
-    override_problem,
     policy,
-    probe_atomic_aliases,
     request_atomic,
-    safe_aliases,
     skip_atomic_requests,
 )
+from next.transactions.policy import (
+    SAFE_METHODS,
+    override_of,
+    override_problem,
+    probe_atomic_aliases,
+    safe_aliases,
+)
+from next.transactions.savepoints import WRITES
 
 
 RULE_PATH = "tests.transactions.test_policy.rule_by_kind"
@@ -40,23 +43,23 @@ LAZY = AtomicScope(("default",), atomic=WRITES)
 not_callable = 42
 
 
-def rule_by_kind(request: HttpRequest, kind: ViewKind) -> tuple[str, ...]:
-    return ("default",) if kind is ViewKind.ACTION else ()
+def rule_by_kind(request: HttpRequest, kind: RequestKind) -> tuple[str, ...]:
+    return ("default",) if kind is RequestKind.ACTION else ()
 
 
-def rule_one_name(request: HttpRequest, kind: ViewKind) -> str:
+def rule_one_name(request: HttpRequest, kind: RequestKind) -> str:
     return "default"
 
 
-def rule_with_unknown(request: HttpRequest, kind: ViewKind) -> list[str]:
+def rule_with_unknown(request: HttpRequest, kind: RequestKind) -> list[str]:
     return ["replica", "default", "default"]
 
 
-def rule_lazy_actions(request: HttpRequest, kind: ViewKind) -> AtomicOverride:
-    return AtomicOverride(atomic=WRITES if kind is ViewKind.ACTION else False)
+def rule_lazy_actions(request: HttpRequest, kind: RequestKind) -> AtomicOverride:
+    return AtomicOverride(atomic=WRITES if kind is RequestKind.ACTION else False)
 
 
-def rule_misfit_override(request: HttpRequest, kind: ViewKind) -> AtomicOverride:
+def rule_misfit_override(request: HttpRequest, kind: RequestKind) -> AtomicOverride:
     return AtomicOverride(atomic="reads")
 
 
@@ -96,17 +99,6 @@ def _hook_then_fail(committed: list[str]) -> None:
         raise ValueError(msg)
 
 
-class TestViewKind:
-    def test_every_view_names_itself(self) -> None:
-        assert [kind.value for kind in ViewKind] == [
-            "page",
-            "action",
-            "zone",
-            "boundary",
-            "navigation",
-        ]
-
-
 class TestMethodTable:
     """Safe methods follow `SAFE`, every other method follows `UNSAFE`."""
 
@@ -114,40 +106,50 @@ class TestMethodTable:
         assert frozenset({"GET", "HEAD", "OPTIONS", "TRACE"}) == SAFE_METHODS
 
     @pytest.mark.parametrize("method", sorted(SAFE_METHODS))
-    @pytest.mark.parametrize("kind", list(ViewKind))
+    @pytest.mark.parametrize("kind", list(RequestKind))
     def test_a_safe_method_opens_nothing_by_default(
-        self, method: str, kind: ViewKind
+        self, method: str, kind: RequestKind
     ) -> None:
         assert atomic_scope(_request(method), kind).aliases == ()
 
     @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
-    @pytest.mark.parametrize("kind", list(ViewKind))
+    @pytest.mark.parametrize("kind", list(RequestKind))
     def test_an_unsafe_method_wraps_the_default_alias(
-        self, method: str, kind: ViewKind
+        self, method: str, kind: RequestKind
     ) -> None:
         assert atomic_scope(_request(method), kind).aliases == ("default",)
 
     def test_safe_turned_on_wraps_a_get(self) -> None:
         with _transactions(SAFE=True):
-            assert atomic_scope(_request("GET"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("GET"), RequestKind.PAGE).aliases == (
+                "default",
+            )
 
     def test_unsafe_turned_off_leaves_a_post_bare(self) -> None:
         with _transactions(UNSAFE=False):
-            assert atomic_scope(_request("POST"), ViewKind.ACTION).aliases == ()
+            assert atomic_scope(_request("POST"), RequestKind.ACTION).aliases == ()
 
     def test_an_eager_choice_opens_on_entry(self) -> None:
-        assert atomic_scope(_request("POST"), ViewKind.PAGE) == EAGER
+        assert atomic_scope(_request("POST"), RequestKind.PAGE) == EAGER
 
     @pytest.mark.parametrize(("key", "method"), [("SAFE", "GET"), ("UNSAFE", "POST")])
     def test_writes_opens_before_the_first_write(self, key: str, method: str) -> None:
         with _transactions(**{key: WRITES}):
-            assert atomic_scope(_request(method), ViewKind.PAGE) == LAZY
+            assert atomic_scope(_request(method), RequestKind.PAGE) == LAZY
 
     @pytest.mark.parametrize(("key", "value"), [("SAFE", "yes"), ("UNSAFE", 0)])
-    def test_a_non_bool_flag_keeps_its_default(self, key: str, value: object) -> None:
+    def test_a_misfit_mode_raises_naming_key_value_and_shape(
+        self, key: str, value: object
+    ) -> None:
+        expected = (
+            f"NEXT_FRAMEWORK['TRANSACTIONS']['{key}'] must be True, False, 'writes' "
+            f"or 'auto', got {value!r}."
+        )
         with _transactions(**{key: value}):
-            assert atomic_scope(_request("GET"), ViewKind.PAGE).aliases == ()
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            for method in ("GET", "POST"):
+                with pytest.raises(ImproperlyConfigured) as raised:
+                    atomic_scope(_request(method), RequestKind.PAGE)
+                assert str(raised.value) == expected
 
 
 class TestAliases:
@@ -158,40 +160,47 @@ class TestAliases:
     ) -> None:
         _connections(monkeypatch)
         with _transactions(ALIASES="all"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == TWO_ALIASES
+            assert (
+                atomic_scope(_request("POST"), RequestKind.PAGE).aliases == TWO_ALIASES
+            )
 
     def test_a_list_keeps_its_order_without_repeats(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _connections(monkeypatch)
         with _transactions(ALIASES=["replica", "default", "replica"]):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == (
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
                 "replica",
                 "default",
             )
 
     def test_an_alias_without_a_connection_is_skipped(self) -> None:
         with _transactions(ALIASES=["replica", "default"]):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
+                "default",
+            )
 
     @pytest.mark.parametrize("value", ["default", ["default", 1], 42])
-    def test_an_unusable_value_keeps_the_default(self, value: object) -> None:
-        with _transactions(ALIASES=value):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+    def test_an_unusable_value_raises(self, value: object) -> None:
+        with (
+            _transactions(ALIASES=value),
+            pytest.raises(ImproperlyConfigured, match=r"\['ALIASES'\] must be 'all'"),
+        ):
+            atomic_scope(_request("POST"), RequestKind.PAGE)
 
     def test_no_connection_means_no_transaction(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _connections(monkeypatch, ())
-        assert atomic_scope(_request("POST"), ViewKind.ACTION).aliases == ()
+        assert atomic_scope(_request("POST"), RequestKind.ACTION).aliases == ()
 
     def test_a_project_without_databases_opens_no_transaction(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(policy, "connections", ConnectionHandler({}))
-        assert atomic_scope(_request("POST"), ViewKind.ACTION).aliases == ()
+        assert atomic_scope(_request("POST"), RequestKind.ACTION).aliases == ()
         with _transactions(ALIASES="all"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ()
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == ()
 
     def test_a_dummy_alias_is_skipped_beside_a_real_one(
         self, monkeypatch: pytest.MonkeyPatch
@@ -202,22 +211,131 @@ class TestAliases:
         }
         monkeypatch.setattr(connections, "settings", declared)
         with _transactions(ALIASES="all"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
+                "default",
+            )
 
     def test_new_connection_settings_are_read_afresh(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         with _transactions(ALIASES="all"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
+                "default",
+            )
             _connections(monkeypatch)
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == TWO_ALIASES
+            SETTINGS.move()
+            assert (
+                atomic_scope(_request("POST"), RequestKind.PAGE).aliases == TWO_ALIASES
+            )
 
     def test_databases_the_connections_never_read_are_ignored(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(settings, "DATABASES", {"default": {}, "replica": {}})
         with _transactions(ALIASES="all"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
+                "default",
+            )
+
+
+def _flagged(monkeypatch: pytest.MonkeyPatch, *flagged: str) -> None:
+    """Give Django two aliases, `ATOMIC_REQUESTS` set on the `flagged` ones."""
+    declared = {
+        alias: {"ENGINE": SQLITE, "ATOMIC_REQUESTS": alias in flagged}
+        for alias in TWO_ALIASES
+    }
+    monkeypatch.setattr(connections, "settings", declared)
+
+
+class TestAtomicRequests:
+    """The default method table follows the aliases Django's `ATOMIC_REQUESTS` wraps."""
+
+    @pytest.mark.parametrize(
+        ("flagged", "safe", "unsafe"),
+        [
+            pytest.param((), (), ("default",), id="neither"),
+            pytest.param(("replica",), ("replica",), TWO_ALIASES, id="replica"),
+            pytest.param(("default",), ("default",), ("default",), id="default"),
+            pytest.param(TWO_ALIASES, TWO_ALIASES, TWO_ALIASES, id="both"),
+        ],
+    )
+    def test_the_default_wraps_every_flagged_alias_on_entry(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        flagged: tuple[str, ...],
+        safe: tuple[str, ...],
+        unsafe: tuple[str, ...],
+    ) -> None:
+        _flagged(monkeypatch, *flagged)
+        assert (
+            atomic_scope(_request("GET"), RequestKind.PAGE)
+            == AtomicScope(safe, atomic=True)
+            if safe
+            else atomic_scope(_request("GET"), RequestKind.PAGE).aliases == ()
+        )
+        assert atomic_scope(_request("POST"), RequestKind.PAGE) == AtomicScope(
+            unsafe, atomic=True
+        )
+        assert safe_aliases() == safe
+
+    @pytest.mark.parametrize(
+        "flagged", [(), ("replica",), TWO_ALIASES], ids=["neither", "one", "both"]
+    )
+    def test_an_explicit_table_replaces_atomic_requests(
+        self, monkeypatch: pytest.MonkeyPatch, flagged: tuple[str, ...]
+    ) -> None:
+        _flagged(monkeypatch, *flagged)
+        with _transactions(SAFE=False, UNSAFE=WRITES):
+            assert atomic_scope(_request("GET"), RequestKind.PAGE).aliases == ()
+            assert atomic_scope(_request("POST"), RequestKind.PAGE) == LAZY
+
+    def test_a_scope_naming_only_aliases_keeps_following_the_flags(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _flagged(monkeypatch, "replica")
+        with _transactions(ALIASES=["default"]):
+            assert atomic_scope(_request("GET"), RequestKind.PAGE).aliases == (
+                "replica",
+            )
+            assert (
+                atomic_scope(_request("POST"), RequestKind.PAGE).aliases == TWO_ALIASES
+            )
+
+    def test_a_flag_flipped_in_place_is_read_on_the_next_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _flagged(monkeypatch)
+        assert safe_aliases() == ()
+        connections.settings["replica"]["ATOMIC_REQUESTS"] = True
+        assert safe_aliases() == ("replica",)
+
+    def test_a_dummy_alias_is_never_wrapped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        declared = {
+            "default": {"ENGINE": SQLITE, "ATOMIC_REQUESTS": False},
+            "replica": {"ENGINE": "django.db.backends.dummy", "ATOMIC_REQUESTS": True},
+        }
+        monkeypatch.setattr(connections, "settings", declared)
+        assert safe_aliases() == ()
+
+    def test_the_nesting_matches_atomic_requests(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _flagged(monkeypatch, *TWO_ALIASES)
+        wrapped: list[str] = []
+        monkeypatch.setattr(transaction, "atomic", _recorder(wrapped))
+
+        def view(request: HttpRequest) -> HttpResponse:
+            wrapped.append("view")
+            return HttpResponse()
+
+        BaseHandler().make_view_atomic(view)(_request("GET"))
+        opened: list[str] = []
+        monkeypatch.setattr(transaction, "atomic", _recorder(opened))
+        with request_atomic(atomic_scope(_request("GET"), RequestKind.PAGE)):
+            opened.append("view")
+        assert opened == wrapped
 
 
 class TestRule:
@@ -225,18 +343,22 @@ class TestRule:
 
     def test_the_rule_answers_for_every_method(self) -> None:
         with _transactions(RULE=RULE_PATH, SAFE=True):
-            assert atomic_scope(_request("GET"), ViewKind.ACTION).aliases == (
+            assert atomic_scope(_request("GET"), RequestKind.ACTION).aliases == (
                 "default",
             )
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ()
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == ()
 
     def test_one_name_is_one_alias(self) -> None:
         with _transactions(RULE="tests.transactions.test_policy.rule_one_name"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
+                "default",
+            )
 
     def test_an_answer_is_matched_against_the_connections(self) -> None:
         with _transactions(RULE="tests.transactions.test_policy.rule_with_unknown"):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == (
+                "default",
+            )
 
     def test_the_rule_is_imported_once_per_settings(
         self, monkeypatch: pytest.MonkeyPatch
@@ -249,14 +371,14 @@ class TestRule:
 
         monkeypatch.setattr(policy, "import_string", counting)
         with _transactions(RULE=RULE_PATH):
-            atomic_scope(_request("POST"), ViewKind.ACTION)
-            atomic_scope(_request("GET"), ViewKind.PAGE)
+            atomic_scope(_request("POST"), RequestKind.ACTION)
+            atomic_scope(_request("GET"), RequestKind.PAGE)
         assert imported == [RULE_PATH]
 
     def test_a_settings_reload_drops_the_rule(self) -> None:
         with _transactions(RULE=RULE_PATH):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ()
-        assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == ()
+        assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == ("default",)
 
     @pytest.mark.parametrize(
         ("rule", "match"),
@@ -276,20 +398,23 @@ class TestRule:
     )
     def test_an_unusable_rule_raises(self, rule: str, match: str) -> None:
         with _transactions(RULE=rule), pytest.raises(ImproperlyConfigured, match=match):
-            atomic_scope(_request("POST"), ViewKind.PAGE)
+            atomic_scope(_request("POST"), RequestKind.PAGE)
 
     def test_an_override_answer_chooses_the_mode(self) -> None:
         with _transactions(RULE="tests.transactions.test_policy.rule_lazy_actions"):
-            assert atomic_scope(_request("POST"), ViewKind.ACTION) == LAZY
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ()
+            assert atomic_scope(_request("POST"), RequestKind.ACTION) == LAZY
+            assert atomic_scope(_request("POST"), RequestKind.PAGE).aliases == ()
 
     def test_an_alias_answer_opens_on_entry(self) -> None:
         with _transactions(RULE="tests.transactions.test_policy.rule_one_name"):
-            assert atomic_scope(_request("GET"), ViewKind.PAGE) == EAGER
+            assert atomic_scope(_request("GET"), RequestKind.PAGE) == EAGER
 
-    def test_a_rule_that_is_no_path_keeps_the_method_table(self) -> None:
-        with _transactions(RULE=42):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE).aliases == ("default",)
+    def test_a_rule_that_is_no_path_raises(self) -> None:
+        with (
+            _transactions(RULE=42),
+            pytest.raises(ImproperlyConfigured, match=r"RULE'\] must be the dotted"),
+        ):
+            atomic_scope(_request("POST"), RequestKind.PAGE)
 
 
 class TestSafeAliases:
@@ -360,17 +485,19 @@ class TestOverride:
 
     def test_off_leaves_an_unsafe_method_bare(self) -> None:
         override = AtomicOverride(atomic=False)
-        assert atomic_scope(_request("POST"), ViewKind.ACTION, override).aliases == ()
+        assert (
+            atomic_scope(_request("POST"), RequestKind.ACTION, override).aliases == ()
+        )
 
     def test_on_wraps_a_safe_method_in_the_configured_aliases(self) -> None:
         override = AtomicOverride(atomic=True)
-        assert atomic_scope(_request("GET"), ViewKind.PAGE, override).aliases == (
+        assert atomic_scope(_request("GET"), RequestKind.PAGE, override).aliases == (
             "default",
         )
 
     def test_own_aliases_are_matched_against_the_connections(self) -> None:
         override = AtomicOverride(atomic=True, aliases=("replica", "default"))
-        assert atomic_scope(_request("GET"), ViewKind.PAGE, override).aliases == (
+        assert atomic_scope(_request("GET"), RequestKind.PAGE, override).aliases == (
             "default",
         )
 
@@ -378,20 +505,20 @@ class TestOverride:
         _connections(monkeypatch)
         override = AtomicOverride(atomic=True, aliases="all")
         assert (
-            atomic_scope(_request("GET"), ViewKind.PAGE, override).aliases
+            atomic_scope(_request("GET"), RequestKind.PAGE, override).aliases
             == TWO_ALIASES
         )
 
     def test_writes_keeps_the_aliases_and_waits(self) -> None:
         override = AtomicOverride(atomic=WRITES)
-        assert atomic_scope(_request("GET"), ViewKind.PAGE, override) == LAZY
+        assert atomic_scope(_request("GET"), RequestKind.PAGE, override) == LAZY
 
     def test_the_override_wins_over_the_rule(self) -> None:
         override = AtomicOverride(atomic=True)
         with _transactions(RULE=RULE_PATH):
-            assert atomic_scope(_request("POST"), ViewKind.PAGE, override).aliases == (
-                "default",
-            )
+            assert atomic_scope(
+                _request("POST"), RequestKind.PAGE, override
+            ).aliases == ("default",)
 
 
 def _recorder(events: list[str], refused: str | None = None) -> Callable[..., object]:
@@ -542,19 +669,7 @@ class TestSkipAtomicRequests:
         assert marked is view
         assert BaseHandler().make_view_atomic(marked) is view
 
-    def test_an_alias_connected_after_the_mark_is_skipped_too(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def view(request: HttpRequest) -> HttpResponse:
-            return HttpResponse()
-
-        skip_atomic_requests(view)
-        _connections(monkeypatch, atomic_requests=True)
-        assert BaseHandler().make_view_atomic(view) is view
-
-    def test_a_wraps_wrapper_is_marked_and_its_inner_view_kept(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_wraps_wrapper_is_marked(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _connections(monkeypatch, atomic_requests=True)
 
         def view(request: HttpRequest) -> HttpResponse:
@@ -568,17 +683,17 @@ class TestSkipAtomicRequests:
 
         skip_atomic_requests(outer)
         assert BaseHandler().make_view_atomic(outer) is outer
-        assert inner._non_atomic_requests == {"default"}
-        assert "replica" not in inner._non_atomic_requests
 
-    def test_django_marking_afterwards_keeps_every_alias(self) -> None:
+    def test_the_mark_is_djangos_own_on_each_alias(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _connections(monkeypatch)
+
         def view(request: HttpRequest) -> HttpResponse:
             return HttpResponse()
 
         skip_atomic_requests(view)
-        transaction.non_atomic_requests(using="replica")(view)
-        assert "replica" in set(view._non_atomic_requests)
-        assert "any alias" in view._non_atomic_requests
+        assert view._non_atomic_requests == set(TWO_ALIASES)
 
 
 class TestProbeAtomicAliases:

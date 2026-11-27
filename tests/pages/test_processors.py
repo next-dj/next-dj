@@ -2,10 +2,15 @@ from unittest.mock import patch
 
 import pytest
 from django.http import HttpRequest
+from django.template import Template
 from django.test import override_settings
 
-from next.conf.signals import settings_reloaded
-from next.pages.processors import _get_context_processors, context_processors
+from next.conf import next_framework_settings
+from next.pages.processors import (
+    _get_context_processors,
+    context_processors,
+    page_context,
+)
 from tests.support import file_router_config_entry
 
 
@@ -73,7 +78,7 @@ class TestContextProcessorsMemo:
         ) as mock_import:
             _get_context_processors()
 
-            settings_reloaded.send(sender=None)
+            next_framework_settings.reload()
 
             assert _get_context_processors() == [_processor]
             assert mock_import.call_count == 2
@@ -133,3 +138,69 @@ class TestContextProcessorsMemo:
 
             assert (first["var"], second["var"]) == ("value", "value")
             assert mock_import.call_count == 1
+
+
+_JINJA = {"BACKEND": "django.template.backends.jinja2.Jinja2", "OPTIONS": {}}
+
+
+class TestEngineProcessors:
+    """The template processors come from the engine pages compile on."""
+
+    def test_an_engine_ahead_of_django_templates_is_passed_over(self) -> None:
+        templates = [_JINJA, *_templates_with("app.processors.engine")]
+        with (
+            override_settings(TEMPLATES=templates),
+            patch(
+                "next.pages.processors._import_context_processor",
+                return_value=_processor,
+            ) as imported,
+        ):
+            _get_context_processors.cache_clear()
+            context_processors()
+            assert [call.args[0] for call in imported.call_args_list] == [
+                "app.processors.engine"
+            ]
+        _get_context_processors.cache_clear()
+
+    def test_no_django_templates_engine_lends_no_processors(self) -> None:
+        with override_settings(TEMPLATES=[_JINJA], NEXT_FRAMEWORK={}):
+            _get_context_processors.cache_clear()
+            assert context_processors() == []
+        _get_context_processors.cache_clear()
+
+    def test_a_malformed_list_lends_no_processors(self) -> None:
+        templates = _templates_with()
+        templates[0]["OPTIONS"]["context_processors"] = "app.processors.one"
+        with override_settings(TEMPLATES=templates, NEXT_FRAMEWORK={}):
+            _get_context_processors.cache_clear()
+            assert context_processors() == []
+        _get_context_processors.cache_clear()
+
+
+@pytest.mark.urls("tests.support.instances")
+class TestPageContext:
+    """A page renders on a context carrying its request, as `{% url %}` reads it."""
+
+    def test_url_reverses_into_the_current_app(self, rf) -> None:
+        request = rf.get("/")
+        request.current_app = "first"
+        html = Template("{% url 'polls:index' %}").render(page_context({}, request))
+        assert html == "/first/"
+
+    def test_without_a_request_the_last_instance_answers(self) -> None:
+        html = Template("{% url 'polls:index' %}").render(page_context({}, None))
+        assert html == "/second/"
+
+    def test_a_page_render_reverses_into_the_current_app(
+        self, rf, page_instance, tmp_path
+    ) -> None:
+        request = rf.get("/")
+        request.current_app = "first"
+        html, _ = page_instance.render_with_static_assets(
+            tmp_path / "page.py", "{% url 'polls:index' %}", {}, request=request
+        )
+        assert html == "/first/"
+
+    def test_the_options_reach_the_context(self, rf) -> None:
+        context = page_context({}, rf.get("/"), autoescape=False, use_tz=True)
+        assert (context.autoescape, context.use_tz) == (False, True)

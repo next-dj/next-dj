@@ -1,16 +1,22 @@
-"""The pluggable cut and chrome digest of the client router, with their defaults."""
+"""The pluggable cut, chrome digest and prefetch shed of the client router."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Final, override
 
+from next.ports import server_backlog
+
 from .digest import chrome_digest, normalise
 from .markers import Cut, CutKind, Divergence
 
 
 if TYPE_CHECKING:
-    from .markers import Declaration, LayoutKey, ScannedLayout, ScannedShell
+    from pathlib import Path
+
+    from django.http import HttpRequest
+
+    from .markers import ClientLayouts, LayoutKey, ScannedLayout, ScannedPage
 
 
 _HALF: Final = 16
@@ -22,9 +28,9 @@ class ChromeDigest:
     A subclass strips a per-response token of its own on top of the default.
     """
 
-    def normalise(self, text: str, seal: str) -> str:
-        """Return `text` without what changes per response, its seal being `seal`."""
-        return normalise(text, seal)
+    def normalise(self, text: str, response_id: str) -> str:
+        """Return `text` without what changes per response, `response_id` among it."""
+        return normalise(text, response_id)
 
     def digest(self, text: str) -> str:
         """Return the digest of normalised chrome, 16 hex characters."""
@@ -35,7 +41,7 @@ class NavigationCut(ABC):
     """Decide where a navigation cuts the target page against the client's chain."""
 
     @abstractmethod
-    def cut(self, declared: Declaration | None, shell: ScannedShell) -> Cut:
+    def cut(self, declared: ClientLayouts | None, shell: ScannedPage) -> Cut:
         """Return the cut of `shell` for `declared`, `None` naming no declaration."""
 
 
@@ -47,7 +53,7 @@ class VerifiedCut(NavigationCut):
     """
 
     @override
-    def cut(self, declared: Declaration | None, shell: ScannedShell) -> Cut:
+    def cut(self, declared: ClientLayouts | None, shell: ScannedPage) -> Cut:
         """Return the slot, body or visit cut, naming where the chain diverged."""
         early = _unrooted(declared, shell)
         if early is not None or declared is None:
@@ -64,7 +70,30 @@ class VerifiedCut(NavigationCut):
         return Cut(CutKind.BODY, diverged_at=at, reason=reason)
 
 
-def _unrooted(declared: Declaration | None, shell: ScannedShell) -> Cut | None:
+class PrefetchShed(ABC):
+    """Decide whether a prefetch yields to the work the server already holds.
+
+    A shed prefetch answers 429, and the client backs off before it prefetches again.
+    """
+
+    @abstractmethod
+    def waited(self, request: HttpRequest, page_path: Path) -> float | None:
+        """Return how long work waits now when `request` yields, `None` to serve it."""
+
+
+class LoadShed(PrefetchShed):
+    """Shed a prefetch while the deferred work of the process waits past its timeout.
+
+    A project without the boundary feature binds no server load, so nothing is shed.
+    """
+
+    @override
+    def waited(self, request: HttpRequest, page_path: Path) -> float | None:
+        """Return the backlog the server load reports, `None` while it keeps up."""
+        return server_backlog()
+
+
+def _unrooted(declared: ClientLayouts | None, shell: ScannedPage) -> Cut | None:
     """Return the cut decided before any chrome compares, `None` to compare."""
     if declared is None:
         return Cut(CutKind.BODY, diverged_at=shell.root, reason=Divergence.DECLARATION)
@@ -93,4 +122,4 @@ def _matched(
     return tuple(kept), None
 
 
-__all__ = ["ChromeDigest", "NavigationCut", "VerifiedCut"]
+__all__ = ["ChromeDigest", "LoadShed", "NavigationCut", "PrefetchShed", "VerifiedCut"]

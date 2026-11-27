@@ -5,7 +5,6 @@ from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 from django.utils.cache import patch_vary_headers
 
-from next.defer import Depth
 from next.partial import is_partial_request, partial_intent
 from next.partial.headers import (
     ACCEPT,
@@ -19,6 +18,7 @@ from next.partial.headers import (
     set_stream_vary,
     vary_on,
 )
+from next.requests import PrefetchDepth
 from next.testing import NextClient
 
 
@@ -315,7 +315,7 @@ class TestNavigationIntent:
         assert (intent.navigate, intent.layouts, intent.prefetch) == (
             True,
             "a.b",
-            Depth.SHELL,
+            PrefetchDepth.SHELL,
         )
 
     def test_layouts_and_prefetch_need_the_navigation(self) -> None:
@@ -327,7 +327,12 @@ class TestNavigationIntent:
 
     @pytest.mark.parametrize(
         ("value", "depth"),
-        [("1", Depth.SHELL), ("full", Depth.FULL), ("deep", None), (None, None)],
+        [
+            ("1", PrefetchDepth.SHELL),
+            ("full", PrefetchDepth.FULL),
+            ("deep", None),
+            (None, None),
+        ],
     )
     def test_the_prefetch_depth(self, value, depth) -> None:
         headers = {"X-Next-Request": "1", "X-Next-Navigate": "1"}
@@ -344,7 +349,12 @@ class TestNavigationIntent:
 
     @pytest.mark.parametrize(
         ("value", "depth"),
-        [("1", Depth.FULL), ("full", Depth.FULL), ("deep", None), (None, None)],
+        [
+            ("1", PrefetchDepth.FULL),
+            ("full", PrefetchDepth.FULL),
+            ("deep", None),
+            (None, None),
+        ],
     )
     def test_a_zone_prefetch_is_always_full(self, value, depth) -> None:
         headers = {"X-Next-Request": "1", "X-Next-Zone": "sheet"}

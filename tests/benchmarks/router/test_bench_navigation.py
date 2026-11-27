@@ -11,9 +11,11 @@ from django.urls import resolve
 
 from next.pages.loaders import layout_ids
 from next.pages.manager import page as page_singleton
-from next.router import CutKind, Declaration, LayoutKey, VerifiedCut
+from next.router import ClientLayouts, CutKind, LayoutKey, VerifiedCut
 from next.router.manager import client_router
+from next.router.markers import MAX_LAYOUTS
 from next.router.navigation import parse_declaration, read_shell
+from next.router.render import LAYOUTS_ATTR
 from next.testing import declared_layouts
 from tests.benchmarks.factories import (
     REQUEST_ROUNDS,
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
 
     from django.http import HttpRequest, HttpResponseBase
 
-    from next.router import ScannedShell
+    from next.router import ScannedPage
 
 
 _LINKS = "".join(f'<a href="/docs/topic-{i}/">Topic {i}</a>' for i in range(8))
@@ -43,8 +45,7 @@ _SECTION_LAYOUT = "<section><h2>Section</h2>{% template %}</section>"
 _ARTICLE = "<article><h1>{{ request.path }}</h1>" + "<p>row</p>" * 10 + "</article>"
 _PUBLIC = "x = 1\n"
 _ROUTER_ON = {"ENABLED": True}
-_SEAL = re.compile(r"<!--nx:s [0-9a-f]{16} ([0-9a-f]{8})-->")
-_MAX_LAYOUTS = 32
+_RESPONSE_ID = re.compile(r"<!--nx:s [0-9a-f]{16} ([0-9a-f]{8})-->")
 _COLD_ROUNDS = 50
 _COLD_WARMUP_ROUNDS = 5
 
@@ -67,20 +68,20 @@ def _document(path: str) -> str:
     return resolve(path).func(plain_get(path)).content.decode()
 
 
-def _shell(root: Path, html: str) -> ScannedShell:
+def _shell(root: Path, html: str) -> ScannedPage:
     """Return the digested shell of a rendered document of the target page."""
-    found = _SEAL.search(html)
+    found = _RESPONSE_ID.search(html)
     assert found is not None
     ids = layout_ids(root / "docs" / "topic-2" / "page.py")
     return read_shell(html, found[1], ids, client_router.digest())
 
 
-def _declared(shell: ScannedShell, *, stale: bool = False) -> Declaration:
+def _declared(shell: ScannedPage, *, stale: bool = False) -> ClientLayouts:
     """Return the declaration of a client showing `shell`, its last digest moved."""
     keys = [LayoutKey(layout.ident, layout.digest) for layout in shell.layouts]
     if stale:
         keys[-1] = LayoutKey(keys[-1].ident, "0" * 16)
-    return Declaration(tuple(keys))
+    return ClientLayouts(tuple(keys))
 
 
 class TestBenchNavigation:
@@ -92,7 +93,7 @@ class TestBenchNavigation:
         request = plain_get("/docs/topic-2/")
         with _site(tmp_path) as view:
             response = view(request)
-            assert b'"$layouts":[[' in response.content
+            assert LAYOUTS_ATTR.encode() in response.content
             assert b'aria-current="page"' in response.content
             benchmark.pedantic(
                 view,
@@ -167,16 +168,16 @@ class TestBenchCut:
     def test_parse_declaration(self, tmp_path: Path, benchmark) -> None:
         with _site(tmp_path):
             layouts = declared_layouts(_document("/docs/topic-1/"))
-        declared = benchmark(parse_declaration, layouts, _MAX_LAYOUTS)
+        declared = benchmark(parse_declaration, layouts, MAX_LAYOUTS)
         assert declared is not None
         assert len(declared.keys) == 2
 
     @pytest.mark.benchmark(group="router.cut")
     def test_read_shell_digests_the_layouts(self, tmp_path: Path, benchmark) -> None:
-        """The sealed slot markers found and the chrome of each layout digested."""
+        """The enclosing slot markers found and the chrome of each layout digested."""
         with _site(tmp_path):
             html = _document("/docs/topic-2/")
-            found = _SEAL.search(html)
+            found = _RESPONSE_ID.search(html)
             assert found is not None
             ids = layout_ids(tmp_path / "docs" / "topic-2" / "page.py")
             backend = client_router.digest()
@@ -188,7 +189,7 @@ class TestBenchCut:
         """The second read of a response, which finds the markers and digests none."""
         with _site(tmp_path):
             html = _document("/docs/topic-2/")
-            found = _SEAL.search(html)
+            found = _RESPONSE_ID.search(html)
             assert found is not None
             ids = layout_ids(tmp_path / "docs" / "topic-2" / "page.py")
             shell = benchmark(read_shell, html, found[1], ids)

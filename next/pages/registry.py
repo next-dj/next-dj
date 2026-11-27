@@ -38,7 +38,7 @@ class PageContextEntry(NamedTuple):
     """One context callable registered for a `page.py` file.
 
     `zones` binds the callable to named zones, so a GET for another zone skips it.
-    `guard` is the declared verdict, `None` leaving it to the scan of the source.
+    `guard=True` runs it before the shell of a deferred page boundary.
     """
 
     func: Callable[..., Any]
@@ -47,7 +47,7 @@ class PageContextEntry(NamedTuple):
     serializer: JsContextSerializer | None = None
     zones: frozenset[str] | None = None
     is_async: bool = False
-    guard: bool | None = None
+    guard: bool = False
 
 
 class ZoneBinding(NamedTuple):
@@ -289,10 +289,7 @@ class PageContextRegistry:
         )
 
     def declare_guard(self, file_path: Path, key: str | None, *, guard: bool) -> None:
-        """Record whether the callable `key` of `file_path` runs before a gated shell.
-
-        The declaration overrides what the scan of its source would decide.
-        """
+        """Record whether the `key` callable of `file_path` guards a gated shell."""
         bucket = self._context_registry.get(file_path, {})
         entry = bucket.get(key)
         if entry is None or entry.guard is guard:

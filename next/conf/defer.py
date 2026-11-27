@@ -9,7 +9,8 @@ from types import MappingProxyType
 from typing import Final, Literal, TypeGuard
 
 from next.caches import IdentityMemo
-from next.defer import MAX_DURATION, MIN_KEY_LENGTH, BoundaryOptionError, parse_duration
+from next.errors import DurationError
+from next.utils import MAX_DURATION, parse_duration
 
 from .merge import FROZEN_DEFAULTS
 from .settings import next_framework_settings
@@ -20,9 +21,8 @@ from .shapes import (
     Usable,
     choice,
     count,
+    enforce,
     flag,
-    misfits,
-    optional_text,
     owned,
     text,
     texts,
@@ -38,7 +38,7 @@ def _seconds(*, positive: bool = False) -> Usable:
     def usable(value: object) -> bool:
         try:
             seconds = parse_duration(value)
-        except BoundaryOptionError:
+        except DurationError:
             return False
         return seconds > 0 or not positive
 
@@ -58,18 +58,6 @@ _ONE_UP: Final = count(1)
 
 def _dotted(value: object) -> bool:
     return isinstance(value, str) and _DOTTED.fullmatch(value) is not None
-
-
-def _keys(value: object) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return _dotted(value)
-    return (
-        texts(value)
-        and bool(value)
-        and all(len(key) >= MIN_KEY_LENGTH for key in value)
-    )
 
 
 _MARK_KINDS: Final = frozenset({"WSGI", "ASGI"})
@@ -103,17 +91,11 @@ def _streams(value: object) -> bool:
 
 
 _DEADLINE_MODES: Final = choice(("state", "always", False))
-_ERRORS_ATOMIC: Final = choice(("writes", True, False))
 
 
 def deadline_choice(value: object) -> TypeGuard[DeadlineMode]:
     """Whether `value` is a `DEADLINE_TO_DB` mode."""
     return _DEADLINE_MODES.usable(value)
-
-
-def atomic_choice(value: object) -> TypeGuard[bool | Literal["writes"]]:
-    """Whether `value` is an atomic mode, as `ERRORS` and `TRANSACTIONS` take it."""
-    return _ERRORS_ATOMIC.usable(value)
 
 
 def _pattern(value: object) -> bool:
@@ -135,42 +117,51 @@ _CAP: Final = Shape(_ONE_UP, "an integer from 1")
 _WAIT: Final = Shape(_seconds(), "a duration from 0, in seconds or as '2s'")
 
 
+_NO_SHAPES: Final[Mapping[str, Shape | Section]] = MappingProxyType({})
+
+
 def _backend(
     path: str,
     options: Mapping[str, Shape | Section],
-    below: tuple[tuple[str, str], ...] = (),
+    beside: Mapping[str, Shape | Section] = _NO_SHAPES,
 ) -> Section:
     return Section(
-        {"BACKEND": _PATH, "OPTIONS": Section(options, default=path, below=below)}
+        {"BACKEND": _PATH, "OPTIONS": Section(options, default=path), **beside}
     )
 
 
 SHAPE: Final = Section(
     {
         "EXECUTOR": _backend(
-            "next.suspense.LaneExecutor",
+            "next.defer.LaneExecutor",
             {
                 "MAX_WORKERS": _CAP,
+                "MAX_QUEUE": _CAP,
+                "CONN_IDLE": _WAIT,
+                "SHUTDOWN_TIMEOUT": _WAIT,
+            },
+            {
                 "PER_REQUEST": _CAP,
                 "QUEUE_TIMEOUT": _WAIT,
-                "MAX_QUEUE": _CAP,
-                "MAX_FOREGROUND": _CAP,
-                "CONN_IDLE": _WAIT,
+                "SHED_DELAY": Shape(
+                    _seconds(positive=True), "a duration above 0, in seconds or as '2s'"
+                ),
+                "MAX_REQUEST_JOBS": _CAP,
                 "PARALLEL": _FLAG,
-                "SQLITE": choice(("foreground", "parallel")),
+                "SQLITE": choice(("request", "parallel")),
                 "THREAD_LOCAL_MIDDLEWARE": _PATHS,
             },
         ),
-        "POLICY": _backend(
-            "next.suspense.DefaultStreamPolicy",
+        "DELIVERY": _backend(
+            "next.defer.DefaultDeliveryPolicy",
             {
                 "STREAM": _FLAG,
                 "BOTS": Shape(_pattern, "a regular expression or None"),
                 "SYNC_WORKERS": choice(("inline", "stream")),
             },
         ),
-        "TRANSPORT": _backend(
-            "next.suspense.DefaultStreamTransport",
+        "SERVER": _backend(
+            "next.defer.DefaultServerProbe",
             {
                 "INCREMENTAL": Shape(_optional(flag), "True, False or None"),
                 "CONCURRENT": Shape(_optional(flag), "True, False or None"),
@@ -182,57 +173,37 @@ SHAPE: Final = Section(
             },
         ),
         "TOKENS": _backend(
-            "next.suspense.StackedTokenBackend",
+            "next.defer.StackedTokenBackend",
             {
-                "CODEC": _PATH,
                 "STORAGE": _PATH,
                 "SEAL": _PATH,
                 "BINDING": _PATH,
-                "TRANSPORT": _PATH,
+                "CARRIER": choice(("header", "query", "body")),
                 "MAX_AGE": Shape(_age, "an integer from 1 or a dotted path"),
-                "BUCKET": Shape(_optional(count(0)), "an integer from 0 or None"),
                 "MAX_BYTES": _CAP,
                 "MAX_STORED_BYTES": _CAP,
                 "CACHE_ALIAS": Shape(text, "a cache alias"),
-                "KEYS": Shape(
-                    _keys,
-                    "None, a dotted path or a list of keys of "
-                    f"{MIN_KEY_LENGTH} characters or more",
-                ),
                 "EPOCH": Shape(count(0), "an integer from 0"),
             },
-            below=(("BUCKET", "MAX_AGE"),),
         ),
         "CONNECTION_STATE": _PATHS,
         "THREAD_STATE": _PATHS,
-        "ADMISSION": _PATH,
+        "ADMISSION": _backend("next.defer.QueueDelay", {}),
         "DEADLINE": Shape(
             _seconds(positive=True), "a duration above 0, in seconds or as '2s'"
         ),
         "DEADLINE_TO_DB": _DEADLINE_MODES,
-        "DB_TIMEOUT_FLOOR": _WAIT,
         "WRITE_GRACE": _WAIT,
+        "WRITE_TIMEOUT": Shape(
+            _seconds(positive=True), "a duration above 0, in seconds or as '2s'"
+        ),
         "REQUEST_CONCURRENCY": _CAP,
         "MAX_BOUNDARIES": _CAP,
         "MAX_PER_SITE": _CAP,
         "MAX_DEPTH": _CAP,
         "MAX_INSTANCES": _CAP,
         "MAX_STREAMS": Shape(_streams, "'auto' or an integer from 1"),
-        "BATCH_WINDOW": _WAIT,
-        "LOADER_MAX_BATCH": _CAP,
-        "LOADING": Shape(optional_text, "a template path or None"),
-        "ERROR": Shape(optional_text, "a template path or None"),
         "NOSCRIPT": _FLAG,
-        "ERRORS": Section(
-            {
-                "RAISE": _FLAG,
-                "REPORTER": Shape(optional_text, "a dotted path or None"),
-                "ATOMIC": _ERRORS_ATOMIC,
-                "KINDS": choice(("detailed", "opaque")),
-                "DEBUG_DETAIL": _FLAG,
-            }
-        ),
-        "MORE": Section({"MAX_RESTORE": _CAP}),
     }
 )
 """Every `DEFER` key with what it accepts, nested the way the scope nests."""
@@ -273,21 +244,15 @@ def long_token_age(scope: Mapping[str, object]) -> int | None:
     return None
 
 
-def _option(
-    scope: Mapping[str, object],
-    path: tuple[str, ...],
-    refused: frozenset[tuple[str, ...]],
-) -> object:
+def _option(scope: Mapping[str, object], path: tuple[str, ...]) -> object:
     """Return the value at `path`, a section merged over its defaults key by key."""
     default = _at(FROZEN_DEFAULTS[SCOPE], path)
     held = _at(scope, path)
     if isinstance(_shape_at(path), Section) or isinstance(default, Mapping):
         keys = dict.fromkeys(default if isinstance(default, Mapping) else ())
         keys.update(dict.fromkeys(held if isinstance(held, Mapping) else ()))
-        return MappingProxyType(
-            {key: _option(scope, (*path, key), refused) for key in keys}
-        )
-    if held is _ABSENT or path in refused:
+        return MappingProxyType({key: _option(scope, (*path, key)) for key in keys})
+    if held is _ABSENT:
         return None if default is _ABSENT else default
     return held
 
@@ -297,30 +262,29 @@ class _Reads:
     """The reads of one merged `DEFER` mapping, replaced whole along with it."""
 
     scope: Mapping[str, object]
-    refused: frozenset[tuple[str, ...]]
     values: dict[tuple[str, ...], object] = field(default_factory=dict)
 
 
 def _reads() -> _Reads:
-    """Start the reads of the merged `DEFER` mapping, its misfit paths refused."""
+    """Start the reads of the merged `DEFER` mapping, refusing a value off its shape."""
     held = next_framework_settings.DEFER
     scope = held if isinstance(held, Mapping) else EMPTY
-    found = misfits(scope, SHAPE, FROZEN_DEFAULTS[SCOPE])
-    return _Reads(scope, frozenset(m.path for m in found if not m.unknown))
+    enforce(f"NEXT_FRAMEWORK[{SCOPE!r}]", scope, SHAPE, FROZEN_DEFAULTS[SCOPE])
+    return _Reads(scope)
 
 
 _READS: Final[IdentityMemo[_Reads]] = IdentityMemo()
 
 
 def defer_option(*path: str) -> object:
-    """Return `DEFER` at `path`, each nested key the project omits or misfits defaulted.
+    """Return `DEFER` at `path`, each nested key the project omits at its default.
 
     The reads are held until the settings replace the merged `DEFER` mapping.
     """
     reads = _READS.get(next_framework_settings.DEFER, _reads)
     values = reads.values
     if path not in values:
-        values[path] = _option(reads.scope, path, reads.refused)
+        values[path] = _option(reads.scope, path)
     return values[path]
 
 
@@ -347,18 +311,13 @@ _COUNT: Final = count(0)
 
 
 def defer_count(*path: str) -> int:
-    """Return the integer `DEFER` value at `path`, the default replacing a misfit."""
+    """Return the integer `DEFER` value at `path`."""
     return defer_read(_COUNT, *path)
 
 
 def defer_seconds(*path: str) -> float:
-    """Return the duration at `path` in seconds, the default replacing a misfit."""
+    """Return the duration at `path` in seconds."""
     return parse_duration(defer_option(*path))
-
-
-def defer_template(*path: str) -> str | None:
-    """Return the template path `DEFER` names at `path`, the default for a misfit."""
-    return defer_read(optional_text, *path)
 
 
 def entry_options(config: Mapping[str, object] | None) -> Mapping[str, object]:
@@ -375,9 +334,15 @@ def backend_option(options: Mapping[str, object], section: str, key: str) -> obj
 
 
 def backend_count(options: Mapping[str, object], section: str, key: str) -> int:
-    """Return the integer `key` of a backend's `OPTIONS`, as `defer_count` reads one."""
-    value = backend_option(options, section, key)
-    return _typed(_COUNT, value, (section, "OPTIONS", key))
+    """Return the integer `key` of backend `OPTIONS`, from `DEFER` when they omit it."""
+    return _typed(
+        _COUNT, backend_option(options, section, key), (section, "OPTIONS", key)
+    )
+
+
+def backend_seconds(options: Mapping[str, object], section: str, key: str) -> float:
+    """Return the duration `key` of a backend's `OPTIONS` in seconds."""
+    return parse_duration(backend_option(options, section, key))
 
 
 def backend_paths(key: Literal["THREAD_STATE", "CONNECTION_STATE"]) -> tuple[str, ...]:
@@ -390,45 +355,38 @@ def deadline_mode() -> DeadlineMode:
     return defer_read(deadline_choice, "DEADLINE_TO_DB")
 
 
-def timeout_floor() -> float:
-    """Return `DB_TIMEOUT_FLOOR` in seconds, the least timeout sent to the database."""
-    return defer_seconds("DB_TIMEOUT_FLOOR")
-
-
 def parallel() -> bool:
-    """Return `EXECUTOR["OPTIONS"]["PARALLEL"]`, False keeping jobs on the request."""
-    return defer_read(flag, "EXECUTOR", "OPTIONS", "PARALLEL")
+    """Return `EXECUTOR["PARALLEL"]`, False keeping jobs on the request."""
+    return defer_read(flag, "EXECUTOR", "PARALLEL")
 
 
 def sqlite_parallel() -> bool:
-    """Whether `EXECUTOR["OPTIONS"]["SQLITE"]` lets SQLite jobs run on the pool."""
-    return defer_option("EXECUTOR", "OPTIONS", "SQLITE") == "parallel"
+    """Whether `EXECUTOR["SQLITE"]` lets SQLite jobs run on the pool."""
+    return defer_option("EXECUTOR", "SQLITE") == "parallel"
 
 
 def thread_local_middleware() -> tuple[str, ...]:
-    """Return the middleware `EXECUTOR["OPTIONS"]["THREAD_LOCAL_MIDDLEWARE"]` lists."""
-    return tuple(defer_read(texts, "EXECUTOR", "OPTIONS", "THREAD_LOCAL_MIDDLEWARE"))
+    """Return the middleware `EXECUTOR["THREAD_LOCAL_MIDDLEWARE"]` lists."""
+    return tuple(defer_read(texts, "EXECUTOR", "THREAD_LOCAL_MIDDLEWARE"))
 
 
 __all__ = [
     "SCOPE",
     "SHAPE",
     "DeadlineMode",
-    "atomic_choice",
     "backend_count",
     "backend_option",
     "backend_paths",
+    "backend_seconds",
     "deadline_choice",
     "deadline_mode",
     "defer_count",
     "defer_option",
     "defer_read",
     "defer_seconds",
-    "defer_template",
     "entry_options",
     "long_token_age",
     "parallel",
     "sqlite_parallel",
     "thread_local_middleware",
-    "timeout_floor",
 ]

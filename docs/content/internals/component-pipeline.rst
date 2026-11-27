@@ -45,7 +45,7 @@ Modules
    ``ComponentRegistry`` stores entries in order.
    ``ComponentVisibilityResolver`` decides which entries are reachable from a given template path.
 
-``next.components.loading``.
+``next.components.modules``.
    ``ModuleLoader`` imports ``component.py``.
    ``ModuleCache`` keeps the imports between requests.
 

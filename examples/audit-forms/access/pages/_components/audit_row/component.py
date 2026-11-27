@@ -10,6 +10,7 @@ _KIND_CLASS = {
     AuditEntry.KIND_VALIDATION_FAILED: "bg-rose-100 text-rose-800",
     AuditEntry.KIND_REQUEST_STARTED: "bg-slate-100 text-slate-700",
     AuditEntry.KIND_ACCESS_DENIED: "bg-rose-100 text-rose-800",
+    AuditEntry.KIND_RECEIPT_ISSUED: "bg-sky-100 text-sky-800",
 }
 _SOURCE_CLASS = {
     AuditEntry.SOURCE_BACKEND: "bg-indigo-100 text-indigo-800",

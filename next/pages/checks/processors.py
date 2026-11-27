@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from django.apps import apps
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 from django.utils.module_loading import import_string
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf import next_framework_settings
 
 

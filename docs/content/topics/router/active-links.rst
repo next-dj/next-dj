@@ -33,7 +33,7 @@ Which links are marked
 ----------------------
 
 Only an ``<a href>`` inside a navigation container is marked.
-``ROUTER["CURRENT"]["CONTAINERS"]`` lists the containers, ``("nav", "[role=navigation]", "[data-next-nav]")`` by default, and a link outside every container is left exactly as written.
+``ROUTER["ACTIVE_LINKS"]["CONTAINERS"]`` lists the containers, ``("nav", "[role=navigation]", "[data-next-nav]")`` by default, and a link outside every container is left exactly as written.
 The link is compared within its innermost container.
 
 Each entry of ``CONTAINERS`` is one simple selector in one of three shapes.
@@ -135,12 +135,28 @@ The marks are plain attributes, so a stylesheet styles them directly.
 
 Tailwind reaches them through its attribute variants, ``aria-[current=page]:`` and ``data-[next-current=ancestor]:``, which is how the shared UI kit of the examples styles its ``nav_link`` component, see :doc:`/content/misc/examples`.
 
+Where the pass runs
+-------------------
+
+A page template marks its links where it writes them.
+When a page is first served, each navigation container its source spells, from the start tag to the matching end tag, becomes one node that marks the links of its own output, so the pass costs the size of the navigation and nothing for the rest of the document.
+A component call marks the links of its own output the same way.
+
+A container the source cannot show keeps the pass over the whole document.
+That is a page with an ``{% include %}``, an ``{% extends %}``, a ``{% form %}``, or another tag of unknown output, a block whose branches leave a container or a tag half open, and a container written inside ``{% verbatim %}`` or as the wrapper of a zone.
+A container a variable writes as safe markup, such as ``{{ menu }}`` holding ready HTML, is invisible to the source and left unmarked on the server.
+On a routed document the client marks it on the first load, see `After a navigation`_.
+``ROUTER["ACTIVE_LINKS"]["PASS"] = "document"`` brings back the pass over every rendered document for a site that writes its menus that way.
+
 After a navigation
 ------------------
 
 The ``$router`` payload hands the containers and the home paths to the browser.
-The ``intent`` bundle, which the router loads once the page is idle, marks the links of every container again by the same rule after each envelope applies, a navigation, a zone update, an action response, a server push, or a restored snapshot alike, so a menu in a kept layout follows the page.
+The ``intent`` bundle marks the links of every container again by the same rule after each envelope applies, a navigation, a zone update, an action response, a server push, or a restored snapshot alike, so a menu in a kept layout follows the page.
 Inside an open layer it marks the links for the page beneath the layer.
+
+On the first load it marks the containers that hold no marked link, the ones a render could not mark, and leaves the rest as the server wrote them.
+The router fetches the bundle at once when the document holds such a container and once the page is idle otherwise, so a container written by a variable shows its marks shortly after the page appears.
 The client pass runs only on a routed document, so with the router off the marks of a server push hold as the push wrote them.
 The chrome digest of :doc:`layouts` is taken before the server writes the marks, so a link that changes its state never stops a layout from being kept.
 
@@ -150,7 +166,7 @@ With the router off
 The marks do not depend on the router.
 ``ROUTER["ENABLED"] = False`` keeps the server pass on every document, zone, and action response.
 
-``ROUTER["CURRENT"]`` takes ``True``, ``False``, or a dict.
+``ROUTER["ACTIVE_LINKS"]`` takes ``True``, ``False``, or a dict.
 ``True`` keeps the defaults, ``False`` turns the server pass and the client pass off, and a dict sets the keys it names, ``{"ENABLED": False}`` being the same as ``False``.
 
 .. code-block:: python
@@ -159,22 +175,19 @@ The marks do not depend on the router.
    NEXT_FRAMEWORK = {
        "ROUTER": {
            "ENABLED": False,
-           "CURRENT": {"CONTAINERS": ("nav", "[data-menu]")},
+           "ACTIVE_LINKS": {"CONTAINERS": ("nav", "[data-menu]")},
        },
    }
 
-A replacement backend
----------------------
+Choosing the pass
+-----------------
 
-``ROUTER["CURRENT"]["BACKEND"]`` names the ``CurrentLinks`` subclass that runs the pass, ``next.router.CurrentLinks`` by default.
-It is built with the configured containers, and its ``mark(html, path, origin=None, *, hidden=(0, 0))`` returns ``html`` with the links marked for the request.
-``path`` is a callable that answers the request path with its query, and ``origin`` one that answers the scheme and host absolute links are compared with, and each runs only once ``html`` opens a container.
-``hidden`` is the span of the runtime payload of the framework in the document, which the pass never treats as a container.
-A subclass that marks links by a rule of its own overrides ``mark``, and ``current_links()`` returns the backend the settings name, or ``None`` while the pass is off.
-The ``intent`` bundle marks the links again with the default rule after each update in the browser, so the marks of a different rule hold until the first navigation or partial update of the page.
-A path that does not import or names no concrete subclass is reported as ``next.E219``.
+``ROUTER["ACTIVE_LINKS"]["PASS"]`` takes ``"template"``, the default, or ``"document"``.
+``"template"`` marks each container where a template writes it and falls back to the pass over the whole document for a page whose containers the source cannot show, as `Where the pass runs`_ describes.
+``"document"`` runs the pass over every rendered document, for a site whose menus come from variables.
+The rule that decides a current link is the same in both, and the browser applies it again after every update, so the choice moves only the cost of the pass on the server.
 
 .. seealso::
 
-   :doc:`/content/ref/router` for ``CurrentLinks`` and ``current_links``.
-   :doc:`/content/ref/settings` for the ``ROUTER["CURRENT"]`` keys.
+   :doc:`/content/ref/router` for the server pass.
+   :doc:`/content/ref/settings` for the ``ROUTER["ACTIVE_LINKS"]`` keys.

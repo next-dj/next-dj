@@ -1,18 +1,28 @@
-import type { BeforeApply } from "./apply";
+// The reader of streamed answers: the server-sent frames of a partial or navigation
+// stream, and the `$nx` queue of a streamed document, both drained into boundaries.
+
 import { createDrain, drain } from "./drain";
 import type { DrainHost, Fill, Take } from "./drain";
-import type { PartialSurface } from "./partial";
-import { ATTR_ERROR } from "./protocol";
+import type { BeforeApply } from "./apply";
+import type { Kernel } from "./kernel";
+import {
+  ATTR_ERROR,
+  CHUNK_END,
+  CHUNK_ENVELOPE,
+  EVENT_END,
+  EVENT_HELLO,
+  EVENT_PATCH,
+  PROTOCOL,
+} from "./protocol";
 import type { Outcome } from "./wire";
 
-export interface ReaderHost {
-  partial: DrainHost & Pick<PartialSurface, "_reader" | "_now">;
-  on(event: "ready", listener: () => void): () => void;
-}
+export type ReaderHost = DrainHost &
+  Pick<Kernel, "now" | "release" | "serve" | "onReady">;
 
 type Body = Pick<ReadableStreamDefaultReader<Uint8Array>, "read">;
 
 const BREAK = /\r\n?|\n/;
+const ENDED = Promise.resolve({ done: true as const, value: undefined });
 
 /** Yield the event name and the data of each server-sent event frame of a body. */
 export async function* frames(
@@ -49,28 +59,22 @@ export async function* frames(
 }
 
 export function createReader(
-  next: ReaderHost,
+  kernel: ReaderHost,
   listening: AddEventListenerOptions = {},
 ): void {
-  const { partial } = next;
   let streams = 0;
   let sweep: Take | undefined;
 
-  next.on("ready", () => {
-    sweep ??= drain(partial, () => streams > 0, listening);
+  kernel.onReady(() => {
+    sweep ??= drain(kernel, () => streams > 0, listening);
   });
 
-  partial._reader = async (response, { signal, open, land }) => {
-    const body = (
-      response.body ??
-      new ReadableStream<Uint8Array<ArrayBuffer>>({ start: (ended) => ended.close() })
-    ).getReader();
-    const grabbed: BeforeApply[] = [];
-    const grab = (event: Event): number =>
-      grabbed.push((event as CustomEvent<BeforeApply>).detail);
+  kernel.serve("read", async (response, { signal, open, land }) => {
+    // A body-less answer reads as a stream that ends at once.
+    const body = response.body?.getReader();
     const filled: string[] = [];
     let idle: () => void;
-    const finished = new Promise<void>((resolve) => (idle = () => resolve()));
+    const finished = new Promise<void>((resolve) => (idle = resolve));
     let own: BeforeApply | undefined;
     let outcome: Outcome | undefined;
     let since = 0;
@@ -78,13 +82,13 @@ export function createReader(
       signal.aborted &&
       (outcome === undefined || (signal.reason as Error).name !== "TimeoutError");
     const stop = (): void => {
-      void body.cancel().catch(() => undefined);
+      void body?.cancel().catch(() => undefined);
       if (dead()) idle();
     };
     const mine = (): Element[] => own?.boundaries ?? [];
     const stale = (el: Element): boolean =>
-      dead() || partial._busy(el) || partial._stamped(el) > since;
-    const take = createDrain(partial, {
+      dead() || kernel.busy(el) || kernel.stamped(el) > since;
+    const take = createDrain(kernel, {
       stale,
       scope: () => mine().filter((el) => !stale(el)),
       live: () => !dead(),
@@ -95,9 +99,9 @@ export function createReader(
     });
     // A failed read once the page landed only ends the stream, its fills already in.
     const read = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
-      const result = await body.read().catch((error: unknown) => {
+      const result = await (body?.read() ?? ENDED).catch((error: unknown) => {
         if (outcome === undefined) throw error;
-        return { done: true as const, value: undefined };
+        return ENDED;
       });
       if (dead()) throw signal.reason as Error;
       open();
@@ -107,9 +111,9 @@ export function createReader(
     streams += 1;
     try {
       for await (const [kind, frame] of frames({ read })) {
-        if (kind === "end") break;
-        if (kind !== "patch") continue;
-        let parsed: Fill;
+        if (kind === EVENT_END) break;
+        if (kind !== EVENT_PATCH && kind !== EVENT_HELLO) continue;
+        let parsed: Fill & { protocol?: unknown };
         try {
           parsed = JSON.parse(frame) as Fill;
         } catch (error) {
@@ -117,37 +121,45 @@ export function createReader(
             return await land(frame, () => {
               throw error;
             });
-          partial._fire("partial:error", { kind: "parse", body: frame, error });
+          kernel.fire("partial:error", { kind: "parse", body: frame, error });
           continue;
+        }
+        // A server of another release streams frames this runtime may misread, so the
+        // stream ends unpatched and the runtime reloads once.
+        if (kind === EVENT_HELLO) {
+          if (parsed.protocol === PROTOCOL) continue;
+          kernel.release(false);
+          break;
         }
         if (outcome !== undefined) take(parsed);
         else {
-          document.addEventListener("partial:before-apply", grab);
-          const landing = land(frame, () => parsed.e);
-          document.removeEventListener("partial:before-apply", grab);
-          const landed = await landing;
+          // The boundaries of the landed page are the ones the later frames fill.
+          const landed = await land(
+            frame,
+            () => parsed[CHUNK_ENVELOPE],
+            (detail: BeforeApply) => (own ??= detail),
+          );
           outcome = landed;
-          own = grabbed.find(({ envelope }) => envelope === landed.envelope);
           if (landed.status !== "ok") return landed;
-          since = partial._now();
+          since = kernel.now();
         }
       }
-      if (outcome === undefined) throw new TypeError("partial stream ended unpatched");
-      take(0);
+      if (outcome === undefined) throw new TypeError("stream ended unpatched");
+      take(CHUNK_END);
       await finished;
       if (dead()) throw signal.reason as Error;
       const left = mine()
         .filter((el) => el.getAttribute(ATTR_ERROR) === "incomplete")
         .map((el) => el.id);
       if (left.length > 0)
-        partial._fire("partial:error", { kind: "incomplete", boundaries: left });
+        kernel.fire("partial:error", { kind: "incomplete", boundaries: left });
       return { ...outcome, boundaries: filled };
     } finally {
       streams -= 1;
       signal.removeEventListener("abort", stop);
-      take(0);
+      take(CHUNK_END);
       stop();
       sweep?.();
     }
-  };
+  });
 }

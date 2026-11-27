@@ -171,28 +171,28 @@ def _imported_from(module: object, root: str) -> bool:
     return any(Path(location).is_relative_to(root) for location in locations)
 
 
-# Every checks submodule binds `get_router_manager` at import, so patch each module.
+# Every checks submodule binds `get_route_manager` at import, so patch each module.
 PAGES_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
-    "next.pages.checks.branches.get_router_manager",
-    "next.pages.checks.composed.get_router_manager",
-    "next.pages.checks.contexts.get_router_manager",
-    "next.pages.checks.layouts.get_router_manager",
-    "next.pages.checks.metadata.pages.get_router_manager",
-    "next.pages.checks.modules.get_router_manager",
-    "next.pages.checks.structure.get_router_manager",
+    "next.pages.checks.branches.get_route_manager",
+    "next.pages.checks.composed.get_route_manager",
+    "next.pages.checks.contexts.get_route_manager",
+    "next.pages.checks.layouts.get_route_manager",
+    "next.pages.checks.metadata.pages.get_route_manager",
+    "next.pages.checks.modules.get_route_manager",
+    "next.pages.checks.structure.get_route_manager",
 )
 PARTIAL_ROUTER_MANAGER_TARGETS: tuple[str, ...] = (
-    "next.pages.checks.composed.get_router_manager",
-    "next.partial.checks.templates.get_router_manager",
+    "next.pages.checks.composed.get_route_manager",
+    "next.partial.checks.templates.get_route_manager",
 )
-URLS_ROUTER_MANAGER_TARGETS: tuple[str, ...] = ("next.urls.checks.get_router_manager",)
+URLS_ROUTER_MANAGER_TARGETS: tuple[str, ...] = ("next.urls.checks.get_route_manager",)
 
 
 @contextmanager
-def patched_router_manager(
+def patched_route_manager(
     *targets: str, manager: MagicMock
 ) -> Generator[None, None, None]:
-    """Answer `get_router_manager` with `manager` at each named binding."""
+    """Answer `get_route_manager` with `manager` at each named binding."""
     with ExitStack() as stack:
         for target in targets:
             stack.enter_context(patch(target, return_value=(manager, [])))
@@ -200,7 +200,7 @@ def patched_router_manager(
 
 
 @contextmanager
-def patch_checks_router_manager(
+def patch_checks_route_manager(
     *, pages_directory: Path
 ) -> Generator[tuple[MagicMock, MagicMock, MagicMock], None, None]:
     """Point the check seams at one real pages directory through a stub manager."""
@@ -209,7 +209,7 @@ def patch_checks_router_manager(
     mock_mgr.backends = (mock_router,)
     mock_router.components_folder_name.return_value = None
     with (
-        patched_router_manager(
+        patched_route_manager(
             *PAGES_ROUTER_MANAGER_TARGETS,
             *URLS_ROUTER_MANAGER_TARGETS,
             manager=mock_mgr,
@@ -222,13 +222,13 @@ def patch_checks_router_manager(
 
 
 @contextmanager
-def patch_checks_router_manager_with_routers(
+def patch_checks_route_manager_with_routers(
     *, routers: list[object]
 ) -> Generator[MagicMock, None, None]:
-    """Patch `get_router_manager` so the manager exposes the given routers list."""
+    """Patch `get_route_manager` so the manager exposes the given routers list."""
     mock_mgr = MagicMock()
     mock_mgr.backends = tuple(routers)
-    with patched_router_manager(
+    with patched_route_manager(
         *PAGES_ROUTER_MANAGER_TARGETS,
         *PARTIAL_ROUTER_MANAGER_TARGETS,
         *URLS_ROUTER_MANAGER_TARGETS,

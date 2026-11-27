@@ -9,19 +9,19 @@ from django.db.backends.signals import connection_created
 from django.test.utils import CaptureQueriesContext
 
 from next.boundaries import (
-    Boundary,
     contain,
-    protect,
     protection as protection_module,
-    render_boundaries,
     scope as scope_module,
 )
-from next.defer import Addressing, BoundaryFailure, ErrorKind
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import Boundary, BoundaryFailure, ErrorKind
+from next.boundaries.protection import protect
+from next.boundaries.scope import render_boundaries
 from next.static import StaticCollector
 from next.static.assets import StaticAsset
 from next.testing import capture_signals
 from next.transactions import savepoints
-from tests.support.boundaries import RecordingFallback, defer_errors, raising
+from tests.support.boundaries import RecordingErrorUI, defer_errors, raising
 
 
 class TestJournal:
@@ -44,7 +44,7 @@ class TestJournal:
         contain(
             Boundary("card", Addressing.COMPONENT, collector=collector),
             render,
-            RecordingFallback(render=error_ui),
+            RecordingErrorUI(render=error_ui),
         )
         urls = [asset.url for asset in collector.assets_in_slot("styles")]
         assert urls == ["/before.css", "/error.css"]
@@ -62,7 +62,7 @@ class TestJournal:
         contain(
             Boundary("card", Addressing.COMPONENT, collector=collector),
             render,
-            RecordingFallback(),
+            RecordingErrorUI(),
         )
         assert [a.url for a in collector.assets_in_slot("styles")] == ["/kept.css"]
         assert collector._journal is None
@@ -75,13 +75,13 @@ class TestJournal:
             return contain(
                 Boundary("inner", Addressing.COMPONENT, collector=collector),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
 
         contain(
             Boundary("outer", Addressing.COMPONENT, collector=collector),
             outer_render,
-            RecordingFallback(),
+            RecordingErrorUI(),
         )
         assert [a.url for a in collector.assets_in_slot("styles")] == ["/outer.css"]
 
@@ -103,12 +103,12 @@ def _write_then_fail(*names: str) -> Callable[[], str]:
     return render
 
 
-def _error_ui_writes(name: str) -> RecordingFallback:
+def _error_ui_writes(name: str) -> RecordingErrorUI:
     def render(error: BoundaryFailure, kind: ErrorKind) -> str:
         Group.objects.create(name=name)
         return str(Group.objects.count())
 
-    return RecordingFallback(render=render)
+    return RecordingErrorUI(render=render)
 
 
 @pytest.mark.django_db()
@@ -132,12 +132,10 @@ class TestSavepointInsideAnAtomicBlock:
             contain(
                 Boundary("card", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
             contain(
-                Boundary("card", Addressing.COMPONENT),
-                lambda: "ok",
-                RecordingFallback(),
+                Boundary("card", Addressing.COMPONENT), lambda: "ok", RecordingErrorUI()
             )
         assert queries.captured_queries == []
 
@@ -146,7 +144,7 @@ class TestSavepointInsideAnAtomicBlock:
             contain(
                 Boundary("card", Addressing.COMPONENT),
                 _write("kept"),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
             assert Group.objects.filter(name="kept").exists()
 
@@ -157,12 +155,12 @@ class TestSavepointInsideAnAtomicBlock:
 
         def page() -> str:
             return "".join(
-                contain(Boundary("row", Addressing.COMPONENT), row, RecordingFallback())
+                contain(Boundary("row", Addressing.COMPONENT), row, RecordingErrorUI())
                 for _ in range(100)
             )
 
         with transaction.atomic(), CaptureQueriesContext(connection) as queries:
-            contain(Boundary("page", Addressing.PAGE), page, RecordingFallback())
+            contain(Boundary("page", Addressing.PAGE), page, RecordingErrorUI())
         leads = [q["sql"].split()[0] for q in queries.captured_queries]
         assert leads == ["SAVEPOINT", *["SELECT"] * 100, "RELEASE"]
 
@@ -179,14 +177,12 @@ class TestSavepointInsideAnAtomicBlock:
             return contain(
                 Boundary("row", Addressing.COMPONENT),
                 broken_row,
-                RecordingFallback("row"),
+                RecordingErrorUI("row"),
             )
 
         with transaction.atomic():
             html = contain(
-                Boundary("page", Addressing.PAGE),
-                page,
-                RecordingFallback("<p>page</p>"),
+                Boundary("page", Addressing.PAGE), page, RecordingErrorUI("<p>page</p>")
             )
             Group.objects.create(name="after")
         assert "<p>page</p>" in html
@@ -219,7 +215,7 @@ def _page(card: Callable[[], str], *, fails: bool = False) -> Callable[[], str]:
         html = contain(
             Boundary("card", Addressing.COMPONENT),
             card,
-            RecordingFallback("<p>card</p>"),
+            RecordingErrorUI("<p>card</p>"),
         )
         if fails:
             raise ValueError
@@ -242,7 +238,7 @@ class TestApplicationBlocksInsideNestedBoundaries:
             html = contain(
                 Boundary("page", Addressing.PAGE),
                 render,
-                RecordingFallback("<p>page</p>"),
+                RecordingErrorUI("<p>page</p>"),
             )
         return html, _savepoints(queries)
 
@@ -296,11 +292,11 @@ class TestApplicationBlocksInsideNestedBoundaries:
         def page() -> str:
             list(Group.objects.all())
             return contain(
-                Boundary("card", Addressing.COMPONENT), card, RecordingFallback()
+                Boundary("card", Addressing.COMPONENT), card, RecordingErrorUI()
             )
 
         with CaptureQueriesContext(connection) as queries:
-            contain(Boundary("page", Addressing.PAGE), page, RecordingFallback())
+            contain(Boundary("page", Addressing.PAGE), page, RecordingErrorUI())
         assert _savepoints(queries) == []
         assert len(queries.captured_queries) == 2
 
@@ -315,9 +311,9 @@ def test_a_render_without_queries_opens_no_connection() -> None:
                 lambda: contain(
                     Boundary("row", Addressing.COMPONENT),
                     lambda: "r",
-                    RecordingFallback(),
+                    RecordingErrorUI(),
                 ),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         held.append([c.alias for c in connections.all(initialized_only=True)])
 
@@ -347,13 +343,11 @@ class TestWritesInAutocommit:
                 return contain(
                     Boundary("inner", Addressing.COMPONENT),
                     _write_then_fail("inner"),
-                    RecordingFallback(),
+                    RecordingErrorUI(),
                 )
 
         with defer_errors(ATOMIC=False):
-            contain(
-                Boundary("outer", Addressing.COMPONENT), nested, RecordingFallback()
-            )
+            contain(Boundary("outer", Addressing.COMPONENT), nested, RecordingErrorUI())
         assert list(Group.objects.values_list("name", flat=True)) == []
 
     def test_atomic_false_leaves_the_writes_of_autocommit(self) -> None:
@@ -361,7 +355,7 @@ class TestWritesInAutocommit:
             contain(
                 Boundary("card", Addressing.COMPONENT),
                 _write_then_fail("one"),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         assert list(Group.objects.values_list("name", flat=True)) == ["one"]
 
@@ -371,7 +365,7 @@ class TestWritesInAutocommit:
             raise ValueError
 
         with CaptureQueriesContext(connection) as queries:
-            contain(Boundary("card", Addressing.COMPONENT), render, RecordingFallback())
+            contain(Boundary("card", Addressing.COMPONENT), render, RecordingErrorUI())
         assert [q["sql"].split()[0] for q in queries.captured_queries] == ["SELECT"]
 
 

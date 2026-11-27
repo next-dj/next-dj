@@ -14,7 +14,7 @@ Solution
 --------
 
 Subclass ``TokenStorage``, implement ``put`` and ``get``, and name the class in ``DEFER["TOKENS"]["OPTIONS"]["STORAGE"]``.
-The shipped ``StackedTokenBackend`` builds the codec, the storage, the seal, the binding, and the transport from those options, so replacing one seam leaves the others as they are.
+The shipped ``StackedTokenBackend`` builds the storage, the seal, and the binding from those options, so replacing one seam leaves the others as they are.
 A project that needs a different token scheme altogether replaces the backend instead.
 
 Walkthrough
@@ -23,7 +23,7 @@ Walkthrough
 Know the layers
 ~~~~~~~~~~~~~~~
 
-A mint runs the claims through four seams in order.
+A mint runs the claims through two seams in order.
 
 .. list-table::
    :header-rows: 1
@@ -32,22 +32,16 @@ A mint runs the claims through four seams in order.
    * - Seam
      - What a subclass implements
      - Shipped
-   * - ``TokenCodec``
-     - ``dumps(claims) -> bytes`` and ``loads(data, version) -> BoundaryClaims``, plus a classmethod ``available()`` for a library it needs.
-     - ``JsonCodec``, ``MsgpackCodec``
    * - ``TokenStorage``
-     - ``put(data, context) -> bytes`` returns the reference of the claims bytes, and ``get(reference, context) -> bytes`` returns the bytes of a verified reference.
+     - ``put(data, terms) -> bytes`` returns the reference of the claims bytes, and ``get(reference, terms) -> bytes`` returns the bytes of a verified reference, plus the class attribute ``inline`` and the optional ``overflow(data, terms)``.
      - ``InlineStorage``, ``CacheStorage``, ``SpillStorage``
    * - ``TokenSeal``
-     - ``seal(payload, context) -> str`` and ``open(sealed, context) -> bytes``, plus ``available()``.
-     - ``NoSeal``, ``SignedSeal``, ``EncryptedSeal``
-   * - ``TokenTransport``
-     - ``extract(request) -> str | None`` and the class attributes ``place`` and ``name``.
-     - ``HeaderTransport``, ``QueryTransport``, ``BodyTransport``
+     - ``seal(payload, salt) -> str`` and ``open(sealed, salt) -> bytes``, plus ``available()`` and the class attribute ``protects``.
+     - ``SignedSeal``, ``EncryptedSeal``
 
-The codec turns the claims into bytes, the storage turns those bytes into a short reference, and the seal signs or encrypts the reference into the text after ``version.epoch.`` of the token.
+The claims are strict JSON, the storage turns those bytes into a short reference, and the seal signs or encrypts the reference into the text after ``version.epoch.profile.`` of the token.
 A redeem opens the seal first, so a reference a client forged never reaches the storage, and only then asks the storage for the bytes.
-The context carries the lifetime of the token, the key ring, ``max_stored_bytes``, the cache alias, and the digest of the bound subject.
+``StorageTerms`` carries the lifetime of the token, ``max_stored_bytes``, and the cache alias, a frozen value the storage only reads.
 
 Write the storage
 ~~~~~~~~~~~~~~~~~
@@ -70,33 +64,42 @@ A table keeps the claims, and the reference is the content address of the bytes,
    import hashlib
    from datetime import timedelta
 
+   from django.db import DatabaseError
    from django.utils import timezone
    from shop.models import StoredClaims
 
-   from next.suspense import (
+   from next.defer import (
        BoundarySizeError,
+       BoundaryStorageError,
        BoundaryTokenError,
+       StorageTerms,
        TokenRejection,
        TokenStorage,
    )
-   from next.suspense.tokens.context import TokenContext
 
    class DatabaseStorage(TokenStorage):
-       def put(self, data: bytes, context: TokenContext) -> bytes:
-           if len(data) > context.max_stored_bytes:
+       def put(self, data: bytes, terms: StorageTerms) -> bytes:
+           if len(data) > terms.max_stored_bytes:
                msg = f"the claims take {len(data)} bytes, over MAX_STORED_BYTES"
                raise BoundarySizeError(msg)
            handle = hashlib.sha256(data).hexdigest()
-           expires = timezone.now() + timedelta(seconds=max(1, context.lifetime))
-           StoredClaims.objects.update_or_create(
-               handle=handle, defaults={"data": data, "expires": expires}
-           )
+           expires = timezone.now() + timedelta(seconds=max(1, terms.lifetime))
+           try:
+               StoredClaims.objects.update_or_create(
+                   handle=handle, defaults={"data": data, "expires": expires}
+               )
+           except DatabaseError as exc:
+               raise BoundaryStorageError(str(exc)) from exc
            return handle.encode()
 
-       def get(self, reference: bytes, context: TokenContext) -> bytes:
-           row = StoredClaims.objects.filter(
-               handle=reference.decode(errors="replace"), expires__gt=timezone.now()
-           ).first()
+       def get(self, reference: bytes, terms: StorageTerms) -> bytes:
+           try:
+               row = StoredClaims.objects.filter(
+                   handle=reference.decode(errors="replace"),
+                   expires__gt=timezone.now(),
+               ).first()
+           except DatabaseError as exc:
+               raise BoundaryTokenError(TokenRejection.STORAGE_DOWN) from exc
            if row is None:
                raise BoundaryTokenError(TokenRejection.STORAGE_MISS)
            return bytes(row.data)
@@ -104,11 +107,13 @@ A table keeps the claims, and the reference is the content address of the bytes,
 ``put`` raises ``BoundarySizeError`` for claims over its cap, and the page then renders that boundary in the same response instead of sending a token.
 ``get`` raises ``BoundaryTokenError`` with a ``TokenRejection`` for a reference it cannot answer, and a missing row is ``STORAGE_MISS``, which the browser answers with one reload of the page that mints a fresh token.
 The class is built with no arguments once per backend, so it keeps no request state.
+A table keeps the claims outside the token, so the class leaves ``inline`` false and a prop is capped by ``MAX_STORED_BYTES``.
+A ``put`` whose table is down raises ``BoundaryStorageError``, and the page renders that boundary without a token, while a ``get`` whose table is down raises ``BoundaryTokenError`` with ``STORAGE_DOWN``, which the browser answers with one reload of the page, as ``CacheStorage`` does for its cache.
 
 The seal covers the reference, so under the default signed seal a client cannot name another row.
 The expiry is part of the stored claims, and a redeem checks it after the storage answered, so the ``expires`` column only lets a cleanup job delete rows, and a job that deletes the ones in the past is enough.
-Claims that carry a mint second differ between mints unless ``BUCKET`` floors it, so equal claims share a row only within a bucket.
-A storage on a cache or a table that a client can write to, or one that unpickles what it reads, verifies what it reads the way ``CacheStorage`` does with a keyed address, since a poisoned entry would otherwise reach the codec.
+Claims carry their mint second, so equal claims share a row only within one second.
+A storage on a cache or a table that a client can write to, or one that unpickles what it reads, verifies what it reads the way ``CacheStorage`` does with a keyed address, since a poisoned entry would otherwise reach the claims parser.
 
 Configure it
 ~~~~~~~~~~~~
@@ -135,29 +140,28 @@ Raising ``EPOCH`` refuses every token minted before it, which is the way to revo
 Replace another seam
 ~~~~~~~~~~~~~~~~~~~~
 
-The same options name the others, ``CODEC``, ``SEAL``, ``BINDING``, and ``TRANSPORT``.
-A codec or a seal declares ``available()`` as a classmethod that answers whether the library it needs imports, and ``manage.py check`` reports a configured one that answers ``False`` as ``next.E237`` for the codec and ``next.E230`` for the seal, since no token can be minted then.
-``encrypts`` on a seal is ``True`` when two mints of the same claims differ, which ``BUCKET`` defeats.
+The same options name the others, ``SEAL`` and ``BINDING``, while ``CARRIER`` picks one of the places the client runtime knows, ``"header"``, ``"query"``, or ``"body"``.
+A seal declares ``available()`` as a classmethod that answers whether the library it needs imports, and ``manage.py check`` reports a configured one that answers ``False`` as ``next.E230``, since no token can be minted then.
+``protects`` is ``False`` for a seal a client can forge, which ``next.E221`` refuses while ``DEBUG`` is off.
+The salt a seal receives already carries the header of the token and the digest of the bound subject, and a seal derives its keys from ``SECRET_KEY`` and ``SECRET_KEY_FALLBACKS``, so a key rotation keeps older tokens open.
 ``BINDING`` takes the dotted path of a ``SubjectBinding`` subclass or of a callable that takes the request and returns the subject as text, see :doc:`bind-tickets-to-your-own-identity`.
 
 Replace the whole backend
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``DEFER["TOKENS"]["BACKEND"]`` names a ``BoundaryTokenBackend`` for a scheme the stack cannot express.
-A subclass implements two abstract methods and, to serve a boundary reload, two more.
+A subclass implements the three abstract methods a reload calls.
 
 ``issue(request, claims, *, tokens=()) -> str``
    Returns the token of a client-trip boundary whose access rule passed.
-``redeem(request, token, target) -> BoundaryClaims``
-   Returns the verified claims or raises ``BoundaryTokenError`` with a reason, comparing the claims with the ``BoundaryTarget`` the server resolved the request to.
 ``open(request, token, *, tokens=()) -> BoundaryClaims``
-   Returns the claims a token proves, none of them compared yet, since a reload knows no component before it reads them.
+   Returns the claims a token proves, none of them compared yet, since a reload knows no component before it reads them, or raises ``BoundaryTokenError`` with a reason.
 ``settle(request, claims, target) -> BoundaryClaims``
-   Returns the opened claims once they name the target and are still alive.
+   Returns the opened claims once they name the ``BoundaryTarget`` the server resolved the request to and are still alive, or raises ``BoundaryTokenError`` with a reason.
 
-``transport`` answers where the client puts a token, ``prop_limit(tokens)`` the longest text one prop carries, ``validate(tokens)`` refuses component overrides the backend cannot run under, and ``announce(request, error, component)`` receives a refusal ``open`` raised.
-A backend that leaves ``open`` and ``settle`` unimplemented serves no boundary reload.
-Every redeem refusal also fires ``boundary_token_rejected`` with its reason.
+``redeem(request, token, target)`` opens and settles in one call, which a test uses, and ``announce(request, error, component)`` sends ``boundary_token_rejected`` and logs the refusal, so a subclass that raises from ``open`` and ``settle`` fires the signal for every refusal of a reload.
+``carrier`` answers where the client puts a token, ``prop_limit(tokens)`` the longest text one prop carries, ``validate(tokens)`` refuses component overrides the backend cannot run under, and ``bound(request, tokens)`` whether a token binds the visitor, which keeps the page out of shared caches and holds unless the subclass answers false.
+``profile(token)`` names the overrides a token was minted under, read from its unsealed text, and a reload then opens it under those overrides alone and refuses it for a component that declares others, while ``None``, the default, opens it under the project settings and again under the overrides of the component it resolves to.
 
 Verification
 ------------
@@ -171,9 +175,9 @@ A test mints a token through the configured backend and redeems it, then deletes
    from django.test import RequestFactory
    from shop.models import StoredClaims
 
-   from next.suspense import BoundaryTokenError, TokenRejection
-   from next.suspense.manager import suspense_manager
-   from next.suspense.tokens import BoundaryClaims, BoundaryTarget
+   from next.defer import BoundaryTokenError, TokenRejection
+   from next.defer.manager import defer_manager
+   from next.defer.tokens import BoundaryClaims, BoundaryTarget
    from next.testing import issue_boundary_token, override_next_settings
 
    OPTIONS = {"TOKENS": {"OPTIONS": {"STORAGE": "shop.tokens.DatabaseStorage"}}}
@@ -187,7 +191,7 @@ A test mints a token through the configured backend and redeems it, then deletes
        with override_next_settings(DEFER=OPTIONS):
            token = issue_boundary_token(request, claims)
            assert StoredClaims.objects.count() == 1
-           backend = suspense_manager.tokens()
+           backend = defer_manager.tokens()
            assert backend.redeem(request, token, target).component == "recommendations"
            StoredClaims.objects.all().delete()
            with pytest.raises(BoundaryTokenError) as refused:

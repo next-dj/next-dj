@@ -1,19 +1,28 @@
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 from django.core.checks import run_checks
 from django.test import override_settings
 
 from next.checks import NEXT
+from next.compression import GzipBackend
 from next.compression.checks import (
     GZIP_MIDDLEWARE,
     MIDDLEWARE,
+    check_compress_declarations,
     check_compression_codecs,
     check_compression_cookies,
     check_compression_middleware,
     check_compression_paths,
     check_compression_settings,
+    check_stream_middleware,
 )
 from next.middleware import CompressionMiddleware
+from next.pages.declarations import page_declarations
+from next.pages.loaders import load_python_module_memo
 from next.testing import override_next_settings
+from tests.support.checks import written
 from tests.support.compressors import fake_brotli, fake_zstandard, install
 
 
@@ -25,8 +34,20 @@ CACHE = "django.middleware.cache.CacheMiddleware"
 UPDATE = "django.middleware.cache.UpdateCacheMiddleware"
 
 
+GZIP = [{"BACKEND": "next.compression.GzipBackend"}]
+ZSTD = "next.compression.ZstdBackend"
+BROTLI = "next.compression.BrotliBackend"
+
+
 class CustomCompression:
     pass
+
+
+class Unshipped(GzipBackend):
+    coding = "lz"
+
+    def available(self) -> bool:
+        return False
 
 
 class Subclassed(CompressionMiddleware):
@@ -35,6 +56,10 @@ class Subclassed(CompressionMiddleware):
 
 def _compression(**scope: object):
     return override_next_settings(COMPRESSION=scope)
+
+
+def _entry(dotted: str, **options: int) -> dict[str, object]:
+    return {"BACKEND": dotted, "OPTIONS": options}
 
 
 def _ids(messages) -> list[str]:
@@ -49,11 +74,15 @@ class TestSettingsShape:
             assert check_compression_settings() == []
 
     def test_a_non_dict_scope_is_left_to_the_type_check(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"COMPRESSION": "on"}):
+        with written({"COMPRESSION": "on"}):
             assert check_compression_settings() == []
 
     def test_silent_on_a_valid_scope(self) -> None:
-        with _compression(ENABLED=False, LEVELS={"gzip": 6}, CONTENT_TYPES=["text/*"]):
+        with _compression(
+            ENABLED=False,
+            BACKENDS=[_entry("next.compression.GzipBackend", LEVEL=6)],
+            CONTENT_TYPES=["text/*"],
+        ):
             assert check_compression_settings() == []
 
     def test_an_unknown_key_yields_e035(self) -> None:
@@ -61,6 +90,25 @@ class TestSettingsShape:
             (message,) = check_compression_settings()
         assert message.id == "next.E035"
         assert "NEXT_FRAMEWORK['COMPRESSION'] has unknown keys 'LEVEL'" in message.msg
+
+    @pytest.mark.parametrize(
+        "backends",
+        [
+            pytest.param(["next.compression.GzipBackend"], id="bare-path"),
+            pytest.param([{"OPTIONS": {}}], id="no-backend"),
+            pytest.param([{"BACKEND": ""}], id="empty-path"),
+            pytest.param([{"BACKEND": ZSTD, "NAME": "z"}], id="stray-key"),
+            pytest.param([{"BACKEND": ZSTD, "OPTIONS": []}], id="options-list"),
+            pytest.param([_entry(ZSTD, PADDING=1)], id="stray-option"),
+            pytest.param([_entry(ZSTD, LEVEL=True)], id="bool-level"),
+            pytest.param({"BACKEND": ZSTD}, id="one-dict"),
+        ],
+    )
+    def test_a_misfit_backend_entry_yields_e076(self, backends) -> None:
+        with _compression(BACKENDS=backends):
+            (message,) = check_compression_settings()
+        assert message.id == "next.E076"
+        assert "NEXT_FRAMEWORK['COMPRESSION']['BACKENDS'] must be" in message.msg
 
     def test_a_misfit_yields_e076(self) -> None:
         with _compression(MIN_SIZE="1k", STREAMS="proxy"):
@@ -86,10 +134,10 @@ class TestPaths:
         ],
     )
     def test_a_backend_path(self, dotted: str, problem: str) -> None:
-        with _compression(BACKENDS=[dotted]):
+        with _compression(BACKENDS=[*GZIP, {"BACKEND": dotted}]):
             (message,) = check_compression_paths()
         assert message.id == "next.E219"
-        assert "['BACKENDS']" in message.msg
+        assert "['BACKENDS'][1]['BACKEND']" in message.msg
         assert problem in message.msg
 
     @pytest.mark.parametrize(
@@ -119,18 +167,44 @@ class TestCodecs:
         install(monkeypatch, zstandard=fake_zstandard(), brotli=fake_brotli())
         assert check_compression_codecs() == []
 
-    def test_a_missing_core_codec_is_refused(self) -> None:
-        (message,) = check_compression_codecs()
+    def test_a_default_codec_without_its_library_is_left_out_quietly(self) -> None:
+        assert check_compression_codecs() == []
+
+    @pytest.mark.parametrize(
+        "scope",
+        [
+            pytest.param({"ORDER": ["zstd", "gzip"]}, id="order"),
+            pytest.param({"BACKENDS": [{"BACKEND": ZSTD}, *GZIP]}, id="backends"),
+        ],
+    )
+    def test_a_named_zstd_without_its_library_is_refused(self, scope) -> None:
+        with _compression(**scope):
+            (message,) = check_compression_codecs()
         assert message.id == "next.E228"
-        assert "offers 'zstd'" in message.msg
+        assert "names the 'zstd' codec" in message.msg
+        assert "pip install 'next.dj[zstd]'" in message.hint
+
+    def test_backends_without_zstd_name_nothing(self) -> None:
+        with _compression(
+            BACKENDS=[{"BACKEND": "missing.Backend"}, *GZIP], ORDER=["gzip"]
+        ):
+            assert check_compression_codecs() == []
+
+    def test_a_codec_of_no_extra_without_its_library_is_refused(self) -> None:
+        with _compression(
+            BACKENDS=[{"BACKEND": f"{__name__}.Unshipped"}, *GZIP], ORDER=["lz", "gzip"]
+        ):
+            (message,) = check_compression_codecs()
+        assert "names the 'lz' codec" in message.msg
+        assert "Install the library of the codec" in message.hint
 
     def test_a_missing_optional_codec_needs_a_written_order(self, monkeypatch) -> None:
         install(monkeypatch, zstandard=fake_zstandard())
         assert check_compression_codecs() == []
         with _compression(ORDER=["br", "gzip"]):
             (message,) = check_compression_codecs()
-        assert "offers 'br'" in message.msg
-        assert "'brotli' extra" in message.hint
+        assert "names the 'br' codec" in message.msg
+        assert "pip install 'next.dj[brotli]'" in message.hint
 
     def test_disabled_skips_the_libraries(self) -> None:
         with _compression(ENABLED=False, SSE_TOPICS="reset", ORDER=["br"]):
@@ -138,44 +212,50 @@ class TestCodecs:
 
     def test_unknown_codings(self, monkeypatch) -> None:
         install(monkeypatch, zstandard=fake_zstandard(), brotli=fake_brotli())
-        with _compression(
-            ORDER=["gzip", "deflate", "deflate"], LEVELS={"lz4": 1}, WINDOWS={"xz": 20}
-        ):
-            messages = check_compression_codecs()
-        assert _ids(messages) == ["next.E228"] * 3
-        assert "['ORDER'] names the coding 'deflate'" in messages[0].msg
-        assert "['LEVELS'] names the coding 'lz4'" in messages[1].msg
-        assert "['WINDOWS'] names the coding 'xz'" in messages[2].msg
-        assert "br, gzip, zstd" in messages[0].hint
+        with _compression(ORDER=["gzip", "deflate", "deflate"]):
+            (message,) = check_compression_codecs()
+        assert message.id == "next.E228"
+        assert "['ORDER'] names the coding 'deflate'" in message.msg
+        assert "br, gzip, zstd" in message.hint
 
     def test_no_backend_at_all(self) -> None:
-        with _compression(BACKENDS=["next.compression.Missing"], ORDER=["gzip"]):
+        with _compression(
+            BACKENDS=[{"BACKEND": "next.compression.Missing"}], ORDER=["gzip"]
+        ):
             (message,) = check_compression_codecs()
         assert "(none)" in message.hint
 
     def test_levels_and_windows_out_of_range(self, monkeypatch) -> None:
         install(monkeypatch, zstandard=fake_zstandard(), brotli=fake_brotli())
         with _compression(
-            LEVELS={"gzip": 10, "br": 11, "zstd": 0},
-            WINDOWS={"gzip": 15, "br": 25, "zstd": 20},
+            BACKENDS=[
+                _entry("next.compression.GzipBackend", LEVEL=10, WINDOW=15),
+                _entry(BROTLI, LEVEL=11, WINDOW=25),
+                _entry(ZSTD, LEVEL=0, WINDOW=20),
+            ]
         ):
             messages = check_compression_codecs()
         texts = [message.msg for message in messages]
         assert _ids(messages) == ["next.E228"] * 4
-        assert "['LEVELS']['gzip'] is 10, outside 1 to 9" in texts[0]
-        assert "['LEVELS']['zstd'] is 0, outside 1 to 22" in texts[1]
-        assert "['WINDOWS']['gzip'] is 15, while the codec takes no window" in texts[2]
-        assert "['WINDOWS']['br'] is 25, while the codec takes 10 to 24" in texts[3]
+        assert "[0]['OPTIONS']['LEVEL'] is 10, outside 1 to 9" in texts[0]
+        assert "the 'gzip' codec keeps its level 4" in texts[0]
+        assert (
+            "[0]['OPTIONS']['WINDOW'] is 15, while the 'gzip' codec takes no"
+            in (texts[1])
+        )
+        assert (
+            "[1]['OPTIONS']['WINDOW'] is 25, while the 'br' codec takes 10 to 24"
+            in (texts[2])
+        )
+        assert "[2]['OPTIONS']['LEVEL'] is 0, outside 1 to 22" in texts[3]
 
     def test_a_zstd_window_past_what_browsers_decode_is_refused(
         self, monkeypatch
     ) -> None:
         install(monkeypatch, zstandard=fake_zstandard())
-        with _compression(WINDOWS={"zstd": 24}):
+        with _compression(BACKENDS=[_entry(ZSTD, WINDOW=24), *GZIP]):
             (message,) = check_compression_codecs()
-        assert "['WINDOWS']['zstd'] is 24, while the codec takes 10 to 23" in (
-            message.msg
-        )
+        assert "['WINDOW'] is 24, while the 'zstd' codec takes 10 to 23" in message.msg
 
     def test_reset_topics_need_a_resetting_codec(self, monkeypatch) -> None:
         install(monkeypatch, zstandard=fake_zstandard(), brotli=fake_brotli())
@@ -207,10 +287,9 @@ class TestMiddleware:
         assert message.id == "next.E227"
         assert GZIP_MIDDLEWARE in message.hint
 
-    def test_a_missing_middleware_yields_w164(self) -> None:
+    def test_a_missing_middleware_is_silent(self) -> None:
         with override_settings(MIDDLEWARE=[SECURITY, GZIP_MIDDLEWARE]):
-            (message,) = check_compression_middleware()
-        assert message.id == "next.W164"
+            assert check_compression_middleware() == []
 
     def test_a_missing_middleware_while_disabled_is_silent(self) -> None:
         with override_settings(MIDDLEWARE=[]), _compression(ENABLED=False):
@@ -238,6 +317,39 @@ class TestMiddleware:
     def test_entries_that_do_not_import_are_skipped(self) -> None:
         with override_settings(MIDDLEWARE=["missing.Middleware", 42, MIDDLEWARE]):
             assert check_compression_middleware() == []
+
+
+class TestStreamMiddleware:
+    """`check_stream_middleware` warns when streams go to a missing middleware."""
+
+    def test_streams_left_to_a_missing_middleware_yield_w193(self) -> None:
+        with (
+            override_settings(MIDDLEWARE=[SECURITY, GZIP_MIDDLEWARE]),
+            _compression(STREAMS="middleware"),
+        ):
+            (message,) = check_stream_middleware()
+        assert message.id == "next.W193"
+        assert "['STREAMS'] is 'middleware'" in message.msg
+        assert MIDDLEWARE in message.hint
+
+    @pytest.mark.parametrize(
+        ("middleware", "scope"),
+        [
+            pytest.param([SECURITY], {}, id="self"),
+            pytest.param(
+                [SECURITY, MIDDLEWARE], {"STREAMS": "middleware"}, id="listed"
+            ),
+            pytest.param(
+                [f"{__name__}.Subclassed"], {"STREAMS": "middleware"}, id="subclass"
+            ),
+            pytest.param(
+                [], {"STREAMS": "middleware", "ENABLED": False}, id="disabled"
+            ),
+        ],
+    )
+    def test_silent_otherwise(self, middleware, scope) -> None:
+        with override_settings(MIDDLEWARE=middleware), _compression(**scope):
+            assert check_stream_middleware() == []
 
 
 class TestCookies:
@@ -274,7 +386,43 @@ class TestCookies:
             assert check_compression_cookies() == []
 
 
+class TestCompressDeclarations:
+    """`next.E245` names a `page.compress()` call made outside a `page.py`."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self) -> Iterator[None]:
+        page_declarations.reset()
+        yield
+        page_declarations.reset()
+
+    def test_a_page_call_is_silent(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "from next.pages import page\n\npage.compress(enabled=False)\n"
+        )
+        load_python_module_memo(page_file)
+        assert check_compress_declarations() == []
+
+    def test_a_misplaced_call(self, tmp_path: Path) -> None:
+        helper = tmp_path / "helpers.py"
+        helper.write_text(
+            "from next.pages import page\n\npage.compress(enabled=False)\n"
+        )
+        load_python_module_memo(helper)
+        [found] = check_compress_declarations()
+        assert found.id == "next.E245"
+        assert found.msg == (
+            f"page.compress() in {helper} declares nothing, since the call sits "
+            "outside a page.py and so names no page."
+        )
+
+
 def test_the_checks_run_under_the_next_tag() -> None:
-    with override_settings(MIDDLEWARE=[COMMON, MIDDLEWARE, GZIP_MIDDLEWARE]):
+    with (
+        override_settings(MIDDLEWARE=[COMMON, MIDDLEWARE, GZIP_MIDDLEWARE]),
+        _compression(ORDER=["zstd", "gzip"]),
+    ):
         found = set(_ids(run_checks(tags=[NEXT])))
-    assert {"next.E227", "next.E228", "next.W165"} <= found
+    with override_settings(MIDDLEWARE=[]), _compression(STREAMS="middleware"):
+        found.update(_ids(run_checks(tags=[NEXT])))
+    assert {"next.E227", "next.E228", "next.W165", "next.W193"} <= found

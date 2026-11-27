@@ -14,13 +14,55 @@ Only pages and components own boundaries, because only they have a directory for
    The error UI that replaces a subtree whose render failed.
    Its presence turns the page directory or the component into an error boundary, in every render, deferred or not.
 
-A deferred boundary is delivered later than the rest of the response in one of four modes.
+A deferred boundary is delivered later than the rest of the response in one of five modes.
 A ``stream`` boundary arrives in the same response, after the shell.
+An ``inline`` boundary renders in place on the first paint and keeps its wrapper so a zone reload can show its loading UI.
 A ``load``, ``visible``, or ``manual`` boundary is a client-trip boundary, which the browser fetches on a later request once the page is ready, once the wrapper scrolls into view, or once a control asks for it.
 The shell is the response as first rendered, every deferred body replaced by its loading UI, and a job is the work that fills one deferred boundary.
 
 A zone is a different thing.
 A ``{% zone %}`` is an inline reload region that actions, polls, and reloads target, it is never deferred, and a part of a page that should load later is a component with a ``loading.djx`` instead, see :doc:`/content/topics/partial-rendering/zones`.
+
+Why boundaries
+--------------
+
+A page that waits for its slowest part sends nothing until that part ends.
+A boundary lets the response go out with a placeholder where the slow part belongs, and delivers the part when it is ready.
+It also gives a failure somewhere to stop, so one broken widget shows its own message and the rest of the page works.
+
+The loading UI and the error UI are files, ``loading.djx`` and ``error.djx``, and not tags in the template that calls the component.
+Both are templates with markup of their own, and a file beside the component follows it to every page that calls it, so the call site carries no fallback.
+The same holds for a page directory, where the files cover everything below it.
+The cost is a fallback that does not show where the component is called, which :doc:`compared` lists among the places next.dj asks for more.
+
+A boundary has several delivery modes because the choice is a trade between the first byte, the number of requests, and what the deferred part may read.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 14 46
+
+   * - The need
+     - Mode
+     - What it costs
+   * - The slow part reads the context of the page and should arrive in the same response.
+     - ``stream``
+     - Nothing to declare.
+       A server that cannot stream sends the page whole, see :doc:`streaming`.
+   * - The part renders in place on the first paint, and a zone reload should still show its loading UI.
+     - ``inline``
+     - The response waits for the part.
+   * - The part should load once the page is ready, on a later request.
+     - ``load``
+     - Declared props only, and a token on the wrapper, see :doc:`loading`.
+   * - The part is below the fold and should cost nothing until it is seen.
+     - ``visible``
+     - The same as ``load``.
+   * - The part loads on a click.
+     - ``manual``
+     - The same as ``load``, with a ``data-next-fetch`` control in the loading UI.
+
+Start with ``stream``, which is what a ``loading.djx`` alone gives.
+Move to ``visible`` or ``manual`` when the part should not run at all until the visitor needs it, since a ``stream`` or ``load`` job runs for every visitor who opens the page.
 
 A first deferred component
 --------------------------
@@ -139,10 +181,14 @@ The pages of this guide
    The ``error.djx`` file, what an error boundary catches, the kinds an error UI reads, retry, and what a failed subtree rolls back and what it leaves behind.
 
 :doc:`streaming`
-   The delivery policy, what a streamed response means for headers, cookies, status codes, and middleware, compression, the client states and events, and the deployment notes.
+   The delivery policy and what a streamed response means for headers, cookies, status codes, and middleware.
+   The compression of a stream, the client states and events, and the deployment notes.
 
 :doc:`async`
    Async page and component code, the request scope, the ``Loader``, the lanes a job runs on, the thread and transaction rules, and the limits stated as the code has them.
+
+:doc:`compared`
+   The same slow widget with a loading and an error state in next.dj, htmx, Next.js, Turbo, and LiveView, and where next.dj asks for more.
 
 .. toctree::
    :hidden:
@@ -152,11 +198,14 @@ The pages of this guide
    errors
    streaming
    async
+   compared
 
 .. seealso::
 
    :doc:`/content/topics/partial-rendering/index` for zones, infinite lists through ``{% more %}``, and the reload skeletons of ``loading.<zone>.djx``.
-   :doc:`/content/ref/defer` for the boundary vocabulary, the error boundary functions, and the transaction helpers.
+   :doc:`/content/ref/defer` for the boundary vocabulary of the deferred engine.
+   :doc:`/content/ref/boundaries` for the boundary options, the error kinds, and the error boundary function.
+   :doc:`/content/ref/transactions` for the transaction helpers.
    :doc:`/content/ref/settings` for the ``DEFER``, ``TRANSACTIONS``, and ``COMPRESSION`` scopes.
    :doc:`/content/intro/limitations` for what deferred boundaries do not do.
    :repo:`observability <tree/main/examples/observability>`, :repo:`search-catalog <tree/main/examples/search-catalog>`, and :repo:`audit-forms <tree/main/examples/audit-forms>` demonstrate the boundaries in running code, each page of this guide names the ones that show its subject.

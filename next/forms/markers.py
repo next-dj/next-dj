@@ -5,7 +5,13 @@ from typing import get_args, get_origin, override
 
 from django.forms import BaseForm, BaseFormSet
 
-from next.deps import DDependencyBase, RegisteredParameterProvider, ResolutionContext
+from next.deps import (
+    READS_NOTHING,
+    ContextReads,
+    DDependencyBase,
+    RegisteredParameterProvider,
+    ResolutionContext,
+)
 from next.deps.markers import unwrap_annotated
 
 
@@ -62,6 +68,11 @@ class FormProvider(RegisteredParameterProvider):
         return None if _annotated_form_class(param.annotation) is not None else False
 
     @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
+
+    @override
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the form instance from context."""
         return context.form
@@ -84,6 +95,11 @@ class CleanedDataProvider(RegisteredParameterProvider):
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         """Rule out every other name. A match still needs cleaned data present."""
         return None if param.name == "cleaned_data" else False
+
+    @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
 
     @override
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:

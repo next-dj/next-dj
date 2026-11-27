@@ -113,7 +113,7 @@ class ShadowingConfigBackend(ConsentBackend):
 
 
 # The `storedChoice` pattern of `consent.ts`, matched whole as JS `$` ends the string.
-CLIENT_CHOICE = re.compile(r"([12]):([^:]*):[^:]*")
+CLIENT_CHOICE = re.compile(r"2:([^:]*):[^:]*")
 LOGGER = "next.consent.manager"
 
 
@@ -161,11 +161,11 @@ class TestGetConsent:
         assert get_consent(None) == UNDECIDED
 
     def test_the_cookie_is_read_and_held(self) -> None:
-        request = consent_request("1:analytics,unknown:1")
+        request = consent_request("2:analytics|unknown:1")
         with override_next_settings(CONSENT={"CATEGORIES": ["analytics"]}):
             consent = get_consent(request)
         assert consent == Consent(frozenset({NECESSARY, "analytics"}), decided=True)
-        request.COOKIES["next_consent"] = "1::1"
+        request.COOKIES["next_consent"] = "2::1"
         assert get_consent(request) is consent
         assert getattr(request, CONSENT_ATTR) is consent
 
@@ -176,35 +176,31 @@ class TestClientParity:
     @pytest.mark.parametrize(
         "value",
         [
-            "1:analytics:1700",
-            "1:analytics,marketing:1",
+            "2:analytics:1700",
             "2:analytics|marketing:1",
             "2:analytics,marketing:1",
             "2::1",
             "2:|analytics|:1",
-            "1:analytics|marketing:1",
-            "1::1",
-            "1:necessary:1",
-            "1:analytics:",
-            "1:,,analytics,,:1",
-            "1:,:1",
-            "1: analytics :1",
-            "1:analytics ,marketing:1",
-            "1:Analytics:1",
-            "1:ANALYTICS,marketing:1",
-            "1:unknown,analytics:1",
-            "1:analytics:1:extra",
-            "1:analytics:1700:",
-            "1:a:b:c:d",
-            "1:analytics",
-            "1",
-            " 1:analytics:1",
-            "1 :analytics:1",
-            "01:analytics:1",
-            "2:analytics:1",
-            "3:analytics:1",
-            "02:analytics:1",
+            "2:necessary:1",
+            "2:analytics:",
+            "2:||analytics||:1",
+            "2:|:1",
+            "2: analytics :1",
+            "2:analytics |marketing:1",
+            "2:Analytics:1",
+            "2:ANALYTICS|marketing:1",
+            "2:unknown|analytics:1",
+            "2:analytics:1:extra",
+            "2:analytics:1700:",
+            "2:a:b:c:d",
             "2:analytics",
+            "2",
+            " 2:analytics:1",
+            "2 :analytics:1",
+            "02:analytics:1",
+            "1:analytics:1",
+            "1:analytics,marketing:1",
+            "3:analytics:1",
             "::",
             ":",
             "",
@@ -217,8 +213,7 @@ class TestClientParity:
             assert consent == UNDECIDED
             return
         categories = consent_categories()
-        separator = "," if match.group(1) == "1" else "|"
-        listed = match.group(2).split(separator)
+        listed = match.group(1).split("|")
         granted = {name for name in listed if name in categories}
         assert consent == Consent(frozenset({NECESSARY, *granted}), decided=True)
 

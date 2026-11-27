@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
+import type { Stack } from "./stack";
 import type { DialogAdapter } from "./layers";
 import { chunkModules, manualPollClock } from "./test-doubles";
 
@@ -75,7 +76,7 @@ describe("layer flow through the partial surface", () => {
       ...chunkModules,
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       mergeContext: () => undefined,
-    });
+    }).partial;
     partial._configure({
       document,
       dialog: made.adapter,
@@ -644,7 +645,7 @@ describe("layer flow through the partial surface", () => {
           window.dispatchEvent(new PopStateEvent("popstate"));
         },
       ],
-      ["reset", () => partial.layers._reset()],
+      ["reset", () => (partial.layers as Stack)._reset()],
     ])("restores the host title and description on %s", async (_name, closeLayer) => {
       await partial.layers.open(null, "/photo/7/", "photo-modal");
       closeLayer();

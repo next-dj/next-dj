@@ -46,7 +46,7 @@ Modules
 ``next.deps.resolver``.
    ``DependencyResolver``, the ``resolver`` holder every reference points at, and the ``current_resolver`` accessor.
    Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters, and ``resolve_callable_dependency(name, context, *, param=None)`` to fill one named dependency with the cycle guard and the pass cache.
-   The ``dependency`` decorator stands on ``register_dependency``, beside the ``get_dependency``, ``unregister_dependency``, and ``dependencies`` accessors of the named-dependency table, and ``forget_caches`` drops the compiled plans when the ``forget_dep_caches`` receiver of ``router_reloaded`` calls it.
+   The ``dependency`` decorator stands on ``register_dependency``, beside the ``get_dependency``, ``unregister_dependency``, and ``dependencies`` accessors of the named-dependency table, and ``forget_caches`` drops the compiled plans when ``forget_dep_caches``, attached to the ``ROUTES`` source of ``next.caches``, calls it.
    ``resolver`` is a Django ``SimpleLazyObject`` holding nothing at import time, and the first read builds the class ``DEPENDENCY_RESOLVER`` names.
    ``apply_resolver_setting`` puts a fresh instance of the configured class behind that holder on every ``settings_reloaded``, and it returns early when the object already behind it has the configured class, so an unrelated reload keeps the resolver in force.
    A reference taken before a swap therefore reads the object that replaced it rather than going stale, which is what lets a framework module, a provider, and a test helper all import ``resolver`` once.
@@ -97,7 +97,7 @@ Modules
 
 The signature, type-hint, and plan caches are bounded and evict the least recently used entry once they are full, and a hit moves its entry back to the fresh end.
 The dev reloader re-executes a ``page.py`` on every save and mints fresh function objects, so an unbounded memo keyed by callable would pin every dead function for the life of the process.
-A router reload clears every one of them through ``router_reloaded``, so a rebuilt route tree never replays a plan compiled against the previous generation of callables.
+A router reload clears every one of them through ``routes_reloaded``, so a rebuilt route tree never replays a plan compiled against the previous generation of callables.
 
 Provider order
 --------------
@@ -243,6 +243,40 @@ Extension points
 - Use ``resolver.dependency("name")`` to register a callable for ``Depends("name")``.
 - Raise ``UnknownDependencyError`` from a provider that resolves by name.
   The resolve that was replaying the plan attaches the callable it was filling, so the message names the innermost one of a nested chain.
+
+.. _internals-di-request-scope:
+
+Request scope and segment runner
+--------------------------------
+
+Request scope
+~~~~~~~~~~~~~
+
+``RequestScope`` computes each shared dependency once per async render as a task the scope owns, and every later reader receives the same value or the same error.
+Only the loop thread that owns a scope computes into it, while ``get`` and ``layer()`` work from any thread.
+``layer()`` opens a child that keeps its own writes and reads its parent on a miss, and ``close()`` runs the close callbacks, fails the waiters, and cancels what is still running.
+Each async deferred job of a response resolves in a layer of the response scope, so it reads what the shell left and keeps its own values, while loader batches still span every job through the root.
+A component instance rendered under a request scope resolves in a layer of its render unit that ``RequestMemo.instance()`` opens, so it reads what the page computed through the request scope and never a value another instance computed from its own props.
+A value is therefore shared page-wide only when the page computed it through the scope, since the page's providers read the request, the URL kwargs and the page context but no props or template context of a component.
+``request_memo`` is the context variable that holds the ``RequestMemo`` of the current render, its scope and the keys it shares, and a render with no async callable sets none.
+
+``render_scope(seed)`` opens the scope of one async render over the seed of the request, and ``bridged_scope(seed, work)`` awaits ``work`` in a scope of its own from sync code through the bridge.
+Both live in ``next.deps.scope`` beside ``RequestScope``.
+
+.. automodule:: next.deps.scope
+   :members: RequestScope, render_scope, bridged_scope
+
+Segment runner
+~~~~~~~~~~~~~~
+
+The async replay of a plan hands each blocking step to ``segment_runner``, a context variable whose default ``run_on_request_thread`` runs the step through ``sync_to_async(thread_sensitive=True)``, on the thread Django gives the request.
+A scope swaps the runner by setting the variable, and a ``SegmentRunner`` is any callable that takes the step and returns an awaitable of its result.
+
+``bridge(site, work)`` runs the async ``work`` a sync caller meets through ``next.bridge.drive``, with ``site`` naming the dependency or the component the call is for.
+Under ``DEBUG`` it logs each site once with the cost of the bridge beyond the work, so a sync template that renders an async component or a sync resolve that meets an async dependency shows up in the log.
+
+.. automodule:: next.deps.runner
+   :members: SegmentRunner, run_on_request_thread, segment_runner, bridge
 
 See also
 --------

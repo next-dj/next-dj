@@ -35,7 +35,7 @@ Public API
 
    The process-wide ``Page`` coordinator that every router-built view renders through.
    ``Page`` takes ``login_required``, ``permission_required``, and ``public`` from ``PageDeclarations``, documented with ``next.pages.access`` below.
-   It takes ``atomic`` from ``AtomicDeclaring``, documented with ``next.pages.transactions`` below, ``defer`` from ``PageDeferDeclaring``, ``compress`` from ``CompressDeclaring``, and ``router`` from ``RouterDeclaring``, see `Declaration stores`_.
+   It takes ``atomic``, ``defer``, ``compress``, and ``router`` from ``DeclaringCalls``, typed methods that hand each call to its registered declaration, see `Declaration registry`_.
 
 Access declarations
 ~~~~~~~~~~~~~~~~~~~
@@ -63,22 +63,22 @@ Both read ``has_body(file_path, module)`` of ``next.pages.loaders``, the one cri
 Transaction declaration
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``page.atomic(atomic, *, aliases=None)`` at the top of a ``page.py`` decides whether its page runs inside a request transaction, whatever the method, and wins over ``TRANSACTIONS["SAFE"]``, ``TRANSACTIONS["UNSAFE"]``, and ``TRANSACTIONS["RULE"]``, see ``TRANSACTIONS`` in :doc:`settings`.
-``page.atomic(True)`` wraps every request of the page, a ``GET`` included, ``page.atomic("writes")`` wraps it from right before its first write, and ``page.atomic(False)`` leaves every request of it, a ``POST`` included, in autocommit.
+``page.transaction(*, atomic, aliases=None)`` at the top of a ``page.py`` decides whether its page runs inside a request transaction, whatever the method, and wins over ``TRANSACTIONS["SAFE"]``, ``TRANSACTIONS["UNSAFE"]``, and ``TRANSACTIONS["RULE"]``, see ``TRANSACTIONS`` in :doc:`settings`.
+``page.transaction(atomic=True)`` wraps every request of the page, a ``GET`` included, ``page.transaction(atomic="writes")`` wraps it from right before its first write, and ``page.transaction(atomic=False)`` leaves every request of it, a ``POST`` included, in autocommit.
 ``aliases`` of ``None`` takes ``TRANSACTIONS["ALIASES"]``, ``"all"`` takes every alias ``DATABASES`` declares, and a list or a tuple names the aliases to wrap.
 The declaration binds its own page alone, the pages below its directory follow their own ``page.py``, and a full page, a zone, a boundary, and a navigation request of the page all read it.
 The form actions the page declares do not read it and take their own choice through ``@action(atomic=...)`` or ``Meta.atomic``, see :doc:`forms`.
 The last call of a module wins, and an edited ``page.py`` that drops the call stops applying it once the module loads again.
-A call inside a function, a mode other than ``True``, ``False``, or ``"writes"``, or an ``aliases`` value of another shape applies nothing and is reported by ``next.E240``.
+A mode other than ``True``, ``False``, or ``"writes"``, or an ``aliases`` value of another shape, raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the module runs, naming the file and the values it takes, a call inside a function raises ``DeclarationOutsideModuleError``, and a call outside a ``page.py`` is reported by ``next.E240``.
 
 Boundary declaration
 ~~~~~~~~~~~~~~~~~~~~
 
 ``page.defer(*, timeout=None, parallel=True)`` at the top of a ``page.py`` bounds the job of the page boundary a ``loading.djx`` above the page declares, and ``parallel=False`` keeps that job on the request thread.
-The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value outside its shape declares nothing and is reported by ``next.E222``.
+The last call of a module wins, a value outside its shape or a call inside a function raises when the module runs, and a call outside a ``page.py`` declares nothing and is reported by ``next.E222``.
 See :doc:`defer` and :doc:`/content/topics/boundaries/loading`.
 
-Every page view carries the ``_non_atomic_requests`` mark for every alias, so ``ATOMIC_REQUESTS`` never wraps it, settles the access check of the page before it opens its transaction, and closes the transaction once the response object exists.
+Every page view is marked with :func:`~django.db.transaction.non_atomic_requests` on every alias, so ``ATOMIC_REQUESTS`` never wraps it, settles the access check of the page before it opens its transaction, and closes the transaction once the response object exists.
 An exception leaving the view rolls the transaction back, and a returned response commits it whatever its status.
 
 .. automodule:: next.pages.transactions
@@ -89,14 +89,14 @@ Router declaration
 
 ``page.router(*, navigate=True, prefetch=True, snapshot=True)`` at the top of a ``page.py`` declares how the client router treats its page.
 ``navigate=False`` answers every navigation with a hard load, ``prefetch=False`` refuses a prefetch with ``204`` before any render, and ``snapshot=False`` keeps the page out of the history snapshots.
-The last call of a module wins, and a flag that is no bool, a call inside a function, or a call outside a ``page.py`` declares nothing and is reported by ``next.E238``.
+The last call of a module wins, a flag that is no bool or a call inside a function raises when the module runs, and a call outside a ``page.py`` declares nothing and is reported by ``next.E238``.
 See :doc:`router` and :doc:`/content/topics/router/index`.
 
 Compression declaration
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-``page.compress(enabled)`` at the top of a ``page.py`` keeps every response of its page plain for ``False`` and states the default for ``True``, a page that renders a secret beside reflected input opting out against BREACH.
-The last call of a module wins, and a call inside a function, outside a ``page.py``, or with a value that is no bool declares nothing and is reported by ``next.E222``.
+``page.compress(*, enabled)`` at the top of a ``page.py`` keeps every response of its page plain for ``False`` and states the default for ``True``, a page that renders a secret beside reflected input opting out against BREACH.
+The last call of a module wins, a value that is no bool, a flag passed by position, or a call inside a function raises when the module runs, and a call outside a ``page.py`` declares nothing and is reported by ``next.E245``.
 The choice reaches the response through the ``compress`` field of ``ResponsePolicy``, see :doc:`compression`.
 
 .. code-block:: python
@@ -104,19 +104,49 @@ The choice reaches the response through the ``compress`` field of ``ResponsePoli
 
    from next import page
 
-   page.compress(False)
+   page.compress(enabled=False)
 
-Declaration stores
-~~~~~~~~~~~~~~~~~~
+Declaration registry
+~~~~~~~~~~~~~~~~~~~~
 
-``DeclarationStore`` of ``next.pages.declarations`` holds the last call of each ``page.py`` and what it declares.
-A later call wins, and a reload runs the module in a new namespace, so a call the edit removed stops applying.
-A call made outside a ``page.py`` or inside a function is kept apart for the check that reports it.
-``atomic_store`` of ``next.pages.transactions``, ``page_defer_store`` of ``next.pages.defer``, ``compress_store`` of ``next.pages.compression``, and ``router_store`` of ``next.pages.router`` are its four instances, and ``page_atomic``, ``page_defer``, ``page_compress``, and ``page_router`` read the declaration of the page at a ``page.py`` path.
-Each store carries a ``version`` that bumps on every change, which the derived memos of the views key on.
+A ``PageDeclaration`` of ``next.pages.declarations`` describes one ``page.<name>()`` call, its ``name``, the ``parse`` function that turns its arguments into a value or raises ``ValueError`` naming the problem, the ``default`` a page without the call reads, and an ``Inherit`` rule.
+``Inherit.OWN`` binds the declaring page alone, ``Inherit.NEAREST`` gives every page the value of the closest ``page.py`` at or above it that makes the call, and ``Inherit.MERGE`` folds the values of every such ``page.py``, the root first, through the ``merge`` function the declaration takes.
+``page_declarations``, a ``PageDeclarationRegistry``, holds every registered declaration by name, and ``register_declaration(declaration)`` adds one, which the app that owns it calls in ``AppConfig.ready()``.
+A declaration holds the last call of each ``page.py``, a later call winning, and a reload runs the module in a new namespace, so a call the edit removed stops applying.
+A call off the top level of its module raises ``DeclarationOutsideModuleError``, one with a value outside its shape raises ``ImproperlyConfigured`` naming the file, and one made outside a ``page.py`` is kept apart for the check of the owning area.
+``declaration.of(file_path)`` reads the value of a page once per module load, and ``reset_page_registrations()`` drops every call through ``page_declarations.reset()``.
+The registry carries a ``version`` that bumps on every change, which the plans of the page views key on.
+
+next.dj registers four declarations.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Call
+     - Described in
+     - Checked in
+     - Inheritance
+   * - ``page.transaction()``
+     - ``next.pages.transactions.transaction_declaration``
+     - ``next.transactions.checks`` (``next.E240``)
+     - Own page
+   * - ``page.compress()``
+     - ``next.pages.compression.compress_declaration``
+     - ``next.compression.checks`` (``next.E245``)
+     - Own page
+   * - ``page.defer()``
+     - ``next.pages.defer.defer_declaration``
+     - ``next.defer.checks.declarations`` (``next.E222``)
+     - Own page
+   * - ``page.router()``
+     - ``next.router.declarations.router_declaration``
+     - ``next.router.checks.pages`` (``next.E238``)
+     - Own page
+
+A project adds its own call the same way, see :doc:`/content/howto/add-a-page-declaration`.
 
 .. automodule:: next.pages.declarations
-   :members: DeclarationStore, NESTED
+   :members: PageDeclaration, PageDeclarationRegistry, Inherit, register_declaration
 
 Cross-area contract
 ~~~~~~~~~~~~~~~~~~~
@@ -158,7 +188,7 @@ Page boundaries
 ``page_boundary(source, context, ident=None)`` returns the error boundary of an ``error.djx``, ``contain_page(source, tag, context, render)`` runs a render under it, and ``PageJob`` renders a deferred page boundary as a job, its loading UI, its content, and its errors, see :doc:`defer`.
 
 .. automodule:: next.pages.jobs
-   :members: PageFallback, PageJob, page_boundary, contain_page
+   :members: PageErrorUI, PageJob, page_boundary, contain_page
 
 Context graph
 ~~~~~~~~~~~~~
@@ -327,14 +357,15 @@ Ports
 ~~~~~
 
 ``next.pages.ports`` holds ``PageScanImpl``, which binds the page-tree scan to the ``PageScan`` port of :doc:`ports`.
-The scan reads the router manager from ``next.discovery``, so discovery reaches the scan back through the port rather than through an import that would close the cycle.
+The scan reads the route manager from ``next.discovery``, so discovery reaches the scan back through the port rather than through an import that would close the cycle.
 
 Processors
 ~~~~~~~~~~
 
 Context-processor discovery has no public callable of its own.
-The merged list comes from ``OPTIONS.context_processors`` on each ``PAGE_BACKENDS`` entry followed by ``OPTIONS.context_processors`` on the first ``TEMPLATES`` entry, deduplicated by dotted path with the first occurrence kept, and it is memoised until either source setting changes.
+The merged list comes from ``OPTIONS.context_processors`` on each ``PAGE_BACKENDS`` entry followed by ``OPTIONS.context_processors`` on the first ``DjangoTemplates`` entry of ``TEMPLATES``, the engine every page compiles on, deduplicated by dotted path with the first occurrence kept, and it is memoised until either source setting changes.
 See *Resolution order* in :doc:`/content/topics/context` for where the merged list sits among the other context sources.
+A page renders on a context that carries its request, as a ``RequestContext`` does with its processors already run, so ``{% url %}`` reverses into ``request.current_app``.
 
 Visits
 ~~~~~~

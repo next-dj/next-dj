@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from next.components.info import ComponentInfo
-from next.components.loading import ModuleLoader
+from next.components.modules import ModuleLoader
 from next.components.renderers import (
     COMPONENT_PROPS_CONTEXT_KEY,
     CachedComponentTemplateLoader,

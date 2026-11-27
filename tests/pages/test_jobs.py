@@ -8,22 +8,22 @@ from django.template.base import NodeList
 from django.template.exceptions import TemplateSyntaxError
 from django.test import RequestFactory
 
+from next.boundaries.failures import ErrorKind
+from next.components import tags as component_tags
 from next.components.trip import TripInput
-from next.defer import ErrorKind
+from next.defer.components import deferring
 from next.diagnostics import degraded_status, watch_degraded
-from next.pages.boundaries import FAILED_STATUS, SHELL_KEY, ErrorShell
+from next.pages.boundaries import FAILED_STATUS, SHELL_KEY, ErrorContext
 from next.pages.gating import GATE_KEY, ShellGate, plan_gating
 from next.pages.graph import Blame, Phase, merged, run_phase
 from next.pages.jobs import PageJob
 from next.pages.loaders import BoundaryChain, PageBoundary, forget_layout_texts
+from next.pages.nodes import PageBoundaryNode
 from next.pages.registry import PageContextRegistry
 from next.ports import render_deferred
 from next.seeding import COLLECTOR_KEY, TEMPLATE_PATH_KEY
 from next.static import StaticCollector
 from next.static.runtime import BUNDLE_NOTE
-from next.suspense.components import deferring
-from next.templatetags import components as component_tags
-from next.templatetags.boundaries import PageBoundaryNode
 from tests.components.sites import info_in, resolving
 from tests.pages.shells import (
     LEAF,
@@ -255,8 +255,8 @@ def inner_error(tmp_path: Path) -> Path:
 class TestJobContainment:
     """A failing gated callable is held by the nearest boundary above its level."""
 
-    def error_shell(self, gate: ShellGate) -> ErrorShell:
-        return ErrorShell({}, {}, (_SITE_LEVEL,), gate.blame(), gate.chain)
+    def error_shell(self, gate: ShellGate) -> ErrorContext:
+        return ErrorContext({}, {}, (_SITE_LEVEL,), gate.blame(), gate.chain)
 
     def test_a_boundary_inside_the_content_renders_its_error_ui_in_place(
         self, loading_file, inner_error
@@ -319,7 +319,7 @@ class TestJobContainment:
             level=_SITE_LEVEL + 1,
             word=lambda: "W",
         )
-        shell = ErrorShell({}, {}, (_SITE_LEVEL,), Blame(), gate.chain)
+        shell = ErrorContext({}, {}, (_SITE_LEVEL,), Blame(), gate.chain)
         context = Context({GATE_KEY: gate, SHELL_KEY: shell, "boom": boom})
 
         html = _content(loading_file, boundary_tag(inner_error, "{{ boom }}"), context)
@@ -361,10 +361,7 @@ class TestPageLoadingCalls:
 
         with (
             resolving(infos),
-            mock.patch(
-                "next.templatetags.components.collect_component_assets",
-                return_value=None,
-            ),
+            mock.patch("next.static.ports.collect_component_assets", return_value=None),
             deferring(request=request) as held,
         ):
             html, failure = PageJob(
@@ -377,6 +374,7 @@ class TestPageLoadingCalls:
 
 
 class _Granted:
+    pk = 1
     is_authenticated = True
 
     def has_perm(self, perm: str, obj: object = None) -> bool:
@@ -410,10 +408,7 @@ class TestPageJobGuards:
         )
         with (
             resolving(infos),
-            mock.patch(
-                "next.templatetags.components.collect_component_assets",
-                return_value=None,
-            ),
+            mock.patch("next.static.ports.collect_component_assets", return_value=None),
         ):
             return render_deferred(
                 lambda: template.render(context), collector=None, request=request

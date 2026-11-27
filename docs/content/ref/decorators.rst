@@ -15,7 +15,7 @@ Decorators
 @context
 ~~~~~~~~
 
-.. py:decorator:: context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None, zone=None)
+.. py:decorator:: context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None, zone=None, guard=False)
 
    Registers a context function on a page module (``page.py``).
    The first positional argument is ``func_or_key``.
@@ -29,6 +29,7 @@ Decorators
    Pass ``zone="name"`` to run the callable only for a matching zone GET request.
    The callable still runs on a full page render.
    ``zone=`` cannot be combined with ``inherit_context=True``, and the pair raises ``ValueError`` at registration.
+   Pass ``guard=True`` for a callable that answers 404, 403, or 400, so a deferred page boundary runs it before the first byte and a boundary reload runs it before its component, see :ref:`topics-boundaries-loading`.
 
 @page.metadata
 ~~~~~~~~~~~~~~

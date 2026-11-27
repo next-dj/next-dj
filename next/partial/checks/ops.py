@@ -2,9 +2,9 @@
 
 import re
 
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.partial.registry import patch_op_registry
 
 from .codes import E_OP_BAD_NAME

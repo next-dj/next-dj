@@ -8,14 +8,13 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeGuard, cast
 
-from django.conf import settings
 from django.core import signing
 from django.urls import get_script_prefix
-from django.utils.crypto import constant_time_compare, salted_hmac
 from django.utils.module_loading import import_string
 
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
+from next.identity import bound_salt
 from next.utils import int_between
 
 from .binding import ticket_binding
@@ -52,7 +51,6 @@ def _max_ticket_length() -> int:
     A reference character outside the BMP costs a twelve-character JSON escape pair.
     """
     payload = {
-        "session": "0" * 64,
         "topics": ["t" * _MAX_TOPIC_LENGTH] * MAX_TOPICS,
         "transform": "\U0010ffff" * MAX_REFERENCE_LENGTH,
         "authorizer": "\U0010ffff" * MAX_REFERENCE_LENGTH,
@@ -115,9 +113,8 @@ def issue_ticket(
     _require_grant(topics, (transform_ref, authorizer_ref, presence_ref))
     subject = ticket_binding().issue(request)
     age = ticket_max_age()
-    signer = signing.TimestampSigner(salt=_SALT)
+    signer = signing.TimestampSigner(salt=bound_salt(_SALT, subject))
     payload: dict[str, object] = {
-        "session": _session_digest(subject, settings.SECRET_KEY),
         "topics": list(topics),
         "transform": transform_ref,
         "authorizer": authorizer_ref,
@@ -148,7 +145,7 @@ def _require_grant(topics: tuple[str, ...], references: tuple[str | None, ...]) 
 def verify_ticket(token: object, credential: str) -> TicketClaims:
     """Verify signature, age, binding, and the signed topic grant.
 
-    The credential is what the ticket binding read from the handshake cookies.
+    The credential's subject salts the signature, so another session fails it.
     """
     if not isinstance(token, str) or not token or len(token) > _MAX_TICKET_LENGTH:
         msg = "A non-empty WebSocket ticket is required."
@@ -156,19 +153,18 @@ def verify_ticket(token: object, credential: str) -> TicketClaims:
     if not isinstance(credential, str) or not credential:
         msg = "The WebSocket connection carries no ticket credential."
         raise InvalidTicketError(msg)
+    subject = ticket_binding().subject(credential)
+    if subject is None:
+        msg = "The WebSocket connection proves no session."
+        raise InvalidTicketError(msg)
+    signer = signing.TimestampSigner(salt=bound_salt(_SALT, subject))
     try:
-        payload = signing.TimestampSigner(salt=_SALT).unsign_object(
-            token, max_age=ticket_max_age()
-        )
+        payload = signer.unsign_object(token, max_age=ticket_max_age())
     except (signing.BadSignature, TypeError, ValueError) as exc:
-        msg = "The WebSocket ticket is invalid or expired."
+        msg = "The WebSocket ticket is invalid or expired, or of another session."
         raise InvalidTicketError(msg) from exc
     if not isinstance(payload, Mapping):
         msg = "The WebSocket ticket has an invalid payload."
-        raise InvalidTicketError(msg)
-    subject = ticket_binding().subject(credential)
-    if subject is None or not _bound(payload.get("session"), subject):
-        msg = "The WebSocket ticket belongs to another session."
         raise InvalidTicketError(msg)
     return _ticket_claims(payload)
 
@@ -287,21 +283,6 @@ def websocket_path() -> str:
     """Return the WebSocket route below the script prefix, the default for a bad one."""
     path = scope_value("REALTIME", "WS_PATH")
     return path if valid_ws_path(path) else _DEFAULT_PATH
-
-
-def _session_digest(subject: str, secret: str | bytes) -> str:
-    """Bind a ticket without exposing the raw binding subject in its payload."""
-    return salted_hmac(_SALT, subject, secret=secret, algorithm="sha256").hexdigest()
-
-
-def _bound(digest: object, subject: str) -> bool:
-    """Whether a signed digest names the subject under the key or a fallback key."""
-    if not isinstance(digest, str):
-        return False
-    keys = (settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS)
-    return any(
-        constant_time_compare(digest, _session_digest(subject, key)) for key in keys
-    )
 
 
 __all__ = [

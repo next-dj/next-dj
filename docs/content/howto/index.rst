@@ -20,8 +20,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`reload-routes-from-code`
    Trigger router reload at runtime.
 
-:doc:`write-a-router-backend`
-   Implement a router backend that reads URLs from a database.
+:doc:`write-a-page-backend`
+   Implement a page backend that reads URLs from a database.
 
 :doc:`read-query-parameters`
    Read query-string values with the ``DQuery`` marker.
@@ -49,6 +49,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
 :doc:`group-pages-by-section`
    Scope layouts and access to a section of pages with a route group that leaves the URL alone.
+
+:doc:`add-a-page-declaration`
+   Add your own ``page.py`` call beside ``page.transaction()`` and ``page.router()``, with its parse, default, and inheritance.
 
 .. rubric:: SEO
 
@@ -89,13 +92,22 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    Gather the lookups of many components into one query with a ``Loader``.
 
 :doc:`run-a-page-in-a-transaction`
-   Wrap a page in a transaction with ``page.atomic`` or take it out of one, and read what the boundaries issue.
+   Wrap a page in a transaction with ``page.transaction()`` or take it out of one, and read what the boundaries issue.
 
 :doc:`tune-router-prefetch-and-press`
    Tune or turn off the prefetch on hover, scroll, and press, for the project, a link, or a page.
 
 :doc:`replace-the-boundary-token-storage`
    Keep the claims of a boundary token in a store of your own, or replace the token backend.
+
+:doc:`replay-request-state-on-a-pool-thread`
+   Carry a tenant ``search_path`` or a thread-local to the pool thread of a deferred job with ``ConnectionState`` and ``ThreadState``.
+
+:doc:`switch-boundaries-off-in-an-incident`
+   Take streaming and parallel jobs back to a plain page with settings, a proxy rule, or a policy that reads a shared flag.
+
+:doc:`send-boundary-failures-to-sentry-and-tracing`
+   Forward contained and uncontained boundary failures to Sentry, trace each job with OpenTelemetry, and count how streams end.
 
 .. rubric:: Static assets
 
@@ -215,7 +227,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    reverse-urls
    serve-an-application-under-a-prefix
    reload-routes-from-code
-   write-a-router-backend
+   write-a-page-backend
    read-query-parameters
    page-a-list-by-cursor
    add-a-custom-template-loader
@@ -225,6 +237,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    give-a-section-its-own-document-shell
    open-a-page-as-a-modal-over-another
    group-pages-by-section
+   add-a-page-declaration
    audit-seo-before-deploy
    cache-pages-on-a-cdn
    move-and-remove-pages
@@ -238,6 +251,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    run-a-page-in-a-transaction
    tune-router-prefetch-and-press
    replace-the-boundary-token-storage
+   replay-request-state-on-a-pool-thread
+   switch-boundaries-off-in-an-incident
+   send-boundary-failures-to-sentry-and-tracing
    ship-a-site-wide-stylesheet
    use-a-compiled-stylesheet
    add-a-new-asset-kind

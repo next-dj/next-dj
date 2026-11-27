@@ -191,7 +191,7 @@ describe("details open obeys the touched rule", () => {
     target.addEventListener("next:morph-attribute", (e) => {
       if ((e as CustomEvent).detail.name === "open") e.preventDefault();
     });
-    morph(target, '<details id="d"></details>');
+    morph(target, '<details id="d"></details>', { events: true });
     expect(target.hasAttribute("open")).toBe(true);
   });
 });

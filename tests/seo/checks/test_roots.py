@@ -85,7 +85,7 @@ class TestLoadedSeoRoots:
         root = write_tree(tmp_path / "pages", sitemap="")
         with (
             routed(root),
-            patch.object(seo_roots, "get_router_manager", return_value=failed),
+            patch.object(seo_roots, "get_route_manager", return_value=failed),
         ):
             assert loaded_seo_roots() == ()
             for check in CHECKS:

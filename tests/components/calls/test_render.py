@@ -1,11 +1,12 @@
 import pytest
 from django.template.base import NodeList
 
+from next.boundaries.failures import BoundaryFailure, ErrorKind
+from next.boundaries.options import DeferMode
+from next.components import tags as component_tags
 from next.components.calls import DeferredRender
+from next.components.tags import ComponentNode
 from next.components.trip import TripInput
-from next.defer import BoundaryFailure, DeferMode, ErrorKind
-from next.templatetags import components as component_tags
-from next.templatetags.components import ComponentNode
 from tests.components.sites import HEAD, LOGIN, TRIP, ComponentSite
 
 

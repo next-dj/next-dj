@@ -18,6 +18,8 @@ from types import (
 )
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeGuard
 
+from django.core.exceptions import ImproperlyConfigured
+
 from next.errors import AsyncCallableError
 
 
@@ -87,13 +89,33 @@ def registering_file() -> Path:
     return Path(sys._getframe(2).f_code.co_filename)
 
 
-def registering_site() -> tuple[Path, bool]:
-    """Return the file calling the caller of this helper, and whether its top level did.
+class DeclaringSite(NamedTuple):
+    """The file of a declaring call, whether its top level made it, and its globals."""
+
+    path: Path
+    top_level: bool
+    namespace: dict[str, object]
+
+
+def refused_declaration(
+    call: str, site: DeclaringSite, problem: str
+) -> ImproperlyConfigured:
+    """Return the error a declaring call written outside its shape raises at once."""
+    return ImproperlyConfigured(
+        f"{call} in {site.path} declares nothing, since {problem}."
+    )
+
+
+def registering_site() -> DeclaringSite:
+    """Return the site that called the caller of this helper, which declarations read.
 
     Module code runs once per load, so only a call from there declares for good.
     """
-    code = sys._getframe(2).f_code
-    return Path(code.co_filename), code.co_name == "<module>"
+    frame = sys._getframe(2)
+    code = frame.f_code
+    return DeclaringSite(
+        Path(code.co_filename), code.co_name == "<module>", frame.f_globals
+    )
 
 
 def declared_file(
@@ -229,6 +251,7 @@ class MisattributionLog:
 
 
 __all__ = [
+    "DeclaringSite",
     "MisattributedContext",
     "MisattributionLog",
     "callable_name",
@@ -239,6 +262,7 @@ __all__ = [
     "is_async_callable",
     "is_coroutine_callable",
     "refuse_async",
+    "refused_declaration",
     "registering_file",
     "registering_site",
 ]

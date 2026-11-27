@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
 import threading
+import time
 from collections.abc import AsyncIterator, Iterator, Sequence
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -9,11 +10,15 @@ import pytest
 from django.http import HttpResponse, HttpResponseBase, StreamingHttpResponse
 from django.test import AsyncClient, Client, override_settings
 
-from next.boundaries import Boundary, boundary_failed, contain
+from next.boundaries import boundary_failed, contain
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import Boundary, BoundaryFailure, ErrorKind
+from next.bridge.deadline import deadline
 from next.components import ComponentInfo
 from next.compression import GzipBackend
-from next.defer import Addressing, BoundaryFailure, ErrorKind
-from next.suspense.connections import foreground_facts
+from next.defer.connections import lane_facts
+from next.defer.markers import Job
+from next.defer.signals import boundary_job_started
 from next.testing import (
     NextClient,
     boundary_errors,
@@ -25,6 +30,7 @@ from next.testing import (
 from next.testing.boundaries import (
     HeldFailures,
     RecordedFailure,
+    gated,
     in_document_order,
     raise_first,
     recorded_failures,
@@ -40,7 +46,7 @@ from tests.support.trees import layout_root, templated_page
 DOWN = "widget down"
 
 
-class _Fallback:
+class _ErrorUI:
     def retry(self) -> bool:
         return True
 
@@ -58,7 +64,7 @@ def _fail(name: str, exc: Exception) -> str:
     def render() -> str:
         raise exc
 
-    return contain(Boundary(name, Addressing.COMPONENT), render, _Fallback())
+    return contain(Boundary(name, Addressing.COMPONENT), render, _ErrorUI())
 
 
 def _mode() -> str:
@@ -545,10 +551,10 @@ class TestDeferredHelpers:
     """The helpers that force the pool and hold a component's jobs."""
 
     def test_parallel_boundaries_lifts_the_request_lane_rules(self) -> None:
-        assert foreground_facts(None).sqlite != ()
+        assert lane_facts(None).sqlite != ()
         with parallel_boundaries():
-            assert foreground_facts(None).sqlite == ()
-        assert foreground_facts(None).sqlite != ()
+            assert lane_facts(None).sqlite == ()
+        assert lane_facts(None).sqlite != ()
 
     @pytest.mark.usefixtures("widget_pages")
     def test_boundary_gate_holds_the_named_component(self) -> None:
@@ -647,3 +653,41 @@ class TestLateAndEncodedFailures:
             b"".join(got.streaming_content)
         assert _names(got.boundary_failures) == ["early", "late"]
         assert _names(outer) == ["early", "late"]
+
+
+def _start(name: str, *, within: float) -> None:
+    with deadline(time.monotonic() + within):
+        boundary_job_started.send_robust(sender=Job, id="b-1-0", name=name)
+
+
+class TestGated:
+    """A gate holds the starting jobs of one component until the test releases it."""
+
+    def test_a_held_job_waits_for_the_release(self) -> None:
+        started: list[str] = []
+        with gated("card") as gate:
+            worker = threading.Thread(
+                target=lambda: (_start("card", within=5), started.append("ran"))
+            )
+            worker.start()
+            assert gate.wait(5) is True
+            assert started == []
+            gate.release()
+            worker.join(5)
+        assert started == ["ran"]
+
+    def test_a_held_job_leaves_at_its_deadline(self) -> None:
+        with gated("card") as gate:
+            _start("card", within=0)
+        assert gate.wait(0) is True
+
+    def test_another_component_passes_the_gate(self) -> None:
+        with gated("other") as gate:
+            _start("card", within=5)
+        assert gate.wait(0) is False
+
+    def test_a_closed_gate_holds_nothing(self) -> None:
+        with gated("card") as outer, gated("card") as inner:
+            assert inner is not outer
+        _start("card", within=5)
+        assert (outer.wait(0), inner.wait(0)) == (False, False)

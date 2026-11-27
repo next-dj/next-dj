@@ -20,9 +20,10 @@ from django.template.defaulttags import ForNode
 from django.template.loader_tags import BlockNode, IncludeNode
 from django.templatetags.cache import CacheNode
 
-from next.boundaries import wrapper_tag
-from next.defer import DEFAULT_TAG
+from next.boundaries.markup import wrapper_tag
+from next.boundaries.options import DEFAULT_TAG
 from next.utils import child_nodelists, open_elements
+from next.wire import KEY_ATTR
 
 from .nodes import ComponentTagNode
 
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 
 
 _KEYED: Final = re.compile(
-    r"""(?:^|\s)data-next-key\s*=\s*(?:"(?P<double>[^"]*)"|'(?P<single>[^']*)')"""
+    rf"""(?:^|\s){KEY_ATTR}\s*=\s*(?:"(?P<double>[^"]*)"|'(?P<single>[^']*)')"""
 )
 _HOLE: Final = re.compile("\x00([0-9]+)\x00")
 

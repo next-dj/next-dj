@@ -18,6 +18,7 @@ from django.http import HttpRequest, HttpResponse
 from django.utils.encoding import escape_uri_path
 
 from next.backends import SingleBackendManager
+from next.caches import FRAMEWORK
 
 from .backends import ActionRegistration, scope_key_for
 from .base import (
@@ -266,11 +267,6 @@ class SessionFormWizardBackend(FormWizardBackend):
 wizard_backend_manager = SingleBackendManager(
     _FORM_WIZARD_BACKEND_KEY, base=FormWizardBackend, signal=wizard_backend_loaded
 )
-
-
-def forget_wizard_backend(**kwargs: object) -> None:
-    """Drop the cached backend so a reloaded config takes effect."""
-    wizard_backend_manager.reset()
 
 
 def _replace_step_segment(path: str, current: str, target: str) -> str:
@@ -560,6 +556,9 @@ class FormWizard:
         """Finalise the wizard after the last step. Subclasses must override."""
         msg = f"{type(self).__name__} must implement done(request, cleaned_data)."
         raise NotImplementedError(msg)
+
+
+FRAMEWORK.attach(wizard_backend_manager.reset)
 
 
 __all__ = [

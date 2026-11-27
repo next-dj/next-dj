@@ -1,114 +1,19 @@
-"""`AppConfig` for next-dj that wires reloader, templates, finders, and components."""
+"""`AppConfig` for next-dj that applies every area manifest, then installs the hooks."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Final, override
+from typing import TYPE_CHECKING, ClassVar, override
 
 from django.apps import AppConfig
-from django.contrib.auth.signals import user_logged_in, user_logged_out
 from django.core.signals import setting_changed
-from django.db.backends.signals import connection_created
 
-from next.checks.catalog import CHECK_MODULES
-from next.components.manager import forget_component_backends, forget_render_pipeline
-from next.components.sources import reset_components_manager_cache
-from next.compression.manager import forget_compression
-from next.conf.settings import reload_on_setting_changed
 from next.conf.signals import settings_reloaded
-from next.consent.manager import forget_consent_settings
-from next.csrf import forget_csrf_delivery
-from next.deps.objects import forget_object_rows
-from next.deps.resolver import (
-    apply_resolver_setting,
-    forget_dep_caches,
-    reapply_resolver_setting,
-)
-from next.diagnostics import reset_failure_logs
-from next.discovery import reset_router_manager_cache
-from next.forms.backends import forget_action_urls
-from next.forms.manager import form_action_manager
-from next.forms.ports import ActionOwnersImpl
-from next.forms.wizard import forget_wizard_backend
-from next.pages.access import forget_page_access
-from next.pages.loaders import (
-    forget_app_page_roots,
-    forget_page_roots,
-    forget_registered_loaders,
-    forget_shared_layouts,
-)
-from next.pages.metadata.backends import forget_metadata_renderer
-from next.pages.metadata.hreflang import (
-    forget_translated_urls,
-    forget_urlconf_translations,
-)
-from next.pages.metadata.resolve import forget_crumb_routes
-from next.pages.metadata.scope import forget_metadata_scope
-from next.pages.ports import PageScanImpl
-from next.pages.processors import forget_context_processors, forget_template_processors
-from next.pages.responses import forget_response_policies
-from next.pages.watch import forget_watch_state
-from next.partial.layers import stash_layers
-from next.partial.manager import forget_asset_version, forget_partial_backend
-from next.permissions.access import forget_login_default
-from next.ports import (
-    action_owners_slot,
-    async_bridge_slot,
-    context_propagator_slot,
-    deferrals_slot,
-    form_routes_slot,
-    layer_loading_slot,
-    page_scan_slot,
-    page_scripts_slot,
-    realtime_negotiation_slot,
-    router_access_slot,
-    router_stamp_slot,
-    seo_routes_slot,
-    static_assets_slot,
-    thread_wait_slot,
-    zone_marking_slot,
-)
-from next.realtime.asgi import forget_trusted_origins
-from next.realtime.manager import forget_realtime_broker
-from next.realtime.ports import RealtimeNegotiationImpl
-from next.realtime.transports import forget_transports
-from next.router.manager import forget_router, forget_router_entry
-from next.router.navigation import (
-    action_marking,
-    clear_on_login,
-    clear_on_logout,
-    stamp,
-)
-from next.scripts.manager import forget_script_srcs, forget_scripts
-from next.scripts.ports import PageScriptsImpl
-from next.seo.manager import forget_seo_sources
-from next.seo.ports import SeoRoutesImpl
-from next.site.config import forget_site_config
-from next.static.finders import forget_scans
-from next.static.manager import (
-    forget_manager_page_roots,
-    forget_static_manager,
-    forget_storage_state,
-)
-from next.static.nonce import forget_nonce_setting
-from next.static.ports import StaticAssetsImpl
-from next.static.serializers import forget_serializer
-from next.suspense import drive, serve_until
-from next.suspense.assembly import inline_sink
-from next.suspense.bridge import BridgePropagator
-from next.suspense.connections import forget_detection
-from next.suspense.manager import forget_suspense_backends
-from next.transactions import cover_new_connection
-from next.urls.checks import reset_collected_patterns_cache
-from next.urls.manager import (
-    reload_app_routers,
-    reload_router_settings,
-    seo_routes_version,
-)
-from next.urls.ports import RouterAccessImpl
-from next.urls.signals import router_reloaded
-from next.utils import forget_app_holdings, forget_middleware_classes
+from next.lifecycle import register_participant
+from next.pages.declarations import register_declaration
+from next.ports import page_scripts
 
 from . import autodiscover, autoreload, components, staticfiles, templates
+from .areas import CHECK_MODULES, MANIFESTS
 
 
 if TYPE_CHECKING:
@@ -117,88 +22,42 @@ if TYPE_CHECKING:
 
     from django.dispatch import Signal
 
-
-_SETTING_CHANGED: Final[tuple[Callable[..., None], ...]] = (
-    reload_on_setting_changed,
-    forget_trusted_origins,
-    forget_app_page_roots,
-    forget_urlconf_translations,
-    forget_template_processors,
-    forget_render_pipeline,
-    forget_action_urls,
-    forget_app_holdings,
-    forget_asset_version,
-    forget_storage_state,
-    reload_app_routers,
-    forget_script_srcs,
-    forget_login_default,
-    forget_router_entry,
-    staticfiles.reinstall_finders,
-    templates.reinstall_builtins,
-)
-
-_SETTINGS_RELOADED: Final[tuple[Callable[..., None], ...]] = (
-    reset_failure_logs,
-    reset_router_manager_cache,
-    reapply_resolver_setting,
-    forget_watch_state,
-    forget_shared_layouts,
-    forget_page_roots,
-    forget_registered_loaders,
-    forget_site_config,
-    forget_translated_urls,
-    forget_metadata_scope,
-    forget_crumb_routes,
-    forget_metadata_renderer,
-    forget_context_processors,
-    forget_csrf_delivery,
-    forget_response_policies,
-    forget_page_access,
-    forget_component_backends,
-    reset_components_manager_cache,
-    forget_wizard_backend,
-    forget_partial_backend,
-    forget_serializer,
-    forget_scans,
-    forget_suspense_backends,
-    forget_detection,
-    forget_nonce_setting,
-    forget_static_manager,
-    reset_collected_patterns_cache,
-    reload_router_settings,
-    forget_seo_sources,
-    forget_scripts,
-    forget_consent_settings,
-    forget_compression,
-    forget_realtime_broker,
-    forget_transports,
-    forget_router,
-    forget_middleware_classes,
-)
-
-# A reload from code keeps the settings, so memos derived from old routers drop.
-_ROUTER_RELOADED: Final[tuple[Callable[..., None], ...]] = (
-    forget_watch_state,
-    forget_shared_layouts,
-    forget_page_roots,
-    forget_manager_page_roots,
-    forget_dep_caches,
-    forget_object_rows,
-    forget_seo_sources,
-    forget_translated_urls,
-    forget_scripts,
-)
+    from next.manifest import Manifest
 
 
-def _connect(signal: Signal, receivers: tuple[Callable[..., None], ...]) -> None:
-    """Connect each receiver once, in order, however often `ready` runs."""
-    for receiver in receivers:
-        uid = f"{receiver.__module__}.{receiver.__qualname__}"
-        signal.connect(receiver, dispatch_uid=uid)
+def _connect(signal: Signal, receiver: Callable[..., None]) -> None:
+    """Connect `receiver` once, however often `ready` runs."""
+    signal.connect(
+        receiver, dispatch_uid=f"{receiver.__module__}.{receiver.__qualname__}"
+    )
+
+
+def _receivers(manifest: Manifest) -> None:
+    """Connect every receiver `manifest` names, in its order."""
+    for receiver in manifest.setting_changed:
+        _connect(setting_changed, receiver)
+    for receiver in manifest.settings_reloaded:
+        _connect(settings_reloaded, receiver)
+    for signal, receiver in manifest.connects:
+        _connect(signal, receiver)
+
+
+def _composed(manifest: Manifest) -> None:
+    """Bind the ports of `manifest`, run its startup and register what it declares."""
+    for binding in manifest.ports:
+        binding.apply()
+    for step in manifest.startup:
+        step()
+    for declaration in manifest.declarations:
+        register_declaration(declaration)
+    for participant in manifest.participants:
+        register_participant(participant)
+    for provider in manifest.providers:
+        page_scripts.register(provider)
 
 
 class NextFrameworkConfig(AppConfig):
-    """Connect autoreload, template tag builtins, and filesystem watches."""
+    """Apply the area manifests, then connect autoreload, templates and finders."""
 
     name = "next"
     verbose_name = "Next Django Framework"
@@ -206,33 +65,14 @@ class NextFrameworkConfig(AppConfig):
 
     @override
     def ready(self) -> None:
-        """Connect every receiver, compose the ports, then install the hooks.
+        """Connect every receiver, compose every area, then install the hooks.
 
         The resolver and the ports come before the installs, which import user modules.
         """
-        _connect(setting_changed, _SETTING_CHANGED)
-        _connect(settings_reloaded, _SETTINGS_RELOADED)
-        _connect(router_reloaded, _ROUTER_RELOADED)
-        _connect(user_logged_in, (clear_on_login,))
-        _connect(user_logged_out, (clear_on_logout,))
-        _connect(connection_created, (cover_new_connection,))
-        apply_resolver_setting()
-        async_bridge_slot.set(drive)
-        context_propagator_slot.set(BridgePropagator())
-        thread_wait_slot.set(serve_until)
-        deferrals_slot.set(inline_sink)
-        action_owners_slot.set(ActionOwnersImpl())
-        form_routes_slot.set(form_action_manager)
-        layer_loading_slot.set(stash_layers)
-        page_scan_slot.set(PageScanImpl())
-        realtime_negotiation_slot.set(RealtimeNegotiationImpl())
-        router_access_slot.set(RouterAccessImpl())
-        router_stamp_slot.set(stamp)
-        zone_marking_slot.set(action_marking)
-        page_scripts_slot.set(PageScriptsImpl())
-        seo_routes_slot.set(SeoRoutesImpl())
-        seo_routes_version.move()
-        static_assets_slot.set(StaticAssetsImpl())
+        for manifest in MANIFESTS:
+            _receivers(manifest)
+        for manifest in MANIFESTS:
+            _composed(manifest)
         autoreload.install()
         templates.install()
         staticfiles.install()

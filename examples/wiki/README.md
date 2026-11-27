@@ -35,18 +35,18 @@ Open the index, click `New article`, write some Markdown, and submit. The new ar
 
 ### 1. Two URL sources, one router
 
-`wiki.backends.HybridRouterBackend.generate_urls` returns `super().generate_urls()` plus one named pattern per existing article. Each alias targets the catchall callback at `wiki/[slug]/` and binds a fixed `slug` kwarg so `DArticle` resolves the right row. The catchall file route `wiki/pages/wiki/[slug]/page.py` owns the rendering logic. The aliases give templates a per-slug `reverse()` name and keep the public URL space tidy at `/wiki/<slug>/`.
+`wiki.backends.HybridPageBackend.generate_urls` returns `super().generate_urls()` plus one named pattern per existing article. Each alias targets the catchall callback at `wiki/[slug]/` and binds a fixed `slug` kwarg so `DArticle` resolves the right row. The catchall file route `wiki/pages/wiki/[slug]/page.py` owns the rendering logic. The aliases give templates a per-slug `reverse()` name and keep the public URL space tidy at `/wiki/<slug>/`.
 
 The catchall view never has to know whether it was reached through the generic `<slug>` capture or through a hybrid alias. Both paths feed the same DI flow.
 
 ### 2. Reloading after data changes
 
-`wiki/signals.py` listens to `post_save` and `post_delete` of `Article` and calls `router_manager.reload()`. The reload path is one public method that:
+`wiki/signals.py` listens to `post_save` and `post_delete` of `Article` and calls `route_manager.reload()`. The reload path is one public method that:
 
 1. Drops the cached backend list.
 2. Reinstantiates every backend from `PAGE_BACKENDS`.
 3. Clears Django's URL resolver caches.
-4. Sends the `router_reloaded` signal.
+4. Sends the `routes_reloaded` signal.
 
 The next request observes the fresh URL tree without a process restart. Tests confirm the loop end-to-end through `SignalRecorder`.
 
@@ -134,7 +134,7 @@ def articles() -> QuerySet[Article]:
 
 The trail is the directory path of the page, `[slug]` included, and the check refuses a trail no page under the root answers to. The callable returns the queryset itself rather than a list of entries, so nothing runs until the document is requested, and then the database does the paging: one `COUNT` sizes the document, one `LIMIT`/`OFFSET` slice fills the page asked for, and the newest `updated_at` for the index comes from one ordered query. The number of queries per page does not grow with the number of articles. `kwargs` maps one row onto the URL kwargs that reverse the page, so `/wiki/<slug>/` is built by the router rather than spelled by hand, and `lastmod="updated_at"` names the column each `<lastmod>` is read from. `only()` keeps the query to the two columns those read, and `order_by("pk")` gives the pages a stable order, which the framework would add on its own for an unordered queryset. The callable runs through the same resolver as a `@context`, `request` is a parameter when it is needed and a `Depends` works, this one needs nothing. The file is loaded once and re-read when it changes.
 
-The static side of the tree needs no declaration. `/`, `/docs/routing/` and `/docs/components/` are listed because they are routes without a parameter, and `articles/new/` drops out on its own because section 11 marks it `noindex`, no glob names it. `articles/edit/[slug]` is a dynamic route without a callable, and the check that asks whether such a trail was forgotten skips it, since its static metadata already says `noindex`. `exclude` drops one trail, `search`, which the robots file below keeps crawlers off, and the check reports a listed URL that robots disallows. The aliases the `HybridRouterBackend` of section 1 appends are named patterns for the same page, the sitemap walks the page tree and lists each article once. `NEXT_FRAMEWORK["SITE"]["URL"]` is `https://wiki.example`, so every `<loc>` is absolute on the published origin and the document does not depend on the host that served it. `INDEXABLE` is pinned to `True` beside it, so the dev server serves the sitemap a deploy does, where `"auto"` would close the site while `DEBUG` is on. The section route is `/sitemap-wiki.xml`, labelled after the app.
+The static side of the tree needs no declaration. `/`, `/docs/routing/` and `/docs/components/` are listed because they are routes without a parameter, and `articles/new/` drops out on its own because section 11 marks it `noindex`, no glob names it. `articles/edit/[slug]` is a dynamic route without a callable, and the check that asks whether such a trail was forgotten skips it, since its static metadata already says `noindex`. `exclude` drops one trail, `search`, which the robots file below keeps crawlers off, and the check reports a listed URL that robots disallows. The aliases the `HybridPageBackend` of section 1 appends are named patterns for the same page, the sitemap walks the page tree and lists each article once. `NEXT_FRAMEWORK["SITE"]["URL"]` is `https://wiki.example`, so every `<loc>` is absolute on the published origin and the document does not depend on the host that served it. `INDEXABLE` is pinned to `True` beside it, so the dev server serves the sitemap a deploy does, where `"auto"` would close the site while `DEBUG` is on. The section route is `/sitemap-wiki.xml`, labelled after the app.
 
 ### 13. Robots from a list of rules
 
@@ -168,8 +168,8 @@ The intercept [`page.py`](wiki/pages/search/%28..%29wiki/%5Bslug%5D/page.py) rea
 
 ## Further reading
 
-- [next/urls/manager.py](../../next/urls/manager.py): `RouterManager.reload` emits the `router_reloaded` signal.
-- [next/urls/backends.py](../../next/urls/backends.py): `FileRouterBackend.generate_urls` is the public extension surface.
+- [next/urls/manager.py](../../next/urls/manager.py): `RouteManager.reload` emits the `routes_reloaded` signal.
+- [next/urls/backends.py](../../next/urls/backends.py): `FilePageBackend.generate_urls` is the public extension surface.
 - [next/deps/providers.py](../../next/deps/providers.py): DI provider contract used by `ArticleProvider`.
 - [next/pages/metadata/](../../next/pages/metadata/): the metadata chain behind `@page.metadata` and `{% metadata %}`.
 - [next/seo/](../../next/seo/): `@sitemap.items`, `RobotsRule`, and the sitemap backend that lists the page tree.

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from django.conf import settings
+
+from next.conf import USER_SETTING
 from tests.support.trees import routed
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
     from django.core.checks import CheckMessage
 
@@ -40,3 +44,21 @@ def write_files(root: Path, files: Mapping[str, str]) -> None:
     """Write each `files` entry under `root`, creating the directories it needs."""
     for relative, source in files.items():
         write_file(root / relative, source)
+
+
+@contextmanager
+def written(framework: object) -> Iterator[None]:
+    """Write `NEXT_FRAMEWORK` as a check reads it, with no reload to refuse a misfit.
+
+    `patch.object(..., create=True)` deletes an attribute `LazySettings` has not cached.
+    """
+    missing = object()
+    before = getattr(settings, USER_SETTING, missing)
+    setattr(settings, USER_SETTING, framework)
+    try:
+        yield
+    finally:
+        if before is missing:
+            delattr(settings, USER_SETTING)
+        else:
+            setattr(settings, USER_SETTING, before)

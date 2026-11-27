@@ -6,7 +6,7 @@ from django.test import override_settings
 
 from next.pages.checks import check_metadata_tag_rendered
 from tests.pages.checks.metadata.trees import metadata_page
-from tests.support import check_ids, patch_checks_router_manager
+from tests.support import check_ids, patch_checks_route_manager
 from tests.support.trees import framework, templated_page
 
 
@@ -29,7 +29,7 @@ class TestTagRendered:
         pages, _page_file = self._project(
             tmp_path, "<html><head>{% metadata %}</head>{% template %}</html>"
         )
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_tag_rendered() == []
 
     def test_a_tag_inside_a_component_is_silent(self, tmp_path: Path) -> None:
@@ -63,7 +63,7 @@ class TestTagRendered:
 
     def test_no_tag_and_no_component_is_w085(self, tmp_path: Path) -> None:
         pages, _page_file = self._project(tmp_path, "<html>{% template %}</html>")
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_ids(check_metadata_tag_rendered()) == ["next.W085"]
 
     def test_a_page_without_metadata_is_silent(self, tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ class TestTagRendered:
         pages.mkdir()
         (pages / "layout.djx").write_text("<html>{% template %}</html>")
         templated_page(pages / "hello", "x = 1\n")
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_tag_rendered() == []
 
     def test_metadata_on_an_ancestor_counts_as_declared(self, tmp_path: Path) -> None:
@@ -80,7 +80,7 @@ class TestTagRendered:
         (pages / "layout.djx").write_text("<html>{% template %}</html>")
         metadata_page(pages, '{"title": "Root"}')
         child = templated_page(pages / "child", "x = 1\n")
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             messages = check_metadata_tag_rendered()
         assert sorted(m.obj for m in messages) == sorted(
             [str(pages / "page.py"), str(child)]
@@ -90,7 +90,7 @@ class TestTagRendered:
         pages, _page_file = self._project(
             tmp_path, '<html>{% component "head" %}{% template %}</html>'
         )
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_tag_rendered() == []
 
     def test_a_render_page_is_silent(self, tmp_path: Path) -> None:
@@ -104,14 +104,14 @@ class TestTagRendered:
             "    return '<p>x</p>'\n",
             body=None,
         )
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_tag_rendered() == []
 
     def test_a_composition_that_does_not_compile_is_silent(
         self, tmp_path: Path
     ) -> None:
         pages, _page_file = self._project(tmp_path, "<html>{% if %}{% template %}")
-        with patch_checks_router_manager(pages_directory=pages):
+        with patch_checks_route_manager(pages_directory=pages):
             assert check_metadata_tag_rendered() == []
 
     def test_a_component_that_does_not_compile_is_silent(self, tmp_path: Path) -> None:
@@ -166,7 +166,7 @@ class TestTagRenderedThroughIncludes:
         )
         with (
             override_settings(**templates),
-            patch_checks_router_manager(pages_directory=pages),
+            patch_checks_route_manager(pages_directory=pages),
         ):
             assert check_metadata_tag_rendered() == []
 
@@ -178,7 +178,7 @@ class TestTagRenderedThroughIncludes:
         )
         with (
             override_settings(**templates),
-            patch_checks_router_manager(pages_directory=pages),
+            patch_checks_route_manager(pages_directory=pages),
         ):
             assert check_metadata_tag_rendered() == []
 
@@ -188,7 +188,7 @@ class TestTagRenderedThroughIncludes:
         )
         with (
             override_settings(**templates),
-            patch_checks_router_manager(pages_directory=pages),
+            patch_checks_route_manager(pages_directory=pages),
         ):
             assert check_ids(check_metadata_tag_rendered()) == ["next.W085"]
 
@@ -209,6 +209,6 @@ class TestTagRenderedThroughIncludes:
         pages, templates = self._project(tmp_path, head, partials)
         with (
             override_settings(**templates),
-            patch_checks_router_manager(pages_directory=pages),
+            patch_checks_route_manager(pages_directory=pages),
         ):
             assert check_metadata_tag_rendered() == []

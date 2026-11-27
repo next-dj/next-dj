@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAssets, nativeLinkLoader } from "./assets";
-import type { Assets, LinkLoader, SessionStore } from "./assets";
+import type { LinkLoader, SessionStore } from "./assets";
 import type { Asset } from "./apply";
 import type { Clock } from "./wire";
 
@@ -23,7 +23,7 @@ function memorySession(): SessionStore {
 }
 
 function css(url: string): Asset {
-  return { kind: "css", url };
+  return { kind: "css", url, load: "link" };
 }
 
 // An inline body spells its verb out only when the kind's wrapper is the
@@ -91,7 +91,7 @@ describe("assets registry and delta", () => {
     document.head.innerHTML = '<script src="http://x/seeded.js"></script>';
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadJs([{ kind: "js", url: "http://x/seeded.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/seeded.js", load: "script" }]);
     expect(
       document.head.querySelectorAll('script[src="http://x/seeded.js"]'),
     ).toHaveLength(1);
@@ -127,9 +127,9 @@ describe("assets registry and delta", () => {
 
   it("takes the lazy first scan once, not on every delta", () => {
     const { assets } = makeAssets();
-    assets.loadJs([{ kind: "js", url: "http://x/first.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/first.js", load: "script" }]);
     const scan = vi.spyOn(document, "querySelectorAll");
-    assets.loadJs([{ kind: "js", url: "http://x/second.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/second.js", load: "script" }]);
     assets.loadCss([css("http://x/second.css")], () => undefined);
     expect(scan).not.toHaveBeenCalled();
   });
@@ -325,8 +325,8 @@ describe("assets registry and delta", () => {
 
   it("inserts js once per url after the ops", () => {
     const { assets } = makeAssets();
-    assets.loadJs([{ kind: "js", url: "http://x/w.js" }]);
-    assets.loadJs([{ kind: "js", url: "http://x/w.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/w.js", load: "script" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/w.js", load: "script" }]);
     const scripts = document.head.querySelectorAll('script[src="http://x/w.js"]');
     expect(scripts.length).toBe(1);
   });
@@ -340,7 +340,7 @@ describe("assets registry and delta", () => {
   it("only loads the css kind from a mixed manifest", () => {
     const { assets, loaded } = makeAssets();
     assets.loadCss(
-      [{ kind: "js", url: "http://x/j.js" }, css("http://x/s.css")],
+      [{ kind: "js", url: "http://x/j.js", load: "script" }, css("http://x/s.css")],
       () => undefined,
     );
     expect(loaded).toEqual(["http://x/s.css"]);
@@ -391,7 +391,7 @@ describe("assets registry and delta", () => {
 
   it("inserts a module as a type=module script kept in order", () => {
     const { assets } = makeAssets();
-    assets.loadJs([{ kind: "module", url: "http://x/island.mjs" }]);
+    assets.loadJs([{ kind: "module", url: "http://x/island.mjs", load: "module" }]);
     const script = document.head.querySelector<HTMLScriptElement>(
       'script[src="http://x/island.mjs"]',
     )!;
@@ -401,7 +401,7 @@ describe("assets registry and delta", () => {
 
   it("inserts a classic script without the module type", () => {
     const { assets } = makeAssets();
-    assets.loadJs([{ kind: "js", url: "http://x/plain.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/plain.js", load: "script" }]);
     const script = document.head.querySelector<HTMLScriptElement>(
       'script[src="http://x/plain.js"]',
     )!;
@@ -412,9 +412,9 @@ describe("assets registry and delta", () => {
   it("inserts scripts and modules in manifest order", () => {
     const { assets } = makeAssets();
     assets.loadJs([
-      { kind: "module", url: "http://x/first.mjs" },
-      { kind: "js", url: "http://x/second.js" },
-      { kind: "module", url: "http://x/third.mjs" },
+      { kind: "module", url: "http://x/first.mjs", load: "module" },
+      { kind: "js", url: "http://x/second.js", load: "script" },
+      { kind: "module", url: "http://x/third.mjs", load: "module" },
     ]);
     const srcs = Array.from(
       document.head.querySelectorAll<HTMLScriptElement>("script[src]"),
@@ -459,7 +459,7 @@ describe("assets registry and delta", () => {
     expect(done).toHaveBeenCalledTimes(1);
   });
 
-  it("prefers the server verb over the legacy meaning of the kind", () => {
+  it("takes the verb from the server, whatever the kind name says", () => {
     const { assets, loaded } = makeAssets();
     assets.loadCss(
       [{ kind: "js", url: "http://x/odd.css", load: "link" }],
@@ -527,7 +527,7 @@ describe("assets registry and delta", () => {
       value: null,
       configurable: true,
     });
-    assets.loadJs([{ kind: "js", url: "http://x/n.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/n.js", load: "script" }]);
     const script = document.head.querySelector<HTMLScriptElement>(
       'script[src="http://x/n.js"]',
     )!;
@@ -541,7 +541,7 @@ describe("assets registry and delta", () => {
     document.head.append(boot);
     const { assets } = makeAssets();
     boot.remove();
-    assets.loadJs([{ kind: "js", url: "http://x/m.js" }]);
+    assets.loadJs([{ kind: "js", url: "http://x/m.js", load: "script" }]);
     expect(
       document.head.querySelector<HTMLScriptElement>('script[src="http://x/m.js"]')!
         .nonce,
@@ -613,7 +613,7 @@ describe("url dedup keys", () => {
     const { assets, loaded } = makeAssets();
     assets.seed();
     assets.loadCss([css("/static/b.css")], () => undefined);
-    assets.loadJs([{ kind: "js", url: "/static/b.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/b.js", load: "script" }]);
     expect(loaded).toEqual([]);
     expect(document.head.querySelectorAll("script[src]")).toHaveLength(1);
   });
@@ -676,15 +676,18 @@ describe("url dedup keys", () => {
     const { assets, loaded } = makeAssets();
     // An empty url resolves to the document itself, so the entry would fetch the
     // page as a stylesheet and claim a real asset's key.
-    assets.loadCss([{ kind: "css", url: "" }, css(document.baseURI)], () => undefined);
+    assets.loadCss(
+      [{ kind: "css", url: "", load: "link" }, css(document.baseURI)],
+      () => undefined,
+    );
     expect(loaded).toEqual([document.baseURI]);
   });
 
   it("skips a script entry whose url is empty rather than keying the page", () => {
     const { assets } = makeAssets();
     assets.loadJs([
-      { kind: "js", url: "" },
-      { kind: "js", url: document.baseURI },
+      { kind: "js", url: "", load: "script" },
+      { kind: "js", url: document.baseURI, load: "script" },
     ]);
     const srcs = Array.from(
       document.head.querySelectorAll<HTMLScriptElement>("script[src]"),
@@ -696,8 +699,8 @@ describe("url dedup keys", () => {
     const { assets, loaded } = makeAssets();
     assets.loadCss([css("http://"), css("http://")], () => undefined);
     assets.loadJs([
-      { kind: "js", url: "https://" },
-      { kind: "js", url: "https://" },
+      { kind: "js", url: "https://", load: "script" },
+      { kind: "js", url: "https://", load: "script" },
     ]);
     expect(loaded).toEqual(["http://"]);
     expect(document.head.querySelectorAll("script[src]")).toHaveLength(1);
@@ -746,7 +749,7 @@ describe("seeding across the parse window", () => {
     assets.seed();
     parseTag('<script src="/static/c.js"></script>');
     finishParsing();
-    assets.loadJs([{ kind: "js", url: "/static/c.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/c.js", load: "script" }]);
     expect(document.querySelectorAll('script[src="/static/c.js"]')).toHaveLength(1);
   });
 
@@ -787,7 +790,7 @@ describe("seeding across the parse window", () => {
     parseTag('<script src="/static/d.js"></script>');
     // readyState flipped but the event has not fired, so the catch-up gates the rescan.
     readyState("interactive");
-    assets.loadJs([{ kind: "js", url: "/static/d.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/d.js", load: "script" }]);
     expect(document.querySelectorAll('script[src="/static/d.js"]')).toHaveLength(1);
   });
 
@@ -796,7 +799,7 @@ describe("seeding across the parse window", () => {
     // an eager delta doubles it. Deferred to DOMContentLoaded, the scan sees it.
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadJs([{ kind: "js", url: "/static/react-dom.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/react-dom.js", load: "script" }]);
     parseTag('<script src="/static/react-dom.js"></script>');
     finishParsing();
     expect(
@@ -811,7 +814,7 @@ describe("seeding across the parse window", () => {
     parseTag('<link rel="stylesheet" href="/static/shell.css">');
     document.documentElement.setAttribute("data-next-streamed", "");
     assets.loadCss([css("/static/shell.css"), css("/static/reload.css")], done);
-    assets.loadJs([{ kind: "js", url: "/static/reload.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/reload.js", load: "script" }]);
     document.documentElement.removeAttribute("data-next-streamed");
     expect(loaded).toEqual(["/static/reload.css"]);
     expect(done).toHaveBeenCalledTimes(1);
@@ -837,7 +840,7 @@ describe("seeding across the parse window", () => {
   it("drops a deferred asset phase on reset so it never fires after parsing", () => {
     const { assets } = makeAssets();
     assets.seed();
-    assets.loadJs([{ kind: "js", url: "/static/orphan.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/orphan.js", load: "script" }]);
     assets._reset();
     finishParsing();
     expect(document.querySelectorAll('script[src="/static/orphan.js"]')).toHaveLength(
@@ -850,7 +853,7 @@ describe("seeding across the parse window", () => {
     assets.seed();
     finishParsing();
     const scan = vi.spyOn(document, "querySelectorAll");
-    assets.loadJs([{ kind: "js", url: "/static/after.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/after.js", load: "script" }]);
     assets.loadCss([css("/static/after.css")], () => undefined);
     expect(scan).not.toHaveBeenCalled();
   });
@@ -883,7 +886,7 @@ describe("seeding across the parse window", () => {
     expect(forget).toHaveBeenCalledWith("DOMContentLoaded", handler);
     parseTag('<script src="/static/dead.js"></script>');
     finishParsing();
-    assets.loadJs([{ kind: "js", url: "/static/dead.js" }]);
+    assets.loadJs([{ kind: "js", url: "/static/dead.js", load: "script" }]);
     expect(document.querySelectorAll('script[src="/static/dead.js"]')).toHaveLength(2);
   });
 
@@ -896,15 +899,30 @@ describe("seeding across the parse window", () => {
     expect(forget).not.toHaveBeenCalled();
   });
 
-  it("seeds what a streamed page parsed between two deltas", () => {
+  it("seeds what a streamed page parsed between two deltas", async () => {
     const { assets, loaded } = makeAssets();
     assets.seed();
     document.body.setAttribute("data-next-streamed", "");
     assets.loadCss([css("/static/chunk.css")], () => undefined);
+    await Promise.resolve();
     parseTag('<link rel="stylesheet" href="/static/tail.css">');
     assets.loadCss([css("/static/tail.css")], () => undefined);
     document.body.removeAttribute("data-next-streamed");
     expect(loaded).toEqual(["/static/chunk.css"]);
+  });
+
+  it("scans a streaming document once for the css and the js phase of one apply", () => {
+    const { assets } = makeAssets();
+    assets.seed();
+    document.body.setAttribute("data-next-streamed", "");
+    const scans = vi.spyOn(document, "querySelectorAll");
+    assets.loadCss([css("/static/chunk.css")], () => undefined);
+    assets.loadJs([{ kind: "js", url: "/static/chunk.js", load: "script" }]);
+    document.body.removeAttribute("data-next-streamed");
+    const sheets = scans.mock.calls.filter(([selector]) =>
+      selector.startsWith("link[rel"),
+    );
+    expect(sheets).toHaveLength(1);
   });
 });
 
@@ -913,28 +931,35 @@ describe("version safeguard and reload-once", () => {
     document.head.innerHTML = "";
   });
 
-  it("learns the first version without a visit", () => {
+  it("asserts nothing while the payload named no version, and learns none", () => {
     const navigate = vi.fn();
     const { assets } = makeAssets({ navigate });
     expect(assets.versionMismatch("v1", "/here/")).toBe(false);
+    assets.acceptVersion("v1");
     expect(navigate).not.toHaveBeenCalled();
+    expect(assets.version()).toBe("");
+  });
+
+  it("checks the very first envelope against the pinned payload version", () => {
+    const navigate = vi.fn();
+    const { assets } = makeAssets({ navigate, session: memorySession() });
+    assets.pin("v1");
     expect(assets.version()).toBe("v1");
+    expect(assets.versionMismatch("v1", "/here/")).toBe(false);
+    expect(assets.versionMismatch("v2", "/here/")).toBe(true);
+    expect(navigate).toHaveBeenCalledWith(`${location.origin}/here/`);
   });
 
   it("visits once on a mismatch and degrades on the second", () => {
     const navigate = vi.fn();
     const session = memorySession();
-    let made: Assets;
-    {
-      const m = makeAssets({ navigate, session });
-      made = m.assets;
-    }
-    made.versionMismatch("v1", "/here/");
-    expect(made.versionMismatch("v2", "/here/")).toBe(true);
+    const made = makeAssets({ navigate, session });
+    made.assets.pin("v1");
+    expect(made.assets.versionMismatch("v2", "/here/")).toBe(true);
     expect(navigate).toHaveBeenCalledWith(`${location.origin}/here/`);
 
     const second = makeAssets({ navigate, session });
-    second.assets.versionMismatch("v1", "/here/");
+    second.assets.pin("v1");
     expect(second.assets.versionMismatch("v2", "/here/")).toBe(true);
     const err = second.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.kind).toBe("asset");
@@ -945,16 +970,15 @@ describe("version safeguard and reload-once", () => {
   it("reloads a double-slash page on its own origin", () => {
     const navigate = vi.fn();
     const { assets } = makeAssets({ navigate, session: memorySession() });
-    assets.versionMismatch("v1", "//attacker.example/x/");
+    assets.pin("v1");
     expect(assets.versionMismatch("v2", "//attacker.example/x/")).toBe(true);
     expect(navigate).toHaveBeenCalledWith(`${location.origin}//attacker.example/x/`);
   });
 
   it("refuses a reload that would leave the page's origin", () => {
     const navigate = vi.fn();
-    const session = memorySession();
-    const made = makeAssets({ navigate, session });
-    made.assets.versionMismatch("v1", "/here/");
+    const made = makeAssets({ navigate, session: memorySession() });
+    made.assets.pin("v1");
     expect(made.assets.versionMismatch("v2", "https://attacker.example/")).toBe(true);
     expect(navigate).not.toHaveBeenCalled();
     const err = made.dispatched.find((d) => d.event === "partial:error");
@@ -964,7 +988,7 @@ describe("version safeguard and reload-once", () => {
 
   it("names the zones of the envelope on a version error, none when it named none", () => {
     const made = makeAssets({ session: memorySession() });
-    made.assets.versionMismatch("v1", "/here/");
+    made.assets.pin("v1");
     made.assets.versionMismatch("v2", "https://attacker.example/", ["cart"]);
     made.assets.versionMismatch("v2", "https://attacker.example/");
     const errors = made.dispatched.filter((d) => d.event === "partial:error");
@@ -972,22 +996,57 @@ describe("version safeguard and reload-once", () => {
     expect("zones" in errors[1]!.detail).toBe(false);
   });
 
-  it("ignores an empty version on accept, keeping the known one", () => {
+  it("keeps the reload flag through an unversioned envelope", () => {
     const session = memorySession();
     const { assets } = makeAssets({ session });
-    assets.versionMismatch("v1", "/here/");
+    assets.pin("v1");
+    assets.versionMismatch("v2", "/here/");
     assets.acceptVersion("");
-    expect(assets.version()).toBe("v1");
+    expect(session.get("next:partial:reloaded")).toBe("1");
   });
 
   it("clears the reload flag once a version matches", () => {
     const session = memorySession();
     const { assets } = makeAssets({ session });
-    assets.versionMismatch("v1", "/here/");
+    assets.pin("v1");
     assets.versionMismatch("v2", "/here/");
     expect(session.get("next:partial:reloaded")).toBe("1");
-    assets.acceptVersion("v2");
+    assets.acceptVersion("v1");
     expect(session.get("next:partial:reloaded")).toBeNull();
+  });
+});
+
+describe("the release guard", () => {
+  it("reloads the page once for a runtime of another release", () => {
+    const navigate = vi.fn();
+    const session = memorySession();
+    const made = makeAssets({ navigate, session });
+    made.assets.release(false);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(location.href);
+    expect(made.dispatched).toEqual([]);
+  });
+
+  it("reports instead of reloading again while the release still differs", () => {
+    const navigate = vi.fn();
+    const session = memorySession();
+    makeAssets({ navigate, session }).assets.release(false);
+    const second = makeAssets({ navigate, session });
+    second.assets.release(false);
+    second.assets.release(false);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    const errors = second.dispatched.filter((d) => d.event === "partial:error");
+    expect(errors).toHaveLength(2);
+    expect(errors[0]!.detail.kind).toBe("asset");
+  });
+
+  it("forgets the reload once a page boots on the matching release", () => {
+    const navigate = vi.fn();
+    const session = memorySession();
+    const made = makeAssets({ navigate, session });
+    made.assets.release(false);
+    made.assets.release(true);
+    made.assets.release(false);
+    expect(navigate).toHaveBeenCalledTimes(2);
   });
 });
 

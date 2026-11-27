@@ -81,31 +81,7 @@ The loader batches the keys that its callers ask for concurrently.
        return list(await asyncio.gather(*(product_cards.load(key) for key in keys)))
 
 ``picks_for`` is the project's own method of ``ProductQuerySet`` that answers the primary keys of the picks.
-The rails live on the product page at ``/product/<pk>/``, which loads the product and calls the component once per rail.
-
-.. code-block:: text
-
-   shop/pages/product/
-       [int:pk]/
-           page.py
-           template.djx
-       _components/rail/
-           component.py
-           component.djx
-           loading.djx
-           error.djx
-
-.. code-block:: python
-   :caption: shop/pages/product/[int:pk]/page.py
-
-   from django.shortcuts import get_object_or_404
-   from shop.models import Product
-
-   from next import context
-
-   @context("product")
-   def product(pk: int) -> Product:
-       return get_object_or_404(Product, pk=pk)
+The rails live on the product page at ``/product/<pk>/``, whose ``page.py`` loads the product and whose template calls the component once per rail.
 
 .. code-block:: jinja
    :caption: shop/pages/product/[int:pk]/template.djx
@@ -170,14 +146,14 @@ A key loaded once in a request is answered from memory, its error included.
 Know when a batch closes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-A batch closes once every deferred job of the response that runs or is about to run waits on a loader or has ended, at ``LOADER_MAX_BATCH`` keys, five hundred by default, or ``BATCH_WINDOW`` after its first key, one millisecond by default.
+A batch closes once every deferred job of the response that runs or is about to run waits on a loader or has ended, at ``LOADER["MAX_BATCH"]`` keys, five hundred by default, or ``LOADER["WINDOW"]`` after its first key, one millisecond by default.
 A loader built with ``max_batch=`` or ``window=`` keeps its own limits, and one built without them reads ``DEFER`` each time.
 
 Where the jobs run decides how well they share a batch.
 On the pool the batch function is called once with the keys of both rails, unless one rail asks for its first key more than one window after the other, as a slow query or a busy machine may make it.
 On SQLite the jobs run on the request lane one after the other, so each job loads one batch of its own, which is still one query per rail rather than one per card.
 Code that runs serially, such as a fully sync page, the shell render, or the render of a reloaded boundary, calls the batch function with one key per call.
-An ``async def`` batch function runs on the event loop and serves native async I/O only, so a batch that queries the ORM is a plain ``def``.
+An ``async def`` batch function serves native async I/O only, so a batch that queries the ORM is a plain ``def``.
 
 Verification
 ------------
@@ -215,7 +191,7 @@ The ``product`` fixture of the project saves a product whose two rails both have
    def test_the_rails_on_the_pool_share_one_batch(next_client, product, batches) -> None:
        with (
            parallel_boundaries(),
-           override_next_settings(DEFER={"BATCH_WINDOW": "1s"}),
+           override_next_settings(LOADER={"WINDOW": "1s"}),
        ):
            next_client.get_stream(f"/product/{product.pk}/")
        assert len(batches) == 1
@@ -237,6 +213,6 @@ See also
 
    :doc:`/content/topics/boundaries/async` for the request scope, the lanes, and the limits of a loader.
    :doc:`/content/ref/deps` for ``Loader``, ``rows``, and ``MissingKeyError``.
-   :doc:`/content/ref/settings` for ``LOADER_MAX_BATCH`` and ``BATCH_WINDOW``.
+   :doc:`/content/ref/settings` for ``LOADER["MAX_BATCH"]`` and ``LOADER["WINDOW"]``.
    :doc:`test-a-page-with-deferred-boundaries` for ``parallel_boundaries`` and ``get_stream``.
    :repo:`search-catalog <tree/main/examples/search-catalog>` for the two rails and the tests of both lanes.

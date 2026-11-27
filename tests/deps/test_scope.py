@@ -11,7 +11,7 @@ import pytest
 
 from next.deps import DependencyCycleError
 from next.deps.cache import _CACHE_MISS, DependencyCache, request_memo
-from next.deps.scope import RequestScope, join_waits, render_scope, running_loop
+from next.deps.scope import RequestScope, join_waits, render_scope
 from tests.support.errors import BackendDownError
 
 
@@ -1002,11 +1002,3 @@ class TestRenderScope:
             asyncio.run(main())
         with pytest.raises(RuntimeError, match="closed"):
             _reuse(scopes[0])
-
-
-def test_running_loop_names_the_loop_of_the_calling_thread() -> None:
-    async def inside() -> asyncio.AbstractEventLoop | None:
-        return running_loop()
-
-    assert running_loop() is None
-    assert asyncio.run(inside()) is not None

@@ -19,7 +19,12 @@ from typing import (
 
 from django.http import HttpRequest
 
-from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps import (
+    READS_NOTHING,
+    ContextReads,
+    DDependencyBase,
+    RegisteredParameterProvider,
+)
 from next.deps.markers import marker_origin, unwrap_annotated
 from next.deps.objects import names_object
 
@@ -113,6 +118,11 @@ class HttpRequestProvider(RegisteredParameterProvider):
         return None if _is_http_request_annotation(param.annotation) else False
 
     @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
+
+    @override
     def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the request from the resolution context."""
         return context.request
@@ -133,6 +143,11 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
     def static_can_handle(self, param: inspect.Parameter) -> bool:
         """Settle on the annotation alone. The marker never depends on the context."""
         return marker_origin(param.annotation) is DUrl
+
+    @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
@@ -209,6 +224,11 @@ class UrlKwargsProvider(RegisteredParameterProvider):
         return False if names_object(param.annotation) else None
 
     @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
+
+    @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Raw URL value for the parameter, coerced to the annotation when possible."""
         url_kwargs = context.url_kwargs
@@ -241,6 +261,11 @@ class QueryParamProvider(RegisteredParameterProvider):
     def static_can_handle(self, param: inspect.Parameter) -> bool | None:
         """Rule out every other annotation. A match still needs a request present."""
         return None if marker_origin(param.annotation) is DQuery else False
+
+    @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
 
     @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

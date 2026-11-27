@@ -25,7 +25,7 @@ class PagePathInfo:
 
 
 # Bounded because a router may name page paths without end and each entry pins a tuple.
-_PAGE_PATH_INFO_CACHE: PageCache[Path, PagePathInfo] = PageCache()
+_PAGE_PATH_INFO_CACHE: PageCache[Path, PagePathInfo] = PageCache(depends=())
 
 
 def page_path_info(file_path: Path) -> PagePathInfo:

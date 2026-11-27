@@ -1,46 +1,48 @@
-"""How a page boundary renders its error UI, and how a deferred one runs as a job.
-
-It reads the static manager, so nothing the pages package imports may import it.
-"""
+"""How a page boundary renders its error UI, and how a deferred one runs as a job."""
 
 import functools
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Final, cast, override
+from typing import TYPE_CHECKING, Final, cast, override
 
 from django import template
 from django.template.base import NodeList
 from django.template.context import Context
 
-from next.boundaries import (
+from next.boundaries import contain
+from next.boundaries.calls import DEFERRALS_KEY, Addressing
+from next.boundaries.containment import contain_bare
+from next.boundaries.failures import (
     Boundary,
-    Fallback,
-    claim_wrapper,
-    contain,
-    contain_bare,
-    guarded,
-    protect,
+    BoundaryFailure,
+    ErrorKind,
+    ErrorUI,
+    retry_loads,
+    shown_source,
+    unrun_error,
 )
-from next.components.fallback import retry_loads, unrun_error
-from next.components.stash import loading_content
-from next.defer import DEFERRALS_KEY, Addressing, BoundaryFailure, ErrorKind
+from next.boundaries.protection import guarded, protect
+from next.boundaries.scope import claim_wrapper
+from next.boundaries.stash import loading_content
 from next.permissions.nodes import rendered_under, rendering_guards
 from next.seeding import COLLECTOR_KEY, REQUEST_KEY, TEMPLATE_PATH_KEY
-from next.static.collector import StaticCollector
 
 from .boundaries import (
     CAUGHT_KEY,
     SHELL_KEY,
     Caught,
-    ErrorShell,
+    ErrorContext,
     boundary_template,
     catching,
     mark_failed,
-    shown_source,
 )
 from .gating import GATE_KEY, Advanced, ShellGate
 from .graph import Blame, blaming
+
+
+if TYPE_CHECKING:
+    from next.static.collector import StaticCollector
 
 
 _LIVE_KEYS: Final = (REQUEST_KEY, COLLECTOR_KEY)
@@ -65,7 +67,7 @@ def _loading_rendered(source: Path, data: dict[str, object], context: Context) -
         return _rendered(source, data, context)
 
 
-class PageFallback(Fallback):
+class PageErrorUI(ErrorUI):
     """The error UI of one page boundary, rendered from the shell of its directory."""
 
     __slots__ = ("_context", "_source", "_tag")
@@ -98,7 +100,7 @@ class PageFallback(Fallback):
         source = self._source
         context = self._context
         held = context.get(SHELL_KEY)
-        shell = held.of(source) if isinstance(held, ErrorShell) else {}
+        shell = held.of(source) if isinstance(held, ErrorContext) else {}
         for key in _LIVE_KEYS:
             if key in context:
                 shell[key] = context[key]
@@ -137,7 +139,7 @@ def contain_page(
     return contain(
         page_boundary(source, context, name=name),
         render,
-        PageFallback(source, tag, context),
+        PageErrorUI(source, tag, context),
     )
 
 
@@ -190,7 +192,7 @@ class PageJob:
             return contain_bare(
                 page_boundary(source, context, name=self._name, ident=ident),
                 render,
-                PageFallback(source, self._tag, context),
+                PageErrorUI(source, self._tag, context),
             )
 
     def loading(self, context: Context) -> tuple[str, BoundaryFailure | None]:
@@ -214,22 +216,22 @@ class PageJob:
             outcome = guarded(protect(), work, self._held, context, gate, blamed)
         if not isinstance(outcome, Advanced):
             return self._failed(context, *outcome)
-        collector = context.get(COLLECTOR_KEY)
-        if isinstance(collector, StaticCollector):
+        collector = cast("StaticCollector | None", context.get(COLLECTOR_KEY))
+        if collector is not None:
             serializers = outcome.serializers
             for key, value in outcome.published.items():
                 collector.add_js_context(key, value, serializer=serializers.get(key))
         layer = outcome.layer
         held = context.get(SHELL_KEY)
         following = layer.get(GATE_KEY)
-        if isinstance(held, ErrorShell) and isinstance(following, ShellGate):
+        if isinstance(held, ErrorContext) and isinstance(following, ShellGate):
             layer[SHELL_KEY] = replace(held, blame=following.blame())
         with context.push(layer):
             return self._nodelist.render(context)
 
     def _held(
         self, exc: Exception, context: Context, gate: ShellGate, blamed: Blame
-    ) -> tuple[Caught, ErrorShell] | None:
+    ) -> tuple[Caught, ErrorContext] | None:
         """Return the boundary inside the content that holds `exc`, with its shell.
 
         `None` leaves `exc` to a boundary at or above this one's directory.
@@ -239,12 +241,12 @@ class PageJob:
         if (
             guard is None
             or not gate.inside(self._loading, guard.level)
-            or not isinstance(held, ErrorShell)
+            or not isinstance(held, ErrorContext)
         ):
             return None
         return Caught(guard, exc), replace(held, blame=gate.blame(blamed))
 
-    def _failed(self, context: Context, caught: Caught, shell: ErrorShell) -> str:
+    def _failed(self, context: Context, caught: Caught, shell: ErrorContext) -> str:
         """Render the content over the shell of `caught`, its boundary failing."""
         data = shell.at(caught.boundary.level)
         for key in _JOB_KEYS:
@@ -265,7 +267,7 @@ class PageJob:
         if guard is None:
             mark_failed(kind)
             return "", error
-        return PageFallback(guard, self._tag, context).render(error, kind), error
+        return PageErrorUI(guard, self._tag, context).render(error, kind), error
 
 
-__all__ = ["PageFallback", "PageJob", "contain_page", "page_boundary"]
+__all__ = ["PageErrorUI", "PageJob", "contain_page", "page_boundary"]

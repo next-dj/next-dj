@@ -12,6 +12,7 @@ export interface DirtyTracker {
   // toggled its openness belongs to the user for the life of the page.
   isTouched(el: Element): boolean;
   install(doc: Document): void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -55,7 +56,7 @@ export function createDirtyTracker(deps: DirtyDeps = {}): DirtyTracker {
     }
   }
 
-  return {
+  const exposed = {
     snapshot: () => last,
     isDirtySince(snapshot) {
       return (el) => {
@@ -65,12 +66,17 @@ export function createDirtyTracker(deps: DirtyDeps = {}): DirtyTracker {
     },
     isTouched: (el) => stamps.has(el),
     install,
-    _reset() {
+  } satisfies Omit<DirtyTracker, "_reset"> as DirtyTracker;
+
+  TEST: {
+    exposed._reset = () => {
       // Also drop the capture-phase listeners so a reset leaves nothing bound.
       detach();
       stamps = new WeakMap();
       counter = 0;
       last = 0;
-    },
-  };
+    };
+  }
+
+  return exposed;
 }

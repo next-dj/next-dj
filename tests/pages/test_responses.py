@@ -1,5 +1,6 @@
 import logging
 import re
+from contextvars import copy_context
 from http.cookies import SimpleCookie
 from pathlib import Path
 from unittest.mock import patch
@@ -8,7 +9,7 @@ import pytest
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpResponse
+from django.http import HttpResponse, StreamingHttpResponse
 from django.template import engines
 from django.template.response import SimpleTemplateResponse
 from django.test import Client, RequestFactory, override_settings
@@ -16,6 +17,8 @@ from django.utils.functional import SimpleLazyObject
 
 from next.compression.manager import MIDDLEWARE, OPT_OUT
 from next.csrf import token_deferred
+from next.defer.response.partial import CACHE_CONTROL
+from next.diagnostics import mark_degraded, watch_degraded
 from next.pages import CacheDict, HeadersDict, page
 from next.pages.errors import PageMetadataShapeError
 from next.pages.loaders import load_page_module, module_generation, reset_module_memo
@@ -24,7 +27,7 @@ from next.pages.metadata.resolve import publish_metadata, resolve_metadata
 from next.pages.responses import (
     NO_STORE,
     CacheControl,
-    Depth,
+    PrefetchDepth,
     Purpose,
     RequestInfo,
     ResponsePolicy,
@@ -34,10 +37,13 @@ from next.pages.responses import (
     cookie_varies,
     depth_of,
     finish_response,
+    finish_zone_response,
     headers_problems,
     mark_bound_render,
     mark_personal_render,
     mark_purpose,
+    never_store,
+    next_of,
     personal_render,
     prepare_page_render,
     purpose_of,
@@ -893,7 +899,7 @@ class TestCacheMethods:
             response = getattr(Client(), method)("/")
         assert response.status_code == 200
         assert "Cache-Control" not in response
-        assert "Cookie" in response["Vary"]
+        assert "csrftoken" not in response.cookies
 
     def test_a_post_never_defers_the_token_or_marks_a_shared_render(
         self, tmp_path, rf: RequestFactory
@@ -969,11 +975,11 @@ class TestZoneAndPatchResponses:
 
 
 class TestCompressOptOut:
-    """`page.compress(False)` marks the page and its zone answers uncompressed."""
+    """`page.compress(enabled=False)` marks the page and its zone answers uncompressed."""
 
     SOURCE = (
         "from next.pages import page\n\n"
-        "page.compress(False)\n\n"
+        "page.compress(enabled=False)\n\n"
         "template = '{% zone \"box\" %}<p>x</p>{% endzone %}'\n"
     )
 
@@ -1164,6 +1170,19 @@ class TestRefusedMetadata:
         assert "Run manage.py check" in raised.value.__notes__[0]
 
 
+_READS_TOKEN = """
+from django.http import HttpRequest
+from django.middleware.csrf import get_token
+
+from next import context
+
+
+@context("token")
+def token(request: HttpRequest) -> str:
+    return get_token(request)
+"""
+
+
 class TestCsrfDeferral:
     """A shared page keeps the CSRF token out of its HTML in `auto`."""
 
@@ -1192,15 +1211,71 @@ class TestCsrfDeferral:
         root = _tree(tmp_path, ("", "template = 'x'\ncache = 60\n"), layout=RUNTIME)
         response = _get(root)
         body = response.content.decode()
-        assert '"$csrf":{"header":"X-Csrftoken","url":"/_next/csrf/"}' in body
+        assert (
+            '"$csrf":{"header":"X-Csrftoken","url":"/_next/csrf/","cookie":"csrftoken"}'
+            in body
+        )
         assert response["Cache-Control"] == "public, max-age=60"
         assert not response.cookies
 
-    def test_a_private_page_keeps_the_token_in_auto(self, tmp_path) -> None:
+    def test_a_private_page_without_a_token_names_the_endpoint_in_auto(
+        self, tmp_path
+    ) -> None:
         root = _tree(tmp_path, ("", "template = 'x'\n"), layout=RUNTIME)
         response = _get(root)
-        assert '"$csrf":{"header":"X-Csrftoken","token":' in response.content.decode()
-        assert response.cookies["csrftoken"].value
+        body = response.content.decode()
+        assert (
+            '"$csrf":{"header":"X-Csrftoken","url":"/_next/csrf/","cookie":"csrftoken"}'
+            in body
+        )
+        assert "csrftoken" not in response.cookies
+        assert "Cookie" not in response["Vary"]
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            pytest.param({}, id="cookie"),
+            pytest.param({"CSRF_COOKIE_HTTPONLY": True}, id="httponly"),
+            pytest.param({"CSRF_USE_SESSIONS": True}, id="sessions"),
+        ],
+    )
+    @pytest.mark.django_db()
+    def test_a_private_page_that_reads_a_token_embeds_it_in_auto(
+        self, tmp_path, settings
+    ) -> None:
+        root = _tree(tmp_path, layout=RUNTIME)
+        write_page(root, "", _READS_TOKEN, body='<input value="{{ token }}">')
+        with override_settings(**settings):
+            response = _get(root)
+        body = response.content.decode()
+        token = re.search(r'"\$csrf":\{"header":"X-Csrftoken","token":"(\w+)"', body)
+        assert token is not None
+        assert re.search(r'<input value="\w{64}">', body) is not None
+        sessions = settings.get("CSRF_USE_SESSIONS", False)
+        assert ("csrftoken" in response.cookies) is not sessions
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            pytest.param({"CSRF_COOKIE_HTTPONLY": True}, id="httponly"),
+            pytest.param({"CSRF_USE_SESSIONS": True}, id="sessions"),
+        ],
+    )
+    @pytest.mark.django_db()
+    def test_the_endpoint_answers_a_page_that_named_it(
+        self, tmp_path, settings
+    ) -> None:
+        root = _tree(tmp_path, ("", "template = 'x'\n"), layout=RUNTIME)
+        client = Client(enforce_csrf_checks=True)
+        headers = {"X-Next-Request": "1", "Sec-Fetch-Site": "same-origin"}
+        with override_settings(**settings), routed(root):
+            page_body = client.get("/").content.decode()
+            minted = client.get("/_next/csrf/", headers=headers).json()
+            posted = client.post("/", headers={"X-CSRFToken": minted["token"]})
+            refused = client.post("/")
+        assert '"url":"/_next/csrf/"' in page_body
+        assert posted.status_code == 200
+        assert refused.status_code == 403
 
 
 class TestPolicyMemo:
@@ -1349,7 +1424,7 @@ RENDER_RESPONSE = (
 COUNTED_CACHE = "CALLS = []\n\ndef cache():\n    CALLS.append(1)\n    return 60\n"
 
 
-class TestSealing:
+class TestFinishing:
     """The degraded check runs after every stamp, on eager and lazy responses alike."""
 
     @pytest.mark.parametrize(
@@ -1425,6 +1500,48 @@ class TestCdnHeaders:
         response.cookies["sid"] = "1"
         assert response["Cache-Control"] == "private, max-age=60"
         assert name not in response
+
+
+class TestNeverStore:
+    """A response kept from every cache loses each grant to store and nothing else."""
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [
+            (None, "private, no-store"),
+            ("public, max-age=60, s-maxage=30", "private, no-store"),
+            (
+                "stale-while-revalidate=5, stale-if-error=9, immutable",
+                "private, no-store",
+            ),
+            (CACHE_CONTROL, "private, no-cache, no-store, no-transform"),
+            (
+                "no-transform, must-revalidate",
+                "no-transform, must-revalidate, private, no-store",
+            ),
+        ],
+        ids=["bare", "shared", "stale", "stream", "restrictive"],
+    )
+    def test_the_directives_left(self, before, after) -> None:
+        response = HttpResponse("x")
+        if before is not None:
+            response["Cache-Control"] = before
+        response["CDN-Cache-Control"] = "max-age=600"
+        never_store(response)
+        assert response["Cache-Control"] == after
+        assert "CDN-Cache-Control" not in response
+
+    def test_a_degraded_stream_keeps_its_no_transform(self, rf: RequestFactory) -> None:
+        response = StreamingHttpResponse(iter([b""]))
+        response["Cache-Control"] = CACHE_CONTROL
+
+        def finish() -> None:
+            watch_degraded()
+            mark_degraded()
+            finish_zone_response(response, ResponsePolicy(), rf.get("/"))
+
+        copy_context().run(finish)
+        assert response["Cache-Control"] == CACHE_CONTROL
 
 
 class TestRenderResponseVary:
@@ -1582,7 +1699,7 @@ class TestRequestDepth:
     """`request.next` names the purpose of a request and the depth of a prefetch."""
 
     def test_the_depths(self) -> None:
-        assert [depth.value for depth in Depth] == ["shell", "full"]
+        assert [depth.value for depth in PrefetchDepth] == ["shell", "full"]
 
     def test_an_info_has_no_depth_by_default(self) -> None:
         assert RequestInfo().depth is None
@@ -1590,37 +1707,50 @@ class TestRequestDepth:
     @pytest.mark.parametrize(
         ("purpose", "depth"),
         [
-            (Purpose.NAVIGATION, Depth.FULL),
-            (Purpose.DOCUMENT, Depth.SHELL),
+            (Purpose.NAVIGATE, PrefetchDepth.FULL),
+            (Purpose.DOCUMENT, PrefetchDepth.SHELL),
             (Purpose.PREFETCH, None),
         ],
     )
     def test_an_impossible_pair_is_refused(
-        self, purpose: Purpose, depth: Depth | None, rf: RequestFactory
+        self, purpose: Purpose, depth: PrefetchDepth | None, rf: RequestFactory
     ) -> None:
         with pytest.raises(KeyError, match=re.escape(repr((purpose, depth)))):
             mark_purpose(rf.get("/"), purpose, depth)
 
     def test_a_purpose_without_a_depth(self, rf: RequestFactory) -> None:
         request = rf.get("/")
-        mark_purpose(request, Purpose.NAVIGATION)
-        assert purpose_of(request) is Purpose.NAVIGATION
+        mark_purpose(request, Purpose.NAVIGATE)
+        assert purpose_of(request) is Purpose.NAVIGATE
         assert depth_of(request) is None
-        assert request.next == RequestInfo(Purpose.NAVIGATION)
+        assert request.next.info == RequestInfo(Purpose.NAVIGATE)
 
-    @pytest.mark.parametrize("depth", list(Depth))
-    def test_a_marked_depth(self, depth: Depth, rf: RequestFactory) -> None:
+    @pytest.mark.parametrize("depth", list(PrefetchDepth))
+    def test_a_marked_depth(self, depth: PrefetchDepth, rf: RequestFactory) -> None:
         request = rf.get("/")
         mark_purpose(request, Purpose.PREFETCH, depth)
         assert purpose_of(request) is Purpose.PREFETCH
         assert depth_of(request) is depth
-        assert request.next == RequestInfo(Purpose.PREFETCH, depth)
+        assert request.next.info == RequestInfo(Purpose.PREFETCH, depth)
 
     def test_the_info_is_shared(self, rf: RequestFactory) -> None:
         first, second = rf.get("/"), rf.get("/")
-        mark_purpose(first, Purpose.PREFETCH, Depth.FULL)
-        mark_purpose(second, Purpose.PREFETCH, Depth.FULL)
-        assert first.next is second.next
+        mark_purpose(first, Purpose.PREFETCH, PrefetchDepth.FULL)
+        mark_purpose(second, Purpose.PREFETCH, PrefetchDepth.FULL)
+        assert first.next is not second.next
+        assert first.next.info is second.next.info
+
+    def test_a_later_mark_keeps_the_boundary_state(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        root = next_of(request)
+        root.boundaries = held = object()
+        mark_purpose(request, Purpose.NAVIGATE)
+        assert request.next is root
+        assert (root.purpose, root.depth, root.boundaries) == (
+            Purpose.NAVIGATE,
+            None,
+            held,
+        )
 
     def test_an_unmarked_request_has_no_depth(self, rf: RequestFactory) -> None:
         assert depth_of(rf.get("/")) is None

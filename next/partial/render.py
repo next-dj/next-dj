@@ -11,15 +11,10 @@ from next.caches import PageCache
 from next.diagnostics import degraded_status
 from next.pages.boundaries import Caught, boundary_scope
 from next.pages.manager import defers, page
+from next.pages.nodes import PageBoundaryNode, contained_by, enclosing, failed_by
 from next.ports import render_deferred
 from next.seeding import seed_collector
 from next.static.collector import default_placeholders
-from next.templatetags.boundaries import (
-    PageBoundaryNode,
-    contained_by,
-    enclosing,
-    failed_by,
-)
 
 from .errors import UnknownZoneError
 from .layers import stash_layers
@@ -77,8 +72,8 @@ class ZoneRenderResult:
         return self.collector.js_context_wire()
 
 
-_ENCLOSING: PageCache[tuple["Template", str], tuple[PageBoundaryNode, ...]] = (
-    PageCache()
+_ENCLOSING: PageCache[tuple["Template", str], tuple[PageBoundaryNode, ...]] = PageCache(
+    depends=()
 )
 
 
@@ -94,9 +89,7 @@ def render_zone(
 ) -> ZoneRenderResult:
     """Render the named zones of a page over the context their batch asks for.
 
-    A nested zone runs its `@context(zone=)` too, and a batch of unknown names raises.
-    A failure a page boundary around the zones contains answers with its error UI.
-    A `stashed` batch carries each zone's own skeleton, for a document that lacks it.
+    A batch of unknown names raises, and a `stashed` batch carries each zone's skeleton.
     """
     template = page.composed_template_for(page_path)
     chain = page.composed_chain(page_path)

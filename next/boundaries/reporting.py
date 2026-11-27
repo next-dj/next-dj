@@ -9,22 +9,23 @@ from typing import TYPE_CHECKING, Final, cast
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
+from next.caches import SETTINGS, memo
 from next.diagnostics import Capture, FailureLog
 
 from .failures import Boundary, new_digest
 
 
 if TYPE_CHECKING:
-    from next.defer import ErrorKind
+    from next.conf.boundaries import BoundarySettings
 
-    from .options import Errors
+    from .failures import ErrorKind
 
 
 logger = logging.getLogger("next.boundaries")
 
 failure_log = FailureLog(logger)
 
-_REPORTER_SETTING: Final = "NEXT_FRAMEWORK['DEFER']['ERRORS']['REPORTER']"
+_REPORTER_SETTING: Final = "NEXT_FRAMEWORK['BOUNDARIES']['REPORTER']"
 
 _LOGGED: Final = (
     "The %s %r failed and rendered its error.djx in place of its subtree, digest %s."
@@ -41,33 +42,18 @@ _NO_DIGEST: Final = (
 type Reporter = Callable[..., object]
 
 
-class _Reporters:
-    """Hold the `REPORTER` callable last imported, with the path it came from."""
-
-    __slots__ = ("held",)
-
-    def __init__(self) -> None:
-        """Start empty, the first report imports."""
-        self.held: tuple[str, Reporter] | None = None
-
-    def get(self, dotted: str) -> Reporter:
-        """Return the `REPORTER` callable at `dotted`, imported once per path."""
-        held = self.held
-        if held is not None and held[0] == dotted:
-            return held[1]
-        try:
-            target = import_string(dotted)
-        except ImportError as exc:
-            msg = f"{_REPORTER_SETTING} {dotted!r} could not be imported: {exc}."
-            raise ImproperlyConfigured(msg) from exc
-        if not callable(target):
-            msg = f"{_REPORTER_SETTING} {dotted!r} names no callable."
-            raise ImproperlyConfigured(msg)
-        self.held = (dotted, target)
-        return cast("Reporter", target)
-
-
-_reporters = _Reporters()
+@memo(SETTINGS)
+def _reporter(dotted: str) -> Reporter:
+    """Return the `REPORTER` callable at `dotted`, imported once per path."""
+    try:
+        target = import_string(dotted)
+    except ImportError as exc:
+        msg = f"{_REPORTER_SETTING} {dotted!r} could not be imported: {exc}."
+        raise ImproperlyConfigured(msg) from exc
+    if not callable(target):
+        msg = f"{_REPORTER_SETTING} {dotted!r} names no callable."
+        raise ImproperlyConfigured(msg)
+    return cast("Reporter", target)
 
 
 def _reported(
@@ -79,7 +65,7 @@ def _reported(
     """
     capture = Capture()
     with capture:
-        reporter = _reporters.get(dotted)
+        reporter = _reporter(dotted)
         answer = reporter(
             exc,
             name=boundary.name,
@@ -109,7 +95,9 @@ def _reported(
     return None
 
 
-def report(boundary: Boundary, exc: Exception, kind: ErrorKind, errors: Errors) -> str:
+def report(
+    boundary: Boundary, exc: Exception, kind: ErrorKind, errors: BoundarySettings
+) -> str:
     """Hand the failure to `REPORTER`, else log it, and return its digest.
 
     Inside the quiet period the failure is logged at `DEBUG`, so every digest is found.

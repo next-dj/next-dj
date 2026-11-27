@@ -81,9 +81,9 @@ For example ``HTTPLoginForm`` becomes ``http_login_form`` and ``HTMLForm`` becom
 .. warning::
 
    Renaming a form class changes its action name.
-   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with ``FormActionNotFoundError``.
-   The exception message lists the closest registered names, so a rename typo is usually visible in the error itself.
-   Update every template and reverse call when renaming a class.
+   A ``{% form %}`` tag or reverse URL that names an action that is not registered fails at render time with ``FormActionNotFoundError``.
+   The exception message lists the closest registered names, so a mistyped name is usually visible in the error itself.
+   Every template and reverse call names the action by the current class name.
 
 Anchor files and scope
 ----------------------
@@ -663,7 +663,7 @@ Such an action opts out with ``Meta.atomic = False`` on a ``Form``, ``ModelForm`
            return HttpResponseRedirect("/password-reset/sent/")
 
 An action that often writes nothing, a lookup or a validation round trip, takes ``Meta.atomic = "writes"`` or ``atomic="writes"`` and opens its transaction right before its first write, so a request that writes nothing opens no connection and issues no statement.
-The writes after that point still commit or roll back as one unit, while an ``on_commit`` hook registered before the first write fires at once, see :ref:`howto-run-a-page-in-a-transaction`.
+The writes after that point still commit or roll back as one unit, and an ``on_commit`` hook registered before the first write opens the transaction and waits for its commit, see :ref:`howto-run-a-page-in-a-transaction`.
 
 .. code-block:: python
    :caption: shop/pages/coupons/page.py
@@ -686,7 +686,7 @@ The writes after that point still commit or roll back as one unit, while an ``on
 Like the guard keys, it survives subclassing through the inherited ``Meta``.
 An ``@action(form_class=F)`` that passes no ``atomic=`` takes ``F.Meta.atomic``, an abstract or mixin form class included, and an ``atomic=`` on the decorator wins over it.
 Any other value applies nothing, leaves the action on the method rule, and is reported as ``next.E240``.
-``page.atomic()`` decides for the page view of its ``page.py`` alone and never for the actions the page declares, so each action carries its own choice.
+``page.transaction()`` decides for the page view of its ``page.py`` alone and never for the actions the page declares, so each action carries its own choice.
 
 .. _topics-forms-actions-requires-runtime:
 

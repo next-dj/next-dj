@@ -507,8 +507,8 @@ class TestOverrideOnRender:
             _rendered_form(mock_http_request, _kwargs_form(result, []))
 
 
-class TestFactoryCompatibility:
-    """A form factory keeps its contract next to the kwargs hook."""
+class TestFactoryContract:
+    """A form factory answers beside the kwargs hook."""
 
     @_BUILDERS
     def test_a_non_empty_pair_bypasses_both_hooks(

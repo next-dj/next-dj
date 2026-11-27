@@ -11,7 +11,7 @@ from next.partial import KeysetPager, Paging, Window
 
 metadata: MetadataDict = {"title": "Audit log", "robots": {"index": False}}
 
-log = KeysetPager(("-created_at", "-pk"), per_page=20)
+log = KeysetPager(("-created_at", "-pk"), per_page=20, max_restore=3)
 
 
 @context("active_kind")

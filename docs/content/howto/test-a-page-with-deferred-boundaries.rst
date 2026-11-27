@@ -48,7 +48,8 @@ Its ``shell`` is the first write with every deferred body replaced by its loadin
        assert streamed.ended
 
 ``final_html()`` applies each chunk to the shell in order, as the browser would, so a test reads the settled page without parsing scripts.
-``streamed.boundary(key)``, which the tests read the chunk through, returns the chunk of one boundary by its wire id, its stable key, or its name, the component name or the path a page boundary is named by.
+``streamed.boundary(key)``, which the tests read the chunk through, returns the chunk of one boundary by its wire id, its stable key, or the component name, and ``streamed.boundary(page="shop/pages/orders")`` returns the chunk of the page boundary whose ``loading.djx`` sits in that directory.
+A chunk names its ``state``, ``ready`` or ``error``, and the ``ErrorKind`` of a failure as ``kind``.
 A test of an async stack awaits ``aread_stream(AsyncClient(), url)`` of ``next.testing`` for the same result.
 ``get_stream`` raises ``AssertionError`` when the page did not stream, and names the reason when ``DEBUG`` is on.
 
@@ -62,13 +63,15 @@ The test lasts as long as that timeout, two seconds for this component, and for 
 .. code-block:: python
    :caption: tests/test_product_page.py
 
+   from next.boundaries import ErrorKind
    from next.testing import boundary_errors, boundary_gate
 
    def test_a_slow_component_gives_way_to_its_error_ui(next_client, product) -> None:
        with boundary_errors("render"), boundary_gate(component="recommendations"):
            streamed = next_client.get_stream(f"/product/{product.pk}/")
        chunk = streamed.boundary("recommendations")
-       assert (chunk.state, chunk.kind) == ("error", "timeout")
+       assert chunk.state == "error"
+       assert chunk.kind is ErrorKind.TIMEOUT
        assert "data-next-retry" in chunk.html
 
 ``boundary_gate(page=directory)`` holds the job of the page boundary whose ``loading.djx`` sits in ``directory``, an absolute path or one relative to ``BASE_DIR`` such as ``"shop/pages/orders"``.
@@ -119,14 +122,6 @@ Reload a client-trip component
 A ``load``, ``visible``, or ``manual`` component renders on its own request, from the props it declares alone.
 The product page gains one below the fold, ``also_viewed``, which loads on sight and takes the product as a prop.
 
-.. code-block:: text
-
-   shop/pages/product/_components/also_viewed/
-       component.py
-       component.djx
-       loading.djx
-       error.djx
-
 .. code-block:: python
    :caption: shop/pages/product/_components/also_viewed/component.py
 
@@ -148,43 +143,27 @@ The product page gains one below the fold, ``also_viewed``, which loads on sight
      {% for item in viewed %}<li>{{ item.name }}</li>{% endfor %}
    </ul>
 
-.. code-block:: jinja
-   :caption: shop/pages/product/_components/also_viewed/loading.djx
-
-   <p data-also-viewed-skeleton>Finding what others viewed&hellip;</p>
-
-.. code-block:: jinja
-   :caption: shop/pages/product/_components/also_viewed/error.djx
-
-   <p data-also-viewed-error>The list is unavailable right now.</p>
-
-.. code-block:: jinja
-   :caption: shop/pages/product/[int:pk]/template.djx
-
-   <h1>{{ product.name }}</h1>
-   {% component "recommendations" %}
-   {% component "also_viewed" product_id=product.pk %}
-
+Its ``loading.djx`` and ``error.djx`` sit beside it as in :doc:`show-a-loading-state`, and the page template calls it with ``{% component "also_viewed" product_id=product.pk %}`` below ``recommendations``.
 The shell carries the loading UI of ``also_viewed``, and no chunk of the response fills it, so the tests above still read one chunk.
-``get_boundary(url, name, **props)`` mints the token of the component and sends the request the browser sends, and the envelope it returns holds the op that settles the boundary.
+``get_boundary(url, name, **props)`` mints the token of the component and sends the request the browser sends, and returns the boundary as the reload settled it, with the same ``state``, ``kind``, and ``html`` a chunk has.
 
 .. code-block:: python
    :caption: tests/test_product_page.py
 
    def test_the_reload_delivers_the_list(next_client, product) -> None:
-       envelope = next_client.get_boundary(
+       viewed = next_client.get_boundary(
            f"/product/{product.pk}/", "also_viewed", product_id=product.pk
        )
-       [op] = envelope.ops
-       assert op["s"] == "ready"
-       assert "<ul data-also-viewed>" in op["html"]
+       assert viewed.state == "ready"
+       assert "<ul data-also-viewed>" in viewed.html
 
-``follow_boundary(response, key)`` reloads a wrapper the rendered document holds with the token that document carries, which tests the full round trip including the transport the settings choose.
+``follow_boundary(response, key)`` reloads a wrapper the rendered document holds with the token that document carries, which tests the full round trip including the carrier the settings choose.
 
 Test a token
 ~~~~~~~~~~~~
 
-A token lives ``MAX_AGE`` seconds, and a reload with an expired one answers ``409`` with ``X-Next-Reload: token-expired``.
+A token lives ``MAX_AGE`` seconds, and a reload with an expired one answers ``409`` with ``X-Next-Reload: token_expired``.
+Under ``DEBUG`` a refused reload names its ``TokenRejection`` in the ``X-Next-Token-Rejected`` header and explains it in the body, while with ``DEBUG`` off the answer names no reason.
 ``freeze_token_clock(at)`` holds the clock the tokens read, ``issue_boundary_token`` mints a token through the configured backend, and ``expire_boundary_token`` mints one whose life ended a second ago.
 
 .. code-block:: python
@@ -193,9 +172,9 @@ A token lives ``MAX_AGE`` seconds, and a reload with an expired one answers ``40
    import pytest
    from django.test import RequestFactory
 
-   from next.suspense import BoundaryTokenError, TokenRejection
-   from next.suspense.manager import suspense_manager
-   from next.suspense.tokens import BoundaryClaims, BoundaryTarget
+   from next.defer import BoundaryTokenError, TokenRejection
+   from next.defer.manager import defer_manager
+   from next.defer.tokens import BoundaryClaims, BoundaryTarget
    from next.testing import expire_boundary_token
 
    def test_an_expired_token_is_refused() -> None:
@@ -206,7 +185,7 @@ A token lives ``MAX_AGE`` seconds, and a reload with an expired one answers ``40
        token = expire_boundary_token(request, claims)
        target = BoundaryTarget("recommendations", "pages/product", "/product/7/")
        with pytest.raises(BoundaryTokenError) as refused:
-           suspense_manager.tokens().redeem(request, token, target)
+           defer_manager.tokens().redeem(request, token, target)
        assert refused.value.reason is TokenRejection.EXPIRED
 
 Test the stream policy

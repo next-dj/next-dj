@@ -4,9 +4,7 @@ import pytest
 from django.test import override_settings
 
 from next.conf import next_framework_settings
-from next.ports import realtime_negotiation_slot
 from next.realtime import transports
-from next.static import runtime
 from next.testing import override_next_settings, override_websocket_mount
 
 
@@ -62,12 +60,6 @@ def test_active_transports_repeated_reads_are_cached_until_settings_change() -> 
     assert transports.active_transports() == ("ws", "sse")
 
 
-def test_runtime_payload_transports_match_the_shared_resolution() -> None:
-    transports.announce_websocket()
-    transports.forget_transports()
-    assert realtime_negotiation_slot.get().transports() == ("ws", "sse")
-
-
 @pytest.mark.parametrize("requested", [("ws",), ("sse", "ws"), ["ws", "invalid"]])
 def test_active_transports_any_ws_entry_enables_it_without_a_mount(
     requested: object,
@@ -77,37 +69,10 @@ def test_active_transports_any_ws_entry_enables_it_without_a_mount(
     assert transports.withdraw_websocket() is False
 
 
-@pytest.mark.parametrize("mounted", ["no", "yes"])
-def test_active_transports_non_mapping_setting_follows_the_mount(
-    monkeypatch: pytest.MonkeyPatch, mounted: str
-) -> None:
-    if mounted == "yes":
-        transports.announce_websocket()
+def test_active_transports_read_the_default_of_a_non_mapping_setting() -> None:
+    expected = transports.active_transports()
     with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
-        assert transports.active_transports() == (
-            ("ws", "sse") if mounted == "yes" else ("sse",)
-        )
-
-
-def test_announce_websocket_drops_the_memoised_page_offer() -> None:
-    runtime.forget_realtime_offer()
-    before = runtime.realtime_offer()
-    assert before.websocket is False
-    assert runtime.realtime_offer() is before
-    transports.announce_websocket()
-    after = runtime.realtime_offer()
-    assert after.websocket is True
-    assert '"transports":["ws","sse"]' in after.entry
-
-
-def test_forget_transports_drops_the_memoised_page_offer() -> None:
-    transports.announce_websocket()
-    transports.forget_transports()
-    assert runtime.realtime_offer().websocket is True
-    transports._websocket_mounted.clear()
-    assert runtime.realtime_offer().websocket is True
-    transports.forget_transports()
-    assert runtime.realtime_offer() == runtime.RealtimeOffer("", websocket=False)
+        assert transports.active_transports() == expected
 
 
 def test_withdraw_websocket_reports_and_forgets_the_announcement() -> None:

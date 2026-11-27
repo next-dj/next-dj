@@ -15,12 +15,13 @@ from typing import Protocol, runtime_checkable
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 
+from next.bridge.tasks import contextless
+from next.caches import FORK
 from next.conf.merge import FROZEN_DEFAULTS
 from next.conf.scopes import scope_value
 from next.partial.envelope import Envelope, Patch
 from next.partial.manager import asset_version
-from next.tasks import contextless
-from next.utils import after_fork, int_between, positive_number
+from next.utils import int_between, positive_number
 
 from .errors import InvalidMemberError
 from .lifecycle import published
@@ -481,7 +482,7 @@ def _reset_schedules() -> None:
         schedule.reset()
 
 
-after_fork(_reset_schedules)
+FORK.attach(_reset_schedules)
 
 
 __all__ = [

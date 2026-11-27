@@ -8,8 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, overload
 
+from next.boundaries.options import DeferMode, WrapperTag
 from next.caches import BoundedCache
-from next.defer import DeferMode, WrapperTag
 from next.deps import RESERVED_KEYS, AsyncDependencyError
 from next.introspect import (
     MisattributedContext,
@@ -284,7 +284,7 @@ class ComponentContextManager:
     ) -> None:
         """Deliver this component as a boundary in `mode`, with the options given.
 
-        `next.E222` reports an option outside its shape, which declares nothing.
+        `next.E222` reports a call outside a `component.py`, and a bad option raises.
         """
         defer_declarations.defer(
             registering_site(),

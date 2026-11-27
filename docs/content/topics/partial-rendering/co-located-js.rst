@@ -102,7 +102,7 @@ Mounting on ``DOMContentLoaded`` is the same trap, because the event has already
 The second open of a modal is worse.
 The asset URL is already in the runtime's loaded registry from the first open, so the module is not re-executed at all, and a scan inside it never runs a second time.
 
-Migrate a module-load scan to one of the three idioms above.
+Write a module-load scan as one of the three idioms above.
 The search catalogue's minimum-length hint and the wiki's markdown preview both register through ``onMount`` for exactly this reason.
 With the runtime's dev mode on, that is with Django ``DEBUG``, the runtime prints a ``console.warn`` for every ``<script>`` it neutralises out of a patch.
 The warning names the widget whose initialiser was stripped, so a dead widget is visible during development.

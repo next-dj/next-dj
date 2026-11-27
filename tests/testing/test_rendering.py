@@ -6,10 +6,11 @@ from django.test import RequestFactory
 
 from next.components import ComponentInfo, FileComponentsBackend, components_manager
 from next.components.registry import DeferredComponents
+from next.defer import boundary_settled
+from next.defer.markers import JobState
 from next.pages.manager import page
 from next.seeding import TEMPLATE_PATH_KEY
 from next.static import StaticCollector
-from next.suspense import State, boundary_rendered
 from next.testing import (
     capture_signals,
     override_component_backends,
@@ -280,7 +281,7 @@ class TestRenderComponentByNameDeferral:
 
         with (
             override_component_backends(components_config(root)),
-            capture_signals(boundary_rendered) as recorder,
+            capture_signals(boundary_settled) as recorder,
         ):
             html = render_component_by_name("outer", at=tmp_path / "page.djx")
 
@@ -288,7 +289,7 @@ class TestRenderComponentByNameDeferral:
         assert "loading" not in html
         (event,) = recorder.events
         assert event.kwargs["name"] == "slow"
-        assert event.kwargs["state"] is State.READY
+        assert event.kwargs["state"] is JobState.READY
 
     def test_a_project_without_a_deferred_component_opens_no_block(
         self, tmp_path: Path, fresh_deferred_components: DeferredComponents

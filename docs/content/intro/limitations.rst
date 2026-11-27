@@ -19,9 +19,16 @@ See :doc:`/content/topics/layouts` for the composition rules.
 A synchronous render pipeline
 -----------------------------
 
-The page and component pipeline is synchronous.
-Every context function, component render, and form action runs inside a synchronous request, and the framework offers no async page and no async middleware support.
-An async workload lives outside the routed page tree, behind a task queue or an ordinary Django view.
+The view that serves a page is a synchronous Django view.
+A page ``render``, an ``@context`` callable, an ``@page.metadata`` callable, an ``@component.context`` callable, a named dependency, and a ``Depends`` factory may be ``async def``, and the view drives them to completion on an event loop while the request thread waits.
+The async part runs on the event loop of the ASGI server, or on a background loop under WSGI, and a thread-sensitive call it makes runs on the request thread.
+See :doc:`/content/topics/boundaries/async` for how the callables overlap and what they share.
+
+Everything else on the request path stays synchronous.
+An ``@action`` handler and the form and wizard hooks refuse ``async def``, registration raises :exc:`~next.errors.AsyncCallableError`, and ``manage.py check`` reports the module as ``next.E218``, see :ref:`topics-pages-sync-callables`.
+An async generator is refused wherever an async callable is allowed.
+The pipeline provides no async middleware layer of its own, so a middleware of the project that is sync or async follows Django's rules for adapting it.
+A long async workload lives behind a task queue or an ordinary Django view rather than in the routed page tree.
 
 The one exception is the realtime layer.
 ``TopicStream`` provides broker-backed delivery over SSE and WebSocket, and its topic transforms and upstream handlers may be async, while ``PatchEventStream`` remains the manual source escape hatch.
@@ -36,8 +43,9 @@ A full page streams each settled boundary into the document, and a streamed part
 A zone itself is a reload region rather than a boundary, so a slow zone with no deferred boundary inside holds its response, and a component deferred with ``load``, ``visible`` or ``manual`` fills through a later client round trip.
 A boundary delivers server-rendered HTML and nothing more, so there is no hydration of client components.
 The ``<head>`` is not flushed before the shell renders, since it carries the assets the body render collects.
-The framework bundles no skeleton, spinner or progress bar, so the loading UI is whatever ``loading.djx`` or ``DEFER["LOADING"]`` renders.
+The framework bundles no skeleton, spinner or progress bar, so the loading UI is whatever ``loading.djx`` or ``BOUNDARIES["LOADING_TEMPLATE"]`` renders.
 A job runs on a thread or on the server loop, never in another process or sub-interpreter, because it needs the live request and its database connection.
+The limits of streamed boundaries, from broken markup to a third-party script in a navigation, are listed in :ref:`topics-boundaries-streaming-limits`.
 
 Realtime offers WebSocket first when the process mounts the socket through the built-in ``WebSocketApp`` under ASGI, and SSE otherwise.
 Both transports carry server-authored notifications from server to client, and form actions remain the path for client mutations.

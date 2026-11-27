@@ -6,23 +6,17 @@ import reprlib
 from typing import TYPE_CHECKING, Final, cast
 
 from django.conf import settings
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 from django.template.defaulttags import CsrfTokenNode
 from django.template.library import SimpleNode
 from django.urls import NoReverseMatch
 from django.utils import translation
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
     RunMemo,
     first_visit,
-    get_router_manager,
+    get_route_manager,
     iter_scanned_page_pairs,
 )
 from next.conf.defaults import USER_SETTING
@@ -75,11 +69,11 @@ def _middleware_index(middleware: Iterable[object], base: str) -> int | None:
 
 def _page_modules() -> Iterator[tuple[Path, object, object]]:
     """Yield each routed `page.py` that imports, with its `cache` and `headers`."""
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return
     seen: set[Path] = set()
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         for _url_path, page_path in iter_scanned_page_pairs(router):
             if not first_visit(page_path, seen):
                 continue
@@ -194,11 +188,11 @@ _shared_paths: RunMemo[tuple[Path, ...]] = RunMemo()
 
 def shared_page_paths() -> tuple[Path, ...]:
     """Return each routed page a shared cache may store, built once per check run."""
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return ()
     return _shared_paths.get(
-        router_manager,
+        route_manager,
         lambda: tuple(
             path for path, cache, _headers in _page_modules() if _declared_shared(cache)
         ),

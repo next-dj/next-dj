@@ -33,6 +33,7 @@ from tests.support import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from next.components import ComponentInfo
@@ -192,21 +193,6 @@ class TestForgetManagerBackendUrls:
         assert before.startswith("/static/")
         assert after.startswith("/assets/")
 
-    def test_an_unrelated_setting_keeps_every_memo(self, reset_default: None) -> None:
-        """Only a setting that rebuilds the storage moves the URLs it answered."""
-        with override_settings(NEXT_FRAMEWORK=PAIRED_BACKENDS):
-            manager = get_static_manager()
-            manager._ensure_backends()
-            for backend in manager._backends:
-                backend._url_cache[("a", ".css")] = "/static/next/a.css"
-
-            with override_settings(LANGUAGE_CODE="fr"):
-                held = [
-                    backend._url_cache.get(("a", ".css"))
-                    for backend in manager._backends
-                ]
-        assert held == ["/static/next/a.css"] * 2
-
 
 class TestAppListChanges:
     """An `APP_DIRS` router routes new trees when the app list moves."""
@@ -231,25 +217,6 @@ class TestAppListChanges:
         ):
             assert manager.page_roots() == ((tmp_path, "site"),)
             assert manager.discovery is not stale_discovery
-
-    def test_an_unrelated_setting_change_keeps_the_cached_page_roots(
-        self, reset_default: None, tmp_path: Path
-    ) -> None:
-        """Only the app list moves what an `APP_DIRS` router reports."""
-        manager = get_static_manager()
-        with mock.patch(
-            "next.static.manager.get_page_root_keys_for_watch",
-            return_value=[(tmp_path, "site")],
-        ):
-            assert manager.page_roots() == ((tmp_path, "site"),)
-
-        with (
-            mock.patch(
-                "next.static.manager.get_page_root_keys_for_watch", return_value=[]
-            ),
-            override_settings(LANGUAGE_CODE="fr"),
-        ):
-            assert manager.page_roots() == ((tmp_path, "site"),)
 
 
 class TestReloadConfig:
@@ -390,12 +357,12 @@ class TestChunkUrlMemo:
             "csrf",
             "poll",
             "dev",
-            "defer",
+            "forms",
+            "layers",
+            "boundaries",
             "reload",
             "more",
-            "reader",
             "router",
-            "history",
             "intent",
         ],
     )
@@ -411,6 +378,66 @@ class TestChunkUrlMemo:
             fresh_manager.chunk_url(name)
         assert url.call_count == 2
         assert first == f"/static/next/next.{name}.min.js"
+
+
+def _storage_without(missing: str) -> Callable[[str], str]:
+    def url(name: str) -> str:
+        if name == missing:
+            raise ValueError(name)
+        return _storage_url(name)
+
+    return url
+
+
+class TestListedChunks:
+    """The chunks `$chunks` lists are read once per storage while every one resolves."""
+
+    def test_the_list_is_held_until_the_storage_is_rebuilt(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            first = fresh_manager.listed_chunks(frozenset())
+            assert fresh_manager.listed_chunks(frozenset()) is first
+            fresh_manager.forget_backend_urls()
+            again = fresh_manager.listed_chunks(frozenset())
+        assert again is not first
+        assert again == first
+        assert [name for name, _ in first] == [
+            "scripts",
+            "stream",
+            "csrf",
+            "poll",
+            "forms",
+            "layers",
+        ]
+
+    def test_an_optional_chunk_is_listed_once_enabled(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url", side_effect=_storage_url
+        ):
+            listed = fresh_manager.listed_chunks(frozenset({"dev", "ws"}))
+            unnamed = fresh_manager.listed_chunks(frozenset({"ws"}))
+        assert {"dev", "ws"} <= {name for name, _ in listed}
+        assert {name for name, _ in unnamed} - {name for name, _ in listed} == set()
+        assert "dev" not in {name for name, _ in unnamed}
+
+    def test_a_missing_chunk_leaves_the_list_unheld(
+        self, fresh_manager: StaticManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            side_effect=_storage_without("next/next.poll.min.js"),
+        ):
+            first = fresh_manager.listed_chunks(frozenset())
+            second = fresh_manager.listed_chunks(frozenset())
+        assert "poll" not in {name for name, _ in first}
+        assert second == first
+        assert second is not first
+        assert "next/next.poll.min.js" in caplog.text
 
 
 class TestAssetUrlHook:

@@ -10,19 +10,28 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from django.conf import settings
 
+from next.deps.introspect import (
+    HINT_ERRORS,
+    cached_signature,
+    cached_type_hints,
+    prepared_parameter,
+)
+from next.deps.resolver import current_resolver
 from next.deps.scope import bridged_scope
 from next.introspect import callable_name
 
 from .graph import Blame, Phase, arun_phase, closure, merged, run_phase
-from .guards import scans_as_guard
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    import inspect
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
     from django.http import HttpRequest
 
+    from next.deps.providers import ParameterProvider
+    from next.deps.resolver import DependencyResolver
     from next.static.serializers import JsContextSerializer
 
     from .context import ContextResult
@@ -70,7 +79,7 @@ _MOVED: Final = _Moved.TOKEN
 
 
 @dataclass(frozen=True, slots=True)
-class Plan:
+class SplitPlan:
     """The split of one page's context graph across its deferred page boundaries.
 
     `levels` holds the directory each step feeds, `-1` for the page's own body.
@@ -128,9 +137,69 @@ def step_levels(graph: ContextGraph, inherited: tuple[int, ...]) -> tuple[int, .
     return tuple(_level(step, inherited) for step in graph.steps)
 
 
-def _guarding(graph: ContextGraph, index: int) -> bool:
+def _claimants(
+    param: inspect.Parameter, providers: Iterable[ParameterProvider]
+) -> Iterable[ParameterProvider]:
+    """Yield the providers that may fill `param`, up to the one that claims it."""
+    for provider in providers:
+        verdict = provider.static_can_handle(param)
+        if verdict is False:
+            continue
+        yield provider
+        if verdict is True:
+            return
+
+
+def _filling_answers(
+    provider: ParameterProvider,
+    param: inspect.Parameter,
+    resolver: DependencyResolver,
+    seen: set[int],
+) -> bool:
+    """Return whether filling `param` through `provider` answers a status."""
+    answers = getattr(provider, "static_answers", None)
+    if answers is not None and answers(param) is True:
+        return True
+    reach = getattr(provider, "static_reach", None)
+    reached = () if reach is None else reach(param)
+    return any(answers_by_contract(target, resolver, seen) for _key, target in reached)
+
+
+def answers_by_contract(
+    func: Callable[..., object],
+    resolver: DependencyResolver,
+    seen: set[int] | None = None,
+) -> bool:
+    """Return whether a provider filling `func` answers a status by its contract.
+
+    A `DObject` row answers 404, directly or through the dependency a parameter reaches.
+    """
+    held = set() if seen is None else seen
+    if id(func) in held:
+        return False
+    held.add(id(func))
+    try:
+        signature = cached_signature(func)
+    except (ValueError, TypeError):
+        return False
+    try:
+        hints = cached_type_hints(func)
+    except HINT_ERRORS:
+        hints = {}
+    for name, raw in signature.parameters.items():
+        if resolver.skips(raw):
+            continue
+        param, _fallback = prepared_parameter(name, raw, hints)
+        for provider in _claimants(param, resolver.providers):
+            if _filling_answers(provider, param, resolver, held):
+                return True
+    return False
+
+
+def _guarding(graph: ContextGraph, index: int, resolver: DependencyResolver) -> bool:
+    """Return whether a step runs before the shell, declared or by provider contract."""
     step = graph.steps[index]
-    return step.guard if step.guard is not None else scans_as_guard(step.func)
+    return step.guard or answers_by_contract(step.func, resolver)
 
 
 def _prefix(last: int) -> frozenset[int]:
@@ -143,7 +212,10 @@ def guard_steps(graph: ContextGraph) -> frozenset[int]:
 
     A boundary reload runs them before its component, as if every step were gated.
     """
-    guards = [index for index in range(len(graph.steps)) if _guarding(graph, index)]
+    resolver = current_resolver()
+    guards = [
+        index for index in range(len(graph.steps)) if _guarding(graph, index, resolver)
+    ]
     return _prefix(guards[-1]) if guards else _NONE
 
 
@@ -180,7 +252,7 @@ def plan_gating(
     deferred: tuple[PageBoundary, ...],
     metadata: frozenset[str],
     file_path: Path,
-) -> Plan:
+) -> SplitPlan:
     """Split `graph` between the shell and the jobs of `deferred`, nearest first.
 
     A guard moves to the shell with every step before it, as a run without gating has.
@@ -189,7 +261,10 @@ def plan_gating(
     owners = tuple(_owner(level, deferred) for level in levels)
     shell = {index for index, owner in enumerate(owners) if owner is None}
     gated = frozenset(range(len(owners))) - shell
-    guards = tuple(index for index in sorted(gated) if _guarding(graph, index))
+    resolver = current_resolver()
+    guards = tuple(
+        index for index in sorted(gated) if _guarding(graph, index, resolver)
+    )
     if guards:
         shell |= _prefix(guards[-1])
     pulled = _pulled(graph, metadata, shell)
@@ -202,7 +277,7 @@ def plan_gating(
     split = Split(frozenset(shell), tuple(jobs), guards, tuple(pulled), promoted)
     if settings.DEBUG:
         _note_promoted(graph, split, file_path)
-    return Plan(graph, levels, deferred, split, inherited)
+    return SplitPlan(graph, levels, deferred, split, inherited)
 
 
 def _note_promoted(graph: ContextGraph, split: Split, file_path: Path) -> None:
@@ -210,8 +285,9 @@ def _note_promoted(graph: ContextGraph, split: Split, file_path: Path) -> None:
     steps = graph.steps
     for index in split.guards:
         logger.debug(
-            "The @context callable %r of %s can answer 404, 403 or 400, so it runs "
-            "before the shell of its deferred page boundary.",
+            "The @context callable %r of %s is declared guard=True or takes a "
+            "parameter that answers 404 or 403, so it runs before the shell of its "
+            "deferred page boundary.",
             callable_name(steps[index].func),
             file_path,
         )
@@ -235,7 +311,10 @@ def _note_promoted(graph: ContextGraph, split: Split, file_path: Path) -> None:
 
 
 def note_slow(
-    plan: Plan, file_path: Path, timings: Mapping[int, float] | None, elapsed: float
+    plan: SplitPlan,
+    file_path: Path,
+    timings: Mapping[int, float] | None,
+    elapsed: float,
 ) -> None:
     """Log at `DEBUG` the slowest callable of a shell that took past `SLOW_SHELL`."""
     if timings is None or not timings or elapsed <= SLOW_SHELL:
@@ -273,7 +352,7 @@ class ShellGate:
     `merged` is what they merge into, `kept` the processor keys a job never sets.
     """
 
-    plan: Plan
+    plan: SplitPlan
     chain: BoundaryChain
     file_path: Path
     request: HttpRequest | None
@@ -368,9 +447,10 @@ __all__ = [
     "GATE_KEY",
     "SLOW_SHELL",
     "Advanced",
-    "Plan",
     "ShellGate",
     "Split",
+    "SplitPlan",
+    "answers_by_contract",
     "guard_steps",
     "note_slow",
     "plan_gating",

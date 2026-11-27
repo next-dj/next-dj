@@ -5,7 +5,7 @@ from django.contrib.auth.backends import ModelBackend
 from django.http import HttpRequest
 from django.http.response import HttpResponseBase
 
-from next.suspense.render import current_frame
+from next.defer.render import current_frame
 
 
 DOWN = "down"

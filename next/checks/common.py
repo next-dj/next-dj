@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
@@ -22,13 +22,13 @@ from next.discovery import (
     first_visit,
     get_page_roots,
     get_pages_directories,
-    get_router_manager,
+    get_route_manager,
     iter_page_tree_component_folders,
     iter_scanned_page_pairs,
     iter_scanned_pages,
     page_tree_skip_names,
     read_page_roots,
-    reset_router_manager_cache,
+    reset_route_manager_cache,
 )
 from next.errors import AsyncCallableError
 
@@ -116,23 +116,6 @@ def registration_file_errors(
     return errors
 
 
-class Declaring(Protocol):
-    """One declaring call as written, which says why it applies nothing."""
-
-    def problem(self) -> str | None:
-        """Return why the call declares nothing, `None` when it applies."""
-
-
-class DeclarationLedger(Protocol):
-    """The calls each module made, and the modules outside the kind a call is for."""
-
-    def loaded(self) -> Iterable[tuple[Path, Declaring]]:
-        """Yield each file with the call its latest load made."""
-
-    def outside(self) -> Iterable[Path]:
-        """Return each module that made the call outside the kind it is for."""
-
-
 @dataclass(frozen=True, slots=True)
 class DeclaringCall:
     """How the errors of one declaring call, as `page.router()`, read."""
@@ -151,28 +134,19 @@ def misplaced_error(subject: DeclaringCall, file_path: Path) -> CheckMessage:
         f"sits outside a {subject.module} and so names no {subject.owner}.",
         hint=f"Call {subject.call} at the top of the {subject.module} of the "
         f"{subject.owner} it is for.",
-        obj=settings,
+        obj=str(file_path),
         id=subject.code,
     )
 
 
-def declaration_errors(
-    subject: DeclaringCall, ledger: DeclarationLedger, *, consequence: str, hint: str
+def misplaced_errors(
+    subject: DeclaringCall, outside: Iterable[Path]
 ) -> list[CheckMessage]:
-    """Report each call of `ledger` that applies nothing or sits outside its module."""
-    errors: list[CheckMessage] = [
-        Error(
-            f"{subject.call} in {file_path} declares {subject.declares}, since "
-            f"{problem}. {consequence}",
-            hint=hint,
-            obj=settings,
-            id=subject.code,
-        )
-        for file_path, declaration in ledger.loaded()
-        if (problem := declaration.problem()) is not None
-    ]
-    errors.extend(misplaced_error(subject, file_path) for file_path in ledger.outside())
-    return errors
+    """Report each call made outside the module kind it is for.
+
+    A call off the top level or outside its shape raised already, so this is all left.
+    """
+    return [misplaced_error(subject, file_path) for file_path in outside]
 
 
 def async_refusal(error: BaseException | None) -> AsyncCallableError | None:
@@ -255,8 +229,6 @@ def _by_paths(record: tuple[Path, Path, str]) -> tuple[str, str, str]:
 
 __all__ = [
     "WALK_HINT",
-    "DeclarationLedger",
-    "Declaring",
     "DeclaringCall",
     "PageRootsError",
     "RegistrationSubject",
@@ -265,7 +237,6 @@ __all__ = [
     "async_refusal",
     "callable_problem",
     "class_problem",
-    "declaration_errors",
     "discover_page_registrations",
     "error_for_wrong_shape",
     "errors_for_unknown_keys",
@@ -273,16 +244,17 @@ __all__ = [
     "forget_run_memos",
     "get_page_roots",
     "get_pages_directories",
-    "get_router_manager",
+    "get_route_manager",
     "import_backend_class",
     "iter_page_tree_component_folders",
     "iter_scanned_page_pairs",
     "iter_scanned_pages",
     "misplaced_error",
+    "misplaced_errors",
     "page_tree_skip_names",
     "raw_scope",
     "read_page_roots",
     "registration_file_errors",
-    "reset_router_manager_cache",
+    "reset_route_manager_cache",
     "takes_request",
 ]

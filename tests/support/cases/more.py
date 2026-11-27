@@ -64,7 +64,7 @@ COMPILE_ERROR_CASES: tuple[CompileErrorCase, ...] = (
         "param-not-slug", '{% more zone="z" next=n param="p q" %}', "ASCII slug"
     ),
     CompileErrorCase(
-        "param-restore", '{% more zone="z" next=n param="restore" %}', "restored"
+        "param-restore", '{% more zone="z" next=n param="_restore" %}', "restored"
     ),
     CompileErrorCase(
         "margin-unit", '{% more zone="z" next=n margin="4em" %}', "margin= must be"

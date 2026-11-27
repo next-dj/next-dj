@@ -1,3 +1,4 @@
+import re
 from collections.abc import Generator
 from io import StringIO
 from types import ModuleType
@@ -269,6 +270,34 @@ class TestBadDevServer:
     def test_skipped_checks_leave_a_command_error_naming_it(self) -> None:
         with pytest.raises(CommandError, match=r"MissingServer.*\(next\.E212\)$"):
             _run("--skip-checks")
+
+
+class TestMisshapenSettings:
+    """A value outside its shape reaches the developer as a check, never a traceback."""
+
+    @pytest.mark.parametrize(
+        ("key", "value", "address"),
+        [
+            ("STATIC_VERSION", 5, "['STATIC_VERSION']"),
+            ("DEFER", {"MAX_DEPTH": 0}, "['DEFER']['MAX_DEPTH']"),
+            ("BOUNDARIES", {"KINDS": "x"}, "['BOUNDARIES']['KINDS']"),
+            ("ROUTER", {"PREFETCH": "hover"}, "['ROUTER']['PREFETCH']"),
+            ("COMPRESSION", {"MIN_SIZE": -1}, "['COMPRESSION']['MIN_SIZE']"),
+        ],
+        ids=["top-level", "defer", "boundaries", "router", "compression"],
+    )
+    def test_the_checks_name_it_before_the_server_starts(
+        self, uvicorn, key, value, address
+    ) -> None:
+        with (
+            override_next_settings(**{key: value}),
+            pytest.raises(SystemCheckError) as raised,
+        ):
+            _run(skip_checks=False)
+        report = str(raised.value)
+        assert f"(next.E076) NEXT_FRAMEWORK{address} must be" in report
+        assert re.findall(r"\(\w+\.E\d+\)", report) == ["(next.E076)"]
+        assert uvicorn == []
 
 
 class TestChecksBeforeWsgi:

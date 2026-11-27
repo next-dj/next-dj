@@ -3,9 +3,9 @@ from django.contrib.auth.models import AnonymousUser
 from django.template import Context, Template
 from django.template.base import UNKNOWN_SOURCE
 
-from next.defer import stable_key
-from next.suspense.assembly import finish
-from next.suspense.components import deferring
+from next.boundaries.calls import stable_key
+from next.defer.assembly import finish
+from next.defer.components import deferring
 from tests.components.sites import FIRST_KEY, ComponentSite, Member, template_engine
 from tests.support.boundaries import run_sequentially
 

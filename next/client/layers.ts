@@ -1,29 +1,27 @@
-// Modal layers over the native <dialog> with accept/dismiss semantics. Targets
-// resolve top layer down, so a zone inside the modal wins over the same-named
+// Modal layers over the native <dialog> with accept/dismiss semantics, the layers chunk.
+// Targets resolve top layer down, so a zone inside the modal wins over the same-named
 // page zone underneath. The native modality lives behind an injectable adapter.
 
-import { defaultPopState } from "./adapters";
-import { isPlainActivation } from "./events";
 import { readHead, writeHead } from "./head";
 import type { Head, HeadPatch } from "./head";
 import { fireRemoved } from "./morph";
 import type { Navigation } from "./navigation";
 import {
+  ATTR_ACCEPTED,
   ATTR_BUSY,
+  ATTR_DIALOG,
   ATTR_ZONE,
   HEADER_ORIGIN,
   HEADER_ZONE,
   cssEscape,
-  fire,
-  markBusy,
-  pageKey,
   currentUrl as pageUrl,
+  fire,
+  pageKey,
 } from "./protocol";
+import type { markBusy } from "./protocol";
 import type { FetchAdapter } from "./wire";
 
-const LAYER_ATTR = "data-next-layer";
-const ACCEPTED_ATTR = "data-next-accepted";
-const TOASTS_ATTR = "data-next-toasts";
+const ACCEPTED_ATTR = ATTR_ACCEPTED;
 
 /** The detail passed to close, an accept result or a dismiss reason. */
 export interface LayerCloseEvent {
@@ -87,18 +85,19 @@ export interface LayerDeps {
     headers?: Record<string, string>;
     send?: FetchAdapter | undefined;
   }) => Promise<unknown>;
-  // The hand-over of a prefetched layer body, absent until the prefetch loads.
-  take?: () => ((href: string, zone: string) => FetchAdapter | undefined) | undefined;
+  // The hand-over of a prefetched layer body, undefined until the prefetch serves it.
+  take?: (href: string, zone: string) => FetchAdapter | undefined;
   // Abort a queued fetch, so a closed layer drops its body in flight.
   abort?: (key: string) => void;
   document?: Document;
   dialog?: DialogAdapter;
   // The navigation shared with the applier, which announces the push a layer holds.
   navigation: Navigation;
-  // The Back-gesture seam, a popstate past the top layer's pushed URL closes it.
-  popstate?: PopStateAdapter;
+  // The busy marks of the runtime, whose state a chunk copy of protocol would not share.
+  mark: typeof markBusy;
 }
 
+/** The `Next.partial.layers` surface, the runtime's stack over the layers chunk. */
 export interface LayerStack {
   /** Resolve a zone, scoped to the page that fetched it or the top-down walk. */
   resolveZone(name: string, root: ParentNode, page?: string): Element | null;
@@ -120,21 +119,24 @@ export interface LayerStack {
   toast(text: string, variant: string): Element;
   /** The number of open layers. */
   size(): number;
-  /** Install the delegated click handler, returning its teardown. */
-  install(doc: Document): () => void;
+}
+
+/** The layers the chunk builds, which the runtime's stack hands every call to. */
+export interface Layers extends Omit<LayerStack, "toast"> {
+  /** Close every layer above the address bar's URL after a popstate. */
+  popstate(): void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
+export type LayersFactory = (deps: LayerDeps) => Layers;
+
 /** The layer stack over the seams in deps, defaulting each to a platform adapter. */
-export function createLayers(deps: LayerDeps): LayerStack {
+export function createLayers(deps: LayerDeps): Layers {
   const doc = deps.document ?? document;
   const dialogAdapter = deps.dialog ?? nativeDialog();
-
-  const popstate = deps.popstate ?? defaultPopState();
   const stack: Layer[] = [];
   let serial = 0;
-  let toastHost: HTMLElement | null = null;
-  let detach: (() => void) | null = null;
 
   function topLayer(): Layer | undefined {
     return stack[stack.length - 1];
@@ -235,7 +237,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const sharesOwner = seed !== undefined && top?.pushedUrl === seed.owner;
     if (sharesOwner && !top.committed) return;
     const dialog = doc.createElement("dialog");
-    dialog.setAttribute("data-next-dialog", "");
+    dialog.setAttribute(ATTR_DIALOG, "");
     const root = doc.createElement("div");
     // A seeded zone names the container before the request, so the first morph
     // resolves the target normally. An empty open leaves the shell unnamed.
@@ -248,7 +250,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const host = currentUrl();
     const back = host + doc.location.hash;
     // Taken while the address bar still shows the host the prefetch was asked over.
-    const send = seed && deps.take?.()?.(seed.href, seed.zone);
+    const send = seed && deps.take?.(seed.href, seed.zone);
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
@@ -269,7 +271,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     stack.push(layer);
     // Both ends go busy before the request, and the opener's flag is what the
     // double-click guard above reads. Nothing awaits before this line.
-    const release = markBusy([opener, root]);
+    const release = deps.mark([opener, root]);
     // A body fetch needs both the URL and the zone. A zone-only or empty open
     // shows a bare modal for a later patch to seed, with no history entry.
     try {
@@ -389,7 +391,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
   }
 
   // Back closes every layer above the bar's URL and answers the page left on screen.
-  function onPopstate(): void {
+  function popstate(): void {
     const base = stack[0]?.host;
     deps.navigation.popped(() => {
       for (;;) {
@@ -405,61 +407,11 @@ export function createLayers(deps: LayerDeps): LayerStack {
     });
   }
 
-  function toast(text: string, variant: string): Element {
-    const item = doc.createElement("div");
-    item.setAttribute("data-next-toast", variant);
-    // textContent, never innerHTML, so a server toast string cannot smuggle markup.
-    item.textContent = text;
-    toastTray().append(item);
-    emit("next:toast", { text, variant, element: item });
-    return item;
-  }
-
-  // The page's tray wins top layer down, so the runtime builds one only as a fallback.
-  function toastTray(): Element {
-    const tray = resolveSelector(`[${TOASTS_ATTR}]`, doc);
-    if (tray !== null) return tray;
-    toastHost = doc.createElement("div");
-    toastHost.setAttribute(TOASTS_ATTR, "");
-    toastHost.setAttribute("aria-live", "polite");
-    doc.body.append(toastHost);
-    return toastHost;
-  }
-
   function emit(event: string, detail: Record<string, unknown>): void {
     fire(doc, deps.dispatch, event, detail);
   }
 
-  function onClick(event: Event): void {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const opener = target.closest(`[${LAYER_ATTR}]`);
-    if (!(opener instanceof HTMLElement)) return;
-    const zone = opener.getAttribute(LAYER_ATTR);
-    const href = opener.getAttribute("href");
-    // No zone or no href is a plain navigation, the no-JS path is untouched.
-    if (zone === null || zone === "" || href === null || href === "") return;
-    if (!isPlainActivation(event, opener)) return;
-    event.preventDefault();
-    // A second click while the first is in flight is dropped, no double dialog.
-    if (opener.hasAttribute(ATTR_BUSY)) return;
-    void open(opener, href, zone);
-  }
-
-  function install(target: Document): () => void {
-    if (detach !== null) detach();
-    // One controller owns every listener this install binds, so no teardown can
-    // drift from the flags its addEventListener used.
-    const controller = new AbortController();
-    target.addEventListener("click", onClick, { signal: controller.signal });
-    // The popstate teardown runs on the same signal, so one abort removes both.
-    const stopPopstate = popstate.listen(onPopstate);
-    controller.signal.addEventListener("abort", stopPopstate, { once: true });
-    detach = () => controller.abort();
-    return detach;
-  }
-
-  return {
+  const exposed = {
     resolveZone,
     resolveSelector,
     urlFor,
@@ -468,20 +420,15 @@ export function createLayers(deps: LayerDeps): LayerStack {
     open,
     close,
     head,
-    toast,
     size: () => stack.length,
-    install,
-    _reset() {
-      for (const layer of topDown()) remove(layer);
-      toastHost?.remove();
-      toastHost = null;
-      // Drop the click and popstate listeners install bound, so a reset leaves none.
-      if (detach !== null) {
-        detach();
-        detach = null;
-      }
-    },
+    popstate,
+  } satisfies Omit<Layers, "_reset"> as Layers;
+
+  TEST: exposed._reset = () => {
+    for (const layer of topDown()) remove(layer);
   };
+
+  return exposed;
 }
 
 /** The default modality over the native <dialog>, showModal traps focus for us. */

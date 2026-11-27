@@ -7,12 +7,13 @@ import { lazyChunk } from "./chunks";
 import type { Lazy, LazyModule } from "./chunks";
 import { mintCsrf } from "./csrf";
 import type { Fill } from "./drain";
+import { createForms } from "./forms";
+import { createLayers } from "./layers";
 import { createPoller } from "./poll";
 import type { HistoryHost } from "./router";
 import { createSse } from "./sse";
 import { createWebSocketTransport } from "./ws";
 import type { VisibilityAdapter } from "./sse";
-import type { DeferArm } from "./triggers";
 import type { Clock } from "./wire";
 
 // Holds every pending timer with a working clearTimeout, so a duplicate chain
@@ -114,20 +115,27 @@ export function unloaded<T>(key: string): Lazy<T> & { tags(): number } {
   return { ...chunk, tags };
 }
 
-// The modules of the stream, ws, csrf, and poll chunks, as createPartial takes them.
+// The modules of the chunks createPartial takes, each one already loaded.
 export const chunkModules = {
   context: () => ({}),
   stream: landed(createSse),
   ws: landed(createWebSocketTransport),
   csrf: landed(mintCsrf),
   poll: landed(createPoller),
-  defer: landed<DeferArm>(() => undefined),
+  forms: landed(createForms),
+  layers: landed(createLayers),
 };
 
 // The seams the router hands its chunks, each a quiet default a suite overrides.
 export function historyHost(over: Partial<HistoryHost> = {}): HistoryHost {
   return {
     partial: {} as HistoryHost["partial"],
+    headers: vi.fn<HistoryHost["headers"]>(),
+    parse: vi.fn<HistoryHost["parse"]>(),
+    serve: vi.fn<HistoryHost["serve"]>(),
+    hook: vi.fn<HistoryHost["hook"]>(),
+    scripts: vi.fn<HistoryHost["scripts"]>(() => Promise.reject(new Error("none"))),
+    nonce: undefined,
     settings: vi.fn<HistoryHost["settings"]>().mockReturnValue({}),
     context: vi.fn<HistoryHost["context"]>().mockReturnValue({}),
     region: vi.fn<HistoryHost["region"]>(),

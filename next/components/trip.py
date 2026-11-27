@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Annotated, Final, Protocol, runtime_checkable
 
-from next.caches import BoundedCache
-from next.defer import DeferMode
+from next.boundaries.options import DeferMode
+from next.caches import ROUTES, SETTINGS, BoundedCache
 from next.deps.introspect import cached_signature, cached_type_hints
 from next.utils import app_holding, resolve_base_dir
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-    from next.defer import BoundaryFailure
+    from next.boundaries.failures import BoundaryFailure
 
     from .info import ComponentInfo
 
@@ -30,10 +30,12 @@ CLIENT_MODES: Final = frozenset({DeferMode.LOAD, DeferMode.VISIBLE, DeferMode.MA
 
 type Overrides = tuple[tuple[str, object], ...]
 
-_types: BoundedCache[Path, tuple[tuple[int, int], Mapping[str, object]]] = (
-    BoundedCache()
+_types: BoundedCache[Path, tuple[tuple[int, int], Mapping[str, object]]] = BoundedCache(
+    depends=()
 )
-_anchored: BoundedCache[tuple[Path, Path], str | None] = BoundedCache()
+_anchored: BoundedCache[tuple[Path, Path], str | None] = BoundedCache(
+    depends=(SETTINGS, ROUTES)
+)
 
 
 class _Miss(Enum):

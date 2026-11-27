@@ -43,6 +43,10 @@ The depth tells what runs.
 A press is the expensive one, since a job that started is not interrupted when the visitor leaves.
 That is why a touch or a pen keeps the shell depth by default.
 
+Each trigger reaches only the URLs the router owns.
+Under the default ``ROUTER["SCOPE"]`` of ``"pages"`` those are the URLs a page answers, so a plain Django view, the admin site, or a file is never prefetched, see :ref:`topics-router-scope`.
+Under ``"all"`` every same-origin link is prefetched, and a view with an effect on ``GET`` needs ``data-next-router="off"`` on its links or its prefix in ``ROUTER["EXCLUDE"]``.
+
 Choose the mode for the project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -56,6 +60,7 @@ Choose the mode for the project
 ``PREFETCH`` is ``"intent"`` by default, which prefetches on hover and keyboard focus.
 ``"viewport"`` adds every link that scrolls into view, which suits a site of mostly reading pages and read-only renders, and costs a render per link in view.
 ``"off"`` stops every automatic prefetch, and ``Next.router.prefetch(url)`` still works.
+
 ``PRESS`` is ``"mouse"`` by default, ``"all"`` sends the full request for every pointer, and ``"off"`` keeps every press at the shell depth.
 ``PREFETCH = "off"`` turns the press off as well, since the press follows every other prefetch rule.
 ``PREFETCH_DELAY``, ``PREFETCH_TTL``, ``PREFETCH_SHELL_TTL``, and ``PREFETCH_ENTRIES`` tune the wait and the cache, see :doc:`/content/ref/settings`.
@@ -100,7 +105,7 @@ Count visits in the browser
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A prefetch answer can be shown to the visitor with no further request, a complete one after a hover and a full one after a press.
-On the server a press is a prefetch too, one whose ``request.next.depth`` is ``Depth.FULL``.
+On the server a press is a prefetch too, one whose ``request.next.depth`` is ``PrefetchDepth.FULL``.
 A counter that skips prefetches therefore misses every visit a prefetch answer served, and a counter that counts them also counts the hovers and the presses that never became clicks.
 Count in the browser on ``router:commit``, which fires for each navigation the router commits, and leave the first load of a document to the server.
 A page that must act on a visit on the server declares ``page.router(prefetch=False)`` instead, see :ref:`topics-router-prefetch-visits`.

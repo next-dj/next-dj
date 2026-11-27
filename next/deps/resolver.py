@@ -12,12 +12,12 @@ from dataclasses import replace
 from functools import partial
 from operator import attrgetter
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, cast, overload, override
+from typing import TYPE_CHECKING, Any, Final, cast, overload, override
 
 from django.utils.functional import SimpleLazyObject, empty
 
 from next.backends import resolve_setting_class
-from next.caches import LruCache
+from next.caches import ROUTES, LruCache, instance_dict
 from next.introspect import describe_callable, is_async_callable, is_coroutine_callable
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, request_memo
@@ -41,7 +41,6 @@ from .plan import (
     compile_plan,
     edge_deferred,
     empty_async_plan,
-    name_key,
     replay,
 )
 from .providers import ParameterProvider, RegisteredParameterProvider
@@ -50,11 +49,11 @@ from .runner import bridge, run_isolated
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
     from django.http import HttpRequest
 
-    from .plan import AsyncParameterFiller, AwaitedEntry
+    from .plan import AsyncParameterFiller, AwaitedEntry, Source
 
 
 logger = logging.getLogger(__name__)
@@ -67,9 +66,11 @@ _CLAIMED_RESERVED = frozenset(
 _UNCLAIMED_RESERVED: tuple[str, ...] = tuple(RESERVED_KEYS - _CLAIMED_RESERVED)
 
 _compiling: ContextVar[tuple[tuple[str, bool], ...]] = ContextVar(
-    "_compiling", default=()
+    "next_deps_compiling", default=()
 )
-_shares: ContextVar[frozenset[str]] = ContextVar("_shares", default=frozenset())
+_shares: ContextVar[frozenset[str]] = ContextVar(
+    "next_deps_shares", default=frozenset()
+)
 
 
 class _Described:
@@ -246,8 +247,61 @@ def _finish_call(
     return target(**kwargs)
 
 
+_NO_SEGMENT = Blocking(())
+
+
+def sharing() -> bool:
+    """Return whether the request memo of this context shares any key at all."""
+    memo = request_memo.get()
+    if memo is None:
+        return False
+    return memo.share_all or bool(memo.shared) or bool(_shares.get())
+
+
+def _shares_any(keys: frozenset[str]) -> bool:
+    """Return whether the request memo of this context shares one of `keys`."""
+    memo = request_memo.get()
+    if memo is None:
+        return False
+    return (
+        memo.share_all
+        or not keys.isdisjoint(memo.shared)
+        or not keys.isdisjoint(_shares.get())
+    )
+
+
+async def _seeded[T](
+    resolver: DependencyResolver,
+    sources: tuple[Source, ...],
+    fill: Callable[[ResolutionContext], T],
+    context: ResolutionContext,
+) -> T:
+    """Resolve the shared keys of `sources` on the loop, then run `fill` after them."""
+    await resolver.aseed_sources(sources, context)
+    return await run_isolated(fill, context)
+
+
+def _segment[T](
+    resolver: DependencyResolver,
+    step: Blocking,
+    fill: Callable[[ResolutionContext], T],
+    context: ResolutionContext,
+) -> Awaitable[T]:
+    """Run `fill` as the segment of `step`, once the shared keys it reaches resolve.
+
+    A segment reaching no shared key costs no coroutine beyond the runner's own.
+    """
+    keys = step.keys
+    if keys and _shares_any(keys):
+        return _seeded(resolver, step.sources, fill, context)
+    return run_isolated(fill, context)
+
+
 async def _areplay(
-    plan: AsyncPlan, context: ResolutionContext, target: Callable[..., object] | None
+    resolver: DependencyResolver,
+    plan: AsyncPlan,
+    context: ResolutionContext,
+    target: Callable[..., object] | None,
 ) -> tuple[dict[str, Any], object]:
     """Replay `plan`, calling a sync `target` inside its last blocking segment.
 
@@ -257,23 +311,24 @@ async def _areplay(
     for entry in plan.pure:
         result[entry[0]] = replay(entry, context)
     steps = plan.steps
-    tail: InjectionPlan = ()
+    tail = _NO_SEGMENT
     if target is not None and steps:
         last = steps[-1]
         if isinstance(last, Blocking):
-            tail = last.entries
+            tail = last
             steps = steps[:-1]
     for step in steps:
         if isinstance(step, Blocking):
-            values = await run_isolated(partial(_fill_segment, step.entries), context)
+            fill = partial(_fill_segment, step.entries)
+            values = await _segment(resolver, step, fill, context)
             for entry, value in zip(step.entries, values, strict=True):
                 result[entry[0]] = value
         else:
             await _await_group(step.entries, context, result)
     if target is None:
         return result, None
-    value = await run_isolated(partial(_finish_call, tail, result, target), context)
-    return result, value
+    finish = partial(_finish_call, tail.entries, result, target)
+    return result, await _segment(resolver, tail, finish, context)
 
 
 def forget_dep_caches(**kwargs: object) -> None:
@@ -722,9 +777,13 @@ class DependencyResolver:
                 _Described(func),
                 exc_info=True,
             )
-            plan = compile_async_plan(sig, {}, self._providers, self.skips, target)
+            plan = compile_async_plan(
+                sig, {}, self._providers, self.skips, target, self._planned
+            )
             return plan, False
-        plan = compile_async_plan(sig, hints, self._providers, self.skips, target)
+        plan = compile_async_plan(
+            sig, hints, self._providers, self.skips, target, self._planned
+        )
         return plan, True
 
     def _aplan_for(self, func: Callable[..., Any]) -> AsyncPlan:
@@ -751,26 +810,32 @@ class DependencyResolver:
             self._aplan_cache[key] = (providers_version, dependencies_version, plan)
         return plan
 
+    def _planned(self, func: Callable[..., Any], key: str | None) -> AsyncPlan | None:
+        """Return the async plan of `func` reached under `key`, None for an open cycle.
+
+        A cycle a deferring provider may break is left to the runtime stack check.
+        """
+        mark = describe_callable(func) if key is None else key
+        chain = _compiling.get()
+        deferred = edge_deferred()
+        keys = [named for named, _deferred in chain]
+        if mark in keys:
+            if not deferred and not any(edge for _named, edge in chain):
+                raise DependencyCycleError([*keys[keys.index(mark) :], mark])
+            return None
+        token = _compiling.set((*chain, (mark, deferred)))
+        try:
+            return self._aplan_for(func)
+        finally:
+            _compiling.reset(token)
+
     def awaits(self, func: Callable[..., Any], *, key: str) -> bool:
         """Return whether calling `func` on the async path awaits anything.
 
         A cycle a deferring provider may break awaits, left to the runtime stack check.
         """
-        chain = _compiling.get()
-        deferred = edge_deferred()
-        keys = [named for named, _deferred in chain]
-        if key in keys:
-            if not deferred and not any(edge for _named, edge in chain):
-                raise DependencyCycleError([*keys[keys.index(key) :], key])
-            name_key(key, None)
-            return True
-        token = _compiling.set((*chain, (key, deferred)))
-        try:
-            plan = self._aplan_for(func)
-        finally:
-            _compiling.reset(token)
-        name_key(key, plan)
-        return plan.awaits
+        plan = self._planned(func, key)
+        return plan is None or plan.awaits
 
     def awaits_dependency(self, name: str) -> bool:
         """Return whether the binding of `name` awaits anything, False for none."""
@@ -789,6 +854,29 @@ class DependencyResolver:
             return await compute()
         shared = memo.share_all or key in memo.shared or key in _shares.get()
         return await memo.scope.resolve(key, compute, shared=shared)
+
+    async def aseed_sources(
+        self, sources: tuple[Source, ...], context: ResolutionContext
+    ) -> None:
+        """Resolve through the request scope each of `sources` it shares, in order.
+
+        A segment fills a private copy of the cache, so only the scope runs a key once.
+        """
+        memo = request_memo.get()
+        if memo is None:
+            return
+        share_all = memo.share_all
+        declared = memo.shared
+        counted = _shares.get()
+        for key, func in sources:
+            if share_all or key in declared or key in counted:
+                await self.acall_factory(func, key, context)
+
+    async def aseed(self, func: Callable[..., Any], context: ResolutionContext) -> None:
+        """Resolve the shared keys `func` reaches, for its sync resolve in a segment."""
+        sources = self._aplan_for(func).sources
+        if sources:
+            await self.aseed_sources(sources, context)
 
     async def aresolve_callable_dependency(
         self,
@@ -836,7 +924,7 @@ class DependencyResolver:
         plan = self._aplan_for(func)
         token = _enter_shares(plan)
         try:
-            result, _value = await _areplay(plan, context, None)
+            result, _value = await _areplay(self, plan, context, None)
         except UnknownDependencyError as exc:
             exc.attribute_to(func)
             raise
@@ -866,7 +954,7 @@ class DependencyResolver:
         target = None if plan.target is Colour.ASYNC else func
         token = _enter_shares(plan)
         try:
-            kwargs, value = await _areplay(plan, context, target)
+            kwargs, value = await _areplay(self, plan, context, target)
         except UnknownDependencyError as exc:
             exc.attribute_to(func)
             raise
@@ -883,6 +971,12 @@ class DependencyResolver:
 # One holder every reference points at, so none keeps a resolver the setting replaced.
 _holder = SimpleLazyObject(DependencyResolver)
 resolver: DependencyResolver = cast("DependencyResolver", _holder)
+
+_HANDLE: Final = instance_dict(_holder)
+"""The instance dict the holder keeps `_wrapped` in, read without the proxy lookup.
+
+Every swap writes the same dict, so a read here sees it at no `LazyObject` cost.
+"""
 
 RegisteredParameterProvider.resolver = resolver
 
@@ -903,10 +997,11 @@ def current_resolver() -> DependencyResolver:
 
     Read on a render path, as an attribute off the holder is a forwarded call.
     """
-    if _holder._wrapped is empty:
+    built = _HANDLE["_wrapped"]
+    if built is empty:
         _holder._setup()
-    built: DependencyResolver = _holder._wrapped
-    return built
+        built = _HANDLE["_wrapped"]
+    return cast("DependencyResolver", built)
 
 
 def apply_resolver_setting() -> None:
@@ -923,3 +1018,6 @@ def apply_resolver_setting() -> None:
 def reapply_resolver_setting(**kwargs: object) -> None:
     """Rebuild the resolver singleton when the framework settings change."""
     apply_resolver_setting()
+
+
+ROUTES.attach(forget_dep_caches)

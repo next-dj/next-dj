@@ -4,18 +4,24 @@
 import {
   defaultClock,
   defaultConfirm,
-  defaultHistory,
   defaultObserver,
   defaultVisibility,
 } from "./adapters";
 import type { HistoryAdapter } from "./apply";
 import type { LazyModule } from "./chunks";
 import { inPlace, isPlainActivation } from "./events";
+import { FORMS } from "./forms";
+import type { Forms, FormsFactory } from "./forms";
 import type { PollFactory, Poller } from "./poll";
 import {
   ATTR_ACTION,
-  ATTR_POLL,
+  ATTR_CONFIRM,
+  ATTR_DEFER,
   ATTR_KEY,
+  ATTR_MARGIN,
+  ATTR_MERGE,
+  ATTR_POLL,
+  ATTR_TARGET,
   ATTR_TRANSPORT,
   HEADER_MERGE,
   HEADER_ORIGIN,
@@ -26,17 +32,8 @@ import type { Diagnostics, WireTransport } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
-const TRIGGER_ATTR = "data-next-trigger";
-const TARGET_ATTR = "data-next-target";
-const DEBOUNCE_ATTR = "data-next-debounce";
-const MARGIN_ATTR = "data-next-margin";
-export const MERGE_ATTR = "data-next-merge";
-const CONFIRM_ATTR = "data-next-confirm";
-export const DEFER_ATTR = "data-next-defer";
+const CONFIRM_ATTR = ATTR_CONFIRM;
 export const POLL_ATTR = ATTR_POLL;
-const VALIDATE_ATTR = "data-next-validate";
-// X-Next-Validate is local to inline validation, not shared protocol vocabulary.
-const HEADER_VALIDATE = "X-Next-Validate";
 
 const ARMED = 0;
 const IDLE = 1;
@@ -82,7 +79,8 @@ export interface TriggerDeps {
   visibility?: VisibilityAdapter;
   // The zone poller, exported by the poll chunk.
   poll: LazyModule<PollFactory>;
-  defer: LazyModule<DeferArm>;
+  // The inline validation and filter forms, exported by the forms chunk.
+  forms?: LazyModule<FormsFactory> | undefined;
   // The owning page of an element. Absent, poll GETs read the address bar.
   pageUrl?: (el: Element) => string;
   // The host page of the layer an element sits in, answered by the layer stack. Absent,
@@ -108,7 +106,10 @@ export interface Triggers {
   scan(root: ParentNode): void;
   submission(form: HTMLFormElement, submitter?: Element | null): TriggerRequest;
   sender(el: Element): Pick<TriggerRequest, "owner" | "headers">;
+  /** Send once per entry of an element into view, the sentinels' watch. */
+  watch: Watch;
   sweep(): void;
+  /** Harness seam, absent from the shipped bundles. */
   _reset(): void;
 }
 
@@ -116,10 +117,14 @@ export type Sent = ReturnType<TriggerDeps["fetch"]>;
 
 export type Watch = (el: Element, send: () => Sent) => void;
 
-export type DeferArm = (watch: Watch) => void;
-
-function transportOf(form: Element): WireTransport {
+/** The transport a form's requests ride, `any` letting them over the open socket. */
+export function transportOf(form: Element): WireTransport {
   return form.getAttribute(ATTR_TRANSPORT) === "any" ? "any" : "http";
+}
+
+/** The zone an interactive element targets, named on itself or an ancestor. */
+export function targetZone(el: Element): string | null {
+  return el.closest(`[${ATTR_TARGET}]`)?.getAttribute(ATTR_TARGET) ?? null;
 }
 
 /** Build the trigger handlers over the given seams. */
@@ -129,19 +134,17 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const observer = deps.observer ?? defaultObserver();
   const confirm = deps.confirm ?? defaultConfirm();
   const visibility = deps.visibility ?? defaultVisibility();
-  const history = deps.history ?? defaultHistory();
   const diagnostics = deps.diagnostics ?? ((): undefined => undefined);
-  // Per-element debounce handles, keyed by the element.
-  const timers = new WeakMap<Element, number>();
   // Sentinels already armed, so a re-inserted element fires no second GET.
   const activated = new WeakSet<Element>();
   // Live observer teardowns by element. A reveal drops its own entry once its request
   // settles, so an infinite scroll does not pile them up for the life of the page.
   const observed = new Map<Element, () => void>();
-  // A form's pending validation. The debounce timer and the POST it would send share
-  // one controller, so a submit cancels whichever of the two is pending.
-  const validations = new WeakMap<HTMLFormElement, AbortController>();
   let detach: (() => void) | null = null;
+  // The forms once their chunk has loaded, and the document the triggers listen on.
+  let forms: Forms | undefined;
+  let listened: Document | undefined;
+  let detachForms: (() => void) | undefined;
 
   function here(): string {
     return currentUrl(doc);
@@ -149,84 +152,14 @@ export function createTriggers(deps: TriggerDeps): Triggers {
 
   const pageUrl = deps.pageUrl ?? (() => here());
   const layerHost = deps.layerHost ?? ((): undefined => undefined);
-  const rewrite = deps.rewrite ?? ((): boolean => true);
 
-  // The abortable queue key of inline validation, shared by sender and canceller.
-  function validateQueue(uid: string | null): string {
-    return `validate:${uid ?? ""}`;
+  function adopt(factory: FormsFactory): void {
+    forms ??= factory({ ...deps, document: doc, clock });
+    if (listened && !detachForms) detachForms = forms.install(listened);
   }
 
-  // Drop the form's pending validation, timer and in-flight request alike.
-  function cancelValidation(form: HTMLFormElement): void {
-    const pending = validations.get(form);
-    if (pending === undefined) return;
-    validations.delete(form);
-    pending.abort();
-  }
-
-  // Arm the next validation of a form, superseding the one before it.
-  function armValidation(form: HTMLFormElement): AbortSignal {
-    cancelValidation(form);
-    const controller = new AbortController();
-    const queue = validateQueue(form.getAttribute(ATTR_ACTION));
-    controller.signal.addEventListener("abort", () => deps.abort(queue), {
-      once: true,
-    });
-    validations.set(form, controller);
-    return controller.signal;
-  }
-
-  // The debounce of a validation, held by the same signal as its request, so an
-  // abort before the timer fires leaves nothing behind to send.
-  function afterDelay(ms: number, signal: AbortSignal, run: () => void): void {
-    if (ms === 0) {
-      run();
-      return;
-    }
-    const handle = clock.setTimeout(run, ms);
-    signal.addEventListener("abort", () => clock.clearTimeout(handle), { once: true });
-  }
-
-  // Resolve the zone an interactive element targets, on itself or an ancestor.
-  function targetZone(el: Element): string | null {
-    const owner = el.closest(`[${TARGET_ATTR}]`);
-    return owner?.getAttribute(TARGET_ATTR) ?? null;
-  }
-
-  function debounceMs(el: Element): number {
-    const raw = el.closest(`[${DEBOUNCE_ATTR}]`)?.getAttribute(DEBOUNCE_ATTR);
-    const ms = raw === null || raw === undefined ? 0 : Number.parseInt(raw, 10);
-    return Number.isFinite(ms) && ms > 0 ? ms : 0;
-  }
-
-  // A fresh event clears the element's pending timer, so only the last of a burst runs.
-  function debounced(el: Element, ms: number, run: () => void): void {
-    const pending = timers.get(el);
-    if (pending !== undefined) clock.clearTimeout(pending);
-    if (ms === 0) {
-      run();
-      return;
-    }
-    timers.set(el, clock.setTimeout(run, ms));
-  }
-
-  // A filter form auto-submits as a zone GET, replaceState syncs the bar, not a visit.
-  // URL owns the join, so an action carrying its own query never grows a second one.
-  function submitFilter(form: HTMLFormElement, zone: string): void {
-    // URLSearchParams takes string pairs, so file fields are walked out.
-    const pairs: [string, string][] = [];
-    for (const [name, value] of new FormData(form)) {
-      if (typeof value === "string") pairs.push([name, value]);
-    }
-    // An absent or empty action resolves to the page itself, query included, and
-    // assigning the search then drops whatever the old query held.
-    const target = new URL(form.getAttribute("action") ?? "", doc.baseURI);
-    target.search = new URLSearchParams(pairs).toString();
-    const url = target.pathname + target.search;
-    if (rewrite(form, url)) history.replace(url);
-    // The wire stamps X-Next-Zone from request.zone, triggers pass intent, not headers.
-    void deps.fetch({ url, zone });
-  }
+  const landed = deps.forms?.get();
+  if (landed) adopt(landed);
 
   // A pagination link or sentinel GETs the next page with a merge intent.
   function paginate(el: Element, zone: string): Sent {
@@ -234,57 +167,8 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (href === null || href === "") return;
     // Every caller reaches paginate via a [data-next-merge] match, so this never runs.
     /* v8 ignore next */
-    const merge = el.getAttribute(MERGE_ATTR) ?? "append";
+    const merge = el.getAttribute(ATTR_MERGE) ?? "append";
     return deps.fetch({ url: href, zone, headers: { [HEADER_MERGE]: merge } });
-  }
-
-  // Inline validation on blur. The FormData drops file fields so a multipart form
-  // does not re-upload on every blur, and the abortable queue collapses a burst.
-  function validateField(form: HTMLFormElement, field: string): void {
-    const uid = form.getAttribute(ATTR_ACTION);
-    const zone = targetZone(form);
-    const data = new FormData();
-    for (const [name, value] of new FormData(form)) {
-      if (value instanceof File) continue;
-      data.append(name, value);
-    }
-    void deps.fetch({
-      url: form.getAttribute("action") ?? here(),
-      method: "POST",
-      // The validate POST carries a body but mutates nothing. It uses an abortable
-      // queue of its own, never the uid lock, so a new blur or submit aborts it.
-      queue: validateQueue(uid),
-      // The declared zone, so the server can answer a validation with a zone morph.
-      ...(zone !== null ? { zone } : {}),
-      abortable: true,
-      headers: { [HEADER_VALIDATE]: field },
-      body: data,
-      transport: transportOf(form),
-    });
-  }
-
-  function onInput(event: Event): void {
-    const el = event.target;
-    if (!(el instanceof Element)) return;
-    const trigger = el.closest(`[${TRIGGER_ATTR}]`);
-    if (!(trigger instanceof HTMLElement)) return;
-    const want = trigger.getAttribute(TRIGGER_ATTR);
-    if (want !== event.type) return;
-    const zone = targetZone(trigger);
-    if (zone === null) return;
-    const form = trigger.closest("form");
-    if (!(form instanceof HTMLFormElement)) return;
-    debounced(form, debounceMs(trigger), () => submitFilter(form, zone));
-  }
-
-  function onBlur(event: Event): void {
-    const el = event.target;
-    if (!(el instanceof HTMLElement)) return;
-    const form = el.closest(`form[${VALIDATE_ATTR}]`);
-    if (!(form instanceof HTMLFormElement)) return;
-    const name = el.getAttribute("name");
-    if (name === null || name === "") return;
-    afterDelay(debounceMs(form), armValidation(form), () => validateField(form, name));
   }
 
   // Bound in the bubble phase, so a submit the form's own handlers cancelled stays so.
@@ -310,7 +194,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   ): TriggerRequest {
     // A submit cancels its own validation, the debounce armed on blur as much as the
     // request already sent, so no late answer morphs the form over this response.
-    cancelValidation(form);
+    forms?.cancel(form);
     // The pressed button's formaction overrides the form's, as on a native submit.
     const url =
       submitter?.getAttribute("formaction") ?? form.getAttribute("action") ?? here();
@@ -362,9 +246,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function onClick(event: Event): void {
     const el = event.target;
     if (!(el instanceof Element)) return;
-    const link = el.closest(`a[${MERGE_ATTR}][${TARGET_ATTR}]`);
+    const link = el.closest(`a[${ATTR_MERGE}][${ATTR_TARGET}]`);
     if (link === null || !isPlainActivation(event, link)) return;
-    const zone = link.getAttribute(TARGET_ATTR);
+    const zone = link.getAttribute(ATTR_TARGET);
     if (zone !== null && zone !== "") {
       event.preventDefault();
       void paginate(link, zone);
@@ -405,7 +289,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
         else if (state === ARMED) fire();
         else if (state === LEFT) state = OWED;
       },
-      el.getAttribute(MARGIN_ATTR) ?? "",
+      el.getAttribute(ATTR_MARGIN) ?? "",
     );
     if (state === DONE) stop();
     else observed.set(el, finish);
@@ -429,11 +313,18 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function scan(root: ParentNode): void {
     diagnostics()?.attrs(root);
     // Only marked sentinels arm an observer, plain pagination links stay clicks.
-    for (const el of matching(root, `[${MERGE_ATTR}][${DEFER_ATTR}]`)) {
-      const zone = el.getAttribute(TARGET_ATTR);
+    for (const el of matching(root, `[${ATTR_MERGE}][${ATTR_DEFER}]`)) {
+      const zone = el.getAttribute(ATTR_TARGET);
       if (zone === null || activated.has(el)) continue;
       activated.add(el);
       watch(el, () => paginate(el, zone));
+    }
+    // A page with no validated form or trigger never fetches the forms.
+    if (!forms && deps.forms && matching(root, FORMS).length > 0) {
+      const started = epoch;
+      deps.forms.whenLoaded((factory) => {
+        if (started === epoch) adopt(factory);
+      });
     }
     // A page with no poll zone never fetches the poller.
     const polled = matching(root, `[${POLL_ATTR}]`);
@@ -450,10 +341,12 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     // from the capture flag its addEventListener used.
     const controller = new AbortController();
     const signal = controller.signal;
-    target.addEventListener("input", onInput, { signal });
-    target.addEventListener("change", onInput, { signal });
-    // Capture for blur, which does not bubble.
-    target.addEventListener("blur", onBlur, { capture: true, signal });
+    listened = target;
+    detachForms = forms?.install(target);
+    signal.addEventListener("abort", () => {
+      detachForms?.();
+      detachForms = listened = undefined;
+    });
     target.addEventListener("submit", onSubmit, { signal });
     target.addEventListener("click", onConfirm, { capture: true, signal });
     target.addEventListener("click", onClick, { signal });
@@ -465,23 +358,27 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     return detach;
   }
 
-  deps.defer.whenLoaded((arm) => arm(watch));
-
-  return {
+  const exposed = {
     install,
     scan,
     submission,
     sender,
+    watch,
     sweep() {
       for (const [el, finish] of observed) if (!el.isConnected) finish();
     },
-    _reset() {
+  } satisfies Omit<Triggers, "_reset"> as Triggers;
+
+  TEST: {
+    exposed._reset = () => {
       for (const finish of observed.values()) finish();
       poller?._reset();
       epoch += 1;
       // Also remove the listeners install added, so a reset instance handles no event.
       detach?.();
       detach = null;
-    },
-  };
+    };
+  }
+
+  return exposed;
 }

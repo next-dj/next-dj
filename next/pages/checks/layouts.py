@@ -4,16 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django.core.checks import (
-    CheckMessage,
-    Error,
-    Tags,
-    Warning as DjangoWarning,
-    register,
-)
+from django.core.checks import CheckMessage, Error, Tags, Warning as DjangoWarning
 
-from next.checks import NEXT
-from next.checks.common import first_visit, get_router_manager, iter_scanned_page_pairs
+from next.checks import NEXT, register
+from next.checks.common import first_visit, get_route_manager, iter_scanned_page_pairs
 from next.components.sources import get_components_manager
 from next.pages.loaders import layout_chain, layout_root_scan, template_source
 from next.pages.placeholder import (
@@ -30,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from next.urls import RouterBackend, RouterManager
+    from next.urls import PageBackend, RouteManager
 
 
 def _missing_placeholder_warning(layout_file: Path) -> CheckMessage:
@@ -117,25 +111,25 @@ def _check_layout_file(layout_file: Path) -> list[CheckMessage]:
     return messages
 
 
-def _scanned_pages(router_manager: RouterManager) -> Iterator[Path]:
+def _scanned_pages(route_manager: RouteManager) -> Iterator[Path]:
     """Yield the `page.py` of every page every router scans."""
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         yield from _router_pages(router)
 
 
-def _router_pages(router: RouterBackend) -> Iterator[Path]:
+def _router_pages(router: PageBackend) -> Iterator[Path]:
     """Yield the `page.py` of every page one router scans."""
     for _url_path, page_path in iter_scanned_page_pairs(router):
         yield page_path
 
 
-def iter_layout_ancestry(router_manager: RouterManager) -> Iterator[Path]:
+def iter_layout_ancestry(route_manager: RouteManager) -> Iterator[Path]:
     """Yield once each layout composition wraps a scanned page in, a root ending it.
 
     That covers layouts of folders without a page, `DIRS` roots and any above the tree.
     """
     seen: set[Path] = set()
-    for page_path in _scanned_pages(router_manager):
+    for page_path in _scanned_pages(route_manager):
         for layout_file in layout_chain(page_path):
             if first_visit(layout_file, seen):
                 yield layout_file
@@ -144,20 +138,20 @@ def iter_layout_ancestry(router_manager: RouterManager) -> Iterator[Path]:
 @register(Tags.templates, NEXT)
 def check_layout_templates(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Check every `layout.djx` for its placeholder, root marker and document shell."""
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
 
     messages: list[CheckMessage] = []
-    for layout_file in iter_layout_ancestry(router_manager):
+    for layout_file in iter_layout_ancestry(route_manager):
         messages.extend(_check_layout_file(layout_file))
     return messages
 
 
-def _stray_markers(router_manager: RouterManager) -> Iterator[CheckMessage]:
+def _stray_markers(route_manager: RouteManager) -> Iterator[CheckMessage]:
     """Yield a report for each page and component template that holds a marker."""
     seen: set[Path] = set()
-    for page_path in _scanned_pages(router_manager):
+    for page_path in _scanned_pages(route_manager):
         template = page_path.parent / "template.djx"
         if template.exists() and first_visit(template, seen):
             yield from _stray_marker_report(template, "Page template")
@@ -180,10 +174,10 @@ def check_root_marker_outside_layouts(
     *args: object, **kwargs: object
 ) -> list[CheckMessage]:
     """Warn about a root marker in a `template.djx` or component template."""
-    router_manager, _init_errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _init_errors = get_route_manager()
+    if route_manager is None:
         return []
-    return list(_stray_markers(router_manager))
+    return list(_stray_markers(route_manager))
 
 
 __all__ = [

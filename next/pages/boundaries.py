@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Final
 
 from django.template import Origin, Template, TemplateDoesNotExist
 
-from next.boundaries import contained, render_boundaries
-from next.caches import PageCache
+from next.boundaries.failures import contained
+from next.boundaries.scope import render_boundaries
+from next.caches import SETTINGS, PageCache
 from next.components.registry import error_files
 from next.diagnostics import mark_degraded
 from next.seeding import JS_CONTEXT_KEY, JS_SERIALIZERS_KEY
-from next.utils import is_within, resolve_base_dir
 
 from .loaders import template_source
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-    from next.defer import ErrorKind
+    from next.boundaries.failures import ErrorKind
 
     from .context import ContextResult
     from .graph import Blame
@@ -43,7 +43,7 @@ SHELL_KEY: Final = "_next_page_shell"
 
 
 @dataclass(frozen=True, slots=True)
-class ErrorShell:
+class ErrorContext:
     """The context the error UI of a page boundary renders in, cut at its directory.
 
     Only inherited groups at or above the cut reach it, never what failed below.
@@ -92,7 +92,7 @@ class Caught:
 
     boundary: ErrorBoundary
     error: Exception
-    shell: ErrorShell | None = None
+    shell: ErrorContext | None = None
 
 
 _NO_SCOPE: Final[AbstractContextManager[None]] = nullcontext()
@@ -116,14 +116,6 @@ def mark_failed(kind: ErrorKind) -> None:
     mark_degraded(kind.status or FAILED_STATUS)
 
 
-def shown_source(source: Path) -> str:
-    """Return `source` relative to `BASE_DIR` when it lies inside, as DEBUG shows it."""
-    base = resolve_base_dir()
-    if base is not None and is_within(source, base):
-        return str(source.relative_to(base))
-    return str(source)
-
-
 def catching(
     chain: BoundaryChain, exc: BaseException, level: int = -1
 ) -> ErrorBoundary | None:
@@ -136,7 +128,7 @@ def catching(
     return next((guard for guard in chain.errors if guard.level > level), None)
 
 
-_COMPILED: PageCache[Path, tuple[str, Template]] = PageCache()
+_COMPILED: PageCache[Path, tuple[str, Template]] = PageCache(depends=(SETTINGS,))
 
 
 def boundary_template(source: Path) -> Template:
@@ -158,10 +150,9 @@ __all__ = [
     "FAILURE_KEY",
     "SHELL_KEY",
     "Caught",
-    "ErrorShell",
+    "ErrorContext",
     "boundary_scope",
     "boundary_template",
     "catching",
     "mark_failed",
-    "shown_source",
 ]

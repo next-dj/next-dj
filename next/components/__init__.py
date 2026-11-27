@@ -19,12 +19,12 @@ from .facade import (
     render_component,
 )
 from .info import ComponentInfo
-from .loading import ModuleCache, ModuleLoader
 from .manager import (
     ComponentsManager,
     components_manager,
     register_components_folder_from_router_walk,
 )
+from .modules import ModuleCache, ModuleLoader
 from .registry import ComponentRegistry, ComponentVisibilityResolver
 from .renderers import (
     CachedComponentTemplateLoader,

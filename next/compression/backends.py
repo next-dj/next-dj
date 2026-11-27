@@ -3,8 +3,9 @@
 A codec whose library does not import stays unavailable, never an import error.
 """
 
-import functools
 import importlib
+import secrets
+import struct
 import threading
 import zlib
 from abc import ABC, abstractmethod
@@ -12,10 +13,16 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import ClassVar, Final, Protocol, override
 
+from next.caches import pure_cache
+
 from .errors import CodecUnavailableError
 
 
 _GZIP_WBITS: Final = 31
+_RAW_WBITS: Final = -15
+_GZIP_HEAD: Final = b"\x1f\x8b\x08"
+_GZIP_TAIL: Final = b"\x00\x00\x00\x00\x00\xff"
+_FNAME: Final = b"\x08"
 _STDLIB_ZSTD: Final = "compression.zstd"
 
 ZSTD_WINDOW_LIMIT: Final = 23
@@ -53,7 +60,7 @@ class Compressor(ABC):
 class CompressionBackend(ABC):
     """One codec, its content-coding token, its ranges and the compressors it builds.
 
-    `windows` is `None` for a fixed window, and `optional` marks an extra's codec.
+    `windows` is `None` for a fixed window, and `extra` names the extra of its library.
     """
 
     coding: ClassVar[str]
@@ -62,19 +69,22 @@ class CompressionBackend(ABC):
     window: ClassVar[int | None] = None
     windows: ClassVar[tuple[int, int] | None] = None
     resets: ClassVar[bool] = True
-    optional: ClassVar[bool] = False
+    extra: ClassVar[str | None] = None
 
     @abstractmethod
     def available(self) -> bool:
         """Return whether the codec library imports, cached per process."""
 
     @abstractmethod
-    def create(self, level: int, window: int | None) -> Compressor:
-        """Return a fresh compressor for one stream."""
+    def create(self, level: int, window: int | None, *, pad: int = 0) -> Compressor:
+        """Return a fresh compressor for one stream.
+
+        `pad` is the most random bytes the codec adds where its decoders skip them.
+        """
 
     @abstractmethod
-    def compress_once(self, data: bytes, level: int) -> bytes:
-        """Compress one buffered body in one shot."""
+    def compress_once(self, data: bytes, level: int, *, pad: int = 0) -> bytes:
+        """Compress one buffered body in one shot, padded as `create` pads a stream."""
 
     def decoder(self) -> Decoder:
         """Return a fresh decoder of one stream or body, for tests and tools."""
@@ -92,13 +102,13 @@ def _first_module(*names: str) -> ModuleType | None:
     return None
 
 
-@functools.cache
+@pure_cache()
 def zstd_library() -> ModuleType | None:
     """Return `compression.zstd`, else `zstandard`, else `None`, once per process."""
     return _first_module(_STDLIB_ZSTD, "zstandard")
 
 
-@functools.cache
+@pure_cache()
 def brotli_library() -> ModuleType | None:
     """Return `brotli`, else `brotlicffi`, else `None`, once per process."""
     return _first_module("brotli", "brotlicffi")
@@ -155,30 +165,59 @@ class _Contexts(threading.local):
         self.held: dict[int, OneShot] = {}
 
 
+def _gzip_header(pad: int) -> bytes:
+    """Return a gzip member header, its `FNAME` field a random length up to `pad`.
+
+    Browsers skip the name, so each response length carries noise against BREACH.
+    """
+    size = secrets.randbelow(pad + 1) if pad > 0 else 0
+    if not size:
+        return _GZIP_HEAD + b"\x00" + _GZIP_TAIL
+    return _GZIP_HEAD + _FNAME + _GZIP_TAIL + b"a" * size + b"\x00"
+
+
+def _gzip_trailer(crc: int, size: int) -> bytes:
+    """Return the CRC-32 and the input size that end a gzip member."""
+    return struct.pack("<II", crc, size & 0xFFFFFFFF)
+
+
 class _GzipCompressor(Compressor):
-    """A gzip stream over `zlib`, one member per response."""
+    """A gzip stream over raw `zlib` deflate, one member per response."""
 
-    __slots__ = ("_stream",)
+    __slots__ = ("_crc", "_head", "_size", "_stream")
 
-    def __init__(self, level: int) -> None:
-        """Open the deflate stream with the gzip header and trailer."""
-        self._stream = zlib.compressobj(level, zlib.DEFLATED, _GZIP_WBITS)
+    def __init__(self, level: int, pad: int) -> None:
+        """Open the deflate stream, the header held for the first output."""
+        self._stream = zlib.compressobj(level, zlib.DEFLATED, _RAW_WBITS)
+        self._head = _gzip_header(pad)
+        self._crc = 0
+        self._size = 0
+
+    def _out(self, data: bytes) -> bytes:
+        head = self._head
+        if not head:
+            return data
+        self._head = b""
+        return head + data
 
     @override
     def compress(self, data: bytes) -> bytes:
-        return self._stream.compress(data)
+        self._crc = zlib.crc32(data, self._crc)
+        self._size += len(data)
+        return self._out(self._stream.compress(data))
 
     @override
     def flush(self) -> bytes:
-        return self._stream.flush(zlib.Z_SYNC_FLUSH)
+        return self._out(self._stream.flush(zlib.Z_SYNC_FLUSH))
 
     @override
     def finish(self) -> bytes:
-        return self._stream.flush(zlib.Z_FINISH)
+        tail = self._stream.flush(zlib.Z_FINISH)
+        return self._out(tail) + _gzip_trailer(self._crc, self._size)
 
     @override
     def reset(self) -> bytes:
-        return self._stream.flush(zlib.Z_FULL_FLUSH)
+        return self._out(self._stream.flush(zlib.Z_FULL_FLUSH))
 
 
 class GzipBackend(CompressionBackend):
@@ -193,12 +232,13 @@ class GzipBackend(CompressionBackend):
         return True
 
     @override
-    def create(self, level: int, window: int | None) -> Compressor:
-        return _GzipCompressor(level)
+    def create(self, level: int, window: int | None, *, pad: int = 0) -> Compressor:
+        return _GzipCompressor(level, pad)
 
     @override
-    def compress_once(self, data: bytes, level: int) -> bytes:
-        return zlib.compress(data, level, wbits=_GZIP_WBITS)
+    def compress_once(self, data: bytes, level: int, *, pad: int = 0) -> bytes:
+        body = zlib.compress(data, level, wbits=_RAW_WBITS)
+        return _gzip_header(pad) + body + _gzip_trailer(zlib.crc32(data), len(data))
 
     @override
     def decoder(self) -> Decoder:
@@ -242,20 +282,20 @@ class BrotliBackend(CompressionBackend):
     window = 18
     windows = (10, 24)
     resets = False
-    optional = True
+    extra = "brotli"
 
     @override
     def available(self) -> bool:
         return brotli_library() is not None
 
     @override
-    def create(self, level: int, window: int | None) -> Compressor:
+    def create(self, level: int, window: int | None, *, pad: int = 0) -> Compressor:
         return _BrotliCompressor(
             _required(brotli_library(), self.coding), level, window
         )
 
     @override
-    def compress_once(self, data: bytes, level: int) -> bytes:
+    def compress_once(self, data: bytes, level: int, *, pad: int = 0) -> bytes:
         library = _required(brotli_library(), self.coding)
         compressed: bytes = library.compress(data, quality=level)
         return compressed
@@ -363,13 +403,14 @@ def _zstd_context(library: ModuleType, level: int) -> OneShot:
 
 
 class ZstdBackend(CompressionBackend):
-    """The `zstd` codec, `compression.zstd` from Python 3.14 and `zstandard` below."""
+    """The `zstd` codec, `compression.zstd` from Python 3.14, the `zstd` extra below."""
 
     coding = "zstd"
     level = 3
     levels = (1, 22)
     window = 17
     windows = (10, ZSTD_WINDOW_LIMIT)
+    extra = "zstd"
 
     def __init__(self) -> None:
         """Hold no one-shot context until a thread compresses its first body."""
@@ -380,13 +421,13 @@ class ZstdBackend(CompressionBackend):
         return zstd_library() is not None
 
     @override
-    def create(self, level: int, window: int | None) -> Compressor:
+    def create(self, level: int, window: int | None, *, pad: int = 0) -> Compressor:
         """Return a stream compressor, its window never above `ZSTD_WINDOW_LIMIT`."""
         capped = ZSTD_WINDOW_LIMIT if window is None else min(window, ZSTD_WINDOW_LIMIT)
         return _zstd_stream(_required(zstd_library(), self.coding), level, capped)
 
     @override
-    def compress_once(self, data: bytes, level: int) -> bytes:
+    def compress_once(self, data: bytes, level: int, *, pad: int = 0) -> bytes:
         held = self._contexts.held
         context = held.get(level)
         if context is None:

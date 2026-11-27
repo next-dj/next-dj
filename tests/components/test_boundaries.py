@@ -8,21 +8,24 @@ from django.template import Context, Engine, Template, TemplateSyntaxError
 from django.template.base import NodeList
 from django.test import Client, override_settings
 
+from next.boundaries.failures import ErrorKind
+from next.boundaries.options import BoundaryOptions, WrapperTag
 from next.components import ComponentInfo, components_manager
+from next.components.access import decide
 from next.components.boundaries import Attempt, current_attempt
 from next.components.facade import render_component_error
-from next.components.loading import ModuleLoader
+from next.components.modules import ModuleLoader
 from next.components.placement import Placement
 from next.components.renderers import (
     CachedComponentTemplateLoader,
     ComponentTemplateLoader,
-    _granted,
+    _shown,
 )
-from next.defer import BoundaryOptions, ErrorKind, WrapperTag
+from next.components.tags import ComponentNode
 from next.diagnostics import degraded
+from next.permissions.markers import Denial, Requirement
 from next.static import ScriptInjectionPolicy, StaticCollector
 from next.static.assets import StaticAsset
-from next.templatetags.components import ComponentNode
 from tests.components.sites import BOOM, ComponentSite, info_in, template_engine
 from tests.support import routed
 from tests.support.access import COMPONENTS
@@ -32,6 +35,7 @@ from tests.support.trees import layout_root, templated_page
 
 _RULE = SimpleNamespace(requirements=("auth.view_user",))
 _NO_RULE = SimpleNamespace(requirements=())
+_DENIAL = Denial("login", Requirement("login", Path("/c/component.py")))
 
 
 def _error_body(html: str) -> str:
@@ -72,9 +76,9 @@ class TestPropagation:
             site.render("{% component 'inner' %}")
 
     def test_children_fail_inside_their_owner(self, site: ComponentSite) -> None:
-        site.add("card", "<c>{{ children }}</c>", "[{{ props.title }}]")
+        site.add("card", "<c>{{ children }}</c>", "[{{ title }}]")
         html = site.render(
-            "{% #component 'card' title='T' %}{{ boom }}{% /component %}", props="leak"
+            "{% #component 'card' title='T' %}{{ boom }}{% /component %}", title="leak"
         )
         assert _error_body(html) == "[T]"
 
@@ -113,7 +117,9 @@ class TestPropagation:
         site.add("card", "{{ boom }}", loading="...")
         html = site.render("{% component 'card' %}")
         assert html.startswith('<div id="b-')
-        assert html.endswith('data-next-state="error" data-next-error="error"></div>')
+        assert 'data-next-state="error" data-next-error="error"' in html
+        assert html.endswith("data-next-retry>Try again</button></div></div>")
+        assert '<div role="alert">' in html
 
     def test_a_successful_error_boundary_renders_without_a_wrapper(
         self, site: ComponentSite
@@ -133,7 +139,7 @@ class TestErrorTemplateContext:
             "card",
             "{{ boom }}",
             "{{ page_var }}|{{ error.kind }}|{{ error.digest|length }}|"
-            "{{ props.title }}|{{ title }}|{{ error.message }}",
+            "{{ title }}|{{ props }}|{{ error.message }}",
         )
         html = site.render("{% component 'card' title='T' %}", page_var="V")
         assert _error_body(html) == "V|error|12|T||"
@@ -143,7 +149,7 @@ class TestErrorTemplateContext:
     ) -> None:
         builder = SimpleNamespace(policy=ScriptInjectionPolicy.DISABLED)
         monkeypatch.setattr(
-            "next.components.fallback.get_static_manager",
+            "next.static.ports.get_static_manager",
             lambda: SimpleNamespace(script_builder=lambda: builder),
         )
         site.add("card", "{{ boom }}", "{{ error.retry }}")
@@ -298,7 +304,7 @@ class TestAttempt:
         granted: bool,
         shown: bool,
     ) -> None:
-        monkeypatch.setattr("next.components.boundaries.declared", lambda *_: _RULE)
+        monkeypatch.setattr("next.components.access.declared", lambda *_: _RULE)
         attempt = Attempt(info_in(tmp_path, "c", "", module=tmp_path / "component.py"))
         attempt.props = {"a": 1}
         attempt.granted = granted
@@ -307,7 +313,7 @@ class TestAttempt:
     def test_a_module_without_a_rule_discloses(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("next.components.boundaries.declared", lambda *_: _NO_RULE)
+        monkeypatch.setattr("next.components.access.declared", lambda *_: _NO_RULE)
         attempt = Attempt(info_in(tmp_path, "c", "", module=tmp_path / "component.py"))
         attempt.props = {"a": 1}
         assert attempt.disclosed(ErrorKind.ERROR) == {"a": 1}
@@ -334,7 +340,7 @@ class TestGrant:
 
     @pytest.fixture()
     def ruled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ComponentInfo:
-        monkeypatch.setattr("next.components.renderers.declared", lambda *_: _RULE)
+        monkeypatch.setattr("next.components.access.declared", lambda *_: _RULE)
         return info_in(tmp_path, "c", "", module=tmp_path / "component.py")
 
     @pytest.fixture()
@@ -350,9 +356,9 @@ class TestGrant:
 
     @pytest.fixture()
     def passing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("next.components.renderers.check", lambda *_: None)
+        monkeypatch.setattr("next.components.access.check", lambda *_: None)
 
-    @pytest.mark.parametrize(("answer", "granted"), [(None, True), ("denied", False)])
+    @pytest.mark.parametrize(("answer", "granted"), [(None, True), (_DENIAL, False)])
     def test_the_check_result_is_noted(
         self,
         ruled: ComponentInfo,
@@ -362,15 +368,15 @@ class TestGrant:
         *,
         granted: bool,
     ) -> None:
-        monkeypatch.setattr("next.components.renderers.check", lambda *_: answer)
+        monkeypatch.setattr("next.components.access.check", lambda *_: answer)
         attempt = Attempt(ruled)
         in_attempt(attempt)
-        assert _granted(ruled, {}, None) is granted
+        assert _shown(ruled, decide(ruled, None)) is granted
         assert attempt.granted is granted
 
     @pytest.mark.usefixtures("passing")
     def test_a_grant_outside_any_attempt_is_ignored(self, ruled: ComponentInfo) -> None:
-        assert _granted(ruled, {}, None) is True
+        assert _shown(ruled, decide(ruled, None)) is True
 
     @pytest.mark.usefixtures("passing")
     def test_a_grant_of_another_component_is_ignored(
@@ -381,7 +387,7 @@ class TestGrant:
     ) -> None:
         attempt = Attempt(info_in(tmp_path, "other", ""))
         in_attempt(attempt)
-        assert _granted(ruled, {}, None) is True
+        assert _shown(ruled, decide(ruled, None)) is True
         assert attempt.granted is False
 
 
@@ -463,7 +469,7 @@ def widget_pages(tmp_path: Path) -> Iterator[Path]:
     folder = pages / "_components" / "widget"
     (folder / "component.py").write_text(_FAILING_MODULE)
     (folder / "error.djx").write_text(
-        '<p class="widget-error">{{ error.kind }} {{ props.label }}</p>'
+        '<p class="widget-error">{{ error.kind }} {{ label }}</p>'
     )
     templated_page(
         pages / "home", "cache = 60\n", '[{% component "widget" label="L" %}]'
@@ -611,7 +617,7 @@ class TestDeclaredTag:
     def declared(self, monkeypatch: pytest.MonkeyPatch):
         options: dict[Path, BoundaryOptions] = {}
         monkeypatch.setattr(
-            "next.templatetags.components.defer_declarations",
+            "next.components.tags.defer_declarations",
             SimpleNamespace(options=options.get, version=0),
         )
         return options
@@ -732,9 +738,7 @@ class TestOwnAssets:
             assert collector is not None
             collector.add(StaticAsset(url=f"/{info.name}.css", kind="css"))
 
-        monkeypatch.setattr(
-            "next.templatetags.components.collect_component_assets", own
-        )
+        monkeypatch.setattr("next.static.ports.collect_component_assets", own)
         site.add("card", "{{ boom }}", "E")
         site.add("plain", "<p></p>")
         site.render("{% component 'plain' %}{% component 'card' %}")

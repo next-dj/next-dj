@@ -35,7 +35,7 @@ Skim this map before changing code. Each `next/<area>/` module owns one framewor
 | [next/client/](next/client/) | TypeScript client runtime sources and their co-located vitest tests, bundled by esbuild to `next/static/next/next.min.js`. |
 | [next/templatetags/](next/templatetags/) | Django template tag libraries for components, forms, static assets, page heads and breadcrumbs, zones, and consent-gated scripts. |
 | [next/testing/](next/testing/) | Public test toolkit: client, isolation, signal capture, rendering, patching. |
-| [next/urls/](next/urls/) | File-router backends, URL-pattern parser, dispatcher, markers (`DUrl`). |
+| [next/urls/](next/urls/) | File-page backends, URL-pattern parser, dispatcher, markers (`DUrl`). |
 | [next/backends.py](next/backends.py) | Shared backend-loading machinery used by every area. |
 | [next/caches.py](next/caches.py) | Bounded caches the layers of the framework key their own way. |
 | [next/csrf.py](next/csrf.py) | How a page hands the CSRF token to its runtime and forms, and the token endpoint. |
@@ -172,7 +172,7 @@ Use annotations throughout `next/`. Mypy is strict (see `[tool.mypy]` in `pyproj
 
 ## Extensibility
 
-Major pieces (template loaders, router backends, factories) should stay **replaceable**. Use clear protocols or ABCs, registration or settings-driven selection, and dependency injection where practical. Follow patterns in existing `next/` modules when adding extension points.
+Major pieces (template loaders, page backends, factories) should stay **replaceable**. Use clear protocols or ABCs, registration or settings-driven selection, and dependency injection where practical. Follow patterns in existing `next/` modules when adding extension points.
 
 ## Testing
 

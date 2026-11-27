@@ -609,6 +609,7 @@ The thirteen built-in providers occupy the range ``0`` (object) through ``80`` (
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 A provider that needs a named dependency, the way ``DObject`` reads ``scope``, calls ``self.resolver.resolve_callable_dependency("scope", context, param=param)``, which shares the pass cache and the cycle guard of ``Depends("scope")``.
+Such a provider also answers ``static_reach(param)`` with ``(("scope", bound),)``, the key and the bound callable, so an async render that reaches the key from two callables runs it once, as described in :doc:`/content/ref/deps`.
 
 Static verdicts
 ~~~~~~~~~~~~~~~
@@ -639,6 +640,9 @@ The cache memoises ``Depends("name")`` callables, keyed by the registered name, 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
 To share one value across several context functions in the same render, register it with ``resolver.dependency("active_tenant")`` and ask for it through ``Depends("active_tenant")`` in each callable that needs it.
 The first callable to ask pays the resolution, and every later callable in the same pass reads the value the cache already holds.
+The rule does not depend on the colour of the dependency or of its consumers.
+On an async render a key that two context callables or two parameters of one call name is shared through the request scope, so consumers that overlap wait on one run of it, a sync dependency running in a blocking segment of its own before the segments that read it.
+A shared dependency that raises is called once as well, and every consumer receives that one error, which the scope keeps in place of a value.
 
 A ``Depends(factory)`` follows the same rule, keyed by the factory itself rather than by a name.
 Within one cache the factory runs once, for the first parameter that names it, and every later parameter reads the value it returned, on a sync and an async render alike.
@@ -651,12 +655,13 @@ The rule holds within one render unit.
 The context phase of a page is one unit, with one cache and one request scope.
 Each async deferred job is a unit of its own that resolves in a layer of the response scope, reading the values the shell left and keeping what it computes.
 Two jobs therefore compute a value they both ask for once each, because the scope keys a value by its name or factory alone while the props and template context of two jobs differ.
-A component instance rendered under a request scope is a unit of the same kind, resolving in a layer of its own, so two instances never read each other's values and both read what the page resolved.
-Only a value the page resolved is shared page-wide, as the page's providers read the request, the URL kwargs and the page context but never the props or template context of a component, so a dependency only components ask for runs once per instance.
+A component instance rendered under a request scope is a unit of the same kind, resolving in a layer of its own, so two instances never read each other's values and both read what the page computed through the request scope.
+Only a value the page computed through the scope is shared page-wide, as the page's providers read the request, the URL kwargs and the page context but never the props or template context of a component, so a dependency only components ask for runs once per instance.
 A sync deferred job, on the request thread or a pool thread, resolves against a cache of its own and never waits on a value another job computes, so a value bound to the database connection of one thread never reaches another.
 
 That store covers the callables of the ``page.py``, and a component render is a pass of its own.
 On an ordinary GET every ``@component.context`` callable of one component resolves against a cache built for that component, so a ``Depends("name")`` two components both ask for is resolved once per component rather than once per page.
+That cache starts empty and never holds a value of the page cache, so a dependency the page and a component instance both ask for runs once for the page and once more for the instance.
 A ``render`` function in a ``component.py`` is further apart still and always gets a fresh cache, on a GET and inside a form dispatch alike, so a value it shares with the page around it is computed again for the call.
 Keep a dependency cheap when several components ask for it, or have it read a store of its own scoped to the request.
 

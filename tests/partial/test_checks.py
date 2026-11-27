@@ -26,9 +26,10 @@ from next.testing import reset_check_caches
 from tests.support import (
     PARTIAL_ROUTER_MANAGER_TARGETS,
     RootPagesRouter,
-    patch_checks_router_manager_with_routers,
-    patched_router_manager,
+    patch_checks_route_manager_with_routers,
+    patched_route_manager,
 )
+from tests.support.checks import written
 from tests.support.components import write_component
 from tests.support.guards import (
     CHILDREN_BODY,
@@ -51,7 +52,7 @@ def _scanned_root(root: Path) -> Generator[None]:
     manager = MagicMock()
     manager.backends = (MagicMock(),)
     with (
-        patched_router_manager(*PARTIAL_ROUTER_MANAGER_TARGETS, manager=manager),
+        patched_route_manager(*PARTIAL_ROUTER_MANAGER_TARGETS, manager=manager),
         patch("next.discovery.get_pages_directories", return_value=[root]),
     ):
         yield
@@ -1300,6 +1301,37 @@ class TestBackendNamesPathCheck:
             assert checks.check_partial_backend_names_a_path() == []
 
 
+class TestBackendPathCheck:
+    """`next.E219` fires when a PARTIAL_BACKENDS entry names no usable backend."""
+
+    @pytest.mark.parametrize(
+        ("dotted", "problem"),
+        [
+            ("no.such.Backend", "does not import"),
+            ("pathlib.Path", "is no subclass of PartialProtocolBackend"),
+            ("next.partial.PartialProtocolBackend", "is an abstract class"),
+        ],
+        ids=["unimportable", "wrong_kind", "abstract"],
+    )
+    def test_an_unusable_path_errors(self, dotted: str, problem: str) -> None:
+        with _partial_backends([{"BACKEND": dotted}]):
+            (message,) = checks.check_partial_backend_paths()
+        assert message.id == "next.E219"
+        assert f"NEXT_FRAMEWORK['PARTIAL_BACKENDS'][0]['BACKEND'] {dotted!r}" in (
+            message.msg
+        )
+        assert problem in message.msg
+
+    @pytest.mark.parametrize(
+        "config",
+        [[_BACKEND_DICT], [{}], ["x"], [{"BACKEND": 5}], "not-a-list"],
+        ids=["usable", "no_path", "non_dict", "non_string", "non_sequence"],
+    )
+    def test_a_usable_or_unnamed_backend_is_silent(self, config: object) -> None:
+        with _partial_backends(config):
+            assert checks.check_partial_backend_paths() == []
+
+
 class TestBackendsShapeCheck:
     """`next.E067` fires when PARTIAL_BACKENDS holds anything but a list."""
 
@@ -1309,7 +1341,7 @@ class TestBackendsShapeCheck:
         ids=["tuple", "bare_dict", "dotted_path"],
     )
     def test_non_list_value_errors(self, configs: object) -> None:
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": configs}):
+        with written({"PARTIAL_BACKENDS": configs}):
             ids = [m.id for m in checks.check_partial_backends_is_a_list()]
         assert ids == [checks.E_BACKENDS_NOT_A_LIST]
 
@@ -1334,7 +1366,7 @@ class TestThirdPartyBackendPagesReachTheZoneChecks:
             '{% zone "side" %}<p>{{ b }}</p>{% endzone %}'
         )
 
-        with patch_checks_router_manager_with_routers(
+        with patch_checks_route_manager_with_routers(
             routers=[RootPagesRouter([tmp_path])]
         ):
             ids = [m.id for m in checks.check_duplicate_zone_names()]

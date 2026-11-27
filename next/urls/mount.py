@@ -10,8 +10,8 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.utils import resolved_tree
 
-from .backends import FileRouterBackend, is_plain_subdir
-from .manager import build_url_resolver, routed_pages, router_manager
+from .backends import FilePageBackend, is_plain_subdir
+from .manager import build_url_resolver, route_manager, routed_pages
 from .urlconf import Mount, MountedPatterns
 
 
@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
     from django.apps import AppConfig
     from django.urls import URLPattern, URLResolver
+
+    from .backends import PageBackend
 
 
 def _app_config(app: str) -> AppConfig:
@@ -31,13 +33,13 @@ def _app_config(app: str) -> AppConfig:
     raise LookupError(msg)
 
 
-def tree_router() -> FileRouterBackend | None:
+def tree_router() -> FilePageBackend | None:
     """Return the file router that builds every tree a `pages()` include mounts."""
     return next(
         (
             backend
-            for backend in router_manager.backends
-            if isinstance(backend, FileRouterBackend)
+            for backend in route_manager.backends
+            if isinstance(backend, FilePageBackend)
         ),
         None,
     )
@@ -63,15 +65,20 @@ class _TreePatterns(MountedPatterns):
 
     def version_token(self) -> tuple[int]:
         """Return the router version the patterns of the tree are built at."""
-        return (router_manager.version,)
+        return (route_manager.version,)
+
+    @override
+    def owner(self, entry: URLPattern | URLResolver) -> PageBackend | None:
+        """Return the file router every tree a `pages()` include mounts is built by."""
+        return tree_router()
 
     @override
     def _patterns(self) -> list[URLPattern | URLResolver]:
         cache = self._cache
-        if cache is not None and cache[0] == router_manager.version:
+        if cache is not None and cache[0] == route_manager.version:
             return cache[1]
         patterns = _tree_patterns(self.mount)
-        self._cache = (router_manager.version, patterns)
+        self._cache = (route_manager.version, patterns)
         return patterns
 
 
@@ -93,7 +100,7 @@ class MountedTree(MountedPatterns):
     @override
     def _patterns(self) -> tuple[URLPattern | URLResolver, ...]:
         slot = self._slot
-        version = router_manager.version
+        version = route_manager.version
         if slot is None or slot[0] != version:
             resolver = build_url_resolver(_TreePatterns(self.mount))
             slot = self._slot = (version, (resolver,))

@@ -10,7 +10,7 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString
 
 from next.diagnostics import FailureLog, type_name
-from next.pages.layouts import META, seal_region
+from next.pages.layouts import META, enclose_region
 from next.paths import ANCESTOR_MARK, PAGE_MARK
 from next.seeding import METADATA_KEY
 
@@ -83,7 +83,7 @@ class MetadataNode(Node):
             kind.__name__,
             detail=type_name,
         ):
-            return seal_region(context, META, renderer.render(resolved))
+            return enclose_region(context, META, renderer.render(resolved))
         return ""
 
 

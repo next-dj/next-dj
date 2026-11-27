@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from django.http import HttpRequest
 
-from next.caches import BoundedCache
+from next.caches import FRAMEWORK, ROUTES, SETTINGS, BoundedCache
 from next.conf.sentinels import UNSET
 from next.consent import NECESSARY, UNDECIDED, Consent, get_consent
 from next.consent.manager import consent_configured, consent_payload, server_mode
@@ -28,10 +28,9 @@ from next.static import (
     default_kinds,
     get_static_manager,
 )
-from next.static.backends import MANIFEST_SETTINGS
 from next.static.errors import StaticAssetNotFoundError, StaticAssetTraversalError
 from next.static.runtime import CONSENT_PAYLOAD_KEY, SCRIPTS_PAYLOAD_KEY
-from next.urls.manager import router_manager
+from next.urls.manager import route_manager
 from next.utils import template_edits_watched
 
 from .discovery import ScriptsSource, load_scripts, source_stale
@@ -57,7 +56,7 @@ _NO_SCRIPTS: Final[tuple[Script, ...]] = ()
 
 _ASSET_ERRORS: Final = (StaticAssetNotFoundError, StaticAssetTraversalError)
 
-_ENVELOPED: Final = frozenset({Purpose.NAVIGATION, Purpose.PREFETCH})
+_ENVELOPED: Final = frozenset({Purpose.NAVIGATE, Purpose.PREFETCH})
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +90,7 @@ class ScriptsManager:
 
     def _load(self) -> None:
         # An unchanged source is reused, so a reload runs only the changed `scripts.py`.
-        for tree, _skip_names in routed_page_trees(router_manager):
+        for tree, _skip_names in routed_page_trees(route_manager):
             root = tree.path.resolve()
             if root in self._kept and not source_stale(self._kept[root], root):
                 self._registry.register(root, self._kept[root])
@@ -369,10 +368,9 @@ def forget_scripts(**kwargs: object) -> None:
     scripts_manager.reset()
 
 
-def forget_script_srcs(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised `src` URLs once the staticfiles storage is rebuilt."""
-    if setting in MANIFEST_SETTINGS:
-        scripts_manager.forget_srcs()
+SETTINGS.attach(scripts_manager.forget_srcs)
+FRAMEWORK.attach(forget_scripts)
+ROUTES.attach(forget_scripts)
 
 
 __all__ = [

@@ -5,12 +5,12 @@ It sits below the subpackages that share it, so no shared object closes a cycle.
 
 from __future__ import annotations
 
-import functools
 import importlib.machinery
 import importlib.util
 import logging
 import os
 import re
+import reprlib
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -29,8 +29,18 @@ from django.utils.encoding import repercent_broken_unicode
 from django.utils.module_loading import import_string
 from django.utils.regex_helper import normalize
 
-from next.caches import DEFAULT_CACHE_SIZE, BoundedCache, IdentityMemo
-from next.errors import InvalidDirsError
+from next.caches import (
+    DEFAULT_CACHE_SIZE,
+    FRAMEWORK,
+    ROUTES,
+    SETTINGS,
+    BoundedCache,
+    IdentityMemo,
+    instance_dict,
+    memo,
+    pure_cache,
+)
+from next.errors import DurationError, InvalidDirsError
 from next.stamps import fresh, settled, snapshot
 
 
@@ -80,13 +90,6 @@ def non_negative_number(value: object, ceiling: float) -> TypeGuard[float]:
     )
 
 
-def after_fork(reset: Callable[[], object]) -> None:
-    """Run `reset` in every forked child, nothing on a platform that cannot fork."""
-    register = getattr(os, "register_at_fork", None)
-    if register is not None:
-        register(after_in_child=reset)
-
-
 ROUTE_BRACKET_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"\[\[(?P<wild>[^\[\]]+)\]\]|\[(?P<param>[^\[\]]+)\]"
 )
@@ -109,13 +112,13 @@ _UNREVERSIBLE_TRAIL: Final = "[[route]]"
 """The trail of a `re_path()` route Django cannot reverse, a wildcard listing none."""
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@pure_cache(DEFAULT_CACHE_SIZE)
 def prefix_trail(prefix: str) -> str:
     """Return a Django `path()` prefix as a trail, `<int:pk>` read as `[int:pk]`."""
     return _DJANGO_PARAMETER.sub(r"[\1]", prefix.strip("/"))
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@pure_cache(DEFAULT_CACHE_SIZE)
 def regex_trail(regex: str) -> str:
     """Return a `re_path()` route as a trail, read the way Django reverses it.
 
@@ -211,7 +214,7 @@ def decode_url_path(path: str) -> str:
     return repercent_broken_unicode(unquote_to_bytes(path)).decode()
 
 
-@functools.cache
+@pure_cache()
 def _meta_key(name: str) -> str:
     """Return the WSGI `META` key of a header name."""
     return "HTTP_" + name.upper().replace("-", "_")
@@ -222,26 +225,10 @@ def request_header(request: HttpRequest, name: str) -> str | None:
     return request.META.get(_meta_key(name))
 
 
-@functools.lru_cache(maxsize=DEFAULT_CACHE_SIZE)
+@memo(SETTINGS, ROUTES, maxsize=DEFAULT_CACHE_SIZE)
 def resolved_tree(path: Path) -> Path:
-    """Return the resolved form of a page tree, memoised across the process."""
+    """Return the resolved form of a page tree, again once settings or routes move."""
     return path.resolve()
-
-
-# Memos of resolved paths that a layer keys its own way, dropped with this one.
-_RESOLUTION_CLEARERS: list[Callable[[], None]] = []
-
-
-def on_forget_resolved_trees(clear: Callable[[], None]) -> None:
-    """Register a memo of resolved paths to drop whenever this module drops its own."""
-    _RESOLUTION_CLEARERS.append(clear)
-
-
-def forget_resolved_trees() -> None:
-    """Drop every memoised resolution, so a re-pointed tree is read again."""
-    resolved_tree.cache_clear()
-    for clear in _RESOLUTION_CLEARERS:
-        clear()
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -377,12 +364,12 @@ def resolve_base_dir() -> Path | None:
 
 
 _app_holding_cache: BoundedCache[tuple[str, bool], tuple[str, str] | None] = (
-    BoundedCache()
+    BoundedCache(depends=(SETTINGS,))
 )
 _MISS: Final = object()
 
 
-@functools.cache
+@memo(SETTINGS)
 def _resolved_app_roots() -> tuple[tuple[str, Path], ...]:
     """Return each installed app label with its resolved root, deepest root first."""
     roots = [(c.label, Path(c.path).resolve()) for c in apps.get_app_configs()]
@@ -416,16 +403,19 @@ def app_holding(path: str | Path, *, resolved: bool = False) -> tuple[str, str] 
     return found
 
 
-def forget_app_holdings(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised app lookups when the app list moves."""
-    if setting == "INSTALLED_APPS":
-        _app_holding_cache.clear()
-        _resolved_app_roots.cache_clear()
+_SETTINGS: Final = instance_dict(settings)
+"""The dict `LazySettings` caches read settings in, so `DEBUG` skips the proxy lookup.
+
+Every settings write or override drops the cached value, so no read here goes stale.
+"""
 
 
 def template_edits_watched() -> bool:
     """Whether the caches revalidate snapshots, since autoreload misses `.djx` edits."""
-    return bool(settings.DEBUG)
+    debug = _SETTINGS.get("DEBUG", _MISS)
+    if debug is _MISS:
+        debug = settings.DEBUG
+    return bool(debug)
 
 
 def _dir_entry_candidate(item: Path, base_dir: Path | None) -> Path | None:
@@ -696,7 +686,7 @@ class _PageTreeWalk:
             self.mark(child, source, marker, child_trail, child_raw)
 
 
-_MIDDLEWARE_CLASSES: dict[str, type | None] = {}
+_MIDDLEWARE_CLASSES: BoundedCache[str, type | None] = BoundedCache(depends=(FRAMEWORK,))
 
 
 def _middleware_class(path: str) -> type | None:
@@ -715,12 +705,6 @@ def _middleware_class(path: str) -> type | None:
     resolved = found if isinstance(found, type) else None
     _MIDDLEWARE_CLASSES[path] = resolved
     return resolved
-
-
-def forget_middleware_classes(**kwargs: object) -> None:
-    """Drop the imported `MIDDLEWARE` classes when the framework settings reload."""
-    _MIDDLEWARE_CLASSES.clear()
-    _installed.forget()
 
 
 def is_middleware(entry: object, base: str) -> bool:
@@ -769,6 +753,7 @@ class _Installed:
 
 
 _installed: Final = _Installed()
+FRAMEWORK.attach(_installed.forget)
 
 
 def middleware_installed(base: str) -> bool:
@@ -794,6 +779,49 @@ def redirect_or_fallback(
     with suppress(DisallowedRedirect):
         return HttpResponseRedirect(target, status=status)
     return HttpResponseRedirect(fallback, status=status)
+
+
+MAX_DURATION: Final = 86_400
+"""The longest duration an option takes, one day in seconds."""
+
+_DURATION = re.compile(r"(?P<amount>[0-9]+(?:\.[0-9]+)?)(?P<unit>ms|s)")
+_MS_PER_SECOND: Final = 1000
+_SHOWN_DIGITS: Final = 18
+
+
+def _shown(value: object) -> str:
+    """Return how an error names a value, a huge integer without its digits."""
+    if isinstance(value, int) and abs(value) >= 10**_SHOWN_DIGITS:
+        return "a very large integer"
+    return reprlib.repr(value)
+
+
+def _literal_seconds(value: str) -> float:
+    """Return the seconds a `"2s"` or `"500ms"` literal names."""
+    match = _DURATION.fullmatch(value)
+    if match is None:
+        msg = f"a duration literal reads like '2s' or '500ms', got {_shown(value)}"
+        raise DurationError(msg)
+    seconds = float(match["amount"])
+    return seconds / _MS_PER_SECOND if match["unit"] == "ms" else seconds
+
+
+def parse_duration(value: object) -> float:
+    """Return seconds from a number of seconds or a `"2s"` or `"500ms"` literal.
+
+    A bare numeric string is refused, since a template literal reads it as milliseconds.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        msg = f"a duration is a number of seconds or a '2s' literal, got {value!r}"
+        raise DurationError(msg)
+    seconds = _literal_seconds(value) if isinstance(value, str) else value
+    if not 0 <= seconds <= MAX_DURATION:
+        msg = (
+            "a duration is a number of seconds from 0 up to one day, got "
+            f"{_shown(value)}"
+        )
+        raise DurationError(msg)
+    return float(seconds)
 
 
 VOID_ELEMENTS: Final = frozenset(

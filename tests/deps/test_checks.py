@@ -10,6 +10,7 @@ from django.core.checks import CheckMessage, Error
 from next.components.context import component
 from next.deps import DObject
 from next.deps.checks import (
+    check_loader_settings,
     check_object_component_contexts,
     check_object_declarations,
     check_object_form_parents,
@@ -34,6 +35,7 @@ from tests.support import (
     write_urlconf,
 )
 from tests.support.access import write_guard
+from tests.support.checks import written
 
 
 HEADER = """
@@ -195,10 +197,10 @@ class TestFailedRouters:
             check_object_scope,
         ],
     )
-    def test_no_router_manager_draws_no_message(self, check: CheckFunction) -> None:
+    def test_no_route_manager_draws_no_message(self, check: CheckFunction) -> None:
         failure = Error("broken", id="next.E007")
         with patch(
-            "next.deps.checks.get_router_manager", return_value=(None, [failure])
+            "next.deps.checks.get_route_manager", return_value=(None, [failure])
         ):
             assert object_sites() is None
             assert check() == []
@@ -880,3 +882,19 @@ class TestInterceptPages:
         )
         with installed_apps(tmp_path, "wallets", urlconf=urlconf):
             assert check_object_page_bindings() == []
+
+
+class TestLoaderSettings:
+    """`check_loader_settings` reports `LOADER` misfits."""
+
+    def test_silent_without_the_scope(self) -> None:
+        with written({}):
+            assert check_loader_settings() == []
+
+    def test_unknown_keys_and_misfits_are_named(self) -> None:
+        with written({"LOADER": {"BATCH": 1, "WINDOW": -1}}):
+            unknown, misfit = check_loader_settings()
+        assert unknown.id == "next.E035"
+        assert unknown.msg.startswith("NEXT_FRAMEWORK['LOADER'] has unknown keys")
+        assert misfit.id == "next.E076"
+        assert misfit.msg.startswith("NEXT_FRAMEWORK['LOADER']['WINDOW'] must be")

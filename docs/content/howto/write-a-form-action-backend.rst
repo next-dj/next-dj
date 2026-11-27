@@ -184,12 +184,8 @@ The view then opens the transaction itself, the one ``atomic_scope`` names for t
    from django.views.decorators.http import require_POST
 
    from next.forms import FormActionBackend
-   from next.transactions import (
-       ViewKind,
-       atomic_scope,
-       request_atomic,
-       skip_atomic_requests,
-   )
+   from next.requests import RequestKind
+   from next.transactions import atomic_scope, request_atomic, skip_atomic_requests
 
    class CustomBackend(FormActionBackend):
        def generate_urls(self) -> list[URLPattern]:
@@ -198,7 +194,7 @@ The view then opens the transaction itself, the one ``atomic_scope`` names for t
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponseBase:
            meta = self._metas[uid]
-           scope = atomic_scope(request, ViewKind.ACTION, meta.get("atomic"))
+           scope = atomic_scope(request, RequestKind.ACTION, meta.get("atomic"))
            with request_atomic(scope):
                return self._run(request, meta)
 

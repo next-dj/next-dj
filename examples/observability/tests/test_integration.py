@@ -10,6 +10,7 @@ from obs import metrics
 from obs.metrics import PREFIX, CounterLostError
 from obs.models import MetricSnapshot
 
+from next.boundaries import ErrorKind
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
@@ -47,14 +48,14 @@ from next.testing import (
     find_anchor,
     init_payload,
 )
-from next.urls.signals import route_registered, router_backend_loaded, router_reloaded
+from next.urls.signals import page_backend_loaded, route_registered, routes_reloaded
 
 
 GROUP_SAMPLES: dict[str, list] = {
     "conf": [settings_reloaded],
     "deps": [provider_registered],
     "pages": [template_loaded, context_registered, page_rendered],
-    "urls": [route_registered, router_reloaded],
+    "urls": [route_registered, routes_reloaded],
     "components": [component_registered, components_registered, component_rendered],
     "forms": [action_registered, action_dispatched, form_validation_failed],
     "static": [asset_registered, collector_finalized, html_injected],
@@ -63,7 +64,7 @@ GROUP_SAMPLES: dict[str, list] = {
         component_backend_loaded,
         form_backend_loaded,
         partial_backend_loaded,
-        router_backend_loaded,
+        page_backend_loaded,
         static_backend_loaded,
         wizard_backend_loaded,
     ],
@@ -448,11 +449,20 @@ class TestBusiestPagesOnLoad:
 
     def test_the_boundary_request_delivers_the_list(self, next_client) -> None:
         next_client.get("/stats/pages/")
-        envelope = next_client.get_boundary("/", "busiest_pages")
-        [op] = envelope.ops
-        assert op["s"] == "ready"
-        assert "stats/pages/page.py" in op["html"]
-        assert "Loading the busiest pages" not in op["html"]
+        busiest = next_client.get_boundary("/", "busiest_pages")
+        assert busiest.state == "ready"
+        assert "stats/pages/page.py" in busiest.html
+        assert "Loading the busiest pages" not in busiest.html
+
+    def test_the_limit_prop_rides_in_the_token_and_caps_the_list(
+        self, next_client
+    ) -> None:
+        for number in range(8):
+            metrics.incr("pages.rendered", f"obs/pages/extra{number}/page.py", by=2)
+        body = next_client.get("/").content.decode()
+        assert 'data-next-defer="load"' in body
+        busiest = next_client.get_boundary("/", "busiest_pages")
+        assert busiest.html.count("obs/pages/extra") == 5
 
     def test_a_failed_request_offers_a_retry(self, next_client, monkeypatch) -> None:
         def _lost(kind: str, *, limit: int | None = None) -> list[tuple[str, int]]:
@@ -460,11 +470,10 @@ class TestBusiestPagesOnLoad:
 
         monkeypatch.setattr(metrics, "top_by_kind", _lost)
         with boundary_errors("render"):
-            envelope = next_client.get_boundary("/", "busiest_pages")
-        [op] = envelope.ops
-        assert op["s"] == "error"
-        assert "The busiest pages are unavailable" in op["html"]
-        assert "data-next-retry" in op["html"]
+            busiest = next_client.get_boundary("/", "busiest_pages")
+        assert busiest.state == "error"
+        assert "The busiest pages are unavailable" in busiest.html
+        assert "data-next-retry" in busiest.html
 
     def test_the_boundary_request_skips_the_totals_provider(
         self, next_client, monkeypatch
@@ -535,6 +544,23 @@ class TestLatencyWidget:
         reference = f'Reference <code class="font-mono">{failure.digest}</code>'
         assert reference in response.content.decode()
 
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_each_contained_failure_is_counted_by_its_boundary(
+        self, next_client
+    ) -> None:
+        with boundary_errors("render"):
+            next_client.get("/")
+            next_client.get("/")
+        assert metrics.read_kind("boundaries.failed") == {"latency_widget": 2}
+
+    @pytest.mark.usefixtures("culled_render_count")
+    def test_the_overview_tile_shows_the_failure_total(self, next_client) -> None:
+        with boundary_errors("render"):
+            next_client.get("/")
+        response = next_client.get_zones("/", "overview-totals")
+        html = envelope_of(response).html_for_zone("overview-totals")
+        assert re.search(r"Boundary failures</p>\s*<p[^>]*>\s*1\s*</p>", html)
+
     @pytest.mark.usefixtures("culled_render_count", "rendered_boundary_errors")
     def test_the_degraded_page_stays_out_of_every_cache(self, next_client) -> None:
         response = next_client.get("/")
@@ -587,7 +613,7 @@ class TestLatencyStream:
 
 
 PAGE_RENDERS = "/stats/pages/"
-PAGE_RENDERS_BOUNDARY = "obs/pages/stats/pages/loading.djx"
+PAGE_RENDERS_DIR = "obs/pages/stats/pages"
 
 
 class TestPageRendersBoundary:
@@ -604,7 +630,7 @@ class TestPageRendersBoundary:
     def test_a_chunk_fills_in_the_counts_and_the_means(self, next_client) -> None:
         next_client.get("/stats/")
         streamed = next_client.get_stream(PAGE_RENDERS)
-        chunk = streamed.boundary(PAGE_RENDERS_BOUNDARY)
+        chunk = streamed.boundary(page=PAGE_RENDERS_DIR)
         assert chunk.state == "ready"
         assert "Mean ms" in chunk.html
         assert CULLED_PAGE in chunk.html
@@ -615,12 +641,26 @@ class TestPageRendersBoundary:
         assert CULLED_PAGE in body
         assert "&mdash;" in body
 
+    def test_an_unknown_window_stays_a_404(self, next_client) -> None:
+        assert next_client.get(f"{PAGE_RENDERS}?window=2d").status_code == 404
+
+    def test_an_unknown_window_stays_a_404_when_the_page_streams(
+        self, next_client
+    ) -> None:
+        with pytest.raises(AssertionError, match="answered 404 without a stream"):
+            next_client.get_stream(f"{PAGE_RENDERS}?window=2d")
+
+    def test_a_known_window_streams_the_table(self, next_client) -> None:
+        streamed = next_client.get_stream(f"{PAGE_RENDERS}?window=1h")
+        assert streamed.response.status_code == 200
+        assert streamed.boundary(page=PAGE_RENDERS_DIR).state == "ready"
+
     @pytest.mark.usefixtures("culled_render_count")
     def test_a_culled_counter_streams_the_error_ui_in_place(self, next_client) -> None:
         with boundary_errors("render"):
             streamed = next_client.get_stream(PAGE_RENDERS)
-        chunk = streamed.boundary(PAGE_RENDERS_BOUNDARY)
-        assert (chunk.state, chunk.kind) == ("error", "error")
+        chunk = streamed.boundary(page=PAGE_RENDERS_DIR)
+        assert (chunk.state, chunk.kind) == ("error", ErrorKind.ERROR)
         assert "Page renders are unavailable" in chunk.html
         assert streamed.response.status_code == 200
 
@@ -650,20 +690,18 @@ class TestFlushHistory:
         assert "data-flush-history" not in body
 
     def test_the_fetch_says_when_nothing_was_flushed(self, next_client) -> None:
-        envelope = next_client.get_boundary("/", "flush_history")
-        [op] = envelope.ops
-        assert op["s"] == "ready"
-        assert "Nothing has been flushed yet." in op["html"]
+        history = next_client.get_boundary("/", "flush_history")
+        assert history.state == "ready"
+        assert "Nothing has been flushed yet." in history.html
 
     def test_the_fetch_lists_each_minute_a_flush_ran_in(self, next_client) -> None:
         next_client.get("/stats/")
         call_command("flush_metrics", stdout=StringIO())
         rows = MetricSnapshot.objects.count()
-        envelope = next_client.get_boundary("/", "flush_history")
-        [op] = envelope.ops
-        assert "data-flush-history" in op["html"]
+        history = next_client.get_boundary("/", "flush_history")
+        assert "data-flush-history" in history.html
         assert (
-            f'<td class="py-2 pl-4 text-right tabular-nums">{rows}</td>' in op["html"]
+            f'<td class="py-2 pl-4 text-right tabular-nums">{rows}</td>' in history.html
         )
 
 

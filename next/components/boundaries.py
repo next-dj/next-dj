@@ -5,10 +5,11 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Final, cast
 
-from next.defer import DEFERRALS_KEY, ErrorKind
-from next.permissions.access import declared
+from next.boundaries.calls import DEFERRALS_KEY
+from next.boundaries.failures import ErrorKind
 from next.ports import deferrals_slot
 
+from .access import passed
 from .defer import defer_declarations
 
 
@@ -22,12 +23,6 @@ if TYPE_CHECKING:
 
 UNDISCLOSED: Final = frozenset({ErrorKind.FORBIDDEN, ErrorKind.NOT_FOUND})
 """The kinds whose error UI keeps the props hidden and whose wrapper mints no retry."""
-
-
-def ruled(info: ComponentInfo) -> bool:
-    """Whether `info` declares an access rule, which a render may deny."""
-    module_path = info.module_path
-    return module_path is not None and bool(declared(module_path).requirements)
 
 
 def deferral_sink(context: Context) -> DeferralSink | None:
@@ -48,15 +43,18 @@ class Attempt:
         self.granted = False
         self.props: dict[str, Any] | None = None
 
+    @property
+    def passed(self) -> bool:
+        """Whether the access rule of the component passed, or it declares none."""
+        return passed(self.info, granted=self.granted)
+
     def disclosed(self, kind: ErrorKind) -> dict[str, Any] | None:
         """Return the props the error UI of `kind` reads, `None` when it reads none.
 
         A refused or a missing subject keeps them hidden, and so does an unpassed rule.
         """
         props = self.props
-        if props is None or kind in UNDISCLOSED:
-            return None
-        if not self.granted and ruled(self.info):
+        if props is None or kind in UNDISCLOSED or not self.passed:
             return None
         options = defer_declarations.options(self.info.module_path)
         names = () if options is None else options.props
@@ -70,4 +68,4 @@ current_attempt: ContextVar[Attempt | None] = ContextVar(
 )
 """The guarded render under way, which a passed access rule of its component marks."""
 
-__all__ = ["UNDISCLOSED", "Attempt", "current_attempt", "deferral_sink", "ruled"]
+__all__ = ["UNDISCLOSED", "Attempt", "current_attempt", "deferral_sink"]

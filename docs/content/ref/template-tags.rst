@@ -8,6 +8,7 @@ Module summary
 
 The framework registers its template tags as Django builtins through ``next.apps.templates.install``.
 Templates therefore use them without an explicit ``{% load %}`` statement.
+Each library of ``next.templatetags`` registers its tags and parses their syntax, and the node a tag compiles to lives with the area that owns it, the component tags in ``next.components.tags`` and the page boundary tags in ``next.pages.nodes``.
 
 Forms
 -----
@@ -260,7 +261,7 @@ Partial rendering
    On the end of the list the zone holds the ``{% empty %}`` branch instead.
    On the first window a ``previous=`` tag also holds, after its ``{% empty %}`` branch, a link to the first window with the ``hidden`` attribute, which the runtime shows once ``prune=`` drops the first rows.
    ``zone=`` names the list zone, and ``mode=``, ``merge=``, ``margin=``, and ``param=`` tune the link, see :ref:`topics-partial-rendering-reference-more` for the options, their defaults, and the pagers.
-   ``prune=<rows>`` drops whole batches from the top of a long list and ``url="replace"`` or ``url="push"`` writes ``?<param>=<token>&restore=1`` into the address bar after each batch, both on a ``next=`` tag only.
+   ``prune=<rows>`` drops whole batches from the top of a long list and ``url="replace"`` or ``url="push"`` writes ``?<param>=<token>&_restore=<param>`` into the address bar after each batch, both on a ``next=`` tag only.
    ``prune=`` needs a ``Window``, so with a raw token the tag raises ``TemplateSyntaxError`` at render under ``DEBUG`` or ``STRICT_LOADING`` and renders without pruning otherwise.
    ``next.E235`` reports ``prune=`` or ``url=`` on a page whose context callables take no ``Annotated[Paging, <pager>]``.
    An unknown option, a missing ``zone=``, or both or neither of ``next=`` and ``previous=`` raise ``TemplateSyntaxError`` at parse time.
@@ -365,6 +366,7 @@ Page boundaries
 
 Composition writes internal tags, among them ``{% next:boundary %}`` and ``{% next:failed %}``, at the slot of a directory that holds a ``loading.djx`` or an ``error.djx``.
 They install as builtins under a ``next:`` name, so no page template loads or spells them.
+They compile to ``PageBoundaryNode``, ``LayoutSlotNode``, ``FailedNode``, and ``EndNode`` of ``next.pages.nodes``.
 See :doc:`/content/topics/boundaries/loading`.
 
 Tag loading

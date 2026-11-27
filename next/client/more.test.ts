@@ -3,6 +3,7 @@ import type { MockInstance } from "vitest";
 import type { Envelope } from "./apply";
 import type { LayerStack } from "./layers";
 import { createMore } from "./more";
+import type { MoreHost } from "./more";
 
 const PAGE_TWO = "/list/?q=1&page=2";
 
@@ -60,7 +61,10 @@ function harness() {
       return () => undefined;
     },
   };
-  createMore({ partial }, { signal: controller.signal });
+  createMore(
+    { partial: partial as unknown as MoreHost["partial"] },
+    { signal: controller.signal },
+  );
   return {
     applied,
     scan: () => {
@@ -99,7 +103,7 @@ describe("{% more %} extras", () => {
   }
 
   const LESS =
-    '<div data-next-zone="list-less"><a href="/list/?q=1&page=1&restore=1" ' +
+    '<div data-next-zone="list-less"><a href="/list/?q=1&page=1&_restore=page" ' +
     'data-next-target="list,list-less" data-next-merge="prepend">Less</a></div>';
 
   it("stamps the rows a list starts with as one batch", () => {
@@ -175,7 +179,7 @@ describe("{% more %} extras", () => {
         ops: [
           {
             op: "url",
-            href: "/list/?q=1&page=2&restore=1",
+            href: "/list/?q=1&page=2&_restore=page",
             action: "replace",
             quiet: true,
           },
@@ -201,7 +205,7 @@ describe("{% more %} extras", () => {
         ops: [
           {
             op: "url",
-            href: "/list/?q=1&p=WzAsIjIwMjYtMTEiLDJd&restore=1#top",
+            href: "/list/?q=1&p=WzAsIjIwMjYtMTEiLDJd&_restore=p#top",
             action: "push",
             quiet: true,
           },
@@ -272,7 +276,7 @@ describe("{% more %} extras", () => {
       "a top link and no back token",
       'data-next-prune="3"',
       LESS,
-      "/list/?q=1&page=1&restore=1",
+      "/list/?q=1&page=1&_restore=page",
     ],
     [
       "a top link and a back token",

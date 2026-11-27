@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Applier } from "./apply";
 import type { HistoryAdapter } from "./apply";
 import { createLayers } from "./layers";
-import type { LayerStack, PopStateAdapter } from "./layers";
+import type { PopStateAdapter } from "./layers";
+import { markBusy } from "./protocol";
+import { createStack } from "./stack";
+import type { Stack } from "./stack";
 import { createNavigation } from "./navigation";
 import type { Navigation } from "./navigation";
 import { pageKey } from "./protocol";
 import { createTriggers } from "./triggers";
-import { chunkModules } from "./test-doubles";
+import { chunkModules, landed } from "./test-doubles";
 
 interface Dispatched {
   event: string;
@@ -51,7 +54,7 @@ describe("the commit phase", () => {
   let dispatched: Dispatched[];
   let writes: { action: string; href: string; title: string }[];
   let navigation: Navigation;
-  let layers: LayerStack;
+  let layers: Stack;
   let applier: Applier;
   let back: () => void;
   let order: string[];
@@ -78,26 +81,33 @@ describe("the commit phase", () => {
     });
     const manual = manualPopstate();
     back = manual.back;
-    layers = createLayers({
+    layers = createStack({
       dispatch,
-      fetch: async (request) =>
-        void applier.apply(
-          envelope([
-            {
-              op: "morph",
-              target: { zone: request.zone },
-              html: `<div data-next-zone="${request.zone}">body</div>`,
-            },
-            { op: "meta", title: "Photo" },
-          ]),
-          { page: new URL(request.url, location.href).pathname },
-        ),
-      document,
-      dialog: { open: () => () => undefined },
-      navigation,
-      popstate: manual.popstate,
+      chunk: landed(createLayers),
+      build: (factory) =>
+        factory({
+          dispatch,
+          fetch: async (request) =>
+            void applier.apply(
+              envelope([
+                {
+                  op: "morph",
+                  target: { zone: request.zone },
+                  html: `<div data-next-zone="${request.zone}">body</div>`,
+                },
+                { op: "meta", title: "Photo" },
+              ]),
+              { page: new URL(request.url, location.href).pathname },
+            ),
+          document,
+          dialog: { open: () => () => undefined },
+          navigation,
+          mark: markBusy,
+        }),
+      popped: () => navigation.popped(() => undefined),
+      navigate: () => undefined,
     });
-    layers.install(document);
+    layers.install(document, manual.popstate);
     applier = new Applier({
       dispatch,
       mergeContext: () => undefined,
@@ -506,7 +516,7 @@ describe("a filter submit replaces the URL through the navigation", () => {
       abort: () => undefined,
       history: navigation.asHistory(),
       poll: chunkModules.poll,
-      defer: chunkModules.defer,
+      forms: chunkModules.forms,
     });
     const detach = triggers.install(document);
     const input = document.querySelector("input")!;

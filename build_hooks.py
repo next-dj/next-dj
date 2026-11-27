@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
@@ -19,12 +20,12 @@ _BUNDLES = (
     "next.csrf.min.js",
     "next.poll.min.js",
     "next.dev.min.js",
-    "next.defer.min.js",
+    "next.forms.min.js",
+    "next.layers.min.js",
+    "next.boundaries.min.js",
     "next.reload.min.js",
     "next.more.min.js",
-    "next.reader.min.js",
     "next.router.min.js",
-    "next.history.min.js",
     "next.intent.min.js",
 )
 
@@ -85,6 +86,8 @@ class NextJsBuildHook(BuildHookInterface):
 
         if not (root / "node_modules").exists():
             subprocess.run([npm, "ci"], cwd=root, check=True)  # noqa: S603
-        subprocess.run([npm, "run", "build:next"], cwd=root, check=True)  # noqa: S603
+        # The build writes the protocol module with this interpreter, Django not needed.
+        env = {**os.environ, "PYTHON": sys.executable}
+        subprocess.run([npm, "run", "build:next"], cwd=root, check=True, env=env)  # noqa: S603
 
         _verify_built(outputs)

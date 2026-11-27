@@ -20,8 +20,9 @@ from next.components.info import (
     boundary_files,
     paths_from_component_info,
 )
-from next.components.loading import ModuleLoader
+from next.components.modules import ModuleLoader
 from next.components.registry import DeferredComponents, ErrorFiles, may_defer
+from next.introspect import DeclaringSite
 
 
 class TestComponentRegistry:
@@ -812,8 +813,11 @@ class TestDeferredComponents:
         self, fresh_deferred_components: DeferredComponents, tmp_path: Path, monkeypatch
     ) -> None:
         store = DeferDeclarations()
-        store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
-        store.props((tmp_path / "bare" / "component.py", True), ())
+        store.defer(
+            DeclaringSite(tmp_path / "card" / "component.py", True, {}),
+            {"mode": "load"},
+        )
+        store.props(DeclaringSite(tmp_path / "bare" / "component.py", True, {}), ())
         monkeypatch.setattr("next.components.registry.defer_declarations", store)
         registry = ComponentRegistry()
         registry.register_many([self._info(tmp_path, "bare", module=True)])
@@ -826,7 +830,10 @@ class TestDeferredComponents:
         self, fresh_deferred_components: DeferredComponents, tmp_path: Path, monkeypatch
     ) -> None:
         store = DeferDeclarations()
-        store.defer((tmp_path / "card" / "component.py", True), {"mode": "load"})
+        store.defer(
+            DeclaringSite(tmp_path / "card" / "component.py", True, {}),
+            {"mode": "load"},
+        )
         monkeypatch.setattr("next.components.registry.defer_declarations", store)
         registry = ComponentRegistry()
         registry.register(self._info(tmp_path, "card", loading=True, module=True))

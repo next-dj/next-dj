@@ -75,7 +75,7 @@ It never sees the exception.
 ``error.digest`` is the id the log record of the failure carries, so a support request can quote it.
 ``error.message`` and ``error.traceback`` are filled under ``DEBUG`` only.
 The boundary works in every render, deferred or not, so the file guards the plain ``latency`` component as it would a deferred one.
-A deferred component without one renders an empty wrapper marked as an error, which ``manage.py check`` reports as ``next.W170``.
+A deferred component without one shows the built-in error UI, one neutral sentence and a retry button, and an ``error.djx`` replaces it.
 
 Guard a page
 ~~~~~~~~~~~~
@@ -130,37 +130,8 @@ Know what happens to the database
 
 A boundary runs its subtree inside a lazy savepoint.
 When the subtree fails, its database writes roll back, and so do the assets and the JS context values it registered.
-The writes of the error UI itself stay, and the writes made before the boundary stay too.
-An ``audit_note`` component, guarded by an ``error.djx`` of its own, shows the rule with a row it writes before it fails.
-
-.. code-block:: python
-   :caption: dashboard/pages/_components/audit_note/component.py
-
-   from dashboard.models import AuditNote
-
-   from next import component
-
-   @component.context("note")
-   def note() -> None:
-       AuditNote.objects.create(text="rendered")
-       msg = "the lookup failed"
-       raise RuntimeError(msg)
-
-The row never exists once the error UI shows.
-In autocommit, the default for a ``GET``, the boundary opens a transaction right before the first write of the subtree and issues no statement for a read.
-``DEFER["ERRORS"]["ATOMIC"]`` changes that.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFER": {"ERRORS": {"ATOMIC": True}},
-   }
-
-``"writes"`` is the default, ``True`` opens the transaction before the first query, and ``False`` opens none, so a write in autocommit stays.
-Inside a transaction the request already opened, a ``POST`` under the default rule for instance, the savepoint is taken before the first write of an inner boundary and before the first statement of the outermost one.
-Everything outside the database stays done, a cache write, a sent email, a file, and a call to another service.
-:doc:`/content/topics/boundaries/errors` lists the rest, among them how a failed read inside a transaction surfaces at the nearest boundary that holds a savepoint, and :doc:`run-a-page-in-a-transaction` shows the statements.
+The writes of the error UI itself stay, and so does everything outside the database, such as a cache write, a sent email, or a call to another service.
+``BOUNDARIES["ATOMIC"]`` decides when the savepoint opens, see :doc:`/content/topics/boundaries/errors` for the rules and :doc:`run-a-page-in-a-transaction` for the statements.
 
 Retry
 ~~~~~
@@ -187,37 +158,18 @@ Report the failure
 ~~~~~~~~~~~~~~~~~~
 
 Without a reporter every contained failure is logged with its traceback on the ``next.boundaries`` logger under a fresh digest.
-``DEFER["ERRORS"]["REPORTER"]`` names a callable that sends the failure to an error tracker and returns the reference to show.
-
-.. code-block:: python
-   :caption: dashboard/reporting.py
-
-   import logging
-
-   from django.http import HttpRequest
-
-   logger = logging.getLogger("dashboard.boundaries")
-
-   def report(
-       exception: Exception,
-       *,
-       name: str,
-       addressing: str,
-       kind: str,
-       request: HttpRequest | None,
-   ) -> str | None:
-       logger.error("boundary %s failed as %s", name, kind, exc_info=exception)
-       return None
-
-A reporter that returns ``None`` has no reference, so the framework mints a digest and logs the failure as it does without one.
-A returned string becomes the digest of the error UI and replaces the framework log.
+``BOUNDARIES["REPORTER"]`` names a callable that sends the failure to an error tracker and returns the reference to show.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFER": {"ERRORS": {"REPORTER": "dashboard.reporting.report"}},
+       "BOUNDARIES": {"REPORTER": "dashboard.reporting.report"},
    }
+
+A reporter that returns ``None`` has no reference, so the framework mints a digest and logs the failure as it does without one.
+A returned string becomes the digest of the error UI and replaces the framework log.
+:doc:`send-boundary-failures-to-sentry-and-tracing` writes a reporter for Sentry.
 
 Verification
 ------------
@@ -245,7 +197,7 @@ The component calls ``services.latency()`` through its module, so ``monkeypatch.
        assert b"data-next-retry" in response.content
 
 A component with a ``loading.djx`` settles in a chunk, which ``get_stream`` reads, see :doc:`test-a-page-with-deferred-boundaries`.
-A client-trip component, ``load``, ``visible``, or ``manual``, reloads through ``get_boundary(url, name)``, which mints the token of the component and sends the request the browser sends, and the envelope it returns holds the op with the error UI.
+A client-trip component, ``load``, ``visible``, or ``manual``, reloads through ``get_boundary(url, name)``, which mints the token of the component and sends the request the browser sends, and the boundary it returns has ``state`` ``error`` and the error UI in ``html``.
 A plain ``get`` of ``/stats/pages/`` assembles the page in one piece, so its failure answers 500, and ``boundary_failures`` on the response names the addressing of each failure.
 
 .. code-block:: python

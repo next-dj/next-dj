@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from next.utils import classify_dirs_entries, resolve_base_dir
 
 from .info import ComponentInfo, boundary_files
-from .loading import ModuleLoader
+from .modules import ModuleLoader
 
 
 if TYPE_CHECKING:

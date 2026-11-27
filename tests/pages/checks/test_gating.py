@@ -6,7 +6,7 @@ from django.core.checks import CheckMessage
 
 from next.pages.checks.gating import check_gated_reads, check_hidden_guards
 from next.pages.loaders import forget_layout_texts
-from tests.support import patch_checks_router_manager, write_page
+from tests.support import patch_checks_route_manager, write_page
 
 
 _GATED = (
@@ -46,8 +46,6 @@ _DEEP = (
     "def one():\n    return two()\n\n"
     "@context('item')\n"
     "def item():\n    return one()\n\n"
-    "@context('declared', guard=False)\n"
-    "def declared():\n    return one()\n\n"
     "template = 'ok'\n"
 )
 
@@ -75,7 +73,7 @@ def _flags(messages: list[CheckMessage]) -> list[tuple[str, str | None]]:
 
 @pytest.fixture(autouse=True)
 def _router(tmp_path: Path) -> Iterator[None]:
-    with patch_checks_router_manager(pages_directory=tmp_path):
+    with patch_checks_route_manager(pages_directory=tmp_path):
         yield
 
 
@@ -134,7 +132,7 @@ class TestGatedReads:
 
 
 class TestHiddenGuards:
-    """next.W169 flags a gated callable that guards only through a helper."""
+    """next.W169 flags a deferred callable the scan sees answer a status."""
 
     def test_a_guard_past_the_scan_depth_is_flagged(self, tmp_path: Path) -> None:
         page_file = _tree(tmp_path, _DEEP)
@@ -144,11 +142,23 @@ class TestHiddenGuards:
         assert _flags(messages) == [("next.W169", str(page_file))]
         assert "'item'" in messages[0].msg
         assert "four" in messages[0].msg
+        assert "guard=True" in messages[0].hint
 
-    def test_a_helper_the_scan_follows_is_a_guard_not_a_warning(
+    def test_a_guard_the_scan_follows_is_flagged(self, tmp_path: Path) -> None:
+        page_file = _tree(tmp_path, _HELPED)
+
+        messages = check_hidden_guards()
+
+        assert _flags(messages) == [("next.W169", str(page_file))]
+        assert "answers 404, 403 or 400" in messages[0].msg
+
+    def test_a_declared_guard_runs_in_the_shell_and_is_quiet(
         self, tmp_path: Path
     ) -> None:
-        _tree(tmp_path, _HELPED)
+        _tree(
+            tmp_path,
+            _HELPED.replace("@context('item')", "@context('item', guard=True)"),
+        )
 
         assert check_hidden_guards() == []
 

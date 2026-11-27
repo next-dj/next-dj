@@ -289,17 +289,19 @@ describe("the manifest and the scripts of a swap", () => {
     const ready = vi.fn(() => Promise.resolve(chunk as unknown as ScriptsChunk));
     const nodes = [document.querySelector("main")!];
     const list = [{ name: "a", src: "/a.js" }];
-    const swapped = turn({ scripts: list, consent: null }, undefined, { ready });
+    const swapped = turn({ scripts: list, consent: null }, undefined, {
+      scripts: ready,
+    });
     swapped.after(envelope(), nodes, true);
     await vi.waitFor(() => expect(chunk.consent._reveal).toHaveBeenCalledWith(nodes));
-    expect(ready).toHaveBeenCalledWith("scripts");
+    expect(ready).toHaveBeenCalledTimes(1);
     expect(chunk.consent._configure).toHaveBeenCalledWith(null);
     expect(chunk.scripts._configure).toHaveBeenCalledWith(list);
   });
 
   it("loads no scripts chunk for a page without scripts or consent", () => {
     const ready = vi.fn(() => Promise.reject(new Error("unused")));
-    turn({ scripts: null, consent: null }, undefined, { ready }).after(
+    turn({ scripts: null, consent: null }, undefined, { scripts: ready }).after(
       envelope(),
       [],
       true,
@@ -310,7 +312,7 @@ describe("the manifest and the scripts of a swap", () => {
 
   it("swallows a scripts chunk that cannot load", async () => {
     const ready = vi.fn(() => Promise.reject(new Error("offline")));
-    turn({ consent: {} }, undefined, { ready }).after(envelope(), [], true);
+    turn({ consent: {} }, undefined, { scripts: ready }).after(envelope(), [], true);
     await Promise.resolve();
     expect(ready).toHaveBeenCalledTimes(1);
   });
@@ -397,7 +399,8 @@ describe("extracting a document", () => {
       '<html><head><title>New</title><link rel="stylesheet" href="/p.css" ' +
       'data-next-asset="page"><link rel="stylesheet" href="/s.css">' +
       '<script type="module" src="/m.js"></script><script src="/c.js"></script>' +
-      `</head><body>${body}<script>Next._init({"$layouts":${layouts}})</script>` +
+      `</head><body>${body}<script data-next-init>Next._init({})</script>` +
+      `<script type="application/json" data-next-layouts>${layouts}</script>` +
       "</body></html>"
     );
   }
@@ -442,15 +445,17 @@ describe("extracting a document", () => {
     const [morph] = raw.ops as Record<string, unknown>[];
     expect(morph!.target).toEqual({ body: true });
     expect(morph!.html).toContain("<main>body</main>");
-    const seals = (raw.layouts as unknown[][]).map((layout) => layout[2]);
-    expect(seals).toEqual(JSON.parse(layouts).map((layout: string[]) => layout[2]));
+    const responseIds = (raw.layouts as unknown[][]).map((layout) => layout[2]);
+    expect(responseIds).toEqual(
+      JSON.parse(layouts).map((layout: string[]) => layout[2]),
+    );
   });
 
   it("keeps the sources of the runtime nonce, not noscript or data ones", () => {
     const html =
       '<html><head><link rel="stylesheet" href="/a.css" nonce="n">' +
       '<script type="application/json" src="/d.json"></script>' +
-      '<script nonce="n">Next._init({})</script></head><body><main>x</main>' +
+      '<script nonce="n" data-next-init>Next._init({})</script></head><body><main>x</main>' +
       '<noscript><link rel="stylesheet" href="/n.css"></noscript></body></html>';
     const raw = createSwap(host({ nonce: "n" })).extract(html, "/n/");
     expect(raw.assets).toEqual([{ kind: "css", url: "/a.css", scope: null }]);
@@ -459,12 +464,14 @@ describe("extracting a document", () => {
   it.each([
     [
       "a source without the runtime nonce",
-      '<script src="/evil.js"></script><script nonce="n">Next._init({})</script>',
+      '<script src="/evil.js"></script><script nonce="n" data-next-init>Next._init({})' +
+        "</script>",
       "n",
     ],
     [
       "two runtimes that disagree",
-      '<script nonce="a">Next._init({})</script><script nonce="b">Next._init({})' +
+      '<script nonce="a" data-next-init>Next._init({})</script>' +
+        '<script nonce="b" data-next-init>Next._init({})' +
         '</script><link rel="stylesheet" href="/a.css" nonce="a">',
       undefined,
     ],
@@ -476,6 +483,40 @@ describe("extracting a document", () => {
   ])("hands back no envelope for %s", (_name, head, nonce) => {
     const html = `<html><head>${head}</head><body><main>x</main></body></html>`;
     expect(createSwap(host({ nonce })).extract(html, "/n/")).toEqual({});
+  });
+
+  it.each([
+    ["an inline script", "<script>run()</script>"],
+    ["a module", '<script type="module">run()</script>'],
+  ])("hands back no envelope for a slot holding %s", (_name, script) => {
+    const html = page(
+      '[["L1","D1","T1"]]',
+      `<!--nx:s L1 T1-->${script}<!--/nx:s L1 T1-->`,
+    );
+    expect(createSwap(host({ chain })).extract(html, "/n/")).toEqual({});
+  });
+
+  it("carves a slot whose scripts are data, inert or the init", () => {
+    const html = page(
+      '[["L1","D1","T1"]]',
+      '<!--nx:s L1 T1--><script type="application/json">{}</script>' +
+        "<noscript><script>run()</script></noscript><main>m</main><!--/nx:s L1 T1-->",
+    );
+    const raw = createSwap(host({ chain })).extract(html, "/n/");
+    expect((raw.ops as Record<string, unknown>[])[0]!.target).toEqual({ slot: "L1" });
+  });
+
+  it("reads a layouts block the server never filled as no layouts", () => {
+    const html =
+      '<body><script type="application/json" data-next-layouts>"nx:layouts s"</script>' +
+      '<script type="application/json" data-next-layouts>[</script></body>';
+    expect(createSwap(host({ chain: () => [] })).extract(html, "/n/").layouts).toEqual(
+      [],
+    );
+    const broken = html.replace('"nx:layouts s"', "[");
+    expect(
+      createSwap(host({ chain: () => [] })).extract(broken, "/n/").layouts,
+    ).toEqual([]);
   });
 
   it("reads a document without any payload as one with no layouts", () => {

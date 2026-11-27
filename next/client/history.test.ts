@@ -28,7 +28,7 @@ interface Options {
 const SETTINGS = {
   scope: "all",
   snapshots: 10,
-  intercept: "opt-in",
+  intercept: "opt_in",
 };
 
 const SLOTTED =
@@ -96,22 +96,32 @@ function own(created: PartialSurface): PartialSurface {
   return created;
 }
 
+// The layouts block the router reads its chain from, none for a `null` chain.
+function chained(layouts: unknown): void {
+  document.head.querySelector("script[data-next-layouts]")?.remove();
+  if (layouts === null) return;
+  const block = document.createElement("script");
+  block.type = "application/json";
+  block.setAttribute("data-next-layouts", "");
+  block.textContent = JSON.stringify(layouts);
+  document.head.append(block);
+}
+
 function setup(options: Options = {}) {
+  chained(options.layouts === undefined ? [["L1", "D1", "S1"]] : options.layouts);
   document.body.innerHTML = options.page ?? SLOTTED;
   if (options.state !== undefined) history.replaceState(options.state, "", "/");
   const context: Detail = {
     $router: options.router ?? SETTINGS,
-    $layouts: options.layouts ?? [["L1", "D1", "S1"]],
     ...options.context,
   };
-  surface = own(
-    createPartial({
-      ...chunkModules,
-      dispatch: () => undefined,
-      mergeContext: (data) => Object.assign(context, data),
-      context: () => context,
-    }),
-  );
+  const runtime = createPartial({
+    ...chunkModules,
+    dispatch: () => undefined,
+    mergeContext: (data) => Object.assign(context, data),
+    context: () => context,
+  });
+  surface = own(runtime.partial);
   surface._configure({ reload: () => undefined });
   const host: RouterHost = {
     listen: () => () => undefined,
@@ -119,14 +129,11 @@ function setup(options: Options = {}) {
     replace: (entry, href) => history.replaceState(entry, "", href),
     assign: () => undefined,
   };
-  const on = (_event: "ready", listener: () => void): (() => void) => {
-    listener();
-    return () => undefined;
-  };
-  const router = createRouter({ partial: surface, context, on }, host, {
-    signal: listening.signal,
-  });
-  router._install((seams) => createHistory(seams, { signal: listening.signal }));
+  const router = createRouter(
+    { ...runtime.kernel, onReady: (listener) => listener() },
+    host,
+    { signal: listening.signal },
+  );
   return { router, context };
 }
 
@@ -175,6 +182,35 @@ describe("snapshots", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("puts back what the user typed into the fields of a popped entry", async () => {
+    const page =
+      "<!--nx:s L1 S1--><main><h1>Home</h1>" +
+      '<input id="q" value="server"><input id="c" type="checkbox">' +
+      '<textarea id="t"></textarea>' +
+      '<select id="s"><option>a</option><option>b</option></select>' +
+      '<div data-next-persist="p"><input id="p"></div>' +
+      "</main><!--/nx:s L1 S1-->";
+    const { router } = setup({ page });
+    serve(answer(envelope()));
+    const home = history.state as Entry;
+    const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+    const area = document.getElementById("t") as HTMLTextAreaElement;
+    const select = document.getElementById("s") as HTMLSelectElement;
+    input("q").value = "typed";
+    input("c").checked = true;
+    area.value = "notes";
+    select.selectedIndex = 1;
+    await router.visit("/b/");
+    expect(heading()).toBe("B");
+    await pop(home);
+    expect(heading()).toBe("Home");
+    expect(input("q").value).toBe("typed");
+    expect(input("c").checked).toBe(true);
+    expect((document.getElementById("t") as HTMLTextAreaElement).value).toBe("notes");
+    expect((document.getElementById("s") as HTMLSelectElement).selectedIndex).toBe(1);
+    expect(calls).toHaveLength(1);
+  });
+
   it("revalidates a restored snapshot older than the prefetch lifetime", async () => {
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -208,7 +244,6 @@ describe("snapshots", () => {
     expect(context).toMatchObject({ user: undefined, team: "red" });
     await pop(home);
     expect(context).toMatchObject({ user: "ann", team: undefined });
-    expect(context.$layouts).toEqual([["L1", "D1", "S1"]]);
   });
 
   it("restores the entry it left on a pop when going forward again", async () => {
@@ -277,7 +312,7 @@ describe("snapshots", () => {
   });
 
   it.each([
-    ["the page refused one", { "X-Next-Router": "no-snapshot" }, {}],
+    ["the page refused one", { "X-Next-Router": "no_snapshot" }, {}],
     ["an answer cleared them", {}, { "X-Next-Router": "clear" }],
   ])("keeps no snapshot when %s", async (_name, first, second) => {
     const { router } = setup();
@@ -298,7 +333,7 @@ describe("snapshots", () => {
   it("restores a popped entry but keeps none of the page that refused one", async () => {
     const { router } = setup();
     serve(
-      answer(envelope(), { "X-Next-Router": "no-snapshot" }),
+      answer(envelope(), { "X-Next-Router": "no_snapshot" }),
       answer(envelope("<main><h1>B</h1></main>", "/b/")),
     );
     const home = history.state as Entry;
@@ -366,7 +401,7 @@ describe("snapshots", () => {
       '<link rel="stylesheet" href="/home.css" data-next-asset="page">' +
       '<link rel="stylesheet" href="/site.css">';
     const page = (url: string): Detail => ({
-      assets: [{ kind: "css", url, scope: "page" }],
+      assets: [{ kind: "css", url, load: "link", scope: "page" }],
     });
     serve(answer(envelope(undefined, "/b/", page("/b.css"))));
     const home = history.state as Entry;
@@ -438,7 +473,7 @@ describe("scroll positions", () => {
         ...chunkModules,
         dispatch: () => undefined,
         mergeContext: () => undefined,
-      }),
+      }).partial,
     );
     const keeper = createHistory(
       historyHost({ partial: surface, settings: () => ({ snapshots }) }),
@@ -471,5 +506,26 @@ describe("scroll positions", () => {
     serve(answer(envelope()));
     await router.visit("/b/");
     expect(heading()).toBe("B");
+  });
+});
+
+describe("an unreadable memo of foreign paths", () => {
+  it("starts empty", async () => {
+    sessionStorage.setItem("nx:foreign", "{");
+    const { router } = setup();
+    serve(answer(envelope()));
+    await router.visit("/b/");
+    expect(heading()).toBe("B");
+  });
+});
+
+describe("the scroll of a reloaded entry", () => {
+  it("is placed once more after the load when the page was too short", () => {
+    sessionStorage.setItem("nx:scroll", JSON.stringify([["k9", [120]]]));
+    setup({ state: { next: 1, kind: "nav", key: "k9" } });
+    expect(scrolled).toHaveBeenCalledWith(0, 120);
+    scrolled.mockClear();
+    window.dispatchEvent(new Event("load"));
+    expect(scrolled).toHaveBeenCalledWith(0, 120);
   });
 });

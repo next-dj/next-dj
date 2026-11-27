@@ -3,4 +3,4 @@
 
 import { mintCsrf } from "../csrf";
 
-window.Next._land("csrf", mintCsrf);
+window.Next._extend("csrf", () => mintCsrf, __BUILD__);

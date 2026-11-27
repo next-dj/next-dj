@@ -32,14 +32,19 @@ NUMBER_CASES: tuple[NumberCase, ...] = (
     NumberCase("past-the-ceiling", f"page={'9' * 19}", range(10), "2", None),
     NumberCase("too-many-digits", f"page={'1' * 20}", range(10), "2", None),
     NumberCase("last", "page=10", range(90, 95), None, "9"),
-    NumberCase("past-the-end", "page=11", range(0), None, None),
-    NumberCase("addressable-but-empty", f"page={10**17}", range(0), None, None),
+    NumberCase("past-the-end", "page=11", range(0), None, "10"),
+    NumberCase("addressable-but-empty", f"page={10**17}", range(0), None, "10"),
     NumberCase(
-        "restore-short", "page=5&restore=1", range(50), "6", None, ("1", "2", "3", "4")
+        "restore-short",
+        "page=5&_restore=page",
+        range(50),
+        "6",
+        None,
+        ("1", "2", "3", "4"),
     ),
     NumberCase(
         "restore-bounded",
-        "page=12&restore=1",
+        "page=12&_restore=page",
         range(20, 95),
         None,
         "2",
@@ -47,15 +52,15 @@ NUMBER_CASES: tuple[NumberCase, ...] = (
     ),
     NumberCase(
         "restore-whole",
-        "page=10&restore=1",
+        "page=10&_restore=page",
         range(95),
         None,
         None,
         ("1", "2", "3", "4", "5", "6", "7", "8", "9"),
     ),
-    NumberCase("restore-far", "page=25&restore=1", range(0), None, None),
-    NumberCase("restore-other-value", "page=3&restore=true", range(20, 30), "4", "2"),
-    NumberCase("restore-without-page", "restore=1", range(10), "2", None),
+    NumberCase("restore-far", "page=25&_restore=page", range(0), None, "10"),
+    NumberCase("restore-other-value", "page=3&_restore=other", range(20, 30), "4", "2"),
+    NumberCase("restore-without-page", "_restore=page", range(10), "2", None),
 )
 
 

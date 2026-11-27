@@ -2,4 +2,4 @@
 
 import { createSse } from "../sse";
 
-window.Next._land("stream", createSse);
+window.Next._extend("stream", () => createSse, __BUILD__);

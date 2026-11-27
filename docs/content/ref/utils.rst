@@ -24,6 +24,8 @@ A directory named with a marker and a segment, such as ``(.)photo``, is an inter
 ``resolve_intercept(scope_trail, marker, rest)`` returns the URL trail the intercept targets from the group-free URL trail of the directory that holds it, or ``None`` when ``(..)`` climbs past the tree root.
 ``InterceptPage`` is the frozen value the walk reports for a page under an intercept directory, with the ``target_trail`` it sits over, its ``file``, the marked ``source`` directory, and the ``marker``.
 
+``parse_duration(value)`` returns the seconds a number of seconds or a ``"2s"`` or ``"500ms"`` literal names, up to ``MAX_DURATION``, one day, and raises :class:`~next.errors.DurationError` for anything else, a bare numeric string included, since a template literal reads it as milliseconds.
+
 ``redirect_or_fallback(target, fallback, *, status=302)`` redirects to ``target``, or to ``fallback`` when Django refuses it as a ``Location``.
 
 The HTML scan reads markup the way a browser parser splits it into tags, without building a tree.
@@ -57,7 +59,7 @@ Public API
 
 .. automodule:: next.utils
    :members:
-   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, app_holding, forget_app_holdings, resolved_tree, forget_resolved_trees, on_forget_resolved_trees, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed, int_between, positive_number, non_negative_number, after_fork, is_within, child_nodelists, is_intercept_name, regex_trail, UNMOUNTED, LAYOUT_TEMPLATE
+   :exclude-members: walk_page_tree, PageDir, list_page_dir, routes_into, PAGE_FILES, page_roots_shape_error, template_edits_watched, normalise_route_name, app_holding, resolved_tree, MAX_ANCESTOR_WALK_DEPTH, WEB_SCHEMES, is_int, ROUTE_BRACKET_PATTERN, is_dynamic_trail, prefix_trail, join_trail, TreeSource, load_tree_source, decode_url_path, exec_module_file, is_middleware, middleware_listed, int_between, positive_number, non_negative_number, is_within, child_nodelists, is_intercept_name, regex_trail, UNMOUNTED, LAYOUT_TEMPLATE
 
 See also
 --------

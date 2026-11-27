@@ -2,7 +2,7 @@ from django.test import override_settings
 
 from next.pages.ports import PageScanImpl
 from next.ports import PageScan
-from next.urls.ports import RouterAccessImpl
+from next.urls.ports import RouteAccessImpl
 from tests.support import call_shape, file_router_config_entry, port_methods
 
 
@@ -27,7 +27,7 @@ class TestPageScanPort:
         entry = file_router_config_entry(pages_dir=tmp_path)
 
         with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
-            manager = RouterAccessImpl().create_manager()
+            manager = RouteAccessImpl().create_manager()
             loaded = PageScanImpl().load_scanned_page_modules(manager)
 
         assert loaded == [("blog", page_file)]

@@ -15,8 +15,9 @@ from django.template import Engine, Template, TemplateDoesNotExist, TemplateSynt
 from django.template.base import FilterExpression, NodeList
 from django.template.loader_tags import BlockNode, ExtendsNode, IncludeNode
 
+from next.caches import FRAMEWORK, Memo
 from next.conf import next_framework_settings
-from next.discovery import get_router_manager, iter_page_tree_component_folders
+from next.discovery import get_route_manager, iter_page_tree_component_folders
 from next.utils import child_nodelists
 
 from .context import component
@@ -36,29 +37,23 @@ if TYPE_CHECKING:
 type _Blocks = dict[str, tuple[NodeList, ...]]
 
 
-class _ComponentsManagerCache:
-    """The one manager a check run builds, instead of one per asking check."""
-
-    def __init__(self) -> None:
-        """Start with nothing built."""
-        self.held: ComponentsManager | None = None
-
-
-_components_manager_cache = _ComponentsManagerCache()
+_components_manager: Memo[ComponentsManager] = Memo(depends=(FRAMEWORK,))
+"""The one manager a check run builds, instead of one per asking check."""
 
 
 def get_components_manager() -> ComponentsManager:
     """Return a per-run cached `ComponentsManager` holding every component source.
 
-    The live registry holds only walked components. Dropped on `settings_reloaded`.
+    The live registry holds only walked components. Dropped on a framework reload.
     """
-    cached = _components_manager_cache.held
-    if cached is not None:
-        return cached
+    return _components_manager.get(_build_components_manager)
+
+
+def _build_components_manager() -> ComponentsManager:
+    """Build the manager of every component source, its page tree folders registered."""
     manager = ComponentsManager()
     # This module owns the manager, so no listener hears about its backends.
     manager.reload(notify=False)
-    _components_manager_cache.held = manager
     _register_page_tree_component_folders(manager)
     return manager
 
@@ -68,17 +63,17 @@ def _register_page_tree_component_folders(manager: ComponentsManager) -> None:
 
     The router's own folders and registration make a reader see what a render sees.
     """
-    router_manager, _errors = get_router_manager()
-    if router_manager is None:
+    route_manager, _errors = get_route_manager()
+    if route_manager is None:
         return
-    for router in router_manager.backends:
+    for router in route_manager.backends:
         for folder, tree_root, scope_trail in iter_page_tree_component_folders(router):
             manager.register_router_walk_folder(folder, tree_root, scope_trail)
 
 
 def reset_components_manager_cache(**kwargs: object) -> None:
     """Drop the cached `ComponentsManager` so the next read rebuilds it."""
-    _components_manager_cache.held = None
+    _components_manager.forget()
 
 
 def components_listed() -> bool:

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import stat
@@ -14,12 +13,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, Final, override
 
-from next.boundaries import wrapper_tag
-from next.caches import PageCache
+from next.boundaries.markup import wrapper_tag
+from next.boundaries.options import DEFAULT_TAG
+from next.caches import FRAMEWORK, ROUTES, SETTINGS, PageCache, memo
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
 from next.conf.router import router_enabled
-from next.defer import DEFAULT_TAG
+from next.discovery import get_pages_directories_for_watch
+from next.errors import SettingError
 from next.introspect import is_coroutine_callable, refuse_async
 from next.pages.errors import PageModuleImportError
 from next.permissions.access import declarations
@@ -57,7 +58,6 @@ from .placeholder import (
     quote_source,
     scan_root,
 )
-from .watch import get_pages_directories_for_watch
 
 
 if TYPE_CHECKING:
@@ -92,7 +92,7 @@ class _PageLoad:
     error: Exception | None
 
 
-_MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache()
+_MODULE_MEMO: PageCache[Path, _PageLoad] = PageCache(depends=())
 _FAILED_PATHS: set[Path] = set()
 _MEMO_WRITE_LOCK = threading.Lock()
 
@@ -304,6 +304,9 @@ def _page_load(file_path: Path) -> _PageLoad | None:
     try:
         with declarations.collecting(file_path):
             module = _load_python_module(file_path)
+    except SettingError:
+        # A misshapen setting is no broken page, so its check names it, not this memo.
+        raise
     except Exception as exc:
         if stat_mtime_ns(file_path) is None:
             # Removed between the stat and the execution, so absent rather than broken.
@@ -346,7 +349,7 @@ def _pages_dirs_for_config(config: dict) -> list[Path]:
     return list(path_roots)
 
 
-@functools.cache
+@memo(FRAMEWORK, ROUTES)
 def shared_layouts() -> tuple[Path, ...]:
     """Return the resolved root `layout.djx` of each page backend `DIRS`.
 
@@ -363,12 +366,7 @@ def shared_layouts() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(candidates))
 
 
-def forget_shared_layouts(**kwargs: object) -> None:
-    """Drop cached root-level `layout.djx` paths on settings reload."""
-    shared_layouts.cache_clear()
-
-
-@functools.cache
+@memo(SETTINGS, ROUTES)
 def _page_roots() -> tuple[Path, ...]:
     """Return the resolved page trees the routers report, memoised.
 
@@ -385,17 +383,12 @@ def forget_page_roots(**kwargs: object) -> None:
         _version.value += 1
 
 
-def forget_app_page_roots(*, setting: str, **kwargs: object) -> None:
-    """Drop the memoised page trees when the app list behind them moves.
-
-    `settings_reloaded` misses `INSTALLED_APPS`, which the `APP_DIRS` trees follow.
-    """
-    if setting == "INSTALLED_APPS":
-        forget_page_roots()
+SETTINGS.attach(forget_page_roots)
+ROUTES.attach(forget_page_roots)
 
 
 _TREE_DEPTHS: PageCache[Path, tuple[tuple[Path, ...], tuple[int, int] | None]] = (
-    PageCache()
+    PageCache(depends=())
 )
 
 
@@ -539,8 +532,10 @@ class DjxTemplateLoader(TemplateLoader):
         return djx_file if djx_file.exists() else None
 
 
-_ABOVE_TREE: PageCache[tuple[Path, int], tuple[tuple[Path, int], ...]] = PageCache()
-_RESOLVED: PageCache[Path, Path] = PageCache()
+_ABOVE_TREE: PageCache[tuple[Path, int], tuple[tuple[Path, int], ...]] = PageCache(
+    depends=(SETTINGS, ROUTES)
+)
+_RESOLVED: PageCache[Path, Path] = PageCache(depends=())
 
 
 def _resolved(path: Path) -> Path:
@@ -827,7 +822,9 @@ def layout_chain(
     return tuple(_climb(file_path, 0, cut=cut, resolved=resolved)[0])
 
 
-_BOUNDARIES: PageCache[Path, tuple[int, tuple[Path, ...], BoundaryChain]] = PageCache()
+_BOUNDARIES: PageCache[Path, tuple[int, tuple[Path, ...], BoundaryChain]] = PageCache(
+    depends=()
+)
 
 
 def _discover(file_path: Path) -> tuple[tuple[Path, ...], BoundaryChain]:
@@ -910,8 +907,8 @@ class _Held[T]:
     value: T
 
 
-_LAYOUT_TEXTS: PageCache[Path, _Held[str]] = PageCache()
-_LAYOUT_ROOTS: PageCache[Path, _Held[RootScan]] = PageCache()
+_LAYOUT_TEXTS: PageCache[Path, _Held[str]] = PageCache(depends=())
+_LAYOUT_ROOTS: PageCache[Path, _Held[RootScan]] = PageCache(depends=())
 
 
 def template_source(source: Path) -> str | None:
@@ -1164,7 +1161,7 @@ class LayoutTemplateLoader:
         return result
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def build_registered_loaders() -> Sequence[TemplateLoader]:
     """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
 
@@ -1194,11 +1191,6 @@ def build_registered_loaders() -> Sequence[TemplateLoader]:
         instances.append(cls())
 
     return tuple(instances)
-
-
-def forget_registered_loaders(**kwargs: object) -> None:
-    """Drop cached loader instances on settings reload."""
-    build_registered_loaders.cache_clear()
 
 
 def has_body(file_path: Path, module: types.ModuleType | None) -> bool:

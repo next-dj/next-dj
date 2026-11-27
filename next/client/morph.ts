@@ -3,7 +3,7 @@
 // scroll survive a patch. Matching runs on id-sets, then a child walk reuses.
 
 import { defaultMove } from "./adapters";
-import { ATTR_BUSY, ATTR_KEY, isBusy } from "./protocol";
+import { ATTR_BUSY, ATTR_KEEP, ATTR_KEY, isBusy } from "./protocol";
 
 /** Whether a morph replaces the target itself or only its children. */
 export type MorphMode = "node" | "children";
@@ -30,6 +30,9 @@ export interface MorphOptions {
   onDiscard?: (node: Node) => boolean | void;
   // Reports a node carrying both data-next-key and id, the dev channel's warning.
   keyed?: ((el: Element) => void) | undefined;
+  // Fire the cancelable next:morph-element and next:morph-attribute events. Default
+  // false, since a CustomEvent per node and per attribute costs a large patch dearly.
+  events?: boolean;
 }
 
 interface Ctx {
@@ -40,6 +43,7 @@ interface Ctx {
   beforeNode: (oldNode: Node | null, newNode: Node) => boolean | void;
   afterNode: (oldNode: Node, newNode: Node) => void;
   onDiscard: (node: Node) => boolean | void;
+  events: boolean;
 }
 
 type Keyed = MorphOptions["keyed"];
@@ -104,14 +108,11 @@ function intersects(a: Set<string> | undefined, persistent: Set<string>): boolea
 }
 
 function sharesPersistent(
-  ctx: Ctx,
-  oldEl: Element,
-  newEl: Element,
+  oldIds: Set<string> | undefined,
+  newIds: Set<string>,
   persistent: Set<string>,
 ): boolean {
-  const oldIds = ctx.ids.get(oldEl);
-  const newIds = ctx.ids.get(newEl);
-  if (oldIds === undefined || newIds === undefined) return false;
+  if (oldIds === undefined) return false;
   for (const id of oldIds) {
     if (persistent.has(id) && newIds.has(id)) return true;
   }
@@ -126,14 +127,14 @@ function isElement(node: Node): node is Element {
 function isHardMatch(
   ctx: Ctx,
   oldNode: Node,
-  newNode: Node,
+  newNode: Element,
+  newIds: Set<string>,
   persistent: Set<string>,
 ): boolean {
   return (
     isElement(oldNode) &&
-    isElement(newNode) &&
     oldNode.tagName === newNode.tagName &&
-    sharesPersistent(ctx, oldNode, newNode, persistent)
+    sharesPersistent(ctx.ids.get(oldNode), newIds, persistent)
   );
 }
 
@@ -161,9 +162,12 @@ function findMatch(
   persistent: Set<string>,
   end: Node | null,
 ): Node | null {
-  for (let scan = pointer; scan && scan !== end; scan = scan.nextSibling) {
-    if (isHardMatch(ctx, scan, newChild, persistent)) {
-      return scan;
+  // A child with no persistent id can only soft match, so a list of id-less rows
+  // costs one step per row instead of a scan of every sibling left.
+  const ids = isElement(newChild) ? ctx.ids.get(newChild) : undefined;
+  if (ids !== undefined && isElement(newChild) && intersects(ids, persistent)) {
+    for (let scan = pointer; scan && scan !== end; scan = scan.nextSibling) {
+      if (isHardMatch(ctx, scan, newChild, ids, persistent)) return scan;
     }
   }
   if (!pointer || pointer === end) return null;
@@ -179,10 +183,16 @@ function isAtomic(el: Element): boolean {
 // A keep node is left untouched so a foreign root mounted into it survives, hard
 // matched by id or paired by position when the server gives it no stable id.
 function isKept(el: Element): boolean {
-  return el.hasAttribute("data-next-keep");
+  return el.hasAttribute(ATTR_KEEP);
 }
 
-function emit(target: Element, name: string, detail: Record<string, unknown>): boolean {
+function emit(
+  ctx: Ctx,
+  target: Element,
+  name: string,
+  detail: Record<string, unknown>,
+): boolean {
+  if (!ctx.events) return true;
   const event = new CustomEvent(name, { bubbles: true, cancelable: true, detail });
   target.dispatchEvent(event);
   return !event.defaultPrevented;
@@ -267,7 +277,10 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
     if (skipAttribute(ctx, oldEl, attr.name)) continue;
     if (oldEl.getAttribute(attr.name) === attr.value) continue;
     if (
-      emit(oldEl, "next:morph-attribute", { name: attr.name, mutationType: "update" })
+      emit(ctx, oldEl, "next:morph-attribute", {
+        name: attr.name,
+        mutationType: "update",
+      })
     ) {
       try {
         oldEl.setAttribute(attr.name, attr.value);
@@ -281,7 +294,7 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
   const oldNames = Array.from(oldEl.attributes, (attr) => attr.name);
   for (const name of oldNames) {
     if (newEl.hasAttribute(name) || skipAttribute(ctx, oldEl, name)) continue;
-    if (emit(oldEl, "next:morph-attribute", { name, mutationType: "remove" })) {
+    if (emit(ctx, oldEl, "next:morph-attribute", { name, mutationType: "remove" })) {
       oldEl.removeAttribute(name);
     }
   }
@@ -295,7 +308,7 @@ function morphNode(
   persistent: Set<string>,
 ): void {
   if (ctx.beforeNode(oldEl, newEl) === false) return;
-  if (!emit(oldEl, "next:morph-element", { newNode: newEl })) return;
+  if (!emit(ctx, oldEl, "next:morph-element", { newNode: newEl })) return;
 
   if (isKept(oldEl)) {
     // A keep node with an id is untouched: no attribute sync, no recursion.
@@ -460,6 +473,7 @@ function prepare(
     beforeNode: options.beforeNode ?? (() => undefined),
     afterNode: options.afterNode ?? (() => undefined),
     onDiscard: options.onDiscard ?? (() => undefined),
+    events: options.events === true,
   };
   const snap = snapshotFocus(doc);
   body(ctx, persistent);

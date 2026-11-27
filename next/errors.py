@@ -9,6 +9,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 
+class DurationError(ValueError):
+    """Raised for a duration that is no seconds count or `"2s"` literal up to a day."""
+
+
 class InvalidDirsError(ImproperlyConfigured):
     """Raised when a ``DIRS`` value is no sequence of trees, a string included."""
 
@@ -54,7 +58,14 @@ def _setting_address(setting: str, scope: str | None = None) -> str:
     return "NEXT_FRAMEWORK" + "".join(f"[{key!r}]" for key in keys)
 
 
-class SettingImportError(ImproperlyConfigured):
+class SettingError(ImproperlyConfigured):
+    """Raised for a `NEXT_FRAMEWORK` value a system check names as unusable.
+
+    A check that meets one yields to the check of that value, so it reports once.
+    """
+
+
+class SettingImportError(SettingError):
     """Raised when the class one dotted-path settings key names does not import."""
 
     def __init__(
@@ -80,7 +91,7 @@ class BackendNotSubclassError(ImproperlyConfigured):
         super().__init__(f"Backend {dotted!r} is not a {base_name} subclass.")
 
 
-class SettingNotSubclassError(ImproperlyConfigured):
+class SettingNotSubclassError(SettingError):
     """Raised when the class one dotted-path key names stands outside its family."""
 
     def __init__(
@@ -113,6 +124,15 @@ class AbstractBackendError(ImproperlyConfigured):
         )
 
 
+class SettingShapeError(SettingError):
+    """Raised for a `NEXT_FRAMEWORK` value written outside the shape its key takes."""
+
+    def __init__(self, problems: "Iterable[str]") -> None:
+        """Store one sentence per misfit value, each naming the key, value and shape."""
+        self.problems = tuple(problems)
+        super().__init__(" ".join(self.problems))
+
+
 class AsyncCallableError(ImproperlyConfigured):
     """Raised when a page, context, action or form hook callable is `async def`."""
 
@@ -133,7 +153,10 @@ __all__ = [
     "BackendImportError",
     "BackendNotSubclassError",
     "BackendPathError",
+    "DurationError",
     "InvalidDirsError",
+    "SettingError",
     "SettingImportError",
     "SettingNotSubclassError",
+    "SettingShapeError",
 ]

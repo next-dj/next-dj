@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from next.boundaries import aguarded, guarded, protect
+from next.boundaries.protection import aguarded, guarded, protect
 from next.pages.boundaries import Caught, catching
 from next.pages.graph import blaming
 

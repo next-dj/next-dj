@@ -8,12 +8,21 @@ from typing import TYPE_CHECKING, Final
 
 from django.conf import settings
 from django.utils.html import escape
+from django.utils.translation import gettext
 
-from next.defer import DEFAULT_TAG, BoundaryFailure, DebugBoundaryFailure, ErrorKind
+from next.conf.boundaries import boundary_settings
 from next.utils import open_elements, root_ends, root_miss
+from next.wire import (
+    BOUNDARY_ATTR,
+    DETAIL_ATTR,
+    DIGEST_ATTR,
+    ERROR_ATTR,
+    SOURCE_ATTR,
+    STATE_ATTR,
+)
 
-from .failures import Trace
-from .options import error_settings
+from .failures import BoundaryFailure, DebugBoundaryFailure, ErrorKind, Trace
+from .options import DEFAULT_TAG
 from .reporting import failure_log
 
 
@@ -21,10 +30,10 @@ if TYPE_CHECKING:
     from next.static.collector import StaticCollector
 
 
-_RETRY_BUNDLE: Final = "defer"
+_RETRY_BUNDLE: Final = "boundaries"
 
 RETRY_ATTR: Final = "data-next-retry"
-"""The attribute of a retry control in an error UI, which the `defer` bundle answers."""
+"""The attribute of a retry control in an error UI, read by the boundaries bundle."""
 
 _RETRY_CONTROL: Final = re.compile(
     r"<[a-z][^\s/>]*"
@@ -97,16 +106,30 @@ def wrapper_tag(preceding: str, tag: str = DEFAULT_TAG) -> str | None:
     return tag
 
 
+def builtin_error_ui(error: BoundaryFailure) -> str:
+    """Return the unstyled error UI a deferred component without one of its own shows.
+
+    It names nothing of the failure, so it shows the same text with `DEBUG` off or on.
+    """
+    retry = (
+        f'<button type="button" {RETRY_ATTR}>{escape(gettext("Try again"))}</button>'
+        if error.retry
+        else ""
+    )
+    text = escape(gettext("This part of the page could not be loaded."))
+    return f'<div role="alert"><p>{text}</p>{retry}</div>'
+
+
 def debug_detail(trace: Trace) -> str:
     """Return the unstyled element that shows the exception line and its traceback."""
     return (
-        f"<details open data-next-error-detail><summary>{escape(trace.line)}</summary>"
+        f"<details open {DETAIL_ATTR}><summary>{escape(trace.line)}</summary>"
         f"<pre>{escape(trace.text)}</pre></details>"
     )
 
 
 def _detail_attribute(text: str) -> str:
-    return f' data-next-error-detail="{escape(text)}"'
+    return f' {DETAIL_ATTR}="{escape(text)}"'
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,19 +180,19 @@ def wrap(tag: str | None, attributes: str, body: str, shown: Shown) -> str:
 def identity(ident: str) -> str:
     """Return the `id` and `data-next-boundary` attributes a wrapper is swapped by."""
     shown = escape(ident)
-    return f' id="{shown}" data-next-boundary="{shown}"'
+    return f' id="{shown}" {BOUNDARY_ATTR}="{shown}"'
 
 
 def _failure(kind: ErrorKind, digest: str | None) -> str:
-    shown = "" if digest is None else f' data-next-error-digest="{escape(digest)}"'
-    return f' data-next-state="error" data-next-error="{escape(kind.value)}"{shown}'
+    shown = "" if digest is None else f' {DIGEST_ATTR}="{escape(digest)}"'
+    return f' {STATE_ATTR}="error" {ERROR_ATTR}="{escape(kind.value)}"{shown}'
 
 
 def error_attributes(
     ident: str, kind: ErrorKind, digest: str | None, source: str | None = None
 ) -> str:
     """Return the attributes of a wrapper that settled as an error."""
-    named = "" if source is None else f' data-next-boundary-source="{escape(source)}"'
+    named = "" if source is None else f' {SOURCE_ATTR}="{escape(source)}"'
     return identity(ident) + _failure(kind, digest) + named
 
 
@@ -192,7 +215,7 @@ def failed(
     digest = None
     if isinstance(error, DebugBoundaryFailure):
         digest = error.digest
-        if error.traceback and error_settings().detail:
+        if error.traceback and boundary_settings().detail:
             trace = Trace(error.message, error.traceback)
     marked = attributes + _failure(error.kind, digest)
     return wrap(tag, marked, body, Shown(trace, site, debug=digest is not None))
@@ -232,6 +255,7 @@ __all__ = [
     "RETRY_ATTR",
     "Shown",
     "adopt",
+    "builtin_error_ui",
     "debug_detail",
     "error_attributes",
     "failed",

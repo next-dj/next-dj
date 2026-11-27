@@ -370,7 +370,7 @@ class TestParallel:
         run = graph_module._Run(registry.graph(LEAF), LEAF, base)
         lane = graph_module._Lane(((0, {}),), -1, ())
 
-        run._lane(lane, run.base)
+        run._lane(lane, lane.steps, run.base)
 
         assert lane.done == []
 

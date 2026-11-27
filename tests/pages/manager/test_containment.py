@@ -10,7 +10,8 @@ from next.pages import page
 from next.pages.boundaries import Caught
 from next.pages.graph import Blame
 from next.pages.loaders import NO_BOUNDARIES, BoundaryChain, PageBoundary
-from next.transactions import LazySavepoint, probe_atomic_aliases
+from next.transactions.policy import probe_atomic_aliases
+from next.transactions.savepoints import LazySavepoint
 from tests.support.statements import query_missing_table
 
 

@@ -9,7 +9,7 @@ from next.checks.common import forget_run_memos
 from next.components.manager import components_manager
 from next.components.sources import reset_components_manager_cache
 from next.diagnostics import reset_failure_logs
-from next.discovery import reset_router_manager_cache
+from next.discovery import reset_route_manager_cache
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
@@ -85,7 +85,7 @@ def reset_check_caches() -> None:
 
     A test that rewrites the page or component tree in place needs this.
     """
-    reset_router_manager_cache()
+    reset_route_manager_cache()
     forget_run_memos()
     reset_components_manager_cache()
     reset_collected_patterns_cache()

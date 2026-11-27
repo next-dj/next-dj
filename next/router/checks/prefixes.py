@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning
 from django.urls import (
     LocalePrefixPattern,
     URLPattern,
@@ -14,7 +14,7 @@ from django.urls import (
     get_script_prefix,
 )
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf.router import router_enabled, router_settings
 from next.router.manager import asset_prefixes
 

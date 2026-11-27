@@ -1,0 +1,764 @@
+import logging
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
+from django.test import override_settings
+
+from next.caches import DEFAULT_CACHE_SIZE
+from next.discovery import (
+    get_layout_djx_paths_for_watch,
+    get_page_roots,
+    get_pages_directories_for_watch,
+    get_template_djx_paths_for_watch,
+    iter_page_backends_for_watch,
+    iter_pages_roots_with_components_folder_names,
+)
+from next.urls import route_manager
+from next.urls.ports import RouteAccessImpl
+from next.utils import resolved_tree
+from tests.support import (
+    MalformedRootsRouter,
+    OddComponentsNameRouter,
+    RaisingComponentsRouter,
+    RaisingRootsRouter,
+    RootPagesRouter,
+    app_snapshot,
+    file_router_config_entry,
+    importable_dir,
+)
+from tests.support.cases.watch import WATCHED_BACKENDS_CASES, WatchedBackendsCase
+
+
+# The promise every watcher diagnostic ends on, which a reload then keeps.
+_RECONFIGURE_PROMISE = (
+    "The same failure is not logged again for 600 seconds or until the framework is "
+    "reconfigured."
+)
+
+
+def _write_app(root: Path, name: str) -> Path:
+    """Write an importable app package with an empty `pages` tree."""
+    app_pages = root / name / "pages"
+    app_pages.mkdir(parents=True)
+    (root / name / "__init__.py").write_text("")
+    return app_pages
+
+
+def _watch_tracebacks(caplog) -> list[logging.LogRecord]:
+    """Return the records the watch helpers logged with a traceback."""
+    return [
+        record
+        for record in caplog.records
+        if record.exc_info and record.name == "next.discovery"
+    ]
+
+
+def _watched(entry: dict[str, object]) -> list[Path]:
+    """Return the directories the watcher observes for one `PAGE_BACKENDS` entry."""
+    with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+        return get_pages_directories_for_watch()
+
+
+class TestGetLayoutDjxPathsForWatch:
+    """Tests for get_layout_djx_paths_for_watch()."""
+
+    def test_returns_layout_djx_paths_under_pages_dirs(self, tmp_path) -> None:
+        """Returns resolved paths of all layout.djx under given pages dirs."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "a" / "layout.djx").write_text("<div>a</div>")
+        (tmp_path / "a" / "b").mkdir()
+        (tmp_path / "a" / "b" / "layout.djx").write_text("<div>b</div>")
+        with patch("next.discovery.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_layout_djx_paths_for_watch()
+        assert len(result) == 2
+        parent_names = {p.parent.name for p in result}
+        assert parent_names == {"a", "b"}
+        assert all(p.name == "layout.djx" for p in result)
+
+    def test_returns_empty_when_no_layout_djx(self, tmp_path) -> None:
+        """Returns empty set when no layout.djx under pages dirs."""
+        with patch("next.discovery.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_layout_djx_paths_for_watch()
+        assert result == set()
+
+    def test_swallows_oserror_on_rglob_layout(self, tmp_path) -> None:
+        """When rglob raises OSError (e.g. permission), log and return partial result."""
+        with (
+            patch("next.discovery.get_pages_directories_for_watch") as mock_watch,
+            patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
+        ):
+            mock_watch.return_value = [tmp_path]
+            result = get_layout_djx_paths_for_watch()
+        assert result == set()
+
+
+class TestGetTemplateDjxPathsForWatch:
+    """Tests for get_template_djx_paths_for_watch()."""
+
+    def test_returns_template_djx_paths_under_pages_dirs(self, tmp_path) -> None:
+        """Returns resolved paths of all template.djx under given pages dirs."""
+        (tmp_path / "x").mkdir()
+        (tmp_path / "x" / "template.djx").write_text("x")
+        (tmp_path / "x" / "y").mkdir()
+        (tmp_path / "x" / "y" / "template.djx").write_text("y")
+        with patch("next.discovery.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_template_djx_paths_for_watch()
+        assert len(result) == 2
+        assert all(p.name == "template.djx" for p in result)
+        parent_names = {p.parent.name for p in result}
+        assert parent_names == {"x", "y"}
+
+    def test_returns_empty_when_no_template_djx(self, tmp_path) -> None:
+        """Returns empty set when no template.djx under pages dirs."""
+        with patch("next.discovery.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_template_djx_paths_for_watch()
+        assert result == set()
+
+    def test_swallows_oserror_on_rglob_template(self, tmp_path) -> None:
+        """When rglob raises OSError (e.g. permission), log and return partial result."""
+        with (
+            patch("next.discovery.get_pages_directories_for_watch") as mock_watch,
+            patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
+        ):
+            mock_watch.return_value = [tmp_path]
+            result = get_template_djx_paths_for_watch()
+        assert result == set()
+
+
+class TestIterPageBackendsForWatch:
+    """One router per ``PAGE_BACKENDS`` entry, broken entries skipped."""
+
+    def test_non_dict_entries_are_skipped(self) -> None:
+        """List entries that are not dicts name no backend."""
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict", None]}):
+            assert list(iter_page_backends_for_watch()) == []
+
+    def test_construction_failure_costs_only_its_own_entry(
+        self, tmp_path, caplog
+    ) -> None:
+        """An entry that cannot be built is skipped, and the working one is still read."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [
+                        {"BACKEND": "nonexistent.Backend"},
+                        file_router_config_entry(pages_dir=root),
+                    ]
+                }
+            ),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            backends = list(iter_page_backends_for_watch())
+            watched = get_pages_directories_for_watch()
+
+        assert len(backends) == 1
+        assert watched == [root.resolve()]
+        # Two passes over one broken entry, one report, because this runs per tick.
+        assert len(_watch_tracebacks(caplog)) == 1
+
+    def test_two_nameless_broken_entries_are_diagnosed_apart(self, caplog) -> None:
+        """Entries that name no BACKEND share a name, so position tells them apart."""
+        with (
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [{}, {}]}),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            assert list(iter_page_backends_for_watch()) == []
+
+        assert len(_watch_tracebacks(caplog)) == 2
+        for record in _watch_tracebacks(caplog):
+            assert record.getMessage().endswith(_RECONFIGURE_PROMISE)
+
+
+class TestWatchedRootsFollowThePageRoots:
+    """Every tree a router routes is a tree the watcher observes."""
+
+    def test_root_trees_are_watched(self, tmp_path) -> None:
+        """A configured ``DIRS`` root is watched."""
+        root = tmp_path / "shell"
+        root.mkdir()
+
+        assert _watched(file_router_config_entry(pages_dir=root)) == [root.resolve()]
+
+    def test_app_trees_are_watched(self, tmp_path, settings) -> None:
+        """An installed app's pages tree is watched."""
+        app_pages = _write_app(tmp_path, "shop")
+        with importable_dir(tmp_path):
+            settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
+            watched = _watched(file_router_config_entry(app_dirs=True))
+
+        assert watched == [app_pages.resolve()]
+
+    def test_app_trees_of_a_root_only_router_are_left_alone(
+        self, tmp_path, settings
+    ) -> None:
+        """Without ``APP_DIRS`` no app tree is routed, so none is watched."""
+        app_pages = _write_app(tmp_path, "shop")
+        root = tmp_path / "shell"
+        root.mkdir()
+        with importable_dir(tmp_path):
+            settings.INSTALLED_APPS = [*settings.INSTALLED_APPS, "shop"]
+            watched = _watched(file_router_config_entry(pages_dir=root))
+
+        assert watched == [root.resolve()]
+        assert app_pages.resolve() not in watched
+
+    def test_unrouted_working_directory_pages_are_neither_routed_nor_watched(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A tree beside the process is nobody's page root, `next.W002` names it."""
+        (tmp_path / "pages").mkdir()
+        monkeypatch.chdir(tmp_path)
+        entry = file_router_config_entry()
+
+        with patch("next.utils.settings", Mock(BASE_DIR=None)):
+            watched = _watched(entry)
+            checked = [
+                root.path
+                for root in get_page_roots(RouteAccessImpl().create_backend(entry))
+            ]
+
+        assert watched == []
+        assert checked == []
+
+    def test_a_root_two_backends_reach_is_watched_once(self, tmp_path) -> None:
+        """Two entries mounting one tree produce one watch directory."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, dict(entry)]}):
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [root.resolve()]
+
+    def test_a_backend_reporting_no_root_is_not_watched(self) -> None:
+        """A router that routes from elsewhere contributes no watch directory."""
+        with (
+            patch.object(
+                RouteAccessImpl, "create_backend", return_value=RootPagesRouter([])
+            ),
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}]}
+            ),
+        ):
+            assert get_pages_directories_for_watch() == []
+
+
+class TestRouterFailuresNeverReachTheWatcher:
+    """`runserver`, `collectstatic` and the finder all read through these helpers."""
+
+    def test_a_raising_tree_listing_costs_only_its_own_backend(self, tmp_path) -> None:
+        """One backend that raises leaves the working one watched."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        build = RouteAccessImpl().create_backend
+
+        def broken_first(config: dict) -> object:
+            if config["BACKEND"] == "broken.Backend":
+                return RaisingRootsRouter()
+            return build(config)
+
+        with (
+            patch.object(RouteAccessImpl, "create_backend", side_effect=broken_first),
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [
+                        {"BACKEND": "broken.Backend"},
+                        file_router_config_entry(pages_dir=root),
+                    ]
+                }
+            ),
+        ):
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [root.resolve()]
+
+    def test_a_raising_components_folder_name_costs_only_its_pairs(
+        self, tmp_path
+    ) -> None:
+        """The pages of that backend stay watched, its component glob does not."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with (
+            patch.object(
+                RouteAccessImpl,
+                "create_backend",
+                return_value=RaisingComponentsRouter([root]),
+            ),
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
+            ),
+        ):
+            watched = get_pages_directories_for_watch()
+            pairs = iter_pages_roots_with_components_folder_names()
+
+        assert watched == [root.resolve()]
+        assert pairs == []
+
+    def test_a_malformed_tree_listing_costs_only_its_own_backend(
+        self, tmp_path, caplog
+    ) -> None:
+        """Bare paths instead of `PageRoot` entries are dropped, not dereferenced."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        build = RouteAccessImpl().create_backend
+
+        def malformed_first(config: dict) -> object:
+            if config["BACKEND"] == "broken.Backend":
+                return MalformedRootsRouter([tmp_path / "unreported"])
+            return build(config)
+
+        with (
+            patch.object(
+                RouteAccessImpl, "create_backend", side_effect=malformed_first
+            ),
+            override_settings(
+                NEXT_FRAMEWORK={
+                    "PAGE_BACKENDS": [
+                        {"BACKEND": "broken.Backend"},
+                        file_router_config_entry(pages_dir=root),
+                    ]
+                }
+            ),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [root.resolve()]
+        # A wrong shape is no failing source, so it reports the type with no traceback.
+        assert _watch_tracebacks(caplog) == []
+        watched_records = [r for r in caplog.records if r.name == "next.discovery"]
+        assert (
+            "reported page roots of the wrong type" in watched_records[0].getMessage()
+        )
+        assert watched_records[0].getMessage().endswith(_RECONFIGURE_PROMISE)
+
+    def test_a_malformed_components_folder_name_costs_only_its_pairs(
+        self, tmp_path, caplog
+    ) -> None:
+        """A name that is not a `str` is dropped, and the pages stay watched."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with (
+            patch.object(
+                RouteAccessImpl,
+                "create_backend",
+                return_value=OddComponentsNameRouter([root]),
+            ),
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "odd.Backend"}]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            for _tick in range(3):
+                pairs = iter_pages_roots_with_components_folder_names()
+            watched = get_pages_directories_for_watch()
+
+        reports = [r for r in caplog.records if r.name == "next.discovery"]
+        assert pairs == []
+        assert watched == [root.resolve()]
+        assert len(reports) == 1
+        assert (
+            "reported components folder name of the wrong type"
+            in reports[0].getMessage()
+        )
+
+    def test_the_same_failure_is_logged_once(self, caplog) -> None:
+        """These helpers run per reloader tick, so a repeat must stay quiet."""
+        with (
+            patch.object(
+                RouteAccessImpl, "create_backend", return_value=RaisingRootsRouter()
+            ),
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
+            ),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            for _tick in range(5):
+                get_pages_directories_for_watch()
+
+        assert len(_watch_tracebacks(caplog)) == 1
+        assert _watch_tracebacks(caplog)[0].getMessage().endswith(_RECONFIGURE_PROMISE)
+
+    def test_a_settings_reload_lets_the_failure_be_reported_again(self, caplog) -> None:
+        """A reconfigured project is diagnosed again rather than staying silent."""
+        with patch.object(
+            RouteAccessImpl, "create_backend", return_value=RaisingRootsRouter()
+        ):
+            with (
+                override_settings(
+                    NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
+                ),
+                caplog.at_level(logging.ERROR, logger="next.discovery"),
+            ):
+                get_pages_directories_for_watch()
+                get_pages_directories_for_watch()
+            with (
+                override_settings(
+                    NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "broken.Backend"}]}
+                ),
+                caplog.at_level(logging.ERROR, logger="next.discovery"),
+            ):
+                get_pages_directories_for_watch()
+
+        assert len(_watch_tracebacks(caplog)) == 2
+
+
+class TestIterPagesRootsWithComponentsFolderNames:
+    """Pairs ``(pages root, components folder name)`` for autoreload globs."""
+
+    def test_each_root_carries_the_backend_folder_name(self, tmp_path) -> None:
+        """The pair names the folder the router registers components from."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=root)],
+                "COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "widgets",
+                    }
+                ],
+            }
+        ):
+            pairs = iter_pages_roots_with_components_folder_names()
+
+        assert pairs == [(root.resolve(), "widgets")]
+
+    def test_backend_without_a_components_folder_contributes_no_pair(
+        self, tmp_path
+    ) -> None:
+        """A router that registers no components is watched for pages only."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        with (
+            patch.object(
+                RouteAccessImpl, "create_backend", return_value=RootPagesRouter([root])
+            ),
+            override_settings(
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "elsewhere.Backend"}]}
+            ),
+        ):
+            assert get_pages_directories_for_watch() == [root.resolve()]
+            assert iter_pages_roots_with_components_folder_names() == []
+
+    def test_a_root_two_backends_reach_pairs_once(self, tmp_path) -> None:
+        """One tree mounted twice under one folder name yields one pair."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, dict(entry)]}):
+            pairs = iter_pages_roots_with_components_folder_names()
+
+        assert pairs == [(root.resolve(), "_components")]
+
+    def test_non_dict_entries_are_skipped(self) -> None:
+        """Non-dict entries name no backend and produce no pair."""
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict"]}):
+            assert iter_pages_roots_with_components_folder_names() == []
+
+
+def _watched_backends(case: WatchedBackendsCase, tmp_path: Path) -> list[object]:
+    """Return the `PAGE_BACKENDS` value one case spells out under `tmp_path`."""
+    existing = tmp_path / "existing"
+    existing.mkdir(exist_ok=True)
+    (tmp_path / "shop").mkdir(exist_ok=True)
+    entries: dict[str, object] = {
+        "not_a_dict": "not a dict",
+        "unimportable": {"BACKEND": "nonexistent.Backend"},
+        "existing": file_router_config_entry(pages_dir=existing),
+        "missing": file_router_config_entry(pages_dir=tmp_path / "missing"),
+        "app_dirs": file_router_config_entry(app_dirs=True),
+        "skipping": file_router_config_entry(pages_dir=existing, dirs=["_drafts"]),
+        "extra_root": file_router_config_entry(pages_dir=existing, dirs=["shop"]),
+    }
+    return [entries[name] for name in case.entries]
+
+
+class TestTheRoutersOutliveOneTick:
+    """Off `DEBUG` the reloader reads held routers, so they are built rarely."""
+
+    def test_a_second_read_builds_no_router_again(self, tmp_path) -> None:
+        """Two reads of one configuration go through one construction."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        with (
+            override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(
+                RouteAccessImpl,
+                "create_backend",
+                wraps=RouteAccessImpl().create_backend,
+            ) as build,
+        ):
+            first = get_pages_directories_for_watch()
+            second = get_pages_directories_for_watch()
+
+            assert build.call_count == 1
+        assert first == second == [root.resolve()]
+
+    def test_a_settings_reload_builds_the_routers_again(self, tmp_path) -> None:
+        """A reconfigured project is read from its new routers, not the old ones."""
+        first_root = tmp_path / "one"
+        first_root.mkdir()
+        second_root = tmp_path / "two"
+        second_root.mkdir()
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=first_root)]
+            }
+        ):
+            first = get_pages_directories_for_watch()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "PAGE_BACKENDS": [file_router_config_entry(pages_dir=second_root)]
+            }
+        ):
+            second = get_pages_directories_for_watch()
+
+        assert first == [first_root.resolve()]
+        assert second == [second_root.resolve()]
+
+    def test_the_resolution_memo_stays_bounded(self, tmp_path) -> None:
+        """A router free to report a new tree per tick cannot grow the memo."""
+        first_root = tmp_path / "one"
+        first_root.mkdir()
+        second_root = tmp_path / "two"
+        second_root.mkdir()
+        entry = file_router_config_entry(pages_dir=first_root, dirs=[second_root])
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            watched = get_pages_directories_for_watch()
+            info = resolved_tree.cache_info()
+
+        assert watched == [first_root.resolve(), second_root.resolve()]
+        assert info.maxsize == DEFAULT_CACHE_SIZE
+        assert info.currsize == 2
+
+    def test_a_repeated_tree_costs_one_resolution(self, tmp_path) -> None:
+        """The steady set of a project is resolved once, however often it is read."""
+        root = tmp_path / "one"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry, dict(entry)]}):
+            get_pages_directories_for_watch()
+            get_pages_directories_for_watch()
+            info = resolved_tree.cache_info()
+
+        assert info.misses == 1
+        assert info.currsize == 1
+
+    def test_a_new_base_dir_is_read_through_the_router_reload(self, tmp_path) -> None:
+        """A relative `DIRS` entry follows `BASE_DIR`, whose change reloads the routers."""
+        first_base = tmp_path / "a"
+        (first_base / "site").mkdir(parents=True)
+        second_base = tmp_path / "b"
+        (second_base / "site").mkdir(parents=True)
+
+        with override_settings(
+            DEBUG=False,
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": [file_router_config_entry(dirs=["site"])]},
+        ):
+            with override_settings(BASE_DIR=first_base):
+                first = get_pages_directories_for_watch()
+            with override_settings(BASE_DIR=second_base):
+                second = get_pages_directories_for_watch()
+
+        assert first == [(first_base / "site").resolve()]
+        assert second == [(second_base / "site").resolve()]
+
+    def test_a_router_reload_rebuilds_the_held_routers(self, tmp_path) -> None:
+        """A reload from code replaces the routers the URL resolver serves."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+
+        with (
+            override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(
+                RouteAccessImpl,
+                "create_backend",
+                wraps=RouteAccessImpl().create_backend,
+            ) as build,
+        ):
+            get_pages_directories_for_watch()
+            route_manager.reload()
+            reloaded = build.call_count
+            watched = get_pages_directories_for_watch()
+
+            assert build.call_count == reloaded + 1
+        assert watched == [root.resolve()]
+
+    @pytest.mark.parametrize("case", WATCHED_BACKENDS_CASES, ids=lambda case: case.id)
+    def test_the_memo_answers_what_a_rebuild_answers(self, tmp_path, case) -> None:
+        """Across the configured shapes, held routers read like rebuilt ones.
+
+        The comparison is against routers built for a fresh generation.
+        """
+        backends = _watched_backends(case, tmp_path)
+        settings_value = {"PAGE_BACKENDS": backends}
+
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=False, NEXT_FRAMEWORK=settings_value
+        ):
+            held = get_pages_directories_for_watch()
+            held_again = get_pages_directories_for_watch()
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=False, NEXT_FRAMEWORK=settings_value
+        ):
+            rebuilt = get_pages_directories_for_watch()
+
+        assert held == held_again
+        assert held == rebuilt
+
+
+class TestAWatchingProcessHoldsNoRouter:
+    """Under `DEBUG` a router reports trees it probed once, so none is held.
+
+    A tree created, moved, or removed must reach the very next read.
+    """
+
+    def test_every_read_builds_the_routers_again(self, tmp_path) -> None:
+        """Two reads of one configuration go through two constructions."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        with (
+            override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(
+                RouteAccessImpl,
+                "create_backend",
+                wraps=RouteAccessImpl().create_backend,
+            ) as build,
+        ):
+            first = get_pages_directories_for_watch()
+            second = get_pages_directories_for_watch()
+
+            assert build.call_count == 2
+        assert first == second == [root.resolve()]
+
+    def test_a_dirs_root_created_later_reaches_the_watcher(self, tmp_path) -> None:
+        """A `DIRS` entry that named a URL segment names a tree once one is there.
+
+        Only a fresh classification tells them apart, which a held router never reports.
+        """
+        entry = file_router_config_entry(dirs=["site"])
+
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}
+        ):
+            assert get_pages_directories_for_watch() == []
+
+            (tmp_path / "site").mkdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [(tmp_path / "site").resolve()]
+
+    def test_an_app_tree_created_later_reaches_the_watcher(self, tmp_path) -> None:
+        """A page tree an app grows under the dev server reaches the next read."""
+        app_dir = tmp_path / "shop"
+        app_dir.mkdir()
+        entry = file_router_config_entry(app_dirs=True)
+
+        with (
+            patch(
+                "next.urls.backends._installed_app_directories",
+                return_value=app_snapshot({"shop": app_dir}),
+            ),
+            override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+        ):
+            assert get_pages_directories_for_watch() == []
+
+            (app_dir / "pages").mkdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [(app_dir / "pages").resolve()]
+
+    def test_a_base_dir_tree_created_later_reaches_the_watcher(self, tmp_path) -> None:
+        """The `BASE_DIR` fallback is probed per read while the disk is watched."""
+        entry = file_router_config_entry(app_dirs=False)
+
+        with override_settings(
+            BASE_DIR=tmp_path, DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}
+        ):
+            assert get_pages_directories_for_watch() == []
+
+            (tmp_path / "pages").mkdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == [(tmp_path / "pages").resolve()]
+
+    def test_a_tree_that_goes_away_leaves_the_watcher(self, tmp_path) -> None:
+        """A tree removed under the dev server stops being watched at once."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+
+        with override_settings(DEBUG=True, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}):
+            assert get_pages_directories_for_watch() == [root.resolve()]
+
+            root.rmdir()
+            watched = get_pages_directories_for_watch()
+
+        assert watched == []
+
+
+class TestABrokenEntryIsBuiltAgain:
+    """A construction that failed once is no permanent hole in the watch list."""
+
+    def test_a_failed_build_is_tried_again_and_a_healthy_one_is_not(
+        self, tmp_path, caplog
+    ) -> None:
+        """These helpers run before every app is loaded, so a failure can pass."""
+        root = tmp_path / "shell"
+        root.mkdir()
+        entry = file_router_config_entry(pages_dir=root)
+        build = RouteAccessImpl().create_backend
+        attempts: list[dict] = []
+
+        def failing_first(config: dict) -> object:
+            attempts.append(config)
+            if len(attempts) == 1:
+                raise ImportError(config["BACKEND"])
+            return build(config)
+
+        with (
+            override_settings(DEBUG=False, NEXT_FRAMEWORK={"PAGE_BACKENDS": [entry]}),
+            patch.object(RouteAccessImpl, "create_backend", side_effect=failing_first),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            first = get_pages_directories_for_watch()
+            second = get_pages_directories_for_watch()
+            third = get_pages_directories_for_watch()
+
+        assert first == []
+        assert second == third == [root.resolve()]
+        assert len(attempts) == 2
+        assert len(_watch_tracebacks(caplog)) == 1
+
+    def test_a_new_base_dir_diagnoses_the_failure_again(self, tmp_path, caplog) -> None:
+        """The rebuild a new base directory forces reports what it drops again."""
+        with (
+            override_settings(
+                DEBUG=False,
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "nonexistent.Backend"}]},
+            ),
+            caplog.at_level(logging.ERROR, logger="next.discovery"),
+        ):
+            with override_settings(BASE_DIR=tmp_path / "a"):
+                get_pages_directories_for_watch()
+                get_pages_directories_for_watch()
+            with override_settings(BASE_DIR=tmp_path / "b"):
+                get_pages_directories_for_watch()
+
+        assert len(_watch_tracebacks(caplog)) == 2

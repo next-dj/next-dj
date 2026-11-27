@@ -12,7 +12,7 @@ Compression is available, but it must not compress twice when a proxy in front o
 Solution
 --------
 
-List ``next.middleware.CompressionMiddleware`` in ``MIDDLEWARE``, install a codec library when brotli is wanted, and decide which layer compresses.
+List ``next.middleware.CompressionMiddleware`` in ``MIDDLEWARE``, install a codec extra when zstd or brotli is wanted, and decide which layer compresses.
 The framework negotiates the coding per request from ``Accept-Encoding``, compresses streamed pages as they are written, and sets ``Content-Encoding`` and ``Vary`` itself.
 
 Walkthrough
@@ -21,7 +21,7 @@ Walkthrough
 Add the middleware
 ~~~~~~~~~~~~~~~~~~
 
-The scaffold already lists it, and a project that predates it adds one line directly below ``SecurityMiddleware``.
+Without the middleware a streamed page still compresses itself and every other response leaves plain, so a project adds one line directly below ``SecurityMiddleware`` to compress the rest.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -35,23 +35,28 @@ The scaffold already lists it, and a project that predates it adds one line dire
 
 The position matters.
 Middleware above it read the compressed body, and ``CommonMiddleware`` and the cache middleware below it read the plain one, which is what they need to set a correct ``ETag`` and ``Content-Length``.
-``manage.py check`` reports a missing middleware as ``next.W164`` and one listed too low as ``next.W165``.
+``manage.py check`` reports one listed too low as ``next.W165``.
 Django's ``GZipMiddleware`` and this one do not mix, and ``next.E227`` reports both.
 
 The defaults need no setting.
-``COMPRESSION`` is on, zstd is offered first, then brotli, then gzip, and a coding whose library is missing is left out.
-zstd needs nothing extra on any supported Python.
-Brotli needs the extra.
+``COMPRESSION`` is on, and zstd is offered first, then brotli, then gzip.
+A coding whose library is missing is left out.
+gzip needs nothing, zstd comes from the standard library from Python 3.14 and from the ``zstd`` extra below it, and brotli needs the ``brotli`` extra.
 
 .. code-block:: bash
    :caption: shell
 
-   uv add "next.dj[brotli]"
+   uv add "next.dj[zstd,brotli]"
+
+A codec named in ``ORDER`` or ``BACKENDS`` whose library is missing is ``next.E228``, with the extra to install in its hint.
+With ``STREAMS`` set to ``"middleware"``, a ``MIDDLEWARE`` without this middleware is ``next.W193``, since no page stream is then compressed.
 
 Know what is compressed
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 A buffered response over ``MIN_SIZE`` bytes whose media type is in ``CONTENT_TYPES`` is compressed once, and is sent plain when the result is not smaller.
+``CONTENT_TYPES`` matches a media type exactly, by a ``text/*`` family, or by a structured suffix such as ``application/*+json``, which covers the patch envelope of a partial answer.
+
 A streamed page compresses itself, one flushed write at a time, so the browser decodes each chunk as it arrives.
 An event stream follows ``SSE``, and a realtime topic stream stays plain unless ``SSE_TOPICS`` says otherwise.
 A file response, a response that already has ``Content-Encoding``, a ``206``, a ``304``, and a response with ``Cache-Control: no-transform`` are left as they are.
@@ -65,13 +70,20 @@ Tune it
 
    NEXT_FRAMEWORK = {
        "COMPRESSION": {
-           "LEVELS": {"zstd": 5, "br": 5, "gzip": 6},
+           "BACKENDS": [
+               {"BACKEND": "next.compression.ZstdBackend", "OPTIONS": {"LEVEL": 5}},
+               {"BACKEND": "next.compression.BrotliBackend", "OPTIONS": {"LEVEL": 5}},
+               {"BACKEND": "next.compression.GzipBackend", "OPTIONS": {"LEVEL": 6}},
+           ],
            "MIN_SIZE": 512,
            "EXCLUDE": "config.compression.keep_plain",
        },
    }
 
-``LEVELS`` lays over the default levels key by key, and ``MIN_SIZE`` is the smallest buffered body that is compressed.
+``BACKENDS`` replaces the default list whole, so it names every codec the project offers.
+``LEVEL`` in the ``OPTIONS`` of an entry sets the compression level of that codec, and a ``WINDOW`` left out keeps the window of the codec.
+A level outside the range of the codec is ``next.E228``, and an option other than ``LEVEL`` and ``WINDOW`` is ``next.E076``.
+``MIN_SIZE`` is the smallest buffered body that is compressed.
 ``EXCLUDE`` names a callable that takes the request and the response and returns ``True`` to keep the response plain.
 
 .. code-block:: python
@@ -86,16 +98,16 @@ Keep a secret out of a compressed page
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A page that renders a secret beside input the visitor controls can leak the secret through the size of the compressed response.
-Every compressed HTML write carries a comment of random length against this, and a page that cannot take the risk opts out.
+Every compressed body and every write of a stream the framework writes carries filler of random length against this, and a page that cannot take the risk opts out.
 
 .. code-block:: python
    :caption: statements/pages/statement/page.py
 
    from next import page
 
-   page.compress(False)
+   page.compress(enabled=False)
 
-``page.compress(False)`` keeps every response of that page plain, the full page, its stream, and its zone answers.
+``page.compress(enabled=False)`` keeps every response of that page plain, the full page, its stream, and its zone answers.
 A plain Django view takes the ``no_compress`` decorator of ``next.compression``.
 
 .. code-block:: python
@@ -122,8 +134,8 @@ When the proxy compresses, turn the application off.
 
    NEXT_FRAMEWORK = {"COMPRESSION": {"ENABLED": False}}
 
-``ENABLED`` set to ``False`` switches off the middleware and every self-compressing stream at once, and clears ``next.W164``.
-A proxy that compresses must also forward each write of a streamed page as it arrives, and a deployment where it buffers states ``DEFER["TRANSPORT"]["OPTIONS"]["INCREMENTAL"] = False``, see :doc:`/content/deployment/wsgi-asgi`.
+``ENABLED`` set to ``False`` switches off the middleware and every self-compressing stream at once.
+A proxy that compresses must also forward each write of a streamed page as it arrives, and a deployment where it buffers states ``DEFER["SERVER"]["OPTIONS"]["INCREMENTAL"] = False``, see :doc:`/content/deployment/wsgi-asgi`.
 
 Verification
 ------------

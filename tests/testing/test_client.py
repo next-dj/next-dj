@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import override
 
 import pytest
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponse
@@ -13,6 +14,7 @@ from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial.backends import JsonPartialProtocolBackend
 from next.partial.envelope import Asset, Envelope, FormMeta, Patch
 from next.testing import (
+    AsyncNextClient,
     NextClient,
     PartialEnvelope,
     envelope_of,
@@ -103,6 +105,34 @@ class TestNextClient:
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
         assert b"<p>test page</p>" in response.content
+
+
+class TestAsyncNextClient:
+    """`AsyncNextClient` sends the shortcuts through Django's async test client."""
+
+    def test_get_action_url_returns_known_url(self) -> None:
+        assert "_next/form/" in AsyncNextClient().get_action_url("simple_form")
+
+    @pytest.mark.django_db()
+    def test_post_action_dispatches_form(self) -> None:
+        client = AsyncNextClient()
+        response = async_to_sync(client.post_action)(
+            "simple_form_redirect", {"name": "Carol"}, origin="/"
+        )
+        assert response.status_code == 302
+        assert response["Location"] == "/done/"
+
+    def test_get_zones_returns_the_envelope(self) -> None:
+        response = async_to_sync(AsyncNextClient().get_zones)(
+            "/zoned/", ("alpha", "beta"), version="stale"
+        )
+        assert response.status_code == 409
+        assert response.asgi_request.headers["X-Next-Zone"] == "alpha,beta"
+
+    def test_a_document_holds_no_failure(self) -> None:
+        response = async_to_sync(AsyncNextClient().get_zones)("/zoned/", "alpha")
+        assert envelope_of(response).zone_targets() == ["alpha"]
+        assert response.boundary_failures == ()
 
 
 class TestGetZones:
@@ -412,23 +442,20 @@ def trip_pages(tmp_path: Path) -> Path:
 class TestGetBoundary:
     """`get_boundary` mints a token and reloads the component through the view."""
 
-    @pytest.mark.parametrize(
-        "transport",
-        [None, "next.suspense.QueryTransport", "next.suspense.BodyTransport"],
-    )
-    def test_the_component_reloads_through_each_transport(
-        self, trip_pages: Path, transport: str | None
+    @pytest.mark.parametrize("carrier", [None, "query", "body"])
+    def test_the_component_reloads_through_each_carrier(
+        self, trip_pages: Path, carrier: str | None
     ) -> None:
-        options = {} if transport is None else {"TRANSPORT": transport}
+        options = {} if carrier is None else {"CARRIER": carrier}
         with routed(
             trip_pages,
             COMPONENT_BACKENDS=COMPONENTS,
             DEFER={"TOKENS": {"OPTIONS": options}},
         ):
-            envelope = NextClient().get_boundary("/shop/", "card", sku="b")
-        (op,) = envelope.ops
-        assert op["html"] == "<p>card b</p>"
-        assert op["s"] == "ready"
+            reloaded = NextClient().get_boundary("/shop/", "card", sku="b")
+        assert reloaded.html == "<p>card b</p>"
+        assert (reloaded.state, reloaded.kind, reloaded.retry) == ("ready", None, None)
+        assert reloaded.response is reloaded.envelope.response
 
     def test_an_unknown_component_raises(self, trip_pages: Path) -> None:
         with (
@@ -455,16 +482,13 @@ def _signed_in(name: str) -> NextClient:
 class TestReloadBoundary:
     """`reload_boundary` sends a token as the runtime does and returns the response."""
 
-    @pytest.mark.parametrize(
-        "transport",
-        [None, "next.suspense.QueryTransport", "next.suspense.BodyTransport"],
-    )
+    @pytest.mark.parametrize("carrier", [None, "query", "body"])
     def test_a_token_minted_for_one_user_is_refused_for_another(
-        self, trip_pages: Path, transport: str | None
+        self, trip_pages: Path, carrier: str | None
     ) -> None:
         options = {"BINDING": "user"}
-        if transport is not None:
-            options["TRANSPORT"] = transport
+        if carrier is not None:
+            options["CARRIER"] = carrier
         with routed(
             trip_pages,
             COMPONENT_BACKENDS=COMPONENTS,
@@ -523,9 +547,8 @@ class TestBoundaryTokenWithoutContribApps:
             override_settings(INSTALLED_APPS=installed, MIDDLEWARE=layers),
             routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS, DEFER=_CARRIED),
         ):
-            envelope = client.get_boundary("/shop/", "card", sku="b")
-        (op,) = envelope.ops
-        assert op["html"] == "<p>card b</p>"
+            reloaded = client.get_boundary("/shop/", "card", sku="b")
+        assert reloaded.html == "<p>card b</p>"
         assert (settings.SESSION_COOKIE_NAME in client.cookies) is (
             app != "django.contrib.sessions"
         )
@@ -541,14 +564,11 @@ _TRIP_WRAPPER = re.compile(
 class TestFollowBoundary:
     """`follow_boundary` reloads a wrapper of a rendered page with its own token."""
 
-    @pytest.mark.parametrize(
-        "transport",
-        [None, "next.suspense.QueryTransport", "next.suspense.BodyTransport"],
-    )
-    def test_the_rendered_token_reloads_through_each_transport(
-        self, trip_pages: Path, transport: str | None
+    @pytest.mark.parametrize("carrier", [None, "query", "body"])
+    def test_the_rendered_token_reloads_through_each_carrier(
+        self, trip_pages: Path, carrier: str | None
     ) -> None:
-        options = {} if transport is None else {"TRANSPORT": transport}
+        options = {} if carrier is None else {"CARRIER": carrier}
         with routed(
             trip_pages,
             COMPONENT_BACKENDS=COMPONENTS,
@@ -564,11 +584,10 @@ class TestFollowBoundary:
                 return original(**request)
 
             client.request = spy
-            envelope = client.follow_boundary(document, "card")
+            reloaded = client.follow_boundary(document, "card")
         [found] = _TRIP_WRAPPER.finditer(document.content.decode())
-        (op,) = envelope.ops
-        assert op["target"] == {"boundary": found["id"]}
-        assert op["html"] == "<p>card a</p>"
+        assert reloaded.id == found["id"]
+        assert reloaded.html == "<p>card a</p>"
         assert sent[0]["PATH_INFO"] == "/shop/"
         assert str(sent[0]["QUERY_STRING"]).startswith("q=1")
         assert sent[0]["HTTP_X_NEXT_ZONE"] == found["id"]
@@ -581,8 +600,8 @@ class TestFollowBoundary:
             client = NextClient()
             document = client.get("/shop/")
             [found] = _TRIP_WRAPPER.finditer(document.content.decode())
-            envelope = client.follow_boundary(document, found[field])
-        assert envelope.ops[0]["html"] == "<p>card a</p>"
+            reloaded = client.follow_boundary(document, found[field])
+        assert reloaded.html == "<p>card a</p>"
 
     def test_following_mints_nothing_and_reads_no_session(
         self, trip_pages: Path, django_assert_num_queries
@@ -591,8 +610,8 @@ class TestFollowBoundary:
             client = NextClient()
             document = client.get("/shop/")
             with django_assert_num_queries(0):
-                envelope = client.follow_boundary(document, "card")
-        assert envelope.ops[0]["s"] == "ready"
+                reloaded = client.follow_boundary(document, "card")
+        assert reloaded.state == "ready"
 
     def test_an_unknown_boundary_raises(self, trip_pages: Path) -> None:
         with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
@@ -619,8 +638,8 @@ class TestFollowBoundary:
             client = NextClient()
             response = client.get_zones("/zoned/", "list")
             source = envelope_of(response) if read == "envelope" else response
-            envelope = client.follow_boundary(source, "card")
-        assert envelope.ops[0]["html"] == "<p>card z</p>"
+            reloaded = client.follow_boundary(source, "card")
+        assert reloaded.html == "<p>card z</p>"
 
     def test_a_zone_refresh_without_the_boundary_raises(self, trip_pages: Path) -> None:
         write_page(
@@ -634,6 +653,15 @@ class TestFollowBoundary:
             response = client.get_zones("/zoned/", "list")
             with pytest.raises(LookupError, match="card"):
                 client.follow_boundary(response, "card")
+
+    def test_a_reloaded_boundary_is_searched_like_its_envelope(
+        self, trip_pages: Path
+    ) -> None:
+        with routed(trip_pages, COMPONENT_BACKENDS=COMPONENTS):
+            client = NextClient()
+            reloaded = client.get_boundary("/shop/", "card", sku="b")
+            with pytest.raises(LookupError, match="no client-trip boundary 'card'"):
+                client.follow_boundary(reloaded, "card")
 
     def test_a_hand_built_envelope_is_refused(self) -> None:
         with pytest.raises(TypeError, match="test client"):

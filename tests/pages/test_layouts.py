@@ -6,20 +6,20 @@ from django.template import Context, Template, TemplateSyntaxError
 
 from next.pages.layouts import (
     META,
-    SEAL_ATTR,
+    RESPONSE_ID_ATTR,
     SLOT,
     LayoutChain,
     closing,
-    context_seal,
+    context_response_id,
+    enclose_region,
+    enclosed,
     forget_chains,
     held_chain,
     hold_chain,
     layout_id,
-    mint_seal,
+    mint_response_id,
     opening,
-    request_seal,
-    seal_region,
-    sealed,
+    request_response_id,
 )
 from next.pages.loaders import LayoutTemplateLoader, layout_ids, module_version
 from next.pages.placeholder import slot_problem
@@ -61,24 +61,28 @@ class TestLayoutId:
 
 
 class TestSeal:
-    """The router seal lives on the request a page view routes."""
+    """The response id lives on the request a page view routes."""
 
-    def test_a_request_mints_one_seal_and_keeps_it(self) -> None:
+    def test_a_request_mints_one_response_id_and_keeps_it(self) -> None:
         request = HttpRequest()
-        assert request_seal(request) is None
-        seal = mint_seal(request)
-        assert len(seal) == 8
-        assert mint_seal(request) == seal == getattr(request, SEAL_ATTR)
+        assert request_response_id(request) is None
+        response_id = mint_response_id(request)
+        assert len(response_id) == 8
+        assert (
+            mint_response_id(request)
+            == response_id
+            == getattr(request, RESPONSE_ID_ATTR)
+        )
 
-    def test_regions_seal_only_with_a_seal(self) -> None:
+    def test_regions_enclose_only_with_a_response_id(self) -> None:
         request = HttpRequest()
         context = Context({"request": request})
-        assert context_seal(context) is None
-        assert seal_region(context, META, "<title>t</title>") == "<title>t</title>"
-        seal = mint_seal(request)
-        assert seal_region(context, META, "x") == sealed(META, seal, "x")
-        assert sealed(SLOT, seal, "x", "id") == (
-            f"{opening(SLOT, seal, 'id')}x{closing(SLOT, seal, 'id')}"
+        assert context_response_id(context) is None
+        assert enclose_region(context, META, "<title>t</title>") == "<title>t</title>"
+        response_id = mint_response_id(request)
+        assert enclose_region(context, META, "x") == enclosed(META, response_id, "x")
+        assert enclosed(SLOT, response_id, "x", "id") == (
+            f"{opening(SLOT, response_id, 'id')}x{closing(SLOT, response_id, 'id')}"
         )
 
 
@@ -144,19 +148,19 @@ class TestComposition:
         )
 
 
-class TestSlotNode:
-    """The slot tag writes the sealed comments only for a routed request."""
+class TestLayoutSlotNode:
+    """The slot tag writes the enclosing comments only for a routed request."""
 
-    def test_a_slot_without_a_seal_renders_plain(self) -> None:
+    def test_a_slot_without_a_response_id_renders_plain(self) -> None:
         source = "<main>{% next:slot abc %}<p>x</p>{% /next:slot %}</main>"
         assert Template(source).render(Context({})) == "<main><p>x</p></main>"
 
-    def test_a_slot_with_a_seal_renders_sealed(self) -> None:
+    def test_a_slot_with_a_response_id_renders_enclosed(self) -> None:
         request = HttpRequest()
-        seal = mint_seal(request)
+        response_id = mint_response_id(request)
         source = "{% next:slot abc %}<p>x</p>{% /next:slot %}"
         html = Template(source).render(Context({"request": request}))
-        assert html == sealed(SLOT, seal, "<p>x</p>", "abc")
+        assert html == enclosed(SLOT, response_id, "<p>x</p>", "abc")
 
     def test_an_extends_content_takes_the_rest(self) -> None:
         source = "{% next:slot abc %}{% extends base %}{% /next:slot %}"

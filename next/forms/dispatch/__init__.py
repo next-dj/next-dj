@@ -37,7 +37,9 @@ from next.forms.transport import (
 )
 from next.permissions.markers import OPEN
 from next.ports import marked_zones, stamp_router
-from next.transactions import ViewKind, atomic_scope, request_atomic
+from next.requests import RequestKind
+from next.transactions import atomic_scope, request_atomic
+from next.wire import RESPONSE_ACTION, RESPONSE_FORM
 
 from .build import _construct_form, _form_for_class, _resolve_form_class
 from .permissions import (
@@ -243,7 +245,7 @@ class FormActionDispatch:
         denial = _declared_view_permissions(meta, request, state)
         if denial is not None:
             return denial
-        scope = atomic_scope(request, ViewKind.ACTION, meta.get("atomic"))
+        scope = atomic_scope(request, RequestKind.ACTION, meta.get("atomic"))
         with request_atomic(scope):
             response = FormActionDispatch._route(
                 backend, request, action_name, meta, state
@@ -503,9 +505,9 @@ class FormActionDispatch:
                 outcome.url_kwargs,
             )
             response = HttpResponse(html)
-            response["X-Next-Form"] = "invalid"
+            response[RESPONSE_FORM] = "invalid"
             if outcome.uid:
-                response["X-Next-Action"] = outcome.uid
+                response[RESPONSE_ACTION] = outcome.uid
             return response
         if outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE:
             return HttpResponseRedirect(cast("str", outcome.redirect_to))

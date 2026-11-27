@@ -1,12 +1,14 @@
-"""What a boundary contains, its fallback, and the trace and kind of a failure."""
+"""What a boundary contains, the error it settles as, its error UI and its trace."""
 
 from __future__ import annotations
 
+import enum
 import secrets
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
 
+from django.conf import settings
 from django.core.exceptions import (
     BadRequest,
     PermissionDenied,
@@ -16,20 +18,88 @@ from django.core.exceptions import (
 from django.http import Http404
 from django.http.multipartparser import MultiPartParserError
 
-from next.defer import Addressing, BoundaryFailure, ErrorKind
+from next.conf.boundaries import boundary_settings
 from next.diagnostics import INTENDED_EXCEPTIONS
+from next.ports import static_assets_slot
+from next.utils import is_within, resolve_base_dir
 
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Hashable, Mapping
+    from pathlib import Path
 
     from django.http import HttpRequest
 
     from next.static.collector import StaticCollector
 
+    from .calls import Addressing
+
 
 _BAD_REQUESTS: Final = (BadRequest, SuspiciousOperation, MultiPartParserError)
 _DIGEST_BYTES: Final = 6
+
+
+class ErrorKind(enum.StrEnum):
+    """Why a boundary settled as an error, the last two raised only by the client."""
+
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    OVERLOADED = "overloaded"
+    NOT_FOUND = "not_found"
+    FORBIDDEN = "forbidden"
+    BAD_REQUEST = "bad_request"
+    INCOMPLETE = "incomplete"
+    NETWORK = "network"
+
+    @property
+    def status(self) -> int | None:
+        """Return the HTTP status this kind stands for, `None` for an unexpected one."""
+        return _STATUSES.get(self)
+
+
+_STATUSES: Final[Mapping[ErrorKind, int]] = {
+    ErrorKind.NOT_FOUND: 404,
+    ErrorKind.FORBIDDEN: 403,
+    ErrorKind.BAD_REQUEST: 400,
+    ErrorKind.OVERLOADED: 503,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryFailure:
+    """The `error` an `error.djx` reads, strings and integers only, never an exception.
+
+    Outside `DEBUG` it has no `message` or `traceback`, which a template reads as empty.
+    """
+
+    kind: ErrorKind
+    digest: str
+    status: int | None
+    retry: bool
+
+    @staticmethod
+    def of(
+        kind: ErrorKind, digest: str, *, retry: bool, message: str, traceback: str
+    ) -> BoundaryFailure:
+        """Return the error of `kind`, with its message and traceback under `DEBUG`."""
+        if settings.DEBUG:
+            return DebugBoundaryFailure(
+                kind, digest, kind.status, retry, message, traceback
+            )
+        return BoundaryFailure(kind, digest, kind.status, retry)
+
+
+@dataclass(frozen=True, slots=True)
+class DebugBoundaryFailure(BoundaryFailure):
+    """A `BoundaryFailure` with the message and the traceback a `DEBUG` page shows."""
+
+    message: str = field(repr=False)
+    traceback: str = field(repr=False)
+
+
+def errors_opaque() -> bool:
+    """Whether `BOUNDARIES["KINDS"]` hides every kind with a status as `error`."""
+    return boundary_settings().opaque
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +121,7 @@ class Boundary:
     ident: str | None = None
 
 
-class Fallback(Protocol):
+class ErrorUI(Protocol):
     """What a boundary shows in place of a failed subtree, asked after the failure."""
 
     __slots__ = ()
@@ -116,12 +186,40 @@ def shown_kind(kind: ErrorKind, *, opaque: bool) -> ErrorKind:
     return kind
 
 
+def retry_loads() -> bool:
+    """Return whether the runtime script loads, which every retry needs."""
+    return static_assets_slot.get().runtime_loads()
+
+
+def unrun_error(kind: ErrorKind) -> BoundaryFailure:
+    """Return the error a boundary settles as without running, under its shown kind."""
+    shown = shown_kind(kind, opaque=errors_opaque())
+    return BoundaryFailure.of(
+        shown, new_digest(), retry=retry_loads(), message="", traceback=""
+    )
+
+
+def shown_source(source: Path) -> str:
+    """Return `source` relative to `BASE_DIR` when it lies inside, as DEBUG shows it."""
+    base = resolve_base_dir()
+    if base is not None and is_within(source, base):
+        return str(source.relative_to(base))
+    return str(source)
+
+
 __all__ = [
     "Boundary",
-    "Fallback",
+    "BoundaryFailure",
+    "DebugBoundaryFailure",
+    "ErrorKind",
+    "ErrorUI",
     "Trace",
     "contained",
+    "errors_opaque",
     "kind_of",
     "new_digest",
+    "retry_loads",
     "shown_kind",
+    "shown_source",
+    "unrun_error",
 ]

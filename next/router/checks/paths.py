@@ -9,9 +9,9 @@ import textwrap
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from django.core.checks import CheckMessage, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.conf.router import router_enabled
 from next.pages.checks.reads import chrome_contents
 from next.pages.loaders import PAGE_MODULE, layout_chain, template_source

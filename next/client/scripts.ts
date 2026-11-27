@@ -2,7 +2,7 @@
 // on idle, on the first interaction, or on demand. A tag the server already rendered
 // is not inserted again.
 
-import { asString, cssEscape, fire, isRecord } from "./protocol";
+import { ATTR_SCRIPT, asString, cssEscape, fire, isRecord } from "./protocol";
 
 export type ScriptStatus =
   | "rendered"
@@ -60,7 +60,6 @@ interface Entrant {
   waiters: Waiter[];
 }
 
-const ATTR_SCRIPT = "data-next-script";
 const IDLE_TIMEOUT_MS = 3000;
 const INTERACTIONS = ["pointerdown", "keydown", "touchstart", "scroll"];
 // A dynamically inserted script is async by default. These strategies set async to

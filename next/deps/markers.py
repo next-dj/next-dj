@@ -13,7 +13,7 @@ from next.introspect import is_async_callable, is_coroutine_callable
 from .cache import _CACHE_MISS, _IN_PROGRESS
 from .errors import DependencyCycleError
 from .introspect import cached_signature
-from .providers import RegisteredParameterProvider
+from .providers import READS_NOTHING, ContextReads, RegisteredParameterProvider
 from .runner import bridge
 
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from .context import ResolutionContext
-    from .plan import AsyncParameterFiller, ParameterFiller
+    from .plan import AsyncParameterFiller, ParameterFiller, Reach
     from .resolver import DependencyResolver
 
 
@@ -171,6 +171,16 @@ class DependsProvider(RegisteredParameterProvider):
         return isinstance(param.default, Depends)
 
     @override
+    def static_reads(self, param: inspect.Parameter) -> ContextReads:
+        """Read what the bound dependency of a name or the factory reads."""
+        target = _marker_target(param)
+        if isinstance(target, str):
+            return ContextReads(dependencies=(target,))
+        if callable(target):
+            return ContextReads(calls=((factory_key(target), target),))
+        return READS_NOTHING
+
+    @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Resolve a `Depends` marker by name, callable, or constant."""
         marker = param.default
@@ -241,6 +251,17 @@ class DependsProvider(RegisteredParameterProvider):
         """Block for a name or a factory running user code, not for a constant."""
         target = _marker_target(param)
         return isinstance(target, str) or callable(target)
+
+    @override
+    def static_reach(self, param: inspect.Parameter) -> tuple[Reach, ...]:
+        """Name the binding of a name or the factory, under the key memoising it."""
+        target = _marker_target(param)
+        if isinstance(target, str):
+            bound = self._resolver.get_dependency(target)
+            return () if bound is None else ((target, bound),)
+        if callable(target):
+            return ((factory_key(target), target),)
+        return ()
 
     @override
     def compile_aresolve(self, param: inspect.Parameter) -> AsyncParameterFiller | None:

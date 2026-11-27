@@ -4,30 +4,41 @@ import threading
 import pytest
 from django.db import connection
 
-from next.boundaries import Boundary, contain, minting, render_boundaries, scope
-from next.defer import Addressing
+from next.boundaries import contain, scope
+from next.boundaries.calls import Addressing
+from next.boundaries.failures import Boundary
+from next.boundaries.ids import deferral
+from next.boundaries.scope import render_boundaries
 from next.transactions import savepoints
-from tests.support.boundaries import RecordingFallback, raising
+from tests.support.boundaries import RecordingErrorUI, raising
+
+
+class _Minting:
+    def __init__(self, minted: str | None) -> None:
+        self._minted = minted
+
+    def minted(self) -> str | None:
+        return self._minted
 
 
 class TestMinting:
-    """A bound minter names the error wrappers, the render counter standing in."""
+    """The render session names the error wrappers, the render counter standing in."""
 
     def test_a_minted_id_names_the_wrapper(self) -> None:
-        with minting(lambda: "b-seal-7"):
+        with deferral(_Minting("b-5ea1-7")):
             html = contain(
                 Boundary("a", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
-        assert html.startswith('<div id="b-seal-7" data-next-boundary="b-seal-7"')
+        assert html.startswith('<div id="b-5ea1-7" data-next-boundary="b-5ea1-7"')
 
     def test_a_minter_without_an_id_leaves_the_render_counter(self) -> None:
-        with minting(lambda: None):
+        with deferral(_Minting(None)):
             html = contain(
                 Boundary("a", Addressing.COMPONENT),
                 raising(ValueError()),
-                RecordingFallback(),
+                RecordingErrorUI(),
             )
         assert html.startswith('<div id="b-')
         assert '-1" data-next-boundary="b-' in html
@@ -51,7 +62,7 @@ class TestRenderBoundaries:
                 contain(
                     Boundary(name, Addressing.COMPONENT),
                     raising(ValueError()),
-                    RecordingFallback(),
+                    RecordingErrorUI(),
                 )
                 for name in ("a", "b", "c")
             )
@@ -74,11 +85,11 @@ class TestRenderBoundaries:
     def test_the_wrappers_stay_for_the_render_and_go_with_it(self) -> None:
         with render_boundaries():
             contain(
-                Boundary("a", Addressing.COMPONENT), lambda: "ok", RecordingFallback()
+                Boundary("a", Addressing.COMPONENT), lambda: "ok", RecordingErrorUI()
             )
             assert savepoints._local.session is not None
             contain(
-                Boundary("b", Addressing.COMPONENT), lambda: "ok", RecordingFallback()
+                Boundary("b", Addressing.COMPONENT), lambda: "ok", RecordingErrorUI()
             )
         assert savepoints._local.session is None
         assert connection.execute_wrappers == []
@@ -92,13 +103,13 @@ class TestRenderBoundaries:
         )
         with render_boundaries():
             contain(
-                Boundary("a", Addressing.COMPONENT), lambda: "ok", RecordingFallback()
+                Boundary("a", Addressing.COMPONENT), lambda: "ok", RecordingErrorUI()
             )
             with render_boundaries():
                 contain(
                     Boundary("b", Addressing.COMPONENT),
                     lambda: "ok",
-                    RecordingFallback(),
+                    RecordingErrorUI(),
                 )
             assert savepoints._local.session is not None
         assert len(probes) == 1
@@ -111,13 +122,13 @@ class TestRenderBoundaries:
                 contain(
                     Boundary("t", Addressing.COMPONENT),
                     raising(ValueError()),
-                    RecordingFallback(),
+                    RecordingErrorUI(),
                 )
             )
 
         with render_boundaries():
             contain(
-                Boundary("a", Addressing.COMPONENT), lambda: "ok", RecordingFallback()
+                Boundary("a", Addressing.COMPONENT), lambda: "ok", RecordingErrorUI()
             )
             thread = threading.Thread(
                 target=contextvars.copy_context().run, args=(work,)

@@ -18,10 +18,10 @@ from next.pages import page
 from next.seo.manager import seo_manager
 from next.testing import capture_signals, override_next_settings
 from next.urls import (
-    FileRouterBackend,
-    RouterManager,
+    FilePageBackend,
+    RouteManager,
     TrieURLResolver,
-    router_manager,
+    route_manager,
     urlpatterns,
 )
 from next.urls.manager import (
@@ -32,8 +32,8 @@ from next.urls.manager import (
     reload_router_settings,
     seo_routes_version,
 )
-from next.urls.ports import RouterAccessImpl
-from next.urls.signals import router_reloaded
+from next.urls.ports import RouteAccessImpl
+from next.urls.signals import routes_reloaded
 from next.views import page_view
 from tests.support import (
     NAMESPACED_URLCONF,
@@ -65,9 +65,12 @@ class _StubManager:
             self._on_iter()
         return iter(self.items)
 
+    def owned(self) -> Iterator[tuple[None, str]]:
+        return ((None, item) for item in self)
 
-class TestRouterManager:
-    """RouterManager iteration, reload, and config access."""
+
+class TestRouteManager:
+    """RouteManager iteration, reload, and config access."""
 
     def test_init(self, manager) -> None:
         """Starts with empty routers, no config cache, and nothing loaded."""
@@ -78,14 +81,14 @@ class TestRouterManager:
     def test_repr(self, manager) -> None:
         """``repr`` shows router count and load state."""
         manager.reload()
-        assert repr(manager) == "<RouterManager backends=1 loaded=True>"
+        assert repr(manager) == "<RouteManager backends=1 loaded=True>"
 
     def test_repr_on_a_fresh_manager_does_not_load(self, manager) -> None:
         """Looking at a manager in a debugger never rebuilds the routes."""
         with patch.object(manager, "reload") as mock_reload:
             rendered = repr(manager)
         mock_reload.assert_not_called()
-        assert rendered == "<RouterManager backends=0 loaded=False>"
+        assert rendered == "<RouteManager backends=0 loaded=False>"
 
     def test_backends_reports_the_loaded_list_in_order(self, manager) -> None:
         """``backends`` is the public read the other areas key their walks on."""
@@ -100,7 +103,7 @@ class TestRouterManager:
             loaded = manager.backends
         mock_reload.assert_called_once()
         assert manager._loaded is True
-        assert [type(backend) for backend in loaded] == [FileRouterBackend]
+        assert [type(backend) for backend in loaded] == [FilePageBackend]
 
     def test_backends_reads_after_the_load_do_not_reload(self, manager) -> None:
         """The load happens once, later reads hand back the loaded list."""
@@ -172,9 +175,9 @@ class TestRouterManager:
         manager.reload()
         assert manager._config_cache is not None
         assert len(manager._config_cache) == 1
-        assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
+        assert manager._config_cache[0]["BACKEND"] == "next.urls.FilePageBackend"
         assert len(manager._backends) == 1
-        assert isinstance(manager._backends[0], FileRouterBackend)
+        assert isinstance(manager._backends[0], FilePageBackend)
 
     def test_a_backend_reading_the_manager_mid_build_neither_recurses_nor_grows(
         self, manager
@@ -271,7 +274,7 @@ class TestRouterManager:
             assert len(manager._backends) == 0
             assert manager._config_cache is not None
             assert len(manager._config_cache) == 1
-            assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
+            assert manager._config_cache[0]["BACKEND"] == "next.urls.FilePageBackend"
 
     def test_reload_swallows_a_misconfigured_entry(self, manager, caplog) -> None:
         """The one type a bad entry raises is logged and swallowed by the loader."""
@@ -284,7 +287,7 @@ class TestRouterManager:
         ):
             manager.reload()
         assert manager._backends == []
-        assert "error creating RouterBackend from config" in caplog.text
+        assert "error creating PageBackend from config" in caplog.text
 
     def test_reload_propagates_unexpected_errors(self, manager) -> None:
         """Exceptions outside the config-error set escape reload."""
@@ -308,7 +311,7 @@ class TestRouterManager:
 
     def test_two_managers_never_share_a_version(self) -> None:
         """The counter is process-wide, so one manager's token never reads as another's."""
-        first, second = RouterManager(), RouterManager()
+        first, second = RouteManager(), RouteManager()
         first.reload()
         second.reload()
 
@@ -318,7 +321,7 @@ class TestRouterManager:
         """A manager nobody serves from flushes no resolver cache and tells nobody."""
         with (
             patch("next.urls.manager.clear_url_caches") as flush,
-            capture_signals(router_reloaded) as recorder,
+            capture_signals(routes_reloaded) as recorder,
         ):
             manager.reload(notify=False)
 
@@ -345,7 +348,7 @@ class TestRouterManager:
             manager._config_cache = None
             result = manager._get_next_pages_config()
             assert len(result) == 1
-            assert result[0]["BACKEND"] == "next.urls.FileRouterBackend"
+            assert result[0]["BACKEND"] == "next.urls.FilePageBackend"
 
 
 class TestInstalledAppsMovesTheRouters:
@@ -371,7 +374,7 @@ class TestInstalledAppsMovesTheRouters:
     ) -> None:
         self._write_app(tmp_path, "catalogue_app", "catalogue")
         app_dirs_entry = {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
             "DIRS": [],
@@ -395,45 +398,45 @@ class TestInstalledAppsMovesTheRouters:
 
     def test_swapping_the_urlconf_rebuilds_the_routers(self) -> None:
         """A swapped URLconf can mount other trees, so the routers follow it."""
-        before = router_manager.version
+        before = route_manager.version
 
         with override_settings(ROOT_URLCONF=NAMESPACED_URLCONF):
-            during = router_manager.version
+            during = route_manager.version
 
-        assert before != during != router_manager.version
+        assert before != during != route_manager.version
 
     def test_moving_the_base_dir_rebuilds_the_routers(self, tmp_path) -> None:
         """The relative `DIRS` roots and the static keys of the trees follow it."""
-        before = router_manager.version
+        before = route_manager.version
 
         with override_settings(BASE_DIR=tmp_path):
-            during = router_manager.version
+            during = route_manager.version
 
-        assert before != during != router_manager.version
+        assert before != during != route_manager.version
 
     def test_an_unrelated_setting_leaves_the_routers_where_they_are(self) -> None:
         """Only the app list rebuilds, so a stray setting costs no scan of the trees."""
-        before = router_manager.version
+        before = route_manager.version
 
         with override_settings(SECRET_KEY="another-secret"):
-            assert router_manager.version == before
+            assert route_manager.version == before
 
-        assert router_manager.version == before
+        assert route_manager.version == before
 
 
 class TestGlobalInstances:
-    """Module level router_manager, urlpatterns, and integration style coverage."""
+    """Module level route_manager, urlpatterns, and integration style coverage."""
 
-    def test_router_manager_instance(self) -> None:
-        """``router_manager`` is a RouterManager instance."""
-        assert router_manager is not None
-        assert isinstance(router_manager, RouterManager)
+    def test_route_manager_instance(self) -> None:
+        """``route_manager`` is a RouteManager instance."""
+        assert route_manager is not None
+        assert isinstance(route_manager, RouteManager)
 
-    def test_router_manager_reload_clears_cache(self) -> None:
+    def test_route_manager_reload_clears_cache(self) -> None:
         """Global manager reload refreshes config cache."""
-        len(router_manager._backends)
-        router_manager.reload()
-        assert router_manager._config_cache is not None
+        len(route_manager._backends)
+        route_manager.reload()
+        assert route_manager._config_cache is not None
 
     def test_urlpatterns_dynamic(self) -> None:
         """``urlpatterns`` is one TrieURLResolver over the lazy pattern sequence."""
@@ -443,13 +446,13 @@ class TestGlobalInstances:
         assert isinstance(urlpatterns[0].urlconf_name, _LazyUrlPatterns)
 
         with (
-            patch.object(router_manager, "_backends", [Mock()]),
-            patch.object(router_manager, "_loaded", True),
+            patch.object(route_manager, "_backends", [Mock()]),
+            patch.object(route_manager, "_loaded", True),
         ):
-            mock_router = router_manager._backends[0]
+            mock_router = route_manager._backends[0]
             mock_router.generate_urls.return_value = ["url1", "url2"]
 
-            patterns = list(router_manager)
+            patterns = list(route_manager)
             assert patterns == ["url1", "url2"]
 
     def test_empty_app_trees_yield_no_urls(self) -> None:
@@ -524,7 +527,7 @@ class TestGlobalInstances:
 
     def test_create_backend_real_execution(self) -> None:
         """A third-party backend is built from its entry without file-router fields."""
-        backend = RouterAccessImpl().create_backend(
+        backend = RouteAccessImpl().create_backend(
             {"BACKEND": "tests.support.routers.EntryRouter"}
         )
 
@@ -711,8 +714,8 @@ class TestLazyUrlPatterns:
 
     @pytest.fixture()
     def _csrf_marker(self):
-        """Stand one marker in for the CSRF endpoint, mounted after the actions."""
-        with patch("next.urls.manager._CSRF_PATTERN", "c1"):
+        """Stand one marker in for the framework endpoints, mounted before the actions."""
+        with patch("next.urls.manager._ENDPOINTS", ("c1",)):
             yield
 
     @pytest.fixture()
@@ -727,7 +730,7 @@ class TestLazyUrlPatterns:
     def test_sequence_protocol_without_list_inheritance(self) -> None:
         """Iteration, len, indexing, slicing, and reversed work without list."""
         with (
-            patch("next.urls.manager.router_manager", _StubManager(["r1", "r2"])),
+            patch("next.urls.manager.route_manager", _StubManager(["r1", "r2"])),
             patch("next.urls.manager.form_action_manager", _StubManager(["f1"])),
         ):
             lazy = _LazyUrlPatterns()
@@ -746,7 +749,7 @@ class TestLazyUrlPatterns:
         routes = SimpleNamespace(patterns=lambda: ["s1"])
         bound = SimpleNamespace(peek=lambda: routes)
         with (
-            patch("next.urls.manager.router_manager", _StubManager(["r1"])),
+            patch("next.urls.manager.route_manager", _StubManager(["r1"])),
             patch("next.urls.manager.form_action_manager", _StubManager(["f1"])),
         ):
             lazy = _LazyUrlPatterns()
@@ -757,7 +760,7 @@ class TestLazyUrlPatterns:
 
     def test_the_token_is_the_router_form_action_and_seo_versions(self) -> None:
         assert lazy_urlpatterns.version_token() == (
-            router_manager.version,
+            route_manager.version,
             form_action_manager.version,
             seo_routes_version.value,
         )
@@ -777,7 +780,7 @@ class TestLazyUrlPatterns:
         routes = SimpleNamespace(patterns=lambda: served[0])
         version = SeoRoutesVersion()
         with (
-            patch("next.urls.manager.router_manager", _StubManager(["r1"])),
+            patch("next.urls.manager.route_manager", _StubManager(["r1"])),
             patch("next.urls.manager.form_action_manager", _StubManager(["f1"])),
             patch(
                 "next.urls.manager.seo_routes_slot",
@@ -816,7 +819,7 @@ class TestLazyUrlPatterns:
     def test_cache_hit_builds_once(self) -> None:
         """Two accesses with stable versions expand the routers once."""
         with patch.object(
-            RouterManager, "__iter__", side_effect=lambda *args: iter([])
+            RouteManager, "owned", side_effect=lambda *args: iter([])
         ) as mock_iter:
             first = list(lazy_urlpatterns)
             second = list(lazy_urlpatterns)
@@ -824,12 +827,12 @@ class TestLazyUrlPatterns:
         assert second == first
 
     def test_invalidated_by_router_reload(self) -> None:
-        """`router_manager.reload()` bumps the version and forces a rebuild."""
+        """`route_manager.reload()` bumps the version and forces a rebuild."""
         with patch.object(
-            RouterManager, "__iter__", side_effect=lambda *args: iter([])
+            RouteManager, "owned", side_effect=lambda *args: iter([])
         ) as mock_iter:
             list(lazy_urlpatterns)
-            router_manager.reload()
+            route_manager.reload()
             list(lazy_urlpatterns)
         assert mock_iter.call_count == 2
 
@@ -839,7 +842,7 @@ class TestLazyUrlPatterns:
         router = _StubManager([])
         forms = _StubManager(["f1"])
         with (
-            patch("next.urls.manager.router_manager", router),
+            patch("next.urls.manager.route_manager", router),
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
@@ -856,7 +859,7 @@ class TestLazyUrlPatterns:
         router = _StubManager(["r1"])
         forms = FormActionManager(backends=[RegistryFormActionBackend()])
         with (
-            patch("next.urls.manager.router_manager", router),
+            patch("next.urls.manager.route_manager", router),
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
@@ -879,7 +882,7 @@ class TestLazyUrlPatterns:
         router = _StubManager(["r1"])
         forms = FormActionManager(backends=[RegistryFormActionBackend()])
         with (
-            patch("next.urls.manager.router_manager", router),
+            patch("next.urls.manager.route_manager", router),
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
@@ -900,7 +903,7 @@ class TestLazyUrlPatterns:
 
         router = _StubManager(["r1"], on_iter=register_during_expand)
         with (
-            patch("next.urls.manager.router_manager", router),
+            patch("next.urls.manager.route_manager", router),
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
@@ -915,7 +918,7 @@ class TestLazyUrlPatterns:
         router = _StubManager(["r1", "r2"])
         forms = _StubManager(["f1"])
         with (
-            patch("next.urls.manager.router_manager", router),
+            patch("next.urls.manager.route_manager", router),
             patch("next.urls.manager.form_action_manager", forms),
         ):
             lazy = _LazyUrlPatterns()
@@ -930,7 +933,7 @@ class TestLazyUrlPatterns:
     def test_include_defers_materialisation_until_first_resolve(self) -> None:
         """``include()`` does not iterate patterns, the first resolve does."""
         with patch.object(
-            RouterManager, "__iter__", side_effect=lambda *args: iter([])
+            RouteManager, "owned", side_effect=lambda *args: iter([])
         ) as mock_iter:
             included = include("next.urls")
             mock_iter.assert_not_called()
@@ -995,7 +998,7 @@ class TestBuildUrlResolver:
 
     @pytest.mark.parametrize(
         "dotted",
-        ["next.urls.RouterManager", "next.urls.manager.urlpatterns"],
+        ["next.urls.RouteManager", "next.urls.manager.urlpatterns"],
         ids=["class_not_a_resolver", "not_a_class"],
     )
     def test_non_resolver_target_raises_improperly_configured(self, dotted) -> None:
@@ -1019,14 +1022,14 @@ class TestBuildUrlResolver:
         assert type(urlpatterns[0]) is TrieURLResolver
 
 
-class TestRouterManagerNextPagesConfig:
-    """``RouterManager._get_next_pages_config`` defensive branches."""
+class TestRouteManagerNextPagesConfig:
+    """``RouteManager._get_next_pages_config`` defensive branches."""
 
     def test_an_entry_that_is_not_a_dict_is_no_entry(self) -> None:
         """A malformed entry never reaches the factory that would choke on it."""
         mock_nf = SimpleNamespace(PAGE_BACKENDS=["not-a-dict", {"BACKEND": "x"}])
         with patch("next.backends.next_framework_settings", mock_nf):
-            assert RouterManager()._get_next_pages_config() == [{"BACKEND": "x"}]
+            assert RouteManager()._get_next_pages_config() == [{"BACKEND": "x"}]
 
 
 class TestLazyResolverSlot:
@@ -1066,7 +1069,7 @@ class TestLazyResolverSlot:
     def test_settings_reload_resets_the_module_slot(self) -> None:
         """The settings-reload receiver reloads routers and clears the slot."""
         with (
-            patch.object(router_manager, "reload") as mock_reload,
+            patch.object(route_manager, "reload") as mock_reload,
             patch.object(_LazyResolverSlot, "reset") as mock_reset,
         ):
             reload_router_settings()

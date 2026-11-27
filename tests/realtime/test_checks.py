@@ -36,6 +36,7 @@ from next.realtime.replay import MAX_SIZE, MAX_TTL
 from next.realtime.transports import active_transports
 from next.realtime.views import TicketIntrospectionView
 from tests.support.cases.realtime import INVALID_CONNECTION_LIMITS
+from tests.support.checks import written
 
 
 class CustomBroker(MemoryBroker):
@@ -81,7 +82,9 @@ def test_check_builtin_backend_path_bad_options_report_errors() -> None:
 def test_check_ignores_missing_or_non_mapping_realtime_setting() -> None:
     with override_settings(NEXT_FRAMEWORK={}):
         assert check_realtime_settings() == []
-    with override_settings(NEXT_FRAMEWORK={"REALTIME": "invalid"}):
+    with written({"REALTIME": "invalid"}):
+        assert check_realtime_settings() == []
+    with written({"REALTIME": None}), override_settings(MIDDLEWARE=[]):
         assert check_realtime_settings() == []
 
 
@@ -389,7 +392,7 @@ def test_check_ignores_server_side_or_unimportable_session_engines(engine: str) 
     assert _ids(NEXT_FRAMEWORK=_WS, SESSION_ENGINE=engine) == set()
 
 
-@pytest.mark.parametrize("config", [{}, {"REALTIME": None}, None, {"REALTIME": {}}])
+@pytest.mark.parametrize("config", [{}, None, {"REALTIME": {}}])
 def test_check_automatic_transports_leave_warnings_to_the_mounted_app(
     config: object,
 ) -> None:
@@ -706,7 +709,7 @@ def _unused_realtime(
     with (
         override_settings(NEXT_FRAMEWORK={}, ROOT_URLCONF=urlconf),
         patch.object(checks, "handler_registry", HandlerRegistry()),
-        patch.object(checks, "get_router_manager", return_value=(MagicMock(), [])),
+        patch.object(checks, "get_route_manager", return_value=(MagicMock(), [])),
         patch.object(checks, "iter_existing_scanned_pages", return_value=pages),
     ):
         yield
@@ -723,10 +726,10 @@ def test_check_w149_stays_quiet_for_a_project_without_realtime() -> None:
         assert check_shared_broker() == []
 
 
-def test_check_w149_stays_quiet_without_a_router_manager() -> None:
+def test_check_w149_stays_quiet_without_a_route_manager() -> None:
     with (
         _unused_realtime(),
-        patch.object(checks, "get_router_manager", return_value=(None, [])),
+        patch.object(checks, "get_route_manager", return_value=(None, [])),
     ):
         assert check_shared_broker() == []
 

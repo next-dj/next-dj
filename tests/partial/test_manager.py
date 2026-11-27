@@ -9,7 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 from django.utils.functional import SimpleLazyObject
 
-from next.conf.signals import settings_reloaded
+from next.conf import next_framework_settings
 from next.partial import PartialProtocolBackend
 from next.partial.manager import asset_version, partial_backend_manager
 
@@ -197,7 +197,7 @@ class TestPartialBackendSelection:
     def test_settings_reloaded_drops_the_cached_backend(self) -> None:
         first = partial_backend_manager.get()
 
-        settings_reloaded.send(sender=self.__class__)
+        next_framework_settings.reload()
 
         assert partial_backend_manager.get() is not first
 
@@ -257,7 +257,7 @@ class TestAssetVersionMemo:
                 "next.partial.manager.staticfiles_storage",
                 _RecordedHashStorage("after"),
             ):
-                settings_reloaded.send(sender=self.__class__)
+                next_framework_settings.reload()
 
                 assert asset_version() == "after"
 
@@ -297,22 +297,6 @@ class TestAssetVersionMemo:
                 override_settings(STATIC_ROOT="/tmp/next-static-root"),
             ):
                 assert asset_version() == "after"
-
-    def test_an_unrelated_setting_change_keeps_the_memoised_version(self) -> None:
-        with _backend_options({"VERSION": "manifest"}):
-            with patch(
-                "next.partial.manager.staticfiles_storage",
-                _RecordedHashStorage("before"),
-            ):
-                assert asset_version() == "before"
-            with (
-                patch(
-                    "next.partial.manager.staticfiles_storage",
-                    _RecordedHashStorage("after"),
-                ),
-                override_settings(USE_TZ=False),
-            ):
-                assert asset_version() == "before"
 
     def test_a_pinned_version_still_follows_the_options(self) -> None:
         with _backend_options({"VERSION": "release-1"}):

@@ -28,7 +28,7 @@ from .manager import asset_version, partial_backend_manager
 from .patches import Patches, PatchResponse
 from .render import render_plain_zones, render_zone
 from .signals import intercept_access_denied
-from .stream import streamable
+from .stream import PROTOCOL, streamable
 
 
 if TYPE_CHECKING:
@@ -42,12 +42,13 @@ if TYPE_CHECKING:
 
     from .headers import PartialIntent
     from .render import ZoneRenderResult
-    from .stream import Streamable
+    from .stream import Deferred
 
 
 _SAFE_METHODS = frozenset({"GET", "HEAD"})
 _BAD_REQUEST = 400
 _VERSION_CONFLICT = 409
+_PROTOCOL = str(PROTOCOL)
 _VARY = {
     (False, False): VARY_HEADERS,
     (True, False): (*VARY_HEADERS, *STREAM_VARY),
@@ -70,8 +71,6 @@ def zone_response(
     """Build the partial response for a zone GET, or a refusal or 400/409 short-circuit.
 
     An intercept serving the zones refuses on its own rule before any status check.
-    A body failure a page boundary `caught` answers with its error UI in the zones.
-    Deferred boundaries the zones hold stream after the envelope when the client asks.
     """
     served = _served_intercept(page_path, intent, request)
     if served is not None:
@@ -97,12 +96,16 @@ def zone_response(
             )
         except UnknownZoneError:
             return _bad_request("unknown zone")
-    envelope = _build_envelope(
-        result, intent, version, request, served=served, url_kwargs=url_kwargs
-    )
-    streamed = _streamed(block, envelope, page_path)
-    if streamed is not None:
-        return streamed
+    pending = None if block is None else block.deferred
+    try:
+        envelope = _build_envelope(
+            result, intent, version, request, served=served, url_kwargs=url_kwargs
+        )
+        if pending is not None:
+            return _streamed(pending, envelope, page_path)
+    finally:
+        if pending is not None:
+            pending.release()
     body = backend.serialize_envelope(envelope)
     vary = _VARY[request.method in _SAFE_METHODS, html_finish.get() is not None]
     return PatchResponse(
@@ -147,17 +150,11 @@ def plain_zone_response(
 
 
 def _streamed(
-    block: "Streamable | None", envelope: Envelope, page_path: "Path"
-) -> HttpResponseBase | None:
-    """Return the stream the zone render left, `None` to answer the envelope whole.
-
-    A page whose policy opts out of compression keeps its stream plain.
-    """
-    deferred = None if block is None else block.deferred
-    if deferred is None:
-        return None
+    pending: "Deferred", envelope: Envelope, page_path: "Path"
+) -> HttpResponseBase:
+    """Return the stream of what the zone render left, plain when the page opts out."""
     compress = zone_policy(page, page_path).compress
-    return deferred.respond(envelope, page_path=page_path, compress=compress)
+    return pending.respond(envelope, page_path=page_path, compress=compress)
 
 
 def _served_intercept(
@@ -214,10 +211,12 @@ def _announce_denial(
 
 
 def _version_conflict(intent: "PartialIntent", version: str) -> bool:
-    """Return True when the client asserts a version that differs from the current.
+    """Return True when the client asserts an asset version or a wire protocol it lacks.
 
-    An absent or empty client version asserts nothing, so a first request is safe.
+    The runtime sends both from its first request, a client without one asserts nothing.
     """
+    if intent.protocol is not None and intent.protocol != _PROTOCOL:
+        return True
     return bool(intent.version) and intent.version != version
 
 

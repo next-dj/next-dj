@@ -1,58 +1,12 @@
-"""The inline error boundary, which contains a failed subtree behind its error UI."""
+"""The boundary unit, its options, error UI and wire ids, and the inline error boundary.
 
-from .containment import contain, contain_bare
-from .failures import (
-    Boundary,
-    Fallback,
-    Trace,
-    contained,
-    kind_of,
-    new_digest,
-    shown_kind,
-)
-from .markup import (
-    ADOPTING_ELEMENTS,
-    RETRY_ATTR,
-    adopt,
-    debug_detail,
-    failed,
-    identity,
-    note_retry,
-    wrapped,
-    wrapper_tag,
-)
-from .options import errors_opaque
-from .protection import aguarded, guarded, protect
-from .scope import claim_wrapper, minting, render_boundaries, wrapping
+Every area that draws a boundary reads it from here, the deferred engine included.
+"""
+
+from .containment import contain
+from .errors import BoundaryOptionError
+from .failures import ErrorKind
 from .signals import boundary_failed
 
 
-__all__ = [
-    "ADOPTING_ELEMENTS",
-    "RETRY_ATTR",
-    "Boundary",
-    "Fallback",
-    "Trace",
-    "adopt",
-    "aguarded",
-    "boundary_failed",
-    "claim_wrapper",
-    "contain",
-    "contain_bare",
-    "contained",
-    "debug_detail",
-    "errors_opaque",
-    "failed",
-    "guarded",
-    "identity",
-    "kind_of",
-    "minting",
-    "new_digest",
-    "note_retry",
-    "protect",
-    "render_boundaries",
-    "shown_kind",
-    "wrapped",
-    "wrapper_tag",
-    "wrapping",
-]
+__all__ = ["BoundaryOptionError", "ErrorKind", "boundary_failed", "contain"]

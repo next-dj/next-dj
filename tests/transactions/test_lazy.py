@@ -2,15 +2,9 @@ import pytest
 from django.contrib.auth.models import Group
 from django.db import connection, connections, transaction
 
-from next.transactions import (
-    WRITES,
-    AtomicMode,
-    AtomicScope,
-    LazySavepoint,
-    probe_atomic_aliases,
-    request_atomic,
-    savepoints,
-)
+from next.transactions import AtomicMode, AtomicScope, request_atomic, savepoints
+from next.transactions.policy import probe_atomic_aliases
+from next.transactions.savepoints import WRITES, LazySavepoint
 from tests.support.statements import fresh_default, statement_log
 
 
@@ -141,7 +135,7 @@ class TestOnCommitByMode:
         ("atomic", "expected"),
         [
             (True, ["write", "end", "early", "late"]),
-            (WRITES, ["early", "write", "end", "late"]),
+            (WRITES, ["write", "end", "early", "late"]),
             (False, ["early", "write", "late", "end"]),
         ],
     )
@@ -157,12 +151,28 @@ class TestOnCommitByMode:
             events.append("end")
         assert events == expected
 
-    def test_a_rollback_drops_only_the_hook_set_after_the_first_write(self) -> None:
+    def test_a_rollback_drops_the_hooks_set_before_the_first_write_too(self) -> None:
         events: list[str] = []
         with pytest.raises(ValueError, match="view failed"):
             _hooks_then_fail(events)
-        assert events == ["early"]
+        assert events == []
         assert _names() == []
+
+    def test_a_hook_opens_the_transaction_a_write_would(self) -> None:
+        events: list[str] = []
+        with request_atomic(LAZY):
+            assert not connection.in_atomic_block
+            transaction.on_commit(lambda: events.append("hook"))
+            assert connection.in_atomic_block
+            assert events == []
+        assert events == ["hook"]
+
+    def test_the_hook_is_djangos_own_once_the_block_closes(self) -> None:
+        events: list[str] = []
+        with request_atomic(LAZY):
+            pass
+        transaction.on_commit(lambda: events.append("now"))
+        assert events == ["now"]
 
 
 @pytest.mark.django_db(transaction=True)

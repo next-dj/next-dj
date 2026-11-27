@@ -44,7 +44,8 @@ interface NextStatic {
   ready(chunk: "scripts"): Promise<{ consent: Consent; scripts: unknown }>;
   navigation: { current(): { url: string; path: string; title: string } };
   _init(context: Record<string, unknown>): void;
-  _land(key: string, value: unknown): void;
+  _extend(name: string, install: (kernel: unknown) => unknown, build: string): void;
+  router?: unknown;
   on(event: string, listener: (payload: Record<string, unknown>) => void): () => void;
   use<T>(plugin: (next: NextStatic) => T): T;
 }
@@ -96,39 +97,44 @@ describe("Next._init", () => {
 });
 
 describe("Next._init dev channel", () => {
-  // _configure is stubbed, a real call would leave this file's runtime wired for dev.
-  function spyConfigure() {
-    return vi.spyOn(win.Next.partial, "_configure").mockImplementation(() => undefined);
+  // The dev flag a custom op reads, the one the applier hands every op.
+  function devFlag(): boolean {
+    let seen = false;
+    win.Next.partial.defineOp("probe", (_patch, ctx) => {
+      seen = (ctx as { dev: boolean }).dev;
+    });
+    win.Next.partial.apply({ version: "", ops: [{ op: "probe" }] });
+    return seen;
   }
 
   beforeEach(() => {
     win.Next._init({});
   });
 
-  it("opens the dev channel from a literal true and before the initial scan", () => {
-    const configure = spyConfigure();
-    const ready = vi.spyOn(win.Next.partial, "ready");
+  // Shut again, so the rest of the file runs without the dev channel.
+  afterEach(() => {
+    win.Next.partial._configure({ dev: false });
+  });
+
+  it("opens the dev channel from a literal true and before the ready listeners", () => {
+    let ready: boolean | undefined;
+    const off = win.Next.on("ready", () => (ready = devFlag()));
     win.Next._init({ $dev: true });
-    expect(configure).toHaveBeenCalledWith({ dev: true });
-    expect(configure.mock.invocationCallOrder[0]!).toBeLessThan(
-      ready.mock.invocationCallOrder[0]!,
-    );
+    off();
+    expect(ready).toBe(true);
   });
 
   it("leaves the channel shut when the payload carries no key", () => {
-    const configure = spyConfigure();
     win.Next._init({});
-    expect(configure).not.toHaveBeenCalled();
+    expect(devFlag()).toBe(false);
   });
 
   it("leaves the channel shut for a truthy value that is not the boolean", () => {
-    const configure = spyConfigure();
     win.Next._init({ $dev: "true" });
-    expect(configure).not.toHaveBeenCalled();
+    expect(devFlag()).toBe(false);
   });
 
   it("keeps $dev in the context store and in the changed keys", () => {
-    const configure = spyConfigure();
     const received: Record<string, unknown>[] = [];
     const off = win.Next.on("context-updated", (payload) => {
       received.push(payload);
@@ -137,7 +143,7 @@ describe("Next._init dev channel", () => {
     expect(win.Next.context.$dev).toBe(true);
     expect(received[0]!.changed).toEqual(["$dev", "page"]);
     off();
-    expect(configure).toHaveBeenCalledTimes(1);
+    expect(devFlag()).toBe(true);
   });
 });
 
@@ -235,13 +241,9 @@ describe("Next._init csrf seed", () => {
 
   it("leaves a malformed payload to the dev chunk, warning about nothing itself", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    // _configure is stubbed so the shared runtime does not stay wired for dev.
-    const configure = vi
-      .spyOn(win.Next.partial, "_configure")
-      .mockImplementation(() => undefined);
     win.Next._init({ $dev: true, $csrf: { header: "X-CSRFToken" } });
     expect(warn).not.toHaveBeenCalled();
-    expect(configure).toHaveBeenCalledTimes(1);
+    win.Next.partial._configure({ dev: false });
   });
 });
 
@@ -322,9 +324,76 @@ describe("window.Next", () => {
     win.Next.partial._reset();
   });
 
-  it("ignores a chunk handshake naming a module this runtime does not know", () => {
-    const next = win.Next as unknown as { _land(key: string, value: unknown): void };
-    expect(() => next._land("unknown", {})).not.toThrow();
+  it("ignores a chunk naming a module this runtime does not know", () => {
+    const install = vi.fn();
+    expect(() => win.Next._extend("unknown", install, "test")).not.toThrow();
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it("hands a chunk the scripts chunk the runtime fetches", async () => {
+    let scripts: Promise<unknown> | undefined;
+    win.Next._extend(
+      "reload",
+      (kernel) => {
+        scripts = (kernel as { scripts(): Promise<unknown> }).scripts();
+        return true;
+      },
+      "test",
+    );
+    await expect(scripts).resolves.toBe(await win.Next.ready("scripts"));
+  });
+
+  it("installs a chunk once however often its bundle evaluates", () => {
+    const install = vi.fn(() => ({ visit: vi.fn() }));
+    win.Next._extend("router", install, "test");
+    win.Next._extend("router", install, "test");
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(win.Next.router).toBe(install.mock.results[0]!.value);
+  });
+});
+
+describe("the release handshake", () => {
+  // The reload-once flag of the version guard in assets.ts.
+  const STALE = "next:partial:stale";
+
+  afterEach(() => {
+    sessionStorage.clear();
+    win.Next.partial._reset();
+  });
+
+  it("boots on a payload naming the protocol of this runtime", () => {
+    const navigate = vi.fn();
+    win.Next.partial._configure({ navigate });
+    sessionStorage.setItem(STALE, "1");
+    win.Next._init({ $protocol: 2 });
+    expect(sessionStorage.getItem(STALE)).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("reloads for a payload of a server speaking another protocol", () => {
+    const navigate = vi.fn();
+    win.Next.partial._configure({ navigate });
+    win.Next._init({ $protocol: 3 });
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(STALE)).toBe("1");
+  });
+
+  it("asserts nothing for a payload that names no protocol", () => {
+    const navigate = vi.fn();
+    win.Next.partial._configure({ navigate });
+    sessionStorage.setItem(STALE, "1");
+    win.Next._init({});
+    expect(sessionStorage.getItem(STALE)).toBe("1");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a chunk of another build and keeps waiting for its own", () => {
+    const navigate = vi.fn();
+    win.Next.partial._configure({ navigate });
+    const install = vi.fn(() => ({ attrs: vi.fn() }));
+    win.Next._extend("dev", install, "older");
+    expect(install).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -882,7 +951,7 @@ describe("the dev chunk", () => {
     const diagnostics = { attrs: vi.fn() };
     win.Next._init({ $dev: true, $chunks: { dev: "/static/next/next.dev.min.js" } });
     win.Next._init({});
-    win.Next._land("dev", diagnostics);
+    win.Next._extend("dev", () => diagnostics, "test");
     expect(diagnostics.attrs).not.toHaveBeenCalled();
   });
 });

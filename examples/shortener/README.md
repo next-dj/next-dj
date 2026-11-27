@@ -36,7 +36,7 @@ Tailwind loads via the Play CDN in the shared [`page_head`](../_shared/_componen
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "host")],
             "PAGES_DIR": "pages",
@@ -380,6 +380,17 @@ URL                       Name  File                                            
 The intercept [`page.py`](shortener/pages/admin/%28.%29links/%5Bslug%5D/page.py) declares `page.public()` like every page of this example, resolves the row through `DLink[Link]` from the `slug` of the target URL, and adds the clicks still waiting in the cache. Its metadata titles the tab `Quick look · peeked · next.dj shortener` until the modal closes. The [`template.djx`](shortener/pages/admin/%28.%29links/%5Bslug%5D/template.djx) wraps the `link_card` and two `stat_card` tiles in `{% zone "link-peek" %}` and leaves the reset form out, so the destructive action lives on the full page only.
 
 `TestLinkPeek` pins the server side and [`tests/e2e/test_peek.py`](tests/e2e/test_peek.py) drives the modal in a browser, the URL and title on open and close, Back, Escape, reload and the link to the full page.
+
+### 16. Keeping one page out of compression
+
+`CompressionMiddleware` sits in `MIDDLEWARE` and compresses every buffered HTML page over the minimum size for a client that sends `Accept-Encoding`. The detail page of a link, [`admin/links/[slug]/page.py`](shortener/pages/admin/links/%5Bslug%5D/page.py), renders a CSRF token for its reset form beside a slug the visitor chose in the URL. Compressing a body that holds a secret next to input the visitor controls leaks the secret through the size of the result, so the page opts out with one module-level call:
+
+```python
+page.public()
+page.compress(enabled=False)
+```
+
+Every response of that page goes out plain, the full page and its zone answers alike, while `/admin/` and the other pages keep their encoding. `TestCompressionOptOut` asks both for `gzip` and checks that `/admin/links/<slug>/` answers with no `Content-Encoding` header and `/admin/` answers with `gzip`.
 
 ## Gotchas
 

@@ -79,7 +79,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "wiki.backends.HybridRouterBackend",
+            "BACKEND": "wiki.backends.HybridPageBackend",
             "APP_DIRS": True,
             # The shared HTML envelope, walked next to the per-app trees.
             "DIRS": [str(BASE_DIR / "shell")],

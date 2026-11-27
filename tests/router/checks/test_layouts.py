@@ -13,7 +13,7 @@ from next.router.checks import (
     layouts as router_checks,
 )
 from next.testing import override_next_settings
-from tests.support import patch_checks_router_manager, write_page
+from tests.support import patch_checks_route_manager, write_page
 from tests.support.checks import write_file
 
 
@@ -135,7 +135,7 @@ class TestLayoutPageReads:
     def test_a_key_the_pages_set_differently_is_named(self, tmp_path: Path) -> None:
         self._tree(tmp_path)
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             (message,) = check_layout_page_reads()
 
         assert message.id == "next.W183"
@@ -151,7 +151,7 @@ class TestLayoutPageReads:
         )
         forget_layout_texts()
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_layout_page_reads() == []
 
     def test_a_page_py_without_a_body_is_not_read(self, tmp_path: Path) -> None:
@@ -160,7 +160,7 @@ class TestLayoutPageReads:
             _SECTION.replace('"active_tab"', '"other"')
         )
 
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_layout_page_reads() == []
 
     def test_a_layout_off_the_page_path_shares_no_callable(self) -> None:

@@ -14,14 +14,9 @@ from django.db.backends.signals import connection_created
 from django.db.transaction import TransactionManagementError
 from django.utils.connection import ConnectionDoesNotExist
 
-from next.transactions import (
-    WRITES,
-    AtomicScope,
-    LazySavepoint,
-    keep_savepoints,
-    probe_atomic_aliases,
-    request_atomic,
-)
+from next.transactions import AtomicScope, request_atomic
+from next.transactions.policy import probe_atomic_aliases
+from next.transactions.savepoints import WRITES, LazySavepoint, keep_savepoints
 from tests.support.statements import (
     close_driver,
     fresh_default,

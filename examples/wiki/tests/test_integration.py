@@ -16,7 +16,7 @@ from django.http import Http404
 from django.test.utils import CaptureQueriesContext
 from django.urls import path, reverse
 from django.utils.text import Truncator
-from wiki.backends import HybridRouterBackend
+from wiki.backends import HybridPageBackend
 from wiki.deps import ArticleProvider, DArticle
 from wiki.models import Article
 
@@ -29,7 +29,7 @@ from next.testing import (
     make_resolution_context,
     parse_sitemap,
 )
-from next.urls.signals import router_reloaded
+from next.urls.signals import routes_reloaded
 
 
 if TYPE_CHECKING:
@@ -502,7 +502,7 @@ class TestNestedFieldComponent:
 
 
 class TestRouterReloadSignal:
-    """`router_reloaded` fires once per article save and once per delete."""
+    """`routes_reloaded` fires once per article save and once per delete."""
 
     @pytest.mark.parametrize(
         "trigger", ["save", "delete"], ids=["on-save", "on-delete"]
@@ -510,12 +510,12 @@ class TestRouterReloadSignal:
     def test_router_reload_signal_fires(
         self, make_article: Callable[..., Article], routing_doc: Article, trigger: str
     ) -> None:
-        with SignalRecorder(router_reloaded) as recorder:
+        with SignalRecorder(routes_reloaded) as recorder:
             if trigger == "save":
                 make_article("signal-trigger", title="Signal")
             else:
                 routing_doc.delete()
-        assert len(recorder.events_for(router_reloaded)) >= 1
+        assert len(recorder.events_for(routes_reloaded)) >= 1
 
 
 class TestUnits:
@@ -574,9 +574,9 @@ class TestUnits:
         self, routing_doc: Article
     ) -> None:
         unrelated = path("elsewhere/", lambda _request: None, name="elsewhere")
-        backend = HybridRouterBackend(settings.NEXT_FRAMEWORK["PAGE_BACKENDS"][0])
+        backend = HybridPageBackend(settings.NEXT_FRAMEWORK["PAGE_BACKENDS"][0])
         with patch(
-            "wiki.backends.FileRouterBackend.generate_urls", return_value=[unrelated]
+            "wiki.backends.FilePageBackend.generate_urls", return_value=[unrelated]
         ):
             result = backend.generate_urls()
         assert result == [unrelated]

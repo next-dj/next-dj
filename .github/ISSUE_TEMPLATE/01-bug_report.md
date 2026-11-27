@@ -37,4 +37,4 @@ labels: ["bug"]
 
 ## Debugging notes (optional)
 
-<!-- If coverage failed locally: see terminal output and `htmlcov/index.html` after `make test`. For faster loops, `make test-fast`. See CONTRIBUTING.md § Help. -->
+<!-- If coverage failed locally: see terminal output and `htmlcov/index.html` after `make test`. For a faster loop, run one area with `uv run pytest tests/<area> --no-cov`. See CONTRIBUTING.md § Help. -->

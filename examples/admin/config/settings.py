@@ -88,7 +88,7 @@ NEXT_FRAMEWORK = {
     "LOGIN_REQUIRED": True,
     "PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "next.urls.FilePageBackend",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "pages",

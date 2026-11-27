@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import functools
 import re
 import threading
-import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -13,18 +11,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
 from next.boundaries import boundary_failed, contain
+from next.boundaries.failures import shown_source
+from next.bridge.deadline import remaining
+from next.caches import pure_cache
 from next.components.sources import get_components_manager
-from next.pages.boundaries import shown_source
+from next.defer.connections import forcing_pool
+from next.defer.markers import Job
+from next.defer.signals import boundary_job_started
 from next.pages.loaders import LOADING_TEMPLATE
-from next.suspense.connections import forcing_pool
-from next.suspense.render import job_gates
 from next.utils import resolve_base_dir
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
-    from next.defer import ErrorKind
+    from next.boundaries.failures import ErrorKind
 
 
 type Mode = Literal["raise", "render"]
@@ -96,7 +97,7 @@ def _record(
         _hand_on(recordings, (failure,))
 
 
-@functools.cache
+@pure_cache()
 def _listen() -> None:
     """Connect `_record` on the first recording, so importing this module connects none.
 
@@ -209,10 +210,15 @@ class ComponentGate:
         self.entered = threading.Event()
         self.released = threading.Event()
 
-    def hold(self, at: float) -> None:
-        """Note a held job and wait until released, at most until the instant `at`."""
+    def hold(self, name: str, **_signal: object) -> None:
+        """Hold a starting job of the component until released, at most to its deadline.
+
+        It receives `boundary_job_started` on the job's thread and under its deadline.
+        """
+        if name != self.name:
+            return
         self.entered.set()
-        self.released.wait(max(0.0, at - time.monotonic()))
+        self.released.wait(remaining())
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until a job of the component is held, false once `timeout` passed."""
@@ -225,14 +231,16 @@ class ComponentGate:
 
 @contextmanager
 def gated(name: str) -> Generator[ComponentGate]:
-    """Hold every job of the component `name` inside the block until it is released."""
+    """Hold every job of the component `name` inside the block until it is released.
+
+    Any thread's job is held, a live server's too, as the signal is process-wide.
+    """
     held = ComponentGate(name)
-    job_gates[name] = held
+    boundary_job_started.connect(held.hold, sender=Job, weak=False)
     try:
         yield held
     finally:
-        if job_gates.get(name) is held:
-            del job_gates[name]
+        boundary_job_started.disconnect(held.hold, sender=Job)
         held.release()
 
 
@@ -250,7 +258,7 @@ def _component_name(name: str) -> str:
     raise LookupError(msg)
 
 
-def _page_name(page: Path | str) -> str:
+def page_boundary(page: Path | str) -> str:
     """Return the name of the page boundary whose `loading.djx` sits in `page`.
 
     A relative `page` reads from `BASE_DIR`, as the name a site carries does.
@@ -261,7 +269,7 @@ def _page_name(page: Path | str) -> str:
         directory = base / directory
     loading = directory / LOADING_TEMPLATE
     if not loading.is_file():
-        msg = f"boundary_gate(page={str(page)!r}) finds no {LOADING_TEMPLATE} there"
+        msg = f"the page directory {str(page)!r} holds no {LOADING_TEMPLATE}"
         raise LookupError(msg)
     return shown_source(loading)
 
@@ -271,7 +279,7 @@ def _gate_name(component: str | None, page: Path | str | None) -> str:
     if component is not None and page is None:
         return _component_name(component)
     if component is None and page is not None:
-        return _page_name(page)
+        return page_boundary(page)
     msg = "boundary_gate takes exactly one of component= or page="
     raise TypeError(msg)
 
@@ -320,6 +328,7 @@ __all__ = [
     "boundary_gate",
     "gated",
     "in_document_order",
+    "page_boundary",
     "parallel_boundaries",
     "raise_first",
     "recorded_failures",

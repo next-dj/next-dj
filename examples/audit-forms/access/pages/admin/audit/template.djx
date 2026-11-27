@@ -13,6 +13,7 @@
           <option value="validation_failed" {% if active_kind == "validation_failed" %}selected{% endif %}>validation_failed</option>
           <option value="request_started" {% if active_kind == "request_started" %}selected{% endif %}>request_started</option>
           <option value="access_denied" {% if active_kind == "access_denied" %}selected{% endif %}>access_denied</option>
+          <option value="receipt_issued" {% if active_kind == "receipt_issued" %}selected{% endif %}>receipt_issued</option>
         </select>
         <noscript>
           <button type="submit" class="rounded-md border border-input bg-background px-2 py-1 hover:bg-accent">Apply</button>

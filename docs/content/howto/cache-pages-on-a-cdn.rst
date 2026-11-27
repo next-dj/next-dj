@@ -109,6 +109,26 @@ Every zone response and every envelope carries ``Cache-Control: private, no-stor
 A CSP nonce belongs to one response, so a response whose render writes a tag that carries one is sent with ``Cache-Control: private``, and ``manage.py check`` warns while a nonce is active beside shared pages.
 Set ``CSP_NONCE`` to ``False`` and allow the scripts by hash or by source on a site a CDN serves, see :doc:`/content/security/csp-and-nonce`.
 
+Keep client-trip tokens shared
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A shared page that carries a ``load``, ``visible``, or ``manual`` component mints a boundary token while it renders.
+The default ``DEFER["TOKENS"]["OPTIONS"]["BINDING"]`` is ``"auto"``, which binds the token to the user ``AuthenticationMiddleware`` put on the request.
+Reading that user reads the session, so the response gains ``Vary: Cookie``, the framework sends the page ``private``, and the CDN keeps no copy of it.
+A page whose boundaries are all ``stream`` or ``inline`` mints no token and stays shared.
+``"none"`` binds nobody, so the token and the shell stay shared.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFER": {"TOKENS": {"OPTIONS": {"BINDING": "none"}}},
+   }
+
+Every reload still runs the page refusal, the page guards, the access rule of the component, and the recorded permissions for the visitor who sends it, so a replayed token shows its holder only what the holder's own account may see.
+Within ``MAX_AGE`` it opens the boundary for whoever holds it, and the props and the URL it carries reach that holder, see :doc:`/content/security/overview`.
+``next.W186`` reports ``"none"`` in a project that runs ``AuthenticationMiddleware``, and a project that made this choice lists it in ``SILENCED_SYSTEM_CHECKS``.
+
 Verification
 ------------
 

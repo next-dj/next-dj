@@ -13,7 +13,7 @@ The example focuses on the form-action subsystem of next-dj: a custom backend wi
 | `/request/scope/` | Step 2: project slug, free-form reason, expiry days. |
 | `/request/approval/` | Step 3: read-only confirmation summary. |
 | `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. Once the filing is recorded, "View the receipt" opens the receipt as a modal. |
-| `/request/<id>/receipt/` | The receipt of a filed request, a page whose body comes from `render()`. `?format=txt` downloads it as plain text. |
+| `/request/<id>/receipt/` | The receipt of a filed request, a page whose body comes from `render()`. `?format=txt` downloads it as plain text. The first opening writes one `receipt_issued` row to the log (section 13). |
 | `/admin/audit/` | Global audit log, newest first. The table pages by cursor: it grows as you scroll, drops old batches from the top, and a reload restores the window the address names. The per-channel totals load once they scroll into view, behind a skeleton. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows linked to a request open a summary of that request as a modal over the log. |
 
 The user flow:
@@ -234,7 +234,7 @@ def entries(active_kind: str, page: Annotated[Paging, log]) -> Window[AuditEntry
 {% endmore %}
 ```
 
-`next=` renders the link that fetches the following batch when it scrolls into view, and the batch lands as `<tr>` rows appended to the `<tbody>`. `url="replace"` writes `?cursor=<token>&restore=1` into the address after each batch. `prune=60` drops whole batches from the top once the table holds more than 60 rows, keeps the scroll position, and shows the `previous=` link, which sits hidden on the first window until then. A reload of the written address renders the batch the cursor names under the batches before it, up to `DEFER["MORE"]["MAX_RESTORE"]`, which [`config/settings.py`](config/settings.py) sets to `3` so a restore brings back the three batches the prune keeps and no more. A cursor the pager cannot read, cut short or edited by hand, answers with the first window rather than an error.
+`next=` renders the link that fetches the following batch when it scrolls into view, and the batch lands as `<tr>` rows appended to the `<tbody>`. `url="replace"` writes `?cursor=<token>&_restore=cursor` into the address after each batch. `prune=60` drops whole batches from the top once the table holds more than 60 rows, keeps the scroll position, and shows the `previous=` link, which sits hidden on the first window until then. A reload of the written address renders the batch the cursor names under the batches before it, up to the `max_restore=3` the pager in [`access/pages/admin/audit/page.py`](access/pages/admin/audit/page.py) takes, so a restore brings back the three batches the prune keeps and no more. A cursor the pager cannot read, cut short or edited by hand, answers with the first window rather than an error.
 
 #### Why an append-only log pages by cursor
 
@@ -343,7 +343,7 @@ The test suite asserts the server contract (the envelopes, the zone targets, the
 - **Caret and typed input.** A blur-validation error on the email field re-renders the step without moving the caret or clearing text already typed into a neighbouring field.
 - **Geometry.** The dialog is centered, scrolls its own body when the step is tall, and the backdrop covers the full viewport with no gap at the page edges.
 - **Toast and list refresh.** The success toast appears once on submit, and the recent-requests list under the closed modal shows the new row without a full page reload.
-- **Audit log on scroll.** After `seed_demo`, opening `/admin/audit/` shows the first twenty rows at once and the totals skeleton, which fills in once it is on screen. Scrolling down appends batches without a reload and the address gains `?cursor=…&restore=1`. The fourth batch drops the first from the top without a jump and reveals "Show newer rows", and a reload brings back the same three batches. Picking another kind restarts the list from its newest row and reloads the totals with it.
+- **Audit log on scroll.** After `seed_demo`, opening `/admin/audit/` shows the first twenty rows at once and the totals skeleton, which fills in once it is on screen. Scrolling down appends batches without a reload and the address gains `?cursor=…&_restore=cursor`. The fourth batch drops the first from the top without a jump and reveals "Show newer rows", and a reload brings back the same three batches. Picking another kind restarts the list from its newest row and reloads the totals with it.
 
 ### 11. Tab titles that never name the requester
 
@@ -485,6 +485,16 @@ The string `render()` returns is template source, composed into the layout and r
 The portal has no accounts and no default login, so neither the targets nor the intercepts declare access and both chains admit everyone. Both still run on every zone GET, so a row `visible_to` hides is a `404` inside the modal too. Under `LoginRequiredMiddleware` an intercept that declares nothing would require a login even over a public target, which `manage.py check` reports as `next.W140`.
 
 `TestAuditPeek`, `TestAuditLogPeek`, and `TestReceipt` in the integration suite pin the server side: the plain GET against the zone GET, the `meta` op, the poll, the `400` for an unknown zone, the `404` for a hidden row, and `render()` running once. [`tests/e2e/test_intercepts.py`](tests/e2e/test_intercepts.py) drives each modal in a browser: the `:modal` dialog, the URL and title on open and close, Back, reload, the plain link, and a poll that brings in a new row.
+
+### 13. A page that writes on a GET: `page.transaction(atomic="writes")`
+
+Opening a receipt for the first time leaves a row in the log. [`receipt/page.py`](access/pages/request/%5Bint:access_request%5D/receipt/page.py) calls `services.issue_receipt(access_request)` from its `render()`, and that service writes one `AuditEntry` with `kind="receipt_issued"` linked to the request, once. A `GET` is in autocommit by default, so the page declares its own transaction rule at module level:
+
+```python
+page.transaction(atomic="writes")
+```
+
+The mode opens the transaction right before the first write, never on entry. A second opening finds the row and writes nothing, an unfiled request answers `404` before the service runs, and none of those opens a transaction. The first opening, the `?format=txt` download included, writes inside a transaction, so an exception after the write takes the row back with it. `page.transaction(atomic=True)` would wrap every request of the page, reads included, and `page.transaction(atomic=False)` would leave the write alone in autocommit. The declaration binds this page only. The wizard action keeps its own `Meta.atomic = False` from section 3a. `TestReceipt` pins one row across two openings, no row for a `404`, and the rollback when `receipt_text()` raises. The row shows in the log under `?kind=receipt_issued`.
 
 ## Further reading
 

@@ -1,6 +1,6 @@
 """The base classes of the nodes `{% component %}` and its slot tags compile to.
 
-A check finds compiled tags through them, since the library imports `next.static`.
+A check and the placement walk find compiled tags through them, below the render code.
 """
 
 from django.template.base import Node, NodeList

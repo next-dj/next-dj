@@ -7,12 +7,12 @@ from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
 
-from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Tags, Warning as DjangoWarning
 from django.template import Engine, Template, TemplateDoesNotExist, TemplateSyntaxError
 from django.template.base import NodeList
 from django.template.loader_tags import IncludeNode
 
-from next.checks import NEXT, SEO
+from next.checks import NEXT, SEO, register
 from next.components.nodes import ComponentTagNode
 from next.components.sources import get_components_manager
 from next.pages.checks.composed import iter_composed_pages

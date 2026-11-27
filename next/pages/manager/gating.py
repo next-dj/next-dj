@@ -11,8 +11,8 @@ from django.conf import settings
 
 from next.deps.resolver import current_resolver
 from next.deps.scope import bridged_scope
-from next.pages.boundaries import Caught, ErrorShell
-from next.pages.gating import GATE_KEY, Plan, ShellGate, note_slow, plan_gating
+from next.pages.boundaries import Caught, ErrorContext
+from next.pages.gating import GATE_KEY, ShellGate, SplitPlan, note_slow, plan_gating
 from next.pages.graph import (
     Phase,
     arun_phase,
@@ -40,9 +40,9 @@ if TYPE_CHECKING:
 class PageGating(ContextRender):
     """Split the callables of a page across its boundaries and build its shell."""
 
-    _plans: PageCache[Path, tuple[object, int, object, Plan]]
+    _plans: PageCache[Path, tuple[object, int, object, SplitPlan]]
 
-    def gating_plan(self, file_path: Path, chain: BoundaryChain) -> Plan:
+    def gating_plan(self, file_path: Path, chain: BoundaryChain) -> SplitPlan:
         """Return the split of the callables of `file_path` across its page boundaries.
 
         It is computed once per graph, registry epoch and set of `loading.djx` files.
@@ -173,8 +173,8 @@ class PageGating(ContextRender):
 
     def _gate(
         self,
-        plan: Plan,
-        shell: ErrorShell,
+        plan: SplitPlan,
+        shell: ErrorContext,
         results: dict[int, object],
         render: tuple[Path, HttpRequest | None, Mapping[str, object], dict[str, Any]],
     ) -> dict[str, object]:

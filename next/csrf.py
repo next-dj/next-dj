@@ -4,7 +4,6 @@ A token in the HTML sets the CSRF cookie, so a page a shared cache may store def
 """
 
 import enum
-import functools
 import logging
 from typing import Final
 
@@ -29,12 +28,13 @@ from django.urls import (
 from django.utils import translation
 from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
-from next.caches import BoundedCache
+from next.caches import FRAMEWORK, BoundedCache, memo
 from next.conf import next_framework_settings
 from next.diagnostics import FailureLog
 from next.permissions.access import open_view
 from next.site.headers import ROBOTS_HEADER
 from next.utils import request_header
+from next.wire import REQUEST_FLAG
 
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,6 @@ CSRF_DEFERRED_ATTR: Final = "_next_csrf_deferred"
 _PAYLOAD_ATTR: Final = "_next_csrf_payload"
 _COOKIE_KEY: Final = "CSRF_COOKIE"
 _RENEWED_KEY: Final = "CSRF_COOKIE_NEEDS_UPDATE"
-_REQUEST_FLAG: Final = "X-Next-Request"
 _SAFE_METHODS: Final = ("GET", "HEAD")
 _SAME_ORIGIN: Final = "same-origin"
 
@@ -59,7 +58,7 @@ _SAME_ORIGIN: Final = "same-origin"
 class CsrfDelivery(enum.StrEnum):
     """Where a rendered page puts the CSRF token its forms and runtime post with.
 
-    `AUTO` defers it on a page a shared cache may store and embeds it on the rest.
+    `AUTO` embeds it only where the render read a token or the page streams.
     """
 
     AUTO = "auto"
@@ -67,19 +66,13 @@ class CsrfDelivery(enum.StrEnum):
     LAZY = "lazy"
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def csrf_delivery() -> CsrfDelivery:
     """Return the `CSRF_DELIVERY` setting, `AUTO` where it names no mode."""
     try:
         return CsrfDelivery(next_framework_settings.CSRF_DELIVERY)
     except ValueError:
         return CsrfDelivery.AUTO
-
-
-def forget_csrf_delivery(**kwargs: object) -> None:
-    """Drop the memoised delivery mode and endpoint URL after a settings reload."""
-    csrf_delivery.cache_clear()
-    _urls.clear()
 
 
 def defer_token(request: HttpRequest) -> None:
@@ -124,7 +117,7 @@ def csrf_token_payload(request: HttpRequest) -> dict[str, str]:
 
 
 _urls: Final[BoundedCache[tuple[str | None, str, str | None], tuple[object, str]]] = (
-    BoundedCache()
+    BoundedCache(depends=(FRAMEWORK,))
 )
 """The reversed endpoint per URLconf, script prefix and language, with its resolver.
 
@@ -152,6 +145,25 @@ def csrf_url() -> str:
     return url
 
 
+def _endpoint() -> dict[str, str] | None:
+    """Return the payload naming the endpoint, `None` while it does not reverse.
+
+    A cookie scripts may read is named too, so the client sends it before asking.
+    """
+    with _failures.guard(
+        CSRF_URL_NAME,
+        "The CSRF token endpoint does not reverse, so this page embeds its token "
+        "instead of deferring it. Add path('', include('next.urls')) to "
+        "ROOT_URLCONF.",
+        catch=(NoReverseMatch,),
+    ):
+        payload = {"header": csrf_header_name(), "url": csrf_url()}
+        if not (settings.CSRF_COOKIE_HTTPONLY or settings.CSRF_USE_SESSIONS):
+            payload["cookie"] = settings.CSRF_COOKIE_NAME
+        return payload
+    return None
+
+
 def csrf_payload(request: HttpRequest) -> dict[str, str]:
     """Return the `$csrf` payload, the endpoint URL in place of a deferred token.
 
@@ -159,14 +171,9 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
     One request masks one token per secret, shared by its page and its envelope.
     """
     if token_deferred(request):
-        with _failures.guard(
-            CSRF_URL_NAME,
-            "The CSRF token endpoint does not reverse, so this page embeds its token "
-            "instead of deferring it. Add path('', include('next.urls')) to "
-            "ROOT_URLCONF.",
-            catch=(NoReverseMatch,),
-        ):
-            return {"header": csrf_header_name(), "url": csrf_url()}
+        endpoint = _endpoint()
+        if endpoint is not None:
+            return endpoint
     meta = request.META
     held: tuple[object, dict[str, str]] | None = request.__dict__.get(_PAYLOAD_ATTR)
     if held is None or held[0] != meta.get(_COOKIE_KEY):
@@ -174,6 +181,32 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
         held = (meta.get(_COOKIE_KEY), payload)
         setattr(request, _PAYLOAD_ATTR, held)
     return held[1]
+
+
+def token_minted(request: HttpRequest) -> bool:
+    """Whether this request already read a token, so its response sets the cookie."""
+    return bool(request.META.get(_RENEWED_KEY))
+
+
+def document_csrf(
+    request: HttpRequest | None, *, streams: bool
+) -> dict[str, str] | None:
+    """Return the `$csrf` payload of a rendered page, `None` without a real request.
+
+    Under `AUTO` a page that minted no token names the endpoint, as Django sets the
+    cookie only once a template reads one. A streamed page mints before its headers.
+    """
+    if request is None or not isinstance(getattr(request, "META", None), dict):
+        return None
+    if (
+        not streams
+        and csrf_delivery() is CsrfDelivery.AUTO
+        and not token_minted(request)
+    ):
+        endpoint = _endpoint()
+        if endpoint is not None:
+            return endpoint
+    return csrf_payload(request)
 
 
 def secret_changed(request: HttpRequest) -> bool:
@@ -195,8 +228,8 @@ def _refusal(request: HttpRequest) -> HttpResponse | None:
     """Return the error response for a request that gets no token, else `None`."""
     if request.method not in _SAFE_METHODS:
         return HttpResponseNotAllowed(_SAFE_METHODS)
-    if request_header(request, _REQUEST_FLAG) != "1":
-        return HttpResponseBadRequest(f"{_REQUEST_FLAG}: 1 is required")
+    if request_header(request, REQUEST_FLAG) != "1":
+        return HttpResponseBadRequest(f"{REQUEST_FLAG}: 1 is required")
     fetch_site = request_header(request, "Sec-Fetch-Site")
     if fetch_site is not None and fetch_site != _SAME_ORIGIN:
         return HttpResponseForbidden("Only a same-origin request gets a token")
@@ -232,8 +265,9 @@ __all__ = [
     "csrf_url",
     "csrf_view",
     "defer_token",
-    "forget_csrf_delivery",
+    "document_csrf",
     "nonce_minted",
     "secret_changed",
     "token_deferred",
+    "token_minted",
 ]

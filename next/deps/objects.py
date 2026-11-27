@@ -29,12 +29,14 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db.models import Model
 from django.http import Http404
 
+from next.caches import ROUTES
+
 from .cache import _CACHE_MISS, DependencyCache, render_dep_cache
 from .context import ResolutionContext
 from .errors import MissingKeyError, UnboundObjectError
 from .loader import Loader
 from .markers import DDependencyBase, unwrap_annotated
-from .providers import RegisteredParameterProvider
+from .providers import READS_NOTHING, ContextReads, RegisteredParameterProvider
 from .resolver import current_resolver
 
 
@@ -45,7 +47,7 @@ if TYPE_CHECKING:
     from django.db.models import QuerySet
     from django.http import HttpRequest
 
-    from .plan import AsyncParameterFiller, ParameterFiller
+    from .plan import AsyncParameterFiller, ParameterFiller, Reach
     from .resolver import DependencyResolver
 
 
@@ -532,6 +534,14 @@ class ObjectProvider(RegisteredParameterProvider):
         return names_object(param.annotation)
 
     @override
+    def static_reads(self, param: inspect.Parameter) -> ContextReads:
+        """Read the parent key a parented `DObject` names and what its `scope` reads."""
+        target = object_target(param.annotation)
+        parent = None if target is None else target[1]
+        nested = frozenset() if parent is None else frozenset({parent})
+        return ContextReads(nested=nested, dependencies=(SCOPE_DEPENDENCY,))
+
+    @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Fill the parameter through the filler the plan compiler builds for it."""
         return self.compile_resolve(param)(context)
@@ -564,6 +574,17 @@ class ObjectProvider(RegisteredParameterProvider):
             raise TypeError(msg)
         model, parent = target
         return _object_filler(self._resolver, param, model, parent)
+
+    @override
+    def static_answers(self, _param: inspect.Parameter) -> bool:
+        """Report that a missing or hidden row answers 404, as `DObject` promises."""
+        return True
+
+    @override
+    def static_reach(self, _param: inspect.Parameter) -> tuple[Reach, ...]:
+        """Name the `scope` dependency every row of the parameter loads through."""
+        bound = self._resolver.get_dependency(SCOPE_DEPENDENCY)
+        return () if bound is None else ((SCOPE_DEPENDENCY, bound),)
 
     @override
     def compile_aresolve(self, param: inspect.Parameter) -> AsyncParameterFiller | None:
@@ -605,6 +626,11 @@ class UnservedObjectProvider(RegisteredParameterProvider):
         return names_object(param.annotation)
 
     @override
+    def static_reads(self, _param: inspect.Parameter) -> ContextReads:
+        """Report that filling the parameter reads nothing of the page context."""
+        return READS_NOTHING
+
+    @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Raise the refusal of the parameter."""
         raise _unserved(param)
@@ -617,6 +643,9 @@ class UnservedObjectProvider(RegisteredParameterProvider):
             raise _unserved(param)
 
         return fill
+
+
+ROUTES.attach(forget_object_rows)
 
 
 __all__ = ["DObject", "ObjectProvider"]

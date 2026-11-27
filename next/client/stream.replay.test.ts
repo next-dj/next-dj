@@ -42,7 +42,8 @@ function sseHarness(): Harness {
     connect: () => Promise.resolve(last().open()),
     drop: () => Promise.resolve(last().error(false)),
     send: (frame) => last().message(JSON.stringify(frame)),
-    hello: (topics) => last().control("next-hello", JSON.stringify({ topics })),
+    hello: (topics) =>
+      last().control("next-hello", JSON.stringify({ protocol: 2, topics })),
     subs: () => [],
   };
 }
@@ -93,7 +94,9 @@ function wsHarness(): Harness {
     },
     send: (frame) => last().message(JSON.stringify({ type: "patches", data: frame })),
     hello: (topics) =>
-      last().message(JSON.stringify({ type: "hello", heartbeat: 0, topics })),
+      last().message(
+        JSON.stringify({ type: "hello", protocol: 2, heartbeat: 0, topics }),
+      ),
     subs: () => sockets.map((item) => JSON.parse(item.sent[0]!) as unknown),
   };
 }
@@ -486,12 +489,12 @@ describe("sse event ids", () => {
     const source = FakeEventSource.last!;
     const id = (seq: number) => (ids ? `e:${seq}` : undefined);
     source.onopen?.();
-    source.emit("next-hello", { topics: position(0) });
+    source.emit("next-hello", { protocol: 2, topics: position(0) });
     for (const seq of [1, 2, 3]) source.emit("next-patches", frame(seq), id(seq));
     source.onerror?.();
     source.onopen?.();
     source.emit("next-patches", frame(4), id(4));
-    source.emit("next-hello", { topics: position(4) });
+    source.emit("next-hello", { protocol: 2, topics: position(4) });
     source.emit("next-patches", frame(4), id(4));
     source.emit("next-patches", frame(4), ids ? "e:9" : undefined);
     source.emit("next-patches", frame(6), id(6));
@@ -515,7 +518,7 @@ describe("sse event ids", () => {
     sse.scan(document);
     const source = FakeEventSource.last!;
     source.onopen?.();
-    source.emit("next-hello", { topics: position(0) });
+    source.emit("next-hello", { protocol: 2, topics: position(0) });
     source.emit("next-patches", presence(1));
     source.emit("next-patches", frame(1), "e:1");
     source.emit("next-patches", presence(2));

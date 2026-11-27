@@ -132,7 +132,7 @@ Composition stops at that layout, and no layout further out wraps the page.
    </html>
 
 A request to ``/embed/42/`` composes the page body and ``embed/layout.djx``, and ``notes/pages/layout.djx`` stays out of the result.
-Pages elsewhere in the tree compose as before.
+Pages elsewhere in the tree compose through the layouts of their own directories.
 
 The marker rule
 ~~~~~~~~~~~~~~~
@@ -358,12 +358,12 @@ The separation comes from the directories, not from the backends, because layout
    NEXT_FRAMEWORK = {
        "PAGE_BACKENDS": [
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "pages",
            },
            {
-               "BACKEND": "next.urls.FileRouterBackend",
+               "BACKEND": "next.urls.FilePageBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "admin_pages",
            }

@@ -1,6 +1,6 @@
 """The template node `{% form %}` compiles to, rendering one form block.
 
-It lives here so the partial checks reach it without importing the tag shim.
+It lives apart from the `{% form %}` tag so the partial checks import it alone.
 """
 
 from typing import TYPE_CHECKING, Any, Final, cast, override
@@ -36,6 +36,7 @@ from next.seeding import (
     RenderFrame,
     ambient_frame,
 )
+from next.wire import ACTION_ATTR
 
 
 _CSRF_INPUT: Final = '<input type="hidden" name="csrfmiddlewaretoken" value="{}">'
@@ -168,7 +169,7 @@ class FormNode(template.Node):
         bits: list[str] = [format_html('<form action="{}" method="post"', action_url)]
         uid = meta.get("uid") if meta is not None else None
         if uid:
-            bits.append(format_html('data-next-action="{}"', uid))
+            bits.append(format_html('{}="{}"', ACTION_ATTR, uid))
         transport = meta.get("transport") if meta is not None else None
         if transport is not None:
             bits.append(format_html('{}="{}"', TRANSPORT_ATTR, transport))

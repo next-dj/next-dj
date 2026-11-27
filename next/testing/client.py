@@ -2,26 +2,33 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from html import unescape
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, Final, cast, override
 
 from django.apps import apps
 from django.contrib.auth import get_user
 from django.http import HttpRequest, QueryDict, StreamingHttpResponse
-from django.test import Client, RequestFactory
+from django.test import AsyncClient, Client, RequestFactory
 from django.urls import resolve
 
+from next.boundaries.failures import ErrorKind
+from next.boundaries.options import DeferMode
 from next.components.trip import TripInput
 from next.compression.streams import media_type
-from next.conf.router import router_settings
-from next.defer import DeferMode
+from next.defer.manager import defer_manager
+from next.defer.reload import RETRY_WITH, page_components
+from next.defer.signals import boundary_settled
+from next.defer.tokens.carrier import FIELD
+from next.defer.trip import mint, note_route
 from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial import keys
 from next.partial.envelope import Envelope
 from next.partial.headers import (
+    BOUNDARY,
     LAYOUTS,
     NAVIGATE,
     ORIGIN,
@@ -31,22 +38,17 @@ from next.partial.headers import (
     VERSION,
     ZONE,
 )
+from next.partial.keys import BOUNDARY_ATTR, BOUNDARY_KEY_ATTR, CARRIER_ATTR, TRIP_ATTR
 from next.partial.manager import partial_backend_manager
-from next.router.markers import CutKind, Divergence
+from next.router.markers import MAX_LAYOUTS, CutKind, Divergence
 from next.router.navigation import DECLARATION_BYTES
+from next.router.render import LAYOUTS_ATTR
 from next.router.signals import navigation_rendered
-from next.static.runtime import LAYOUTS_PAYLOAD_KEY
-from next.suspense.manager import suspense_manager
-from next.suspense.reload import page_components
-from next.suspense.signals import boundary_rendered
-from next.suspense.tokens.transport import FIELD, HEADER
-from next.suspense.trip import mint, note_route
 
 from .actions import resolve_action_url
 from .boundaries import HeldFailures, RecordedFailure, raise_first
 from .capture import SignalRecorder, capture_signals
-from .html import init_payload
-from .streaming import StreamedPage, decoded, names_of, read_stream
+from .streaming import StreamedPage, aread_stream, decoded, names_of, read_stream
 
 
 if TYPE_CHECKING:
@@ -55,7 +57,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from django.http import HttpResponse, HttpResponseBase
-    from django.test.client import _MonkeyPatchedWSGIResponse
+    from django.test.client import (
+        _MonkeyPatchedASGIResponse,
+        _MonkeyPatchedWSGIResponse,
+    )
 
     from next.components.info import ComponentInfo
 
@@ -65,10 +70,13 @@ _AUTH_APP = "django.contrib.auth"
 _ADDRESS = "b-00000000-0"
 _SAME_ORIGIN = "same-origin"
 _VISIT = "visit"
+_LAYOUTS_BLOCK: Final = re.compile(
+    rf"<script[^>]*\s{LAYOUTS_ATTR}[^>]*>(?P<chain>.*?)</script>"
+)
 _WRAPPER = re.compile(
-    r'\sid="(?P<id>b-[0-9a-f]+-[0-9]+)" data-next-boundary="(?P=id)" '
-    r'data-next-boundary-key="(?P<key>[^"]*)"[^>]*?\sdata-next-token="(?P<token>[^"]*)"'
-    r'(?:\sdata-next-transport="(?P<transport>[^"]*)")?'
+    rf'\sid="(?P<id>b-[0-9a-f]+-[0-9]+)" {BOUNDARY_ATTR}="(?P=id)" '
+    rf'{BOUNDARY_KEY_ATTR}="(?P<key>[^"]*)"[^>]*?\s{TRIP_ATTR}="(?P<token>[^"]*)"'
+    rf'(?:\s{CARRIER_ATTR}="(?P<carrier>[^"]*)")?'
 )
 
 
@@ -184,6 +192,40 @@ class PartialEnvelope:
         raise AssertionError(msg)
 
 
+@dataclass(frozen=True, slots=True)
+class ReloadedBoundary:
+    """One client-trip boundary a reload settled, read off the op that fills it.
+
+    `retry` is the token a failed reload offers to try again with, else `None`.
+    """
+
+    id: str
+    state: str
+    kind: ErrorKind | None
+    html: str
+    retry: str | None
+    envelope: PartialEnvelope
+
+    @property
+    def response(self) -> HttpResponseBase | None:
+        """Return the response that carried the reload."""
+        return self.envelope.response
+
+
+def _reloaded(envelope: PartialEnvelope) -> ReloadedBoundary:
+    """Return the boundary the first op of a reload envelope settles."""
+    op = envelope.ops[0]
+    kind = op.get(keys.CHUNK_KIND)
+    return ReloadedBoundary(
+        id=op[keys.TARGET][keys.BOUNDARY],
+        state=op[keys.CHUNK_STATE],
+        kind=None if kind is None else ErrorKind(kind),
+        html=op.get(keys.HTML) or "",
+        retry=op.get(RETRY_WITH),
+        envelope=envelope,
+    )
+
+
 def _settle(response: HttpResponseBase, failures: tuple[RecordedFailure, ...]) -> None:
     """Hold the ordered failures of the complete response and re-raise the first."""
     vars(response)["boundary_failures"] = failures
@@ -245,9 +287,7 @@ def envelope_of(response: HttpResponse) -> PartialEnvelope:
 
 def _declaration(chain: Sequence[Sequence[object]]) -> str:
     """Join `id.digest` per layout, trimmed to the bounds the client router keeps."""
-    declared = [
-        f"{entry[0]}.{entry[1]}" for entry in chain[: router_settings().max_layouts]
-    ]
+    declared = [f"{entry[0]}.{entry[1]}" for entry in chain[:MAX_LAYOUTS]]
     while len(",".join(declared)) > DECLARATION_BYTES:
         declared.pop()
     return ",".join(declared)
@@ -256,13 +296,13 @@ def _declaration(chain: Sequence[Sequence[object]]) -> str:
 def declared_layouts(document: str) -> str:
     """Return the `X-Next-Layouts` value a browser showing `document` sends.
 
-    It reads the `$layouts` chain of the bootstrap payload, which the router writes.
+    It reads the layouts block of the document, which the router writes.
     """
-    payload = init_payload(document)
-    if LAYOUTS_PAYLOAD_KEY not in payload:
-        msg = "the document carries no $layouts, as the client router is off for it"
+    found = _LAYOUTS_BLOCK.search(document)
+    if found is None:
+        msg = "the document carries no layouts block, as the client router is off"
         raise LookupError(msg)
-    return _declaration(payload[LAYOUTS_PAYLOAD_KEY])
+    return _declaration(json.loads(found["chain"]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +385,56 @@ def _source_html(source: HttpResponseBase | PartialEnvelope) -> str:
     return "".join(op.get("html") or "" for op in envelope.ops)
 
 
+def _held(response: HttpResponseBase, held: HeldFailures) -> None:
+    """Hold the failures of `response`, its stream re-raising the first on its end."""
+    if isinstance(response, StreamingHttpResponse):
+        chunks = response.streaming_content
+        if isinstance(chunks, AsyncIterator):
+            response.streaming_content = _aconsumed(chunks, response, held)
+        else:
+            response.streaming_content = _consumed(chunks, response, held)
+        return
+    _settle(response, held.settle(getattr(response, "content", b"")))
+
+
+def _action(
+    action_name: str,
+    data: dict[str, Any] | None,
+    *,
+    origin: str,
+    page: str | PathLike[str] | None,
+    partial: bool | str | tuple[str, ...],
+    version: str | None,
+    headers: dict[str, str] | None,
+) -> tuple[str, dict[str, Any], dict[str, str]]:
+    """Return the URL, the payload and the headers of an action POST from `origin`."""
+    url = resolve_action_url(action_name, page=page)
+    payload: dict[str, Any] = dict(data or {})
+    payload.setdefault(ORIGIN_FIELD_NAME, origin)
+    sent = dict(headers or {})
+    if partial:
+        sent[REQUEST_FLAG] = "1"
+    if isinstance(partial, str):
+        sent[ZONE] = partial
+    elif isinstance(partial, tuple):
+        sent[ZONE] = ",".join(partial)
+    if version is not None:
+        sent[VERSION] = version
+    return url, payload, sent
+
+
+def _zones(
+    zones: str | tuple[str, ...], version: str | None, headers: dict[str, str] | None
+) -> dict[str, str]:
+    """Return the headers a partial request for the named zones sends."""
+    sent = dict(headers or {})
+    sent[REQUEST_FLAG] = "1"
+    sent[ZONE] = zones if isinstance(zones, str) else ",".join(zones)
+    if version is not None:
+        sent[VERSION] = version
+    return sent
+
+
 class NextClient(Client):
     """Django test client with next-dj form-action shortcuts.
 
@@ -360,15 +450,7 @@ class NextClient(Client):
         held = HeldFailures()
         with held.recording():
             response = super().request(**request)
-        sent: HttpResponseBase = response
-        if isinstance(sent, StreamingHttpResponse):
-            chunks = sent.streaming_content
-            if isinstance(chunks, AsyncIterator):
-                sent.streaming_content = _aconsumed(chunks, sent, held)
-            else:
-                sent.streaming_content = _consumed(chunks, sent, held)
-            return response
-        _settle(response, held.settle(getattr(response, "content", b"")))
+        _held(response, held)
         return response
 
     def post_action(
@@ -387,18 +469,15 @@ class NextClient(Client):
 
         `partial` takes True for a partial request or the zone names it asks for.
         """
-        url = resolve_action_url(action_name, page=page)
-        payload: dict[str, Any] = dict(data or {})
-        payload.setdefault(ORIGIN_FIELD_NAME, origin)
-        sent = dict(headers or {})
-        if partial:
-            sent[REQUEST_FLAG] = "1"
-        if isinstance(partial, str):
-            sent[ZONE] = partial
-        elif isinstance(partial, tuple):
-            sent[ZONE] = ",".join(partial)
-        if version is not None:
-            sent[VERSION] = version
+        url, payload, sent = _action(
+            action_name,
+            data,
+            origin=origin,
+            page=page,
+            partial=partial,
+            version=version,
+            headers=headers,
+        )
         forwarded: dict[str, Any] = extra
         return cast(
             "HttpResponse", self.post(url, data=payload, headers=sent, **forwarded)
@@ -437,29 +516,31 @@ class NextClient(Client):
         info = _component(page_path, name)
         return mint(request, TripInput(info, DeferMode.LOAD, props))
 
-    def get_boundary(self, url: str, name: str, **props: object) -> PartialEnvelope:
+    def get_boundary(self, url: str, name: str, **props: object) -> ReloadedBoundary:
         """Mint a token for the component `name` and reload it, as the browser does.
 
-        The token travels through the configured transport, and the envelope returns.
+        The token travels in the configured carrier, and the settled boundary returns.
         """
         token = self.boundary_token(url, name, **props)
-        return envelope_of(self.reload_boundary(url, token))
+        return _reloaded(envelope_of(self.reload_boundary(url, token)))
 
     def reload_boundary(self, url: str, token: str) -> HttpResponse:
         """Send `token` to `url` as a boundary reload and return the response as is.
 
         The token may come from another client, so a test reads the refusal it earns.
         """
-        place = suspense_manager.tokens().transport.describe()
+        place = defer_manager.tokens().carrier.describe()
         return self._reload(url, _ADDRESS, token, place.place, place.name)
 
     def follow_boundary(
-        self, source: HttpResponseBase | PartialEnvelope, key: str
-    ) -> PartialEnvelope:
+        self, source: HttpResponseBase | PartialEnvelope | ReloadedBoundary, key: str
+    ) -> ReloadedBoundary:
         """Reload a client-trip boundary a document or an envelope holds, as a browser.
 
         `key` is the wire id, the stable key or the component name the token claims.
         """
+        if isinstance(source, ReloadedBoundary):
+            source = source.envelope
         response = source.response if isinstance(source, PartialEnvelope) else source
         request = getattr(response, "wsgi_request", None)
         if not isinstance(request, HttpRequest):
@@ -470,7 +551,7 @@ class NextClient(Client):
             (one for one in wrappers if key in {one["id"], unescape(one["key"])}), None
         )
         if found is None:
-            backend = suspense_manager.tokens()
+            backend = defer_manager.tokens()
             found = next(
                 (
                     one
@@ -482,10 +563,12 @@ class NextClient(Client):
         if found is None:
             msg = f"the source holds no client-trip boundary {key!r}"
             raise LookupError(msg)
-        place, _, name = unescape(found["transport"] or "").partition(":")
+        place, _, name = unescape(found["carrier"] or "").partition(":")
         token = unescape(found["token"])
         url = request.get_full_path()
-        return envelope_of(self._reload(url, found["id"], token, place, name))
+        return _reloaded(
+            envelope_of(self._reload(url, found["id"], token, place, name))
+        )
 
     def _reload(
         self, url: str, ident: str, token: str, place: str, name: str
@@ -501,7 +584,7 @@ class NextClient(Client):
         elif place == "body":
             response = self.post(url, data={field: token}, headers=sent)
         else:
-            sent[HEADER] = token
+            sent[BOUNDARY] = token
             response = self.get(url, headers=sent)
         return cast("HttpResponse", response)
 
@@ -517,7 +600,7 @@ class NextClient(Client):
     ) -> Navigation:
         """GET `path` as the client router does on a link from the `origin` page.
 
-        Without `layouts` the origin loads as a document and its `$layouts` declare.
+        Without `layouts` the origin loads as a document and its layouts block declares.
         """
         if layouts is None:
             layouts = "" if origin is None else declared_layouts(self._shown(origin))
@@ -533,7 +616,7 @@ class NextClient(Client):
             sent[PREFETCH] = "1"
         sent.update(headers or {})
         forwarded: dict[str, Any] = extra
-        with capture_signals(navigation_rendered, boundary_rendered) as recorder:
+        with capture_signals(navigation_rendered, boundary_settled) as recorder:
             response = self.get(path, headers=sent, **forwarded)
             return _navigation(response, recorder)
 
@@ -554,14 +637,76 @@ class NextClient(Client):
 
         `zones` joins into `X-Next-Zone` and `version` sets the asset version header.
         """
-        names = zones if isinstance(zones, str) else ",".join(zones)
-        sent = dict(headers or {})
-        sent[REQUEST_FLAG] = "1"
-        sent[ZONE] = names
-        if version is not None:
-            sent[VERSION] = version
+        sent = _zones(zones, version, headers)
         forwarded: dict[str, Any] = extra
         return cast("HttpResponse", self.get(url, headers=sent, **forwarded))
+
+
+class AsyncNextClient(AsyncClient):
+    """Django's async test client with the next-dj shortcuts that read no document.
+
+    Each request holds its contained failures and re-raises the first, as `NextClient`.
+    """
+
+    @override
+    async def request(self, **request: object) -> _MonkeyPatchedASGIResponse:
+        """Send the request, holding its contained failures on `boundary_failures`."""
+        held = HeldFailures()
+        with held.recording():
+            response = await super().request(**request)
+        _held(response, held)
+        return response
+
+    async def post_action(
+        self,
+        action_name: str,
+        data: dict[str, Any] | None = None,
+        *,
+        origin: str,
+        page: str | PathLike[str] | None = None,
+        partial: bool | str | tuple[str, ...] = False,
+        version: str | None = None,
+        headers: dict[str, str] | None = None,
+        **extra: object,
+    ) -> HttpResponse:
+        """Resolve `action_name` and POST `data` from the `origin` page to its URL."""
+        url, payload, sent = _action(
+            action_name,
+            data,
+            origin=origin,
+            page=page,
+            partial=partial,
+            version=version,
+            headers=headers,
+        )
+        forwarded: dict[str, Any] = extra
+        response = await self.post(url, data=payload, headers=sent, **forwarded)
+        return cast("HttpResponse", response)
+
+    def get_action_url(
+        self, action_name: str, *, page: str | PathLike[str] | None = None
+    ) -> str:
+        """Return the reverse URL for a registered form action, `page` picking one."""
+        return resolve_action_url(action_name, page=page)
+
+    async def get_stream(self, url: str, **extra: object) -> StreamedPage:
+        """GET `url` as a streamed page, read whole into its shell and chunks."""
+        return await aread_stream(self, url, **extra)
+
+    async def get_zones(
+        self,
+        url: str,
+        zones: str | tuple[str, ...],
+        *,
+        version: str | None = None,
+        headers: dict[str, str] | None = None,
+        **extra: object,
+    ) -> HttpResponse:
+        """GET `url` as a partial request for the named zones."""
+        sent = _zones(zones, version, headers)
+        forwarded: dict[str, Any] = extra
+        response = await self.get(url, headers=sent, **forwarded)
+        return cast("HttpResponse", response)
 
 
 def _component(page_path: Path, name: str) -> ComponentInfo:
@@ -574,9 +719,11 @@ def _component(page_path: Path, name: str) -> ComponentInfo:
 
 
 __all__ = [
+    "AsyncNextClient",
     "Navigation",
     "NextClient",
     "PartialEnvelope",
+    "ReloadedBoundary",
     "declared_layouts",
     "envelope_of",
 ]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import posixpath
@@ -17,8 +16,9 @@ from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
 
+from next.caches import FRAMEWORK, pure_cache
 from next.components import component_watch_roots, get_component_paths_for_watch
-from next.pages.watch import (
+from next.discovery import (
     get_layout_djx_paths_for_watch,
     get_page_root_keys_for_watch,
     get_template_djx_paths_for_watch,
@@ -132,7 +132,7 @@ _RUNTIME_BUNDLE_PATHS: Final = (
     f"{NEXT_JS_STATIC_PATH}.map",
     *(
         path
-        for chunk in CHUNK_STATIC_PATHS.values()
+        for chunk in dict.fromkeys(CHUNK_STATIC_PATHS.values())
         for path in (chunk, f"{chunk}.map")
     ),
 )
@@ -156,7 +156,7 @@ class _BundleLayout(NamedTuple):
     files: tuple[tuple[str, str, Path], ...]
 
 
-@functools.lru_cache(maxsize=1)
+@pure_cache(1)
 def _bundle_layout(root: Path) -> _BundleLayout:
     """Build the bundle paths under `root` once, as each `Path` join is costly."""
     return _BundleLayout(
@@ -255,29 +255,9 @@ class _Scan(NamedTuple):
     directories: tuple[tuple[Path, int | None], ...]
 
 
-class _SettingsGeneration:
-    """The reconfiguration counter every held scan carries, as no mtime moves."""
-
-    def __init__(self) -> None:
-        """Start at the generation the first scan is stamped with."""
-        self.value = 0
-
-    def bump(self) -> None:
-        """Mark every held scan stale."""
-        self.value += 1
-
-
-_settings_generation = _SettingsGeneration()
-
-
-def forget_scans(**kwargs: object) -> None:
-    """Mark every held scan stale, so a reconfigure is walked again."""
-    _settings_generation.bump()
-
-
 def _registry_generation() -> tuple[int, int, int]:
     """Return the generation of everything a scan reads while it is built."""
-    return (default_stems.version, default_kinds.version, _settings_generation.value)
+    return (default_stems.version, default_kinds.version, FRAMEWORK.version)
 
 
 def _scan_roots() -> _ScanRoots:
@@ -392,14 +372,12 @@ class NextStaticFilesFinder(BaseFinder):
 
     @override
     def find(  # type: ignore[override]
-        self, path: str, find_all: bool = False, **kwargs: bool
+        self, path: str, find_all: bool = False
     ) -> str | list[str]:
         """Resolve the logical path to an absolute path, or an empty list on a miss.
 
         A miss is `[]` whatever `find_all` is, and django-stubs types the result `str`.
         """
-        # Django dictates a positional bool and a deprecated `all` keyword.
-        find_all = kwargs.get("all", find_all)
         source = self._current_scan().mapping.get(path) or _runtime_bundle_source(path)
         if source is None:
             return []

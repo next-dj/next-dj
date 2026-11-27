@@ -430,7 +430,7 @@ class TestBreadcrumbTrail:
         root = _breadcrumb_tree(tmp_path / "pages")
         with routed(root, **WITH_BASE):
             on = Client().get(path).content.decode()
-        off_router = {"ENABLED": False, "CURRENT": {"ENABLED": False}}
+        off_router = {"ENABLED": False, "ACTIVE_LINKS": {"ENABLED": False}}
         with routed(root, ROUTER=off_router, **WITH_BASE):
             off = Client().get(path).content.decode()
         assert _trail(on) == _trail(off)

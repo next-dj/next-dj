@@ -7,13 +7,13 @@ from next.pages import ld
 from next.pages.checks import check_metadata_jsonld
 from next.pages.metadata.scope import SITE_SOURCE
 from tests.pages.checks.metadata.trees import metadata_page, scope
-from tests.support import check_ids, patch_checks_router_manager
+from tests.support import check_ids, patch_checks_route_manager
 from tests.support.trees import templated_page
 
 
 def _messages(tmp_path: Path, source: str) -> list[tuple[str, str]]:
     templated_page(tmp_path, source)
-    with patch_checks_router_manager(pages_directory=tmp_path):
+    with patch_checks_route_manager(pages_directory=tmp_path):
         return [(message.id, message.msg) for message in check_metadata_jsonld()]
 
 
@@ -93,7 +93,7 @@ class TestGraph:
             '{"jsonld": {"@id": "#site", "@type": "WebSite", '
             '"publisher": {"@id": "#org", "@type": "Person"}}}',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_jsonld()
         assert check_ids(messages) == ["next.E101"]
         assert "'/#org' as Organization, Person" in messages[0].msg
@@ -105,7 +105,7 @@ class TestGraph:
             '{"jsonld": [{"@id": "/#org", "@type": "Organization"}, '
             '{"@type": "WebSite", "publisher": {"@id": "#org", "@type": "Person"}}]}',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_jsonld()
         assert check_ids(messages) == ["next.E101"]
 
@@ -115,7 +115,7 @@ class TestGraph:
             '{"jsonld": {"@id": "#org", "@type": "Person", "x": {1, 2}}}',
         )
         metadata_page(tmp_path, '{"jsonld": {"@id": "#org", "@type": "Organization"}}')
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             messages = check_metadata_jsonld()
         assert "next.E101" not in check_ids(messages)
 
@@ -125,5 +125,5 @@ class TestGraph:
             '{"jsonld": [{"@id": "#org", "@type": "Organization"}, '
             '{"@type": "WebSite", "publisher": {"@id": "#org", "@type": "Organization"}}]}',
         )
-        with patch_checks_router_manager(pages_directory=tmp_path):
+        with patch_checks_route_manager(pages_directory=tmp_path):
             assert check_metadata_jsonld() == []

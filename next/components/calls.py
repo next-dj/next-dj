@@ -1,37 +1,38 @@
-"""How one guarded or deferred component call renders behind its error boundary.
-
-It reads the static manager, so nothing the components package imports may import it.
-"""
+"""How one guarded or deferred component call renders behind its error boundary."""
 
 import functools
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Final, Protocol, override
 
 from django.conf import settings
 from django.template import Context
 
-from next.boundaries import (
+from next.boundaries import contain
+from next.boundaries.containment import contain_bare
+from next.boundaries.failures import (
     Boundary,
-    Fallback,
-    claim_wrapper,
-    contain,
-    contain_bare,
+    BoundaryFailure,
+    ErrorKind,
+    ErrorUI,
     new_digest,
+    retry_loads,
+    shown_source,
+    unrun_error,
 )
-from next.defer import BoundaryFailure, DeferMode, ErrorKind
+from next.boundaries.options import DeferMode
+from next.boundaries.scope import claim_wrapper
+from next.boundaries.stash import loading_content
 from next.diagnostics import mark_degraded
-from next.pages.boundaries import shown_source
 from next.permissions.nodes import Guards, rendered_under, rendering_guards
 from next.seeding import REQUEST_KEY
 from next.utils import misrooted
 
-from .boundaries import UNDISCLOSED, Attempt, current_attempt, deferral_sink, ruled
+from .access import passed
+from .boundaries import UNDISCLOSED, Attempt, current_attempt, deferral_sink
 from .facade import render_component_error, render_component_loading
-from .fallback import retry_loads, unrun_error
 from .info import ComponentInfo
-from .stash import loading_content
 from .trip import TripInput, addressable, client_mode
 
 
@@ -73,7 +74,9 @@ class CallSite(Protocol):
     def wrapper(self, context: Context, info: ComponentInfo) -> str | None:
         """Return the wrapper element the call allows, `None` for an adopted root."""
 
-    def file_context(self, context: Context, path: Path) -> dict[str, Any]:
+    def file_context(
+        self, context: Context, path: Path, props: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
         """Return the call-site context a `loading.djx` or an `error.djx` reads."""
 
     def token_input(
@@ -82,7 +85,7 @@ class CallSite(Protocol):
         """Return what a token of the call carries, `None` for unnamed guards."""
 
 
-class ComponentFallback(Fallback):
+class ComponentErrorUI(ErrorUI):
     """The error UI of one component call, rendered from the call-site context.
 
     A deferred call falls back to the project default and mints no retry token itself.
@@ -122,7 +125,7 @@ class ComponentFallback(Fallback):
             or props is None
             or not error.retry
             or error.kind in UNDISCLOSED
-            or not (attempt.granted or not ruled(info))
+            or not attempt.passed
         ):
             return ""
         context = self._context
@@ -139,20 +142,18 @@ class ComponentFallback(Fallback):
 
     @override
     def render(self, error: BoundaryFailure, kind: ErrorKind) -> str:
-        """Render `error.djx` from the call-site context, `error` and the props."""
+        """Render `error.djx` over the call site, the props it may show and `error`."""
         context = self._context
-        render_ctx = self._call.file_context(context, self._path)
-        render_ctx["error"] = error
         props = self._attempt.disclosed(kind)
-        if props is None:
-            render_ctx.pop("props", None)
-        else:
-            render_ctx["props"] = props
+        render_ctx = self._call.file_context(context, self._path, props)
+        render_ctx["error"] = error
+        deferred = self._deferred
         return render_component_error(
             self._attempt.info,
             render_ctx,
             request=context.get(REQUEST_KEY),
-            deferred=self._deferred,
+            deferred=deferred,
+            wrapped=deferred and self.tag() is not None,
         )
 
 
@@ -193,7 +194,7 @@ class DeferredRender:
         self._granted = granted
         self._tag = tag
         self._trip = trip
-        self._passed = granted or not ruled(info)
+        self._passed = passed(info, granted=granted)
         held = rendering_guards()
         self._guards: Guards = held if trip is None else (*held, *trip.perms)
 
@@ -242,27 +243,27 @@ class DeferredRender:
         context: Context,
         attempt: Attempt,
         render: Callable[[], str],
-        boundary: Callable[[Boundary, Callable[[], str], Fallback], R],
+        boundary: Callable[[Boundary, Callable[[], str], ErrorUI], R],
     ) -> R:
         """Run `render` inside the error boundary `boundary` draws, `contain` or bare.
 
         Its boundary claims the id of the wrapper around it, which a failure names.
         """
-        fallback = ComponentFallback(
+        error_ui = ComponentErrorUI(
             self._call, context, attempt, self._path, deferred=True
         )
         guard = self._call.guard(context, self._info, None, claim_wrapper())
         token = current_attempt.set(attempt)
         try:
             with rendered_under(self._guards):
-                return boundary(guard, render, fallback)
+                return boundary(guard, render, error_ui)
         finally:
             current_attempt.reset(token)
 
     def _component[R](
         self,
         context: Context,
-        boundary: Callable[[Boundary, Callable[[], str], Fallback], R],
+        boundary: Callable[[Boundary, Callable[[], str], ErrorUI], R],
     ) -> R:
         attempt = Attempt(self._info)
         render = functools.partial(
@@ -285,12 +286,8 @@ class DeferredRender:
         attempt = self._attempt()
 
         def render() -> str:
-            render_ctx = self._call.file_context(context, self._path)
             props = attempt.disclosed(ErrorKind.ERROR)
-            if props is None:
-                render_ctx.pop("props", None)
-            else:
-                render_ctx["props"] = props
+            render_ctx = self._call.file_context(context, self._path, props)
             with loading_content():
                 return render_component_loading(
                     self._info, render_ctx, request=context.get(REQUEST_KEY)
@@ -306,14 +303,14 @@ class DeferredRender:
 
     def error(self, context: Context, kind: ErrorKind) -> tuple[str, BoundaryFailure]:
         """Render the error UI of `kind` without running the component."""
-        fallback = ComponentFallback(
+        error_ui = ComponentErrorUI(
             self._call, context, self._attempt(), self._path, deferred=True
         )
         error = unrun_error(kind)
-        return fallback.render(error, kind), error
+        return error_ui.render(error, kind), error
 
 
-def props_lookup(props: dict[str, Any]) -> Callable[[object], object]:
+def props_lookup(props: Mapping[str, object]) -> Callable[[object], object]:
     """Return the object lookup of a rule checked on call-site props alone."""
 
     def lookup(name: object) -> object:
@@ -334,7 +331,7 @@ def wrapper_source(info: ComponentInfo) -> str | None:
 
 __all__ = [
     "CallSite",
-    "ComponentFallback",
+    "ComponentErrorUI",
     "DeferredRender",
     "props_lookup",
     "wrapper_source",

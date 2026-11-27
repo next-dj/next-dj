@@ -1,0 +1,14 @@
+event: hello
+data: {"protocol":2,"streamed":true}
+
+event: patch
+data: {"e":{"version":"9f3c2e1b","ops":[{"op":"morph","target":{"zone":"results"},"html":"<!--b-5ea1c0de-0:div--><div id=\"b-5ea1c0de-0\" data-next-boundary=\"b-5ea1c0de-0\" data-next-boundary-key=\"card\" data-next-state=\"loading\" aria-busy=\"true\"><p>loading</p></div><!--/b-5ea1c0de-0-->"}],"assets":[],"form":null}}
+
+:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+
+event: patch
+data: {"z":"b-5ea1c0de-0","s":"ready","e":{"version":"0","ops":[{"op":"inner","target":{"boundary":"b-5ea1c0de-0"},"html":"<p>filled</p>"}],"assets":[],"form":null}}
+
+event: end
+data: {"code":"complete"}
+

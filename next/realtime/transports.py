@@ -1,11 +1,10 @@
 """Resolve the realtime transports available to the current Django deployment."""
 
-import functools
 import logging
 import threading
 
+from next.caches import FRAMEWORK, memo
 from next.conf.scopes import scope_value
-from next.static.runtime import forget_realtime_offer
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +14,7 @@ _unmounted_warned = threading.Event()
 _warning_lock = threading.Lock()
 
 
-@functools.cache
+@memo(FRAMEWORK)
 def active_transports() -> tuple[str, ...]:
     """Return enabled transports in preference order, always retaining SSE fallback.
 
@@ -50,7 +49,7 @@ def warn_unmounted_websocket() -> None:
 def announce_websocket() -> None:
     """Record that this process serves the realtime WebSocket endpoint."""
     _websocket_mounted.set()
-    forget_transports()
+    active_transports.cache_clear()
 
 
 def withdraw_websocket() -> bool:
@@ -60,20 +59,13 @@ def withdraw_websocket() -> bool:
     """
     announced = _websocket_mounted.is_set()
     _websocket_mounted.clear()
-    forget_transports()
-    return announced
-
-
-def forget_transports(**kwargs: object) -> None:
-    """Drop the cached transports when the settings or the WebSocket mount change."""
     active_transports.cache_clear()
-    forget_realtime_offer()
+    return announced
 
 
 __all__ = [
     "active_transports",
     "announce_websocket",
-    "forget_transports",
     "warn_unmounted_websocket",
     "withdraw_websocket",
 ]

@@ -4,18 +4,30 @@ from collections.abc import Mapping, Sequence
 from typing import Final
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning as DjangoWarning, register
+from django.core.checks import CheckMessage, Error, Warning as DjangoWarning
 
-from next.checks import NEXT
+from next.checks import NEXT, register
 from next.checks.common import (
+    DeclaringCall,
     callable_problem,
     class_problem,
     import_backend_class,
+    misplaced_errors,
     raw_scope,
 )
 from next.conf.checks import error_for_misfit, error_for_unusable_path
-from next.conf.compression import SCOPE, SHAPE, TopicMode, compression_settings
+from next.conf.compression import (
+    SCOPE,
+    SHAPE,
+    CodecEntry,
+    StreamOwner,
+    TopicMode,
+    compression_settings,
+)
 from next.conf.shapes import Shape, misfits
+from next.pages.checks.access import load_declarations
+from next.pages.compression import compress_declaration
+from next.pages.loaders import PAGE_MODULE
 
 from .backends import CompressionBackend
 from .manager import GZIP_MIDDLEWARE, MIDDLEWARE, in_range
@@ -50,13 +62,23 @@ def _imported(dotted: str) -> object:
         return None
 
 
-def _backends() -> dict[str, CompressionBackend]:
-    """Return a fresh instance of each usable `BACKENDS` entry by coding, first wins."""
+type _Built = tuple[int, CodecEntry, CompressionBackend]
+
+
+def _built() -> list[_Built]:
+    """Return each usable `BACKENDS` entry with its position and a fresh backend."""
+    found: list[_Built] = []
+    for index, entry in enumerate(compression_settings().backends):
+        if class_problem(entry.path, CompressionBackend) is None:
+            found.append((index, entry, import_backend_class(entry.path)()))
+    return found
+
+
+def _by_coding(built: Sequence[_Built]) -> dict[str, CompressionBackend]:
+    """Return the backends of `built` by coding, the first entry of each winning."""
     found: dict[str, CompressionBackend] = {}
-    for dotted in compression_settings().backends:
-        if class_problem(dotted, CompressionBackend) is None:
-            backend: CompressionBackend = import_backend_class(dotted)()
-            found.setdefault(backend.coding, backend)
+    for _index, _entry, backend in built:
+        found.setdefault(backend.coding, backend)
     return found
 
 
@@ -69,15 +91,15 @@ def check_compression_settings(*args: object, **kwargs: object) -> list[CheckMes
     return [error_for_misfit(_PREFIX, misfit) for misfit in misfits(scope, SHAPE)]
 
 
-def _path_error(key: str, dotted: str, problem: str) -> CheckMessage:
+def _path_error(where: str, dotted: str, problem: str) -> CheckMessage:
     """Build the `next.E219` error for one unusable `COMPRESSION` path."""
     return error_for_unusable_path(
-        f"{_PREFIX}[{key!r}]",
+        f"{_PREFIX}{where}",
         dotted,
         problem,
         "the framework skips it",
-        "Name a concrete CompressionBackend subclass for BACKENDS, and a callable "
-        "taking the request and the response for EXCLUDE.",
+        "Name a concrete CompressionBackend subclass in each BACKENDS entry, and a "
+        "callable taking the request and the response for EXCLUDE.",
     )
 
 
@@ -86,14 +108,14 @@ def check_compression_paths(*args: object, **kwargs: object) -> list[CheckMessag
     """Report a `BACKENDS` or `EXCLUDE` path that names nothing usable (`next.E219`)."""
     current = compression_settings()
     errors = [
-        _path_error("BACKENDS", dotted, problem)
-        for dotted in current.backends
-        if (problem := class_problem(dotted, CompressionBackend)) is not None
+        _path_error(f"['BACKENDS'][{index}]['BACKEND']", entry.path, problem)
+        for index, entry in enumerate(current.backends)
+        if (problem := class_problem(entry.path, CompressionBackend)) is not None
     ]
     exclude = current.exclude
     problem = None if exclude is None else callable_problem(exclude)
     if exclude is not None and problem is not None:
-        errors.append(_path_error("EXCLUDE", exclude, problem))
+        errors.append(_path_error("['EXCLUDE']", exclude, problem))
     return errors
 
 
@@ -105,78 +127,86 @@ def _codec_error(message: str, hint: str) -> CheckMessage:
 def _unknown_codings(
     scope: Mapping[str, object] | None, backends: Mapping[str, CompressionBackend]
 ) -> list[CheckMessage]:
-    """Report each coding `ORDER`, `LEVELS` or `WINDOWS` names and no backend serves."""
-    errors: list[CheckMessage] = []
+    """Report each coding `ORDER` names and no backend serves."""
+    written = _written(scope, "ORDER")
+    codings = list(written) if isinstance(written, Sequence) else []
     known = ", ".join(sorted(backends)) or "none"
-    for key in ("ORDER", "LEVELS", "WINDOWS"):
-        written = _written(scope, key)
-        codings = list(written) if isinstance(written, Sequence | Mapping) else []
-        errors.extend(
-            _codec_error(
-                f"{_PREFIX}[{key!r}] names the coding {coding!r}, which no BACKENDS "
-                "entry serves.",
-                f"Use a coding a backend serves ({known}) or add its backend.",
-            )
-            for coding in dict.fromkeys(codings)
-            if coding not in backends
+    return [
+        _codec_error(
+            f"{_PREFIX}['ORDER'] names the coding {coding!r}, which no BACKENDS "
+            "entry serves.",
+            f"Use a coding a backend serves ({known}) or add its backend.",
         )
-    return errors
+        for coding in dict.fromkeys(codings)
+        if coding not in backends
+    ]
 
 
-def _range_errors(
-    scope: Mapping[str, object] | None, backends: Mapping[str, CompressionBackend]
-) -> list[CheckMessage]:
-    """Report each written level or window outside the range of its codec."""
+def _option_errors(built: Sequence[_Built]) -> list[CheckMessage]:
+    """Report each `LEVEL` or `WINDOW` option outside the range of its codec."""
     errors: list[CheckMessage] = []
-    levels = _written(scope, "LEVELS")
-    for coding, level in (levels if isinstance(levels, Mapping) else {}).items():
-        backend = backends.get(coding)
-        if backend is not None and not in_range(level, backend.levels):
+    for index, entry, backend in built:
+        where = f"{_PREFIX}['BACKENDS'][{index}]['OPTIONS']"
+        level = entry.level
+        if level is not None and not in_range(level, backend.levels):
             low, high = backend.levels
             errors.append(
                 _codec_error(
-                    f"{_PREFIX}['LEVELS'][{coding!r}] is {level}, outside {low} to "
-                    f"{high}, so the codec keeps its default level {backend.level}.",
+                    f"{where}['LEVEL'] is {level}, outside {low} to {high}, so "
+                    f"the {backend.coding!r} codec keeps its level {backend.level}.",
                     f"Write a level from {low} to {high}.",
                 )
             )
-    windows = _written(scope, "WINDOWS")
-    for coding, window in (windows if isinstance(windows, Mapping) else {}).items():
-        backend = backends.get(coding)
-        if backend is not None and not in_range(window, backend.windows):
+        window = entry.window
+        if window is not None and not in_range(window, backend.windows):
             span = backend.windows
             allowed = "no window" if span is None else f"{span[0]} to {span[1]}"
             errors.append(
                 _codec_error(
-                    f"{_PREFIX}['WINDOWS'][{coding!r}] is {window}, while the codec "
-                    f"takes {allowed}, so it keeps its default window.",
-                    "Drop the entry or write a window the codec takes.",
+                    f"{where}['WINDOW'] is {window}, while the {backend.coding!r} "
+                    f"codec takes {allowed}, so it keeps its default window.",
+                    "Drop the option or write a window the codec takes.",
                 )
             )
     return errors
+
+
+def _missing_library(backend: CompressionBackend) -> CheckMessage:
+    """Build the `next.E228` error of a codec the project names without its library."""
+    install = (
+        "the library of the codec"
+        if backend.extra is None
+        else f"the {backend.extra!r} extra, pip install 'next.dj[{backend.extra}]'"
+    )
+    return _codec_error(
+        f"{_PREFIX} names the {backend.coding!r} codec, whose library does not "
+        "import, so no response is encoded with it.",
+        f"Install {install}, or drop the coding from ORDER.",
+    )
 
 
 def _availability_errors(
     scope: Mapping[str, object] | None, backends: Mapping[str, CompressionBackend]
 ) -> list[CheckMessage]:
-    """Report a codec `ORDER` forces whose library is missing, and a dead reset mode.
+    """Report a codec the project names whose library is missing, and a dead reset mode.
 
-    The default `ORDER` forces only the codecs of the core dependencies.
+    An extra's codec the defaults offer is left out quietly when its library is missing.
     """
     current = compression_settings()
     if not current.enabled:
         return []
-    written = _written(scope, "ORDER") is not None
+    order = _written(scope, "ORDER")
+    named = current.backends if _written(scope, "BACKENDS") is not None else ()
     ordered = [backends[c] for c in dict.fromkeys(current.order) if c in backends]
     errors = [
-        _codec_error(
-            f"{_PREFIX}['ORDER'] offers {backend.coding!r}, whose library does not "
-            "import, so no response is encoded with it.",
-            "Install the library of the codec, the 'brotli' extra for 'br', or drop "
-            "the coding from ORDER.",
-        )
+        _missing_library(backend)
         for backend in ordered
-        if not backend.available() and (written or not backend.optional)
+        if not backend.available()
+        and (
+            backend.extra is None
+            or (isinstance(order, Sequence) and backend.coding in order)
+            or _named(named, type(backend))
+        )
     ]
     if current.sse_topics == TopicMode.RESET and not any(
         backend.resets and backend.available() for backend in ordered
@@ -191,14 +221,20 @@ def _availability_errors(
     return errors
 
 
+def _named(entries: Sequence[CodecEntry], klass: type) -> bool:
+    """Return whether one of the `entries` names `klass`."""
+    return any(_imported(entry.path) is klass for entry in entries)
+
+
 @register(NEXT)
 def check_compression_codecs(*args: object, **kwargs: object) -> list[CheckMessage]:
     """Report unknown codings, levels and windows out of range, and missing codecs."""
     scope = raw_scope(SCOPE)
-    backends = _backends()
+    built = _built()
+    backends = _by_coding(built)
     return [
         *_unknown_codings(scope, backends),
-        *_range_errors(scope, backends),
+        *_option_errors(built),
         *_availability_errors(scope, backends),
     ]
 
@@ -218,7 +254,7 @@ def _position(middleware: Sequence[object], base: str) -> int | None:
 
 @register(NEXT)
 def check_compression_middleware(*args: object, **kwargs: object) -> list[CheckMessage]:
-    """Report a doubled compressor, a missing middleware and one listed too low."""
+    """Report a doubled compressor and a middleware listed too low."""
     middleware = list(getattr(settings, "MIDDLEWARE", None) or ())
     position = _position(middleware, MIDDLEWARE)
     messages: list[CheckMessage] = []
@@ -234,18 +270,6 @@ def check_compression_middleware(*args: object, **kwargs: object) -> list[CheckM
             )
         )
     if position is None:
-        if compression_settings().enabled:
-            messages.append(
-                DjangoWarning(
-                    f"{_PREFIX}['ENABLED'] is on, while settings.MIDDLEWARE does not "
-                    f"list {MIDDLEWARE}, so only the streams that compress "
-                    "themselves are compressed.",
-                    hint=f"List {MIDDLEWARE} directly below SecurityMiddleware, or "
-                    "set ENABLED to False.",
-                    obj=settings,
-                    id="next.W164",
-                )
-            )
         return messages
     below = [
         base
@@ -264,6 +288,29 @@ def check_compression_middleware(*args: object, **kwargs: object) -> list[CheckM
             )
         )
     return messages
+
+
+@register(NEXT)
+def check_stream_middleware(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Warn that page streams go to a middleware `MIDDLEWARE` lacks (`next.W193`)."""
+    current = compression_settings()
+    middleware = list(getattr(settings, "MIDDLEWARE", None) or ())
+    if (
+        not current.enabled
+        or current.streams != StreamOwner.MIDDLEWARE
+        or _position(middleware, MIDDLEWARE) is not None
+    ):
+        return []
+    return [
+        DjangoWarning(
+            f"{_PREFIX}['STREAMS'] is 'middleware' while settings.MIDDLEWARE lists no "
+            f"{MIDDLEWARE}, so next.dj compresses no page stream.",
+            hint=f"List {MIDDLEWARE} directly below SecurityMiddleware, or set "
+            "STREAMS to 'self'.",
+            obj=settings,
+            id="next.W193",
+        )
+    ]
 
 
 def _cross_site(value: object) -> bool:
@@ -294,13 +341,27 @@ def check_compression_cookies(*args: object, **kwargs: object) -> list[CheckMess
     ]
 
 
+_COMPRESS_CALL: Final = DeclaringCall(
+    "page.compress()", "next.E245", PAGE_MODULE, "page"
+)
+
+
+@register(NEXT)
+def check_compress_declarations(*args: object, **kwargs: object) -> list[CheckMessage]:
+    """Report a `page.compress()` call made outside a `page.py` (`next.E245`)."""
+    load_declarations()
+    return misplaced_errors(_COMPRESS_CALL, compress_declaration.outside())
+
+
 __all__ = [
     "BODY_READERS",
     "GZIP_MIDDLEWARE",
     "MIDDLEWARE",
+    "check_compress_declarations",
     "check_compression_codecs",
     "check_compression_cookies",
     "check_compression_middleware",
     "check_compression_paths",
     "check_compression_settings",
+    "check_stream_middleware",
 ]

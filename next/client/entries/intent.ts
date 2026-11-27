@@ -1,12 +1,14 @@
-import { createCurrent } from "../current";
-import { createPrefetch } from "../prefetch";
-import { once } from "../protocol";
-import type { Router } from "../router";
+// The entry point of next.intent.min.js, the link and layer prefetch and the active
+// links pass, which the router loads once the page is idle.
 
-const next = window.Next as typeof window.Next & { router?: Router };
-once("intent", () =>
-  next.router?._install((host) => {
-    createCurrent(host);
+import { createLinks } from "../links";
+import { createPrefetch } from "../prefetch";
+
+window.Next._extend(
+  "intent",
+  () => (host) => {
+    createLinks(host).first();
     return createPrefetch(host);
-  }),
+  },
+  __BUILD__,
 );

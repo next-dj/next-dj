@@ -2,26 +2,29 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
-from next.pages.loaders import load_python_module_memo
-from next.pages.transactions import atomic_store, page_atomic
+from next.pages.loaders import load_page_module, load_python_module_memo
+from next.pages.transactions import page_transaction
 from next.transactions import AtomicOverride
 
 
 @pytest.mark.usefixtures("fresh_declarations")
-class TestPageAtomic:
+class TestPageTransaction:
     def test_the_aliases_are_read_from_the_call(
         self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]
     ) -> None:
-        page_file = page_declaring(tmp_path, "page.atomic(True, aliases='all')")
+        page_file = page_declaring(
+            tmp_path, "page.transaction(atomic=True, aliases='all')"
+        )
         load_python_module_memo(page_file)
-        assert page_atomic(page_file) == AtomicOverride(atomic=True, aliases="all")
+        assert page_transaction(page_file) == AtomicOverride(atomic=True, aliases="all")
 
     @pytest.mark.parametrize(
         ("declaration", "atomic"),
         [
-            pytest.param("page.atomic(False)", False, id="off"),
-            pytest.param("page.atomic('writes')", "writes", id="writes"),
+            pytest.param("page.transaction(atomic=False)", False, id="off"),
+            pytest.param("page.transaction(atomic='writes')", "writes", id="writes"),
         ],
     )
     def test_a_value_besides_on_is_an_override(
@@ -33,14 +36,28 @@ class TestPageAtomic:
     ) -> None:
         page_file = page_declaring(tmp_path, declaration)
         load_python_module_memo(page_file)
-        assert page_atomic(page_file) == AtomicOverride(atomic=atomic)
+        assert page_transaction(page_file) == AtomicOverride(atomic=atomic)
 
-    def test_an_unusable_value_declares_nothing(
+    def test_an_unusable_value_raises_on_load(
         self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]
     ) -> None:
-        page_file = page_declaring(tmp_path, "page.atomic('yes')")
-        load_python_module_memo(page_file)
-        assert page_atomic(page_file) is None
-        [(file_path, held)] = list(atomic_store.loaded())
-        assert file_path == page_file
-        assert held.problem() == "atomic must be True, False or 'writes', got 'yes'"
+        page_file = page_declaring(tmp_path, "page.transaction(atomic='yes')")
+        module, error = load_page_module(page_file)
+        assert module is None
+        assert isinstance(error.__cause__, ImproperlyConfigured)
+        assert str(error.__cause__) == (
+            f"page.transaction() in {page_file} declares nothing, since atomic must be True, False or 'writes', got 'yes'."
+        )
+        assert page_transaction(page_file) is None
+
+    def test_a_positional_mode_raises_on_load(
+        self, tmp_path: Path, page_declaring: Callable[[Path, str], Path]
+    ) -> None:
+        page_file = page_declaring(tmp_path, "page.transaction(True)")
+        module, error = load_page_module(page_file)
+        assert module is None
+        assert isinstance(error.__cause__, TypeError)
+        assert str(error.__cause__) == (
+            "DeclaringCalls.transaction() takes 1 positional argument but 2 were given"
+        )
+        assert page_transaction(page_file) is None

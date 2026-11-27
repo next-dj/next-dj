@@ -204,12 +204,13 @@ class TestCompressionMiddleware:
         assert response["Content-Encoding"] == "gzip"
         assert response["ETag"] == 'W/"v"'
 
-    def test_a_sync_stream_is_flushed_per_chunk(self) -> None:
+    def test_a_sync_stream_without_a_window_is_flushed_per_chunk(self) -> None:
         chunks = [b"<main>", b"<p>one</p>", b"<p>two</p></main>"]
         middleware = CompressionMiddleware(
             lambda _request: StreamingHttpResponse(iter(chunks))
         )
-        response = middleware(_gzip_request())
+        with override_next_settings(COMPRESSION={"COALESCE": 0}):
+            response = middleware(_gzip_request())
         reader = zlib.decompressobj(31)
         decoded = [reader.decompress(part) for part in response]
         assert b"".join(decoded) == b"".join(chunks)
