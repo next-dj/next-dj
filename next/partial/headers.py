@@ -2,17 +2,16 @@
 
 import enum
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final
 
 from django.http import HttpResponse
 from django.utils.cache import patch_vary_headers
 
 from next.caches import pure_cache
-from next.conf.sentinels import UNSET
 from next.forms.uid import validated_origin_path
 from next.requests import PrefetchDepth
 from next.transactions.policy import SAFE_METHODS
-from next.utils import request_header
+from next.utils import meta_key
 from next.wire import REQUEST_FLAG
 
 
@@ -128,28 +127,42 @@ def _parse_merge(raw: str | None) -> "MergeMode | None":
         return None
 
 
+_FLAG_KEY: Final = meta_key(REQUEST_FLAG)
+_NAVIGATE_KEY: Final = meta_key(NAVIGATE)
+_ZONE_KEY: Final = meta_key(ZONE)
+_PREFETCH_KEY: Final = meta_key(PREFETCH)
+_ORIGIN_KEY: Final = meta_key(ORIGIN)
+_VALIDATE_KEY: Final = meta_key(VALIDATE)
+_MERGE_KEY: Final = meta_key(MERGE)
+_VERSION_KEY: Final = meta_key(VERSION)
+_PROTOCOL_KEY: Final = meta_key(PROTOCOL)
+_REQUEST_ID_KEY: Final = meta_key(REQUEST_ID)
+_LAYOUTS_KEY: Final = meta_key(LAYOUTS)
+
+
 def _parse_intent(request: "HttpRequest") -> PartialIntent:
     """Parse the partial-request headers of a request into an intent."""
-    if request_header(request, REQUEST_FLAG) != "1":
+    meta = request.META
+    if meta.get(_FLAG_KEY) != "1":
         return _NOT_PARTIAL
-    navigate = request_header(request, NAVIGATE) == "1"
-    zones = _split_names(request_header(request, ZONE))
-    wire = request_header(request, PREFETCH) if navigate or zones else None
+    navigate = meta.get(_NAVIGATE_KEY) == "1"
+    zones = _split_names(meta.get(_ZONE_KEY))
+    wire = meta.get(_PREFETCH_KEY) if navigate or zones else None
     depth = _WIRE_DEPTHS.get(wire) if wire is not None else None
-    origin = request_header(request, ORIGIN)
+    origin = meta.get(_ORIGIN_KEY)
     # Only a submission from a layer sends the origin on an unsafe method.
     layer = None if request.method in SAFE_METHODS else validated_origin_path(origin)
     return PartialIntent(
         partial=True,
         zones=zones,
-        validate_fields=_split_names(request_header(request, VALIDATE)),
-        merge=_parse_merge(request_header(request, MERGE)),
-        version=request_header(request, VERSION),
-        protocol=request_header(request, PROTOCOL),
-        request_id=request_header(request, REQUEST_ID),
+        validate_fields=_split_names(meta.get(_VALIDATE_KEY)),
+        merge=_parse_merge(meta.get(_MERGE_KEY)),
+        version=meta.get(_VERSION_KEY),
+        protocol=meta.get(_PROTOCOL_KEY),
+        request_id=meta.get(_REQUEST_ID_KEY),
         origin=origin,
         navigate=navigate,
-        layouts=request_header(request, LAYOUTS) if navigate else None,
+        layouts=meta.get(_LAYOUTS_KEY) if navigate else None,
         prefetch=PrefetchDepth.FULL if zones and depth is not None else depth,
         layer=layer,
     )
@@ -157,9 +170,9 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
 
 def partial_intent(request: "HttpRequest") -> PartialIntent:
     """Return the partial intent of the request, memoised on the request."""
-    cached = getattr(request, _INTENT_ATTR, UNSET)
-    if cached is not UNSET:
-        return cast("PartialIntent", cached)
+    cached = getattr(request, _INTENT_ATTR, None)
+    if isinstance(cached, PartialIntent):
+        return cached
     intent = _parse_intent(request)
     setattr(request, _INTENT_ATTR, intent)
     return intent

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class NextFrameworkSettings:
     """Lazy merged view of top-level keys declared in `DEFAULTS`.
 
-    A merge or a value a reload overtakes answers its caller and is not kept.
+    A read keeps its value in the instance dict, unless a reload overtook its merge.
     """
 
     DEFAULTS: ClassVar[Mapping[str, Any]] = DEFAULTS
@@ -38,7 +38,6 @@ class NextFrameworkSettings:
         """Initialise empty merge and attribute caches."""
         self._merged_cache: dict[str, Any] | None = None
         self._mistyped: dict[str, str] = {}
-        self._attr_value_cache: dict[str, Any] = {}
         self._epoch = 0
         self._lock = threading.Lock()
 
@@ -50,7 +49,9 @@ class NextFrameworkSettings:
         with self._lock:
             self._epoch += 1
             self._merged_cache = None
-            self._attr_value_cache.clear()
+            kept = self.__dict__
+            for key in self.DEFAULTS:
+                kept.pop(key, None)
         SETTINGS.move()
         FRAMEWORK.move()
         dispatch_settings_reloaded(type(self))
@@ -81,12 +82,10 @@ class NextFrameworkSettings:
         return tuple(self._mistyped.values())
 
     def __getattr__(self, attr: str) -> Any:
-        """Return merged values for keys declared in `DEFAULTS`.
+        """Return the merged value of a key declared in `DEFAULTS`, kept for next reads.
 
         A mistyped key reads as its default, but raises inside a check for it to yield.
         """
-        if attr in self._attr_value_cache:
-            return self._attr_value_cache[attr]
         if attr not in self.DEFAULTS:
             allowed = ", ".join(sorted(self.DEFAULTS))
             msg = f"Invalid Next framework setting: {attr!r}. Allowed keys: {allowed}."
@@ -97,7 +96,7 @@ class NextFrameworkSettings:
         if problem is None:
             with self._lock:
                 if epoch == self._epoch:
-                    self._attr_value_cache[attr] = val
+                    self.__dict__[attr] = val
         elif CHECKING.get():
             raise SettingShapeError((problem,))
         return val
@@ -105,7 +104,7 @@ class NextFrameworkSettings:
     @override
     def __setattr__(self, name: str, value: object) -> None:
         """Allow only internal cache attributes and raise for declared keys."""
-        if name in {"_merged_cache", "_mistyped", "_attr_value_cache"}:
+        if name in {"_merged_cache", "_mistyped"}:
             super().__setattr__(name, value)
             return
         if name in self.DEFAULTS:

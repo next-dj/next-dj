@@ -215,14 +215,14 @@ def decode_url_path(path: str) -> str:
 
 
 @pure_cache()
-def _meta_key(name: str) -> str:
+def meta_key(name: str) -> str:
     """Return the WSGI `META` key of a header name."""
     return "HTTP_" + name.upper().replace("-", "_")
 
 
 def request_header(request: HttpRequest, name: str) -> str | None:
     """Return a request header value from `META`, skipping the parsed headers map."""
-    return request.META.get(_meta_key(name))
+    return request.META.get(meta_key(name))
 
 
 @memo(SETTINGS, ROUTES, maxsize=DEFAULT_CACHE_SIZE)

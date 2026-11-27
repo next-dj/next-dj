@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Final, cast
 
@@ -116,7 +116,7 @@ class PagePlan:
     """What one page uses of the features a request may need, decided ahead of it.
 
     `plain` holds when a safe request renders the template straight, nothing to gather,
-    guard or drive. `safe` and `unsafe` hold the points of each kind by method.
+    guard or drive. The points of a kind are asked of the participants on its first use.
     """
 
     links: bool
@@ -128,12 +128,19 @@ class PagePlan:
     awaits: bool
     plain: bool
     layers: bool
-    safe: Mapping[RequestKind, Points]
-    unsafe: Mapping[RequestKind, Points]
+    facts: PageFacts
+    held: dict[tuple[RequestKind, bool], Points] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
     def points(self, kind: RequestKind, *, safe: bool) -> Points:
         """Return the points a request of `kind` takes, by the safety of its method."""
-        return (self.safe if safe else self.unsafe)[kind]
+        key = (kind, safe)
+        found = self.held.get(key)
+        if found is None:
+            facts = self.facts if safe else replace(self.facts, safe=False, plain=False)
+            found = self.held[key] = lifecycle.points(replace(facts, kind=kind))
+        return found
 
 
 def _open(node: Node) -> bool:
@@ -287,14 +294,6 @@ def _components() -> tuple[int, ...]:
     return (defer_declarations.version, *versions)
 
 
-_KINDS: Final = (
-    RequestKind.PAGE,
-    RequestKind.ZONE,
-    RequestKind.BOUNDARY,
-    RequestKind.NAVIGATE,
-)
-
-
 def _fixed(page: Page, file_path: Path) -> Mapping[str, tuple[str, str | None]]:
     """Return the digests the layouts of fixed chrome took from their source."""
     skeleton = page.layout_skeleton(file_path)[0]
@@ -416,7 +415,6 @@ class PagePlans:
             slot=None if template is None else partial(slot_view, template),
             compiler=compile_containers,
         )
-        unsafe = replace(facts, safe=False, plain=False)
         plan = PagePlan(
             links=links is not None,
             marks=marks,
@@ -427,8 +425,7 @@ class PagePlans:
             awaits=awaits,
             plain=plain,
             layers=layers,
-            safe={k: lifecycle.points(replace(facts, kind=k)) for k in _KINDS},
-            unsafe={k: lifecycle.points(replace(unsafe, kind=k)) for k in _KINDS},
+            facts=facts,
         )
         return plan, reached
 

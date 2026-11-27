@@ -201,6 +201,7 @@ class TestBlindSpots:
 class TestOpens:
     def test_a_tag_without_a_name_opens_nothing(self) -> None:
         assert not LINKS.opens("<>")
+        assert not LINKS.opens('<> role="navigation"')
         assert LINKS.opens('<div role="navigation">')
 
 

@@ -736,11 +736,14 @@ class TemplateLinks:
     def opens(self, tag: str) -> bool:
         """Whether the start tag `tag`, written whole, opens a container."""
         low = fold(tag)
+        plan = _plan(self.containers)
+        if not any(needle in low for needle in plan.needles):
+            return False
         found = _TAG.match(low, 1)
         if found is None:
             return False
         opened = _Tag(tag, low, found)
-        return any(s.hit(opened) for s in _plan(self.containers).selectors)
+        return any(s.hit(opened) for s in plan.selectors)
 
     def fixed(self, html: str) -> StaticLinks:
         """Return the anchors of `html`, a container text no request changes."""

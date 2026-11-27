@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 type _Event = tuple[str, str, int]
 
 _NAME: Final = re.compile(r"</?([a-zA-Z][^\t\n\f\r />]*)")
+_TAG_STOP: Final = re.compile(r"[\"'>]")
 _RAW: Final = frozenset({*RAW_TEXT_ELEMENTS, "template", "plaintext"})
 _TEXT, _TAG, _QUOTED, _RAW_TEXT, _COMMENT = range(5)
 _HELD: Final = "_next_containers"
@@ -165,18 +166,19 @@ class _Lexer:
 
     def _in_tag(self, text: str, at: int, events: list[_Event]) -> int:
         """Move past a quoted value or the end of the tag being read."""
-        for index in range(at, len(text)):
-            char = text[index]
-            if char in "\"'":
-                self.mode, self.quote = _QUOTED, char
-                return index + 1
-            if char == ">":
-                events.append(("shut" if self.closing else "end", self.tag, index))
-                self.mode = _TEXT
-                if not self.closing and self.tag in _RAW:
-                    self.mode, self.raw = _RAW_TEXT, self.tag
-                return index + 1
-        return len(text)
+        found = _TAG_STOP.search(text, at)
+        if found is None:
+            return len(text)
+        index = found.start()
+        char = text[index]
+        if char != ">":
+            self.mode, self.quote = _QUOTED, char
+            return index + 1
+        events.append(("shut" if self.closing else "end", self.tag, index))
+        self.mode = _TEXT
+        if not self.closing and self.tag in _RAW:
+            self.mode, self.raw = _RAW_TEXT, self.tag
+        return index + 1
 
 
 @dataclass(slots=True)
@@ -202,15 +204,15 @@ class _Pending:
 class _Compiler:
     """Wrap each container of one template, raising `_BlindError` where it is blind.
 
-    `apply` off reads the whole template first, so a blind spot changes nothing.
+    The rewrites land once the whole template has read, so a blind spot changes nothing.
     """
 
-    def __init__(self, links: TemplateLinks, *, apply: bool) -> None:
+    def __init__(self, links: TemplateLinks) -> None:
         """Hold the backend the containers are told by."""
         self.links = links
-        self.apply = apply
         self.names = links.names()
         self.attrs = links.attributes()
+        self.rewrites: list[tuple[NodeList, list[Node]]] = []
 
     def container(self, opening: _Opening) -> bool:
         """Whether the start tag read so far may open a container a selector names.
@@ -235,9 +237,13 @@ class _Compiler:
             walk.node(node)
         if walk.pending is not None or walk.opening is not None:
             raise _BlindError
-        if self.apply:
-            nodelist[:] = walk.out
+        self.rewrites.append((nodelist, walk.out))
         return walk.balance
+
+    def apply(self) -> None:
+        """Replace each node list walked with its rewritten nodes."""
+        for nodelist, nodes in self.rewrites:
+            nodelist[:] = nodes
 
 
 class _Walk:
@@ -389,7 +395,7 @@ class _Walk:
         self.pending = None
         nodes = NodeList(self.out[pending.start :])
         fixed = None
-        if self.compiler.apply and all(type(node) is TextNode for node in nodes):
+        if all(type(node) is TextNode for node in nodes):
             text = "".join(cast("TextNode", node).s for node in nodes)
             fixed = self.compiler.links.fixed(text)
         wrapper = ContainerNode(nodes, fixed)
@@ -422,12 +428,13 @@ def compile_containers(template: Template, links: TemplateLinks) -> bool:
 
 
 def _compiled(template: Template, links: TemplateLinks) -> bool:
-    """Wrap the containers of `template` when a dry walk finds no blind spot."""
+    """Wrap the containers of `template` when its walk finds no blind spot."""
+    compiler = _Compiler(links)
     try:
-        _Compiler(links, apply=False).nodes(template.nodelist, _Lexer(), wrapping=True)
+        compiler.nodes(template.nodelist, _Lexer(), wrapping=True)
     except _BlindError:
         return False
-    _Compiler(links, apply=True).nodes(template.nodelist, _Lexer(), wrapping=True)
+    compiler.apply()
     return True
 
 

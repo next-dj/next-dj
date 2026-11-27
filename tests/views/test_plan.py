@@ -200,7 +200,7 @@ class TestPagePlan:
         assert plans.of(template).points(RequestKind.PAGE, safe=True).around == ()
         with override_next_settings(TRANSACTIONS={"SAFE": True}):
             plan = plans.of(template)
-        assert len(plan.points(RequestKind.PAGE, safe=True).around) == 1
+            assert len(plan.points(RequestKind.PAGE, safe=True).around) == 1
         assert plan.plain is True
 
     @pytest.mark.django_db()
