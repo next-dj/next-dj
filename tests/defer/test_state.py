@@ -9,11 +9,12 @@ from next.defer.ledger import ResponseJobs
 from next.defer.markers import Caps
 from next.defer.render import Processed
 from next.defer.state import RequestState, state_of
-from next.pages.responses import Purpose, mark_purpose
+from next.pages.visits import visit_request
+from next.requests import Purpose, mark_purpose
 
 
 class _Raced:
-    """A lock another thread wins once, running `win` just before the caller holds it."""
+    """A lock another thread wins once, running `win` before the caller holds it."""
 
     def __init__(self, win: Callable[[], object]) -> None:
         self.win: Callable[[], object] | None = win
@@ -45,7 +46,7 @@ class TestStateOf:
         request = rf.get("/")
         state = state_of(request)
         assert state_of(request) is state
-        assert request.next.boundaries is state
+        assert request.next.defer is state
 
     def test_a_later_purpose_keeps_the_state(self, rf: RequestFactory) -> None:
         request = rf.get("/")
@@ -62,6 +63,31 @@ class TestStateOf:
             state_module, "_lock", _Raced(lambda: won.append(state_of(request)))
         )
         assert state_of(request) is won[0]
+
+
+class TestVisitState:
+    """A visit reads the boundary state of the live request it forked from."""
+
+    def test_a_visit_asking_first_shares_the_state(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        mark_purpose(request, Purpose.NAVIGATE)
+        visit = visit_request(request, "/notes/")
+        assert state_of(visit) is state_of(request)
+
+    def test_the_live_request_asking_first_shares_the_state(
+        self, rf: RequestFactory
+    ) -> None:
+        request = rf.get("/")
+        mark_purpose(request, Purpose.NAVIGATE)
+        visit = visit_request(request, "/notes/")
+        state = state_of(request)
+        assert state_of(visit) is state
+
+    def test_a_visit_of_a_visit_shares_the_state(self, rf: RequestFactory) -> None:
+        request = rf.get("/")
+        mark_purpose(request, Purpose.NAVIGATE)
+        inner = visit_request(visit_request(request, "/notes/"), "/notes/2/")
+        assert state_of(inner) is state_of(request)
 
 
 class TestLazyFields:

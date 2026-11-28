@@ -19,10 +19,11 @@ from next.caches import FRAMEWORK, memo, pure_cache
 from next.conf.defaults import DEFAULTS
 from next.conf.imports import import_callable
 from next.conf.scopes import scope_value
-from next.conf.sentinels import UNSET, Unset
+from next.conf.sentinels import UNSET
 from next.conf.settings import fail_loudly
 from next.diagnostics import FailureLog, type_name
 from next.introspect import describe_callable
+from next.requests import next_of
 from next.utils import WEB_SCHEMES
 
 from .errors import SiteOriginError
@@ -31,11 +32,6 @@ from .errors import SiteOriginError
 SITE_KEYS: Final = frozenset(DEFAULTS["SITE"])
 """The keys a `NEXT_FRAMEWORK["SITE"]` mapping may carry."""
 
-SITE_ORIGIN_ATTR: Final = "_next_site_origin"
-"""The request attribute the origin of one request is held under."""
-
-_DECLARED_ATTR: Final = "_next_site_declared"
-_INDEXABLE_ATTR: Final = "_next_site_indexable"
 _URL_SETTING: Final = "NEXT_FRAMEWORK['SITE']['URL']"
 _INDEXABLE_SETTING: Final = "NEXT_FRAMEWORK['SITE']['INDEXABLE']"
 
@@ -54,7 +50,8 @@ class _Failed(enum.Enum):
     FAILED = enum.auto()
 
 
-type _Declared = tuple[str, str] | Literal[_Failed.FAILED] | None
+type DeclaredOrigin = tuple[str, str] | Literal[_Failed.FAILED] | None
+"""The origin a `URL` rule declares, `FAILED` for a callable that raised or erred."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +129,7 @@ def forget_site_config(**kwargs: object) -> None:
     site_config.cache_clear()
 
 
-def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declared:
+def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> DeclaredOrigin:
     """Return the origin a callable `URL` answers, `None` when it answers `None`."""
     guard = _failures.guard(
         ("URL", "raised"),
@@ -163,7 +160,7 @@ def _answered_origin(rule: SiteUrlRule, request: HttpRequest | None) -> _Declare
     return _Failed.FAILED
 
 
-def _declared_origin(request: HttpRequest | None) -> _Declared:
+def _declared_origin(request: HttpRequest | None) -> DeclaredOrigin:
     """Return the origin the `URL` rule answers, `None` for no rule or no origin.
 
     A callable is called once per request, and its answer is held on the request.
@@ -175,10 +172,10 @@ def _declared_origin(request: HttpRequest | None) -> _Declared:
         return url_origin(rule)
     if request is None:
         return _answered_origin(rule, None)
-    held: _Declared | Unset = getattr(request, _DECLARED_ATTR, UNSET)
+    namespace = next_of(request)
+    held = namespace.site_declared
     if held is UNSET:
-        held = _answered_origin(rule, request)
-        setattr(request, _DECLARED_ATTR, held)
+        held = namespace.site_declared = _answered_origin(rule, request)
     return held
 
 
@@ -220,8 +217,9 @@ def site_origin(request: HttpRequest | None) -> tuple[str, str]:
         if not isinstance(declared, tuple):
             raise SiteOriginError
         return declared
-    held = getattr(request, SITE_ORIGIN_ATTR, None)
-    if isinstance(held, tuple):
+    namespace = next_of(request)
+    held = namespace.site_origin
+    if held is not None:
         return held
     declared = _declared_origin(request)
     origin = (
@@ -229,7 +227,7 @@ def site_origin(request: HttpRequest | None) -> tuple[str, str]:
         if isinstance(declared, tuple)
         else (request.scheme or "https", _current_domain(request))
     )
-    setattr(request, SITE_ORIGIN_ATTR, origin)
+    namespace.site_origin = origin
     return origin
 
 
@@ -245,10 +243,10 @@ def site_indexable(request: HttpRequest | None = None) -> bool:
         return rule
     if request is None:
         return _answered_indexable(rule, None)
-    held: bool | None = getattr(request, _INDEXABLE_ATTR, None)
-    if held is None:
-        held = _answered_indexable(rule, request)
-        setattr(request, _INDEXABLE_ATTR, held)
+    namespace = next_of(request)
+    held = namespace.site_indexable
+    if held is UNSET:
+        held = namespace.site_indexable = _answered_indexable(rule, request)
     return held
 
 
@@ -302,7 +300,7 @@ def url_declared_per_request() -> bool:
 
 __all__ = [
     "SITE_KEYS",
-    "SITE_ORIGIN_ATTR",
+    "DeclaredOrigin",
     "SiteConfig",
     "debug_closed",
     "forget_site_config",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from next.pages.responses import next_of
+from next.requests import root_of
 
 
 if TYPE_CHECKING:
@@ -73,15 +73,18 @@ class RequestState:
 
 
 def state_of(request: object) -> RequestState:
-    """Return the boundary state of `request`, made once whichever thread asks first."""
-    root = next_of(request)
-    held = root.boundaries
-    if isinstance(held, RequestState):
+    """Return the boundary state of `request`, made once whichever thread asks first.
+
+    A visit reads the state of the request it forked from.
+    """
+    root = root_of(request)
+    held = root.defer
+    if held is not None:
         return held
     with _lock:
-        held = root.boundaries
-        if not isinstance(held, RequestState):
-            held = root.boundaries = RequestState()
+        held = root.defer
+        if held is None:
+            held = root.defer = RequestState()
     return held
 
 

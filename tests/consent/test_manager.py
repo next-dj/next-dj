@@ -2,6 +2,7 @@ import logging
 import re
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.http import Http404
 from django.test import override_settings
 
@@ -14,7 +15,6 @@ from next.consent import (
     get_consent,
 )
 from next.consent.manager import (
-    CONSENT_ATTR,
     consent_backend_manager,
     consent_configured,
     consent_payload,
@@ -23,6 +23,7 @@ from next.consent.manager import (
 )
 from next.diagnostics import QUIET_PERIOD, degraded, watch_degraded
 from next.pages.responses import mark_shared_render, shared_render
+from next.requests import next_of
 from next.testing import override_next_settings
 from tests.support import consent_request
 
@@ -160,6 +161,12 @@ class TestGetConsent:
     def test_anything_but_a_request_is_undecided(self) -> None:
         assert get_consent(None) == UNDECIDED
 
+    def test_a_foreign_value_under_next_is_refused(self) -> None:
+        request = consent_request("2:analytics:1")
+        request.next = "/after-login/"
+        with pytest.raises(ImproperlyConfigured, match=r"owns request\.next"):
+            get_consent(request)
+
     def test_the_cookie_is_read_and_held(self) -> None:
         request = consent_request("2:analytics|unknown:1")
         with override_next_settings(CONSENT={"CATEGORIES": ["analytics"]}):
@@ -167,7 +174,7 @@ class TestGetConsent:
         assert consent == Consent(frozenset({NECESSARY, "analytics"}), decided=True)
         request.COOKIES["next_consent"] = "2::1"
         assert get_consent(request) is consent
-        assert getattr(request, CONSENT_ATTR) is consent
+        assert next_of(request).consent is consent
 
 
 class TestClientParity:

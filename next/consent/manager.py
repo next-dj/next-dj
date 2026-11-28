@@ -14,6 +14,7 @@ from next.conf.scopes import scope_value
 from next.conf.settings import fail_loudly
 from next.diagnostics import FailureLog, mark_degraded
 from next.pages.responses import shared_render
+from next.requests import next_of
 from next.static.runtime import CONSENT_PAYLOAD_KEY
 
 from .backends import ConsentBackend
@@ -32,9 +33,6 @@ _FALLBACK: Final = (
     "every visitor reads as undecided and every category but necessary stays denied "
     "until it is fixed"
 )
-
-CONSENT_ATTR: Final = "_next_consent"
-"""The request attribute the consent of one request is held under."""
 
 CONSENT_KEYS: Final = frozenset(DEFAULTS["CONSENT"])
 """The keys a `NEXT_FRAMEWORK["CONSENT"]` mapping may carry."""
@@ -80,8 +78,9 @@ def get_consent(request: HttpRequest | None) -> Consent:
     """
     if not isinstance(request, HttpRequest):
         return UNDECIDED
-    held = getattr(request, CONSENT_ATTR, None)
-    if isinstance(held, Consent):
+    namespace = next_of(request)
+    held = namespace.consent
+    if held is not None:
         return held
     backend = _backend()
     read = UNDECIDED if backend is None else _read(backend, request)
@@ -90,7 +89,7 @@ def get_consent(request: HttpRequest | None) -> Consent:
         frozenset(name for name in read.granted if name in categories) | {NECESSARY},
         decided=read.decided,
     )
-    setattr(request, CONSENT_ATTR, consent)
+    namespace.consent = consent
     return consent
 
 
@@ -230,7 +229,6 @@ FRAMEWORK.attach(consent_backend_manager.reset)
 
 
 __all__ = [
-    "CONSENT_ATTR",
     "CONSENT_KEYS",
     "consent_backend_manager",
     "consent_categories",

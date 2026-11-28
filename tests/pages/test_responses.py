@@ -27,26 +27,19 @@ from next.pages.metadata.resolve import publish_metadata, resolve_metadata
 from next.pages.responses import (
     NO_STORE,
     CacheControl,
-    PrefetchDepth,
-    Purpose,
-    RequestInfo,
     ResponsePolicy,
     SharedCookies,
     cache_control,
     cache_problems,
     cookie_varies,
-    depth_of,
     finish_response,
     finish_zone_response,
     headers_problems,
     mark_bound_render,
     mark_personal_render,
-    mark_purpose,
     never_store,
-    next_of,
     personal_render,
     prepare_page_render,
-    purpose_of,
     response_policy,
     robots_tag,
     vary_on_cookie,
@@ -1693,106 +1686,3 @@ class TestBoundRender:
 
     def test_no_request_marks_nothing(self) -> None:
         mark_bound_render(None)
-
-
-class TestRequestDepth:
-    """`request.next` names the purpose of a request and the depth of a prefetch."""
-
-    def test_the_depths(self) -> None:
-        assert [depth.value for depth in PrefetchDepth] == ["shell", "full"]
-
-    def test_an_info_has_no_depth_by_default(self) -> None:
-        assert RequestInfo().depth is None
-
-    @pytest.mark.parametrize(
-        ("purpose", "depth"),
-        [
-            (Purpose.NAVIGATE, PrefetchDepth.FULL),
-            (Purpose.DOCUMENT, PrefetchDepth.SHELL),
-            (Purpose.PREFETCH, None),
-        ],
-    )
-    def test_an_impossible_pair_is_refused(
-        self, purpose: Purpose, depth: PrefetchDepth | None, rf: RequestFactory
-    ) -> None:
-        with pytest.raises(KeyError, match=re.escape(repr((purpose, depth)))):
-            mark_purpose(rf.get("/"), purpose, depth)
-
-    def test_a_purpose_without_a_depth(self, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        mark_purpose(request, Purpose.NAVIGATE)
-        assert purpose_of(request) is Purpose.NAVIGATE
-        assert depth_of(request) is None
-        assert request.next.info == RequestInfo(Purpose.NAVIGATE)
-
-    @pytest.mark.parametrize("depth", list(PrefetchDepth))
-    def test_a_marked_depth(self, depth: PrefetchDepth, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        mark_purpose(request, Purpose.PREFETCH, depth)
-        assert purpose_of(request) is Purpose.PREFETCH
-        assert depth_of(request) is depth
-        assert request.next.info == RequestInfo(Purpose.PREFETCH, depth)
-
-    def test_the_info_is_shared(self, rf: RequestFactory) -> None:
-        first, second = rf.get("/"), rf.get("/")
-        mark_purpose(first, Purpose.PREFETCH, PrefetchDepth.FULL)
-        mark_purpose(second, Purpose.PREFETCH, PrefetchDepth.FULL)
-        assert first.next is not second.next
-        assert first.next.info is second.next.info
-
-    def test_a_later_mark_keeps_the_boundary_state(self, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        root = next_of(request)
-        root.boundaries = held = object()
-        mark_purpose(request, Purpose.NAVIGATE)
-        assert request.next is root
-        assert (root.purpose, root.depth, root.boundaries) == (
-            Purpose.NAVIGATE,
-            None,
-            held,
-        )
-
-    def test_an_unmarked_request_has_no_depth(self, rf: RequestFactory) -> None:
-        assert depth_of(rf.get("/")) is None
-
-    def test_an_object_that_is_no_request_has_no_depth(self) -> None:
-        assert depth_of(object()) is None
-
-
-class TestForeignRequestNext:
-    """A value next.dj did not set under `request.next` is refused by name and type."""
-
-    _MESSAGE = re.escape(
-        "request.next holds a str, but next.dj owns the request.next attribute."
-    )
-
-    def test_making_the_namespace_refuses_it(self, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        request.next = "/home"
-        with pytest.raises(ImproperlyConfigured, match=self._MESSAGE):
-            next_of(request)
-        assert request.next == "/home"
-
-    def test_marking_the_purpose_refuses_it(self, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        request.next = "/home"
-        with pytest.raises(ImproperlyConfigured, match=self._MESSAGE):
-            mark_purpose(request, Purpose.NAVIGATE)
-
-    @pytest.mark.parametrize("reader", [purpose_of, depth_of])
-    def test_reading_it_refuses_it(self, reader, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        request.next = "/home"
-        with pytest.raises(ImproperlyConfigured, match=self._MESSAGE):
-            reader(request)
-
-    def test_a_none_is_foreign_too(self, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        request.next = None
-        with pytest.raises(ImproperlyConfigured, match="holds a NoneType"):
-            next_of(request)
-
-    def test_the_namespace_is_made_once(self, rf: RequestFactory) -> None:
-        request = rf.get("/")
-        assert next_of(request) is next_of(request) is request.next
-        assert purpose_of(request) is Purpose.DOCUMENT

@@ -682,8 +682,6 @@ Outside a form dispatch the function answers a fresh empty dict the request neve
        cache = render_dep_cache(request)
        return f"Cache has {len(cache)} entries."
 
-The constant ``REQUEST_DEP_CACHE_ATTR`` names the request attribute that holds the cache.
-
 More recipes for diagnosing missing markers and CSRF or dispatch errors live in :doc:`/content/faq/troubleshooting`.
 
 Resolution performance

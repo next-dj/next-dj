@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from next.marks import FragmentPass
-    from next.pages.responses import Purpose
+    from next.requests import Purpose
     from next.router.markers import ScannedLayout, ScannedPage
 
     from .marking import Compiler

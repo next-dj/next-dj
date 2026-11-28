@@ -30,8 +30,10 @@ from django.utils.cache import add_never_cache_headers, patch_vary_headers
 
 from next.caches import FRAMEWORK, BoundedCache, memo
 from next.conf import next_framework_settings
+from next.conf.sentinels import UNSET, Unset
 from next.diagnostics import FailureLog
 from next.permissions.access import open_view
+from next.requests import held_next, next_of
 from next.site.headers import ROBOTS_HEADER
 from next.utils import request_header
 from next.wire import REQUEST_FLAG
@@ -45,10 +47,6 @@ _failures = FailureLog(logger)
 CSRF_URL_NAME: Final = "csrf"
 """The name the token endpoint answers under in the `next` namespace."""
 
-CSRF_DEFERRED_ATTR: Final = "_next_csrf_deferred"
-"""The request attribute that marks a render whose HTML carries no CSRF token."""
-
-_PAYLOAD_ATTR: Final = "_next_csrf_payload"
 _COOKIE_KEY: Final = "CSRF_COOKIE"
 _RENEWED_KEY: Final = "CSRF_COOKIE_NEEDS_UPDATE"
 TOKEN_META: Final = (_COOKIE_KEY, _RENEWED_KEY)
@@ -79,19 +77,28 @@ def csrf_delivery() -> CsrfDelivery:
 
 def defer_token(request: HttpRequest) -> None:
     """Keep the token out of the HTML of this render. The runtime fetches it instead."""
-    setattr(request, CSRF_DEFERRED_ATTR, True)
+    next_of(request).csrf_deferred = True
 
 
 def token_deferred(request: HttpRequest) -> bool:
     """Whether this render keeps the CSRF token out of its HTML."""
-    return getattr(request, CSRF_DEFERRED_ATTR, False) is True
+    held = held_next(request)
+    return held is not None and held.csrf_deferred
 
-
-NONCE_ATTR: Final = "_next_csp_nonce"
-"""The request attribute that holds the nonce resolved for the request."""
 
 CSP_NONCE_ATTR: Final = "_csp_nonce"
 """The request attribute where Django's CSP middleware and django-csp keep the nonce."""
+
+
+def memoised_nonce(request: HttpRequest) -> str | Unset | None:
+    """Return the nonce memoised for `request`, `UNSET` before one was resolved."""
+    held = held_next(request)
+    return UNSET if held is None else held.nonce
+
+
+def memoise_nonce(request: HttpRequest, nonce: str | None) -> None:
+    """Memoise the nonce resolved for `request`, where `None` names no nonce."""
+    next_of(request).nonce = nonce
 
 
 def nonce_minted(request: HttpRequest) -> bool:
@@ -99,7 +106,7 @@ def nonce_minted(request: HttpRequest) -> bool:
 
     Django's `LazyNonce` is truthy once evaluated, and django-csp stores the string.
     """
-    return isinstance(getattr(request, NONCE_ATTR, None), str) or bool(
+    return isinstance(memoised_nonce(request), str) or bool(
         getattr(request, CSP_NONCE_ATTR, None)
     )
 
@@ -177,12 +184,13 @@ def csrf_payload(request: HttpRequest) -> dict[str, str]:
         if endpoint is not None:
             return endpoint
     meta = request.META
-    held: tuple[object, dict[str, str]] | None = request.__dict__.get(_PAYLOAD_ATTR)
-    if held is None or held[0] != meta.get(_COOKIE_KEY):
-        payload = csrf_token_payload(request)
-        held = (meta.get(_COOKIE_KEY), payload)
-        setattr(request, _PAYLOAD_ATTR, held)
-    return held[1]
+    namespace = next_of(request)
+    held = namespace.csrf_payload
+    if held is not None and held[0] == meta.get(_COOKIE_KEY):
+        return held[1]
+    payload = csrf_token_payload(request)
+    namespace.csrf_payload = (meta.get(_COOKIE_KEY), payload)
+    return payload
 
 
 def token_minted(request: HttpRequest) -> bool:
@@ -256,9 +264,7 @@ def csrf_view(request: HttpRequest) -> HttpResponse:
 
 __all__ = [
     "CSP_NONCE_ATTR",
-    "CSRF_DEFERRED_ATTR",
     "CSRF_URL_NAME",
-    "NONCE_ATTR",
     "TOKEN_META",
     "CsrfDelivery",
     "csrf_delivery",
@@ -269,6 +275,8 @@ __all__ = [
     "csrf_view",
     "defer_token",
     "document_csrf",
+    "memoise_nonce",
+    "memoised_nonce",
     "nonce_minted",
     "secret_changed",
     "token_deferred",

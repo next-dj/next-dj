@@ -6,7 +6,6 @@ from django.template import Context, Template, TemplateSyntaxError
 
 from next.pages.layouts import (
     META,
-    RESPONSE_ID_ATTR,
     SLOT,
     LayoutChain,
     closing,
@@ -23,6 +22,7 @@ from next.pages.layouts import (
 )
 from next.pages.loaders import LayoutTemplateLoader, layout_ids, module_version
 from next.pages.placeholder import slot_problem
+from next.requests import NEXT_ATTR, next_of
 from next.testing import override_next_settings
 
 
@@ -66,13 +66,11 @@ class TestSeal:
     def test_a_request_mints_one_response_id_and_keeps_it(self) -> None:
         request = HttpRequest()
         assert request_response_id(request) is None
+        assert NEXT_ATTR not in vars(request)
         response_id = mint_response_id(request)
         assert len(response_id) == 8
-        assert (
-            mint_response_id(request)
-            == response_id
-            == getattr(request, RESPONSE_ID_ATTR)
-        )
+        assert mint_response_id(request) == response_id == next_of(request).response_id
+        assert request_response_id(request) == response_id
 
     def test_regions_enclose_only_with_a_response_id(self) -> None:
         request = HttpRequest()

@@ -32,6 +32,7 @@ from next.deps.runner import bridge
 from next.introspect import callable_name
 from next.marks import marked, rendered
 from next.permissions.errors import UnknownAccessObjectError
+from next.requests import next_of
 from next.seeding import (
     ACTION_ANCHOR_KEY,
     COLLECTOR_KEY,
@@ -84,9 +85,6 @@ _RESERVED_CONTEXT_KEYS = frozenset(
 )
 
 SLOT_KEY_PREFIX = "slot_"
-
-# The request attribute holding the lazy token the components of a request share.
-_SHARED_CSRF = "_next_component_csrf"
 
 
 def _compiled_template(text: str, path: Path) -> Template:
@@ -392,9 +390,10 @@ def _merge_csrf_context(
     """
     if request is None or "csrf_token" in context_dict:
         return
-    held = request.__dict__.get(_SHARED_CSRF)
+    namespace = next_of(request)
+    held = namespace.component_csrf
     if held is None:
-        held = request.__dict__[_SHARED_CSRF] = SimpleLazyObject(
+        held = namespace.component_csrf = SimpleLazyObject(
             functools.partial(get_token, request)
         )
     context_dict["csrf_token"] = held

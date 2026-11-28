@@ -19,6 +19,7 @@ from django.utils.encoding import escape_uri_path
 
 from next.backends import SingleBackendManager
 from next.caches import FRAMEWORK
+from next.requests import next_of
 
 from .backends import ActionRegistration, scope_key_for
 from .base import (
@@ -44,7 +45,6 @@ if TYPE_CHECKING:
     from django.forms import Form as DjangoForm
 
 
-_WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
 _FORM_WIZARD_BACKEND_KEY: Final[str] = "FORM_WIZARD_BACKEND"
 
 type _JSONValue = (
@@ -54,11 +54,11 @@ type _JSONValue = (
 
 def _request_load_memo(request: "HttpRequest") -> dict[str, dict[str, Any]]:
     """Return the request-scoped `{storage_id: loaded steps}` memo, creating it."""
-    memo = getattr(request, _WIZARD_LOAD_CACHE_ATTR, None)
+    namespace = next_of(request)
+    memo = namespace.wizard_loads
     if memo is None:
-        memo = {}
-        setattr(request, _WIZARD_LOAD_CACHE_ATTR, memo)
-    return cast("dict[str, dict[str, Any]]", memo)
+        memo = namespace.wizard_loads = {}
+    return memo
 
 
 def _ensure_session_key(request: "HttpRequest", *, create: bool) -> str:

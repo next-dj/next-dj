@@ -8,7 +8,7 @@ from django.http import HttpRequest
 from next.caches import FRAMEWORK, memo
 from next.conf import next_framework_settings
 from next.conf.sentinels import UNSET
-from next.csrf import CSP_NONCE_ATTR, NONCE_ATTR, nonce_minted
+from next.csrf import CSP_NONCE_ATTR, memoise_nonce, memoised_nonce, nonce_minted
 from next.utils import middleware_installed
 
 
@@ -58,18 +58,17 @@ def resolve_nonce(request: HttpRequest | None) -> str | None:
     """
     if not isinstance(request, HttpRequest):
         return None
-    held = getattr(request, NONCE_ATTR, UNSET)
+    held = memoised_nonce(request)
     if held is not UNSET:
-        return held if isinstance(held, str) else None
+        return held
     nonce = request_nonce(request) if nonce_enabled() else None
-    setattr(request, NONCE_ATTR, nonce)
+    memoise_nonce(request, nonce)
     return nonce
 
 
 __all__ = [
     "CSP_MIDDLEWARE",
     "CSP_NONCE_ATTR",
-    "NONCE_ATTR",
     "NonceResolver",
     "nonce_active",
     "nonce_enabled",

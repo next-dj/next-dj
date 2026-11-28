@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 from django.db.models import Model
 from django.forms.models import BaseModelForm as DjangoBaseModelForm
 
-from next.conf.sentinels import UNSET
-from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.deps import bind_dep_cache
 from next.deps.introspect import cached_accepts_var_keyword
 from next.deps.resolver import current_resolver
 from next.forms.origin import url_kwargs_for_request
@@ -96,20 +95,14 @@ def _call_on_request_cache(
 ) -> object:
     """Call `hook` as `_resolve_and_call` does, its cache hung on `request` meanwhile.
 
-    A request already carrying that cache keeps it, so dispatch hangs nothing twice.
+    The cache the request carried before is bound again once the hook returns.
     """
     cache = deps[0]
-    previous = getattr(request, REQUEST_DEP_CACHE_ATTR, UNSET)
-    if previous is cache:
-        return _resolve_and_call(hook, request, url_kwargs, deps=deps)
-    setattr(request, REQUEST_DEP_CACHE_ATTR, cache)
+    previous = bind_dep_cache(request, cache)
     try:
         return _resolve_and_call(hook, request, url_kwargs, deps=deps)
     finally:
-        if previous is UNSET:
-            delattr(request, REQUEST_DEP_CACHE_ATTR)
-        else:
-            setattr(request, REQUEST_DEP_CACHE_ATTR, previous)
+        bind_dep_cache(request, previous)
 
 
 def _call_get_initial(

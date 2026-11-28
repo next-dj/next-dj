@@ -341,7 +341,7 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.identity``
      - A single flat module holding the subject a request proves, which realtime tickets and boundary tokens share.
    * - ``next.requests``
-     - A single flat module holding ``RequestKind``, the kinds of request a view routes by and the transaction rule receives, spelled once for every layer, and ``PrefetchDepth``, how much of a page a router prefetch asks for.
+     - A single flat module holding ``RequestKind``, the kinds of request a view routes by and the transaction rule receives, spelled once for every layer, ``PrefetchDepth``, how much of a page a router prefetch asks for, and ``RequestNext``, the one namespace under ``request.next`` that every area keeps its per-request state in, see :ref:`ref-request-next`.
    * - ``next.intercept``
      - A single flat module holding the table of intercepting routes, which page serves a zone over a routed target.
    * - ``next.interpolation``
@@ -378,6 +378,29 @@ The set of submodules differs by area, and :doc:`adding-an-area` states the cont
    * - ``next.templatetags``
      - ``boundaries``, ``components``, ``forms``, ``next_static``, ``pages``, ``partial``, ``permissions``, ``scripts``.
        Each module registers its tags and parses their syntax, and the nodes the component and page boundary tags compile to live with their owners in ``next.components.tags`` and ``next.pages.nodes``.
+
+.. _internals-request-namespace:
+
+The request namespace
+---------------------
+
+Every area keeps its per-request state in one object, ``request.next``, a ``RequestNext`` of ``next.requests``, in place of attributes set by name on the request.
+Each slot has one owning area, and a contract test scans the sources so no area reads or writes a slot it does not own.
+``next_of`` returns the namespace and creates it on the first call, ``held_next`` returns ``None`` while none exists, and both raise :exc:`~django.core.exceptions.ImproperlyConfigured` for a foreign value under the attribute.
+``mark_purpose`` records the ``Purpose`` and the ``PrefetchDepth`` of a request in its ``RequestInfo``.
+The public contract is in :ref:`ref-request-next`.
+
+.. autoclass:: next.requests.RequestInfo
+
+.. autoclass:: next.requests.RequestNext
+   :members: purpose, depth, fork, adopt
+   :no-special-members:
+
+.. autofunction:: next.requests.next_of
+
+.. autofunction:: next.requests.held_next
+
+.. autofunction:: next.requests.mark_purpose
 
 See also
 --------

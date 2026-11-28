@@ -7,9 +7,15 @@ from django.test import Client
 
 from next.defer.lifecycle import boundary_token
 from next.lifecycle import PageCall, lifecycle
-from next.pages.responses import PrefetchDepth, Purpose, depth_of, purpose_of
 from next.partial.headers import partial_intent
-from next.requests import RequestKind
+from next.requests import (
+    PrefetchDepth,
+    Purpose,
+    RequestKind,
+    depth_of,
+    next_of,
+    purpose_of,
+)
 from next.testing import override_next_settings
 from next.views.kinds import note_purpose, route_request
 from tests.support import build_page_request, build_zone_request
@@ -140,10 +146,10 @@ class TestDecideRoute:
     def test_a_partial_request_without_a_token_keeps_nothing(self, rf) -> None:
         request = rf.get("/", **_PARTIAL)
         partial_intent(request)
-        held = set(vars(request))
         assert token_of(request) is None
         assert token_of(request) is None
-        assert set(vars(request)) == held
+        assert next_of(request).boundary_token is None
+        assert not [name for name in vars(request) if name.startswith("_next_")]
 
     def test_an_empty_token_field_is_still_carried(self, rf) -> None:
         with override_next_settings(
@@ -199,6 +205,6 @@ class TestForeignRequestNext:
 
     def test_the_page_view_names_the_attribute(self, settings) -> None:
         settings.MIDDLEWARE = [*settings.MIDDLEWARE, f"{__name__}.remember_redirect"]
-        owned = re.escape("next.dj owns the request.next attribute")
+        owned = re.escape("next.dj owns request.next and refuses any other value")
         with pytest.raises(ImproperlyConfigured, match=owned):
             Client().get("/")

@@ -10,8 +10,8 @@ from django.conf import settings
 from next.caches import FORK, ROUTES, BoundedCache
 from next.pages.loaders import layout_chain, layout_ids, template_source
 from next.pages.placeholder import placeholder_spans
-from next.pages.responses import depth_of, purpose_of
 from next.partial.headers import NAVIGATE
+from next.requests import depth_of, purpose_of
 from next.router.markers import Cut, CutKind, Divergence
 from next.router.signals import navigation_rendered
 

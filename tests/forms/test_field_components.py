@@ -23,12 +23,12 @@ from next.forms.errors import UnregisteredComponentError
 from next.forms.manager import form_action_manager
 from next.forms.serializers import field_spec
 from next.forms.widgets import (
-    COMPONENT_LOOKUP_CACHE_ATTR,
     ComponentFileWidget,
     ComponentWidget,
     _project_anchor,
     bind_component_widgets,
 )
+from next.requests import next_of
 from next.seeding import RenderFrame
 from next.static import StaticCollector
 from next.testing import override_component_backends
@@ -242,7 +242,7 @@ class TestComponentWidgetRequestCache:
             widget.render("slug", "a", attrs={})
             widget.render("slug", "b", attrs={})
         assert lookup.call_count == 1
-        cache = getattr(widget._frame.request, COMPONENT_LOOKUP_CACHE_ATTR)
+        cache = next_of(widget._frame.request).component_lookups
         assert ("echo", str(echo_component)) in cache
 
     def test_render_without_request_skips_cache(self, echo_component: Path) -> None:
@@ -260,7 +260,7 @@ class TestComponentWidgetRequestCache:
         widget._frame = RenderFrame(template_path=echo_component, request=HttpRequest())
         with pytest.raises(UnregisteredComponentError, match="is not registered"):
             widget.render("slug", "v", attrs={})
-        cache = getattr(widget._frame.request, COMPONENT_LOOKUP_CACHE_ATTR)
+        cache = next_of(widget._frame.request).component_lookups
         assert cache == {}
 
 

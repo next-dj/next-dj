@@ -148,7 +148,7 @@ The rows of ``DefaultDeliveryPolicy._reason`` read in this order, and the first 
 Each row is a ``DeliveryReason``, and the facts they read come from ``delivery_facts``, which gathers them once on the request thread.
 The cure for a row of the deployment, such as a buffering middleware, rides with its log record, see `Where to put a breakpoint`_.
 
-The decision is held on ``request.next.boundaries``, so an error boundary, a second render, or a partial render of the same request never asks twice.
+The decision is held on ``request.next.defer``, so an error boundary, a second render, or a partial render of the same request never asks twice.
 A stream takes its ``StreamSlot`` at the decision.
 The render has to know before it defers anything whether to stream or to assemble, and a partial response has no way back to inline once its response object exists.
 
@@ -267,7 +267,7 @@ State
 Three kinds of state exist, and a fix often belongs to the wrong one.
 
 On the request
-   ``RequestState`` in ``next/defer/state.py`` sits on ``request.next.boundaries``.
+   ``RequestState`` in ``next/defer/state.py`` sits on ``request.next.defer``, one slot of the namespace of :ref:`ref-request-next`.
    It holds the delivery decision, the server facts, the URL kwargs a trip token binds, the subjects issued to a binding, the context processor results the jobs share, and the session a render outside a render session counts on.
    Its lazy fields are made once under one lock, whichever thread asks first.
    The kernel types the slot as ``object`` and the feature narrows it, since the kernel never imports the feature.

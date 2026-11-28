@@ -6,7 +6,6 @@ import pytest
 from django.http import HttpRequest, HttpResponse
 from django.test import override_settings
 
-from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.pages import page
 from next.pages.loaders import (
     PageModuleImportError,
@@ -14,6 +13,7 @@ from next.pages.loaders import (
     load_python_module_memo,
 )
 from next.pages.manager import Built, render as manager_render
+from next.requests import next_of
 from tests.support import (
     bound_dependency,
     build_page_request,
@@ -257,7 +257,7 @@ class TestAuthorizationResolvesLikeAVisit:
         unified_view(page, leaf)
         request = HttpRequest()
         request.method = "POST"
-        setattr(request, REQUEST_DEP_CACHE_ATTR, {"board": "id=1"})
+        next_of(request).dep_cache = {"board": "id=1"}
         with bound_dependency("board", lambda board_id: f"id={board_id}"):
             denial, dynamic = page.authorization_outcome(
                 leaf, request, "/boards/2/", {"board_id": 2}
@@ -265,7 +265,7 @@ class TestAuthorizationResolvesLikeAVisit:
         assert denial is not None
         assert denial.content == b"id=2"
         assert dynamic is False
-        assert getattr(request, REQUEST_DEP_CACHE_ATTR) == {"board": "id=1"}
+        assert next_of(request).dep_cache == {"board": "id=1"}
 
     def test_two_guards_on_one_request_resolve_apart(self, tmp_path: Path) -> None:
         (leaf,) = write_page_chain(tmp_path, [("board", GUARDED)])

@@ -244,7 +244,7 @@ Each family owns its own signal rather than sharing one, so a receiver connected
      - After ``Page.render`` produces HTML and injects static assets.
        ``duration_ms`` times the render.
        ``context_keys`` is the tuple of context keys.
-       ``purpose`` is the ``Purpose`` of ``request.next``, ``document``, ``navigate``, ``prefetch`` or ``speculation``.
+       ``purpose`` is the ``Purpose`` of ``request.next``, ``document`` by default, ``navigate``, ``prefetch`` or ``speculation``.
        ``depth`` is the ``PrefetchDepth`` of ``request.next``, ``shell`` or ``full`` for a router prefetch and ``None`` for any other request.
        ``depth`` does not count visits, so see :ref:`topics-router-prefetch-visits` for how to count them.
        Fired only when a receiver for ``Page`` is connected, and the ``duration_ms`` timer runs under the same gate.

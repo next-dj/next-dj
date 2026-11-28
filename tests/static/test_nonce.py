@@ -6,10 +6,10 @@ from django.conf import settings
 from django.test import RequestFactory, override_settings
 from django.utils.functional import SimpleLazyObject
 
+from next.requests import next_of
 from next.static.nonce import (
     CSP_MIDDLEWARE,
     CSP_NONCE_ATTR,
-    NONCE_ATTR,
     django_get_nonce,
     nonce_active,
     nonce_enabled,
@@ -74,7 +74,7 @@ class TestResolveNonce:
         assert resolve_nonce(request) == "n1"
         request.csp_nonce = "n2"
         assert resolve_nonce(request) == "n1"
-        assert getattr(request, NONCE_ATTR) == "n1"
+        assert next_of(request).nonce == "n1"
 
     def test_false_turns_the_nonce_off(self) -> None:
         request = RequestFactory().get("/")
@@ -88,7 +88,7 @@ class TestResolveNonce:
         with patch("next.static.nonce.django_get_nonce", None):
             assert resolve_nonce(request) is None
             assert resolve_nonce(request) is None
-        assert getattr(request, NONCE_ATTR) is None
+        assert next_of(request).nonce is None
 
     def test_a_nonce_a_tag_read_counts_as_minted(self) -> None:
         request = RequestFactory().get("/")

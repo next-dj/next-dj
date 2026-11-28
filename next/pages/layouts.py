@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Final, NewType
 
 from next.boundaries.ids import ID_BYTES
 from next.caches import PageCache
+from next.requests import held_next, next_of
 from next.seeding import REQUEST_KEY
 from next.stamps import all_fresh
 from next.utils import template_edits_watched
@@ -40,7 +41,6 @@ META: Final = "nx:m"
 ASSETS: Final = "nx:a"
 """The marker kind around the tags the static injector writes into a placeholder."""
 
-RESPONSE_ID_ATTR: Final = "_next_response_id"
 _DIGEST_BYTES: Final = 8
 
 
@@ -74,18 +74,18 @@ def mint_response_id(request: HttpRequest) -> str:
 
     Only a view of a page with the router on mints one, so markers render nowhere else.
     """
-    held = getattr(request, RESPONSE_ID_ATTR, None)
-    if isinstance(held, str):
+    namespace = next_of(request)
+    held = namespace.response_id
+    if held is not None:
         return held
-    response_id = secrets.token_hex(ID_BYTES)
-    setattr(request, RESPONSE_ID_ATTR, response_id)
+    response_id = namespace.response_id = secrets.token_hex(ID_BYTES)
     return response_id
 
 
 def request_response_id(request: object) -> str | None:
     """Return the response id `request` carries, `None` for a render without one."""
-    held = getattr(request, RESPONSE_ID_ATTR, None)
-    return held if isinstance(held, str) else None
+    held = held_next(request)
+    return None if held is None else held.response_id
 
 
 def context_response_id(context: Context) -> str | None:
@@ -161,7 +161,6 @@ def forget_chains() -> None:
 __all__ = [
     "ASSETS",
     "META",
-    "RESPONSE_ID_ATTR",
     "SLOT",
     "ZONE",
     "LayoutChain",

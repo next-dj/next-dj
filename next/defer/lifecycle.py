@@ -15,7 +15,7 @@ from next.lifecycle import Gate, ResponseSource, Share
 from next.pages.access import refusal
 from next.pages.guards import GUARD_RAISES
 from next.partial.headers import partial_intent
-from next.requests import RequestKind
+from next.requests import RequestKind, held_next, next_of
 
 from . import reload
 from .assembly import PageRender, page_deferring, page_response
@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 
 
 NAME: Final = "defer"
-_CARRIED_ATTR: Final = "_next_boundary_token"
 
 
 def _kept(fields: QueryDict, field: str = FIELD) -> _ImmutableQueryDict:
@@ -81,19 +80,25 @@ def _without_field(request: HttpRequest) -> None:
         request.POST = _kept(request.POST, carrier.name)
 
 
+def _carried(request: HttpRequest) -> str | None:
+    """Return the token already found on `request`, creating no namespace."""
+    namespace = held_next(request)
+    return None if namespace is None else namespace.boundary_token
+
+
 def boundary_token(request: HttpRequest) -> str | None:
     """Return the token a partial request carries in the configured carrier.
 
     A carried token is kept before the query loses its field, an absent one is not.
     """
-    held = getattr(request, _CARRIED_ATTR, None)
-    if isinstance(held, str):
+    held = _carried(request)
+    if held is not None:
         return held
     token = None
     if partial_intent(request).partial:
         token = defer_manager.tokens().carrier.extract(request)
     if token is not None:
-        setattr(request, _CARRIED_ATTR, token)
+        next_of(request).boundary_token = token
     _without_field(request)
     return token
 
@@ -132,8 +137,7 @@ def _admitted(call: PageCall) -> HttpResponseBase | None:
 def _reloaded(call: PageCall) -> HttpResponseBase:
     """Answer the reload of one boundary the token of the request names."""
     request = call.request
-    held = getattr(request, _CARRIED_ATTR, "")
-    token = held if isinstance(held, str) else ""
+    token = _carried(request) or ""
     return reload.answer(request, call.file_path, call.kwargs, token, call.dep_cache)
 
 

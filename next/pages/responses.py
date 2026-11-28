@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import enum
 import functools
 import logging
 import re
@@ -13,7 +12,7 @@ import reprlib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from http.cookies import Morsel, SimpleCookie
-from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict, overload, override
+from typing import TYPE_CHECKING, Any, Final, TypedDict, override
 
 from django.core.exceptions import ImproperlyConfigured
 from django.template.response import SimpleTemplateResponse
@@ -21,7 +20,6 @@ from django.utils.cache import patch_cache_control, patch_vary_headers
 
 from next.caches import FRAMEWORK, PageCache
 from next.conf.compression import OPT_OUT
-from next.conf.sentinels import UNSET
 from next.conf.settings import fail_loudly
 from next.csrf import CsrfDelivery, csrf_delivery, defer_token, nonce_minted
 from next.deps.cache import render_dep_cache
@@ -31,7 +29,7 @@ from next.pages.compression import page_compress
 from next.pages.loaders import AncestorStamps
 from next.pages.metadata.markers import NOINDEX_DIRECTIVES, Metadata, robots_directives
 from next.pages.metadata.resolve import published_metadata, robots_contents
-from next.requests import PrefetchDepth
+from next.requests import held_next, next_of
 from next.site.headers import ROBOTS_HEADER, stamp_site_robots
 from next.utils import is_int
 
@@ -473,131 +471,6 @@ def _dynamic_cache(
     return NO_STORE
 
 
-class Purpose(enum.StrEnum):
-    """Why a page view rendered, which `request.next.purpose` names."""
-
-    DOCUMENT = "document"
-    NAVIGATE = "navigate"
-    PREFETCH = "prefetch"
-    SPECULATION = "speculation"
-
-
-@dataclass(frozen=True, slots=True)
-class RequestInfo:
-    """What next.dj tells user code about the request a page view serves."""
-
-    purpose: Purpose = Purpose.DOCUMENT
-    depth: PrefetchDepth | None = None
-
-
-NEXT_ATTR: Final = "next"
-"""The request attribute a page view sets, read by user code as `request.next`."""
-
-_INFOS: Final[dict[tuple[Purpose, PrefetchDepth | None], RequestInfo]] = {
-    key: RequestInfo(*key)
-    for key in (
-        (Purpose.DOCUMENT, None),
-        (Purpose.NAVIGATE, None),
-        (Purpose.SPECULATION, None),
-        (Purpose.PREFETCH, PrefetchDepth.SHELL),
-        (Purpose.PREFETCH, PrefetchDepth.FULL),
-    )
-}
-_DOCUMENT: Final = _INFOS[Purpose.DOCUMENT, None]
-
-
-class RequestNext:
-    """What next.dj keeps on one request, which user code reads as `request.next`.
-
-    User code reads `purpose` and `depth`, and `boundaries` holds the boundary state.
-    """
-
-    __slots__ = ("boundaries", "info")
-
-    def __init__(self, info: RequestInfo = _DOCUMENT) -> None:
-        """Hold `info` and no boundary state yet."""
-        self.info = info
-        self.boundaries: object = None
-
-    @property
-    def purpose(self) -> Purpose:
-        """Return why the page view rendered."""
-        return self.info.purpose
-
-    @property
-    def depth(self) -> PrefetchDepth | None:
-        """Return how much of the page a router prefetch asks for."""
-        return self.info.depth
-
-
-def _foreign(held: object) -> ImproperlyConfigured:
-    """Return the error for a value under `request.next` that next.dj did not set."""
-    return ImproperlyConfigured(
-        f"request.{NEXT_ATTR} holds a {type(held).__name__}, but next.dj owns the "
-        f"request.{NEXT_ATTR} attribute. Store the value under another name."
-    )
-
-
-def next_of(request: object) -> RequestNext:
-    """Return `request.next`, made on the first call as a document's."""
-    space = vars(request)
-    held = space.get(NEXT_ATTR)
-    if isinstance(held, RequestNext):
-        return held
-    if NEXT_ATTR in space:
-        raise _foreign(held)
-    made: RequestNext = space.setdefault(NEXT_ATTR, RequestNext())
-    return made
-
-
-@overload
-def mark_purpose(
-    request: HttpRequest, purpose: Literal[Purpose.PREFETCH], depth: PrefetchDepth
-) -> None: ...
-@overload
-def mark_purpose(
-    request: HttpRequest,
-    purpose: Literal[Purpose.DOCUMENT, Purpose.NAVIGATE, Purpose.SPECULATION],
-) -> None: ...
-def mark_purpose(
-    request: HttpRequest, purpose: Purpose, depth: PrefetchDepth | None = None
-) -> None:
-    """Point `request.next` at the shared info of `purpose` at `depth`.
-
-    Only a prefetch carries a depth, and any other pair is a `KeyError`.
-    """
-    next_of(request).info = _INFOS[purpose, depth]
-
-
-def _info(request: object) -> RequestInfo:
-    """Return the info `request.next` holds, a document's when no view set one."""
-    held = getattr(request, NEXT_ATTR, UNSET)
-    if isinstance(held, RequestNext):
-        return held.info
-    if held is UNSET:
-        return _DOCUMENT
-    raise _foreign(held)
-
-
-def purpose_of(request: object) -> Purpose:
-    """Return the purpose `request.next` names, a document when no view set one."""
-    return _info(request).purpose
-
-
-def depth_of(request: object) -> PrefetchDepth | None:
-    """Return the prefetch depth `request.next` names, `None` for any other request."""
-    return _info(request).depth
-
-
-_SHARED_RENDER_ATTR: Final = "_next_shared_render"
-_PERSONAL_RENDER_ATTR: Final = "_next_personal_render"
-_BOUND_RENDER_ATTR: Final = "_next_bound_render"
-_COOKIE_VARY_ATTR: Final = "_next_cookie_vary"
-
-RENDER_FLAGS: Final = (_PERSONAL_RENDER_ATTR, _BOUND_RENDER_ATTR, _COOKIE_VARY_ATTR)
-"""The flags a render sets on its request that keep the response private or varied."""
-
-
 def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
     """Prepare the render of a full page according to its policy.
 
@@ -612,47 +485,52 @@ def prepare_page_render(policy: ResponsePolicy, request: HttpRequest) -> None:
 
 def mark_shared_render(request: HttpRequest) -> None:
     """Mark a render a shared cache may store, so its HTML must not show a visitor."""
-    setattr(request, _SHARED_RENDER_ATTR, True)
+    next_of(request).shared_render = True
 
 
 def shared_render(request: HttpRequest | None) -> bool:
     """Whether a shared cache may store the response this render builds."""
-    return getattr(request, _SHARED_RENDER_ATTR, False) is True
+    held = held_next(request)
+    return held is not None and held.shared_render
 
 
 def mark_personal_render(request: HttpRequest | None) -> None:
     """Mark a render whose HTML is specific to one visitor, so it stays private."""
     if request is not None:
-        setattr(request, _PERSONAL_RENDER_ATTR, True)
+        next_of(request).personal_render = True
 
 
 def personal_render(request: HttpRequest | None) -> bool:
     """Whether this render put visitor-specific content into its HTML."""
-    return getattr(request, _PERSONAL_RENDER_ATTR, False) is True
+    held = held_next(request)
+    return held is not None and held.personal_render
 
 
 def mark_bound_render(request: HttpRequest | None) -> None:
     """Mark a render that minted a token bound to its visitor, sent private always."""
-    mark_personal_render(request)
     if request is not None:
-        setattr(request, _BOUND_RENDER_ATTR, True)
+        namespace = next_of(request)
+        namespace.personal_render = True
+        namespace.bound_render = True
 
 
 def _bound_private(response: HttpResponseBase, request: HttpRequest) -> None:
     """Send a response holding a visitor-bound token private when nothing else did."""
-    if getattr(request, _BOUND_RENDER_ATTR, False) is True and _carries_cache(response):
+    held = held_next(request)
+    if held is not None and held.bound_render and _carries_cache(response):
         patch_cache_control(response, private=True)
 
 
 def vary_on_cookie(request: HttpRequest | None) -> None:
     """Mark the response of `request` as one whose HTML depends on a cookie."""
     if request is not None:
-        setattr(request, _COOKIE_VARY_ATTR, True)
+        next_of(request).cookie_vary = True
 
 
 def cookie_varies(request: HttpRequest | None) -> bool:
     """Whether the HTML of this response depends on a cookie."""
-    return getattr(request, _COOKIE_VARY_ATTR, False) is True
+    held = held_next(request)
+    return held is not None and held.cookie_vary
 
 
 def _warn_private(file_path: Path) -> None:
@@ -933,22 +811,15 @@ __all__ = [
     "CDN_HEADERS",
     "CSP_HEADERS",
     "FORBIDDEN_HEADERS",
-    "NEXT_ATTR",
     "NO_STORE",
-    "RENDER_FLAGS",
     "CacheControl",
     "CacheDict",
     "HeadersDict",
-    "PrefetchDepth",
-    "Purpose",
-    "RequestInfo",
-    "RequestNext",
     "ResponsePolicy",
     "SharedCookies",
     "cache_control",
     "cache_problems",
     "cookie_varies",
-    "depth_of",
     "drop_cdn_headers",
     "finish_response",
     "finish_zone_response",
@@ -957,13 +828,10 @@ __all__ = [
     "is_header_value",
     "mark_bound_render",
     "mark_personal_render",
-    "mark_purpose",
     "mark_shared_render",
     "never_store",
-    "next_of",
     "personal_render",
     "prepare_page_render",
-    "purpose_of",
     "response_policy",
     "robots_tag",
     "shared_render",

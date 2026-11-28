@@ -108,7 +108,8 @@ Nonce
 
 ``resolve_nonce(request)`` answers the nonce of one render, read once per request while ``CSP_NONCE`` is ``True``.
 ``nonce_minted(request)`` answers whether a nonce was minted for the request, by a framework tag or by a template reading it, and the page response is made private once it is, so no shared cache keeps it.
-``nonce_minted``, ``NONCE_ATTR``, and ``CSP_NONCE_ATTR`` live in ``next.csrf`` beside the other request-scoped render flags, and ``next.static.nonce`` re-exports them, see :doc:`csrf`.
+``nonce_minted`` and ``CSP_NONCE_ATTR`` live in ``next.csrf`` beside the other request-scoped render flags, and ``next.static.nonce`` re-exports them, see :doc:`csrf`.
+``resolve_nonce`` keeps its answer on the request through ``memoised_nonce`` and ``memoise_nonce`` of ``next.csrf``, so the nonce is resolved once per request.
 ``request_nonce`` reads django-csp's ``request.csp_nonce`` or Django's own ``get_nonce``, and ``nonce_active()`` answers whether ``CSP_NONCE`` is on and one of the two middlewares, or a subclass of one, is installed.
 The injector hands the nonce to the script builder and to every backend renderer as the ``nonce`` keyword, see :doc:`/content/security/csp-and-nonce`.
 

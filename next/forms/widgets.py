@@ -15,6 +15,7 @@ from next.components.manager import components_manager
 from next.components.renderers import COMPONENT_PROPS_CONTEXT_KEY
 from next.interpolation import interpolation_of, scoped
 from next.ports import static_assets_slot
+from next.requests import next_of
 from next.seeding import EMPTY_FRAME, RenderFrame, current_ambient_frame
 from next.utils import resolve_base_dir
 
@@ -26,10 +27,6 @@ if TYPE_CHECKING:
 
     from next.components.info import ComponentInfo
     from next.static import StaticCollector
-
-
-# Per-request component lookup cache on the request, keyed by (name, anchor path).
-COMPONENT_LOOKUP_CACHE_ATTR: Final[str] = "_next_component_lookup_cache"
 
 
 _UNBOUND_ANCHOR_NAME: Final[str] = "<unbound-widget>"
@@ -96,10 +93,10 @@ class ComponentWidget(django_forms.Widget):
         cache: dict[tuple[str, str], ComponentInfo] | None = None
         key = (self.component_name, str(anchor))
         if request is not None:
-            cache = getattr(request, COMPONENT_LOOKUP_CACHE_ATTR, None)
+            namespace = next_of(request)
+            cache = namespace.component_lookups
             if cache is None:
-                cache = {}
-                setattr(request, COMPONENT_LOOKUP_CACHE_ATTR, cache)
+                cache = namespace.component_lookups = {}
             cached = cache.get(key)
             if cached is not None:
                 return cached

@@ -9,12 +9,12 @@ from django.urls import clear_script_prefix, set_script_prefix
 from next.forms import Form, origin
 from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.origin import (
-    _ORIGIN_MATCH_ATTR,
     OriginMatch,
     _page_path_from_view,
     resolve_origin,
     url_kwargs_for_request,
 )
+from next.requests import next_of
 
 
 SITE_PAGES = Path(__file__).resolve().parent.parent / "site_pages"
@@ -95,12 +95,12 @@ class TestResolveOrigin:
         second = resolve_origin(req)
         assert first is second
         assert calls["n"] == 1
-        assert getattr(req, _ORIGIN_MATCH_ATTR) is first
+        assert next_of(req).origin_match is first
 
     def test_none_result_is_memoised_too(self, mock_http_request) -> None:
         req = mock_http_request(method="POST", POST=QueryDict())
         assert resolve_origin(req) is None
-        assert getattr(req, _ORIGIN_MATCH_ATTR) is None
+        assert next_of(req).origin_match is None
         assert resolve_origin(req) is None
 
     def test_script_prefix_is_stripped_before_resolve(self, mock_http_request) -> None:

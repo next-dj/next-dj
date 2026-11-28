@@ -132,7 +132,7 @@ Cache
 ~~~~~
 
 ``DependencyCache`` stores what a named ``Depends("name")`` and a ``Depends(factory)`` returned and the rows ``DObject`` loads, so each of them runs once per cache, within one render unit on a sync and an async render alike, see :ref:`topics-dependency-injection`.
-A form action dispatch publishes its cache on the request under the attribute ``REQUEST_DEP_CACHE_ATTR`` names, and ``render_dep_cache`` hands a render that cache, so a hook and the render it triggers share their providers.
+A form action dispatch binds its cache to the request through ``bind_dep_cache``, and ``render_dep_cache`` hands a render that cache, so a hook and the render it triggers share their providers.
 
 .. automodule:: next.deps.cache
    :members:

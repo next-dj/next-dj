@@ -9,12 +9,12 @@ import pytest
 from django.http import Http404, HttpRequest
 from django.test import override_settings
 
-from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.pages import Page, page
 from next.pages.boundaries import SHELL_KEY, Caught
 from next.pages.manager import render as manager_render
 from next.pages.metadata import ResolvedMetadata
 from next.pages.metadata.chain import MetadataThunk
+from next.requests import next_of
 from next.seeding import METADATA_KEY, REQUEST_KEY
 from next.testing import override_next_settings
 from tests.support import (
@@ -507,14 +507,14 @@ class TestOneDependencyCachePerRender:
         with bound_dependency("counter", counter):
             unified_view(page, leaf)(request)
             page.build_render_context(leaf, request)
-        assert not hasattr(request, REQUEST_DEP_CACHE_ATTR)
+        assert next_of(request).dep_cache is None
         assert calls == [1, 1]
 
     def test_a_cache_already_on_the_request_is_reused(self, tmp_path: Path) -> None:
         source = _leaf_callable('wallet=Depends("wallet")', "wallet")
         (leaf,) = write_page_chain(tmp_path, [("leaf", source)])
         request = HttpRequest()
-        setattr(request, REQUEST_DEP_CACHE_ATTR, {"wallet": "preloaded"})
+        next_of(request).dep_cache = {"wallet": "preloaded"}
         with bound_dependency("wallet", lambda: "fresh"):
             meta = resolve_page_metadata(page, leaf, request)
         assert meta.title == "preloaded"

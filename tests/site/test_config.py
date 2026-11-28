@@ -6,9 +6,9 @@ from django.http import Http404, HttpRequest
 from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
+from next.requests import next_of
 from next.site import SiteOriginError, site_indexable, site_origin, site_url
 from next.site.config import (
-    SITE_ORIGIN_ATTR,
     SiteConfig,
     forget_site_config,
     indexable_without_request,
@@ -234,7 +234,7 @@ class TestSiteOrigin:
     def test_a_request_holds_its_origin_for_every_later_url(self) -> None:
         request = _get("testserver")
         first = site_origin(request)
-        assert getattr(request, SITE_ORIGIN_ATTR) == first
+        assert next_of(request).site_origin == first
         with site_settings(URL=BASE):
             assert site_origin(request) == first
             assert site_origin(_get("testserver")) == ("https", "acme.example")

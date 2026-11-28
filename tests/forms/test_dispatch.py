@@ -23,7 +23,7 @@ from django.test import override_settings
 from next.components import render_component
 from next.components.context import component as component_ctx
 from next.components.info import ComponentInfo
-from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
+from next.deps import Depends, resolver
 from next.forms import (
     ActionOutcome,
     ActionOutcomeKind,
@@ -46,7 +46,7 @@ from next.forms.uid import ORIGIN_FIELD_NAME
 from next.forms.wizard import FormWizard
 from next.pages import page
 from next.pages.registry import PageContextRegistry
-from next.requests import RequestKind
+from next.requests import RequestKind, next_of
 from next.testing import capture_signals, override_dependency
 from next.transactions import AtomicOverride
 from next.transactions.savepoints import WRITES
@@ -1035,7 +1035,7 @@ class TestDispatchSharedDepCache:
     """Dispatch threads a single dep_cache through factory, handler, and signals."""
 
     def test_dispatch_attaches_dep_cache_to_request(self, mock_http_request) -> None:
-        """``FormActionDispatch.dispatch`` sets ``request._next_dep_cache`` to a dict."""
+        """``FormActionDispatch.dispatch`` binds a dict as the dep cache of the request."""
         backend = RegistryFormActionBackend()
 
         def handler() -> str:
@@ -1057,7 +1057,7 @@ class TestDispatchSharedDepCache:
         assert meta is not None
         FormActionDispatch.dispatch(backend, request, "only_handler", meta)
 
-        assert isinstance(getattr(request, REQUEST_DEP_CACHE_ATTR, None), dict)
+        assert isinstance(next_of(request).dep_cache, dict)
 
     def test_action_dispatched_signal_carries_dep_cache(
         self, mock_http_request
@@ -1126,7 +1126,7 @@ class TestDispatchSharedDepCache:
             )
 
         assert response.content == b"hi"
-        assert getattr(request, REQUEST_DEP_CACHE_ATTR)["async_greeting"] == "hi"
+        assert next_of(request).dep_cache["async_greeting"] == "hi"
 
     def test_depends_provider_invoked_once_across_phases(
         self, mock_http_request
@@ -1170,7 +1170,7 @@ class TestDispatchSharedDepCache:
     def test_request_scope_cache_rejoined_by_consumer(
         self, mock_http_request, tmp_path, run_consumer
     ) -> None:
-        """Re-render consumers reuse ``request._next_dep_cache`` over re-resolving."""
+        """Re-render consumers reuse the dep cache of the request over re-resolving."""
         calls = {"n": 0}
 
         def make_token() -> str:
@@ -1178,7 +1178,7 @@ class TestDispatchSharedDepCache:
             return "fresh"
 
         request = mock_http_request(method="POST")
-        setattr(request, REQUEST_DEP_CACHE_ATTR, {"token": "preloaded"})
+        next_of(request).dep_cache = {"token": "preloaded"}
         with bound_dependency("token", make_token):
             value = run_consumer(tmp_path, request)
 

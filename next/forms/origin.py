@@ -2,12 +2,13 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from django.urls import Resolver404, get_script_prefix, resolve
 
 from next.conf.sentinels import UNSET
 from next.deps import RESERVED_KEYS
+from next.requests import next_of
 from next.utils import decode_url_path
 
 from .uid import URL_NAME_FORM_ACTION, is_path_only, posted_origin_path
@@ -15,9 +16,6 @@ from .uid import URL_NAME_FORM_ACTION, is_path_only, posted_origin_path
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
-
-
-_ORIGIN_MATCH_ATTR = "_next_form_origin_match"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,11 +97,12 @@ def _resolve_origin_match(request: "HttpRequest") -> "OriginMatch | None":
 
 def resolve_origin(request: "HttpRequest") -> "OriginMatch | None":
     """Return the posted-origin match for the request, memoised on the request."""
-    cached = getattr(request, _ORIGIN_MATCH_ATTR, UNSET)
+    namespace = next_of(request)
+    cached = namespace.origin_match
     if cached is not UNSET:
-        return cast("OriginMatch | None", cached)
+        return cached
     match = _resolve_origin_match(request)
-    setattr(request, _ORIGIN_MATCH_ATTR, match)
+    namespace.origin_match = match
     return match
 
 
