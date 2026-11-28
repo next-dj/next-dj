@@ -115,6 +115,11 @@ next.dj adds no middleware to ``MIDDLEWARE`` on its own and no model layer, so t
 - Plain Django views coexist with file-routed pages, see *Coexisting with plain Django views* in :doc:`/content/topics/pages`.
 - A link to a plain Django view loads as a document, since the client router takes over only the links to pages, see :ref:`topics-router-scope`.
 
+.. warning::
+
+   ``request.next`` is reserved for next.dj.
+   A middleware or view that assigns it, ``None`` included, makes the framework raise ``ImproperlyConfigured`` on its next read, so keep project state under another attribute, see :ref:`ref-request-next`.
+
 Where to start
 --------------
 

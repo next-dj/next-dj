@@ -20,8 +20,8 @@ from next.marks import fragment_marks
 from next.pages import page
 from next.pages.layouts import SLOT, enclosed
 from next.pages.loaders import layout_ids
-from next.pages.responses import Purpose
 from next.partial.patches import Envelope
+from next.requests import Purpose, next_of
 from next.router import Cut, CutKind, Divergence, router_clear, router_cleared
 from next.router.declarations import RouterOptions
 from next.router.markers import ClientLayouts, LayoutKey, ScannedLayout, ScannedPage
@@ -759,6 +759,17 @@ class TestDirectives:
         assert [event.kwargs["reason"] for event in recorder.events] == ["policy"]
         assert directives(request) == (CLEAR,)
         assert directives(request, snapshot=False) == (CLEAR, NO_SNAPSHOT)
+
+    def test_a_read_makes_no_namespace(self) -> None:
+        request = HttpRequest()
+        assert directives(request) == ()
+        assert "next" not in vars(request)
+
+    def test_the_reason_lives_in_the_namespace(self) -> None:
+        request = HttpRequest()
+        router_clear(request, "login")
+        assert next_of(request).router_clear == "login"
+        assert next_of(request).purpose is Purpose.DOCUMENT
 
     def test_a_cycled_session_clears(self, rf) -> None:
         request = rf.get("/")

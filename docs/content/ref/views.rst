@@ -46,11 +46,10 @@ A request to a page URL is routed once, then answered as :ref:`internals-request
 
 A partial request carries ``X-Next-Request: 1``, a header no cross-site form can set without a CORS preflight, so no request from another site reaches a boundary reload.
 ``next.defer.lifecycle.boundary_token`` reads the token from the configured carrier once and drops the token field from the query string and a form body, so nothing the page renders echoes it, and the page gate of ``next.defer`` drops the field from every other page request.
-``note_purpose`` sets ``request.next``, whose ``purpose`` names why the view renders, ``document``, ``navigate``, ``prefetch``, or ``speculation`` for a browser prefetch.
-Its ``depth`` is the ``PrefetchDepth`` of ``next.requests``, ``PrefetchDepth.SHELL`` for a router prefetch that asks for the shell, ``PrefetchDepth.FULL`` for one sent at the press of a link, and ``None`` for any other request.
-``purpose_of(request)`` and ``depth_of(request)`` from ``next.pages.responses`` read them, and :ref:`topics-router-prefetch-visits` says why ``depth`` is no visit counter.
-The ``next`` attribute of a request is reserved for the framework.
-A middleware or view that stores anything else there, a redirect target for one, makes the page view raise ``ImproperlyConfigured`` naming the attribute and the type found, so keep such a value under another name.
+``note_purpose`` records on ``request.next`` why the view renders, as ``purpose``, and how much of the page a router prefetch asks for, as ``depth``, see :ref:`ref-request-next`.
+``purpose`` is ``document``, ``navigate``, ``prefetch``, or ``speculation`` for a browser prefetch.
+``depth`` is ``PrefetchDepth.SHELL`` for a router prefetch that asks for the shell, ``PrefetchDepth.FULL`` for one sent at the press of a link, and ``None`` for any other request.
+:ref:`topics-router-prefetch-visits` says why ``depth`` is no visit counter.
 
 ``route_request`` answers a ``RequestKind`` of ``next.requests``, the one vocabulary of request kinds every layer shares, ``page``, ``zone``, ``boundary``, or ``navigate``, and form action dispatch adds ``action``.
 A request with ``X-Next-Request: 1`` takes the most specific kind a participant claims, ``boundary`` before ``zone`` before ``navigate``, and any other request is a ``page``.
@@ -66,6 +65,40 @@ A request with ``X-Next-Request: 1`` takes the most specific kind a participant 
 .. autofunction:: next.views.kinds.route_request
 
 .. autofunction:: next.defer.lifecycle.boundary_token
+
+.. _ref-request-next:
+
+The request namespace
+~~~~~~~~~~~~~~~~~~~~~
+
+``request.next`` tells a view or a template why next.dj renders the page.
+``request.next.purpose`` is the reason, a ``Purpose`` that reads ``document`` for a plain page load, ``navigate`` for a client router navigation, ``prefetch`` for a router prefetch, and ``speculation`` for a browser prefetch.
+``request.next.depth`` is how much of the page a router prefetch asks for, ``PrefetchDepth.SHELL`` or ``PrefetchDepth.FULL``, and it is ``None`` on every other request.
+``purpose`` is never ``None``, and a request ``note_purpose`` never marked answers ``Purpose.DOCUMENT``, a form re-render, a login view, and a plain Django view alike.
+``purpose_of(request)`` and ``depth_of(request)`` read the same two values off any request without creating the namespace.
+
+``request.next`` is owned by next.dj, and that is a hard requirement.
+A project never assigns it.
+Any value other than the namespace the framework made, ``None`` included, makes the next framework read of it raise :exc:`~django.core.exceptions.ImproperlyConfigured`.
+The read can come from anywhere, a page view, the auth login and logout signals, a middleware, or a plain template that renders a component or reads consent.
+The refusal is deliberate, because the framework keeps no tolerance path that would let two owners of one attribute disagree silently.
+Keep project state under an attribute with a name of the project's own.
+
+The namespace is not an extension point.
+Its other attributes are internal slots, and writing any of them is unsupported.
+The class is final and declares ``__slots__``, so it takes no new attribute either.
+
+Threads and deferred jobs that hold the request share the namespace by reference, and the first read creates it without a race.
+``copy.copy(request)`` shares the namespace with the original.
+A visit made by ``visit_request`` of ``next.pages.visits`` forks it with ``RequestNext.fork()``, so the visit has a namespace of its own that still reaches the same deferred state as the request it came from, see :doc:`pages`.
+:ref:`internals-request-namespace` describes the namespace itself.
+
+.. autoclass:: next.requests.Purpose
+   :no-special-members:
+
+.. autofunction:: next.requests.purpose_of
+
+.. autofunction:: next.requests.depth_of
 
 Participants
 ------------

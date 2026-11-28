@@ -5,9 +5,8 @@ from typing import Final
 from django.http import HttpRequest
 
 from next.lifecycle import lifecycle
-from next.pages.responses import Purpose, mark_purpose
 from next.partial.headers import partial_intent
-from next.requests import RequestKind
+from next.requests import Purpose, RequestKind, mark_purpose
 
 
 _SPECULATIVE: Final = "prefetch"

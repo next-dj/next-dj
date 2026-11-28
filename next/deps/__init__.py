@@ -6,7 +6,7 @@ The resolver backend is pluggable via `NEXT_FRAMEWORK["DEPENDENCY_RESOLVER"]`.
 from __future__ import annotations
 
 from . import signals
-from .cache import REQUEST_DEP_CACHE_ATTR, render_dep_cache
+from .cache import bind_dep_cache, render_dep_cache
 from .context import RESERVED_KEYS, ResolutionContext
 from .errors import (
     AsyncDependencyError,
@@ -37,7 +37,6 @@ from .resolver import DependencyResolver, resolver
 __all__ = [
     "READS_EVERY",
     "READS_NOTHING",
-    "REQUEST_DEP_CACHE_ATTR",
     "RESERVED_KEYS",
     "AnsweringParameterProvider",
     "AsyncCompilingParameterProvider",
@@ -60,6 +59,7 @@ __all__ = [
     "ResolutionContext",
     "UnboundObjectError",
     "UnknownDependencyError",
+    "bind_dep_cache",
     "provider_registry",
     "render_dep_cache",
     "resolver",

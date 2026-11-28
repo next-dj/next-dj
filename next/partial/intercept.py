@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import PermissionDenied
 
@@ -10,6 +10,7 @@ from next.deps import render_dep_cache
 from next.intercept import intercepts
 from next.pages.access import page_access, refusal
 from next.pages.loaders import last_load_error
+from next.requests import held_next, next_of
 
 from .errors import ForeignPageNotAuthorizedError
 from .registry import zones_served
@@ -24,18 +25,15 @@ if TYPE_CHECKING:
     from next.intercept import Intercept
 
 
-_GRANTS_ATTR: Final = "_next_partial_grants"
-
-
 @dataclass(frozen=True, slots=True)
-class _Grant:
+class Grant:
     """One admission of a page to a user under the URL kwargs it was checked with."""
 
     page_path: "Path"
     url_kwargs: dict[str, Any]
     user: object
 
-    def same(self, other: "_Grant") -> bool:
+    def same(self, other: "Grant") -> bool:
         """Whether `other` admitted the same page, kwargs and user object."""
         return (
             self.user is other.user
@@ -67,14 +65,13 @@ def admit(
 
     A grant is kept on the request for the same page, kwargs and user, a refusal never.
     """
-    grant = _Grant(page_path, dict(url_kwargs), getattr(request, "user", None))
-    granted = _grants(request)
-    if any(grant.same(held) for held in granted):
+    grant = Grant(page_path, dict(url_kwargs), getattr(request, "user", None))
+    if any(grant.same(held) for held in _granted(request)):
         return None
     cache = render_dep_cache(request) if dep_cache is None else dep_cache
     redirect = refusal(page_path, request, grant.url_kwargs, cache)
     if redirect is None:
-        granted.append(grant)
+        _keep_grant(request, grant)
     return redirect
 
 
@@ -124,14 +121,20 @@ def refuse_access(
     refuse_intercept(page_path, request, url_kwargs)
 
 
-def _grants(request: "HttpRequest") -> list[_Grant]:
-    """Return the grants kept on `request`, an empty list kept on its first read."""
-    held = getattr(request, _GRANTS_ATTR, None)
-    if held is not None:
-        return cast("list[_Grant]", held)
-    fresh: list[_Grant] = []
-    setattr(request, _GRANTS_ATTR, fresh)
-    return fresh
+def _granted(request: "HttpRequest") -> list[Grant]:
+    """Return the grants kept on `request`, none before its first admission."""
+    namespace = held_next(request)
+    held = None if namespace is None else namespace.grants
+    return [] if held is None else held
+
+
+def _keep_grant(request: "HttpRequest", grant: Grant) -> None:
+    """Keep `grant` on `request`, making the list on the first one."""
+    namespace = next_of(request)
+    grants = namespace.grants
+    if grants is None:
+        grants = namespace.grants = []
+    grants.append(grant)
 
 
 def _serves_all(page_path: "Path", target_file: "Path", zones: tuple[str, ...]) -> bool:
@@ -141,6 +144,7 @@ def _serves_all(page_path: "Path", target_file: "Path", zones: tuple[str, ...]) 
 
 
 __all__ = [
+    "Grant",
     "admit",
     "pick_intercept",
     "refuse_access",

@@ -9,7 +9,7 @@ from django.utils.cache import patch_vary_headers
 
 from next.caches import pure_cache
 from next.forms.uid import validated_origin_path
-from next.requests import PrefetchDepth
+from next.requests import PrefetchDepth, next_of
 from next.transactions.policy import SAFE_METHODS
 from next.utils import meta_key
 from next.wire import REQUEST_FLAG
@@ -62,7 +62,6 @@ VARY_HEADERS: tuple[str, ...] = (
 )
 STREAM_VARY: tuple[str, ...] = ("Accept",)
 
-_INTENT_ATTR = "_next_partial_intent"
 _JSON = "application/json"
 _RANKED = frozenset({EVENT_STREAM, _JSON})
 PREFETCH_SHELL: Final = "1"
@@ -170,11 +169,12 @@ def _parse_intent(request: "HttpRequest") -> PartialIntent:
 
 def partial_intent(request: "HttpRequest") -> PartialIntent:
     """Return the partial intent of the request, memoised on the request."""
-    cached = getattr(request, _INTENT_ATTR, None)
-    if isinstance(cached, PartialIntent):
+    namespace = next_of(request)
+    cached = namespace.intent
+    if cached is not None:
         return cached
     intent = _parse_intent(request)
-    setattr(request, _INTENT_ATTR, intent)
+    namespace.intent = intent
     return intent
 
 

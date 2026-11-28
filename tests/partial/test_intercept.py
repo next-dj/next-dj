@@ -19,6 +19,7 @@ from next.partial.intercept import (
     refuse_intercept,
     resolve_served_page,
 )
+from next.requests import next_of
 from tests.support import routed, write_page
 from tests.support.access import PAGE_HEAD, login_required_middleware, page_source
 from tests.support.cases.intercepts import PICK_CASES, PickCase, zone_body
@@ -253,6 +254,26 @@ class TestGrantsWithinOneRequest:
             refuse_access(page_file, request, {})
 
         assert calls == [page_file]
+
+    def test_a_refusal_keeps_no_grants(self, root: Path) -> None:
+        page_file = _page(
+            root, "shut", "x", f'{PAGE_HEAD}page.permission_required("auth.add_user")\n'
+        )
+        request = _request(())
+
+        with _mounted(root, "/shut/"), pytest.raises(ForeignPageNotAuthorizedError):
+            refuse_intercept(page_file, request, {})
+
+        assert next_of(request).grants is None
+
+    def test_an_admission_keeps_a_grant(self, root: Path) -> None:
+        page_file = _page(root, "open", "x", page_source())
+        request = _request()
+
+        with _mounted(root, "/open/"):
+            admit(page_file, request, {}, {})
+
+        assert len(next_of(request).grants) == 1
 
     def test_other_kwargs_are_checked_again(
         self, root: Path, calls: list[Path]

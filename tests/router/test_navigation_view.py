@@ -15,10 +15,10 @@ from next.defer.policy import DefaultDeliveryPolicy, DeliveryDecision, open_stre
 from next.pages import page
 from next.pages.layouts import SLOT
 from next.pages.loaders import LayoutTemplateLoader
-from next.pages.responses import PrefetchDepth, Purpose, purpose_of
 from next.pages.signals import page_rendered
 from next.partial.headers import VARY_HEADERS
 from next.ports import PortSlot
+from next.requests import PrefetchDepth, Purpose, purpose_of
 from next.router import (
     CutKind,
     PrefetchShed,

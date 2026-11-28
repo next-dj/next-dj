@@ -14,7 +14,7 @@ from django.http import (
     HttpResponseRedirect,
 )
 
-from next.deps import REQUEST_DEP_CACHE_ATTR, UnboundObjectError
+from next.deps import UnboundObjectError, bind_dep_cache
 from next.deps.resolver import current_resolver
 from next.forms.errors import SessionRotationError
 from next.forms.formsets import error_field_names, error_message_count
@@ -221,7 +221,7 @@ class FormActionDispatch:
             origin_match=origin_match,
             guard=guard,
         )
-        setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
+        bind_dep_cache(request, state.dep_cache)
         try:
             return FormActionDispatch._atomic(
                 backend, request, action_name, meta, state, pin

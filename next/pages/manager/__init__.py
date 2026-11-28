@@ -32,9 +32,9 @@ from next.pages.metadata.scope import forget_metadata_scope
 from next.pages.paths import clear_page_path_info, forget_page_path_info
 from next.pages.processors import page_context
 from next.pages.registry import PageContextRegistry
-from next.pages.responses import depth_of, purpose_of
 from next.pages.signals import page_rendered, template_loaded
 from next.ports import render_deferred, static_assets_slot
+from next.requests import depth_of, purpose_of
 from next.seeding import seed_collector
 
 from .bodies import PageBodies

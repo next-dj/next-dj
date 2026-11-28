@@ -12,13 +12,7 @@ from django.contrib.auth.models import Group, Permission
 
 from next.components import components_manager
 from next.components.modules import ModuleLoader
-from next.deps import (
-    REQUEST_DEP_CACHE_ATTR,
-    Depends,
-    DObject,
-    RegisteredParameterProvider,
-    provider_registry,
-)
+from next.deps import Depends, DObject, RegisteredParameterProvider, provider_registry
 from next.deps.cache import RequestMemo, request_memo
 from next.deps.objects import SCOPE_DEPENDENCY
 from next.deps.resolver import DependencyResolver
@@ -26,6 +20,7 @@ from next.deps.runner import run_on_request_thread, segment_runner
 from next.deps.scope import RequestScope, render_scope
 from next.pages import Context, page
 from next.pages.registry import PageContextRegistry
+from next.requests import next_of
 from next.testing import make_resolution_context
 from tests.support import (
     bound_dependency,
@@ -441,7 +436,7 @@ class TestComponentUnit:
         ):
             request = build_page_request()
             if dispatch:
-                setattr(request, REQUEST_DEP_CACHE_ATTR, {})
+                next_of(request).dep_cache = {}
             response = view(request)
         assert response.content.decode().count("<b>LABEL</b>") == 2
         assert len(made) == calls

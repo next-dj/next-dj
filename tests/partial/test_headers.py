@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 from django.utils.cache import patch_vary_headers
@@ -18,7 +19,7 @@ from next.partial.headers import (
     set_stream_vary,
     vary_on,
 )
-from next.requests import PrefetchDepth
+from next.requests import PrefetchDepth, next_of
 from next.testing import NextClient
 
 
@@ -128,6 +129,17 @@ class TestPartialIntentMemoised:
         request.META["HTTP_X_NEXT_ZONE"] = "b"
         assert partial_intent(request) is first
         assert partial_intent(request).zones == ("a",)
+
+    def test_the_intent_lives_in_the_namespace(self) -> None:
+        request = _request_with_headers(**{"X-Next-Request": "1"})
+        assert partial_intent(request) is next_of(request).intent
+        assert not [name for name in vars(request) if name.startswith("_next_")]
+
+    def test_a_foreign_value_under_next_is_refused(self) -> None:
+        request = _request_with_headers(**{"X-Next-Request": "1"})
+        request.next = "/after-login/"
+        with pytest.raises(ImproperlyConfigured, match=r"owns request\.next"):
+            partial_intent(request)
 
     def test_parses_only_once(self) -> None:
         request = MagicMock(spec=HttpRequest)

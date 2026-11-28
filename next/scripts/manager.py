@@ -20,7 +20,8 @@ from next.consent.manager import consent_configured, consent_payload, server_mod
 from next.consent.markers import joint_category
 from next.diagnostics import FailureLog
 from next.discovery import routed_page_trees
-from next.pages.responses import Purpose, purpose_of, vary_on_cookie
+from next.pages.responses import vary_on_cookie
+from next.requests import Purpose, purpose_of
 from next.static import (
     StaticAsset,
     StaticCollector,

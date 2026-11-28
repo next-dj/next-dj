@@ -344,6 +344,18 @@ NextClient
 
 Every inherited method behaves as documented for :class:`django.test.Client`, including ``follow=True``.
 
+The request the view served stays on ``response.wsgi_request``, so a test reads why the page rendered from ``request.next.purpose``.
+
+.. code-block:: python
+   :caption: tests/test_index.py
+
+   from next.requests import Purpose
+   from next.testing.client import NextClient
+
+   def test_index_is_a_document() -> None:
+       response = NextClient().get("/")
+       assert response.wsgi_request.next.purpose is Purpose.DOCUMENT
+
 Posting to actions
 ~~~~~~~~~~~~~~~~~~
 

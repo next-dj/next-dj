@@ -8,7 +8,9 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
+
+from next.requests import held_next, next_of
 
 
 if TYPE_CHECKING:
@@ -21,16 +23,27 @@ _IN_PROGRESS: object = object()
 _CACHE_MISS: object = object()
 
 
-REQUEST_DEP_CACHE_ATTR: Final[str] = "_next_dep_cache"
-
-
 def render_dep_cache(request: object | None) -> dict[str, Any]:
     """Return the form dispatch cache on `request`, or a new dict that stays off it.
 
     A cache stored on the request would be shared with every component on the page.
     """
-    cache = None if request is None else getattr(request, REQUEST_DEP_CACHE_ATTR, None)
-    return cache if isinstance(cache, dict) else {}
+    held = held_next(request)
+    cache = None if held is None else held.dep_cache
+    return {} if cache is None else cache
+
+
+def bind_dep_cache(
+    request: object, cache: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Hang the dispatch `cache` on `request` and return the one it replaces.
+
+    Binding the returned cache restores it, and binding `None` clears the request.
+    """
+    namespace = next_of(request)
+    previous = namespace.dep_cache
+    namespace.dep_cache = cache
+    return previous
 
 
 class DependencyCache:

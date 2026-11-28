@@ -16,11 +16,11 @@ from django.http import HttpResponse
 from next.conf.router import router_enabled
 from next.intercept import intercepts
 from next.lifecycle import Gate, ResponseSource, Share
-from next.pages.responses import depth_of, never_store, purpose_of
+from next.pages.responses import never_store
 from next.partial.headers import SEC_FETCH_SITE, partial_intent, set_partial_vary
 from next.partial.intercept import pick_intercept
 from next.partial.lifecycle import stream_of
-from next.requests import RequestKind
+from next.requests import RequestKind, depth_of, purpose_of
 from next.utils import request_header
 
 from . import navigation

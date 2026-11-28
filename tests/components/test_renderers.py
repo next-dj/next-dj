@@ -31,17 +31,13 @@ from next.components.renderers import (
     _BridgedContextRun,
 )
 from next.deps import Depends, ResolutionContext
-from next.deps.cache import (
-    REQUEST_DEP_CACHE_ATTR,
-    DependencyCache,
-    RequestMemo,
-    request_memo,
-)
+from next.deps.cache import DependencyCache, RequestMemo, request_memo
 from next.deps.markers import factory_key
 from next.deps.resolver import current_resolver
 from next.deps.scope import RequestScope
 from next.marks import fragment_marks
 from next.pages import page
+from next.requests import next_of
 from next.seeding import TEMPLATE_PATH_KEY
 from tests.support import (
     bound_dependency,
@@ -129,7 +125,7 @@ class TestNamedDependenciesPerInstance:
         ):
             request = build_page_request()
             if dispatch:
-                setattr(request, REQUEST_DEP_CACHE_ATTR, {})
+                next_of(request).dep_cache = {}
             response = view(request)
         assert response.content.decode().count("<b>") == 3
         for label in ("alpha", "beta", "gamma"):

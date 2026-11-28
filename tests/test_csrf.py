@@ -25,8 +25,8 @@ from django.urls import (
 )
 
 from next.conf import next_framework_settings
+from next.conf.sentinels import UNSET
 from next.csrf import (
-    CSRF_DEFERRED_ATTR,
     CsrfDelivery,
     csrf_delivery,
     csrf_header_name,
@@ -34,10 +34,14 @@ from next.csrf import (
     csrf_token_payload,
     csrf_view,
     defer_token,
+    memoise_nonce,
+    memoised_nonce,
+    nonce_minted,
     secret_changed,
     token_deferred,
 )
 from next.forms.uid import ORIGIN_FIELD_NAME
+from next.requests import NEXT_ATTR, next_of
 from tests.support import FEED_URLCONF, routed, write_page
 from tests.support.sites import mine
 
@@ -113,7 +117,34 @@ class TestDelivery:
         assert token_deferred(request) is False
         defer_token(request)
         assert token_deferred(request) is True
-        assert getattr(request, CSRF_DEFERRED_ATTR) is True
+        assert next_of(request).csrf_deferred is True
+
+    def test_reading_the_mark_makes_no_namespace(self) -> None:
+        request = RequestFactory().get("/")
+        assert token_deferred(request) is False
+        assert NEXT_ATTR not in vars(request)
+
+
+class TestHeldNonce:
+    """The nonce memo of a request, where `None` is an answer and `UNSET` is none."""
+
+    def test_a_request_without_a_namespace_holds_no_memo(self) -> None:
+        request = RequestFactory().get("/")
+        assert memoised_nonce(request) is UNSET
+        assert not nonce_minted(request)
+        assert NEXT_ATTR not in vars(request)
+
+    @pytest.mark.parametrize("nonce", ["n1", None])
+    def test_a_held_nonce_reads_back(self, nonce: str | None) -> None:
+        request = RequestFactory().get("/")
+        memoise_nonce(request, nonce)
+        assert memoised_nonce(request) == nonce
+        assert nonce_minted(request) is (nonce is not None)
+
+    def test_a_namespace_without_a_memo_holds_none_yet(self) -> None:
+        request = RequestFactory().get("/")
+        defer_token(request)
+        assert memoised_nonce(request) is UNSET
 
 
 class TestPayload:

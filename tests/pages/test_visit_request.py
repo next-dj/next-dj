@@ -7,20 +7,19 @@ from django.middleware.csrf import CsrfViewMiddleware
 from django.test import RequestFactory
 from django.test.utils import override_script_prefix
 
-from next.csrf import NONCE_ATTR, nonce_minted
-from next.deps import REQUEST_DEP_CACHE_ATTR
+from next.conf.sentinels import UNSET
+from next.csrf import memoised_nonce, nonce_minted
 from next.pages import page
 from next.pages.loaders import _load_python_module
-from next.pages.metadata.resolve import RESOLVED_METADATA_ATTR
 from next.pages.responses import (
-    RENDER_FLAGS,
     ResponsePolicy,
     cache_control,
     cookie_varies,
     finish_response,
     personal_render,
 )
-from next.pages.visits import HANDED_BACK, hand_back, visit_request, visiting
+from next.pages.visits import hand_back, visit_request, visiting
+from next.requests import NEXT_ATTR, next_of
 from next.testing import NextClient, envelope_of
 from tests.support.pages import write_page
 
@@ -88,10 +87,25 @@ class TestVisitRequestPresentsTheOriginUrl:
         self, dispatch_post
     ) -> None:
         cache = {"board": "origin"}
-        setattr(dispatch_post, REQUEST_DEP_CACHE_ATTR, cache)
+        next_of(dispatch_post).dep_cache = cache
         visit = visit_request(dispatch_post, "/boards/2/")
-        assert not hasattr(visit, REQUEST_DEP_CACHE_ATTR)
-        assert getattr(dispatch_post, REQUEST_DEP_CACHE_ATTR) is cache
+        assert next_of(visit).dep_cache is None
+        assert next_of(dispatch_post).dep_cache is cache
+
+    def test_the_visit_gets_a_copy_of_the_namespace(self, dispatch_post) -> None:
+        live = next_of(dispatch_post)
+        live.response_id = "r1"
+        visit = next_of(visit_request(dispatch_post, "/notes/"))
+        assert visit is not live
+        assert visit.response_id == "r1"
+        visit.cookie_vary = True
+        assert live.cookie_vary is False
+
+    def test_a_request_without_a_namespace_gets_the_root_of_the_visit(
+        self, dispatch_post
+    ) -> None:
+        visit = visit_request(dispatch_post, "/notes/")
+        assert vars(visit)[NEXT_ATTR].root is vars(dispatch_post)[NEXT_ATTR]
 
 
 class TestVisitRequestWithoutAUrl:
@@ -165,7 +179,7 @@ _MARKING_RENDER = """
 from django.http import HttpRequest, HttpResponseRedirect
 from django.middleware.csrf import get_token
 
-from next.csrf import NONCE_ATTR
+from next.csrf import memoise_nonce
 from next.pages.responses import mark_bound_render, vary_on_cookie
 
 
@@ -173,7 +187,7 @@ def render(request: HttpRequest) -> HttpResponseRedirect:
     get_token(request)
     vary_on_cookie(request)
     mark_bound_render(request)
-    setattr(request, NONCE_ATTR, "visit-nonce")
+    memoise_nonce(request, "visit-nonce")
     return HttpResponseRedirect("/closed/")
 """
 
@@ -202,7 +216,12 @@ class TestVisitHandsBackWhatItsRenderMarked:
         self, tmp_path: Path, dispatch_post: HttpRequest
     ) -> None:
         _authorize(write_page(tmp_path, "", _MARKING_RENDER), dispatch_post)
-        assert all(getattr(dispatch_post, name) is True for name in RENDER_FLAGS)
+        live = next_of(dispatch_post)
+        assert (live.personal_render, live.bound_render, live.cookie_vary) == (
+            True,
+            True,
+            True,
+        )
         assert personal_render(dispatch_post)
         assert cookie_varies(dispatch_post)
 
@@ -210,7 +229,7 @@ class TestVisitHandsBackWhatItsRenderMarked:
         self, tmp_path: Path, dispatch_post: HttpRequest
     ) -> None:
         _authorize(write_page(tmp_path, "", _MARKING_RENDER), dispatch_post)
-        assert getattr(dispatch_post, NONCE_ATTR) == "visit-nonce"
+        assert memoised_nonce(dispatch_post) == "visit-nonce"
         assert nonce_minted(dispatch_post)
 
     def test_a_read_token_sets_the_cookie_of_the_live_response(
@@ -239,16 +258,22 @@ class TestVisitHandsBackWhatItsRenderMarked:
             write_page(tmp_path, "", _QUIET_RENDER), dispatch_post, "/marked/"
         )
         assert denial is None
-        assert not any(hasattr(dispatch_post, name) for name in HANDED_BACK)
+        live = next_of(dispatch_post)
+        assert (live.personal_render, live.bound_render, live.cookie_vary) == (
+            False,
+            False,
+            False,
+        )
+        assert memoised_nonce(dispatch_post) is UNSET
         assert "CSRF_COOKIE_NEEDS_UPDATE" not in dispatch_post.META
 
     def test_what_belongs_to_the_visit_stays_on_it(
         self, dispatch_post: HttpRequest
     ) -> None:
         visit = visit_request(dispatch_post, "/notes/")
-        setattr(visit, RESOLVED_METADATA_ATTR, object())
+        next_of(visit).metadata = object()
         hand_back(visit, dispatch_post)
-        assert not hasattr(dispatch_post, RESOLVED_METADATA_ATTR)
+        assert next_of(dispatch_post).metadata is None
         assert dispatch_post.method == "POST"
 
     def test_a_failing_render_still_hands_back(

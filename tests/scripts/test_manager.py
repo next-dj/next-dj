@@ -6,7 +6,8 @@ import pytest
 from django.test import Client, RequestFactory, override_settings
 
 from next.errors import BackendImportError
-from next.pages.responses import PrefetchDepth, Purpose, cookie_varies, mark_purpose
+from next.pages.responses import cookie_varies
+from next.requests import PrefetchDepth, Purpose, mark_purpose
 from next.scripts.discovery import load_scripts
 from next.scripts.manager import ScriptsManager, scripts_manager
 from next.scripts.markers import Script, Strategy

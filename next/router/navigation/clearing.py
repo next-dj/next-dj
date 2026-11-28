@@ -9,6 +9,7 @@ from django.contrib.sessions.backends.signed_cookies import SessionStore as Sign
 
 from next.conf.router import router_enabled
 from next.partial.headers import ROUTER
+from next.requests import held_next, next_of
 from next.router.signals import router_cleared
 
 from .state import Routing
@@ -25,7 +26,11 @@ CLEAR: Final = "clear"
 NO_SNAPSHOT: Final = "no_snapshot"
 """The `X-Next-Router` directive that keeps a page out of history snapshots."""
 
-_CLEAR_ATTR: Final = "_next_router_clear"
+
+def _clear_reason(request: HttpRequest) -> str | None:
+    """Return the clear reason of `request`, creating no namespace."""
+    held = held_next(request)
+    return None if held is None else held.router_clear
 
 
 def router_clear(request: HttpRequest, reason: str = "policy") -> None:
@@ -33,21 +38,23 @@ def router_clear(request: HttpRequest, reason: str = "policy") -> None:
 
     Login, logout and a session key cycle send it on their own.
     """
-    if getattr(request, _CLEAR_ATTR, None) is not None:
+    if _clear_reason(request) is not None:
         return
-    setattr(request, _CLEAR_ATTR, reason)
+    next_of(request).router_clear = reason
     if router_cleared.has_listeners(Routing):
         router_cleared.send_robust(sender=Routing, reason=reason, request=request)
 
 
 def clear_on_login(*, request: HttpRequest, **kwargs: object) -> None:
     """Mark the request a user logged in on, as `user_logged_in` reports it."""
-    router_clear(request, "login")
+    if router_enabled():
+        router_clear(request, "login")
 
 
 def clear_on_logout(*, request: HttpRequest, **kwargs: object) -> None:
     """Mark the request a user logged out on, as `user_logged_out` reports it."""
-    router_clear(request, "logout")
+    if router_enabled():
+        router_clear(request, "logout")
 
 
 def _cycled(request: HttpRequest) -> bool:
@@ -64,9 +71,9 @@ def _cycled(request: HttpRequest) -> bool:
 
 def clearing(request: HttpRequest) -> bool:
     """Whether the response to `request` clears the router, a cycled session too."""
-    if getattr(request, _CLEAR_ATTR, None) is None and _cycled(request):
+    if _clear_reason(request) is None and _cycled(request):
         router_clear(request, "session")
-    return getattr(request, _CLEAR_ATTR, None) is not None
+    return _clear_reason(request) is not None
 
 
 def directives(request: HttpRequest, *, snapshot: bool = True) -> tuple[str, ...]:

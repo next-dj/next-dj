@@ -6,7 +6,7 @@ from django import forms as django_forms
 from django.contrib.auth.models import Group
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 
-from next.deps import REQUEST_DEP_CACHE_ATTR, Depends
+from next.deps import Depends
 from next.forms import (
     ActionRegistration,
     Form,
@@ -20,6 +20,7 @@ from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.manager import build_form_namespace_for_action, form_action_manager
 from next.forms.uid import ORIGIN_FIELD_NAME
+from next.requests import next_of
 from next.testing import NextClient, envelope_of, override_dependency
 from next.urls import DUrl
 from tests.support import bound_dependency
@@ -200,7 +201,7 @@ class TestDefaultGetFormKwargs:
                 return {"name": tenant}
 
         request = mock_http_request(method="GET")
-        setattr(request, REQUEST_DEP_CACHE_ATTR, {"tenant": "cached"})
+        next_of(request).dep_cache = {"tenant": "cached"}
         with override_dependency("tenant", "fresh"):
             kwargs = TenantForm.get_form_kwargs(request)
         assert kwargs == {"initial": {"name": "cached"}}
@@ -680,7 +681,7 @@ class TestCallerCacheOnTheRequest:
         assert calls == ["tenant"]
         assert form.prefix == "acme"
         assert form.initial == {"name": "acme"}
-        assert not hasattr(request, REQUEST_DEP_CACHE_ATTR)
+        assert next_of(request).dep_cache is None
 
     def test_a_render_hands_back_the_cache_the_request_carried(
         self, mock_http_request
@@ -690,12 +691,12 @@ class TestCallerCacheOnTheRequest:
 
         carried: dict[str, object] = {}
         request = mock_http_request(method="GET")
-        setattr(request, REQUEST_DEP_CACHE_ATTR, carried)
+        next_of(request).dep_cache = carried
         build = _form_action_context_callable(_shared_tenant_form())
         with bound_dependency("tenant", tenant):
             form = build(request, {}).form
         assert form.prefix == "acme"
-        assert getattr(request, REQUEST_DEP_CACHE_ATTR) is carried
+        assert next_of(request).dep_cache is carried
 
     def test_a_post_resolves_the_shared_dependency_once(
         self, mock_http_request
@@ -709,7 +710,7 @@ class TestCallerCacheOnTheRequest:
 
         def keep(request: HttpRequest, form: django_forms.Form) -> HttpResponseRedirect:
             seen["request"] = request
-            seen["cache"] = getattr(request, REQUEST_DEP_CACHE_ATTR)
+            seen["cache"] = next_of(request).dep_cache
             seen["prefix"] = form.prefix
             return HttpResponseRedirect("/done/")
 
@@ -723,4 +724,4 @@ class TestCallerCacheOnTheRequest:
         assert response.status_code == 302
         assert calls == ["tenant"]
         assert seen["prefix"] == "acme"
-        assert getattr(seen["request"], REQUEST_DEP_CACHE_ATTR) is seen["cache"]
+        assert next_of(seen["request"]).dep_cache is seen["cache"]

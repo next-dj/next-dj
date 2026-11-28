@@ -27,6 +27,7 @@ from next.diagnostics import FailureLog, exception_text
 from next.pages.errors import PageMetadataRequestError, PageMetadataShapeError
 from next.paths import PAGE_MARK, Homes, normal_path, path_mark
 from next.ports import route_access_slot
+from next.requests import held_next, next_of
 from next.site import SiteOriginError, site_indexable, site_origin
 from next.site.headers import CLOSED_ROBOTS
 
@@ -58,9 +59,6 @@ from .markers import (
 from .normalize import X_DEFAULT
 from .scope import metadata_options
 
-
-RESOLVED_METADATA_ATTR: Final = "_next_resolved_metadata"
-"""The request attribute a rendered `{% metadata %}` publishes its resolve under."""
 
 _PAGE_ONE: Final = ("page", "1")
 _ROBOTS_BOOLEANS: Final = ("noarchive", "nosnippet", "noimageindex", "notranslate")
@@ -703,13 +701,13 @@ def resolve_metadata(
 
 def publish_metadata(request: HttpRequest, resolved: ResolvedMetadata) -> None:
     """Leave the resolve of a render on its request for the response layer."""
-    setattr(request, RESOLVED_METADATA_ATTR, resolved)
+    next_of(request).metadata = resolved
 
 
 def published_metadata(request: HttpRequest | None) -> ResolvedMetadata | None:
     """Return the resolve a render published on `request`, if one ran."""
-    resolved = getattr(request, RESOLVED_METADATA_ATTR, None)
-    return resolved if isinstance(resolved, ResolvedMetadata) else None
+    held = held_next(request)
+    return None if held is None else held.metadata
 
 
 __all__ = [
@@ -719,7 +717,6 @@ __all__ = [
     "OG_LOCALE",
     "OG_LOCALES",
     "ORIGIN_RELS",
-    "RESOLVED_METADATA_ATTR",
     "SCHEMA_CONTEXTS",
     "absolute_url",
     "iso_time",

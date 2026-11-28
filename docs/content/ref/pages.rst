@@ -373,7 +373,7 @@ Visits
 ``next.pages.visits`` holds ``visit_request``, which copies a live request and restates it as a GET of one page URL.
 ``authorization_outcome`` asks a page through that copy inside ``visiting``, so a ``render()`` reading the method, the path, or the query string answers an out-of-band caller as it answers a visit.
 The user, the session, and every other attribute a middleware attached come through untouched, and the method, the path, the query, and the body of the live request stay as they were.
-When the visit ends, ``hand_back`` copies onto the live request what the render marked for the response, the attributes ``HANDED_BACK`` names and the CSRF cookie keys of ``META``.
+The visit gets its own fork of ``request.next``, and when it ends what the render marked for the response comes back to the live request, the personal, bound, and cookie flags, the CSP nonce, and the CSRF cookie keys of ``META``.
 A render that read a cookie, minted a CSP nonce, or put one visitor into its HTML thus keeps the response of the live request private, and a token it read sets the CSRF cookie of that response.
 The copy leaves out the dependency cache of a form dispatch, and ``authorization_outcome`` resolves ``render()`` with a fresh cache, so a guard never reads a value the dispatch resolved.
 See *Render paths and what each one runs* in :doc:`/content/internals/request-lifecycle` for the callers.

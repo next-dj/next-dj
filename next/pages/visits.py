@@ -3,23 +3,18 @@
 import copy
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from django.http import QueryDict
 from django.urls import get_script_prefix
 
-from next.csrf import NONCE_ATTR, TOKEN_META
-from next.deps import REQUEST_DEP_CACHE_ATTR
-from next.pages.responses import RENDER_FLAGS
+from next.csrf import TOKEN_META
+from next.requests import NEXT_ATTR, next_of
 from next.utils import decode_url_path
 
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
-
-
-HANDED_BACK: Final = (*RENDER_FLAGS, NONCE_ATTR)
-"""The attributes a visit's render sets that keep the live response private."""
 
 
 def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
@@ -29,12 +24,12 @@ def visit_request(request: "HttpRequest", url: str | None) -> "HttpRequest":
     """
     path, _, query = (url or "").partition("?")
     visit = copy.copy(request)
+    vars(visit)[NEXT_ATTR] = next_of(request).fork()
     meta = {**request.META, "REQUEST_METHOD": "GET", "QUERY_STRING": query}
     visit.method = "GET"
     visit.GET = QueryDict(query)
     visit.POST = QueryDict()
     visit.resolver_match = None
-    vars(visit).pop(REQUEST_DEP_CACHE_ATTR, None)
     if path:
         path = decode_url_path(path)
         info = _path_info(path)
@@ -50,10 +45,7 @@ def hand_back(visit: "HttpRequest", request: "HttpRequest") -> None:
 
     A token the render read sets the CSRF cookie of that response through `META`.
     """
-    held = vars(visit)
-    for name in HANDED_BACK:
-        if name in held:
-            setattr(request, name, held[name])
+    next_of(request).adopt(next_of(visit))
     meta = visit.META
     for key in TOKEN_META:
         if key in meta:
@@ -78,4 +70,4 @@ def _path_info(path: str) -> str:
     return path
 
 
-__all__ = ["HANDED_BACK", "hand_back", "visit_request", "visiting"]
+__all__ = ["hand_back", "visit_request", "visiting"]

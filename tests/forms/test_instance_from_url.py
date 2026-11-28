@@ -9,7 +9,6 @@ from django.contrib.auth.models import Group
 from django.http import Http404, HttpRequest, QueryDict
 from django.test import Client
 
-from next.deps import REQUEST_DEP_CACHE_ATTR
 from next.deps.objects import SCOPE_DEPENDENCY
 from next.forms import ActionRegistration, Form, ModelForm, RegistryFormActionBackend
 from next.forms.base import _instance_from_url_db_fields, _instance_lookup_from_spec
@@ -25,6 +24,7 @@ from next.forms.dispatch.build import (
 )
 from next.forms.registration import registration_diagnostics
 from next.forms.uid import ORIGIN_FIELD_NAME
+from next.requests import next_of
 from tests.support import bound_dependency, routed, write_page
 
 
@@ -525,14 +525,12 @@ class TestScopedGetInitial:
     ) -> None:
         group = Group.objects.create(name="auth:staff")
         request = HttpRequest()
-        setattr(request, REQUEST_DEP_CACHE_ATTR, {})
+        next_of(request).dep_cache = {}
         with django_assert_num_queries(1):
             first = GroupByPkForm.get_initial(request, id=str(group.pk))
             second = GroupByPkForm.get_initial(request, id=group.pk)
         assert first is second
-        assert set(getattr(request, REQUEST_DEP_CACHE_ATTR)) >= {
-            f"DObject[auth.group]({group.pk!r})"
-        }
+        assert set(next_of(request).dep_cache) >= {f"DObject[auth.group]({group.pk!r})"}
 
 
 @pytest.mark.django_db()

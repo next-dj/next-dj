@@ -209,7 +209,7 @@ The ``render()`` under this call does not see the POST to ``/_next/form/<uid>/``
 ``next.pages.visits.visit_request`` copies the live request and restates it as a GET of the URL being authorized, rewriting ``method``, ``path``, ``path_info``, ``GET``, ``POST``, ``META`` and ``resolver_match`` while carrying over everything a middleware attached, the user and the session included.
 It drops the dispatch dependency cache from the copy, and the guard resolves ``render()`` with a fresh cache, so no value the dispatch resolved reaches the answer.
 The copy leaves the method, the path, and the POST of the live request alone, so the dispatcher reads its own POST afterwards.
-Once ``render()`` answers, ``next.pages.visits.hand_back`` copies back the render flags, the CSP nonce, and the CSRF cookie keys of ``META``, so the response the dispatcher sends stays private where the render read the visitor and sets the CSRF cookie where it read a token.
+Once ``render()`` answers, the visit hands back the render flags, the CSP nonce, and the CSRF cookie keys of ``META``, so the response the dispatcher sends stays private where the render read the visitor and sets the CSRF cookie where it read a token.
 A page that short-circuits on the request method, on a query parameter, or on a canonical-URL comparison therefore answers a submission exactly as it answers a visit.
 
 Each of the four authorization sites names the URL it asks about, the posted origin for a submission and for ``Patches.morph_zone``, the next step's URL for a wizard advance.
@@ -230,7 +230,7 @@ Either way it runs before ``get_initial`` and form binding.
 The pipeline resolves it after the form binds and before ``is_valid`` and the handler, so ``self.instance`` is the loaded target on a ``ModelForm``.
 A denial here returns a bare HTTP 403 rather than re-rendering, because the form already bound.
 
-Both hooks are dependency-injected through ``resolver.resolve_dependencies`` with the per-request ``dep_cache`` and ``dep_stack`` the dispatcher publishes under ``REQUEST_DEP_CACHE_ATTR``, so a provider resolved in a hook is shared with ``get_initial`` and ``on_valid``.
+Both hooks are dependency-injected through ``resolver.resolve_dependencies`` with the per-request ``dep_cache`` and ``dep_stack`` the dispatcher binds to the request, so a provider resolved in a hook is shared with ``get_initial`` and ``on_valid``.
 A return of ``None`` or ``True`` allows, ``False`` raises ``PermissionDenied``, an ``HttpResponse`` short-circuits, and any other type raises ``TypeError``.
 On a denial the dispatcher records the layer and the reason on its state and emits ``form_access_denied`` once the transaction has closed, when a receiver is connected.
 A wizard enforces ``check_permissions`` once per step POST before the step binds, and the step form's ``has_object_permission`` is enforced per step after the step form binds and before ``is_valid``.
@@ -354,8 +354,8 @@ Two consequences flow from this.
 - Custom providers are idempotent across the dispatch stages.
 - Re-render after a validation failure is cheap because layouts and context functions reuse the values cached during the initial bind.
 
-The cache hangs on ``request`` under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
-Read it through ``next.deps.render_dep_cache(request)`` rather than the raw attribute.
+The cache hangs on ``request`` through ``bind_dep_cache``.
+Read it through ``next.deps.render_dep_cache(request)``.
 
 The origin-page re-render also reuses the compiled page template.
 The page manager caches the composed template source and its compiled ``Template`` keyed by source mtime, so a warm re-render performs no file reads and no template parsing.

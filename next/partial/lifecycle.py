@@ -14,8 +14,7 @@ from next.intercept import intercepts
 from next.lifecycle import Share
 from next.pages.boundaries import Caught
 from next.pages.manager.bodies import BodyResolution
-from next.pages.responses import depth_of
-from next.requests import PrefetchDepth, RequestKind
+from next.requests import PrefetchDepth, RequestKind, depth_of
 
 from .headers import partial_intent
 from .layers import layer_links

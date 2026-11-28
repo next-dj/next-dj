@@ -1,15 +1,17 @@
 import pytest
 from django.http import HttpRequest
 
-from next.deps import REQUEST_DEP_CACHE_ATTR, DependencyResolver, Depends, resolver
+from next.deps import DependencyResolver, Depends, resolver
 from next.deps.cache import (
     _CACHE_MISS,
     _IN_PROGRESS,
     DependencyCache,
     RequestMemo,
+    bind_dep_cache,
     render_dep_cache,
 )
 from next.deps.scope import RequestScope
+from next.requests import NEXT_ATTR, next_of
 from tests.support import bound_dependency, build_mock_http_request
 
 
@@ -187,19 +189,19 @@ class TestRenderDepCache:
         request = HttpRequest()
         cache = render_dep_cache(request)
         assert cache == {}
-        assert not hasattr(request, REQUEST_DEP_CACHE_ATTR)
+        assert NEXT_ATTR not in vars(request)
         assert render_dep_cache(request) is not cache
 
     def test_the_dict_already_on_the_request_is_returned(self) -> None:
         request = HttpRequest()
         attached: dict[str, object] = {"wallet": "w"}
-        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        next_of(request).dep_cache = attached
         assert render_dep_cache(request) is attached
 
     def test_an_empty_dispatch_cache_is_shared_rather_than_replaced(self) -> None:
         request = HttpRequest()
         attached: dict[str, object] = {}
-        setattr(request, REQUEST_DEP_CACHE_ATTR, attached)
+        next_of(request).dep_cache = attached
         assert render_dep_cache(request) is attached
 
     def test_without_a_request_every_ask_is_a_fresh_dict(self) -> None:
@@ -207,15 +209,35 @@ class TestRenderDepCache:
         assert first == {}
         assert render_dep_cache(None) is not first
 
-    def test_a_non_dict_attribute_is_ignored(self) -> None:
-        request = HttpRequest()
-        setattr(request, REQUEST_DEP_CACHE_ATTR, "junk")
-        assert render_dep_cache(request) == {}
-        assert getattr(request, REQUEST_DEP_CACHE_ATTR) == "junk"
-
     def test_a_spec_mock_request_gets_a_fresh_dict(self) -> None:
         request = build_mock_http_request()
         assert render_dep_cache(request) is not render_dep_cache(request)
+
+
+class TestBindDepCache:
+    """Binding a dispatch cache returns the one it replaces, which a caller restores."""
+
+    def test_the_first_bind_replaces_nothing(self) -> None:
+        request = HttpRequest()
+        cache: dict[str, object] = {}
+        assert bind_dep_cache(request, cache) is None
+        assert render_dep_cache(request) is cache
+
+    def test_binding_the_previous_cache_restores_it(self) -> None:
+        request = HttpRequest()
+        outer: dict[str, object] = {"wallet": "w"}
+        bind_dep_cache(request, outer)
+        previous = bind_dep_cache(request, {})
+        assert previous is outer
+        bind_dep_cache(request, previous)
+        assert render_dep_cache(request) is outer
+
+    def test_binding_none_clears_the_request(self) -> None:
+        request = HttpRequest()
+        bind_dep_cache(request, {"wallet": "w"})
+        bind_dep_cache(request, None)
+        assert next_of(request).dep_cache is None
+        assert render_dep_cache(request) == {}
 
 
 class TestRequestMemoInstance:

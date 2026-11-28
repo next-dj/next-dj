@@ -8,20 +8,17 @@ from django.db import connection
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 from django.test import RequestFactory
 
+from next.conf.sentinels import UNSET
 from next.forms import Form
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import FormActionDispatch
 from next.forms.dispatch.build import _form_action_context_callable
 from next.forms.dispatch.permissions import _trees
 from next.forms.dispatch.responses import _normalize_handler_response
-from next.forms.origin import (
-    _ORIGIN_MATCH_ATTR,
-    OriginMatch,
-    filter_reserved_url_kwargs,
-    resolve_origin,
-)
+from next.forms.origin import OriginMatch, filter_reserved_url_kwargs, resolve_origin
 from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
 from next.pages.access import forget_page_access
+from next.requests import next_of
 from next.transactions import AtomicOverride
 from next.transactions.savepoints import WRITES
 from tests.benchmarks.factories import STAND_IN_PK
@@ -78,8 +75,7 @@ class TestBenchDispatchHelpers:
         )
 
         def run() -> object:
-            if hasattr(request, _ORIGIN_MATCH_ATTR):
-                delattr(request, _ORIGIN_MATCH_ATTR)
+            next_of(request).origin_match = UNSET
             return resolve_origin(request)
 
         match = benchmark(run)
@@ -244,7 +240,7 @@ class TestBenchDispatchEndToEnd:
         # The required name is missing, so the dispatch re-renders the origin page.
         request = _action_request("/items/42/")
         origin = OriginMatch(page_path=page_file, url_kwargs={}, origin="/items/42/")
-        setattr(request, _ORIGIN_MATCH_ATTR, origin)
+        next_of(request).origin_match = origin
         response = benchmark(
             FormActionDispatch.dispatch, backend, request, "bench_action", meta
         )
